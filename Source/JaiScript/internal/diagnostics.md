@@ -92,7 +92,7 @@ member_access_value.
 | `E::v` on an enum (C++ scoped access; `E.v` reads the same value) | the value; a name the enum does not declare raises `No value 'v' in enum 'E'` (the checker: `no value 'v' in enum 'E'`; `detail/enum_value.hpp`) |
 | store to a missing member | `Cannot assign to 'x': Vec2 has no such member` |
 | store to a read-only C++ property (binder `.property()` with a getter only / a `nullptr` setter / a member pointer whose type is not copy-assignable, e.g. a signal), or to a host-registered namespace entry (`string::to_lower = v`; `internal/namespaces.md`) | `Cannot assign to 'value': it is read-only` - every spelling: `obj.value = v`, `this.value = v`, a bare `value = v` in a hybrid method, compound and `++`/`--` (the getter and the arithmetic run first), stores through a PROPERTY reference (`auto& r = value; r = v`, `f(value)` into a `T&` parameter), `reflect::set`; a script `_set_value` override or a same-named script field in the chain takes the store instead; serialization loads (`from_json`, the binary archive) keep discarding the setter's result and skip silently. The static checker reports the same mistake at load on a closed class (`cannot assign to read-only property 'value'`, `internal/static_checking.md` Members) |
-| mutating or aliasing a map KEY through a range-for pair (`for (auto kv : m)` / `for (auto& kv : m)` over a statically known map, C++ `pair<const K, V>`: a string mutator on `kv.first` - `kv.first.to_upper()`, `insert`, `erase`, ... (`k_string_mutator_method_names`) - a store `kv.first = v`, compound `kv.first += "hey"`, `++`/`--`; or a mutable alias: `var& cheeky = kv.first` / `auto&` / `T&`, `shared_ptr<var> cheeky = kv.first` / `shared_ptr<auto>` / a store into a shared_ptr-declared variable, `cast<T&>` / `cast<shared_ptr<T>>` of the key, `kv.first` passed where every viable same-script overload takes `T&` or `shared_ptr<T>`, `return kv.first` from a `-> T&` / `-> shared_ptr<T>` function; the marker follows the pair through `var p = kv` / `auto& p = kv` and a ternary over keys) | STATIC ONLY: the checker rejects the load under strict (warn mode prints it) with `cannot mutate 'kv.first': map keys are read-only` for the mutation spellings and `cannot alias 'kv.first': map keys are read-only (copy it instead: var k = kv.first)` for the alias spellings (`a map key` replaces the spelling when the operand is a ternary; `internal/static_checking.md`). The runtime raises nothing: strings are copy-on-write at the in-place write gate (`internal/invariants.md` 11), so the copy (`var okay = kv.first`) and the paths the checker cannot see (`var m`, `m.keys()[0].to_upper()`) mutate the copy alone and the map stays intact - `first` is a shared handle in both bindings, no per-iteration copy |
+| mutating or aliasing a map KEY through a range-for pair (`for (auto kv : m)` / `for (auto& kv : m)` over a statically known map, C++ `pair<const K, V>`: a string mutator on `kv.first` - `kv.first.to_upper()`, `insert`, `erase`, ... (`k_string_mutator_method_names`) - a store `kv.first = v`, compound `kv.first += "hey"`, `++`/`--`; or a mutable alias: `var& cheeky = kv.first` / `auto&` / `T&`, `shared_ptr<var> cheeky = kv.first` / `shared_ptr<auto>` / a store into a shared_ptr-declared variable, `cast<T&>` / `cast<shared_ptr<T>>` of the key, `kv.first` passed where every viable same-script overload takes `T&` or `shared_ptr<T>`, `return kv.first` from a `-> T&` / `-> shared_ptr<T>` function; the marker follows the pair through `var p = kv` / `auto& p = kv` and a ternary over keys) | STATIC ONLY: the checker rejects the load (a warn region reports it as a warning) with `cannot mutate 'kv.first': map keys are read-only` for the mutation spellings and `cannot alias 'kv.first': map keys are read-only (copy it instead: var k = kv.first)` for the alias spellings (`a map key` replaces the spelling when the operand is a ternary; `internal/static_checking.md`). The runtime raises nothing: strings are copy-on-write at the in-place write gate (`internal/invariants.md` 11), so the copy (`var okay = kv.first`) and the paths the checker cannot see (`var m`, `m.keys()[0].to_upper()`) mutate the copy alone and the map stays intact - `first` is a shared handle in both bindings, no per-iteration copy |
 | calling a plain value (`obj.x(...)`, `f(...)` with `f = 5`) | `Cannot call 'x': it is an int, not a function` (member or identifier callee); `Cannot call a value of type int: it is not a function` (computed callee: `fs[0](x)`, `pick()(x)`) |
 
 The callee's type spells the class name for class instances (`it is a Vec2`), the base type
@@ -230,7 +230,7 @@ conversion. The public C++ `script_value::as_int()` accessor saturates (NaN to z
 `{0}` names the rejected namespace. Script declarations cannot open `reflect`,
 `jai`, or their root-qualified subnames (`reflect::sub`, `jai::sub::deep`). The
 shared `core/script_namespace.hpp` predicate and checked error kernel are used by
-both backends, including execution of saved programs and with static checking off.
+both backends, including execution of saved programs and inside a `[[warn_mode]]` region.
 Rejection happens before namespace members or their initializers run.
 
 The host may register values/functions in these namespaces. Names that merely
@@ -427,12 +427,12 @@ Each is recognized only in that position, so a script using one of these words a
 
 ## Const (family B, `type_mismatch`; kernel `detail/const_rules.hpp`, internal/const.md)
 
-A write through a const (internal/const.md 2.2-3) is a load error under strict, a warning under warn, and under warn and off
-the node raises its run-time text when it is reached, before any of it runs. The checker's walk stamps the verdict in every
+A write through a const (internal/const.md 2.2-3) is a load error, a warning in a `[[warn_mode]]` region, and there the node
+raises its run-time text when it is reached, before any of it runs. The checker's walk stamps the verdict in every
 mode (the proof pass), so both backends raise the same text at the same node. A path through a `var` is decided when it runs:
 its values are walked without running code, and a write that crosses a handle runs.
 
-| case | run time | load (strict error, warn warning) |
+| case | run time | load (error; a warning in a warn region) |
 |---|---|---|
 | store, compound store or `++`/`--` of the const itself (a local, a parameter, a global, a namespace const, a class constant) | `Cannot assign to 'MAX': it is read-only` (family B's text) | `cannot assign to const 'MAX'` (`'C::K'`, `'cfg::W'` for scoped ones) |
 | a store through a const | `Cannot assign to 'p.x': it is read-only ('p' is const)` | `cannot assign to 'p.x': 'p' is const` |

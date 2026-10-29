@@ -143,19 +143,17 @@ def plan_page(page):
     for i, b in enumerate(blocks):
         if b["kind"] != "cb-jai" or b["support"]:
             continue
-        expected, expected_mode = None, "strict"
+        expected, expected_warnings = None, False
         for nb in blocks[i + 1:]:
             if nb["kind"] == "cb-jai" and nb["support"]:
                 continue
             if nb["kind"] in ("cb-output", "cb-plain"):
                 expected = nb["code"]
-                m = re.search(r"--check=(strict|warn|off)", nb["label"])
-                if m:
-                    expected_mode = m.group(1)
+                expected_warnings = "--warnings" in nb["label"]
             break
         samples.append({"line": b["line"], "code": b["code"], "attrs": b["attrs"], "label": b["label"],
                         "file": b["name"] or "main.jai", "expected": expected,
-                        "expected_mode": expected_mode, "index": len(samples) + 1})
+                        "expected_warnings": expected_warnings, "index": len(samples) + 1})
     return samples, pool, notes
 
 
@@ -166,8 +164,8 @@ def norm(text, sample_dir):
     return text.strip()
 
 
-def run(runner, backend, main_path, budget, timeout, mode="strict"):
-    cmd = [str(runner), "--no-debug", "--no-pause", "--check=" + mode, "--backend=" + backend]
+def run(runner, backend, main_path, budget, timeout, warnings=False):
+    cmd = [str(runner), "--no-debug", "--no-pause", "--backend=" + backend] + (["--warnings"] if warnings else [])
     if budget:
         cmd.append("--budget=" + str(budget))
     cmd.append(main_path.name)
@@ -307,13 +305,12 @@ def main():
                     host_unmarked.append(tag)
             if not args.quiet_expected and rc_v is not None:
                 so_c, se_c = so_v, se_v
-                if s["expected_mode"] != "strict":
-                    _, so_c, se_c = run(runner, "vm", main_path, budget, args.timeout, s["expected_mode"])
+                if s["expected_warnings"]:
+                    _, so_c, se_c = run(runner, "vm", main_path, budget, args.timeout, True)
                     so_c, se_c = norm(so_c, sdir), norm(se_c, sdir)
                 missing = compare_expected(s["expected"], so_c, se_c)
                 if missing:
-                    drift.append((tag + (" [--check=%s]" % s["expected_mode"] if s["expected_mode"] != "strict" else ""),
-                                  missing, so_c, se_c))
+                    drift.append((tag + (" [--warnings]" if s["expected_warnings"] else ""), missing, so_c, se_c))
 
     print("\n%d samples on %d pages: %d skipped (data-host), %d intentional-error samples matched"
           % (total, len(pages), skipped, len(error_ok)))

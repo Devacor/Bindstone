@@ -166,7 +166,7 @@ try { cast&lt;char&gt;(300); } catch (e) { print("caught: {}", e); }</code></pre
 caught: Division by zero
 caught: Cannot initialize &#x27;n&#x27; (declared int) with string
 caught: Cannot cast &#x27;int&#x27; to &#x27;char&#x27;</code></pre></div>
-<p>Write the same mistake with a literal and no <code>catch</code> will ever see it. The checker (on by default, strict) reads the whole program before anything runs, so a string literal heading for an <code>int</code> is a <strong>load error</strong>: the program does not start, and the <code>try</code> around it is just text.</p>
+<p>Write the same mistake with a literal and no <code>catch</code> will ever see it. The checker (always on, strict) reads the whole program before anything runs, so a string literal heading for an <code>int</code> is a <strong>load error</strong>: the program does not start, and the <code>try</code> around it is just text.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {
     int n = "seven";
 } catch (e) {

@@ -16,9 +16,9 @@ namespace MV {
 
 	// One place for engine policy: VM backend (env MV_SCRIPT_INTERPRETER=1 forces the
 	// tree-walking interpreter for parity debugging), stdlib, Services-bound registrars,
-	// script-error logging via MV::error, a memory cap, and static_checking(warn) (debug
-	// builds surface the diagnostics through Script::eval as MV::warning; -verifyassets
-	// re-arms its engine to strict so a typed mistake in any shipped script is a [FAIL]).
+	// script-error logging via MV::error and a memory cap. Every script loads through the strict
+	// checker (debug builds also surface its warnings through Script::eval as MV::warning), so a
+	// typed mistake fails the load and -verifyassets reports it as that script's [FAIL].
 	// Parse caches (.jaibite) live in a .cache folder beside each script on desktop; on Android/iOS,
 	// where the bundle is read-only, below playerCachePath()/ScriptCache.
 	// Callers still connect the engine into their Services themselves.

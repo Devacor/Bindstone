@@ -176,10 +176,9 @@ public:
                 std::string got;
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
-                eng->static_checking(check_mode::off);
                 eng->set_script_error_handler([&reported](const std::string& message) { reported += message; });
                 try {
-                    got = eng->execute(program).as_string();
+                    got = eng->execute("[[warn_mode]]; " + program).as_string();
                 } catch (const std::exception& e) {
                     got = std::string("threw: ") + e.what();
                 }

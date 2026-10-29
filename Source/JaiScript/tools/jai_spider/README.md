@@ -56,7 +56,7 @@ request may run, over `--budget`) and `max_body` (bytes, over `--max-body`).
 
 ```
 jai_spider app.jai [--port N] [--host ADDR] [--root DIR] [--max-body N] [--timeout S] [--budget S]
-                   [--backend vm|interp] [--check strict|warn|off] [--allow-shutdown] [--quiet]
+                   [--backend vm|interp] [--allow-shutdown] [--quiet]
 ```
 
 | option | meaning |
@@ -67,7 +67,7 @@ jai_spider app.jai [--port N] [--host ADDR] [--root DIR] [--max-body N] [--timeo
 | `--max-body N` | largest request body, `K`/`M` suffixes allowed (default 2M); a larger one is answered 413 |
 | `--timeout S` | seconds a request may take to arrive and a response to leave (default 30) |
 | `--budget S` | execution budget per request (default 30; 0 = unlimited); a runaway handler is a 500 |
-| `--backend`, `--check` | the engine's backend (vm) and static checker mode (strict), as for `jaiscript` |
+| `--backend` | the engine's backend (vm), as for `jaiscript` |
 | `--allow-shutdown` | `POST /__spider/shutdown` from this machine stops the server (for scripts and agents driving it headless) |
 | `--quiet` | no banner and no request log |
 

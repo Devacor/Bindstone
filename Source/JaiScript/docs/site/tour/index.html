@@ -68,7 +68,7 @@ print("a = ({}, {})   b = ({}, {})", a.x, a.y, b.x, b.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = (0.0, 7.0)   b = (100.0, 0.0)</code></pre></div>
 <p>That is the whole spooky-action-at-a-distance category of bug, gone. A function you hand an enemy to cannot quietly teleport yours; if it should, its parameter says <code>Enemy&amp;</code> and everyone can see it.</p>
 <h2 id="mistakes-die-early">Mistakes die before the program runs<a class="hlink" href="#mistakes-die-early" aria-label="link">&#8203;</a></h2>
-<p>Types are not decoration. The checker walks the whole program before the first statement executes, and in its default strict mode a typed mistake stops the load:</p>
+<p>Types are not decoration. The checker walks the whole program before the first statement executes, and a typed mistake stops the load:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ship { int hull = 100; string name = "Wanderer"; }
 
 Ship s = Ship();

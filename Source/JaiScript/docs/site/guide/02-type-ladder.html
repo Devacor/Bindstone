@@ -86,7 +86,7 @@ x is still 5</code></pre></div>
 <li><strong>A mismatch the checker can see</strong> (a literal, a typed local, a typed field, a typed return, an argument to a function the program declares) is a <strong>load error</strong>. Nothing executes, so there is nothing to <code>catch</code>.</li>
 <li><strong>A mismatch it cannot see</strong> (anything sourced from a <code>var</code>, an unresolved host value or a call through a callable variable) is a <strong>run-time error</strong>, raised at the offending statement and catchable there.</li>
 </ul>
-<p>None of this is opt-in. To loosen it, pass <code>--check=warn</code> to the runner (or call <code>eng-&gt;static_checking(jai::check_mode::warn)</code> in a host): the same diagnostics get reported, and the script runs anyway. <code>[[warn_mode]]</code> does the same for one file, one block, or one statement, and <code>extern</code> declares a name the checker cannot see. The full contract is in <a href="13-strict-checking.html">Types That Fail Early</a>.</p>
+<p>None of this is opt-in. To loosen it, put <code>[[warn_mode]]</code> at the top of a file, a block, or one statement: the same diagnostics get reported as warnings, and that region loads and runs. <code>extern</code> declares a name the checker cannot see. The full contract is in <a href="13-strict-checking.html">Types That Fail Early</a>.</p>
 <h2 id="auto-locks-on-first-use">auto locks on first use<a class="hlink" href="#auto-locks-on-first-use" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = 5;      // auto infers int, then enforces it
 x = 2.9;         // float assigned to locked-int: converts (truncates toward zero)
@@ -273,8 +273,8 @@ caught: Cannot cast &#x27;int&#x27; to &#x27;Base&#x27;</code></pre></div>
 <li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code>: a <strong>handle</strong> sharing the same object.</li>
 </ul>
 <p>A class mismatch raises the catchable <code>Cannot cast 'X' to 'T'</code>, where <code>X</code> is the object&#x27;s <em>dynamic</em> class. Upcasts always pass. <code>null</code> passes the value and handle forms and fails the reference form. A <code>T</code> that names no type at all is a load error (<code>unknown type in cast</code>).</p>
-<div class="callout warn"><p>The value form applied to a handle <em>copies</em>, which is rarely what you meant, so the checker says so, at warning severity. Warnings never gate the load; the runner prints them when you pass <code>--check=warn</code>, and a host reads them from <code>last_check_diagnostics()</code>. Line 5 of the sample above draws this one:</p>
-<div class="codeblock cb-output"><span class="cb-label">output &middot; --check=warn</span><pre><code class="lang-output">jaiscript: static check (warn mode, running anyway):
+<div class="callout warn"><p>The value form applied to a handle <em>copies</em>, which is rarely what you meant, so the checker says so, at warning severity. Warnings never gate the load; the runner prints them when you pass <code>--warnings</code>, and a host reads them from <code>last_check_diagnostics()</code>. Line 5 of the sample above draws this one:</p>
+<div class="codeblock cb-output"><span class="cb-label">output &middot; --warnings</span><pre><code class="lang-output">jaiscript: static check warnings:
 try.jai:5:19: warning: cast&lt;Derived&gt;(h) copies the instance - use cast&lt;Derived&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;Derived&gt;&gt;(h) to share it (declared at 4:21)
     print(&quot;copy:   &quot;, cast&lt;Derived&gt;(h).t);       // a VALUE copy tagged Derived
                       ^</code></pre></div>

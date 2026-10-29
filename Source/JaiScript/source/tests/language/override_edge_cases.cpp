@@ -285,7 +285,6 @@ public:
         
         test("multiple_override_errors_in_one_class", [this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::off);   // the run time reports the first (the checker lists both at load)
             
             engine->execute(R"(
                 class Base {
@@ -296,7 +295,7 @@ public:
             
             // Try to define a class with multiple override errors
             try {
-                engine->execute(R"(
+                engine->execute(R"([[warn_mode]];   // the run time reports the first (the checker lists both at load)
                     class Bad : Base {
                         auto foo() { return 10; }  // Missing override
                         auto baz() override { return 20; }  // No such method in base

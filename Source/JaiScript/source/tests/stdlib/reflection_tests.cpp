@@ -60,27 +60,21 @@ public:
         });
 
         test("jai_namespace_rejects_script_declarations", [this]() {
-            for (auto mode : {check_mode::off, check_mode::strict}) {
-                for (const std::string name : {"jai", "jai::sub", "jai::sub::deep"}) {
-                    for (const std::string body : {"function f() { return 1; }", "var value = 1;", "class Value { int value = 1; }"}) {
-                        auto eng = jai::foundry::make_engine();
-                        eng->static_checking(mode);
-                        const auto error = declaration_error(*eng, "namespace " + name + " { " + body + " }");
-                        check(!error.empty(), "script declarations into " + name + " must be rejected");
-                        check_eq(eng->execute("6 * 7").as_int(), script_int{42});
-                    }
+            for (const std::string name : {"jai", "jai::sub", "jai::sub::deep"}) {
+                for (const std::string body : {"function f() { return 1; }", "var value = 1;", "class Value { int value = 1; }"}) {
+                    auto eng = jai::foundry::make_engine();
+                    const auto error = declaration_error(*eng, "namespace " + name + " { " + body + " }");
+                    check(!error.empty(), "script declarations into " + name + " must be rejected");
+                    check_eq(eng->execute("6 * 7").as_int(), script_int{42});
                 }
             }
         });
 
         test("reserved_namespace_error_text", [this]() {
-            for (auto mode : {check_mode::off, check_mode::strict}) {
-                for (const std::string name : {"reflect", "reflect::sub", "jai", "jai::sub"}) {
-                    auto eng = jai::foundry::make_engine();
-                    eng->static_checking(mode);
-                    check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only)",
-                        declaration_error(*eng, "namespace " + name + " { var value = 1; }"));
-                }
+            for (const std::string name : {"reflect", "reflect::sub", "jai", "jai::sub"}) {
+                auto eng = jai::foundry::make_engine();
+                check_eq("Namespace '" + name + "' is reserved for the engine (C++-registered only)",
+                    declaration_error(*eng, "namespace " + name + " { var value = 1; }"));
             }
         });
 
@@ -102,23 +96,19 @@ public:
         });
 
         test("reserved_namespace_saved_program_rejected", [this]() {
-            for (auto mode : {check_mode::off, check_mode::strict}) {
-                auto writer = jai::foundry::make_engine();
-                writer->static_checking(mode);
-                auto bytes = writer->jaibite("namespace jai::saved { var value = 1; }").save_bytes();
-                auto reader = jai::foundry::make_engine();
-                reader->static_checking(mode);
-                auto bite = reader->jaibite_load_bytes(bytes);
-                std::string error;
-                try {
-                    bite.execute();
-                } catch (const std::exception& caught) {
-                    error = caught.what();
-                }
-                check_eq(std::string("Namespace 'jai::saved' is reserved for the engine (C++-registered only)"),
-                    error);
-                check_eq(reader->execute("6 * 7").as_int(), script_int{42});
+            auto writer = jai::foundry::make_engine();
+            auto bytes = writer->jaibite("namespace jai::saved { var value = 1; }").save_bytes();
+            auto reader = jai::foundry::make_engine();
+            auto bite = reader->jaibite_load_bytes(bytes);
+            std::string error;
+            try {
+                bite.execute();
+            } catch (const std::exception& caught) {
+                error = caught.what();
             }
+            check_eq(std::string("Namespace 'jai::saved' is reserved for the engine (C++-registered only)"),
+                error);
+            check_eq(reader->execute("6 * 7").as_int(), script_int{42});
         });
 
         test("reserved_namespace_prefix_boundaries", [this]() {

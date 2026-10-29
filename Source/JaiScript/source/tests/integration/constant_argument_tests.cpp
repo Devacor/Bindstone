@@ -17,10 +17,9 @@ public:
 
 	static constexpr const char* k_refusal = "SQL text must be a constant; pass values as parameters (?)";
 
-	std::shared_ptr<engine> make_host(check_mode mode = check_mode::strict) {
+	std::shared_ptr<engine> make_host() {
 		auto e = make_engine();
 		stdlib::register_all(*e);
-		e->static_checking(mode);
 		engine* raw = e.get();
 		e->add_function("run_sql", [raw](const std::string& sql, const script_value& value) -> std::string {
 			if (!raw->constant_argument_admits("run_sql", 0, sql)) { throw std::runtime_error(k_refusal); }
@@ -81,23 +80,23 @@ public:
 		});
 
 		test("at_run_time_a_text_the_program_does_not_spell_is_refused_on_every_path", [this]() {
-			auto e = make_host(check_mode::warn);
-			check_eq(std::string(k_refusal), e->execute(R"(
+			auto e = make_host();
+			check_eq(std::string(k_refusal), e->execute(R"([[warn_mode]];
 				string m = "";
 				var user = "1; DROP TABLE t";
 				try { run_sql("SELECT * FROM t WHERE id = " + user, 0); } catch (e) { m = e; }
 				m;)").as<std::string>());
-			check_eq(std::string(k_refusal), e->execute(R"(
+			check_eq(std::string(k_refusal), e->execute(R"([[warn_mode]];
 				string m = "";
 				var f = run_sql;
 				try { f("DELETE FROM t", 0); } catch (e) { m = e; }
 				m;)").as<std::string>());
-			check_eq(std::string(k_refusal), e->execute(R"(
+			check_eq(std::string(k_refusal), e->execute(R"([[warn_mode]];
 				string m = "";
 				var s = Store();
 				try { reflect::invoke(s, "query", "DELETE FROM t"); } catch (e) { m = e; }
 				m;)").as<std::string>());
-			check_eq(std::string(k_refusal), e->execute(R"(
+			check_eq(std::string(k_refusal), e->execute(R"([[warn_mode]];
 				string m = "";
 				var s = Store();
 				var text = "SELECT 2";
@@ -106,27 +105,27 @@ public:
 		});
 
 		test("a_built_text_equal_to_a_constant_is_that_constant", [this]() {
-			auto e = make_host(check_mode::warn);
-			check_eq(std::string("ran SELECT 1"), e->execute(R"(
+			auto e = make_host();
+			check_eq(std::string("ran SELECT 1"), e->execute(R"([[warn_mode]];
 				run_sql("SELECT 1", 0);
 				var built = "SELECT" + " " + to_string(1);
 				run_sql(built, 0);)").as<std::string>());
 		});
 
-		test("units_are_gathered_in_every_check_mode_and_across_executes", [this]() {
-			auto e = make_host(check_mode::off);
+		test("units_are_gathered_across_executes", [this]() {
+			auto e = make_host();
 			check_eq(std::string("ran SELECT 9"), e->execute("run_sql(\"SELECT 9\", 0);").as<std::string>());
 			e->execute("const string LATER = \"SELECT later\";");
 			check_eq(std::string("ran SELECT later"), e->execute("run_sql(LATER, 0);").as<std::string>());
-			check_eq(std::string("not a choice|b"), e->execute(R"(
+			check_eq(std::string("not a choice|b"), e->execute(R"([[warn_mode]];
 				string m = "";
 				try { choose("c", ["a", "b"]); } catch (e) { m = e; }
 				m + "|" + choose("b", ["a", "b"]);)").as<std::string>());
 		});
 
 		test("a_const_another_unit_declares_later_is_admitted", [this]() {
-			auto e = make_host(check_mode::warn);
-			e->execute("var call_later = function() { return run_sql(SHARED_QUERY, 0); };");
+			auto e = make_host();
+			e->execute("[[warn_mode]]; var call_later = function() { return run_sql(SHARED_QUERY, 0); };");
 			e->execute("const string SHARED_QUERY = \"SELECT shared\";");
 			check_eq(std::string("ran SELECT shared"), e->execute("call_later();").as<std::string>());
 		});

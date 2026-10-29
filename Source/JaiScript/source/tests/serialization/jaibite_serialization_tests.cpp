@@ -5,6 +5,9 @@
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/detail/ast_serializer.hpp>
+#include <jaiscript/detail/lexer.hpp>
+#include <jaiscript/detail/parser.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <filesystem>
 #include <fstream>
@@ -413,15 +416,25 @@ public:
                 check_true(out.threw);
                 check_true(out.error.find("Cannot initialize") == 0, "got: " + out.error);
             }
-            // a strict region survives the trip too: it gates a warn-mode loading engine
-            auto off_saver = fresh_engine(false, {});
-            off_saver->static_checking(check_mode::off);
-            auto strict_bytes = off_saver->jaibite("int a = 1;\n[[strict_mode]] int x = \"s\";\nx").save_bytes();
-            auto warn_loader = fresh_engine(false, {});
-            warn_loader->static_checking(check_mode::warn);
-            check_throws<static_check_error>([&]() { warn_loader->jaibite_load_bytes(strict_bytes); });
-            auto plain_bytes = off_saver->jaibite("int a = 1;\nint x = \"s\";\nx").save_bytes();
-            check_true(warn_loader->jaibite_load_bytes(plain_bytes).valid());
+            // a strict region inside a warn region survives the trip too: bytes no checker saw (parsed and
+            // serialized directly) gate the loader on the strict region alone
+            auto unstamped_bytes = [](engine& a_engine, const std::string& a_source) {
+                const auto templates = a_engine.get_registered_template_types();
+                lexer lex(a_source, a_engine.get_symbolizer());
+                auto tokens = lex.tokenize();
+                parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+                auto declarations = syntax.parse();
+                check_true(bool(declarations), "fixture must parse: " + a_source);
+                return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+            };
+            auto saver = fresh_engine(false, {});
+            auto loader = fresh_engine(false, {});
+            auto strict_bytes = unstamped_bytes(*saver, "[[warn_mode]];\nint a = 1;\n[[strict_mode]] int x = \"s\";\nx");
+            check_throws<static_check_error>([&]() { loader->jaibite_load_bytes(strict_bytes); });
+            auto warn_bytes = unstamped_bytes(*saver, "[[warn_mode]];\nint a = 1;\nint x = \"s\";\nx");
+            check_true(loader->jaibite_load_bytes(warn_bytes).valid());
+            auto plain_bytes = unstamped_bytes(*saver, "int a = 1;\nint x = \"s\";\nx");
+            check_throws<static_check_error>([&]() { loader->jaibite_load_bytes(plain_bytes); });
         });
 
         // Symbol IDs are per-engine and order-dependent: pre-warming the loader's interner
@@ -656,15 +669,20 @@ public:
 
             // The failure scenario: save with the zero-arg fn, load into an engine
             // without it -> the advisory flag fires. A mismatched bite is re-checked at
-            // load against THIS engine's surface: under warn the load never hard-fails
-            // and the missing function is a diagnostic; under strict (the default) the
-            // load throws before anything runs.
-            auto bytes = a->jaibite("zero_arg_probe();").save_bytes();
+            // load against THIS engine's surface: in a [[warn_mode]] unit the missing
+            // function is a warning and the load proceeds; otherwise the load throws
+            // before anything runs.
+            auto warn_bytes = a->jaibite("[[warn_mode]]; zero_arg_probe();").save_bytes();
             auto bare = fresh_engine(false, {});
-            bare->static_checking(check_mode::warn);
-            auto loaded = bare->jaibite_load_bytes(bytes);
+            auto loaded = bare->jaibite_load_bytes(warn_bytes);
             check_true(loaded.registration_mismatch());
-            check_true(loaded.check_diagnostics().has_errors());
+            check_false(loaded.check_diagnostics().has_errors());
+            bool warned = false;
+            for (const auto& d : loaded.check_diagnostics().diagnostics) {
+                warned = warned || d.message.find("use of undeclared identifier 'zero_arg_probe'") != std::string::npos;
+            }
+            check_true(warned, "the re-check against this engine's surface reports the missing function");
+            auto bytes = a->jaibite("zero_arg_probe();").save_bytes();
             auto strict_bare = fresh_engine(false, {});
             std::string text;
             try { strict_bare->jaibite_load_bytes(bytes); }

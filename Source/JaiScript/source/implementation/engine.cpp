@@ -997,7 +997,7 @@ struct engine::implementation {
         uint64_t checked_epoch = 0;
         check_report check_result;
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
-        bool autos_typed = false;            // the first proof pass types the auto slots, in every mode
+        bool autos_typed = false;            // the first proof pass types the auto slots
         bool proofs_deferred = false;        // the proof pass met a class the engine had not defined yet: re-stamp after an import defines one
         std::vector<std::string> deferred_classes;   // those classes' names
         // Program closure (checked_report): gathered once per surface epoch, and again
@@ -1049,11 +1049,10 @@ struct engine::implementation {
     };
     std::unordered_map<literal_key, std::shared_ptr<script_cache_entry>, literal_key_hash> literal_script_cache;
 
-    // Static type checking (strict by default; off = zero cost beyond one branch at cache entry).
+    // Static type checking: every load is checked, and an error outside a [[warn_mode]] region fails it.
     // check_surface_epoch_ moves on every registration the checker can see
     // (functions, globals, classes, template types), invalidating cached check results
     // without touching the parse cache.
-    check_mode static_check_mode_ = check_mode::strict;
     check_report last_check_;
     uint64_t check_surface_epoch_ = 0;
     // Parse-time type proofs (engine::type_proofs): the proof pass rides the same walk.
@@ -1330,7 +1329,7 @@ struct engine::implementation {
         }
     }
 
-    // The ONE cached checker entry point, mode-independent. A root with literal imports
+    // The ONE cached checker entry point. A root with literal imports
     // gathers its closure when due (names first, so the root's own check already knows
     // them; the root's verdict is re-derived because the union may have moved), then
     // checks every closure unit whose entry is stale so the unit's later execute through
@@ -1338,8 +1337,8 @@ struct engine::implementation {
     // parse error is the whole report (the names it would have declared are unknown, so
     // any check would only cascade). The findings live on the root entry and are
     // republished on every call, gathered or not.
-    const check_report& checked_report(engine& self, script_cache_entry& entry, bool want_diagnostics) {
-        if (want_diagnostics && closure_due(entry)) {
+    const check_report& checked_report(engine& self, script_cache_entry& entry) {
+        if (closure_due(entry)) {
             std::vector<std::string> roots;
             literal_unit_paths(entry.declarations, roots);
             entry.closure_root = !roots.empty();
@@ -1386,11 +1385,11 @@ struct engine::implementation {
                 for (const auto& d : r.diagnostics) {
                     entry.closure_diags.push_back({d.severity, 0, 0,
                         unit.path + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
-                        d.related_line, d.related_column, d.strict_region});
+                        d.related_line, d.related_column});
                 }
             }
         } else {
-            check_entry(self, entry, want_diagnostics);
+            check_entry(self, entry, true);
         }
         program_check_listing_ = entry.closure_listing;
         program_check_diags_ = entry.closure_diags;
@@ -1406,20 +1405,15 @@ struct engine::implementation {
         return r;
     }
 
-    // Strict gates every error; warn gates only the ones a [[strict_mode]] region raised.
-    bool gates(const check_report& r) const {
-        return static_check_mode_ == check_mode::strict ? r.has_errors() : r.has_strict_errors();
-    }
-
     // The tail every checked execute shares: publish last_check_, gate with the root listing
-    // followed by each closure unit's own. A unit that failed to parse fails a strict load as
-    // the parse error itself (warn runs on, and the import raises it when it executes).
+    // followed by each closure unit's own. A unit that failed to parse fails the load as
+    // the parse error itself.
     void gate_checked(const check_report& root, std::string_view source, std::string_view name = "<script>") {
         last_check_ = program_report(root);
-        if (static_check_mode_ == check_mode::strict && !program_parse_failures_.empty()) {
+        if (!program_parse_failures_.empty()) {
             throw parse_error(program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
         }
-        if (gates(last_check_)) {
+        if (last_check_.has_errors()) {
             throw static_check_error("static check failed:\n" + root.format(source, name) + program_check_listing_);
         }
     }
@@ -1471,13 +1465,11 @@ struct engine::implementation {
         has_executed_ = true;
         self.backend()->prepare_for_execution();
         entry.last_used = ++script_cache_clock;
-        const check_report& rep = checked_report(self, entry, static_check_mode_ != check_mode::off);
-        if (static_check_mode_ != check_mode::off) {
-            if (instanceVars.empty()) {
-                gate_checked(rep, source);
-            } else {
-                gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
-            }
+        const check_report& rep = checked_report(self, entry);
+        if (instanceVars.empty()) {
+            gate_checked(rep, source);
+        } else {
+            gate_checked(check_with_instance_vars(self, entry, instanceVars), source);
         }
         return run_unit(self, held, entry.compiled, instanceVars.empty() ? nullptr : &instanceVars, source, false);
     }
@@ -1531,7 +1523,7 @@ struct engine::implementation {
             detail::set_aggregate_view(entry.lowering, lowered);
             check_report broken;
             for (const auto& d : recheck.diagnostics) {
-                if (d.severity != check_diagnostic::level::error || (static_check_mode_ != check_mode::strict && !d.strict_region)) { continue; }
+                if (d.severity != check_diagnostic::level::error) { continue; }
                 const auto& before = entry.check_result.diagnostics;
                 const bool known = std::any_of(before.begin(), before.end(), [&](const check_diagnostic& b) {
                     return b.line == d.line && b.column == d.column && b.message == d.message;
@@ -2001,8 +1993,7 @@ struct engine::implementation {
         std::filesystem::path temporary;
         try {
             uint32_t flags = 0;
-            if (static_check_mode_ != check_mode::off && entry.checked &&
-                entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
+            if (entry.checked && entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
                 flags |= detail::jaibite_checked_clean_flags();
             }
             std::vector<uint8_t> bytes;
@@ -3169,20 +3160,17 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
-        // Runs in every mode (the proof pass rides it); diagnostics surface under warn/strict.
-        const check_report& rep = impl->checked_report(*this, *cached, impl->static_check_mode_ != check_mode::off);
-        if (impl->static_check_mode_ != check_mode::off) {
-            // a unit from a file (the root file, an include, an import) lists under its path
-            const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
-            if (instanceVars.empty()) {
-                impl->gate_checked(rep, scriptContent, listing_name);
-            } else {
-                // host-supplied instance variables are per-call: check fresh with those
-                // names defined instead of caching a result that depends on them
-                impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent, listing_name);
-            }
-            if (!include_scope.empty()) { impl->warn_scoped_enums(*this, *cached, sourcePath, include_scope); }
+        const check_report& rep = impl->checked_report(*this, *cached);
+        // a unit from a file (the root file, an include, an import) lists under its path
+        const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
+        if (instanceVars.empty()) {
+            impl->gate_checked(rep, scriptContent, listing_name);
+        } else {
+            // host-supplied instance variables are per-call: check fresh with those
+            // names defined instead of caching a result that depends on them
+            impl->gate_checked(impl->check_with_instance_vars(*this, *cached, instanceVars), scriptContent, listing_name);
         }
+        if (!include_scope.empty()) { impl->warn_scoped_enums(*this, *cached, sourcePath, include_scope); }
 
         // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
@@ -3272,16 +3260,14 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     return bite;
 }
 
-// Static-check a bite once (warn/strict only - a bite is checked once, diagnostics never
-// re-trigger) and gate under strict; the proof pass re-stamps whenever the switch or the
-// surface epoch moved, in every mode. Source is only available at creation time (loaded
+// Static-check a bite once (diagnostics never re-trigger) and gate it; the proof pass re-stamps
+// whenever the switch or the surface epoch moved. Source is only available at creation time (loaded
 // bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
     if (!bite.lowering_) { bite.lowering_ = std::make_shared<detail::aggregate_lowering_state>(); }
     auto& lowering = *std::static_pointer_cast<detail::aggregate_lowering_state>(bite.lowering_);
     const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
-    const bool need_check = impl->static_check_mode_ != check_mode::off &&
-                            bite.check_state_ == jaibite::check_state::unchecked;
+    const bool need_check = bite.check_state_ == jaibite::check_state::unchecked;
     const bool need_proofs = bite.proof_epoch_ != want_proof_epoch || !bite.autos_typed_ ||
                              (impl->lowering_on() && !lowering.built) || lowering.lowered_view != impl->lowering_on();
     if (need_check) { detail::set_aggregate_view(lowering, false); }   // diagnostics read the parsed bodies
@@ -3311,9 +3297,8 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         bite.proof_epoch_ = want_proof_epoch;
         bite.autos_typed_ = true;
     }
-    if (impl->static_check_mode_ == check_mode::off) { return; }
     impl->last_check_ = bite.check_report_;
-    if (impl->gates(bite.check_report_)) {
+    if (bite.check_report_.has_errors()) {
         throw static_check_error("static check failed:\n" +
                                  bite.check_report_.format(source ? std::string_view(*source) : std::string_view{}));
     }
@@ -3323,7 +3308,7 @@ held_value engine::execute(jai::jaibite& bite) { return hold(execute_unheld(bite
 
 script_value engine::execute_unheld(jai::jaibite& bite) {
     impl->has_executed_ = true;
-    check_bite(bite, nullptr);   // diagnostics once (warn/strict); proofs re-stamp on surface moves
+    check_bite(bite, nullptr);   // diagnostics once; proofs re-stamp on surface moves
     backend()->prepare_for_execution();
     if (bite.unit_ == 0) { bite.unit_ = ++impl->unit_count_; }
     return execute_parsed(bite.declarations_, bite.compiled_, nullptr, bite.unit_);
@@ -3390,7 +3375,7 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
     // Trust the checked-clean stamp only when the registration surface matches the
     // saving engine's; otherwise the bite loads unchecked and is re-checked here
-    // (relocated AST, this engine's surface) when a checking mode is active.
+    // (relocated AST, this engine's surface).
     if (detail::jaibite_stamped_clean(flags) && !bite.registration_mismatch_) {
         bite.check_state_ = jaibite::check_state::clean;
     }
@@ -3422,14 +3407,6 @@ void engine::record_field_migration(std::string_view class_name, uint64_t field_
         }
     }
     hot_reload_reports_.push_back(field_migration_report{std::string(class_name), std::string(field_name), old_type, new_type, outcome, 1});
-}
-
-void engine::static_checking(check_mode mode) {
-    impl->static_check_mode_ = mode;
-}
-
-check_mode engine::static_checking() const {
-    return impl->static_check_mode_;
 }
 
 void engine::type_proofs(bool on) {
@@ -3594,7 +3571,7 @@ check_report engine::check(const std::string& scriptContent) {
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
         impl->stamp_spliced(*cached, parser.spliced_files());
     }
-    return impl->program_report(impl->checked_report(*this, *cached, true));
+    return impl->program_report(impl->checked_report(*this, *cached));
 }
 
 bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
@@ -5973,7 +5950,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             I.importing_.insert(path);
             if (originals < group.size()) { entries[k]->checked = false; }   // a cached verdict never knew the pending modules' text
             try {
-                I.gate_checked(I.checked_report(*this, *entries[k], true), contents[k], path);
+                I.gate_checked(I.checked_report(*this, *entries[k]), contents[k], path);
             } catch (const std::exception& e) {
                 fail(k, e);
             }
@@ -6043,7 +6020,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
 
         bool rerun = false;
         for (const auto& m : group) { rerun = rerun || I.import_cache.count(m.resolved) != 0; }
-        if ((group.size() > 1 || rerun) && I.static_check_mode_ != check_mode::off) {
+        if (group.size() > 1 || rerun) {
             const size_t originals = group.size();
             group_verdict verdict = check_group(group, contents, originals, rerun);
             if (verdict.failed && rerun) {

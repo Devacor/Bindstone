@@ -1073,9 +1073,8 @@ public:
 					auto e = make_engine();
 					jai::stdlib::register_all(e);
 					e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-					e->static_checking(check_mode::off);
 					e->parallel_thread_count(4);
-					const std::string got = e->execute(prelude + src).to_string();
+					const std::string got = e->execute("[[warn_mode]]; " + prelude + src).to_string();
 					check_true(got.rfind(expected, 0) == 0, std::string(vm ? "vm: " : "interp: ") + src + " -> " + got);
 				}
 			}

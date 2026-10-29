@@ -8,6 +8,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
+#include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -93,6 +94,17 @@ std::shared_ptr<jai::engine> program_engine(const std::filesystem::path& dir) {
     return e;
 }
 
+// the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
+std::vector<uint8_t> unstamped_bite_bytes(jai::engine& a_engine, const std::string& a_source) {
+    const auto templates = a_engine.get_registered_template_types();
+    lexer lex(a_source, a_engine.get_symbolizer());
+    auto tokens = lex.tokenize();
+    parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+    auto declarations = syntax.parse();
+    check_true(bool(declarations), "fixture must parse: " + a_source);
+    return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+}
+
 } // namespace
 
 class static_check_tests : public suite {
@@ -151,40 +163,26 @@ public:
             check_eq((size_t)0, quiet.diagnostics.size());
         });
 
-        test("strict_by_default_and_mode_roundtrip", [this]() {
+        test("warn_region_leaves_the_runtime_alone_battery", [this]() {
+            // In a [[warn_mode]] unit the runtime alone decides: conversions run, a typed mismatch
+            // raises the runtime's own error at the store, and no diagnostic is an error.
             auto e = make_engine();
-            check_true(e->static_checking() == check_mode::strict);
-            e->static_checking(check_mode::off);
-            check_true(e->static_checking() == check_mode::off);
-            e->static_checking(check_mode::warn);
-            check_true(e->static_checking() == check_mode::warn);
-            e->static_checking(check_mode::strict);
-            check_true(e->static_checking() == check_mode::strict);
-        });
-
-        test("off_mode_zero_behavior_change_battery", [this]() {
-            // Under off the runtime alone decides: conversions run, a typed mismatch
-            // raises the runtime's own error at the store, and no diagnostics are collected.
-            auto e = make_engine();
-            e->static_checking(check_mode::off);
-            check_eq((int64_t)4, e->execute("int x = 4.7; x").as_int());
-            check_eq(std::string("42"), e->execute("string s = 42; s").as<std::string>());
-            check_eq(true, e->execute("bool b = \"x\"; b").as<bool>());
-            check_eq((int64_t)7, e->execute("var v = 5; v = \"s\"; 7").as_int());
-            check_eq((int64_t)10, e->execute("function ten() { return 10; } ten()").as_int());
+            check_eq((int64_t)4, e->execute("[[warn_mode]]; int x = 4.7; x").as_int());
+            check_eq(std::string("42"), e->execute("[[warn_mode]]; string s = 42; s").as<std::string>());
+            check_eq(true, e->execute("[[warn_mode]]; bool b = \"x\"; b").as<bool>());
+            check_eq((int64_t)7, e->execute("[[warn_mode]]; var v = 5; v = \"s\"; 7").as_int());
+            check_eq((int64_t)10, e->execute("[[warn_mode]]; function ten() { return 10; } ten()").as_int());
             std::string text;
-            try { e->execute("function bad() -> int { return \"nope\"; } bad();"); }
+            try { e->execute("[[warn_mode]]; function bad() -> int { return \"nope\"; } bad();"); }
             catch (const static_check_error&) { text = "static_check_error"; }
             catch (const std::exception& ex) { text = ex.what(); }
             check_true(text.find("Cannot return string from 'bad' (declared -> int)") != std::string::npos,
-                "off: the runtime's text, never the checker's (got: " + text + ")");
-            // and no diagnostics were collected anywhere
-            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size());
+                "a warn region: the runtime's text, never the checker's (got: " + text + ")");
+            check_false(e->last_check_diagnostics().has_errors());
         });
 
-        test("check_is_independent_of_mode", [this]() {
+        test("check_reports_without_executing", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::off);   // check() reports even where execution never would
             auto report = e->check("int x = \"hello\";");
             check_eq((size_t)1, error_count(report));
             check_eq((size_t)1, report.diagnostics[0].line);
@@ -396,10 +394,7 @@ public:
 					e->execute("int runs = 0;");
 					check_throws([&]() { e->execute("runs += 1; int incomplete() {}"); });
 					check_eq(int64_t{0}, e->get_variable("runs").as_int());
-					e->static_checking(check_mode::warn);
-					check_true(e->execute("int unchecked() {} unchecked();").is_null(), "warn mode preserves existing completion behavior");
-					e->static_checking(check_mode::off);
-					check_true(e->execute("int unchecked2() {} unchecked2();").is_null(), "off mode deliberately opts out of the return check");
+					check_true(e->execute("[[warn_mode]]; int unchecked() {} unchecked();").is_null(), "a warn region keeps the completion behavior");
 				}
 			}
 		});
@@ -422,12 +417,11 @@ public:
 					check_true(e->check(source).has_errors());
 					check_true(e->check("void take(array<int>& value) {} array<string> words = [\"a\"]; take(words);").has_errors());
 					check_true(e->check("void take(math::vec2& value) {} math::vec3 v; take(v);").has_errors());
-					e->static_checking(check_mode::off);
-					e->execute(source);
+					e->execute("[[warn_mode]]; " + source);
 					check_eq(int64_t{1}, e->execute("good().value;").as_int());
-					check_true(e->execute("var m = \"\"; try { bad(); } catch (err) { m = err; } m;").as_string().starts_with("Cannot return reference"));
-					check_true(e->execute("void take(array<int>& value) {} array<string> words = [\"a\"]; var m = \"\"; try { take(words); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
-					check_true(e->execute("int touch(int& value) { return value + 1; } string run() { float value = 1.5; try { return \"bad:\" + touch(value); } catch (err) { return err; } } run();").as_string().starts_with("Cannot pass"), "grafting cannot bypass a typed reference bind");
+					check_true(e->execute("[[warn_mode]]; var m = \"\"; try { bad(); } catch (err) { m = err; } m;").as_string().starts_with("Cannot return reference"));
+					check_true(e->execute("[[warn_mode]]; void take(array<int>& value) {} array<string> words = [\"a\"]; var m = \"\"; try { take(words); } catch (err) { m = err; } m;").as_string().starts_with("Cannot pass"));
+					check_true(e->execute("[[warn_mode]]; int touch(int& value) { return value + 1; } string run() { float value = 1.5; try { return \"bad:\" + touch(value); } catch (err) { return err; } } run();").as_string().starts_with("Cannot pass"), "grafting cannot bypass a typed reference bind");
 				}
 			}
 		});
@@ -635,7 +629,6 @@ public:
         test("strict_throws_before_anything_runs", [this]() {
             auto e = make_engine();
             e->execute("var sentinel = 0;");
-            e->static_checking(check_mode::strict);
             bool threw = false;
             std::string message;
             try {
@@ -649,23 +642,21 @@ public:
             check_true(threw);
             check_true(message.find("error:") != std::string::npos);
             check_true(message.find("oops") != std::string::npos);
-            e->static_checking(check_mode::off);
             check_eq((int64_t)0, e->execute("sentinel").as_int());
         });
 
         test("strict_allows_clean_scripts", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             check_eq((int64_t)9, e->execute("int f(int v) { return v * 3; } f(3)").as_int());
         });
 
-        test("warn_mode_executes_and_diagnostics_are_retrievable", [this]() {
+        test("warn_region_executes_and_diagnostics_are_retrievable", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::warn);
-            // checker-error in dead code: runtime-clean, still diagnosed
-            auto result = e->execute("var flag = false;\nif (flag) { zzz_nope(); }\n7");
+            // checker-error in dead code: runtime-clean, still diagnosed, as a warning
+            auto result = e->execute("[[warn_mode]]; var flag = false;\nif (flag) { zzz_nope(); }\n7");
             check_eq((int64_t)7, result.as_int());
-            check_true(e->last_check_diagnostics().has_errors());
+            check_false(e->last_check_diagnostics().has_errors());
+            check_true(has_diag(e->last_check_diagnostics(), dlevel::warning, "use of undeclared identifier 'zzz_nope'"));
             check_eq((size_t)2, e->last_check_diagnostics().diagnostics[0].line);
         });
 
@@ -673,7 +664,6 @@ public:
 
         test("registration_epoch_recheck", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             bool threw = false;
             try { e->execute("mystery_fn_zz(1);"); } catch (const static_check_error&) { threw = true; }
             check_true(threw);
@@ -685,7 +675,6 @@ public:
 
         test("hot_reload_new_source_is_rechecked", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             e->execute("class Hot { int v = 1; }\nHot h = Hot();\nh.v;");
             // reload with a changed class body (new source = new cache entry = checked):
             // the stale member access is caught against the class defined IN that source
@@ -702,25 +691,22 @@ public:
 
         test("jaibite_strict_gates_creation", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             auto bite = e->jaibite("int a = 20; a * 2");
             check_true(bite.checked_clean());
             check_eq((int64_t)40, bite.execute().as_int());
             check_throws([&]() { e->jaibite("int bad = \"s\";"); });
         });
 
-        test("jaibite_warn_carries_diagnostics", [this]() {
+        test("jaibite_warn_region_carries_diagnostics", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::warn);
-            auto bite = e->jaibite("int bad = \"s\";");
-            check_false(bite.checked_clean());
-            check_true(bite.check_diagnostics().has_errors());
-            check_true(e->last_check_diagnostics().has_errors());
+            auto bite = e->jaibite("[[warn_mode]]; int bad = \"s\";");
+            check_true(bite.checked_clean());   // no error-severity diagnostic: the region's errors are warnings
+            check_true(has_diag(bite.check_diagnostics(), dlevel::warning, "cannot initialize 'bad' declared 'int' with 'string'"));
+            check_true(has_diag(e->last_check_diagnostics(), dlevel::warning, "cannot initialize 'bad' declared 'int' with 'string'"));
         });
 
         test("jaibite_save_load_stamp", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             auto bite = e->jaibite("int a = 5; a + 1");
             check_true(bite.checked_clean());
             auto bytes = bite.save_bytes();
@@ -731,37 +717,21 @@ public:
             check_true(loaded.checked_clean());
             check_eq((int64_t)6, loaded.execute().as_int());
 
-            // unchecked save (off mode) loads unchecked, then strict re-checks on load
-            e->static_checking(check_mode::off);
-            auto unchecked_bite = e->jaibite("int b = 7; b");
-            check_false(unchecked_bite.checked_clean());
-            auto unchecked_bytes = unchecked_bite.save_bytes();
-            e->static_checking(check_mode::strict);
+            // unstamped bytes (no checker saw them) load unchecked, then are re-checked on load
+            auto unchecked_bytes = unstamped_bite_bytes(*e, "int b = 7; b");
             auto reloaded = e->jaibite_load_bytes(unchecked_bytes);
             check_true(reloaded.checked_clean());   // re-checked at load
 
-            // mismatched registration surface: stamp NOT trusted (off mode: stays unchecked)
-            auto e2 = make_engine();
-            e2->static_checking(check_mode::off);
-            e2->add_function("extra_reg_fn_zz", [](script_int v) -> script_int { return v; });
-            auto loaded2 = e2->jaibite_load_bytes(bytes);
-            check_true(loaded2.registration_mismatch());
-            check_false(loaded2.checked_clean());
-
-            // ...and a strict engine with a mismatch re-checks instead of trusting
+            // mismatched registration surface: the stamp is NOT trusted, the bite is re-checked instead
             auto e3 = make_engine();
             e3->add_function("extra_reg_fn_zz", [](script_int v) -> script_int { return v; });
-            e3->static_checking(check_mode::strict);
             auto loaded3 = e3->jaibite_load_bytes(bytes);
             check_true(loaded3.registration_mismatch());
             check_true(loaded3.checked_clean());
             check_eq((int64_t)6, loaded3.execute().as_int());
 
-            // strict load of a bad bite throws at load, before anything runs
-            e3->static_checking(check_mode::off);
-            auto bad_bite = e3->jaibite("int bad = \"s\";");
-            auto bad_bytes = bad_bite.save_bytes();
-            e3->static_checking(check_mode::strict);
+            // the load of a bad bite throws at load, before anything runs
+            auto bad_bytes = unstamped_bite_bytes(*e3, "int bad = \"s\";");
             check_throws([&]() { e3->jaibite_load_bytes(bad_bytes); });
         });
 
@@ -769,21 +739,19 @@ public:
             // a checked-clean stamp vouches for the checker that gave it: one from an older revision (rules that have since
             // grown) is checked again on load, one from this revision is trusted
             auto e = make_engine();
-            e->static_checking(check_mode::off);
-            auto bytes = e->jaibite("int bad = \"s\";").save_bytes();
+            auto bytes = unstamped_bite_bytes(*e, "int bad = \"s\";");
             auto stamp = [&bytes](uint32_t flags) {
                 std::vector<uint8_t> stamped = bytes;
                 for (int i = 0; i < 4; ++i) { stamped[8 + i] = static_cast<uint8_t>(flags >> (8 * i)); }
                 return stamped;
             };
-            e->static_checking(check_mode::strict);
             const auto older = stamp(jai::detail::k_jaibite_flag_checked_clean | ((jai::detail::k_jaibite_checker_revision - 1) << 8));
             check_throws<static_check_error>([&]() { e->jaibite_load_bytes(older); }, "an older revision's stamp re-checks and finds the error");
             auto current = e->jaibite_load_bytes(stamp(jai::detail::jaibite_checked_clean_flags()));
             check_true(current.checked_clean(), "this revision's stamp is trusted");
         });
 
-        test("jaibite_execute_checks_lazily", [this]() {
+        test("jaibite_checks_at_creation_and_at_load", [this]() {
             const char* bad = "int bad = \"s\";";
             // strict (default): checked at creation, the listing names the typed mismatch
             auto strict = make_engine();
@@ -791,24 +759,20 @@ public:
             try { strict->jaibite(bad); } catch (const static_check_error& ex) { text = ex.what(); }
             check_true(text.find("cannot initialize 'bad' declared 'int' with 'string'") != std::string::npos,
                 "strict creation rejects the typed mismatch (got: " + text + ")");
-            // off: created unchecked; the first strict execute checks it
+            // unstamped bytes load re-checked, so the load rejects them before any execute
             auto e = make_engine();
-            e->static_checking(check_mode::off);
-            auto bite = e->jaibite(bad);
-            check_false(bite.checked_clean());
-            e->static_checking(check_mode::strict);
-            check_throws<static_check_error>([&]() { e->execute(bite); });
-            // warn: created with diagnostics; execute reaches the runtime's own error
+            const auto unchecked_bytes = unstamped_bite_bytes(*e, bad);
+            check_throws<static_check_error>([&]() { e->jaibite_load_bytes(unchecked_bytes); });
+            // a warn region: created with diagnostics; execute reaches the runtime's own error
             auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
-            auto flagged = warn->jaibite(bad);
-            check_true(flagged.check_diagnostics().has_errors());
+            auto flagged = warn->jaibite(std::string("[[warn_mode]]; ") + bad);
+            check_true(has_diag(flagged.check_diagnostics(), dlevel::warning, "cannot initialize 'bad' declared 'int' with 'string'"));
             text.clear();
             try { flagged.execute(); }
             catch (const static_check_error&) { text = "static_check_error"; }
             catch (const std::exception& ex) { text = ex.what(); }
             check_true(text.find("Cannot initialize 'bad' (declared int) with string") != std::string::npos,
-                "warn executes into the runtime error (got: " + text + ")");
+                "a warn region executes into the runtime error (got: " + text + ")");
             // strict admits the var-sourced twin; the same runtime error fires at execute
             auto var_bite = strict->jaibite("var s = \"s\"; int bad = s;");
             check_true(var_bite.checked_clean());
@@ -882,7 +846,7 @@ public:
 
 		test("lambda_capture_lists_are_exhaustive", [this]() {
 			for (auto backend : {backend_type::interpreter, backend_type::vm}) {
-				for (auto mode : {check_mode::strict, check_mode::off}) {
+				{
 					for (const auto& source : {
 						"auto f() { int x = 5; return []() { return x; }; } f()",
 						"auto f() { int x = 1; int y = 2; return [x]() { return x + y; }; } f()",
@@ -893,7 +857,6 @@ public:
 					}) {
 						auto e = make_engine();
 						e->set_backend(backend);
-						e->static_checking(mode);
 						auto result = outcome(*e, source);
 						check_true(result.rfind("ERROR", 0) == 0 && result.find("capture") != std::string::npos, result);
 					}
@@ -916,11 +879,10 @@ public:
 				e->set_backend(backend);
 				check_eq(std::string("VALUE 4"), outcome(*e,
 					"auto f() { int x = 3; auto g = [&]() { x += 1; return x; }; g(); return x; } f()"));
-				auto off = make_engine();
-				off->set_backend(backend);
-				off->static_checking(check_mode::off);
-				check_eq(std::string("VALUE 12|33"), outcome(*off,
-					"class C { int x = 1; auto f() { return []() { return x; }; } auto g(int k) { return [k]() { return k; }; } } C c = C(); string m = \"\"; "
+				auto warned = make_engine();
+				warned->set_backend(backend);
+				check_eq(std::string("VALUE 12|33"), outcome(*warned,
+					"[[warn_mode]]; class C { int x = 1; auto f() { return []() { return x; }; } auto g(int k) { return [k]() { return k; }; } } C c = C(); string m = \"\"; "
 					"try { c.f(); } catch (e) { m += \"1\"; } try { c.f(); } catch (e) { m += \"2\"; } m + \"|\" + c.g(3)() + c.g(3)()"),
 					"an unverified capture list raises at every creation; a verified one is checked once");
 			}
@@ -1010,13 +972,11 @@ public:
 
         test("shadow_warnings_never_gate_strict", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             // strict throws on errors only; a shadow warning still executes
             check_eq((int64_t)3, e->execute(
                 "class K { int hp = 10; function m() -> int { var hp = 3; return hp; } }\n"
                 "K().m()").as_int());
             check_eq((size_t)1, e->last_check_diagnostics().diagnostics.size());
-            e->static_checking(check_mode::off);
         });
 
         test("shadow_lambda_field_visibility", [this]() {
@@ -1122,11 +1082,10 @@ public:
             check_true(e->type_proofs());
         });
 
-        test("proofs_stamp_in_off_mode_with_counters", [this]() {
+        test("proofs_stamp_with_counters", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
-            // check mode off: no diagnostics anywhere, yet the proof pass stamps
+            // a clean program: no diagnostics, and the proof pass stamps
             auto e = make_engine();
-            e->static_checking(check_mode::off);
             const std::string src =
                 "int a = 1; a = 2; string s = \"x\"; s = s + \"y\";\n"
                 "int twice(int v) { return v * 2; }\n"
@@ -1144,7 +1103,6 @@ public:
 
             // the twin with proofs off runs the same source with zero stamps and equal output
             auto off = make_engine();
-            off->static_checking(check_mode::off);
             off->type_proofs(false);
             check_eq((int64_t)4, off->execute(src).as_int());
             const proof_stats& none = off->last_proof_stats();
@@ -1297,23 +1255,21 @@ public:
             check_true(message.find("no member 'zzz' in class 'Q'") != std::string::npos, message);
         });
 
-        test("proof_jaibite_paths_restamp_without_touching_diagnostics", [this]() {
+        test("proof_jaibite_paths_restamp", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
-            e->static_checking(check_mode::off);
             auto bite = e->jaibite("int a = 5; int b = a; b");
-            check_eq((uint32_t)2, e->last_proof_stats().decls, "proof pass at creation under off");
-            check_false(bite.checked_clean());   // diagnostics untouched under off
+            check_eq((uint32_t)2, e->last_proof_stats().decls, "proof pass at creation");
+            check_true(bite.checked_clean());
             auto loaded = e->jaibite_load_bytes(bite.save_bytes());
             check_eq((uint32_t)2, e->last_proof_stats().decls, "re-derived at load, never serialized");
-            check_false(loaded.checked_clean());
+            check_true(loaded.checked_clean());
             check_eq((int64_t)5, loaded.execute().as_int());
             e->type_proofs(false);
             check_eq((int64_t)5, loaded.execute().as_int());
             check_eq((uint32_t)0, e->last_proof_stats().decls, "next execute clears the bite's stamps");
             e->type_proofs(true);
-            // strict: a trusted-clean load keeps its empty report and still stamps
-            e->static_checking(check_mode::strict);
+            // a trusted-clean load keeps its empty report and still stamps
             auto clean = e->jaibite("int q = 1; int w = q; w");
             check_true(clean.checked_clean());
             auto trusted = e->jaibite_load_bytes(clean.save_bytes());
@@ -1428,7 +1384,6 @@ public:
             for (uint64_t seed = 0; seed < k_seed_count; ++seed) {
                 fuzz::program p = fuzz::generate_program(seed, 3);
                 auto eng = make_engine();
-                eng->static_checking(check_mode::warn);   // strict would abort flagged programs before they can prove they run clean
                 eng->execution_budget(k_backstop_seconds);
                 eng->execution_step_budget(k_step_budget);
                 eng->memory_cap(64 * 1024 * 1024);
@@ -1460,7 +1415,7 @@ public:
                         }
                     }
                     try {
-                        eng->execute(seg);
+                        eng->execute("[[warn_mode]]; " + seg);   // a flagged segment still runs, so it can prove it runs clean
                     } catch (...) {
                         ran_clean = false;   // runtime error: errors on it are legitimate
                         break;
@@ -1614,7 +1569,6 @@ public:
 
         test("cast_types_certain_and_reference_receivers_resolve_members", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             const std::string prelude =
                 "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
                 "auto h = H(); h.p = T();\n";
@@ -1636,20 +1590,18 @@ public:
             check_true(threw, "unknown member on a cast value");
         });
 
-        test("cast_unknown_type_is_a_check_error_and_a_runtime_error_under_warn", [this]() {
+        test("cast_unknown_type_is_a_check_error_and_a_runtime_error_in_a_warn_region", [this]() {
             auto e = make_engine();
-            e->static_checking(check_mode::strict);
             bool threw = false;
             std::string message;
             try { e->execute("var v = 1; cast<Nope>(v);"); } catch (const static_check_error& err) { threw = true; message = err.what(); }
             check_true(threw);
             check_true(message.find("unknown type in cast: 'Nope'") != std::string::npos);
-            // warn keeps the runtime verdict: the operand's class is simply not the target
+            // a warn region keeps the runtime verdict: the operand's class is simply not the target
             auto w = make_engine();
-            w->static_checking(check_mode::warn);
             check_eq(std::string("Cannot cast 'int' to 'Nope'"),
-                     w->execute("var v = 1; var c = \"\"; try { cast<Nope>(v); } catch (e) { c = e; } c").to_string());
-            check_true(w->last_check_diagnostics().has_errors());
+                     w->execute("[[warn_mode]]; var v = 1; var c = \"\"; try { cast<Nope>(v); } catch (e) { c = e; } c").to_string());
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "unknown type in cast: 'Nope'"));
         });
 
         test("cast_value_is_a_proof_source_reference_is_not", [this]() {
@@ -1741,33 +1693,26 @@ public:
             const std::string P = "class C { int v = 1; }\n";
             const std::string body = "shared_ptr<C> h = shared_ptr<C>(); auto c = cast<C>(h); c.v = 5; h.v * 10 + c.v";
             auto strict = make_engine();
-            strict->static_checking(check_mode::strict);
             check_eq((int64_t)15, strict->execute(P + body).as_int());
             const auto& r = strict->last_check_diagnostics();
             check_eq((size_t)1, r.diagnostics.size());
             check_eq((size_t)0, error_count(r));
             check_true(r.diagnostics[0].severity == dlevel::warning);
             auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
             check_eq((int64_t)15, warn->execute("[[strict_mode]];\n" + P + body).as_int());
-            check_false(warn->last_check_diagnostics().has_strict_errors());
+            check_false(warn->last_check_diagnostics().has_errors());
             check_eq((size_t)1, warning_count(warn->last_check_diagnostics()));
             // a weak_ptr operand keeps the runtime's verdict and draws nothing
             check_eq(std::string("Cannot cast 'weak_ptr' to 'C'"),
                      warn->execute(P + "shared_ptr<C> h = shared_ptr<C>(); weak_ptr<C> w = h; var m = \"\"; try { auto d = cast<C>(w); } catch (e) { m = e; } m").to_string());
             check_eq((size_t)0, warn->last_check_diagnostics().diagnostics.size());
-            auto off = make_engine();
-            off->static_checking(check_mode::off);
-            check_eq((int64_t)15, off->execute(P + body).as_int());
-            check_eq((size_t)0, off->last_check_diagnostics().diagnostics.size());
         });
 
         test("cast_copy_warning_jaibite_unaffected", [this]() {
             const std::string src = "class C { int v = 1; }\nshared_ptr<C> h = shared_ptr<C>(); auto c = cast<C>(h); c.v = 5; h.v * 10 + c.v";
-            for (check_mode mode : {check_mode::strict, check_mode::warn}) {
+            for (const std::string& unit : {src, "[[warn_mode]]; " + src}) {
                 auto e = make_engine();
-                e->static_checking(mode);
-                auto bite = e->jaibite(src);
+                auto bite = e->jaibite(unit);
                 check_true(bite.checked_clean());
                 check_false(bite.check_diagnostics().has_errors());
                 check_true(has_diag(bite.check_diagnostics(), dlevel::warning, "cast<C>(h) copies the instance"));
@@ -1813,11 +1758,6 @@ public:
             check_eq((size_t)0, r.diagnostics[0].line);
             check_true(r.diagnostics[0].message.find("leaf_err.jai:1:") != std::string::npos);
             check_true(r.diagnostics[0].message.find("zzz_missing") != std::string::npos);
-            // warn mode runs it
-            auto w = program_engine(dir);
-            w->static_checking(check_mode::warn);
-            w->execute("import \"leaf_err.jai\";\n1");
-            check_true(w->has_function("f"));
             std::filesystem::remove_all(dir);
         });
 
@@ -1909,9 +1849,8 @@ public:
                 check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm.f(1);\nvar vm = {\"g\": 1};\nvm.anything();\nvar d = [1];\nd.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
                 auto w = make_engine();
                 w->type_proofs(proofs);
-                w->static_checking(check_mode::warn);
-                check_eq(std::string("array has no member 'splice'"), w->execute("array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());
-                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "no member 'splice' on 'array<string>'"));
+                check_eq(std::string("array has no member 'splice'"), w->execute("[[warn_mode]]; array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "no member 'splice' on 'array<string>'"));
             }
         });
 
@@ -1978,15 +1917,14 @@ public:
 
                 auto w = make_engine();
                 w->type_proofs(proofs);
-                w->static_checking(check_mode::warn);
                 check_eq(std::string("Cannot pass non-lvalue to reference parameter"),
-                    w->execute("void inc(int& x) { x = x + 1; }\nvar m = \"\";\ntry { inc(5); } catch (err) { m = err; }\nm;").to_string());
-                check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "'inc' writes through parameter 'x' (line 1); pass a variable"));
+                    w->execute("[[warn_mode]]; void inc(int& x) { x = x + 1; }\nvar m = \"\";\ntry { inc(5); } catch (err) { m = err; }\nm;").to_string());
+                check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "'inc' writes through parameter 'x' (line 1); pass a variable"));
             }
         });
 
         // A reference parameter's default names storage as in C++: a literal or an operator's result is a load error, and at the bind
-        // (checking off) a default yielding no reference raises; a const T& default binds a temporary, an lvalue default binds it
+        // (in a [[warn_mode]] region) a default yielding no reference raises; a const T& default binds a temporary, an lvalue default binds it
         test("a_reference_parameters_default_must_name_storage", [this]() {
             auto e = make_engine();
             auto r = e->check("int peek(int& p = 5) { return p; }\nvoid push_one(array<int>& xs = [1]) { xs.push(2); }\nauto lf = [](int& q = 2 + 3) { return q; };");
@@ -1999,17 +1937,16 @@ public:
                 "int k(const int& p = 5) { return p; }\nint m(int& p = true ? g : g) { return p; }")));
 
             auto off = make_engine();
-            off->static_checking(check_mode::off);
             check_eq(std::string("Cannot bind non-lvalue default to reference parameter 'p'"),
-                off->execute("int peek(int& p = 5) { return p; }\nvar msg = \"\";\ntry { peek(); } catch (err) { msg = err; }\nmsg;").to_string());
+                off->execute("[[warn_mode]]; int peek(int& p = 5) { return p; }\nvar msg = \"\";\ntry { peek(); } catch (err) { msg = err; }\nmsg;").to_string());
             check_eq(std::string("Cannot bind non-lvalue default to reference parameter 'q'"),
-                off->execute("auto lf = [](int& q = 2 + 3) { return q; };\nvar msg = \"\";\ntry { lf(); } catch (err) { msg = err; }\nmsg;").to_string());
+                off->execute("[[warn_mode]]; auto lf = [](int& q = 2 + 3) { return q; };\nvar msg = \"\";\ntry { lf(); } catch (err) { msg = err; }\nmsg;").to_string());
             check_eq((size_t)0, error_count(e->check("coroutine int gen(int& p = 5) { yield p; }\nauto g = gen();")), "a coroutine binds a copy of its default");
             check_eq(std::string("5 1"),
-                off->execute("int g = 1;\ncoroutine int lit(int& p = 5) { yield p; }\ncoroutine int named(int& p = g) { p = 9; yield p; }\n"
+                off->execute("[[warn_mode]]; int g = 1;\ncoroutine int lit(int& p = 5) { yield p; }\ncoroutine int named(int& p = g) { p = 9; yield p; }\n"
                              "auto a = lit();\nauto b = named();\nint first = a.next();\nb.next();\n\"\" + first + \" \" + g;").to_string());
             check_eq(std::string("7 5 11"),
-                off->execute("int peek(int& p = 5) { return p; }\nint v = 7;\nint k(const int& p = 5) { return p; }\nint g = 1;\nvoid bump(int& p = g) { p += 10; }\nbump();\n"
+                off->execute("[[warn_mode]]; int peek(int& p = 5) { return p; }\nint v = 7;\nint k(const int& p = 5) { return p; }\nint g = 1;\nvoid bump(int& p = g) { p += 10; }\nbump();\n"
                              "\"\" + peek(v) + \" \" + k() + \" \" + g;").to_string());
         });
 
@@ -2048,14 +1985,11 @@ public:
             )JAI";
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
-                    for (auto mode : {check_mode::strict, check_mode::warn, check_mode::off}) {
-                        auto e = engine::make();
-                        e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
-                        e->type_proofs(proofs);
-                        e->static_checking(mode);
-                        check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
-                        check_eq((size_t)0, error_count(e->last_check_diagnostics()));
-                    }
+                    auto e = engine::make();
+                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+                    e->type_proofs(proofs);
+                    check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
+                    check_eq((size_t)0, error_count(e->last_check_diagnostics()));
                 }
             }
         });
@@ -2197,14 +2131,6 @@ public:
             check_eq((size_t)1, r.diagnostics.size());
             check_eq((size_t)1, error_count(r));
             check_true(r.diagnostics[0].message.find("pe_b.jai:1:12:") != std::string::npos, r.diagnostics[0].message);
-            // warn mode reports it alone as well, and the import raises it when it runs
-            auto w = program_engine(dir);
-            w->static_checking(check_mode::warn);
-            std::string wwhat;
-            try { w->execute(root); } catch (const std::exception& ex) { wwhat = ex.what(); }
-            check_true(wwhat.find("pe_b.jai:1:12:") != std::string::npos, wwhat);
-            check_eq((size_t)1, w->last_check_diagnostics().diagnostics.size());
-            check_true(w->last_check_diagnostics().diagnostics[0].message.find("pe_b.jai:1:12:") != std::string::npos);
             // the fix is seen on the next run
             write_unit(dir, "pe_b.jai", "void f(int v) {}\n");
             check_eq((int64_t)2, e->execute(root).as_int());
@@ -2636,40 +2562,24 @@ public:
             check_eq((size_t)0, error_count(r), r.format());
         });
 
-        test("innermost_wins_and_strict_mode_gates_under_warn", [this]() {
+        test("innermost_wins_and_strict_mode_regions_gate", [this]() {
             // strict inside a warn unit re-arms
             std::string what = outcome(*make_engine(), "[[warn_mode]];\nint ok = \"s\";\n[[strict_mode]] int q = \"s\";\nq");
             check_true(what.find("ERROR static check failed") == 0, "got: " + what);
             check_true(what.find("error: cannot initialize 'q'") != std::string::npos, what);
             check_true(what.find("warning: cannot initialize 'ok'") != std::string::npos, what);
-            // a strict_mode unit gates even when the engine mode is warn
-            auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
-            std::string plain = outcome(*warn, "int q = \"s\";\nq");
-            check_true(plain.find("ERROR Cannot initialize") == 0, "warn engine runs into the runtime error (got: " + plain + ")");
-            check_true(warn->last_check_diagnostics().has_errors());
-            check_false(warn->last_check_diagnostics().has_strict_errors());
-            std::string gated = outcome(*warn, "[[strict_mode]];\nint q = \"s\";\nq");
-            check_true(gated.find("ERROR static check failed") == 0, "got: " + gated);
-            check_true(warn->last_check_diagnostics().has_strict_errors());
-            // only the strict region gates: a statement-level strict_mode in a warn engine
-            std::string partial = outcome(*warn, "int a = \"s\";\n[[strict_mode]] int b = \"s\";\nb");
-            check_true(partial.find("ERROR static check failed") == 0, "got: " + partial);
-            std::string free = outcome(*warn, "int a = \"s\";\n[[warn_mode]] int b = \"s\";\nb");
-            check_true(free.find("ERROR Cannot initialize") == 0, "got: " + free);
-            // jaibite creation gates the same way
-            check_throws<static_check_error>([&]() { warn->jaibite("[[strict_mode]];\nint q = \"s\";"); });
-            check_false(warn->jaibite("int q = \"s\";").checked_clean());
-        });
-
-        test("off_mode_ignores_attributes", [this]() {
+            // a statement-level warn region runs into the runtime error; the rest of the unit still gates
             auto e = make_engine();
-            e->static_checking(check_mode::off);
-            std::string what = outcome(*e, "[[strict_mode]];\nint q = \"s\";\nq");
-            check_true(what.find("ERROR Cannot initialize") == 0, "got: " + what);
-            check_true(e->last_check_diagnostics().diagnostics.empty());
-            check_eq((int64_t)5, e->execute("[[warn_mode]];\nint x = 5;\n[[strict_mode]] int y = x;\n{ [[warn_mode]] y = 5; }\ny").as_int());
-            check_true(e->last_check_diagnostics().diagnostics.empty());
+            std::string free = outcome(*e, "int a = 1;\n[[warn_mode]] int b = \"s\";\nb");
+            check_true(free.find("ERROR Cannot initialize") == 0, "got: " + free);
+            check_false(e->last_check_diagnostics().has_errors());
+            std::string partial = outcome(*e, "int a = \"s\";\n[[warn_mode]] int b = \"s\";\nb");
+            check_true(partial.find("ERROR static check failed") == 0, "got: " + partial);
+            // jaibite creation gates the same way: a strict region inside a warn unit gates, the warn unit alone loads
+            check_throws<static_check_error>([&]() { e->jaibite("[[warn_mode]];\nint ok = 1;\n[[strict_mode]] int q = \"s\";"); });
+            auto warned = e->jaibite("[[warn_mode]];\nint q = \"s\";");
+            check_true(warned.checked_clean());
+            check_true(has_diag(warned.check_diagnostics(), dlevel::warning, "cannot initialize 'q'"));
         });
 
         test("unknown_attribute_is_a_parse_error", [this]() {
@@ -2801,10 +2711,8 @@ public:
             check_eq((size_t)1, error_count(e->check(cls + "int f(V q) { return q.name; }")), "return from a string getter");
             check_eq((size_t)0, error_count(e->check(cls + "int a = v.hp; float f = v.hp; string s = v.name; string t = v.hp; bool b = v.hp; var d = v.name; int l = v.name.size();")), "well-typed reads are clean");
             check_eq((size_t)0, error_count(e->check(cls + "v.name.zzz();")), "a builtin method on the typed result stays lenient");
-            e->static_checking(check_mode::warn);
-            std::string what = outcome(*e, cls + "int n = v.name; n");
+            std::string what = outcome(*e, "[[warn_mode]]; " + cls + "int n = v.name; n");
             check_true(what.find("ERROR Cannot initialize") == 0, "the runtime keeps its rejection (got: " + what + ")");
-            e->static_checking(check_mode::strict);
             // never a proof source: the plain-field twin proves one more decl than the getter-typed read
             auto plain = make_engine();
             check_eq((size_t)0, error_count(plain->check("class F { int hp = 5; } F f = F(); int x = f.hp; int y = 5; x + y")));
@@ -2830,10 +2738,8 @@ public:
             const std::string setter_only = "class T2 { int v_ = 0; void _set_hp(int v) { v_ = v; } }\nT2 t = T2();\n";
             check_eq((size_t)1, error_count(e->check(setter_only + "t.hp = \"s\";")), "setter-only plain store");
             check_eq((size_t)0, error_count(e->check(setter_only + "t.hp += \"s\";")), "setter-only compound store: no getter type, lenient");
-            e->static_checking(check_mode::warn);
-            std::string what = outcome(*e, cls + "s.hp = \"s\"; s.hp");
+            std::string what = outcome(*e, "[[warn_mode]]; " + cls + "s.hp = \"s\"; s.hp");
             check_true(what.find("ERROR Cannot pass string to parameter 'v' of '_set_hp' (declared int)") == 0, "the runtime keeps its rejection (got: " + what + ")");
-            e->static_checking(check_mode::strict);
             // never a proof source: the member stays off the field lanes after registration too
             const std::string prog = cls + "s.hp = 4; int x = s.hp; x";
             check_eq((int64_t)4, e->execute(prog).as_int());
@@ -3117,11 +3023,10 @@ public:
                 check_eq((size_t)1, error_count(rep), rep.format(src));
                 check_true(has_diag(rep, dlevel::error, text), rep.format(src));
             }
-            // warn mode reports it as a warning and runs, with the run-time result unchanged
+            // a warn region reports it as a warning and runs, with the run-time result unchanged
             auto w = make_engine();
-            w->static_checking(check_mode::warn);
-            check_eq(false, w->execute("int i = 1; string s = \"s\"; i == s").as<bool>());
-            check_true(has_diag(w->last_check_diagnostics(), dlevel::error, "cannot compare 'int' with 'string'"));
+            check_eq(false, w->execute("[[warn_mode]]; int i = 1; string s = \"s\"; i == s").as<bool>());
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "cannot compare 'int' with 'string'"));
             // var operands keep the run-time verdict
             check_eq(false, e->execute("var v = 1; var t = \"s\"; v == t").as<bool>());
             // an auto takes its initializer's type, then holds to it like a declaration

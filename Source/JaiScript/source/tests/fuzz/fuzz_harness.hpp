@@ -21,6 +21,10 @@
 
 namespace jai::fuzz {
 
+	// Generated programs are not statically clean and the differential measures runtime parity: every unit the harness
+	// executes opens a [[warn_mode]] region on its first line, so the checker reports and the load proceeds
+	inline constexpr const char* k_warn_region_prefix = "[[warn_mode]]; ";
+
 	// ------------------------------------------------------------------
 	// Deterministic RNG (splitmix64) - no random_device, no wall clock.
 	// ------------------------------------------------------------------
@@ -230,7 +234,6 @@ namespace jai::fuzz {
 		eng->ir_passes(cfg.passes);
 		if (cfg.lowering >= 0) eng->aggregate_lowering(cfg.lowering != 0);
 		if (cfg.miss_every) eng->cells_miss_every(cfg.miss_every);
-		eng->static_checking(check_mode::warn);   // generated programs are not statically clean; this measures runtime parity
 		eng->execution_budget(cfg.budget_seconds);
 		eng->execution_step_budget(cfg.step_budget);
 		eng->memory_cap(cfg.memory_cap_bytes);
@@ -273,7 +276,7 @@ namespace jai::fuzz {
 			std::string r;
 			auto seg_start = std::chrono::steady_clock::now();
 			try {
-				script_value v = eng->execute(seg);
+				script_value v = eng->execute(k_warn_region_prefix + seg);
 				r = "VALUE " + describe_value(v);
 			} catch (const std::exception& ex) {
 				r = std::string("ERROR ") + ex.what();
@@ -653,10 +656,9 @@ namespace jai::fuzz {
 			os << "\t\te->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);\n";
 		}
 		os << "\t\te->max_call_depth(jai::backend_type::vm, e->max_call_depth(jai::backend_type::interpreter));\n";
-		os << "\t\te->static_checking(jai::check_mode::warn);\n";
 		os << "\t\te->execution_budget(0);\n";
 		for (size_t i = 0; i < p.segments.size(); ++i) {
-			os << "\t\ttry { out[idx] += e->execute(R\"__jai(\n" << p.segments[i] << ")__jai\").to_string(); }\n";
+			os << "\t\ttry { out[idx] += e->execute(R\"__jai(" << k_warn_region_prefix << "\n" << p.segments[i] << ")__jai\").to_string(); }\n";
 			os << "\t\tcatch (const std::exception& ex) { out[idx] += std::string(\"ERROR: \") + ex.what(); }\n";
 		}
 		os << "\t\t++idx;\n";

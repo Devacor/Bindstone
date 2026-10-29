@@ -114,8 +114,7 @@ public:
 		});
 		test("handle_result_and_store_of_another_class_raise", [this]() {
 			auto eng = make_engine();
-			eng->static_checking(jai::check_mode::off);
-			auto r = eng->execute(R"(
+			auto r = eng->execute(R"([[warn_mode]];
 				class Base { int v() { return 1; } }
 				class Other { int w = 0; }
 				class Holder {

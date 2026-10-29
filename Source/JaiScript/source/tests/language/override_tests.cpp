@@ -88,7 +88,6 @@ public:
         test("override_keyword_required_for_virtual_methods", [this]() {
             auto engine = make_engine();
             
-            engine->static_checking(jai::check_mode::off);   // the run time's verdict (the checker reports it at load)
             engine->execute(R"(
                 class Animal {
                     auto speak() { return "..."; }
@@ -101,7 +100,7 @@ public:
             
             // Now Animal::speak is virtual, so Cat MUST use override
             try {
-                engine->execute(R"(
+                engine->execute(R"([[warn_mode]];   // the run time's verdict (the checker reports it at load)
                     class Cat : Animal {
                         auto speak() { return "Meow"; }  // Missing override!
                     }
@@ -114,7 +113,6 @@ public:
         
         test("override_without_base_method_throws", [this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::off);
             
             engine->execute(R"(
                 class Base {
@@ -123,7 +121,7 @@ public:
             )");
             
             try {
-                engine->execute(R"(
+                engine->execute(R"([[warn_mode]];
                     class Derived : Base {
                         auto bar() override { return 99; }  // No bar() in Base!
                     }
@@ -137,7 +135,6 @@ public:
         
         test("shadowing_without_override_throws", [this]() {
             auto engine = make_engine();
-            engine->static_checking(jai::check_mode::off);
             
             engine->execute(R"(
                 class Base {
@@ -146,7 +143,7 @@ public:
             )");
             
             try {
-                engine->execute(R"(
+                engine->execute(R"([[warn_mode]];
                     class Derived : Base {
                         auto compute() { return 2; }  // Shadows Base::compute without override
                     }

@@ -705,9 +705,8 @@ through a reference). Coroutines cannot return references (parse error). At top 
 bitwise-and of a class value as `(ClassName) & name()`.
 
 Redefinition: at top level a same-name function definition replaces the previous one
-(last wins); with static checking enabled (`warn`/`strict`) a duplicate definition inside
-one textual parse unit reports a checker WARNING (never an error — strict mode still
-executes). Composition through `include`/`import` stays silent: included files parse and
+(last wins); a duplicate definition inside one textual parse unit reports a checker WARNING
+(never an error — the program still executes). Composition through `include`/`import` stays silent: included files parse and
 check as their own units. In namespaces, same name + same arity requires `override`
 (placed AFTER the parameter list: `int f() override { ... }`); different arities coexist
 as overloads. Class methods and constructors overload by arity (trailing defaults
@@ -821,7 +820,7 @@ y = "hello";             // OK: var allows any type
 
 var mixed = [1, "two", 3.14];  // OK: var allows mixed types
 ```
-See `static_checking.md` for compile-time enforcement (off/warn/strict).
+See `static_checking.md` for compile-time enforcement.
 
 ### Generic Containers
 ```cpp

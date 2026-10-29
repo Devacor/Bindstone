@@ -300,8 +300,7 @@ carry no proofs).
 diagnostics walk (proofs left alone, `proofs_t::leave`) when diagnostics are wanted and stale, then
 a proof pass whenever the switch, the surface epoch, auto typing or the lowering view moved; the
 proof pass alone reads the program's globals and types the auto slots. Every execute calls
-`checked_report` in every mode (`off` included): diagnostics are wanted only under warn/strict, and
-the proof pass rides it. A host's instance-variables call checks fresh for diagnostics only
+`checked_report`, and the proof pass rides it. A host's instance-variables call checks fresh for diagnostics only
 (`check_with_instance_vars`) and never re-stamps. `check_bite` runs on `engine::jaibite`,
 `execute(jaibite&)` and a bite load: "a bite is checked once" holds for diagnostics (a trusted-clean
 loaded bite keeps empty diagnostics), while proofs re-stamp on surface moves.
@@ -311,7 +310,7 @@ Every hook runs after `run_ast_marking_passes` (the parse tail, the jaibite load
 `check_surface_epoch_` moves on `add_global`, `register_overload_impl`, `add_class_impl`,
 `register_template_type` and `note_class_shape_change` (3.2).
 
-Cost: one checker walk per unique source per surface epoch, in every mode; `type_proofs(false)`
+Cost: one checker walk per unique source per surface epoch; `type_proofs(false)`
 clears the stamps.
 
 ## 5. Interpreter — `source/implementation/interpreter.cpp`

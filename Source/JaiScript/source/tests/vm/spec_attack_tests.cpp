@@ -43,11 +43,10 @@ inline std::vector<run_config> configs() {
 	return out;
 }
 
-inline std::shared_ptr<engine> make(const run_config& c, check_mode mode = check_mode::strict) {
+inline std::shared_ptr<engine> make(const run_config& c) {
 	auto e = engine::make();
 	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
-	e->static_checking(mode);
 	if (!c.proofs) { e->type_proofs(false); }
 	if (!c.passes) { e->ir_passes(false); }
 	if (c.miss) { e->cells_miss_every(c.miss); }
@@ -66,10 +65,9 @@ class spec_attack_tests : public suite {
 public:
 	spec_attack_tests() : suite("Spec Attacks") {}
 
-	void every_config(const std::string& label, const std::string& expected, const std::function<std::string(engine&)>& body,
-	                  check_mode mode = check_mode::strict) {
+	void every_config(const std::string& label, const std::string& expected, const std::function<std::string(engine&)>& body) {
 		for (const auto& c : attack::configs()) {
-			auto e = attack::make(c, mode);
+			auto e = attack::make(c);
 			std::string got;
 			try { got = body(*e); }
 			catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
@@ -77,8 +75,8 @@ public:
 		}
 	}
 
-	void expect(const std::string& label, const std::string& src, const std::string& expected, check_mode mode = check_mode::strict) {
-		every_config(label, expected, [&](engine& e) { return attack::render(e.execute(src)); }, mode);
+	void expect(const std::string& label, const std::string& src, const std::string& expected) {
+		every_config(label, expected, [&](engine& e) { return attack::render(e.execute(src)); });
 	}
 
 	void forge_tests() override {
@@ -135,7 +133,7 @@ private:
 					return s;
 				}
 				run();
-			)", "20,2,30,4,", check_mode::warn);
+			)", "20,2,30,4,");
 		});
 		test("loop_bodies_without_braces", [this]() {
 			expect("braceless bodies", R"(
@@ -148,14 +146,14 @@ private:
 			expect("from_this arity", R"(
 				class C { function f() { var w = weak_from_this(1); return 1; } }
 				string r = ""; try { C().f(); } catch (e) { r = e; } r;
-			)", "weak_from_this() takes no arguments", check_mode::warn);
+			)", "weak_from_this() takes no arguments");
 		});
 		test("destructured_names_shared_with_a_closure_live_in_the_environment", [this]() {
 			expect("destructure", R"(
 				function run() -> string { auto [x, y] = [10, 20]; auto f = [&]() { x += 1; }; f(); return "" + x + "," + y; }
 				auto [p, q] = [1, 2];
 				run() + "|" + (p + q);
-			)", "11,20|3", check_mode::warn);
+			)", "11,20|3");
 		});
 	}
 

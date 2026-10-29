@@ -2713,7 +2713,6 @@ public:
                 check_ne(std::string("no error"), member_text("nothere"));
                 check_eq(member_text("nothere"), member_text("_cpp_object"), "a member read of _cpp_object raises the absent-member text");
             }
-            eng->static_checking(check_mode::strict);
             // The checker leaves a C++-based chain's members open; a script-only class reports an absent member at load
             auto checker_text = [&](const std::string& type, const std::string& name) {
                 try { eng->execute("class Plain { int a = 1; }\nfunction typed_read() -> int { " + type + " v = " + type + "(); var x = v." + name + "; return 0; }"); }

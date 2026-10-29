@@ -237,7 +237,7 @@ string upper = name.to_upper();       // changes name and returns it
 print(name, " ", copy, " ", upper, " ", string::to_lower(upper), " ", upper);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA ada ADA ada ADA</code></pre></div>
 <h3 id="statics">Statics use ::<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h3>
-<p><code>Config::volume</code> reaches a static. <code>Config.volume</code> is an error that names the right spelling: the checker reports it at load, and with checking off it raises the same text when it runs:</p>
+<p><code>Config::volume</code> reaches a static. <code>Config.volume</code> is an error that names the right spelling: the checker reports it at load, and in a <code>[[warn_mode]]</code> region it raises the same text when it runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config { static int volume = 7; }
 print(Config::volume);
 print(Config.volume);</code></pre></div>

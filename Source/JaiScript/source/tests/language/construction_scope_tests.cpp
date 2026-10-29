@@ -17,38 +17,35 @@ class construction_scope_tests : public suite {
 public:
 	construction_scope_tests() : suite("Construction Scope") {}
 
-	static std::string run(bool vm, const std::string& program, check_mode mode = check_mode::strict) {
+	static std::string run(bool vm, const std::string& program, bool warn_region = false) {
 		auto e = engine::make();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
-		e->static_checking(mode);
 		stdlib::register_all(*e);
-		try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+		try { return e->execute(warn_region ? "[[warn_mode]]; " + program : program).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 	}
 
-	void both(const std::string& program, const std::string& expected, const std::string& what, check_mode mode = check_mode::strict) {
-		const std::string interp = run(false, program, mode);
-		const std::string vm = run(true, program, mode);
+	void both(const std::string& program, const std::string& expected, const std::string& what, bool warn_region = false) {
+		const std::string interp = run(false, program, warn_region);
+		const std::string vm = run(true, program, warn_region);
 		check_eq(interp, vm, what + ": both backends");
 		if (!expected.empty()) { check_eq(expected, vm, what); }
-		const std::string again = run(true, program + "\n", mode);   // a second engine compiles the chunks afresh
+		const std::string again = run(true, program + "\n", warn_region);   // a second engine compiles the chunks afresh
 		check_eq(vm, again, what + ": repeatable");
 	}
 
-	// the program fails its load with the checker's text, and with checking off raises `raised` on both backends
+	// the program fails its load with the checker's text, and in a [[warn_mode]] region raises `raised` on both backends
 	void refused(const std::string& program, const std::string& diagnostic, const std::string& raised, const std::string& what) {
 		for (bool vm : {false, true}) {
 			const std::string checked = run(vm, program);
 			check(checked.rfind("throw:", 0) == 0 && checked.find(diagnostic) != std::string::npos, what + ": the checker reports " + diagnostic + ", got " + checked);
 		}
-		both(program, "throw:" + raised, what + " (checking off)", check_mode::off);
+		both(program, "throw:" + raised, what + " (a warn region)", true);
 	}
 
 	void forge_tests() override {
 		test("a_field_initializer_never_sees_a_constructor_parameter", [this]() {
 			// C++ [class.mem]: a default member initializer resolves in the class, then the enclosing scope
 			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C(7).x) + \" \" + to_string(C().x);", "40 40", "a global a parameter shadows");
-			both("int n = 40; class C { int x = n; C(int n = 5) {} } to_string(C(7).x) + \" \" + to_string(C().x);", "40 40", "a global a parameter shadows",
-			     check_mode::off);
 			both("class B { int v = 1; int w = v; B(int v) {} } B(7).w;", "1", "a member a parameter shadows");
 			both("int v = 100; class B { int v = 1; int w = v; B(int v) {} } B(7).w;", "1", "a member over a global and a parameter");
 			both("int n = 40; class P { int p = n; P(int n) {} } class D : P { D(int n) : super(n + 1) {} } D(5).p;", "40", "a base's field initializer");

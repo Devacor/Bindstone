@@ -143,7 +143,7 @@ set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY &quot;${JaiScript_MSVC
 <div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S JaiScript -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build --target jaiscript_runner
 build/bin/jaiscript hello.jai                   # run a file; no argument starts a REPL
-build/bin/jaiscript --backend=interp --check=warn hello.jai</code></pre></div>
+build/bin/jaiscript --backend=interp --warnings hello.jai</code></pre></div>
 <p>The runner registers the whole standard library plus file and console functions, runs on the VM like every engine (the interpreter is one <a href="03-backends.html">call</a> away), and lifts the execution budget (<code>--budget=N</code> puts one back).</p>
 <h2 id="headers">The headers a host includes<a class="hlink" href="#headers" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/core/engine.hpp&gt;              // engine, script_value, the error types

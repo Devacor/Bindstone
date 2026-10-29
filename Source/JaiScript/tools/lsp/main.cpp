@@ -30,7 +30,6 @@ std::shared_ptr<jai::engine> make_engine(const std::string& host) {
 	} else {
 		eng = jaiscript_runner_host_engine();
 	}
-	eng->static_checking(jai::check_mode::off);
 	eng->jaibite_cache(false);
 	return eng;
 }

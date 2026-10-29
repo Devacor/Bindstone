@@ -22,10 +22,9 @@ struct run_result {
     std::string error;
 };
 
-run_result run(const std::string& source, check_mode mode = check_mode::strict) {
+run_result run(const std::string& source) {
     auto e = make_engine();
     stdlib::register_all(*e);
-    e->static_checking(mode);
     auto out = std::make_shared<std::ostringstream>();
     e->set_output_stream(out);
     run_result r;
@@ -70,14 +69,12 @@ public:
         });
 
         test("store_to_a_const_raises_at_run_time", [this]() {
-            for (check_mode mode : {check_mode::warn, check_mode::off}) {
-                const auto r = run(R"JS(
-                    function f() { const int a = 1; try { a = 2; } catch (e) { print("caught: ", e); } return a; }
-                    print(f());
-                )JS", mode);
-                check_eq(std::string(""), r.error);
-                check_eq(std::string("caught: Cannot assign to 'a': it is read-only\n1\n"), r.output);
-            }
+            const auto r = run(R"JS([[warn_mode]];
+                function f() { const int a = 1; try { a = 2; } catch (e) { print("caught: ", e); } return a; }
+                print(f());
+            )JS");
+            check_eq(std::string(""), r.error);
+            check_eq(std::string("caught: Cannot assign to 'a': it is read-only\n1\n"), r.output);
         });
 
         test("const_needs_an_initializer", [this]() {

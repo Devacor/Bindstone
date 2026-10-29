@@ -38,7 +38,7 @@ and stack trace (attributed to `<script>`) and exits 1. Several `-e` run in orde
 engine, so declarations carry from one to the next, and the first error stops the run.
 Nothing prints unless the source prints: `jaiscript -e "1 + 2"` prints nothing and exits 3.
 The REPL is the mode that echoes values, piped or typed (`echo 1 + 2 | jaiscript` prints `3`).
-`-e` combines with `--backend`, `--check`, `--workers`, `--budget`, `--time` and `-- args`;
+`-e` combines with `--backend`, `--workers`, `--budget`, `--time` and `-- args`;
 `include`/`import` resolve from the working directory. A script file or `--watch` with `-e`
 is a usage error (exit 2).
 
@@ -108,10 +108,6 @@ a catchable error at the import, and the program keeps its old code
 ```
 -e <source>           run the source text instead of a file (repeatable; see Mode 1)
 --backend=vm|interp   execution backend (default vm)
---check=strict|warn|off
-                      static checker mode (default strict: typed mistakes and undeclared
-                      names fail the load; warn loads anyway and lists them on stderr;
-                      off skips the walk's diagnostics)
 --budget=N            execution budget in seconds per execute (default 0 = unlimited;
                       the embedded-engine default of 5.0s is deliberately lifted —
                       long loops are the user's business in a runner)

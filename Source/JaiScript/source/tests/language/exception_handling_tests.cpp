@@ -654,10 +654,9 @@ public:
             auto strict = make_engine();
             check_true(static_error_text(*strict, src).find("use of undeclared identifier 'missingVar'") != std::string::npos);
             check_true(strict->last_stack_trace().empty());
-            // warn: the runtime error unwinds through all three frames
+            // a warn region: the runtime error unwinds through all three frames
             auto engine = make_engine();
-            engine->static_checking(check_mode::warn);
-            try { engine->execute(src); } catch (...) {}
+            try { engine->execute(std::string("[[warn_mode]]; ") + src); } catch (...) {}
             auto trace = engine->last_stack_trace();
             check_ge(trace.size(), (size_t)4);
             check_eq(std::string("inner"), trace[0].function);
@@ -1100,17 +1099,15 @@ public:
 
         test("bare_return_in_typed_fn_inside_try_caught", [this]() {
             auto engine = make_engine();
-            engine->static_checking(check_mode::warn);   // strict rejects the bare return at load
             script_value result = engine->execute(
-                "int f() {\n"
+                "[[warn_mode]]; int f() {\n"   // strict rejects the bare return at load
                 "  try { return; } catch (e) { return -1; }\n"
                 "}\n"
                 "f()\n");
             check_eq((int64_t)-1, result.as_int());
             auto plain = make_engine();
-            plain->static_checking(check_mode::warn);
             const char* src =
-                "int f() {\n"                 // 1
+                "[[warn_mode]]; int f() {\n"  // 1
                 "  return;\n"                 // 2
                 "}\n"                         // 3
                 "int b = f();\n";             // 4
@@ -1262,9 +1259,8 @@ public:
             )";
             auto strict = make_engine();
             check_true(static_error_text(*strict, typed).find("cannot return 'string' from 'bad' declared to return 'int'") != std::string::npos);
-            auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
-            check_eq(std::string("abc"), warn->execute(typed).as_string());
+            auto region = make_engine();
+            check_eq(std::string("abc"), region->execute(std::string("[[warn_mode]]; ") + typed).as_string());
             auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var v = "nope";
@@ -1289,9 +1285,8 @@ public:
             )";
             auto strict = make_engine();
             check_true(static_error_text(*strict, typed).find("cannot return 'string' from 'bad' declared to return 'int'") != std::string::npos);
-            auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
-            check_eq((int64_t)8, warn->execute(typed).as_int());
+            auto region = make_engine();
+            check_eq((int64_t)8, region->execute(std::string("[[warn_mode]]; ") + typed).as_int());
             auto engine = make_engine();
             script_value result = engine->execute(R"(
                 var v = "nope";
@@ -1316,10 +1311,9 @@ public:
             )";
             auto strict = make_engine();
             check_true(static_error_text(*strict, typed).find("argument 1 of 'takes': cannot pass 'array' to 'x' declared 'int'") != std::string::npos);
-            auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
-            check_eq(std::string("ab"), warn->execute(typed).as_string());
-            check_eq((int64_t)3, warn->execute("takes(3);").as_int());
+            auto region = make_engine();
+            check_eq(std::string("ab"), region->execute(std::string("[[warn_mode]]; ") + typed).as_string());
+            check_eq((int64_t)3, region->execute("takes(3);").as_int());
             auto engine = make_engine();
             script_value result = engine->execute(R"(
                 function takes(int x) -> int { return x; }

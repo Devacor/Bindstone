@@ -19,19 +19,16 @@ public:
             // runtime too): a slot locked to a callable takes null, then a callable again; a
             // call through the null raises a catchable error; a non-callable still rejects
             for (bool vm : {false, true}) {
-                for (bool strict : {true, false}) {
-                    auto e = engine::make();
-                    e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
-                    if (!strict) { e->static_checking(check_mode::off); }
-                    const std::string label = std::string(vm ? "vm" : "interp") + (strict ? " strict" : " off");
-                    auto run = [&](const char* src) {
-                        try { return std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
-                    };
-                    check_eq(std::string("7"), run("function f = []() { return 1; }; f = null; f = []() { return 7; }; f();"), label + " local reset");
-                    check_eq(std::string("3"), run("class C { function cb = []() { return 1; }; } C c = C(); c.cb = null; c.cb = []() { return 3; }; c.cb();"), label + " field reset");
-                    check_eq(std::string("1"), run("function g = []() { return 1; }; g = null; int caught = 0; try { g(); } catch (err) { caught = 1; } caught;"), label + " null call is catchable");
-                    check_true(run("function h = []() { return 1; }; h = null; h = 42; 0;").rfind("throw:", 0) == 0, label + " a non-callable still rejects after the reset");
-                }
+                auto e = engine::make();
+                e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+                const std::string label = vm ? "vm" : "interp";
+                auto run = [&](const char* src) {
+                    try { return std::to_string(e->execute(src).as_int()); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
+                };
+                check_eq(std::string("7"), run("function f = []() { return 1; }; f = null; f = []() { return 7; }; f();"), label + " local reset");
+                check_eq(std::string("3"), run("class C { function cb = []() { return 1; }; } C c = C(); c.cb = null; c.cb = []() { return 3; }; c.cb();"), label + " field reset");
+                check_eq(std::string("1"), run("function g = []() { return 1; }; g = null; int caught = 0; try { g(); } catch (err) { caught = 1; } caught;"), label + " null call is catchable");
+                check_true(run("function h = []() { return 1; }; h = null; h = 42; 0;").rfind("throw:", 0) == 0, label + " a non-callable still rejects after the reset");
             }
         });
 
@@ -327,12 +324,11 @@ public:
             try { eng->execute(src); } catch (const static_check_error& e) { text = e.what(); }
             check_true(text.find("cannot assign 'string' to 'x' declared 'int'") != std::string::npos,
                 "strict rejects the store before anything runs (got: " + text + ")");
-            // warn: the runtime's own rejection
+            // a warn region: the runtime's own rejection
             auto warn = make_engine();
-            warn->static_checking(check_mode::warn);
             bool caught = false;
             try {
-                warn->execute(src);
+                warn->execute(std::string("[[warn_mode]]; ") + src);
             } catch (const std::exception& e) {
                 caught = true;
                 std::string msg = e.what();
@@ -410,10 +406,16 @@ public:
                     text = e.what();
                 }
                 check_true(text.find("Cannot initialize") == 0, "runtime rejects the store (got: " + text + ")");
+                // the reference: the same program with one region over the whole unit
+                std::string whole_unit = src;
+                for (const char* spelling : {"[[warn_mode]];", "[[warn_mode]]"}) {
+                    for (size_t at = whole_unit.find(spelling); at != std::string::npos; at = whole_unit.find(spelling)) {
+                        whole_unit.erase(at, std::string(spelling).size());
+                    }
+                }
                 auto warn = make_engine();
-                warn->static_checking(check_mode::warn);
                 std::string warn_text;
-                try { warn->execute(src); } catch (const std::exception& e) { warn_text = e.what(); }
+                try { warn->execute("[[warn_mode]]; " + whole_unit); } catch (const std::exception& e) { warn_text = e.what(); }
                 check_eq(text, warn_text);
             }
         });
@@ -1417,22 +1419,23 @@ public:
         // var (any-typed) targets keep the old dynamic behavior (int += 2.5 -> float 3.5).
         // Every test runs on BOTH backends and pins byte-identical output.
 
-        auto both_in = [](check_mode mode, const char* src) {
+        // warn_region: the run time's verdict, the unit under [[warn_mode]]
+        auto both_in = [](bool warn_region, const char* src) {
             std::string out[2];
             int idx = 0;
+            const std::string program = (warn_region ? std::string("[[warn_mode]]; ") : std::string()) + src;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
-                e->static_checking(mode);
                 jai::stdlib::register_all(e);
-                try { out[idx] = e->execute(src).to_string(); }
+                try { out[idx] = e->execute(program).to_string(); }
                 catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                 ++idx;
             }
             return std::make_pair(out[0], out[1]);
         };
-        auto both = [both_in](const char* src) { return both_in(check_mode::strict, src); };
+        auto both = [both_in](const char* src) { return both_in(false, src); };
         auto check_both = [this, both](const char* src, const std::string& expected, const char* what) {
             auto [i_out, v_out] = both(src);
             check_eq(expected, i_out, std::string("interp: ") + what);
@@ -1581,7 +1584,7 @@ public:
             check_true(i_out.find("ERROR: static check failed") == 0 &&
                 i_out.find("cannot assign 'string' to field 'v' declared 'int'") != std::string::npos,
                 std::string("strict rejects the field store at load, got: ") + i_out);
-            auto [w_out, wv_out] = both_in(check_mode::warn, typed_mismatch);
+            auto [w_out, wv_out] = both_in(true, typed_mismatch);
             check_eq(w_out, wv_out, "string-into-int field error parity");
             check_true(w_out.find("ERROR") == 0 && w_out.find("Cannot assign string to field 'v' of C (declared int)") != std::string::npos,
                 std::string("locals-identical error text, got: ") + w_out);
@@ -1744,7 +1747,7 @@ public:
             check_true(s_out.find("ERROR: static check failed") == 0 &&
                 s_out.find("no member 't' in class 'S'") != std::string::npos,
                 std::string("strict rejects the subtype member on the static base class, got: ") + s_out);
-            auto [w_out, wv_out] = both_in(check_mode::warn, base_receiver);
+            auto [w_out, wv_out] = both_in(true, base_receiver);
             check_eq(std::string("2"), w_out, "warn: the dynamic object still answers");
             check_eq(w_out, wv_out, "warn subtype-member parity");
             const char* unrelated = R"(
@@ -1760,7 +1763,7 @@ public:
             check_true(i_out.find("ERROR: static check failed") == 0 &&
                 i_out.find("cannot assign 'B' to field 'p' declared 'S'") != std::string::npos,
                 std::string("unrelated class rejected at load, got: ") + i_out);
-            auto [wu_out, wuv_out] = both_in(check_mode::warn, unrelated);
+            auto [wu_out, wuv_out] = both_in(true, unrelated);
             check_eq(wu_out, wuv_out, "warn unrelated class rejection parity");
             check_true(wu_out.find("ERROR") == 0 && wu_out.find("static check failed") == std::string::npos,
                 std::string("warn: the runtime rejects the unrelated class, got: ") + wu_out);
@@ -1800,11 +1803,11 @@ public:
                  "cannot assign 'string' to 'x' declared 'int'", "Cannot apply '+=' to int and string"},
             };
             for (const row& r : typed_mismatches) {
-                auto [si, sv] = both_in(check_mode::strict, r.src);
+                auto [si, sv] = both_in(false, r.src);
                 check_eq(si, sv, std::string("strict listing parity: ") + r.src);
                 check_true(si.find("ERROR: static check failed") == 0 && si.find(r.strict_needle) != std::string::npos,
                     std::string("strict load error: ") + r.src + " (got: " + si + ")");
-                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                auto [wi, wv] = both_in(true, r.src);
                 check_eq(wi, wv, std::string("warn runtime text parity: ") + r.src);
                 check_true(wi.find("ERROR: ") == 0 && wi.find("static check failed") == std::string::npos &&
                     wi.find(r.warn_needle) != std::string::npos,
@@ -1821,8 +1824,8 @@ public:
                 {"var caught = \"\"; var s = \"s\"; try { int x = s; } catch (e) { caught = e; } caught", "Cannot initialize 'x' (declared int) with string"},
             };
             for (const var_row& r : var_sourced) {
-                auto [si, sv] = both_in(check_mode::strict, r.src);
-                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                auto [si, sv] = both_in(false, r.src);
+                auto [wi, wv] = both_in(true, r.src);
                 check_eq(si, sv, std::string("var-sourced strict parity: ") + r.src);
                 check_eq(si, wi, std::string("var-sourced: strict and warn agree: ") + r.src);
                 check_eq(wi, wv, std::string("var-sourced warn parity: ") + r.src);
@@ -1830,7 +1833,7 @@ public:
                     std::string("var-sourced runtime text: ") + r.src + " (got: " + si + ")");
             }
             const char* last_var = var_sourced[6].src;
-            check_eq(std::string("Cannot initialize 'x' (declared int) with string"), both_in(check_mode::strict, last_var).first,
+            check_eq(std::string("Cannot initialize 'x' (declared int) with string"), both_in(false, last_var).first,
                 "the var-sourced runtime error is catchable in script under strict");
             struct clean_row { const char* src; const char* expected; };
             const clean_row clean[] = {
@@ -1843,8 +1846,8 @@ public:
                 {"class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; } auto h = H(); h.p = T(); cast<T&>(h.p).t", "2"},
             };
             for (const clean_row& r : clean) {
-                auto [si, sv] = both_in(check_mode::strict, r.src);
-                auto [wi, wv] = both_in(check_mode::warn, r.src);
+                auto [si, sv] = both_in(false, r.src);
+                auto [wi, wv] = both_in(true, r.src);
                 check_eq(std::string(r.expected), si, std::string("clean under strict: ") + r.src);
                 check_eq(si, sv, std::string("clean strict parity: ") + r.src);
                 check_eq(si, wi, std::string("clean: strict and warn agree: ") + r.src);
@@ -1972,10 +1975,10 @@ public:
             auto [ii, iv] = both("string s = \"a\"; cast<string&>(s)++;");
             check_eq(ii, iv, "static rejection parity: ++ on cast<string&>");
             check(ii.find("ERROR: ") == 0 && ii.find("cannot apply '++' to 'string'") != std::string::npos, "++ on cast<string&> is rejected at load: " + ii);
-            auto [oi, ov] = both_in(check_mode::off, "int x = 1; var c = \"\"; try { cast<int&>(x) = \"s\"; } catch (e) { c = e; } c");
+            auto [oi, ov] = both_in(true, "int x = 1; var c = \"\"; try { cast<int&>(x) = \"s\"; } catch (e) { c = e; } c");
             check_eq(oi, ov, "run-time rejection parity: a string into cast<int&>");
             check_eq(std::string("Cannot assign string to a variable declared int"), oi, "a string into cast<int&> raises at run time");
-            auto [pi, pv] = both_in(check_mode::off, "string s = \"a\"; var c = \"\"; try { cast<string&>(s)++; } catch (e) { c = e; } c");
+            auto [pi, pv] = both_in(true, "string s = \"a\"; var c = \"\"; try { cast<string&>(s)++; } catch (e) { c = e; } c");
             check_eq(pi, pv, "run-time rejection parity: ++ on cast<string&>");
             check_eq(std::string("Cannot apply '++' to string"), pi, "++ on cast<string&> raises at run time");
             check_both("var log = \"\"; function v() -> int { log += \"v\"; return 5; } "
@@ -2052,11 +2055,11 @@ public:
                 check_eq(si, sv, std::string("static parity: ") + src);
                 check(si.find("ERROR: ") == 0 && si.find(lower) != std::string::npos, std::string("load error for ") + src + ": " + si);
                 const std::string caught = std::string("var c = \"\"; try { ") + src + " } catch (e) { c = e; } c";
-                auto [oi, ov] = both_in(check_mode::off, caught.c_str());
+                auto [oi, ov] = both_in(true, caught.c_str());
                 check_eq(std::string(text), oi, std::string("interp run-time text: ") + src);
                 check_eq(std::string(text), ov, std::string("vm run-time text: ") + src);
             }
-            auto [ri, rv] = both_in(check_mode::off, "var cnt = 0; function bump() { cnt++; return 5; } int x = 1; var out = \"\"; "
+            auto [ri, rv] = both_in(true, "var cnt = 0; function bump() { cnt++; return 5; } int x = 1; var out = \"\"; "
                                     "try { x++ = bump(); } catch (e) { out += e; } try { bump() = 1; } catch (e) { out += \"|\" + e; } out + \"|\" + to_string(cnt) + to_string(x)");
             check_eq(std::string("Cannot assign to x++: it yields the old value|Cannot assign to a call result: 'bump' returns by value|11"), ri, "interp: a non-lvalue raises before it runs, a call's result after");
             check_eq(ri, rv, "vm agrees");
@@ -2454,27 +2457,26 @@ public:
             check_quad(q("null == null").c_str(), "true", "null == null");
             check_quad(q("null != null").c_str(), "false", "null != null");
             check_quad(q("v == null").c_str(), "true", "unset var");
-            // a typed slot that never holds null: strict rejects the compare (C++ `5 == nullptr`); with the checker off the
+            // a typed slot that never holds null: strict rejects the compare (C++ `5 == nullptr`); in a warn region the
             // run time's verdict stands on both backends
-            const auto check_off = [this, &q](const char* tail, const std::string& expected, const char* what) {
+            const auto check_runtime = [this, &q](const char* tail, const std::string& expected, const char* what) {
                 const std::string src = q(tail);
                 check_true(jai::engine::make()->check(src).has_errors(), std::string("strict rejects: ") + what);
                 for (bool use_vm : {false, true}) {
                     auto e = jai::engine::make();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
-                    e->static_checking(check_mode::off);
                     jai::stdlib::register_all(e);
-                    check_eq(expected, e->execute(src).to_string(), std::string(use_vm ? "vm/off: " : "interp/off: ") + what);
+                    check_eq(expected, e->execute("[[warn_mode]]; " + src).to_string(), std::string(use_vm ? "vm/warn region: " : "interp/warn region: ") + what);
                 }
             };
-            check_off("i == null", "false", "int vs null");
-            check_off("fl != null", "true", "float != null");
-            check_off("s == null", "false", "string vs null");
-            check_off("c == null", "false", "char vs null (no promotion)");
-            check_off("b != null", "true", "bool != null");
-            check_off("arr == null", "false", "array vs null");
-            check_off("m != null", "true", "map != null");
+            check_runtime("i == null", "false", "int vs null");
+            check_runtime("fl != null", "true", "float != null");
+            check_runtime("s == null", "false", "string vs null");
+            check_runtime("c == null", "false", "char vs null (no promotion)");
+            check_runtime("b != null", "true", "bool != null");
+            check_runtime("arr == null", "false", "array vs null");
+            check_runtime("m != null", "true", "map != null");
             check_quad(q("fn == null").c_str(), "false", "function vs null");
             check_quad(q("e == null").c_str(), "false", "class operator== is NOT consulted for a null operand");
             check_quad(q("e != null").c_str(), "true", "class operator!= is NOT consulted for a null operand");
@@ -2576,28 +2578,27 @@ public:
             check_quad(q("class W { weak_ptr<F> w; string setW(var x) { string r = \"ok\"; try { w = x; } catch (err) { r = err; } return r; } } auto w = W(); auto keep = shared_ptr<F>(); w.setW(keep) + \" \" + w.setW(F()) + \" \" + to_string(w.w == null)").c_str(), "ok Cannot assign F to field 'w' of W (declared weak_ptr<F>) false", "weak_ptr field: a shared handle downgrades (C++ weak = shared), a value raises");
         });
 
-        auto quad_mode = [](const char* src, check_mode mode) {
+        auto quad_in_warn_region = [](const char* src) {
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
-                e->static_checking(mode);
                 jai::stdlib::register_all(e);
-                try { out[idx] = e->execute(src).to_string(); }
+                try { out[idx] = e->execute(std::string("[[warn_mode]]; ") + src).to_string(); }
                 catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
                 ++idx;
             }
             return std::array<std::string, 2>{out[0], out[1]};
         };
-        auto check_quad_off = [this, quad_mode](const char* src, const std::string& expected, const char* what) {
-            auto r = quad_mode(src, check_mode::off);
-            check_eq(expected, r[0], std::string("interp/off: ") + what);
-            check_eq(expected, r[1], std::string("vm/off: ") + what);
+        auto check_quad_runtime = [this, quad_in_warn_region](const char* src, const std::string& expected, const char* what) {
+            auto r = quad_in_warn_region(src);
+            check_eq(expected, r[0], std::string("interp/warn region: ") + what);
+            check_eq(expected, r[1], std::string("vm/warn region: ") + what);
         };
-        auto check_quad_error_text = [this, quad_mode](const char* src, const std::string& needle, const char* what) {
-            auto r = quad_mode(src, check_mode::off);
+        auto check_quad_error_text = [this, quad_in_warn_region](const char* src, const std::string& needle, const char* what) {
+            auto r = quad_in_warn_region(src);
             check_eq(r[0], r[1], std::string("backend parity: ") + what);
             check(r[0].find("ERROR") == 0, std::string("raises: ") + what);
             check(r[0].find(needle) != std::string::npos, std::string("text: ") + what + " (got: " + r[0] + ")");
@@ -2682,16 +2683,16 @@ public:
             check_quad("function L(var x) { return x; } class C { static auto a = 2; } C::a = L(2.5); string r = \"ok\"; try { C::a = L(\"str\"); } catch (err) { r = err; } to_string(C::a) + \" \" + r", "2 Cannot assign string to static 'a' of C (declared int)", "auto static enforces the inferred int");
         });
 
-        test("static_spellings_rejected", [check_quad_error, check_quad_off, check_quad_error_text]() {
+        test("static_spellings_rejected", [check_quad_error, check_quad_runtime, check_quad_error_text]() {
             // `C.s` and `this.s` are not static spellings: their read and write errors stay,
             // byte-identical across backends (the write raises a STRING, never a bool)
             const std::string P = "class C { static int s = 0; int q = 1; string viaThis() { string r = \"ok\"; try { this.s = 1; } catch (err) { r = type_of(err) + \":\" + to_string(err); } return r; } string readThis() { string r = \"ok\"; try { int t = this.s; } catch (err) { r = to_string(err); } return r; } } ";
             check_quad_error("class C { static int s = 0; } C.s", "dot read on a class name");
-            check_quad_off("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:'C' is a class; use C::s 0", "dot store on a class name");
+            check_quad_runtime("class C { static int s = 0; } string r = \"\"; try { C.s = 8; } catch (err) { r = type_of(err) + \":\" + to_string(err); } r + \" \" + to_string(C::s)", "string:'C' is a class; use C::s 0", "dot store on a class name");
             check_quad_error("class C { static int s = 0; } C.s += 1", "dot compound on a class name");
             check_quad_error("class C { static int s = 0; } C.s++", "dot ++ on a class name");
-            check_quad_off((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to 's': C has no such member 0", "this.s store");
-            check_quad_off((P + "auto o = C(); o.readThis()").c_str(), "C has no member 's'", "this.s read");
+            check_quad_runtime((P + "auto o = C(); o.viaThis() + \" \" + to_string(C::s)").c_str(), "string:Cannot assign to 's': C has no such member 0", "this.s store");
+            check_quad_runtime((P + "auto o = C(); o.readThis()").c_str(), "C has no member 's'", "this.s read");
             check_quad_error_text("class S { private: static int counter = 0; public: static int peek() { return counter; } } S::counter = 5", "Cannot access private member 'counter' of class 'S'", "private static store is refused before any conversion");
         });
 

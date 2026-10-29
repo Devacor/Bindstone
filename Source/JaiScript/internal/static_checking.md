@@ -3,30 +3,27 @@
 Backend-neutral AST checker that runs at parse-cache-entry creation — one hook in
 `engine.cpp` covers `execute(string)`, jaibite creation, hot-reload re-parses (new source
 = new cache entry) and registration-epoch changes uniformly. Amortized once per unique
-source, like parsing. Strict by default; the off path costs one branch. Implementation:
+source, like parsing. Always on and strict; `[[warn_mode]]` is the one opt-out, per region. Implementation:
 `detail/type_checker.hpp` + `source/implementation/type_checker.cpp`.
 
-## Mode API
+## Check API
 
 ```cpp
-engine->static_checking(check_mode::off | warn | strict);   // default: strict
-check_report r = engine->check(source);        // parse (cached) + check, ANY mode; tooling
+check_report r = engine->check(source);        // parse (cached) + check without running; tooling
 const check_report& d = engine->last_check_diagnostics();   // last checked execute/bite
 ```
 
-- **strict** (the default) — any error-severity diagnostic makes `execute()` /
-  `engine->jaibite()` / `jaibite_load*()` throw `jai::static_check_error` BEFORE anything
-  runs. A strongly-typed → strongly-typed mismatch (`int x = "s"`, returning a string from
-  a function declared `-> int`, passing an array to an `int` parameter, an unrelated class
-  into a typed slot) is a load error when the source type is known. Dynamic or
-  unresolved sources and value-dependent failures still reach runtime, where
-  `try`/`catch` sees them. Examples include a computed float outside the int range
-  and a missing map key returning null.
-- **warn** — diagnostics collected and retrievable; execution proceeds and the runtime's
-  own conversion errors apply (selectable per engine).
-- **off** — zero behavior change. No diagnostics collected anywhere.
+Every load is checked: any error-severity diagnostic makes `execute()` / `engine->jaibite()` /
+`jaibite_load*()` throw `jai::static_check_error` BEFORE anything runs. A strongly-typed →
+strongly-typed mismatch (`int x = "s"`, returning a string from a function declared `-> int`,
+passing an array to an `int` parameter, an unrelated class into a typed slot) is a load error
+when the source type is known. Dynamic or unresolved sources and value-dependent failures still
+reach runtime, where `try`/`catch` sees them. Examples include a computed float outside the int
+range and a missing map key returning null. A `[[warn_mode]]` region ("Escape hatches") reports
+its errors as warnings, so it loads and the runtime's own conversion errors apply there. There is
+no engine-wide mode.
 
-`what()` under strict is the full accumulated, location-sorted, deduplicated listing
+`what()` is the full accumulated, location-sorted, deduplicated listing
 (cap 100), compiler style:
 
 ```
@@ -35,10 +32,8 @@ const check_report& d = engine->last_check_diagnostics();   // last checked exec
     ^
 ```
 
-Diagnostics are mode-independent (`check_diagnostic {severity, line, column, message,
-related_line/column, strict_region}`); mode only decides whether errors gate execution
-(strict: every error; warn: only errors a `[[strict_mode]]` region raised - "Escape hatches").
-Warning severity never gates.
+A diagnostic is `check_diagnostic {severity, line, column, message, related_line/column}`.
+Every error gates the load; warning severity never gates.
 
 Tools drive the walk directly: `detail::run_static_check(eng, decls, extra, options)` with the
 program tables of their choosing (`program_names`, `program_classes`), and
@@ -400,7 +395,7 @@ D:/.../scripts/maps.jai:12:5: error: use of undeclared identifier 'G'
     ^
 ```
 
-Under warn — and in the report `engine->check()` returns — closure diagnostics follow the
+In the report `engine->check()` and `last_check_diagnostics()` return, closure diagnostics follow the
 root's with line/column 0 and the path-qualified location leading the message (the snippet
 belongs to another source, so none is printed).
 
@@ -433,10 +428,9 @@ mid-redefinition, is not member-checked.
 A unit that fails to **parse** stops the program there: its parse error (the unit's path, line
 and column, exactly the text executing that file directly gives) is the whole report, and no
 unit is checked (the names it would declare are unknown, so any check would only list them as
-undeclared). Under strict the root's `execute()` throws that `parse_error` before any unit
-runs; under warn - and in `engine->check()` - the report holds the parse error alone, as an
-error diagnostic with the text as its message, and the import raises it when it executes. A
-fix to the file is seen on the next run. A unit the closure cannot resolve or read contributes
+undeclared). The root's `execute()` throws that `parse_error` before any unit runs; in
+`engine->check()` the report holds the parse error alone, as an error diagnostic with the text as
+its message. A fix to the file is seen on the next run. A unit the closure cannot resolve or read contributes
 no names and is skipped; the runtime reports it when the unit executes. A **dynamic-path**
 `import(expr)`/`include(expr)`, or an include below the top level (a literal include in a function
 body is spliced into it instead), can define anything: that unit keeps warning severity for undeclared identifiers. Names the program never declares —
@@ -490,8 +484,8 @@ the plain declaration. The checker treats it as a declared global of its type, l
 the spelling for a name a unit needs to exist whether or not the module that owns it runs.
 
 `[[warn_mode]]` and `[[strict_mode]]` set the checker's mode for a region of one unit. They
-compose, innermost wins, and the engine's mode (`static_checking`) is the default for every
-unit. An attribute leads one of three positions:
+compose and innermost wins; outside every region a unit is strict. An attribute leads one of
+three positions:
 
 - **A unit.** As the first declaration of a file (a leading comment is fine, the trailing `;`
   optional) it sets the unit's mode: `[[warn_mode]];` at the top of a file keeps the checker
@@ -512,12 +506,7 @@ In a warn region every error-severity diagnostic is reported as a warning (still
 still in `last_check_diagnostics()` and `engine->check()`), and an undeclared identifier is
 accepted as unknown - an undeclared callee is assumed callable with an unknown result, so
 nothing downstream is proven from it. In a strict region errors gate the load: `[[strict_mode]]`
-inside a warn region re-arms strict there, and a `[[strict_mode]]` unit or statement in a
-warn-mode ENGINE gates that load even though the engine's own errors do not (a diagnostic
-raised in a strict region carries `check_diagnostic::strict_region`;
-`check_report::has_strict_errors()` is what warn mode gates on). Engine mode `off` runs no
-diagnostics walk at all (proofs still stamp), so attributes have no effect under off. The
-runtime never changes: both backends treat the attribute as nothing, and a warn region's type
+inside a warn region re-arms strict there. The runtime never changes: both backends treat the attribute as nothing, and a warn region's type
 mistakes raise at run time exactly as they would without the checker. A unit's mode says
 nothing about the units it imports, and a `[[warn_mode]]` leaf never fails its program.
 `warn_mode` and `strict_mode` are the only attribute names: `[[bogus]]` is a parse error
@@ -669,25 +658,25 @@ interpreter-vs-vm differential green in both proof states.
 
 ## jaibite
 
-A bite created under warn/strict is checked at creation (strict throws there);
+A bite is checked at creation (an error throws there);
 `bite.checked_clean()` / `bite.check_diagnostics()` expose the result. `save()` stamps a
 checked-clean bit in the header's existing flags u32 (no format version bump; old loaders
 ignore it). On load the stamp is trusted ONLY when the registration fingerprint matches
-the saving engine's; otherwise the bite loads unchecked and, under warn/strict, is
-re-checked at load against THIS engine's surface (strict throws on errors). A bite is
+the saving engine's; otherwise the bite loads unchecked and is re-checked at load against
+THIS engine's surface (an error throws). A bite is
 checked once — registrations after that don't re-trigger; re-create the bite to re-check.
-Proofs are independent of that: they stamp at creation/load/execute in every mode and
+Proofs are independent of that: they stamp at creation/load/execute and
 re-stamp whenever the surface epoch or the proof switch moved, while the diagnostics stay
 checked-once.
 
 ## Cost
 
-One AST walk per unique source per surface epoch, in every mode, cached beside the parse
-(the proof pass rides it; diagnostics are collected only under warn/strict). Re-run only
+One AST walk per unique source per surface epoch, cached beside the parse (the proof pass
+rides it). Re-run only
 when the registration surface epoch moves (`add_function`/`add_global`/`add_class`/
 `register_template_type`, script-class first definition and non-identical redefinition) or
-the proof switch flips. `type_proofs(false)` under `off` restores zero walks (one branch at
-cache-entry creation). Executes with host instance variables check fresh per call (the name
+the proof switch flips. A `.jaibite` stamped checked-clean under a matching fingerprint skips
+the diagnostics walk. Executes with host instance variables check fresh per call (the name
 set is per-call; that per-call walk never touches the cached stamps). Walk cost is
 parse-order (same tree, no allocation-heavy state).
 

@@ -189,8 +189,8 @@ Every JaiScript sample on the site must run on both backends under strict checki
 change a sample, run it:
 
 ```bash
-jaiscript --check=strict --backend=vm     sample.jai
-jaiscript --check=strict --backend=interp sample.jai
+jaiscript --backend=vm     sample.jai
+jaiscript --backend=interp sample.jai
 ```
 
 Where a page shows output, paste the real output.

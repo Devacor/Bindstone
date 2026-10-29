@@ -600,7 +600,6 @@ static int RunArena(const std::string& a_left, const std::string& a_right, doubl
 static int RunAssetVerification() {
 	Managers managers({ "", "" });
 	auto jaiEngine = MV::makeScriptEngine(managers.services);
-	jaiEngine->static_checking(jai::check_mode::strict);
 	managers.services.connect<jai::engine>(jaiEngine.get());
 	static MV::TapDevice verifyMouse;
 	managers.services.connect(&verifyMouse);

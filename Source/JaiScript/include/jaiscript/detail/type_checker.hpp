@@ -29,12 +29,6 @@ namespace jai {
     class type_info;
     using declaration_ptr = std::shared_ptr<declaration>;
 
-    enum class check_mode : uint8_t {
-        off,     // zero behavior change, zero cost (one branch at parse-cache entry)
-        warn,    // diagnostics collected + retrievable; execution proceeds
-        strict   // any error-severity diagnostic throws static_check_error before anything runs
-    };
-
     struct check_diagnostic {
         enum class level : uint8_t { warning, error };
         level severity = level::error;
@@ -44,8 +38,6 @@ namespace jai {
         // Related source point (e.g. the declaration a bad assignment violates); 0 = none.
         size_t related_line = 0;
         size_t related_column = 0;
-        // Raised inside a [[strict_mode]] region: gates the load under engine warn mode too.
-        bool strict_region = false;
     };
 
     struct check_report {
@@ -66,12 +58,6 @@ namespace jai {
             }
             return n;
         }
-        bool has_strict_errors() const {
-            for (const auto& d : diagnostics) {
-                if (d.strict_region && d.severity == check_diagnostic::level::error) { return true; }
-            }
-            return false;
-        }
 
         // Compiler-style listing, one diagnostic per entry:
         //   script:12:5: error: cannot assign 'string' to 'x' declared 'int' (declared at 8:3)
@@ -82,7 +68,7 @@ namespace jai {
         std::string format(std::string_view source = {}, std::string_view script_name = "<script>") const;
     };
 
-    // Strict-mode failure: thrown by execute()/jaibite creation/load before any code
+    // Static-check failure: thrown by execute()/jaibite creation/load before any code
     // runs. what() carries the full accumulated, location-sorted, deduplicated listing.
     class static_check_error : public std::runtime_error {
     public:
@@ -185,7 +171,7 @@ namespace jai {
         // AST-level static check against `eng`'s current registration surface.
         // extra_globals: names the host defines for this execution (instance variables).
         // Diagnostics come back location-sorted and deduplicated, capped at
-        // k_check_diagnostic_cap. Mode-independent — callers decide what to do with it.
+        // k_check_diagnostic_cap. Callers decide what to do with it.
         check_report run_static_check(engine& eng, const std::vector<declaration_ptr>& decls,
                                       const std::vector<std::string>* extra_globals = nullptr,
                                       check_options opts = {});

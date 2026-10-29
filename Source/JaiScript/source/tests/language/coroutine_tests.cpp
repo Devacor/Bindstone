@@ -779,7 +779,6 @@ public:
             auto run = [](bool use_vm, const std::string& src) {
                 auto e = jai::engine::make();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->static_checking(jai::check_mode::strict);
                 jai::stdlib::register_all(e);
                 std::string out;
                 try { out = e->execute(src).to_string(); }

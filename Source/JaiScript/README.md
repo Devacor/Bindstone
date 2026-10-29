@@ -88,13 +88,11 @@ jai::dynamic_binder<Vec2>(*e, "Vec2")
 double len = e->execute("Vec2(3, 4).length()").as_float();   // 5.0
 ```
 
-Two knobs are worth knowing on day one:
+One knob is worth knowing on day one:
 
 ```cpp
 e->set_backend(jai::backend_type::interpreter);   // tree-walking interpreter instead of the
                                                   // VM; must come before the first execute
-e->static_checking(jai::check_mode::warn);        // collect diagnostics instead of gating on
-                                                  // them; can change at any time
 ```
 
 The embedding guide covers the rest: binding inheritance and operators, `shared_ptr` handles,
@@ -106,12 +104,12 @@ hot reload, precompiled `.jaibite` scripts, execution budgets, signals, and the 
 `shared_ptr<T>` handles, `weak_ptr<T>`, and `T&` references. The ladder is `int` (enforced),
 `auto` (inferred, then enforced), `var` (dynamic, forever).
 
-**The checker.** Strict by default: typed-to-typed mistakes and undeclared identifiers are
+**The checker.** Always on and strict: typed-to-typed mistakes and undeclared identifiers are
 load errors, thrown as `jai::static_check_error` before anything runs; only a value sourced
 from `var` can still fail at run time. A program's imports are checked as one closure, so a
 name declared in one file is known in every other whatever the import order. `extern`
-declares names the host provides, and `[[warn_mode]]` / `[[strict_mode]]` relax or tighten a
-unit, a block, or a single statement.
+declares names the host provides, and `[[warn_mode]]` reports a unit's, a block's or a single
+statement's errors as warnings and loads it (`[[strict_mode]]` re-arms a region inside one).
 
 **Value semantics.** Assignment copies, like C++. You get aliasing when you ask for it — `T&`
 references, `shared_ptr<T>` handles — and `cast<T>` / `cast<T&>` / `cast<shared_ptr<T>>` are
@@ -195,8 +193,8 @@ jaiscript                      # REPL — globals, functions and classes accumul
 jaiscript --watch hello.jai    # re-run on every save
 ```
 
-It defaults to the VM backend and strict checking; `--backend=interp`, `--check=warn|off` and
-`--budget=N` change that. Details in [`tools/jaiscript/README.md`](tools/jaiscript/README.md).
+It defaults to the VM backend; `--backend=interp` and `--budget=N` change that, and every
+script loads through the strict checker. Details in [`tools/jaiscript/README.md`](tools/jaiscript/README.md).
 
 ## Examples
 

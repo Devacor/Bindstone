@@ -23,6 +23,8 @@ namespace jai::foundry {
 std::shared_ptr<jai::engine> make_engine();
 // --backend=vm-reference: make_engine's engines run engine::vm_reference_mode (a test that asserts an optimization fired skips)
 bool vm_reference_run();
+// The test quench is running (defined in main_test_runner.cpp): a crash report names it
+void note_running_test(const char* suite_name, const char* test_name);
 
 // Test failure exception
 class test_failure : public std::exception {
@@ -118,6 +120,7 @@ public:
         }
 
         // Let derived class register its tests
+        note_running_test(suite_name_.c_str(), "(forge_tests)");
         forge_tests();
 
         suite_result result;
@@ -134,6 +137,7 @@ public:
                 std::cout << "  " << name << " ... " << std::flush;
             }
 
+            note_running_test(suite_name_.c_str(), name.c_str());
             auto start = std::chrono::steady_clock::now();
 
             try {
@@ -162,6 +166,8 @@ public:
                 result.failed++;
             }
         }
+
+        note_running_test(nullptr, nullptr);
 
         // Run benchmarks if any (and no filter is active or filter matches)
         if (verbose && !benchmarks_.empty() && (test_filter.empty() || test_filter == "*")) {

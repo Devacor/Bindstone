@@ -66,6 +66,7 @@ jaiscript_tests "Suite.Test"         # the dot form is the exact AND: suite filt
 jaiscript_tests --verbose            # per-test names and timings; use it to find a hang
 ```
 
-`--gtest_filter=`, `--jaitest_filter=` and `--filter=` take the same patterns. Build directories,
+A crash prints the suite and test it hit to stderr, verbose or not; on Windows `JAI_CRASH_DUMP_DIR=<dir>` also writes a
+minidump there. `--gtest_filter=`, `--jaitest_filter=` and `--filter=` take the same patterns. Build directories,
 generators and the CTest view are in [`docs/BUILD.md`](../../docs/BUILD.md); the contribution
 workflow is in [`CONTRIBUTING.md`](../../CONTRIBUTING.md).

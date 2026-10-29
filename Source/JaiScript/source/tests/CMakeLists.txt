@@ -49,6 +49,10 @@ add_executable(jaiscript_tests
 
 # Link against JaiScript library
 target_link_libraries(jaiscript_tests PRIVATE ${JAISCRIPT_VERIFIER_LIBRARY})
+if(WIN32)
+    # the runner's crash report writes a minidump (MiniDumpWriteDump) into JAI_CRASH_DUMP_DIR
+    target_link_libraries(jaiscript_tests PRIVATE dbghelp)
+endif()
 
 # JAISCRIPT_TESTS_SOURCE_ROOT: the JaiScript folder, so corpus tests find examples/ from any working directory
 get_filename_component(JAISCRIPT_TESTS_SOURCE_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)

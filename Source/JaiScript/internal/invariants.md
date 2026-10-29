@@ -169,7 +169,7 @@ aliases only on an exact width and signedness match; otherwise it throws `jai::r
 
 `run_dispatch` (vm_backend.cpp) executes calls in-loop, so its native frame sits on the
 recursion path (capped by `engine::max_call_depth`) in Debug. Handlers return `op_status`;
-`VM_TRY_OP` / `VM_TRY_OP_SHARED` (identical) add no `checked_result` temp to `run_dispatch`'s
+`VM_TRY_OP` adds no `checked_result` temp to `run_dispatch`'s
 frame. Each case in the main switch still grows that frame, so the ops outside the main set
 share one case that calls the grouped `exec_extended` dispatch. Follow that pattern for new opcodes — do
 NOT add fresh cases to the main switch for them. Canary:
@@ -182,11 +182,10 @@ surfaces in the shell as exit code 127) mid-suite.
 Interpreter and VM must produce identical results AND identical error codes/messages; the suite
 runs green on both (`--backend=vm`). Preferred mechanism: shared kernels in `detail/` used
 verbatim by both backends — `detail/ref_lvalue.hpp` ("shared VERBATIM ... parity by
-construction") is the model, `detail/builtin_methods.hpp` the older one. Legacy twins remain:
-`is_truthy` (interpreter.hpp vs vm_backend.cpp) and the VM's `handle_*` operators, which mirror
-`detail/binary_handlers.hpp` (the interpreter's `handle_*` forward to that kernel) — if you touch one
-twin, touch the other in the same commit. New shared logic goes in `detail/`; don't grow the
-twin population.
+construction") is the model, `detail/builtin_methods.hpp` the older one. Both backends' `is_truthy`
+and `handle_*` forward to shared kernels (`detail::truthy_of`, `detail/binary_handlers.hpp`); code
+marked KEEP BYTE-PARALLEL changes on both sides in the same commit. New shared logic goes in
+`detail/`; don't add twins.
 
 ## 7. Benchmark methodology
 

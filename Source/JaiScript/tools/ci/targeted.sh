@@ -13,12 +13,13 @@
 # VM-reference fuzz (gates.sh fuzz-vm-reference) and the example hashes on the VM. The interpreter tier adds the
 # interpreter's Debug suites, the interpreter against VM fuzz (gates.sh fuzz) and the example hashes on the interpreter, and
 # is picked only when a path touches
-#   - the interpreter: source/implementation/interpreter.cpp, interpreter_dispatch.cpp, include/jaiscript/detail/interpreter.hpp
+#   - the interpreter: source/interpreter/*, include/jaiscript/detail/interpreter.hpp
 #   - the VM's general path or its compiler's front end: source/implementation/vm/vm_backend.cpp, vm_compiler.cpp and
 #     include/jaiscript/vm/vm_backend.hpp, vm_compiler.hpp, chunk.hpp, opcode.hpp
 #   - a kernel both backends share: include/jaiscript/detail/*
-#   - the parser, the lexer or the checker: source/implementation/parser.cpp, lexer.cpp, type_checker.cpp
-#   - an example's script or the fuzzer (they run on both backends)
+#   - the parser, the lexer, the checker or the builtin methods: source/implementation/parser.cpp, lexer.cpp,
+#     type_checker.cpp, builtin_methods.cpp
+#   - Gator Quest's or JaiDOOM's script (the runner runs them on both backends) or the fuzzer
 # The VM's optimized lanes elsewhere (vm_inline.cpp, region_ir.*, the coverage and listing tools) take the VM tier only.
 #
 # --lanes declares a change confined to the VM's optimized lanes (fused, typed, cell, graft and cache code) inside the
@@ -80,9 +81,9 @@ classify() {
 		tools/vscode-jaiscript/*) NOTES="$NOTES $p" ;;
 		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
 		tools/jai_spider/*) pick spider "the web host ($p)" ;;
-		examples/gloom/*) pick gloom "the GLOOM example ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
-		examples/demoreel/*) pick demoreel "the demoreel ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
-		examples/crawler/*) pick crawler "the crawler ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
+		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
+		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
+		examples/crawler/*) pick crawler "the crawler ($p)" ;;
 		examples/gatorquest/*) pick gatorquest "Gator Quest ($p)"; pick lsp "the language server checks Gator Quest ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
 		examples/embed_quickstart/*) pick embed-quickstart "the embedding quickstart ($p)" ;;
 		examples/jaidoom/*) pick timedemo "JaiDOOM ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
@@ -94,9 +95,10 @@ classify() {
 			vm_tier "the VM or its compiler ($p)"; pick android "libc++ and 32-bit compile the library ($p)"
 			[ "$LANES" = 1 ] || interp_tier "the VM's general path or its compiler's front end ($p)" ;;
 		include/jaiscript/vm/* | source/implementation/vm/*) vm_tier "the VM's optimized lanes or its tools ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
-		source/implementation/interpreter.cpp | source/implementation/interpreter_dispatch.cpp | include/jaiscript/detail/interpreter.hpp)
+		source/interpreter/* | include/jaiscript/detail/interpreter.hpp)
 			vm_tier "the interpreter ($p)"; interp_tier "the interpreter ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
-		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp)
+		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp | \
+		source/implementation/builtin_methods.cpp)
 			vm_tier "a kernel both backends share ($p)"; interp_tier "a kernel both backends share ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/jaiscript/properties/* | include/jaiscript/properties.hpp | include/jaiscript/serialization/* | source/implementation/serialization/* | \
 		source/implementation/properties.cpp | source/implementation/schema_binding.cpp)

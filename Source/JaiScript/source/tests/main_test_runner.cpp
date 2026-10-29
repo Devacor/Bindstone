@@ -3,6 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/execution_backend.hpp>
 #if defined(_MSC_VER) && !defined(NDEBUG)
 #include <atomic>
 #include <crtdbg.h>
@@ -20,7 +21,8 @@
 namespace jai::foundry {
 
 namespace {
-    jai::backend_type g_test_backend = jai::backend_type::interpreter;
+    // a host linked without the interpreter (mv_tests) defaults to the vm
+    jai::backend_type g_test_backend = jai::detail::interpreter_compiled() ? jai::backend_type::interpreter : jai::backend_type::vm;
     bool g_test_vm_reference = false;   // --backend=vm-reference: the vm in engine::vm_reference_mode
 }
 
@@ -242,6 +244,15 @@ int main(int argc, char** argv) {
         // positional argument (filter)
         else if (arg[0] != '-') {
             filter = test_filter_config::parse(arg);
+        }
+    }
+
+    if (g_test_backend == jai::backend_type::interpreter) {
+        try {
+            jai::engine::make()->set_backend(g_test_backend);
+        } catch (const std::exception& e) {
+            std::cout << e.what() << "\n";
+            return 1;
         }
     }
 

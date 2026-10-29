@@ -209,7 +209,7 @@ struct console_host {
 };
 
 // Deterministic xorshift64* — the ONLY randomness the game is allowed to touch.
-// Bound as script class `Rng` so dungeons replay exactly from a seed on both backends.
+// Bound as script class `Rng` so dungeons replay exactly from a seed.
 struct crawler_rng {
 	uint64_t s;
 
@@ -312,7 +312,7 @@ void print_usage() {
 	std::puts(
 		"jai_crawler - GRUBWELL, a first-person dungeon crawler written in JaiScript\n"
 		"  --seed N        dungeon seed (default 1337)\n"
-		"  --backend B     vm | interpreter (default vm)\n"
+		"  --backend B     vm (default vm)\n"
 		"  --smoke         headless deterministic autoplay; prints a state hash\n"
 		"  --turns N       smoke turn budget (default 250)\n"
 		"  --input KEYS    scripted keys fed to read_key() (e.g. \"wwdwg>\"; ';'=enter '^'=esc)\n"
@@ -323,7 +323,7 @@ void print_usage() {
 		"  --load          continue from the save file\n"
 		"  --save PATH     save file path (default jai_crawler_save.json)\n"
 		"  --scripts DIR   override the scripts directory\n"
-		"  --debug         listen for a VS Code debugger for the whole run (either backend)\n"
+		"  --debug         listen for a VS Code debugger for the whole run\n"
 		"  --debug-wait    like --debug, but also hold boot until you attach + press Enter\n"
 		"  --debug-port N  port for --debug (default 52472)\n");
 }
@@ -374,10 +374,7 @@ int main(int argc, char** argv) {
 	if (!(opt.debug && opt.debug_wait)) { console.init(); }
 
 	auto eng = jai::engine::make();
-	if (opt.backend == "vm") { eng->set_backend(jai::backend_type::vm); }
-	else if (opt.backend == "interpreter" || opt.backend == "interp") {
-		eng->set_backend(jai::backend_type::interpreter);
-	} else {
+	if (opt.backend != "vm") {
 		console.shutdown();
 		std::fprintf(stderr, "unknown backend: %s\n", opt.backend.c_str());
 		return 2;

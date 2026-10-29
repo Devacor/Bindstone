@@ -1,6 +1,5 @@
 #include "../../include/jaiscript/detail/parser.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
-#include "../../include/jaiscript/detail/interpreter.hpp"  // For string_symbolizer
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/math_intrinsics.hpp"

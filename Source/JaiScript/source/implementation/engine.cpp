@@ -6,7 +6,6 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
-#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/float_text.hpp>
@@ -2480,7 +2479,7 @@ execution_backend* engine::backend() const {
         if (impl->current_backend_type == backend_type::vm) {
             impl->backend = create_vm_backend();
         } else {
-            impl->backend = std::make_unique<interpreter>(&impl->string_symbolizer_, impl->global_environment_);
+            impl->backend = detail::make_interpreter_backend(&impl->string_symbolizer_, impl->global_environment_);
         }
         self->wire_backend();
     }
@@ -4200,12 +4199,21 @@ void engine::wire_backend() {
     }
 }
 
+namespace {
+[[noreturn]] JAI_NOINLINE void throw_interpreter_not_compiled() {
+    throw runtime_error("set_backend(interpreter) is unsupported: this build has no interpreter (link jaiscript_interpreter)");
+}
+}
+
 void engine::set_backend(backend_type type) {
     if (type == backend_type::auto_select) {
         type = backend_type::vm;
     }
     if (type == impl->current_backend_type) {
         return;
+    }
+    if (type == backend_type::interpreter && !detail::interpreter_compiled()) {
+        throw_interpreter_not_compiled();
     }
     if (impl->has_executed_) {
         throw runtime_error("set_backend after execute() is unsupported: defined functions and classes capture the executing backend");
@@ -4713,7 +4721,7 @@ void engine::note_class_shape_change() {
 }
 
 bool engine::throw_on_overflow() const {
-    return kCheckedOverflow;  // compile-time policy (interpreter.hpp)
+    return kCheckedOverflow;  // compile-time policy (integer_ops.hpp)
 }
 
 void engine::execution_budget(double seconds) {
@@ -6114,6 +6122,62 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     }
     mark_seen();
     return ran;
+}
+
+// The one file-resolution ladder: include, import, the static checker's closure gather and
+// the resolve_path builtin all walk it. An absolute path stands as given; a relative one is
+// tried against the folder of the file doing the asking (from_file), then each include path
+// in order, then the working directory. The answer is the canonical spelling, which is the
+// key the unit caches and executes under.
+checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import) {
+    if (engine_ptr) {
+        auto allowed = engine_ptr->require_privilege(privilege::filesystem);
+        if (!allowed) { return allowed.error_value(); }
+    }
+    namespace fs = std::filesystem;
+    auto found = [](const fs::path& candidate, std::string& out) {
+        std::error_code ec;
+        if (!fs::exists(candidate, ec) || ec) return false;
+        fs::path canon = fs::canonical(candidate, ec);
+        if (ec) { ec.clear(); canon = fs::absolute(candidate, ec); }
+        out = (ec ? candidate : canon).string();
+        return true;
+    };
+    std::string out;
+    fs::path p(path);
+    std::string key;
+    if (engine_ptr) {
+        key = engine_ptr->resolution_key(path, from_file);
+        if (const std::string* remembered = engine_ptr->remembered_resolution(key)) { return *remembered; }
+    }
+    std::vector<std::string> misses;
+    auto rung = [&](const fs::path& candidate) {
+        if (found(candidate, out)) {
+            if (engine_ptr) { engine_ptr->remember_resolution(key, std::move(misses), candidate.string(), out); }
+            return true;
+        }
+        misses.push_back(candidate.string());
+        return false;
+    };
+    if (p.is_absolute()) {
+        if (rung(p)) return out;
+    } else {
+        if (!from_file.empty() && from_file != "<script>" && rung(fs::path(from_file).parent_path() / p)) return out;
+        if (engine_ptr) {
+            for (const auto& include_path : engine_ptr->get_include_paths()) {
+                if (rung(fs::path(include_path) / p)) return out;
+            }
+        }
+        if (rung(p)) return out;
+    }
+    return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found),
+        for_import ? "Failed to open import file: {0}" : "Failed to open include file: {0}",
+        engine_ptr ? engine_ptr->symbolize(path) : 0);
+}
+
+// The statement forms ask from the file whose code is executing
+checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr) {
+    return resolve_include_path(path, engine_ptr, engine_ptr ? engine_ptr->current_source_file() : std::string());
 }
 
 const std::string* engine::remembered_resolution(const std::string& key) {

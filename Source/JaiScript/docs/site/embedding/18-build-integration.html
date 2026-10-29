@@ -47,13 +47,14 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td>MinGW GCC</td><td><code>-Wa,-mbig-obj</code></td><td>The COFF counterpart of <code>/bigobj</code>.</td></tr>
 <tr><td>Windows libraries</td><td><code>ws2_32</code></td><td>The debugger&#x27;s socket transport. MSVC and clang targeting MSVC pick it up from the source; a GNU linker needs it named.</td></tr>
 <tr><td>Optional define</td><td><code>JAISCRIPT_ENABLE_DEBUGGER</code></td><td>Compiles in the debugger&#x27;s socket transport for VS Code attach (<a href="12-debugging.html">Debugging</a>). Leave it out for shipping and mobile builds. Define it for every file or for none.</td></tr>
+<tr><td>Optional define</td><td><code>JAISCRIPT_INTERPRETER</code></td><td>Adds the tree-walking interpreter, which only a program that checks the backends against each other needs (<a href="#the-interpreter">The interpreter</a>). Define it for every file or for none.</td></tr>
 </tbody></table></div>
 <p>Compile JaiScript&#x27;s files with the same settings as yours: the same runtime library, the same <code>NDEBUG</code> and the same defines. Setting them once at the project level does that. A mismatch changes class layouts between your code and the library and fails at run time, typically as an assertion in <code>strong_ptr.hpp</code>.</p>
 <h2 id="one-file-or-per-file">One file or per file<a class="hlink" href="#one-file-or-per-file" aria-label="link">&#8203;</a></h2>
 <p><code>source/jaiscript.cpp</code> includes every implementation file, so adding that one file adds the whole library. It is the simplest route and the right default when you use JaiScript without changing it: the library compiles as one unit, once, and stays built.</p>
 <p>The files under <code>source/implementation/</code> are the same library split into about forty units. Add them all instead (a wildcard does it) when you work on JaiScript itself or want the library to compile in parallel: an edit to one implementation file rebuilds only that file. Turn on parallel compilation (MSBuild&#x27;s <code>/MP</code>, Ninja and Xcode by default) to get the benefit. Adding both sets defines everything twice.</p>
 <h2 id="cmake">CMake<a class="hlink" href="#cmake" aria-label="link">&#8203;</a></h2>
-<p>The library is one CMake target, <code>JaiScript::jaiscript</code>. Linking it brings everything in the table above.</p>
+<p>The library is one CMake target, <code>JaiScript::jaiscript</code>. Linking it brings everything in the table above. <code>JaiScript::jaiscript_interpreter</code> is the same library with the interpreter added (<a href="#the-interpreter">The interpreter</a>).</p>
 <p><strong>As a subproject.</strong> Put the JaiScript folder (the one holding its top-level <code>CMakeLists.txt</code>) inside your project; a copy elsewhere takes a binary directory as well, <code>add_subdirectory(path/to/JaiScript jaiscript)</code>. As a subproject only the library builds (the runner, tests, examples and language server stay off) and its MSVC runtime follows yours. A complete host:</p>
 <div class="codeblock cb-plain"><span class="cb-label">CMakeLists.txt</span><pre><code class="lang-plain">cmake_minimum_required(VERSION 3.20)
 project(my_game CXX)
@@ -68,7 +69,7 @@ build/my_game</code></pre></div>
 FetchContent_Declare(jaiscript GIT_REPOSITORY https://github.com/Devacor/JaiScript.git GIT_TAG master)   # or a release tag
 FetchContent_MakeAvailable(jaiscript)
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)</code></pre></div>
-<p>Options set before the <code>add_subdirectory</code> or <code>FetchContent_MakeAvailable</code> (or with <code>-D</code>) turn the tools back on: <code>JAISCRIPT_BUILD_RUNNER</code>, <code>JAISCRIPT_BUILD_TESTS</code>, <code>JAISCRIPT_BUILD_EXAMPLES</code>, <code>JAISCRIPT_BUILD_LSP</code>. <code>JAISCRIPT_ENABLE_DEBUGGER=OFF</code> compiles the debugger&#x27;s socket code out.</p>
+<p>Options set before the <code>add_subdirectory</code> or <code>FetchContent_MakeAvailable</code> (or with <code>-D</code>) turn the tools back on: <code>JAISCRIPT_BUILD_RUNNER</code>, <code>JAISCRIPT_BUILD_TESTS</code>, <code>JAISCRIPT_BUILD_EXAMPLES</code>, <code>JAISCRIPT_BUILD_LSP</code>, and <code>JAISCRIPT_INTERPRETER</code> for the <code>jaiscript_interpreter</code> target. <code>JAISCRIPT_ENABLE_DEBUGGER=OFF</code> compiles the debugger&#x27;s socket code out.</p>
 <h2 id="visual-studio">Visual Studio (MSBuild)<a class="hlink" href="#visual-studio" aria-label="link">&#8203;</a></h2>
 <p><strong>In the IDE.</strong> Add <code>JaiScript\source\jaiscript.cpp</code> to the project (Add &rarr; Existing Item). Then open the project&#x27;s Properties, choose All Configurations and your platform, and under C/C++:</p>
 <ul>
@@ -138,6 +139,12 @@ add_executable(my_game main.cpp)
 target_link_libraries(my_game PRIVATE JaiScript::jaiscript)
 set_property(TARGET my_game PROPERTY MSVC_RUNTIME_LIBRARY &quot;${JaiScript_MSVC_RUNTIME_LIBRARY}&quot;)</code></pre></div>
 <p>The last line matters on MSVC. A standalone JaiScript build uses the static runtime (<code>/MT</code>, <code>/MTd</code>) unless you pass <code>CMAKE_MSVC_RUNTIME_LIBRARY</code>, while a CMake project defaults to the DLL runtime; the package records the runtime its library was built with in <code>JaiScript_MSVC_RUNTIME_LIBRARY</code>, and without the line the link fails with <code>LNK2038: mismatch detected for 'RuntimeLibrary'</code>. Linking a prebuilt library from another build system, compile your files with the definitions it was built with: its runtime, <code>NDEBUG</code> for a Release library, and <code>JAISCRIPT_ENABLE_DEBUGGER</code> unless it was configured off.</p>
+<h2 id="the-interpreter">The interpreter, for checking parity<a class="hlink" href="#the-interpreter" aria-label="link">&#8203;</a></h2>
+<p>The tree-walking interpreter (<a href="03-backends.html">Backends</a>) is the reference the VM is checked against, and nothing a host runs needs it, so the library leaves it out: <code>source/implementation/</code> and <code>source/jaiscript.cpp</code> compile the VM alone, and in such a build <code>set_backend(jai::backend_type::interpreter)</code> throws <code>set_backend(interpreter) is unsupported: this build has no interpreter (link jaiscript_interpreter)</code>. A program that compares the backends adds it:</p>
+<ul>
+<li><strong>CMake</strong>: link <code>JaiScript::jaiscript_interpreter</code> instead of <code>JaiScript::jaiscript</code>. The option <code>JAISCRIPT_INTERPRETER</code> defines the target; it is on in a standalone build, whose test suite, fuzzer and runner link it, and off in a subproject. The two libraries share every compiled file but the interpreter&#x27;s.</li>
+<li><strong>Other build systems</strong>: define <code>JAISCRIPT_INTERPRETER</code> and add the files under <code>source/interpreter/</code> beside the per-file route&#x27;s, or define it for <code>source/jaiscript.cpp</code>, which then includes them.</li>
+</ul>
 <h2 id="the-runner">The runner, for trying scripts<a class="hlink" href="#the-runner" aria-label="link">&#8203;</a></h2>
 <p>A standalone build of JaiScript builds the command-line runner as the target <code>jaiscript_runner</code>; its binary is <code>jaiscript</code>:</p>
 <div class="codeblock cb-plain"><span class="cb-label">shell</span><pre><code class="lang-plain">cmake -S JaiScript -B build -G Ninja -DCMAKE_BUILD_TYPE=Release

@@ -20,7 +20,7 @@ class class_definition;
 class class_instance;
 class coroutine_handle;
 namespace debug { class controller; }
-namespace detail { class engine_operator_table; }
+namespace detail { class engine_operator_table; struct execution_limits; }
 
 struct script_callable;
 
@@ -219,6 +219,9 @@ public:
     // (null outside regions and on engine backends). A worker method wall consults it —
     // a hit dispatches on worker-private state, a miss is an admission verdict.
     virtual void set_parallel_method_pins(const detail::parallel_method_pin_table*) = 0;
+    // A parallel worker's backend: its root environment, its environment epoch sink, its slice of the limits and its budget
+    virtual void configure_parallel_worker(std::shared_ptr<environment> root_env, string_symbolizer* env_epoch_sink,
+                                           detail::execution_limits* worker_limits, std::chrono::nanoseconds budget) = 0;
 
     // Debugger hook: engine::debugger() wires the controller here.
     virtual void set_debug_controller(debug::controller*) = 0;
@@ -384,5 +387,12 @@ public:
 };
 
 using execution_backend_ptr = std::unique_ptr<execution_backend>;
+
+namespace detail {
+    // The tree-walking interpreter is linked only into the parity verifiers (jaiscript_interpreter, JAISCRIPT_INTERPRETER);
+    // a build without it answers false and null
+    bool interpreter_compiled() noexcept;
+    std::unique_ptr<execution_backend> make_interpreter_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);
+}
 
 } // namespace jai

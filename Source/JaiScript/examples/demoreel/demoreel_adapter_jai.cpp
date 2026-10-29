@@ -1,6 +1,5 @@
-// jai_demoreel: the JaiScript adapter for the demoreel shared host. Two engine backends (tree-walking
-// interpreter, bytecode vm) run the same scenes/*.jai; --smoke byte-compares their
-// frame streams, TAB swaps the live one, 'r' hot-reloads every scene file.
+// jai_demoreel: the JaiScript adapter for the demoreel shared host. The bytecode vm runs scenes/*.jai;
+// --smoke hashes its frame stream, 'r' hot-reloads every scene file.
 
 #include "demoreel_host.hpp"
 
@@ -31,7 +30,7 @@ const char* kSceneFiles[] = {
 struct jai_flags {
 	bool precompiled = false;            // jaibite save/load boot path
 	std::string jaibite_path = "demoreel.jaibite";
-	bool debug = false;                  // single-interpreter debug session (VS Code attach)
+	bool debug = false;                  // debug session (VS Code attach)
 	bool debug_wait = false;             // also hold boot until a debugger attaches
 	int64_t debug_port = 52472;
 	std::string coverage;                // the vm's execution-coverage census, written at exit (a build with JAISCRIPT_VM_COVERAGE)
@@ -49,12 +48,9 @@ jai::script_value call_script(jai::engine& eng, const char* fn_name,
 
 class jai_session : public demoreel::script_session {
 public:
-	jai_session(const std::string& backend, const demoreel::host_services& services,
-	            const demoreel::host_options& opt, const jai_flags& flags)
+	jai_session(const demoreel::host_services& services, const demoreel::host_options& opt, const jai_flags& flags)
 		: opt_(opt), flags_(flags), eng_(jai::engine::make()) {
-		if (backend != "vm") { flags_.coverage.clear(); }
 		if (!flags_.coverage.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
-		eng_->set_backend(backend == "vm" ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng_->execution_budget(0.0);
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		jai::stdlib::register_all(eng_);
@@ -190,15 +186,7 @@ class jai_adapter : public demoreel::script_adapter {
 public:
 	std::string program_name() const override { return "jai_demoreel"; }
 	std::string language() const override { return "JaiScript"; }
-	std::vector<std::string> backends() const override { return {"interpreter", "vm"}; }
-	std::string normalize_backend(const std::string& b) const override {
-		return b == "interp" ? "interpreter" : b;
-	}
-	// the debug session is one interpreter (the file-loaded one breakpoints bind to)
-	std::vector<std::string> interactive_backends(const demoreel::host_options&) const override {
-		if (flags_.debug) { return {"interpreter"}; }
-		return backends();
-	}
+	std::vector<std::string> backends() const override { return {"vm"}; }
 
 	int parse_flag(int argc, char** argv, int i) override {
 		std::string a = argv[i];
@@ -224,18 +212,16 @@ public:
 			"  --jaibite PATH   .jaibite path for --precompiled\n"
 			"  --coverage PATH  write the vm's execution-coverage census to PATH at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
-			"  --debug          single-interpreter session, listening for a VS Code attach the whole run\n"
+			"  --debug          listen for a VS Code attach the whole run\n"
 			"  --debug-wait     like --debug, but also hold boot until you attach + press Enter\n"
 			"  --debug-port N   port for --debug (default 52472)\n"
 #endif
 			;
 	}
 
-	std::unique_ptr<demoreel::script_session> make_session(const std::string& backend,
+	std::unique_ptr<demoreel::script_session> make_session(const std::string&,
 			const demoreel::host_services& services, const demoreel::host_options& opt) override {
-		jai_flags f = flags_;
-		f.debug = flags_.debug && backend == "interpreter";
-		return std::make_unique<jai_session>(backend, services, opt, f);
+		return std::make_unique<jai_session>(services, opt, flags_);
 	}
 
 private:

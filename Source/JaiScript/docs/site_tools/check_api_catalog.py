@@ -23,11 +23,11 @@ def main():
 	for e in entries:
 		if not (PROJECT/e['source']).is_file(): errors.append('Missing source: '+e['source'])
 		if not e.get('display') or not e.get('availability') or not e.get('effect'): errors.append('Incomplete entry: '+e['signature'])
-	implementation=(PROJECT/'source/implementation/interpreter.cpp').read_text(encoding='utf-8')
+	implementation=(PROJECT/'source/implementation/builtin_methods.cpp').read_text(encoding='utf-8')
 	for owner,registry in [('array<T>','array'),('map<K,V>','map'),('string','string'),('weak_ptr<T>','weak_ptr'),('shared_ptr<T>','shared_ptr')]:
 		start=implementation.index('out.'+registry+'_methods =')
 		end=implementation.find('\n    out.',start+5)
-		if end<0:end=implementation.find('void interpreter::',start)
+		if end<0:end=len(implementation)
 		registered=set(re.findall(r'symbolizer->intern\("([^"\n]+)"\)',implementation[start:end]))
 		listed={e['name'] for e in entries if e['owner']==owner and e['form']=='method'}
 		for missing in sorted(registered-listed):errors.append(owner+'.'+missing+' absent from catalog')

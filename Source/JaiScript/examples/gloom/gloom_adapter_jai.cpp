@@ -1,7 +1,7 @@
 // jai_gloom: the JaiScript adapter for the GLOOM shared host. Binds the host API into a
 // jai::engine, imports scripts/main.jai, and forwards the six gloom_* entry
-// points. --smoke runs both engine backends (interpreter, vm) and the shared
-// host byte-compares their frame streams + STATE_HASH.
+// points. --smoke runs the vm and the shared host reports its frame stream
+// hash + STATE_HASH.
 
 #include "gloom_host.hpp"
 
@@ -28,9 +28,8 @@ class jai_session : public gloom::script_session {
 public:
 	jai_session(const std::string& backend, const gloom::host_services& services,
 	            const gloom::host_options& opt)
-		: opt_(opt), eng_(jai::engine::make()), coverage_(backend == "vm" ? opt.coverage : std::string()) {
+		: opt_(opt), eng_(jai::engine::make()), coverage_(opt.coverage) {
 		if (!coverage_.empty() && !jai::engine::vm_coverage_available()) { throw std::runtime_error("--coverage needs a build with JAISCRIPT_VM_COVERAGE"); }
-		eng_->set_backend(backend == "vm" ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng_->execution_budget(0.0);
 		if (opt.workers > 0) { eng_->parallel_thread_count(static_cast<size_t>(opt.workers)); }
 		eng_->parameter_alias(opt.param_alias);
@@ -128,10 +127,7 @@ class jai_adapter : public gloom::script_adapter {
 public:
 	std::string program_name() const override { return "jai_gloom"; }
 	std::string language() const override { return "JaiScript"; }
-	std::vector<std::string> backends() const override { return {"interpreter", "vm"}; }
-	std::string normalize_backend(const std::string& b) const override {
-		return b == "interp" ? "interpreter" : b;
-	}
+	std::vector<std::string> backends() const override { return {"vm"}; }
 	std::string title() const override {
 		return "jai_gloom - GLOOM, a terminal raycast shooter written in JaiScript";
 	}

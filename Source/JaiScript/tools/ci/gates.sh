@@ -20,8 +20,9 @@
 # optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
 # bug of an optimized lane. tests-vm-reference runs the suite with --backend=vm-reference.
 #
-# HASH_BACKENDS names the backends the example hash gates run (default "vm interp"; the per-change tier passes "vm" unless
-# its interpreter tier is picked, tools/ci/targeted.sh).
+# HASH_BACKENDS names the backends the runner's hash gates (gatorquest, timedemo) run (default "vm interp"; the per-change
+# tier passes "vm" unless its interpreter tier is picked, tools/ci/targeted.sh). GLOOM, the demoreel, the crawler and the
+# quickstart link the library without the interpreter: their gates run the VM, and skip when HASH_BACKENDS leaves it out.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -67,7 +68,7 @@ HASH_BACKENDS="${HASH_BACKENDS:-vm interp}"
 hash_on() { case " $HASH_BACKENDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # JAI_TEST_SHARD=i/n runs one shard of the suites (jaiscript_tests --shard; tools/ci/ci_lib.sh jai_debug_suites)
-gate_tests_interp() { run "$BIN/jaiscript_tests" ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
+gate_tests_interp() { run "$BIN/jaiscript_tests" --backend=interpreter ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
 gate_tests_vm() { run "$BIN/jaiscript_tests" --backend=vm ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
 gate_tests_vm_reference() { run "$BIN/jaiscript_tests" --backend=vm-reference ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
 
@@ -81,17 +82,13 @@ fuzz_run() {
 gate_fuzz() { fuzz_run; }
 gate_fuzz_vm_reference() { fuzz_run --vm-reference; }
 
+vm_only() { hash_on vm || { echo "$1: its one backend is the VM, which HASH_BACKENDS leaves out; skipped"; return 1; }; }
+
 gloom_hashes() {
+	vm_only gloom || return 0
 	cd "$ROOT/examples/gloom"
-	local narrow=()
-	hash_on interp || narrow=(--backend vm)
-	hash_on vm || narrow=(--backend interpreter)
-	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" "${narrow[@]+"${narrow[@]}"}"
-	for backend in interpreter vm; do
-		hash_on "${backend/interpreter/interp}" || continue
-		want "GLOOM $backend ($1 ticks, $2 workers): expected frame hash $3 and STATE_HASH $4" \
-			"^$backend +\\|.*\\| $3 +\\| $4\$"
-	done
+	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2"
+	want "GLOOM vm ($1 ticks, $2 workers): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
 }
 
 gate_gloom() { gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"; }
@@ -119,8 +116,8 @@ gate_amalgamation() {
 	run "$py" - "$ROOT" <<'PYEOF'
 import re, sys, pathlib
 root = pathlib.Path(sys.argv[1])
-listed = set(re.findall(r"implementation/[A-Za-z0-9_/]+\.cpp", (root / "source/CMakeLists.txt").read_text(encoding="utf-8", errors="replace")))
-included = set(re.findall(r'#include\s+"(implementation/[A-Za-z0-9_/]+\.cpp)"', (root / "source/jaiscript.cpp").read_text(encoding="utf-8", errors="replace")))
+listed = set(re.findall(r"(?:implementation|interpreter)/[A-Za-z0-9_/]+\.cpp", (root / "source/CMakeLists.txt").read_text(encoding="utf-8", errors="replace")))
+included = set(re.findall(r'#include\s+"((?:implementation|interpreter)/[A-Za-z0-9_/]+\.cpp)"', (root / "source/jaiscript.cpp").read_text(encoding="utf-8", errors="replace")))
 separate = {"implementation/debug/connector.cpp", "implementation/debug/controller.cpp", "implementation/parallel_transform.cpp"}
 missing = sorted(listed - included - separate)
 if missing:
@@ -131,18 +128,14 @@ PYEOF
 }
 
 gate_demoreel() {
-	local narrow=()
-	hash_on interp || narrow=(--backend vm)
-	hash_on vm || narrow=(--backend interpreter)
-	run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM" "${narrow[@]+"${narrow[@]}"}"
+	vm_only demoreel || return 0
+	run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM"
 }
 
 gate_crawler() {
-	for backend in vm interpreter; do
-		hash_on "${backend/interpreter/interp}" || continue
-		run_logged "$BIN/jai_crawler" --smoke --seed 99 --turns 1500 --backend "$backend"
-		want "crawler $backend: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
-	done
+	vm_only crawler || return 0
+	run_logged "$BIN/jai_crawler" --smoke --seed 99 --turns 1500
+	want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
 }
 
 python_cmd() {
@@ -222,15 +215,11 @@ gate_android() {
 
 gate_embed_quickstart() {
 	local work
+	vm_only embed_quickstart || return 0
 	work="$(mktemp -d)"
 	cd "$work"
-	for backend in vm interp; do
-		hash_on "$backend" || continue
-		local flags=()
-		[ "$backend" = interp ] && flags=(--interp)
-		run_logged "$BIN/embed_quickstart" "${flags[@]+"${flags[@]}"}"
-		want "embed_quickstart $backend: expected every check to hold" "^all checks passed\$"
-	done
+	run_logged "$BIN/embed_quickstart"
+	want "embed_quickstart: expected every check to hold" "^all checks passed\$"
 	cd "$ROOT"
 	rm -rf "$work"
 }

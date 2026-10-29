@@ -32,7 +32,7 @@ file: include/jaiscript/detail/ast.hpp
     // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop. The body is parsed as a
 >>>
 
-file: source/implementation/interpreter.cpp
+file: source/interpreter/interpreter.cpp
 <<<
             // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
             // S1): re-point the handle itself, so every copy of it - and every receiver site,

@@ -395,7 +395,7 @@ namespace jai::vm {
         void configure_parallel_worker(std::shared_ptr<environment> root_env,
                                        string_symbolizer* env_epoch_sink,
                                        detail::execution_limits* worker_limits,
-                                       std::chrono::nanoseconds budget) {
+                                       std::chrono::nanoseconds budget) override {
             environment_ = std::move(root_env);
             cached_global_env_ = nullptr;
             worker_root_env_ = environment_.get();

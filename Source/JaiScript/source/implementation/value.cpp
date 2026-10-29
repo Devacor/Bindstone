@@ -5,7 +5,6 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
-#include <jaiscript/detail/interpreter.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/member_scope.hpp>
 #include <jaiscript/detail/string_element.hpp>

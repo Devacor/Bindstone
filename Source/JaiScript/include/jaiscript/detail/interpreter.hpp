@@ -19,7 +19,6 @@
 #include "builtin_methods.hpp"
 #include "execution_limits.hpp"
 #include "operator_table.hpp"
-#include "host_member.hpp"
 #include "value_text.hpp"
 #include "truthiness.hpp"
 #include <jaiscript/core/value.hpp>
@@ -1253,15 +1252,6 @@ namespace jai {
         // wall (methods aren't provisioned per worker - their shared body caches and
         // arbitrary env reach are unsafe off-thread) checks this. Never set on the engine's own backend.
         bool parallel_worker_ = false;
-        // The bound C++ members this interpreter reached in place, by node (a member expression, or a bare name in a method): its
-        // own rows, so workers share nothing
-        struct host_member_row { const void* node = nullptr; const class_definition* cd = nullptr; uint64_t epoch = 0; detail::host_member_hit hit; };
-        std::array<host_member_row, 128> host_member_rows_{};
-        void* host_member_cached(const void* node, uint64_t member_id, class_definition* cd, class_instance* inst,
-                                 const script_value& receiver, const detail::host_member_lane*& lane);
-        // the row's address when the node's row is filled for this class and epoch; never fills
-        void* host_member_row_hit(const void* node, const class_definition* cd, const class_instance* inst,
-                                  const detail::host_member_lane*& lane);
         // Shadowing unit of the running code (string_symbolizer::current_unit): set around a call from the
         // callee's function or class, restored after; a worker interpreter never writes it (the symbolizer
         // is shared, and a worker's environments consult their private sink, never the versions)

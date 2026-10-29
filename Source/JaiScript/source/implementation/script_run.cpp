@@ -206,7 +206,10 @@ namespace {
         eng.swap_run_entry_state(run.entry);
         backend->swap_run_state(*run.backend_state);
         if (resumed) { backend->begin_host_call(); }
-        mco_resume(run.fiber->co);
+        {
+            engine::debug_execution_scope executing(eng);
+            mco_resume(run.fiber->co);
+        }
         eng.swap_run_entry_state(run.entry);
         backend->swap_run_state(*run.backend_state);
         runs.active = run.outer;

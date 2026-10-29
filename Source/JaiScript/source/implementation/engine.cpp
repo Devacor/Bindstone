@@ -165,6 +165,7 @@ checked_result<script_value> engine::checked_host_entry(host_entry_body run, voi
         return run(*backend, context);
     }
     note_host_entry();
+    debug_execution_scope executing(*this);
     backend->begin_host_call();
     const auto failure = [&](const char* text) {
         backend->prepare_for_execution();
@@ -498,6 +499,9 @@ struct engine::implementation {
     // Parallel machinery (parallel_transform v0): null until first touched, so an engine
     // that never runs a region carries only this pointer
     std::unique_ptr<detail::parallel_engine_state> parallel_;
+#ifndef NDEBUG
+    std::atomic<std::thread::id> debug_execution_thread_{};   // engine::debug_enter_execution
+#endif
     // Resolved when set, so a region reads its context count without a branch
     size_t parallel_thread_count_ = automatic_parallel_thread_count();
 
@@ -3191,6 +3195,7 @@ script_value engine::execute_parsed(const std::vector<declaration_ptr>& declarat
         execution_backend* be = backend();
         const bool nested = be->is_executing();
         if (!nested) { note_host_entry(); }
+        debug_execution_scope executing(*this);
         run_pin pin(nested ? this : nullptr);   // an include, an import or a host's execute inside running script
 
         // Push scope for instance variables if any
@@ -5338,6 +5343,33 @@ void engine::note_host_entry() {
         impl->entry_start = time().monotonic_now();
         impl->stamped_generation = impl->entry_generation;
     }
+}
+
+bool engine::debug_enter_execution() noexcept {
+#ifndef NDEBUG
+    std::thread::id idle{};
+    if (impl->debug_execution_thread_.compare_exchange_strong(idle, std::this_thread::get_id())) { return true; }
+    assert(debug_releases_here() && "an engine runs on one thread at a time: it is executing on another thread");
+#endif
+    return false;
+}
+
+void engine::debug_leave_execution() noexcept {
+#ifndef NDEBUG
+    impl->debug_execution_thread_.store(std::thread::id{});
+#endif
+}
+
+bool engine::debug_releases_here() const noexcept {
+#ifndef NDEBUG
+    const std::thread::id running = impl->debug_execution_thread_.load();
+    const std::thread::id here = std::this_thread::get_id();
+    if (running == std::thread::id{} || running == here) { return true; }
+    const detail::parallel_region_table* region = impl->parallel_ ? impl->parallel_->active_region : nullptr;
+    return region && region->find_entry(here);
+#else
+    return true;
+#endif
 }
 
 void engine::note_execute_elapsed_use() {

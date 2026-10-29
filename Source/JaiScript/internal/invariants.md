@@ -104,11 +104,13 @@ index) and COMPONENT (`component_base` plus a vector component index). Rules:
   value.cpp — one pop + placement-new per mint, memory_cap-charged for cells). The pool is
   single-threaded: parallel workers DO mint cell references inside their bodies, so acquire
   falls back to plain self-deleting `make_strong` blocks while a region is active (blocks
-  self-describe their release via `dealloc_fn`, so both kinds coexist). A host may drop the
-  last handle to a value on any thread while the engine runs (a value handed to a job
-  thread, a captured std::function destroyed elsewhere): a block released on a foreign
-  thread is deleted there and counted (`foreign`), never pushed onto the free list, so an
-  orphaned pool frees itself once drained (Review Regressions
+  self-describe their release via `dealloc_fn`, so both kinds coexist). A value belongs to its
+  engine's thread: another thread uses or drops it only while the engine is idle, with the
+  hand-off synchronized (Debug builds assert an instance dies on the executing thread, a
+  region's thread, or while the engine is idle: `engine::debug_releases_here`). An idle engine
+  may move between threads, so a block released on a thread other than the pool's owner is
+  deleted there and counted (`foreign`), never pushed onto the free list, and an orphaned
+  pool frees itself once drained (Review Regressions
   `holders_a_host_drops_on_another_thread_stay_off_the_engine_free_list`). Cells are minted
   ONLY by `make_cell_reference`; the boxed value is never itself a reference.
 - Subscript reads whose consumer provably discards identity skip the holder mint entirely

@@ -77,9 +77,9 @@ public:
 
     void forge_tests() override {
         test("holders_a_host_drops_on_another_thread_stay_off_the_engine_free_list", [this]() {
-            // A host may hand values to another thread and drop them there while the engine keeps running; a pooled holder
-            // block returns to the engine's free list only on the thread that owns the pool (holder_block_pool::return_block),
-            // so those releases are foreign returns, never a free-list push racing the engine's own mints
+            // A pooled holder block returns to the engine's free list only on the thread that owns the pool
+            // (holder_block_pool::return_block): a release on any other thread (an engine that moved threads while idle) is a
+            // foreign return, never a free-list push. Checked in its harshest form, releases racing the engine's own mints
             auto e = jai::engine::make();
             jai::engine* eng = e.get();
             std::vector<jai::script_value> handed;
@@ -3742,6 +3742,37 @@ public:
             check_eq(std::string("Value outlived its engine."), error_of([&]() { live->add_global("g", static_cast<const script_value&>(moved_outlived)); }));
             live.reset();
             check_false(reassigned->valid(), "a reassigned value dies with its new engine");
+        });
+
+        // A value belongs to its engine's thread: Debug builds record the thread running the outermost execution, and an instance
+        // dying anywhere else while it runs (a host thread dropping a last handle) asserts. Idle, the engine may move threads; a
+        // region's threads release what they made
+        test("the_debug_release_canary_names_another_thread_only_while_the_engine_runs", [this]() {
+#ifndef NDEBUG
+            auto e = make_engine();
+            const auto on_other_thread = [&]() {
+                bool result = false;
+                std::thread other([&]() { result = e->debug_releases_here(); });
+                other.join();
+                return result;
+            };
+            bool engine_thread = false;
+            bool other_thread = true;
+            e->add_function("probe", [&]() {
+                engine_thread = e->debug_releases_here();
+                other_thread = on_other_thread();
+            });
+            std::atomic<int> refused_on_region_threads{0};
+            e->add_function("probe_region", [&](int64_t) { if (!e->debug_releases_here()) { ++refused_on_region_threads; } });
+            check_true(on_other_thread(), "an idle engine may be used, and its values dropped, on any thread");
+            e->execute("probe();");
+            check_true(engine_thread, "the executing thread releases");
+            check_false(other_thread, "another thread does not while the engine runs");
+            check_true(on_other_thread(), "idle again once the execute returns");
+            e->parallel_thread_count(4);
+            e->execute("array<int> xs; for (int i = 0; i < 400; ++i) { xs.push(i); } parallel_for (int x : xs) { probe_region(x); }");
+            check_eq(0, refused_on_region_threads.load(), "a region's threads release what they made");
+#endif
         });
 
         // A host thread may hold values while the engine lives; destroying the engine on another thread afterwards (not racing the

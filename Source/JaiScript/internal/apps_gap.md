@@ -93,7 +93,8 @@ ordinary code over containers stays general.
 3. **Fewer instructions per call.** The receiver load, the probe and the call, the return and its landing are separate dispatches
    through the two-level main switch. `LOAD r; CALL_METHOD 0` and `PROBE_CALLEE; CALL_FROM_SCRATCH 0` have nothing between the
    receiver or callee and the call (internal/call_site_identity.md, "Eliding the probe"); a call or return that continues at its
-   target without re-entering the loop head saves the frame reload.
+   target without re-entering the loop head saves the frame reload. internal/call_path.md takes the switch, the probe pair and
+   the method rows this way (Richards 0.928, DeltaBlue 0.896); the receiver load stays its own instruction.
 4. **Reference containers typed for proofs.** A reference's referent can change kind through another name, so a reference is
    dynamic to the checker; a tentative type from its declaration, which every consumer already guards, would let `a.size()`,
    element reads and builtin calls through `array<T>&` and `map<K, V>&` parameters take the typed paths.

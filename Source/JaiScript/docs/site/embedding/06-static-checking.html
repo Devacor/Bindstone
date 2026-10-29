@@ -181,7 +181,9 @@ overloads (variadic accepts anything) and only per-argument <em>certainties</em>
 no builtin conversion to a primitive parameter, like <code>square("s")</code>. Numeric to numeric is fine;
 object and <code>script_value</code> parameters accept anything. One boundary difference to remember: the C++
 side has no numeric-to-string conversion, unlike a script <code>string</code> slot. Callables held in variables
-(lambdas, cross-execute function values) are unchecked.</p>
+(lambdas, cross-execute function values) are unchecked. A bound static method (<code>Gate::twice()</code>) is held to
+the arities its <code>static_method</code> bindings declare: an error only when none takes the count, and a binding of
+unknown arity accepts anything.</p>
 <h3 id="returns">Returns<a class="hlink" href="#returns" aria-label="link">&#8203;</a></h3>
 <p>A returned value must be assignable to the declared return type; a value from a <code>void</code> function
 is an error; a bare <code>return;</code> or a path that falls off the end is an error when the result holds no null (a

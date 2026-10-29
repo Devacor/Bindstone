@@ -793,7 +793,7 @@ class engine;
                     if (args.size() != traits::arity) {
                         return checked_result<script_value>(
                             make_error_code(runtime_error_code::argument_count_mismatch),
-                            "Function expects {0} arguments, got {1}",
+                            traits::arity == 1 ? "Function expects {0} argument, got {1}" : "Function expects {0} arguments, got {1}",
                             static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(args.size())
                         );
                     }
@@ -823,7 +823,7 @@ class engine;
                 if (argc != traits::arity) {
                     return checked_result<script_value>(
                         make_error_code(runtime_error_code::argument_count_mismatch),
-                        "Function expects {0} arguments, got {1}",
+                        traits::arity == 1 ? "Function expects {0} argument, got {1}" : "Function expects {0} arguments, got {1}",
                         static_cast<uint64_t>(traits::arity), static_cast<uint64_t>(argc)
                     );
                 }

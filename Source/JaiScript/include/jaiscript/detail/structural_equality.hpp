@@ -364,8 +364,8 @@ namespace jai::detail {
     }
 
     inline bool same_object(const script_value& lv, const script_value& rv) {
-        const script_value l = lv.deref().try_unwrap_transparent_wrapper();
-        const script_value r = rv.deref().try_unwrap_transparent_wrapper();
+        const script_value l = lv.deref().try_unwrap_transparent_wrapper().value_or(lv.deref());
+        const script_value r = rv.deref().try_unwrap_transparent_wrapper().value_or(rv.deref());
         const size_t li = l.raw_storage_index();
         const size_t ri = r.raw_storage_index();
         if (l.is_null() || r.is_null()) { return l.is_null() && r.is_null(); }

@@ -546,7 +546,7 @@ namespace jai::detail {
 	// a handle (a shared_ptr or weak_ptr, a host object held by pointer): past it the pointee, which no const owns
 	inline bool const_handle_value(const script_value& v) {
 		const size_t idx = v.raw_storage_index();
-		if (idx == script_value::TYPEID_SHARED_PTR || idx == script_value::TYPEID_WEAK_PTR) { return true; }
+		if (idx == script_value::TYPEID_WEAK_PTR) { return true; }
 		if (v.is_shared_ptr_type() || v.is_weak_ptr_type()) { return true; }
 		if (idx == script_value::TYPEID_OBJECT && !v.is_null()) {
 			if (!const_cast<script_value&>(v).get_class_instance()) { return true; }

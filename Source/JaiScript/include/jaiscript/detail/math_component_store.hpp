@@ -183,7 +183,7 @@ namespace jai::detail::math {
 			}
 			base = std::move(resolved.value());
 		}
-		if (!base.is_reference() || !base.get_reference_holder()) {
+		if (!base.is_reference()) {
 			return none;
 		}
 		auto value = ref_checked_deref(base);
@@ -201,7 +201,7 @@ namespace jai::detail::math {
 	// over that reference, else a non-reference and the ordinary read
 	inline script_value evaluated_component_reference(const script_value& object, const member_expr* m, engine* eng) {
 		script_value none(std::monostate{}, eng);
-		if (!object.is_reference() || !object.get_reference_holder()) {
+		if (!object.is_reference()) {
 			return none;
 		}
 		auto value = ref_checked_deref(object);

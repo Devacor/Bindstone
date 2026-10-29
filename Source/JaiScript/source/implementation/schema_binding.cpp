@@ -343,7 +343,7 @@ strong_ptr<class_instance> make_native_instance(class_definition& def, std::stri
 
 void note_region_made(const script_value& value, engine* eng) {
 	const script_value& self = value.deref();
-	if (self.raw_storage_index() != script_value::TYPEID_OBJECT && self.raw_storage_index() != script_value::TYPEID_SHARED_PTR) { return; }
+	if (self.raw_storage_index() != script_value::TYPEID_OBJECT) { return; }
 	const auto holder = self.get_object_holder();
 	if (holder && holder->is_instance()) {
 		holder->unchecked_instance()->region_tag(eng->parallel_region_serial());

@@ -46,7 +46,7 @@ namespace jai::detail {
 		return index == script_value::TYPEID_INT || index == script_value::TYPEID_FLOAT;
 	}
 	inline bool object_storage(size_t index) noexcept {
-		return index == script_value::TYPEID_OBJECT || index == script_value::TYPEID_SHARED_PTR;
+		return index == script_value::TYPEID_OBJECT;
 	}
 	inline script_float as_script_float(const script_value& v, size_t index) noexcept {
 		return index == script_value::TYPEID_INT ? script_float(v.unchecked_as_int()) : v.unchecked_as_float();
@@ -155,8 +155,9 @@ namespace jai::detail {
 			if (auto result = arithmetic_on_values<Op>(h, left, right, li, ri)) { return std::move(*result); }
 			return type_mismatch_error(arith_invalid_text<Op>());
 		}
-		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-		const script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+		const auto wrapped_left = left.try_unwrap_transparent_wrapper(), wrapped_right = right.try_unwrap_transparent_wrapper();
+		const script_value& unwrapped_left = wrapped_left ? *wrapped_left : left;
+		const script_value& unwrapped_right = wrapped_right ? *wrapped_right : right;
 		const size_t uli = unwrapped_left.raw_storage_index();
 		const size_t uri = unwrapped_right.raw_storage_index();
 		// overload resolution: the left operand's operator beats the builtin meaning when one of its overloads takes the right operand
@@ -224,8 +225,9 @@ namespace jai::detail {
 			if (math::owns_comparison(li, ri)) [[unlikely]] { return math::ordering_error(left, right); }
 			return type_mismatch_error(order_invalid_text<Op>());
 		}
-		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-		const script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+		const auto wrapped_left = left.try_unwrap_transparent_wrapper(), wrapped_right = right.try_unwrap_transparent_wrapper();
+		const script_value& unwrapped_left = wrapped_left ? *wrapped_left : left;
+		const script_value& unwrapped_right = wrapped_right ? *wrapped_right : right;
 		if (auto result = ordering_on_values<Op>(h, unwrapped_left, unwrapped_right, unwrapped_left.raw_storage_index(), unwrapped_right.raw_storage_index())) {
 			return std::move(*result);
 		}
@@ -308,8 +310,9 @@ namespace jai::detail {
 		if (auto expired = weak_equals_null(left, right)) { return h.make_bool(*expired); }
 		if (auto identity = builtin_identity_equal(left, right)) { return h.make_bool(*identity); }
 
-		const script_value unwrapped_left = left.try_unwrap_transparent_wrapper();
-		const script_value unwrapped_right = right.try_unwrap_transparent_wrapper();
+		const auto wrapped_left = left.try_unwrap_transparent_wrapper(), wrapped_right = right.try_unwrap_transparent_wrapper();
+		const script_value& unwrapped_left = wrapped_left ? *wrapped_left : left;
+		const script_value& unwrapped_right = wrapped_right ? *wrapped_right : right;
 		if ((unwrapped_left.is_int() || unwrapped_left.is_float()) && (unwrapped_right.is_int() || unwrapped_right.is_float())) {
 			// two ints compare exactly: a double loses precision beyond 2^53
 			if (unwrapped_left.is_int() && unwrapped_right.is_int()) { return h.make_bool(unwrapped_left.unchecked_as_int() == unwrapped_right.unchecked_as_int()); }

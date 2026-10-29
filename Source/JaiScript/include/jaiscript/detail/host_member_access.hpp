@@ -22,7 +22,7 @@ inline const script_value::object_holder* host_member_stored(const class_instanc
 // The instance a method's receiver (this) holds, read raw: null for anything but a class instance
 inline class_instance* host_this_instance(const script_value& self) {
 	const size_t kind = self.raw_storage_index();
-	if (kind != script_value::TYPEID_OBJECT && kind != script_value::TYPEID_SHARED_PTR) { return nullptr; }
+	if (kind != script_value::TYPEID_OBJECT) { return nullptr; }
 	const auto& holder = const_cast<script_value&>(self).get_object_holder();
 	if (!holder || !holder->is_instance()) { return nullptr; }
 	return holder->unchecked_instance();

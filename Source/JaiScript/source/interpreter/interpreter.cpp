@@ -80,13 +80,8 @@ namespace {
     // array<int> element enforces int on store exactly like direct element assignment
     // (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
     // re-resolution (realloc/shrink safe). KEEP BYTE-PARALLEL with vm_decl_ref_alias.
-    checked_result<script_value> decl_ref_alias(const script_value& source, engine* eng) {
-        (void)eng;
-        auto refHolder = source.get_reference_holder();
-        if (!refHolder) {
-            return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-        }
-        return script_value(source);
+    checked_result<script_value> decl_ref_alias(const script_value& source, engine*) {
+        return source;
     }
 
     // Box-in-place + share: non-ref storage moves into a cell and the storage becomes
@@ -4085,9 +4080,6 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     if (is_unwinding_) { return {}; }
                     if (!*cell) { return cell->error_value(); }
                     script_value& storage = *cell->value();
-                    if (storage.is_reference() && !storage.get_reference_holder()) {
-                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-                    }
                     JAISCRIPT_TRY(define_variable(share_boxed_slot(storage)));
                     return {};
                 }
@@ -5040,7 +5032,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                 // generic path would mint; a null dispatch caches "no script method of the name"
                 const size_t ti = objectValue.raw_storage_index();
                 class_instance* inst_raw = nullptr;
-                if (ti == script_value::TYPEID_OBJECT || ti == script_value::TYPEID_SHARED_PTR) {
+                if (ti == script_value::TYPEID_OBJECT) {
                     auto holder = objectValue.get_object_holder();
                     if (holder && holder->is_instance()) {
                         inst_raw = holder->unchecked_instance();
@@ -6225,7 +6217,6 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 case script_value::TYPEID_STRING:
                     return make_value(self_val.unchecked_as_string() == other_val.unchecked_as_string());
                 case script_value::TYPEID_OBJECT:
-                case script_value::TYPEID_SHARED_PTR:
                     break; // Fall through to pointer comparison below
                 default:
                     // Other types (arrays, maps, functions, etc.) - not same unless same object
@@ -7500,9 +7491,6 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
                                                              *string_symbolizer_, environment_->find_access_context())) {
                     if (!*cell) { return cell->error_value(); }
                     script_value& storage = *cell->value();
-                    if (storage.is_reference() && !storage.get_reference_holder()) {
-                        return checked_result<void>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-                    }
                     operand = share_boxed_slot(storage);
                 }
             }
@@ -8607,9 +8595,6 @@ std::optional<checked_result<script_value>> interpreter::static_storage_referenc
     if (!cell) { return std::nullopt; }
     if (!*cell) { return checked_result<script_value>(cell->error_value()); }
     script_value& storage = *cell->value();
-    if (storage.is_reference() && !storage.get_reference_holder()) {
-        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-    }
     return checked_result<script_value>(share_boxed_slot(storage));
 }
 
@@ -10189,11 +10174,6 @@ script_value interpreter::share_boxed_slot(script_value& storage) {
 }
 
 checked_result<bool> interpreter::reference_to_storage(script_value& storage, script_value& out) {
-    if (storage.is_reference() && !storage.get_reference_holder()) {
-        return checked_result<bool>(
-            make_error_code(runtime_error_code::invalid_reference),
-            "Reference target is null");
-    }
     // Share the holder (zero alloc; cells alias the same box, element/field refs keep
     // their container/instance re-resolution), boxing on demand when the variable
     // predates its escape mark (cross-execute global, C++ define, dynamic shape)
@@ -10233,7 +10213,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
     // VALUE is an lvalue: share its holder, exactly like the external-invocation path
     // always has. Nothing runs at the bind point, so the fast-path constraint holds.
     // (KEEP BYTE-PARALLEL with vm_backend::bind_parameters' ref branch)
-    if (evaluated_arg && evaluated_arg->is_reference() && evaluated_arg->get_reference_holder()) {
+    if (evaluated_arg && evaluated_arg->is_reference()) {
         call_stack_[frame_index].set_local(param.slot_index, script_value(*evaluated_arg));
         return {};
     }
@@ -10354,9 +10334,9 @@ checked_result<script_value> interpreter::host_reference_argument(const std::vec
     }
     if (const auto* holder = detail::deferred_argument(passed)) {
         const script_value& lvalue = holder->argument_source->lvalue;
-        return lvalue.is_reference() && lvalue.get_reference_holder() ? lvalue : none;
+        return lvalue.is_reference() ? lvalue : none;
     }
-    return passed.is_reference() && passed.get_reference_holder() ? passed : none;
+    return passed.is_reference() ? passed : none;
 }
 
 checked_result<void> interpreter::host_slot_store(const host_slot& slot, script_value& value) {
@@ -11030,7 +11010,6 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         case script_value::TYPEID_STRING: if (target_base_type == script_value_type::jai_string_type) return arg; break;
         case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
         case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
-        case script_value::TYPEID_SHARED_PTR: if (target_base_type == script_value_type::jai_shared_ptr_type) return arg; break;
         case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
         default: break;
     }

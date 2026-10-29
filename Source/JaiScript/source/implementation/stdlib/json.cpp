@@ -110,7 +110,7 @@ namespace stdlib {
             script_value current(std::monostate{}, eng);
             const std::string prop_name(eng->get_symbolizer()->get_string(member_id));
             if (script_value getter = inst.get_method(eng->symbolize("_get_" + prop_name), false); getter.is_function()) {
-                if (auto read = getter.as_function()({ instance })) { current = read.value().try_unwrap_transparent_wrapper(); }
+                if (auto read = getter.as_function()({ instance })) { current = read.value().try_unwrap_transparent_wrapper().value_or(read.value()); }
             }
             const type_info_ptr kind = current.is_null() ? nullptr : current.get_type_info();
             const bool fits = !kind || detail::field_store_convert_no_script(v, kind, eng).has_value();

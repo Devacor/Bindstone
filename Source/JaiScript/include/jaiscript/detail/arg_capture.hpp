@@ -112,7 +112,7 @@ namespace jai::detail {
     inline arg_binding member_call_binding(const script_value& receiver, uint64_t member_id, bool super_call, size_t i, size_t argc = SIZE_MAX) {
         const script_value& recv = receiver.deref();
         const size_t ri = recv.raw_storage_index();
-        if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_SHARED_PTR) return arg_binding::opaque;
+        if (ri != script_value::TYPEID_OBJECT) return arg_binding::opaque;
         const auto holder = recv.get_object_holder();
         if (!holder || !holder->is_instance()) return arg_binding::opaque;
         auto* inst = holder->unchecked_instance();
@@ -145,8 +145,7 @@ namespace jai::detail {
             case script_value::TYPEID_CPP_BOUND: return passed == received;
             case script_value::TYPEID_ARRAY: return const_cast<script_value&>(passed).get_array_storage().get() == const_cast<script_value&>(received).get_array_storage().get();
             case script_value::TYPEID_MAP: return &passed.unchecked_as_map() == &received.unchecked_as_map();
-            case script_value::TYPEID_OBJECT:
-            case script_value::TYPEID_SHARED_PTR: return passed.get_object_holder().get() == received.get_object_holder().get();
+            case script_value::TYPEID_OBJECT: return passed.get_object_holder().get() == received.get_object_holder().get();
             case script_value::TYPEID_FUNCTION: return &passed.unchecked_as_function() == &received.unchecked_as_function();
             default: return script_value::is_math_index(k) && passed == received;
         }
@@ -320,7 +319,7 @@ namespace jai::detail {
         if (!t || t->base_type == script_value_type::jai_any_type) return false;
         const script_value& d = arg.deref();
         const size_t ri = d.raw_storage_index();
-        const bool object = ri == script_value::TYPEID_OBJECT || ri == script_value::TYPEID_SHARED_PTR;
+        const bool object = ri == script_value::TYPEID_OBJECT;
         switch (t->base_type) {
             case script_value_type::jai_object_type: return !(object && d.get_type_info().get() == t);
             case script_value_type::jai_int_type:

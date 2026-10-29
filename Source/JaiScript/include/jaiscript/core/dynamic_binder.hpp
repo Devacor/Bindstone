@@ -746,7 +746,7 @@ public:
             if constexpr (is_specialization_v<D, std::shared_ptr>) {
                 if (k == script_value::TYPEID_NULL) { return true; }
             }
-            return k == script_value::TYPEID_OBJECT || k == script_value::TYPEID_SHARED_PTR;
+            return k == script_value::TYPEID_OBJECT;
         }
         else if constexpr (detail::is_script_value_v<D>) { return true; }
         else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }

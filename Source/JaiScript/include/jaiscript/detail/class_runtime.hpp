@@ -1610,7 +1610,7 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
                                      name_id, args.data() + 1, script_arg_count, eng);
     }
-    return entries[static_cast<size_t>(best)].func(args);
+    return best->func(args);
     } catch (const std::exception& e) {
         std::vector<script_value> scratch;
         if (auto miss = single_overload_miss(detail::deref_builtin_args(raw_args, scratch))) { return *miss; }
@@ -2674,7 +2674,7 @@ std::optional<checked_result<value_store>> slot_value_assign(const script_value&
 // The cheap head every store site asks first: storage holding an object (a handle or an instance)
 inline bool slot_value_assign_candidate(const script_value& storage) noexcept {
     const size_t si = storage.raw_storage_index();
-    return si == script_value::TYPEID_OBJECT || si == script_value::TYPEID_SHARED_PTR;
+    return si == script_value::TYPEID_OBJECT;
 }
 
 // A var field, element or map value whose held object takes the value in place (slot_value_assign's assigned verdict); nullopt:
@@ -2775,7 +2775,7 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
     const size_t vi = value.raw_storage_index();
-    if (vi != script_value::TYPEID_OBJECT && vi != script_value::TYPEID_SHARED_PTR) { return std::nullopt; }
+    if (vi != script_value::TYPEID_OBJECT) { return std::nullopt; }
     auto source_holder = const_cast<script_value&>(value).get_object_holder();
     if (!source_holder || !source_holder->is_instance()) { return std::nullopt; }
     auto* source = source_holder->unchecked_instance();
@@ -2861,7 +2861,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
     if (value.is_null()) { return std::nullopt; }
     const uint64_t assign_id = eng->get_symbolizer()->intern("=");
-    if (value.raw_storage_index() == script_value::TYPEID_OBJECT || value.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
+    if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
         if (source_holder && source_holder->is_instance()) {
             const class_definition* source_def = source_holder->unchecked_instance()->get_class_definition();

@@ -20,6 +20,7 @@
 //   bool unwinding(); bool parallel_worker(); size_t& equality_depth()   // memberwise ==/<=> levels nested natively
 //   checked_result<script_value> equal(l, r)   // the backend's == entry
 //   checked_result<script_value> spaceship_member(l, r, order_walk*)   // the backend's <=> on a member pair of a walk
+// and the class-operator hooks listed above object_equality_via_method below.
 
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/detail/structural_ordering.hpp>
@@ -30,6 +31,11 @@
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/math_values.hpp>
 #include <jaiscript/core/overload_resolution.hpp>
+#include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/math_component_store.hpp>
+#include <jaiscript/detail/operator_ids.hpp>
+#include <jaiscript/detail/operator_table.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
 #include <cmath>
 #include <compare>
 #include <optional>
@@ -472,6 +478,318 @@ namespace jai::detail {
 			if constexpr (Op == bit_op::shift_left) { return h.make_int(a << b); }
 			else { return h.make_int(a >> b); }
 		}
+	}
+
+	// ---- A class operand's operator methods, one body for both backends. Beyond the hooks above the host supplies
+	//   member_target resolve_member_target(v); script_value operator_value(target, id)   // a worker reads only its pins
+	//   checked_result<script_value> operator_call(self, method, id, std::vector<script_value> args)
+	//   bool worker_operators_pinned(v, {ids}); const parallel_method_pin* worker_operator_pin(v, id)
+	//   bool comparison_free(v)   // v's class answers none of ==, != and <=> (a memo; false where the host keeps none)
+	//   const operator_ids& ids(); script_value make_null(); script_value bound_method(self, method); execution_backend& backend()
+
+	template <class T>
+	inline checked_result<T> parallel_operator_refused() {
+		return checked_result<T>(make_error_code(runtime_error_code::unsupported_operation), parallel_operator_verdict_text);
+	}
+
+	inline token_type comparison_token(const operator_ids& ids, uint64_t id) noexcept {
+		return id == ids.less ? token_type::less : id == ids.less_equal ? token_type::less_equal : id == ids.greater ? token_type::greater : token_type::greater_equal;
+	}
+
+	// a == b through the left operand's operator== (a transparent wrapper's, unwrapped); nullopt when none takes b
+	template <class Host>
+	std::optional<checked_result<bool>> object_equality_via_method(Host& h, const script_value& left, const script_value& right) {
+		const operator_ids& ids = h.ids();
+		// a worker whose region did not pin the class's == leaves it to the == entry, which raises the verdict
+		if (h.parallel_worker() && !h.worker_operators_pinned(left, { ids.equal_equal, ids.spaceship })) [[unlikely]] { return std::nullopt; }
+		if (h.comparison_free(left)) { return std::nullopt; }
+		auto target = h.resolve_member_target(left);
+		if (!target) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, ids.equal_equal);
+		if (!method_val.is_function()) {
+			if (target.class_def && target.class_def->is_transparent_wrapper()) {
+				script_value mutable_left = left;
+				script_value unwrapped = target.class_def->unwrap(mutable_left);
+				if (!unwrapped.is_null()) { return object_equality_via_method(h, unwrapped, right); }
+			}
+			return std::nullopt;
+		}
+		if (!equality_operator_candidate(target.class_def, ids.equal_equal, ids.spaceship, right)) { return std::nullopt; }
+		auto result = h.operator_call(left, method_val, ids.equal_equal, { right });
+		// the method's runtime error is the comparison's (a script throw in flight keeps travelling on its own)
+		if (!result && !h.unwinding()) { return checked_result<bool>(result.error_value()); }
+		if (result.has_value() && result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+		return std::nullopt;
+	}
+
+	// A declared operator!= wins over !(a == b) (C++20), asked where operator== would be: a class instance against a value of its
+	// class, or any value one of its != overloads takes when the chain declares <=>
+	template <class Host>
+	std::optional<checked_result<bool>> object_inequality_via_method(Host& h, const script_value& left, const script_value& right) {
+		const operator_ids& ids = h.ids();
+		if (h.parallel_worker() && !h.worker_operators_pinned(left, { ids.bang_equal })) [[unlikely]] {
+			if (!right.is_null()) { return parallel_operator_refused<bool>(); }
+			return std::nullopt;
+		}
+		if (!left.is_object() || right.is_null() || h.comparison_free(left)) { return std::nullopt; }
+		auto target = h.resolve_member_target(left);
+		if (!target) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, ids.bang_equal);
+		if (!method_val.is_function() || !equality_operator_candidate(target.class_def, ids.bang_equal, ids.spaceship, right)) { return std::nullopt; }
+		auto result = h.operator_call(left, method_val, ids.bang_equal, { right });
+		if (!result) {
+			if (h.unwinding()) { return checked_result<bool>(false); }
+			return checked_result<bool>(result.error_value());
+		}
+		if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+		return std::nullopt;
+	}
+
+	// The right operand's <=> where the left operand has no operator: 5 < v is (v <=> 5) > 0, a candidate only when its parameter
+	// takes the left operand; the call's answer, or nullopt
+	template <class Host>
+	std::optional<checked_result<script_value>> reversed_spaceship_call(Host& h, const script_value& left, const script_value& right) {
+		const uint64_t id = h.ids().spaceship;
+		auto target = h.resolve_member_target(right);
+		if (!target || !binary_operator_accepts(target.class_def, id, left)) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, id);
+		if (!method_val.is_function()) { return std::nullopt; }
+		return h.operator_call(right, method_val, id, { left });
+	}
+
+	template <class Host>
+	std::optional<checked_result<bool>> object_comparison_reversed_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<bool>(); }
+		auto result = reversed_spaceship_call(h, left, right);
+		if (!result) { return std::nullopt; }
+		if (!*result) {
+			if (h.unwinding()) { return std::nullopt; }
+			return checked_result<bool>(result->error_value());
+		}
+		if (auto answer = spaceship_rewritten(reversed_comparison(comparison_token(h.ids(), op_symbol_id)), result->value())) { return checked_result<bool>(*answer); }
+		return std::nullopt;
+	}
+
+	template <class Host>
+	std::optional<checked_result<script_value>> object_spaceship_reversed_via_method(Host& h, const script_value& left, const script_value& right) {
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		auto result = reversed_spaceship_call(h, left, right);
+		if (!result) { return std::nullopt; }
+		if (!*result) {
+			if (h.unwinding()) { return std::nullopt; }
+			return checked_result<script_value>(result->error_value());
+		}
+		if (auto sign = reversed_spaceship_sign(result->value())) { return checked_result<script_value>(h.make_int(*sign)); }
+		return std::nullopt;
+	}
+
+	// <=> drives ==: an operand whose chain declares <=> answers a == b, the left operand first, then the right one: its operator==
+	// when an overload takes the other operand, else its <=> as (a <=> b) == 0 when one does; any other operand, a class without
+	// <=> included, keeps its own == (memberwise between values of one class, false otherwise)
+	template <class Host>
+	std::optional<checked_result<bool>> object_spaceship_equality_via_method(Host& h, const script_value& left, const script_value& right) {
+		if (left.is_null() || right.is_null()) { return std::nullopt; }
+		const operator_ids& ids = h.ids();
+		const auto call = [&h, &ids](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
+			auto result = h.operator_call(self, method_val, spaceship ? ids.spaceship : ids.equal_equal, { arg });
+			if (!result) {
+				if (h.unwinding()) { return checked_result<bool>(false); }
+				return checked_result<bool>(result.error_value());
+			}
+			const script_value& r = result.value().deref();
+			if (!spaceship) { return r.is_bool() ? std::optional<checked_result<bool>>(checked_result<bool>(r.unchecked_as_bool())) : std::nullopt; }
+			if (r.is_int()) { return checked_result<bool>(r.as_int() == 0); }
+			if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
+			return std::nullopt;
+		};
+		const auto side = [&](const script_value& self, const script_value& other) -> std::optional<checked_result<bool>> {
+			if (!self.is_object() || h.comparison_free(self)) { return std::nullopt; }
+			auto target = h.resolve_member_target(self);
+			if (!target) { return std::nullopt; }
+			if (h.parallel_worker() && !h.worker_operators_pinned(self, { ids.spaceship, ids.equal_equal })) [[unlikely]] {
+				if (!instance_declares_operator(self, ids.spaceship)) { return std::nullopt; }
+				return parallel_operator_refused<bool>();
+			}
+			script_value spaceship = h.operator_value(target, ids.spaceship);
+			if (!spaceship.is_function()) { return std::nullopt; }
+			if (script_value eq = h.operator_value(target, ids.equal_equal); eq.is_function() && binary_operator_accepts(target.class_def, ids.equal_equal, other)) {
+				return call(self, eq, other, false);
+			}
+			if (binary_operator_accepts(target.class_def, ids.spaceship, other)) { return call(self, spaceship, other, true); }
+			return std::nullopt;
+		};
+		if (auto answer = side(left, right)) { return answer; }
+		return side(right, left);
+	}
+
+	// <, <=, >, >= through the left operand's operator, else its <=> (C++20: an explicit operator no overload of which takes the
+	// operand is not viable), else a transparent wrapper's
+	template <class Host>
+	std::optional<checked_result<bool>> object_comparison_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+		const operator_ids& ids = h.ids();
+		if (h.parallel_worker() && !h.worker_operators_pinned(left, { op_symbol_id, ids.spaceship })) [[unlikely]] {
+			if (instance_declares_operator(left, op_symbol_id)) { return parallel_operator_refused<bool>(); }
+			return std::nullopt;
+		}
+		auto target = h.resolve_member_target(left);
+		if (!target) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, op_symbol_id);
+		const bool declared = method_val.is_function();
+		const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right);
+		if (!declared || host_refuses || (h.operator_value(target, ids.spaceship).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
+			if (script_value spaceship = h.operator_value(target, ids.spaceship); spaceship.is_function() && binary_operator_accepts(target.class_def, ids.spaceship, right)) {
+				auto result = h.operator_call(left, spaceship, ids.spaceship, { right });
+				if (!result) {
+					if (h.unwinding()) { return std::nullopt; }
+					return checked_result<bool>(result.error_value());
+				}
+				if (auto answer = spaceship_rewritten(comparison_token(ids, op_symbol_id), result.value())) { return checked_result<bool>(*answer); }
+				return std::nullopt;
+			}
+			if (target.class_def && target.class_def->is_transparent_wrapper()) {
+				script_value mutable_left = left;
+				script_value unwrapped = target.class_def->unwrap(mutable_left);
+				if (!unwrapped.is_null()) { return object_comparison_via_method(h, unwrapped, right, op_symbol_id); }
+			}
+			if (!declared || host_refuses) { return std::nullopt; }
+		}
+		auto result = h.operator_call(left, method_val, op_symbol_id, { right });
+		if (!result && !h.unwinding()) { return checked_result<bool>(result.error_value()); }
+		if (result.has_value() && result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
+		return std::nullopt;
+	}
+
+	// +, -, *, /, %, the bitwise operators and <=> through the left operand's operator method (a transparent wrapper's, unwrapped)
+	template <class Host>
+	std::optional<checked_result<script_value>> object_arithmetic_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+		// a worker dispatches a class operator through its region pin; one the class declares that the region could not pin raises the
+		// verdict, never the builtin meaning
+		if (h.parallel_worker() && !h.worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		auto target = h.resolve_member_target(left);
+		if (!target) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, op_symbol_id);
+		if (!method_val.is_function()) {
+			if (target.class_def && target.class_def->is_transparent_wrapper()) {
+				script_value mutable_left = left;
+				script_value unwrapped = target.class_def->unwrap(mutable_left);
+				if (!unwrapped.is_null()) { return object_arithmetic_via_method(h, unwrapped, right, op_symbol_id); }
+			}
+			return std::nullopt;
+		}
+		if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right)) { return std::nullopt; }
+		auto result = h.operator_call(left, method_val, op_symbol_id, { right });
+		if (!result && !h.unwinding()) { return checked_result<script_value>(result.error_value()); }
+		if (result.has_value()) { return checked_result<script_value>(std::move(result.value())); }
+		return std::nullopt;
+	}
+
+	// The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose own
+	// operator does not answer
+	template <class Host>
+	std::optional<checked_result<script_value>> object_reflected_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
+		if (!right.deref().is_object()) { return std::nullopt; }
+		const uint64_t reflected_id = h.engine()->reflected_operator_id(op_symbol_id);
+		if (!reflected_id) { return std::nullopt; }
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { reflected_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		auto target = h.resolve_member_target(right);
+		if (!target) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, reflected_id);
+		if (!method_val.is_function() || !host_operator_accepts(method_val, left)) { return std::nullopt; }
+		auto result = h.operator_call(right, method_val, reflected_id, { left });
+		if (!result) {
+			if (h.unwinding()) { return checked_result<script_value>(h.make_null()); }
+			return checked_result<script_value>(result.error_value());
+		}
+		return checked_result<script_value>(std::move(result.value()));
+	}
+
+	// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
+	// without one it is a = a op b through the binary operator
+	template <class Host>
+	std::optional<checked_result<script_value>> object_compound_via_method(Host& h, const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+		if (const uint64_t compound_id = h.engine()->compound_operator_id(op_symbol_id)) {
+			if (h.parallel_worker() && !h.worker_operators_pinned(target, { compound_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+			if (auto owner = h.resolve_member_target(target)) {
+				script_value method_val = h.operator_value(owner, compound_id);
+				if (method_val.is_function() && host_operator_accepts(method_val, right)) {
+					auto result = h.operator_call(target, method_val, compound_id, { right });
+					if (!result) {
+						if (h.unwinding()) { return checked_result<script_value>(h.make_null()); }
+						return checked_result<script_value>(result.error_value());
+					}
+					return checked_result<script_value>(target.deref());
+				}
+			}
+		}
+		return object_arithmetic_via_method(h, target, right, op_symbol_id);
+	}
+
+	// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound or
+	// binary operator, else the operand's reflected one; nullopt keeps the compound's text
+	template <class Host>
+	std::optional<checked_result<script_value>> object_compound_operand(Host& h, const script_value& left, token_type op, const script_value& right) {
+		const operator_ids& ids = h.ids();
+		uint64_t id = 0;
+		switch (op) {
+			case token_type::plus: id = ids.plus; break;
+			case token_type::minus: id = ids.minus; break;
+			case token_type::star: id = ids.star; break;
+			case token_type::slash: id = ids.slash; break;
+			case token_type::percent: id = ids.percent; break;
+			case token_type::ampersand: id = ids.ampersand; break;
+			case token_type::pipe: id = ids.pipe; break;
+			case token_type::caret: id = ids.caret; break;
+			case token_type::left_shift: id = ids.left_shift; break;
+			case token_type::right_shift: id = ids.right_shift; break;
+			default: return std::nullopt;
+		}
+		if (left.is_object()) {
+			if (auto custom = object_compound_via_method(h, left, right, id)) { return custom; }
+		}
+		if (right.is_object()) { return object_reflected_via_method(h, left, right, id); }
+		return std::nullopt;
+	}
+
+	// A class's unary operator: the chain's overload taking no argument, called on the operand; nullopt when the class declares none
+	// (the builtin meaning and text follow)
+	template <class Host>
+	std::optional<checked_result<script_value>> object_unary_via_method(Host& h, const script_value& operand, token_type op) {
+		const operator_ids& ids = h.ids();
+		const uint64_t id = op == token_type::minus ? ids.minus : op == token_type::plus ? ids.plus : ids.tilde;
+		if (h.parallel_worker() && !h.worker_operators_pinned(operand, { id })) [[unlikely]] {
+			if (declares_unary_operator(operand_instance_class(operand), id)) { return parallel_operator_refused<script_value>(); }
+			return std::nullopt;
+		}
+		auto target = h.resolve_member_target(operand);
+		if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
+		script_value method_val = h.operator_value(target, id);
+		if (!method_val.is_function()) { return std::nullopt; }
+		auto result = h.operator_call(operand, method_val, id, {});
+		if (!result) {
+			if (h.unwinding()) { return checked_result<script_value>(h.make_null()); }
+			return checked_result<script_value>(result.error_value());
+		}
+		return checked_result<script_value>(std::move(result.value()));
+	}
+
+	// A callable object: only a call that would raise not callable asks for it, so ordinary calls never pay for it
+	template <class Host>
+	script_value call_operator_of(Host& h, const script_value& callee) {
+		const script_value& v = callee.deref();
+		if (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type) { return h.make_null(); }
+		const uint64_t id = h.ids().call;
+		if (h.parallel_worker()) [[unlikely]] {
+			// a worker calls the region's pin of operator() on this backend (a bound method would run on the engine's)
+			const parallel_method_pin* pin = h.worker_operator_pin(v, id);
+			if (!pin) { return h.make_null(); }
+			return script_value::make_function(script_function([backend = &h.backend(), pin, receiver = v, id, eng = h.engine()](const std::vector<script_value>& args) {
+				return call_parallel_operator_pin(*backend, *pin, id, receiver, args, eng);
+			}), h.engine());
+		}
+		auto target = h.resolve_member_target(v);
+		if (!target) { return h.make_null(); }
+		script_value method_val = target.method(id);
+		return method_val.is_function() ? h.bound_method(v, method_val) : h.make_null();
 	}
 
 }

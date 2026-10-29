@@ -267,25 +267,7 @@ void vm_backend::set_engine_reference(engine* engine_ref) {
 		compiler_.reference(reference_mode_);
 		math_alias_rows_ = engine_->math_alias_rows();
 
-		op_plus_id_ = symbolizer_->intern("+");
-		op_minus_id_ = symbolizer_->intern("-");
-		op_star_id_ = symbolizer_->intern("*");
-		op_slash_id_ = symbolizer_->intern("/");
-		op_percent_id_ = symbolizer_->intern("%");
-		op_less_id_ = symbolizer_->intern("<");
-		op_less_equal_id_ = symbolizer_->intern("<=");
-		op_greater_id_ = symbolizer_->intern(">");
-		op_greater_equal_id_ = symbolizer_->intern(">=");
-		op_equal_equal_id_ = symbolizer_->intern("==");
-		op_bang_equal_id_ = symbolizer_->intern("!=");
-		op_spaceship_id_ = symbolizer_->intern("<=>");
-		op_ampersand_id_ = symbolizer_->intern("&");
-		op_pipe_id_ = symbolizer_->intern("|");
-		op_caret_id_ = symbolizer_->intern("^");
-		op_left_shift_id_ = symbolizer_->intern("<<");
-		op_right_shift_id_ = symbolizer_->intern(">>");
-		op_tilde_id_ = symbolizer_->intern("~");
-		op_call_id_ = symbolizer_->intern("()");
+		ops_.intern(*symbolizer_);
 		builtin_push_id_ = symbolizer_->intern("push");   // interned HERE: symbolizer freezes during parallel regions
 		builtin_has_id_ = symbolizer_->intern("has");
 		this_id_ = symbolizer_->get_this_id();
@@ -1834,7 +1816,7 @@ checked_result<std::string> vm_backend::value_to_string_with_method(const script
 
 bool vm_backend::object_defines_custom_equality(const script_value& v) const {
 	const class_definition* cd = detail::operand_instance_class(v);
-	return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(op_spaceship_id_));
+	return cd && (cd->defines_method(eq_method_id_) || cd->defines_method(ops_.spaceship));
 }
 
 // a script class instance whose class, at its method epoch, answers none of ==, != and <=> and wraps nothing: every equality lane asks
@@ -1916,321 +1898,11 @@ bool vm_backend::comparison_free(const script_value& v) {
 	bool free = false;
 	if (auto target = resolve_member_target(v)) {
 		free = !(target.class_def && target.class_def->is_transparent_wrapper()) && !operator_value(target, eq_method_id_).is_function() &&
-		       !operator_value(target, op_bang_equal_id_).is_function() && !operator_value(target, op_spaceship_id_).is_function();
+		       !operator_value(target, ops_.bang_equal).is_function() && !operator_value(target, ops_.spaceship).is_function();
 	}
 	comparison_free_rows_[comparison_free_next_] = comparison_free_row{cd, epoch, free};
 	comparison_free_next_ = (comparison_free_next_ + 1) % k_comparison_free_rows;
 	return free;
-}
-
-std::optional<checked_result<bool>> vm_backend::object_equality_via_method(const script_value& left, const script_value& right) {
-	// a worker whose region did not pin the class's == leaves it to handle_equal, which raises the verdict
-	if (parallel_worker_ && !worker_operators_pinned(left, { eq_method_id_, op_spaceship_id_ })) [[unlikely]] { return std::nullopt; }
-	if (comparison_free(left)) { return std::nullopt; }
-	auto target = resolve_member_target(left);
-	if (!target) {
-		return std::nullopt;
-	}
-	auto method_val = operator_value(target, eq_method_id_);
-	if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-		if (target.class_def && target.class_def->is_transparent_wrapper()) {
-			script_value mutable_left = left;
-			script_value unwrapped = target.class_def->unwrap(mutable_left);
-			if (!unwrapped.is_null()) {
-				return object_equality_via_method(unwrapped, right);
-			}
-		}
-		return std::nullopt;
-	}
-	if (!equality_operator_candidate(target.class_def, eq_method_id_, op_spaceship_id_, right)) { return std::nullopt; }
-	auto result = operator_call(left, method_val, eq_method_id_, { right });
-	if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }   // the method's runtime error is the operation's (a script throw in flight keeps travelling on its own)
-	if (result.has_value() && result.value().is_bool()) {
-		return checked_result<bool>(result.value().unchecked_as_bool());
-	}
-	return std::nullopt;
-}
-
-// A declared operator!= wins over !(a == b) (C++20), asked where operator== would be: a class
-// instance against a value of its class, or any value one of its != overloads takes when the chain declares <=>.
-// KEEP BYTE-PARALLEL with interpreter::object_inequality_via_method
-std::optional<checked_result<bool>> vm_backend::object_inequality_via_method(const script_value& left, const script_value& right) {
-	if (parallel_worker_ && !worker_operators_pinned(left, { op_bang_equal_id_ })) [[unlikely]] {
-		if (!right.is_null()) {
-			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		return std::nullopt;
-	}
-	if (!left.is_object() || right.is_null() || comparison_free(left)) { return std::nullopt; }
-	auto target = resolve_member_target(left);
-	if (!target) { return std::nullopt; }
-	script_value method_val = operator_value(target, op_bang_equal_id_);
-	if (!method_val.is_function()) { return std::nullopt; }
-	if (!equality_operator_candidate(target.class_def, op_bang_equal_id_, op_spaceship_id_, right)) {
-		return std::nullopt;
-	}
-	auto result = operator_call(left, method_val, op_bang_equal_id_, { right });
-	if (!result) {
-		if (is_unwinding_) { return checked_result<bool>(false); }
-		return checked_result<bool>(result.error_value());
-	}
-	if (result.value().is_bool()) { return checked_result<bool>(result.value().unchecked_as_bool()); }
-	return std::nullopt;
-}
-
-// KEEP BYTE-PARALLEL with the interpreter's three <=> twins
-std::optional<checked_result<bool>> vm_backend::object_comparison_reversed_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
-		return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-	}
-	auto target = resolve_member_target(right);
-	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-	script_value method_val = operator_value(target, op_spaceship_id_);
-	if (!method_val.is_function()) { return std::nullopt; }
-	auto result = operator_call(right, method_val, op_spaceship_id_, { left });
-	if (!result) {
-		if (is_unwinding_) { return std::nullopt; }
-		return checked_result<bool>(result.error_value());
-	}
-	const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
-	                    : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
-	if (auto answer = spaceship_rewritten(reversed_comparison(op), result.value())) { return checked_result<bool>(*answer); }
-	return std::nullopt;
-}
-
-std::optional<checked_result<script_value>> vm_backend::object_spaceship_reversed_via_method(const script_value& left, const script_value& right) {
-	if (parallel_worker_ && !worker_operators_pinned(right, { op_spaceship_id_ })) [[unlikely]] {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-	}
-	auto target = resolve_member_target(right);
-	if (!target || !binary_operator_accepts(target.class_def, op_spaceship_id_, left)) { return std::nullopt; }
-	script_value method_val = operator_value(target, op_spaceship_id_);
-	if (!method_val.is_function()) { return std::nullopt; }
-	auto result = operator_call(right, method_val, op_spaceship_id_, { left });
-	if (!result) {
-		if (is_unwinding_) { return std::nullopt; }
-		return checked_result<script_value>(result.error_value());
-	}
-	if (auto sign = reversed_spaceship_sign(result.value())) { return checked_result<script_value>(script_value(*sign, engine_)); }
-	return std::nullopt;
-}
-
-// <=> drives ==: an operand whose chain declares <=> answers a == b, the left operand first, then the
-// right one: its operator== when an overload takes the other operand, else its <=> as (a <=> b) == 0 when one does; any other
-// operand, a class without <=> included, keeps its own == (memberwise between values of one class, false otherwise)
-std::optional<checked_result<bool>> vm_backend::object_spaceship_equality_via_method(const script_value& left, const script_value& right) {
-	if (left.is_null() || right.is_null()) { return std::nullopt; }
-	const auto call = [this](const script_value& self, const script_value& method_val, const script_value& arg, bool spaceship) -> std::optional<checked_result<bool>> {
-		auto result = operator_call(self, method_val, spaceship ? op_spaceship_id_ : eq_method_id_, { arg });
-		if (!result) {
-			if (is_unwinding_) { return checked_result<bool>(false); }
-			return checked_result<bool>(result.error_value());
-		}
-		const script_value& r = result.value().deref();
-		if (!spaceship) { return r.is_bool() ? std::optional<checked_result<bool>>(checked_result<bool>(r.unchecked_as_bool())) : std::nullopt; }
-		if (r.is_int()) { return checked_result<bool>(r.as_int() == 0); }
-		if (r.is_float()) { return checked_result<bool>(r.as_float() == 0.0); }
-		return std::nullopt;
-	};
-	const auto side = [&](const script_value& self, const script_value& other) -> std::optional<checked_result<bool>> {
-		if (!self.is_object() || comparison_free(self)) { return std::nullopt; }
-		auto target = resolve_member_target(self);
-		if (!target) { return std::nullopt; }
-		if (parallel_worker_ && !worker_operators_pinned(self, { op_spaceship_id_, eq_method_id_ })) [[unlikely]] {
-			if (!self.is_object() || !detail::instance_declares_operator(self, op_spaceship_id_)) { return std::nullopt; }
-			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		script_value spaceship = operator_value(target, op_spaceship_id_);
-		if (!spaceship.is_function()) { return std::nullopt; }
-		if (script_value eq = operator_value(target, eq_method_id_); eq.is_function() && binary_operator_accepts(target.class_def, eq_method_id_, other)) {
-			return call(self, eq, other, false);
-		}
-		if (binary_operator_accepts(target.class_def, op_spaceship_id_, other)) { return call(self, spaceship, other, true); }
-		return std::nullopt;
-	};
-	if (auto answer = side(left, right)) { return answer; }
-	return side(right, left);
-}
-
-std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id, op_spaceship_id_ })) [[unlikely]] {
-		if (detail::instance_declares_operator(left, op_symbol_id)) {
-			return checked_result<bool>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		return std::nullopt;
-	}
-	auto target = resolve_member_target(left);
-	if (!target) {
-		return std::nullopt;
-	}
-	auto method_val = operator_value(target, op_symbol_id);
-	const bool declared = method_val.is_function();
-	const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right);
-	// an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
-	if (!declared || host_refuses || (operator_value(target, op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
-		if (script_value spaceship = operator_value(target, op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {   // KEEP BYTE-PARALLEL with the interpreter
-			auto result = operator_call(left, spaceship, op_spaceship_id_, { right });
-			if (!result) {
-				if (is_unwinding_) { return std::nullopt; }
-				return checked_result<bool>(result.error_value());
-			}
-			const token_type op = op_symbol_id == op_less_id_ ? token_type::less : op_symbol_id == op_less_equal_id_ ? token_type::less_equal
-			                    : op_symbol_id == op_greater_id_ ? token_type::greater : token_type::greater_equal;
-			if (auto answer = spaceship_rewritten(op, result.value())) { return checked_result<bool>(*answer); }
-			return std::nullopt;
-		}
-		if (target.class_def && target.class_def->is_transparent_wrapper()) {
-			script_value mutable_left = left;
-			script_value unwrapped = target.class_def->unwrap(mutable_left);
-			if (!unwrapped.is_null()) {
-				return object_comparison_via_method(unwrapped, right, op_symbol_id);
-			}
-		}
-		if (!declared || host_refuses) { return std::nullopt; }
-	}
-	auto result = operator_call(left, method_val, op_symbol_id, { right });
-	if (!result && !is_unwinding_) { return checked_result<bool>(result.error_value()); }   // the method's runtime error is the operation's (a script throw in flight keeps travelling on its own)
-	if (result.has_value() && result.value().is_bool()) {
-		return checked_result<bool>(result.value().unchecked_as_bool());
-	}
-	return std::nullopt;
-}
-
-// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound
-// or binary operator, else the operand's reflected one; nullopt keeps the compound's text. KEEP BYTE-PARALLEL with interpreter
-std::optional<checked_result<script_value>> vm_backend::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
-	uint64_t id = 0;
-	switch (op) {
-		case token_type::plus: id = op_plus_id_; break;
-		case token_type::minus: id = op_minus_id_; break;
-		case token_type::star: id = op_star_id_; break;
-		case token_type::slash: id = op_slash_id_; break;
-		case token_type::percent: id = op_percent_id_; break;
-		case token_type::ampersand: id = op_ampersand_id_; break;
-		case token_type::pipe: id = op_pipe_id_; break;
-		case token_type::caret: id = op_caret_id_; break;
-		case token_type::left_shift: id = op_left_shift_id_; break;
-		case token_type::right_shift: id = op_right_shift_id_; break;
-		default: return std::nullopt;
-	}
-	if (left.is_object()) {
-		if (auto custom = object_compound_via_method(left, right, id)) { return custom; }
-	}
-	if (right.is_object()) { return object_reflected_via_method(left, right, id); }
-	return std::nullopt;
-}
-
-// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
-// without one it is a = a op b through the binary operator. KEEP BYTE-PARALLEL with interpreter::object_compound_via_method
-std::optional<checked_result<script_value>> vm_backend::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
-	if (const uint64_t compound_id = engine_->compound_operator_id(op_symbol_id)) {
-		if (parallel_worker_ && !worker_operators_pinned(target, { compound_id })) [[unlikely]] {
-			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		if (auto owner = resolve_member_target(target)) {
-			script_value method_val = operator_value(owner, compound_id);
-			if (method_val.is_function() && host_operator_accepts(method_val, right)) {
-				auto result = operator_call(target, method_val, compound_id, { right });
-				if (!result) {
-					if (is_unwinding_) { return checked_result<script_value>(make_null()); }
-					return checked_result<script_value>(result.error_value());
-				}
-				return checked_result<script_value>(target.deref());
-			}
-		}
-	}
-	return object_arithmetic_via_method(target, right, op_symbol_id);
-}
-
-// The right operand's bound reflected operator taking the left one (C++'s free op(L, const R&)), for a left operand whose
-// own operator does not answer. KEEP BYTE-PARALLEL with interpreter::object_reflected_via_method
-std::optional<checked_result<script_value>> vm_backend::object_reflected_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	if (!right.deref().is_object()) { return std::nullopt; }
-	const uint64_t reflected_id = engine_->reflected_operator_id(op_symbol_id);
-	if (!reflected_id) { return std::nullopt; }
-	if (parallel_worker_ && !worker_operators_pinned(right, { reflected_id })) [[unlikely]] {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-	}
-	auto target = resolve_member_target(right);
-	if (!target) { return std::nullopt; }
-	script_value method_val = operator_value(target, reflected_id);
-	if (!method_val.is_function() || !host_operator_accepts(method_val, left)) { return std::nullopt; }
-	auto result = operator_call(right, method_val, reflected_id, { left });
-	if (!result) {
-		if (is_unwinding_) { return checked_result<script_value>(make_null()); }
-		return checked_result<script_value>(result.error_value());
-	}
-	return checked_result<script_value>(std::move(result.value()));
-}
-
-std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_method(const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-	// a worker dispatches a class operator through its region pin; one the class declares that the region could not pin raises the
-	// verdict, never the builtin meaning
-	if (parallel_worker_ && !worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] {
-		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-	}
-	auto target = resolve_member_target(left);
-	if (!target) {
-		return std::nullopt;
-	}
-	auto method_val = operator_value(target, op_symbol_id);
-	if (method_val.is_null() || method_val.is_invalid() || !method_val.is_function()) {
-		if (target.class_def && target.class_def->is_transparent_wrapper()) {
-			script_value mutable_left = left;
-			script_value unwrapped = target.class_def->unwrap(mutable_left);
-			if (!unwrapped.is_null()) {
-				return object_arithmetic_via_method(unwrapped, right, op_symbol_id);
-			}
-		}
-		return std::nullopt;
-	}
-	if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right)) { return std::nullopt; }
-	auto result = operator_call(left, method_val, op_symbol_id, { right });
-	if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
-	if (result.has_value()) {
-		return checked_result<script_value>(std::move(result.value()));
-	}
-	return std::nullopt;
-}
-
-// A callable object: only a call that would raise not callable asks for it, so ordinary calls never
-// pay for it. KEEP BYTE-PARALLEL with interpreter::call_operator_of
-script_value vm_backend::call_operator_of(const script_value& callee) {
-	const script_value& v = callee.deref();
-	if (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type) { return make_null(); }
-	if (parallel_worker_) [[unlikely]] {
-		// a worker calls the region's pin of operator() on this backend (a bound method would run on the engine's)
-		const detail::parallel_method_pin* pin = worker_operator_pin(v, op_call_id_);
-		if (!pin) { return make_null(); }
-		return script_value::make_function(script_function([backend = this, pin, receiver = v, id = op_call_id_, eng = engine_](const std::vector<script_value>& args) {
-			return detail::call_parallel_operator_pin(*backend, *pin, id, receiver, args, eng);
-		}), engine_);
-	}
-	auto target = resolve_member_target(v);
-	if (!target) { return make_null(); }
-	script_value method_val = target.method(op_call_id_);
-	return method_val.is_function() ? make_bound_method(v, method_val) : make_null();
-}
-
-// A class's unary operator; KEEP BYTE-PARALLEL with interpreter::object_unary_via_method
-std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
-	const uint64_t id = op == token_type::minus ? op_minus_id_ : op == token_type::plus ? op_plus_id_ : op_tilde_id_;
-	if (parallel_worker_ && !worker_operators_pinned(operand, { id })) [[unlikely]] {
-		if (declares_unary_operator(detail::operand_instance_class(operand), id)) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
-		}
-		return std::nullopt;
-	}
-	auto target = resolve_member_target(operand);
-	if (!target || !declares_unary_operator(target.class_def, id)) { return std::nullopt; }
-	script_value method_val = operator_value(target, id);
-	if (!method_val.is_function()) { return std::nullopt; }
-	auto result = operator_call(operand, method_val, id, {});
-	if (!result) {
-		if (is_unwinding_) { return checked_result<script_value>(make_null()); }
-		return checked_result<script_value>(result.error_value());
-	}
-	return checked_result<script_value>(std::move(result.value()));
 }
 
 std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<environment> parent) {
@@ -2696,71 +2368,98 @@ struct vm_backend::binary_host {
 		if (!vm.limits_->memory_charge(sizeof(script_value) + joined.value().size())) [[unlikely]] { return detail::raise_memory_cap(*vm.limits_); }
 		return script_value(std::move(joined.value()), vm.engine_);
 	}
-	std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return vm.object_arithmetic_via_method(l, r, id); }
+	std::optional<checked_result<script_value>> object_arithmetic(const script_value& l, const script_value& r, uint64_t id) { return detail::object_arithmetic_via_method(*this, l, r, id); }
 	bool operator_takes(const script_value& l, const script_value& r, uint64_t id) {
 		if (vm.parallel_worker_) [[unlikely]] { return detail::worker_operator_takes(l, r, id); }
 		auto target = vm.resolve_member_target(l);
 		return target && binary_operator_accepts(target.class_def, id, r);
 	}
-	std::optional<checked_result<bool>> object_comparison(const script_value& l, const script_value& r, uint64_t id) { return vm.object_comparison_via_method(l, r, id); }
-	std::optional<checked_result<bool>> object_equality(const script_value& l, const script_value& r) { return vm.object_equality_via_method(l, r); }
-	std::optional<checked_result<bool>> object_inequality(const script_value& l, const script_value& r) { return vm.object_inequality_via_method(l, r); }
-	std::optional<checked_result<bool>> object_comparison_reversed(const script_value& l, const script_value& r, uint64_t id) { return vm.object_comparison_reversed_via_method(l, r, id); }
-	std::optional<checked_result<script_value>> object_spaceship_reversed(const script_value& l, const script_value& r) { return vm.object_spaceship_reversed_via_method(l, r); }
-	std::optional<checked_result<bool>> object_spaceship_equality(const script_value& l, const script_value& r) { return vm.object_spaceship_equality_via_method(l, r); }
-	std::optional<checked_result<script_value>> object_reflected(const script_value& l, const script_value& r, uint64_t id) { return vm.object_reflected_via_method(l, r, id); }
+	std::optional<checked_result<bool>> object_comparison(const script_value& l, const script_value& r, uint64_t id) { return detail::object_comparison_via_method(*this, l, r, id); }
+	std::optional<checked_result<bool>> object_equality(const script_value& l, const script_value& r) { return detail::object_equality_via_method(*this, l, r); }
+	std::optional<checked_result<bool>> object_inequality(const script_value& l, const script_value& r) { return detail::object_inequality_via_method(*this, l, r); }
+	std::optional<checked_result<bool>> object_comparison_reversed(const script_value& l, const script_value& r, uint64_t id) { return detail::object_comparison_reversed_via_method(*this, l, r, id); }
+	std::optional<checked_result<script_value>> object_spaceship_reversed(const script_value& l, const script_value& r) { return detail::object_spaceship_reversed_via_method(*this, l, r); }
+	std::optional<checked_result<bool>> object_spaceship_equality(const script_value& l, const script_value& r) { return detail::object_spaceship_equality_via_method(*this, l, r); }
+	std::optional<checked_result<script_value>> object_reflected(const script_value& l, const script_value& r, uint64_t id) { return detail::object_reflected_via_method(*this, l, r, id); }
 	const class_definition* operand_class(const script_value& v) const {
 		if (vm.parallel_worker_) [[unlikely]] { return detail::operand_instance_class(v); }
 		return v.deref().is_object() ? vm.resolve_member_target(v).class_def : nullptr;
 	}
 	uint64_t equality_id() const noexcept { return vm.eq_method_id_; }
 	bool defines_custom_equality(const script_value& v) const { return vm.object_defines_custom_equality(v); }
-	bool worker_equality_refused(const script_value& v) const { return vm.object_defines_custom_equality(v) && !vm.worker_operators_pinned(v, { vm.eq_method_id_, vm.op_spaceship_id_ }); }
+	bool worker_equality_refused(const script_value& v) const { return vm.object_defines_custom_equality(v) && !vm.worker_operators_pinned(v, { vm.eq_method_id_, vm.ops_.spaceship }); }
 	bool unwinding() const noexcept { return vm.is_unwinding_; }
 	bool parallel_worker() const noexcept { return vm.parallel_worker_; }
 	size_t& equality_depth() noexcept { return vm.structural_equality_depth_; }
 	checked_result<script_value> spaceship_member(const script_value& a, const script_value& b, detail::order_walk* walk) {
 		if (a.is_reference() || b.is_reference()) { return spaceship_member(a.deref(), b.deref(), walk); }   // as handle_spaceship
-		return detail::spaceship_operands(*this, vm.op_spaceship_id_, a, b, walk);
+		return detail::spaceship_operands(*this, vm.ops_.spaceship, a, b, walk);
 	}
 	checked_result<script_value> equal(const script_value& l, const script_value& r) { return vm.handle_equal(l, r); }
+	member_target resolve_member_target(const script_value& v) const { return vm.resolve_member_target(v); }
+	script_value operator_value(const member_target& target, uint64_t id) const { return vm.operator_value(target, id); }
+	checked_result<script_value> operator_call(const script_value& self, const script_value& method, uint64_t id, std::vector<script_value> args) { return vm.operator_call(self, method, id, std::move(args)); }
+	bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const { return vm.worker_operators_pinned(v, ids); }
+	const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const { return vm.worker_operator_pin(v, id); }
+	bool comparison_free(const script_value& v) { return vm.comparison_free(v); }
+	const detail::operator_ids& ids() const noexcept { return vm.ops_; }
+	script_value make_null() const { return vm.make_null(); }
+	script_value bound_method(const script_value& self, const script_value& method) const { return make_bound_method(self, method); }
+	execution_backend& backend() noexcept { return vm; }
 };
+
+std::optional<checked_result<script_value>> vm_backend::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
+	binary_host h{*this};
+	return detail::object_compound_operand(h, left, op, right);
+}
+std::optional<checked_result<script_value>> vm_backend::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+	binary_host h{*this};
+	return detail::object_compound_via_method(h, target, right, op_symbol_id);
+}
+std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
+	binary_host h{*this};
+	return detail::object_unary_via_method(h, operand, op);
+}
+script_value vm_backend::call_operator_of(const script_value& callee) {
+	binary_host h{*this};
+	return detail::call_operator_of(h, callee);
+}
 
 checked_result<script_value> vm_backend::handle_add(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_arithmetic<detail::arith_op::add>(h, op_plus_id_, left, right);
+	return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
 }
 checked_result<script_value> vm_backend::handle_subtract(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_arithmetic<detail::arith_op::sub>(h, op_minus_id_, left, right);
+	return detail::binary_arithmetic<detail::arith_op::sub>(h, ops_.minus, left, right);
 }
 checked_result<script_value> vm_backend::handle_multiply(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_arithmetic<detail::arith_op::mul>(h, op_star_id_, left, right);
+	return detail::binary_arithmetic<detail::arith_op::mul>(h, ops_.star, left, right);
 }
 checked_result<script_value> vm_backend::handle_divide(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_arithmetic<detail::arith_op::div>(h, op_slash_id_, left, right);
+	return detail::binary_arithmetic<detail::arith_op::div>(h, ops_.slash, left, right);
 }
 checked_result<script_value> vm_backend::handle_modulo(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_arithmetic<detail::arith_op::mod>(h, op_percent_id_, left, right);
+	return detail::binary_arithmetic<detail::arith_op::mod>(h, ops_.percent, left, right);
 }
 checked_result<script_value> vm_backend::handle_less(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_ordering<detail::order_op::less>(h, op_less_id_, left, right);
+	return detail::binary_ordering<detail::order_op::less>(h, ops_.less, left, right);
 }
 checked_result<script_value> vm_backend::handle_less_equal(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_ordering<detail::order_op::less_equal>(h, op_less_equal_id_, left, right);
+	return detail::binary_ordering<detail::order_op::less_equal>(h, ops_.less_equal, left, right);
 }
 checked_result<script_value> vm_backend::handle_greater(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_ordering<detail::order_op::greater>(h, op_greater_id_, left, right);
+	return detail::binary_ordering<detail::order_op::greater>(h, ops_.greater, left, right);
 }
 checked_result<script_value> vm_backend::handle_greater_equal(const script_value& left, const script_value& right) {
 	binary_host h{*this};
-	return detail::binary_ordering<detail::order_op::greater_equal>(h, op_greater_equal_id_, left, right);
+	return detail::binary_ordering<detail::order_op::greater_equal>(h, ops_.greater_equal, left, right);
 }
 checked_result<script_value> vm_backend::handle_equal(const script_value& left, const script_value& right) {
 	binary_host h{*this};
@@ -2815,7 +2514,7 @@ checked_result<script_value> vm_backend::handle_not_equal(const script_value& le
 checked_result<script_value> vm_backend::handle_spaceship(const script_value& left, const script_value& right) {
 	if (left.is_reference() || right.is_reference()) { return handle_spaceship(left.deref(), right.deref()); }
 	binary_host h{*this};
-	return detail::binary_spaceship(h, op_spaceship_id_, left, right);
+	return detail::binary_spaceship(h, ops_.spaceship, left, right);
 }
 
 checked_result<script_value> vm_backend::handle_binary_op(token_type op, const script_value& left, const script_value& right) {
@@ -2833,11 +2532,11 @@ checked_result<script_value> vm_backend::handle_binary_op(token_type op, const s
 		case token_type::equal_equal: return handle_equal(left, right);
 		case token_type::bang_equal: return handle_not_equal(left, right);
 		case token_type::spaceship: return handle_spaceship(left, right);
-		case token_type::ampersand: return detail::binary_bitwise<detail::bit_op::bit_and>(h, op_ampersand_id_, left, right);
-		case token_type::pipe: return detail::binary_bitwise<detail::bit_op::bit_or>(h, op_pipe_id_, left, right);
-		case token_type::caret: return detail::binary_bitwise<detail::bit_op::bit_xor>(h, op_caret_id_, left, right);
-		case token_type::left_shift: return detail::binary_bitwise<detail::bit_op::shift_left>(h, op_left_shift_id_, left, right);
-		case token_type::right_shift: return detail::binary_bitwise<detail::bit_op::shift_right>(h, op_right_shift_id_, left, right);
+		case token_type::ampersand: return detail::binary_bitwise<detail::bit_op::bit_and>(h, ops_.ampersand, left, right);
+		case token_type::pipe: return detail::binary_bitwise<detail::bit_op::bit_or>(h, ops_.pipe, left, right);
+		case token_type::caret: return detail::binary_bitwise<detail::bit_op::bit_xor>(h, ops_.caret, left, right);
+		case token_type::left_shift: return detail::binary_bitwise<detail::bit_op::shift_left>(h, ops_.left_shift, left, right);
+		case token_type::right_shift: return detail::binary_bitwise<detail::bit_op::shift_right>(h, ops_.right_shift, left, right);
 		default:
 			return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
 	}

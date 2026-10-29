@@ -11380,23 +11380,13 @@ op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
 	return exec_decl_var(f, site.orig2);
 }
 
+// the compiler lowered only a constant the declaration takes as is (a widened int already folded into a float constant)
 op_status vm_backend::exec_typed_decl_const(frame& f, const vm_instruction& ins) {
-	const chunk::typed_site& site = f.code->typed_sites[f.ip];
+	type_info* stamp = f.code->typed_sites[f.ip].stamp;
 	script_value v = materialize_constant(*f.code, ins.b);
-	const size_t vi = v.raw_storage_index();
-	if (variable_decl::identity_payload(vi, site.stamp)) {
-		if (site.stamp) { v.set_type_info(type_info_ptr{site.stamp}); }
-		frame_slot_set(f, ins.a, std::move(v));
-		return {};
-	}
-	if (variable_decl::widening_payload(vi, site.stamp)) {
-		script_value w(static_cast<script_float>(v.unchecked_as_int()), engine_);
-		w.set_type_info(type_info_ptr{site.stamp});
-		frame_slot_set(f, ins.a, std::move(w));
-		return {};
-	}
-	stack_.push_back(std::move(v));
-	return exec_decl_var(f, site.orig2);
+	if (stamp) { v.set_type_info(type_info_ptr{stamp}); }
+	frame_slot_set(f, ins.a, std::move(v));
+	return {};
 }
 
 // `x = y;` as one op: store_popped_value's proven-identity slot store over the LOAD's value

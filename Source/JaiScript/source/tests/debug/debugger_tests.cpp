@@ -1144,10 +1144,19 @@ public:
             std::mutex m;
             std::condition_variable cv;
             int stops = 0;
+            bool between = false;
+            bool posted = false;
             dbg.set_on_stopped([&](const jai::debug::stop_info&) { std::lock_guard<std::mutex> lk(m); ++stops; cv.notify_all(); });
+            // the script holds between its stops until the late command is posted, so a loaded machine cannot miss the window
+            eng->add_function("between_stops", [&] {
+                std::unique_lock<std::mutex> lk(m);
+                between = true;
+                cv.notify_all();
+                cv.wait_for(lk, std::chrono::seconds(5), [&] { return posted; });
+            });
             dbg.set_breakpoints("<script>", {1, 3});
             dbg.set_enabled(true);
-            std::thread script([&] { eng->execute("var a = 1;\nfor (int i = 0; i < 300000; i += 1) { a += 1; }\nvar c = 3;\n"); });
+            std::thread script([&] { eng->execute("var a = 1;\nbetween_stops();\nvar c = 3;\n"); });
             const auto wait_stops = [&](int n) {
                 std::unique_lock<std::mutex> lk(m);
                 return cv.wait_for(lk, std::chrono::seconds(5), [&] { return stops >= n && dbg.is_paused(); });
@@ -1156,8 +1165,18 @@ public:
             int ran = 0;
             check_true(dbg.post_command_while_paused([&] { ++ran; }), "a parked thread takes the command");
             dbg.resume();
-            while (dbg.is_paused()) { std::this_thread::yield(); }
+            bool left_park = false;
+            {
+                std::unique_lock<std::mutex> lk(m);
+                left_park = cv.wait_for(lk, std::chrono::seconds(5), [&] { return between; });
+            }
             const bool stale = dbg.post_command_while_paused([&] { ran += 100; });
+            {
+                std::lock_guard<std::mutex> lk(m);
+                posted = true;
+            }
+            cv.notify_all();
+            check_true(left_park, "the script left its first park");
             check_true(wait_stops(2));
             dbg.set_enabled(false);
             script.join();

@@ -981,7 +981,10 @@ namespace jai::detail {
         statement_ptr stmt_opt() {
             auto n = node();
             if (!n) return nullptr;
-            if (uint8_t(n->get_type()) < 20) jaibite_fail("expected statement node");
+            // a case label is a switch's own node, never a statement of its own
+            if (uint8_t(n->get_type()) < 20 || n->get_type() == node_type::case_stmt || n->get_type() == node_type::default_stmt) {
+                jaibite_fail("expected statement node");
+            }
             return std::static_pointer_cast<statement>(n);
         }
         statement_ptr stmt_req() {

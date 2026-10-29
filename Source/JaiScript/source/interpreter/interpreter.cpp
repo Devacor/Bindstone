@@ -1934,248 +1934,63 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                     return {};
                 }
 
-                // Write-through: compound on a bound VARIABLE reads the live value, computes,
-                // and stores back through assign_through (was a silent dead-shadow no-op).
-                // KEEP BYTE-PARALLEL with the VM exec_compound_store bound branch.
-                if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                    const size_t rIdx = derefRight.raw_storage_index();
-                    switch (expr->op.type) {
-                        case token_type::plus_equal: {
-                            if (target.is_int()) {
-                                if (rIdx == script_value::TYPEID_INT) {
-                                    script_int rr;
-                                    if (!ints::try_add(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='");
-                                    target.assign_through(make_value(rr));
-                                } else if (rIdx == script_value::TYPEID_FLOAT) {
-                                    target.assign_through(make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()));
-                                } else {
-                                    return detail::compound_mismatch(0, target, derefRight, engine_);
-                                }
-                            } else if (target.is_float()) {
-                                const auto rf = derefRight.checked_as_float();
-                                if (!rf) { return detail::compound_mismatch(0, target, derefRight, engine_); }
-                                target.assign_through(make_value(target.unchecked_as_float() + rf.value()));
-                            } else if (target.is_string() && rIdx == script_value::TYPEID_STRING) {
-                                // engine::memory_cap chokepoint: deny the append before it exists
-                                if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
-                                    return detail::raise_memory_cap(*limits_);
-                                }
-                                target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
-                            } else {
-                                return detail::compound_mismatch(0, target, derefRight, engine_);
-                            }
-                            break;
-                        }
-                        case token_type::minus_equal: {
-                            if (target.is_int()) {
-                                if (rIdx == script_value::TYPEID_INT) {
-                                    script_int rr;
-                                    if (!ints::try_sub(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='");
-                                    target.assign_through(make_value(rr));
-                                } else if (rIdx == script_value::TYPEID_FLOAT) {
-                                    target.assign_through(make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()));
-                                } else {
-                                    return detail::compound_mismatch(1, target, derefRight, engine_);
-                                }
-                            } else if (target.is_float()) {
-                                const auto rf = derefRight.checked_as_float();
-                                if (!rf) { return detail::compound_mismatch(1, target, derefRight, engine_); }
-                                target.assign_through(make_value(target.unchecked_as_float() - rf.value()));
-                            } else {
-                                return detail::compound_mismatch(1, target, derefRight, engine_);
-                            }
-                            break;
-                        }
-                        case token_type::star_equal: {
-                            if (target.is_int()) {
-                                if (rIdx == script_value::TYPEID_INT) {
-                                    script_int rr;
-                                    if (!ints::try_mul(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='");
-                                    target.assign_through(make_value(rr));
-                                } else if (rIdx == script_value::TYPEID_FLOAT) {
-                                    target.assign_through(make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()));
-                                } else {
-                                    return detail::compound_mismatch(2, target, derefRight, engine_);
-                                }
-                            } else if (target.is_float()) {
-                                const auto rf = derefRight.checked_as_float();
-                                if (!rf) { return detail::compound_mismatch(2, target, derefRight, engine_); }
-                                target.assign_through(make_value(target.unchecked_as_float() * rf.value()));
-                            } else {
-                                return detail::compound_mismatch(2, target, derefRight, engine_);
-                            }
-                            break;
-                        }
-                        case token_type::slash_equal: {
-                            if (rIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-                                return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                            }
-                            if (rIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
-                                return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                            }
-                            if (target.is_int()) {
-                                if (rIdx == script_value::TYPEID_INT) {
-                                    script_int rr;
-                                    if (!ints::try_div(target.unchecked_as_int(), derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '/='");
-                                    target.assign_through(make_value(rr));
-                                } else if (rIdx == script_value::TYPEID_FLOAT) {
-                                    target.assign_through(make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()));
-                                } else {
-                                    return detail::compound_mismatch(3, target, derefRight, engine_);
-                                }
-                            } else if (target.is_float()) {
-                                const auto rf = derefRight.checked_as_float();
-                                if (!rf) { return detail::compound_mismatch(3, target, derefRight, engine_); }
-                                target.assign_through(make_value(target.unchecked_as_float() / rf.value()));
-                            } else {
-                                return detail::compound_mismatch(3, target, derefRight, engine_);
-                            }
-                            break;
-                        }
-                        default:
-                            return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
-                    }
-                    push_value(expression_result_needed_ ? target.clone() : target);
-                    return {};
-                }
-
-                // === IN-PLACE MUTATION (ChaiScript-style) ===
-                // Modify the value directly in storage, avoiding make_value() allocations.
-                // Gated on STORAGE (typed-null must not reach unchecked_*); integer ops route
-                // through jai::ints so the checked-overflow policy covers compound assignment.
-                const size_t leftIdx = target.raw_storage_index();
+                // + - * / % on numbers and += on text, in place where the kind holds; a bound variable stores back through
+                // assign_through. A zero divisor raises before the operands' kinds are read, an overflow names the compound, and
+                // a script value's char, utf8 or math operand and its %= take the general arithmetic (KEEP BYTE-PARALLEL with the
+                // VM exec_compound_store)
+                const bool bound = target.raw_storage_index() == script_value::TYPEID_CPP_BOUND;
+                const token_type op = expr->op.type;
+                const token_type baseOp = detail::compound_base(op);
                 const size_t rightIdx = derefRight.raw_storage_index();
-                if (expr->op.type == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
-                    return detail::compound_mismatch(0, target, derefRight, engine_);   // one '+=' table for every destination
-                }
-                // Integral promotion (char_promotion.hpp): a char operand leaves the in-place
-                // ladder and takes the general arithmetic path as int64 0..255, storing back
-                // like the %= case does. KEEP BYTE-PARALLEL with the VM exec_compound_store.
-                if (detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx)) [[unlikely]] {
-                    token_type baseOp = token_type::plus;
-                    switch (expr->op.type) {
-                        case token_type::plus_equal: baseOp = token_type::plus; break;
-                        case token_type::minus_equal: baseOp = token_type::minus; break;
-                        case token_type::star_equal: baseOp = token_type::star; break;
-                        case token_type::slash_equal: baseOp = token_type::slash; break;
-                        case token_type::percent_equal: baseOp = token_type::percent; break;
-                        default: return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
+                const bool zero_divisor = (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) ||
+                                          (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0);
+                if (bound && op == token_type::percent_equal) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
+                if (!bound) {
+                    if (op == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
+                        return detail::compound_mismatch(0, target, derefRight, engine_);   // one '+=' table for every destination
                     }
-                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
-                    JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
-                    push_value(expression_result_needed_ ? target.clone() : target);
-                    return {};
-                }
-                const bool bothInt = leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT;
-                switch (expr->op.type) {
-                    case token_type::plus_equal: {
-                        if (bothInt) {
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            if (!ints::try_add(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='");
-                            tref = rr;
-                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            const auto rf = derefRight.checked_as_float();
-                            if (!rf) { return detail::compound_mismatch(0, target, derefRight, engine_); }
-                            target.unchecked_as_float_ref() += rf.value();
-                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() + derefRight.unchecked_as_float()), identifier->name));
-                        } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
-                            // engine::memory_cap chokepoint: deny the append before it exists
-                            if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] {
-                                return detail::raise_memory_cap(*limits_);
-                            }
-                            target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
-                        } else if (leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
-                            // string += char appends the char as TEXT (out += to_char(b),
-                            // the binary-writer shape) — a char is a text unit. Non-char
-                            // rhs keeps the Strong Types raise (string += int stays an
-                            // error, unlike binary +, by pinned design). KEEP
-                            // BYTE-PARALLEL with the VM exec_compound_store.
-                            if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] {
-                                return detail::raise_memory_cap(*limits_);
-                            }
-                            target.unchecked_as_string_ref(engine_).push_back(derefRight.unchecked_as_char());
-                        } else {
-                            return detail::compound_mismatch(0, target, derefRight, engine_);
-                        }
-                        break;
+                    const size_t leftIdx = target.raw_storage_index();
+                    const bool general = detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx);
+                    if (!general && op == token_type::percent_equal && rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+                        return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
                     }
-
-                    case token_type::minus_equal: {
-                        if (bothInt) {
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            if (!ints::try_sub(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='");
-                            tref = rr;
-                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            const auto rf = derefRight.checked_as_float();
-                            if (!rf) { return detail::compound_mismatch(1, target, derefRight, engine_); }
-                            target.unchecked_as_float_ref() -= rf.value();
-                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() - derefRight.unchecked_as_float()), identifier->name));
-                        } else {
-                            return detail::compound_mismatch(1, target, derefRight, engine_);
-                        }
-                        break;
-                    }
-
-                    case token_type::star_equal: {
-                        if (bothInt) {
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            if (!ints::try_mul(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='");
-                            tref = rr;
-                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            const auto rf = derefRight.checked_as_float();
-                            if (!rf) { return detail::compound_mismatch(2, target, derefRight, engine_); }
-                            target.unchecked_as_float_ref() *= rf.value();
-                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() * derefRight.unchecked_as_float()), identifier->name));
-                        } else {
-                            return detail::compound_mismatch(2, target, derefRight, engine_);
-                        }
-                        break;
-                    }
-
-                    case token_type::slash_equal: {
-                        if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                        }
-                        if (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero));
-                        }
-
-                        if (bothInt) {
-                            script_int& tref = target.unchecked_as_int_ref();
-                            script_int rr;
-                            if (!ints::try_div(tref, derefRight.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '/='");
-                            tref = rr;
-                        } else if (leftIdx == script_value::TYPEID_FLOAT) {
-                            const auto rf = derefRight.checked_as_float();
-                            if (!rf) { return detail::compound_mismatch(3, target, derefRight, engine_); }
-                            target.unchecked_as_float_ref() /= rf.value();
-                        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_FLOAT) {
-                            JAISCRIPT_TRY(compound_typed_store_back(target, make_value(target.unchecked_as_int() / derefRight.unchecked_as_float()), identifier->name));
-                        } else {
-                            return detail::compound_mismatch(3, target, derefRight, engine_);
-                        }
-                        break;
-                    }
-
-                    case token_type::percent_equal: {
-                        if (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-                        }
-                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, token_type::percent, derefRight, 4));
+                    if (general || op == token_type::percent_equal) [[unlikely]] {
+                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
                         JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
-                        break;
+                        push_value(expression_result_needed_ ? target.clone() : target);
+                        return {};
                     }
-
-                    default:
-                        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));
                 }
-
+                if (op == token_type::slash_equal && zero_divisor) { return checked_result<void>(make_error_code(runtime_error_code::division_by_zero)); }
+                // a bound target is read by its kind (the storage is the binding); a script value by its storage (a typed null reads none)
+                const size_t leftIdx = !bound ? target.raw_storage_index() : target.is_int() ? script_value::TYPEID_INT : target.is_float() ? script_value::TYPEID_FLOAT
+                                     : target.is_string() ? script_value::TYPEID_STRING : script_value::TYPEID_NULL;
+                const size_t index = detail::compound_index(baseOp);
+                if (op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
+                    // engine::memory_cap chokepoint: deny the append before it exists
+                    if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
+                    target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
+                } else if (!bound && op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
+                    // string += char appends the char as text (a char is a text unit; string += int stays an error)
+                    if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
+                    target.unchecked_as_string_ref(engine_).push_back(derefRight.unchecked_as_char());
+                } else if (!detail::numeric_storage(leftIdx) || !detail::numeric_storage(rightIdx)) {
+                    return detail::compound_mismatch(index, target, derefRight, engine_);
+                } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
+                    constexpr const char* overflow_text[] = { "Integer overflow in '+='", "Integer overflow in '-='", "Integer overflow in '*='", "Integer overflow in '/='" };
+                    script_int out;
+                    if (detail::int_arith(baseOp, target.unchecked_as_int(), derefRight.unchecked_as_int(), out) != detail::scalar_fault::none) { return int_overflow_v(overflow_text[index]); }
+                    if (bound) { target.assign_through(make_value(out)); }
+                    else { target.unchecked_as_int_ref() = out; }
+                } else {
+                    const script_float a = leftIdx == script_value::TYPEID_INT ? static_cast<script_float>(target.unchecked_as_int()) : target.unchecked_as_float();
+                    const script_float b = rightIdx == script_value::TYPEID_INT ? static_cast<script_float>(derefRight.unchecked_as_int()) : derefRight.unchecked_as_float();
+                    script_float out;
+                    (void)detail::float_arith(baseOp, a, b, out);   // its one fault, a zero divisor, raised above
+                    if (bound) { target.assign_through(make_value(out)); }
+                    else if (leftIdx == script_value::TYPEID_FLOAT) { target.unchecked_as_float_ref() = out; }
+                    else { JAISCRIPT_TRY(compound_typed_store_back(target, make_value(out), identifier->name)); }
+                }
                 push_value(expression_result_needed_ ? target.clone() : target);
                 return {};
                 };

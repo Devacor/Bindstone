@@ -514,8 +514,7 @@ namespace jai::detail::math {
 	// operand meets no class object (its user operators keep their place) and, for arithmetic, no string (`"p = " + v`
 	// concatenates the text)
 	JAI_FORCEINLINE bool owns_comparison(size_t lr, size_t rr) noexcept {
-		return any_kind(lr, rr) && lr != sv::TYPEID_OBJECT && rr != sv::TYPEID_OBJECT &&
-		       lr != sv::TYPEID_SHARED_PTR && rr != sv::TYPEID_SHARED_PTR;
+		return any_kind(lr, rr) && lr != sv::TYPEID_OBJECT && rr != sv::TYPEID_OBJECT;
 	}
 	JAI_FORCEINLINE bool owns_arithmetic(size_t lr, size_t rr) noexcept {
 		return owns_comparison(lr, rr) && lr != sv::TYPEID_STRING && rr != sv::TYPEID_STRING;

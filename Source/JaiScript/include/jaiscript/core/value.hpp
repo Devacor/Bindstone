@@ -478,10 +478,6 @@ namespace detail {
         static script_value make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
                                                  engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                  uint32_t field_slot = UINT32_MAX);
-        // the same pinned by the holder that owns the instance (holder->data is the instance)
-        static script_value make_field_reference(const strong_ptr<object_holder>& owner_pin, class_instance* owner, uint64_t field_id,
-                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
-                                                 uint32_t field_slot = UINT32_MAX);
         // A reference minted through an element of `root` (a chain rooted at arr[i]: nested
         // field, nested element) also counts in root->live_elem_refs, so a parallel fork over
         // `root` can prove its elements reference-free without touching one (value.cpp).
@@ -715,7 +711,7 @@ namespace detail {
         bool is_map() const { return deref().raw_storage_index() == TYPEID_MAP; }
         bool is_object() const {
             auto idx = deref().raw_storage_index();
-            return idx == TYPEID_OBJECT || idx == TYPEID_SHARED_PTR;
+            return idx == TYPEID_OBJECT;
         }
         bool is_function() const { return deref().raw_storage_index() == TYPEID_FUNCTION; }
         bool is_reference() const { return raw_storage_index() == TYPEID_REFERENCE; }  // Don't deref for this check!
@@ -1405,13 +1401,8 @@ namespace detail {
                           std::is_same_v<T, script_float> || std::is_same_v<T, double> || std::is_same_v<T, float> ||
                           std::is_same_v<T, script_bool> || std::is_same_v<T, script_char> ||
                           std::is_same_v<T, script_string> || std::is_same_v<T, std::string>) {
-                const script_value& val = deref();
-                if (val.is_object()) {
-                    script_value unwrapped = val.try_unwrap_transparent_wrapper();
-                    // If unwrapped to a different value (not an object anymore), use that
-                    if (!unwrapped.is_object()) {
-                        return unwrapped.checked_as<T>();
-                    }
+                if (auto unwrapped = deref().try_unwrap_transparent_wrapper(); unwrapped && !unwrapped->is_object()) {
+                    return unwrapped->checked_as<T>();
                 }
             }
 
@@ -2020,10 +2011,8 @@ namespace detail {
         // a float's text: the shortest that reads back to the same double, ".0" kept on a whole number
         static std::string float_text(double v);
 
-        // Try to unwrap a transparent wrapper type (like observable_property_ref)
-        // Returns the unwrapped value if this is a transparent wrapper, otherwise returns copy of this
-        // Used by checked_as<T>() to automatically unwrap wrapper types
-        script_value try_unwrap_transparent_wrapper() const;
+        // A transparent wrapper's (observable_property_ref's) unwrapped value; none for any other value, which copies nothing
+        std::optional<script_value> try_unwrap_transparent_wrapper() const;
 
         // Dereference method - returns this for non-references, dereferences for
         // references. The non-reference fast path is INLINE (one raw index compare):
@@ -2041,13 +2030,12 @@ namespace detail {
             }
             return deref_slow();
         }
-        const script_value& deref_slow() const;
-        script_value& deref_slow();
-        
         // Assignment through reference - assigns to target if this is a reference
         void assign_through(const script_value& value);
         void assign_through(script_value&& value);
     private:
+        const script_value& deref_slow() const;
+        script_value& deref_slow();
         template<typename V>
         void assign_through_reference(V&& value);
     public:
@@ -2245,14 +2233,6 @@ namespace detail {
                 : ptr(p), size_and_sign(ss), semantic_index(sem), owner(o) {}
         };
 
-        // Boxes the (never runtime-constructed) shared_ptr alternative 11 so the variant's
-        // max payload stays one pointer. The atomic inner std::shared_ptr is preserved for
-        // the original thread-safety intent; real cross-thread sharing is object_holder::data.
-        struct shared_value_holder {
-            std::shared_ptr<script_value> inner;
-            explicit shared_value_holder(std::shared_ptr<script_value> v) noexcept : inner(std::move(v)) {}
-        };
-
         // Reference wrapper for reference types. Owner-pinned modes, mutually exclusive -
         // a reference NEVER holds a raw address + lifetime guess, so escape is legal (CELL,
         // MAP-ENTRY and CPP-MEMBER / PROPERTY here; ELEMENT, FIELD, STRING-ELEMENT and
@@ -2335,10 +2315,8 @@ namespace detail {
             // re-resolves the field node by id on every deref/assign-through, so it
             // survives hot-reload field migration (a removed field errors instead of
             // dangling).
-            // The instance is pinned by the script value's holder that owns it (a non-atomic count), or, for an instance no such holder
-            // owns (a script layer reached through a C++ object), by its shared ownership
+            // The instance is pinned by its shared ownership
             class_instance* owner_instance = nullptr;
-            strong_ptr<object_holder> owner_pin;
             strong_ptr<class_instance> owner_shared;
             uint64_t field_id = UINT64_MAX;
             // the field's slot as the owner's class assigned it (a slot never moves within a class; a re-class changes the class, a
@@ -2461,7 +2439,7 @@ namespace detail {
         static constexpr size_t TYPEID_OBJECT = 8;
         static constexpr size_t TYPEID_FUNCTION = 9;
         static constexpr size_t TYPEID_REFERENCE = 10;
-        static constexpr size_t TYPEID_SHARED_PTR = 11;
+        // 11 is reserved (a retired alternative), so the indices after it keep their numbers
         static constexpr size_t TYPEID_WEAK_PTR = 12;
         static constexpr size_t TYPEID_INVALID = 13;
         static constexpr size_t TYPEID_CPP_BOUND = 14;
@@ -2531,7 +2509,6 @@ namespace detail {
             storage(strong_ptr<object_holder> v) noexcept : hdr_(TYPEID_OBJECT) { new (&p_.o) strong_ptr<object_holder>(std::move(v)); }
             storage(strong_ptr<script_function_node> v) noexcept : hdr_(TYPEID_FUNCTION) { new (&p_.fn) strong_ptr<script_function_node>(std::move(v)); }
             storage(strong_ptr<reference_holder> v) noexcept : hdr_(TYPEID_REFERENCE) { new (&p_.r) strong_ptr<reference_holder>(std::move(v)); }
-            storage(strong_ptr<shared_value_holder> v) noexcept : hdr_(TYPEID_SHARED_PTR) { new (&p_.sh) strong_ptr<shared_value_holder>(std::move(v)); }
             storage(jai::weaker_ptr<object_holder> v) noexcept : hdr_(TYPEID_WEAK_PTR) { new (&p_.w) jai::weaker_ptr<object_holder>(std::move(v)); }
             storage(strong_ptr<cpp_bound_holder> v) noexcept : hdr_(TYPEID_CPP_BOUND) { new (&p_.cb) strong_ptr<cpp_bound_holder>(std::move(v)); }
             storage(strong_ptr<script_utf8> v) noexcept : hdr_(TYPEID_UTF8_STRING) { new (&p_.u) strong_ptr<script_utf8>(std::move(v)); }
@@ -2552,7 +2529,6 @@ namespace detail {
                     case TYPEID_OBJECT: new (&p_.o) strong_ptr<object_holder>(o.p_.o); break;
                     case TYPEID_FUNCTION: new (&p_.fn) strong_ptr<script_function_node>(o.p_.fn); break;
                     case TYPEID_REFERENCE: new (&p_.r) strong_ptr<reference_holder>(o.p_.r); break;
-                    case TYPEID_SHARED_PTR: new (&p_.sh) strong_ptr<shared_value_holder>(o.p_.sh); break;
                     case TYPEID_WEAK_PTR: new (&p_.w) jai::weaker_ptr<object_holder>(o.p_.w); break;
                     case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
                     case TYPEID_UTF8_STRING: new (&p_.u) strong_ptr<script_utf8>(o.p_.u); break;
@@ -2645,7 +2621,7 @@ namespace detail {
                 std::monostate, script_int, script_float, strong_ptr<script_string>,
                 script_char, script_bool, strong_ptr<script_array>, strong_ptr<script_map>,
                 strong_ptr<object_holder>, strong_ptr<script_function_node>, strong_ptr<reference_holder>,
-                strong_ptr<shared_value_holder>, jai::weaker_ptr<object_holder>, invalid_tag,
+                std::monostate, jai::weaker_ptr<object_holder>, invalid_tag,
                 strong_ptr<cpp_bound_holder>, parallel_borrow_tag, strong_ptr<script_utf8>,
                 strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>, strong_ptr<script_vec_node>,
                 strong_ptr<script_vec_node>, strong_ptr<script_vec_node>>>;
@@ -2685,7 +2661,6 @@ namespace detail {
                 strong_ptr<object_holder> o;
                 strong_ptr<script_function_node> fn;
                 strong_ptr<reference_holder> r;
-                strong_ptr<shared_value_holder> sh;
                 jai::weaker_ptr<object_holder> w;
                 strong_ptr<cpp_bound_holder> cb;
                 parallel_borrow_tag pb;              // tagged raw pointer, trivially copyable
@@ -2707,7 +2682,6 @@ namespace detail {
                     case TYPEID_OBJECT: p_.o.~strong_ptr(); break;
                     case TYPEID_FUNCTION: p_.fn.~strong_ptr(); break;
                     case TYPEID_REFERENCE: p_.r.~strong_ptr(); break;
-                    case TYPEID_SHARED_PTR: p_.sh.~strong_ptr(); break;
                     case TYPEID_WEAK_PTR: p_.w.~weaker_ptr(); break;
                     case TYPEID_CPP_BOUND: p_.cb.~strong_ptr(); break;
                     case TYPEID_UTF8_STRING: p_.u.~strong_ptr(); break;
@@ -2732,7 +2706,6 @@ namespace detail {
                 else if constexpr (I == TYPEID_OBJECT) { return p_.o; }
                 else if constexpr (I == TYPEID_FUNCTION) { return p_.fn; }
                 else if constexpr (I == TYPEID_REFERENCE) { return p_.r; }
-                else if constexpr (I == TYPEID_SHARED_PTR) { return p_.sh; }
                 else if constexpr (I == TYPEID_WEAK_PTR) { return p_.w; }
                 else if constexpr (I == TYPEID_INVALID) { return invalid_alt_; }
                 else if constexpr (I == TYPEID_CPP_BOUND) { return p_.cb; }
@@ -2755,7 +2728,6 @@ namespace detail {
                 else if constexpr (std::is_same_v<T, strong_ptr<object_holder>>) { return TYPEID_OBJECT; }
                 else if constexpr (std::is_same_v<T, strong_ptr<script_function_node>>) { return TYPEID_FUNCTION; }
                 else if constexpr (std::is_same_v<T, strong_ptr<reference_holder>>) { return TYPEID_REFERENCE; }
-                else if constexpr (std::is_same_v<T, strong_ptr<shared_value_holder>>) { return TYPEID_SHARED_PTR; }
                 else if constexpr (std::is_same_v<T, jai::weaker_ptr<object_holder>>) { return TYPEID_WEAK_PTR; }
                 else if constexpr (std::is_same_v<T, invalid_tag>) { return TYPEID_INVALID; }
                 else if constexpr (std::is_same_v<T, strong_ptr<cpp_bound_holder>>) { return TYPEID_CPP_BOUND; }
@@ -2777,8 +2749,6 @@ namespace detail {
                       "storage must keep the variant's exact 16-byte layout");
 
         storage storage_;
-        static strong_ptr<reference_holder> mint_field_holder(class_instance* owner, uint64_t field_id, engine* eng, type_info_ptr field_type,
-                                                              uint32_t field_slot, strong_ptr<reference_holder> ref);
 
     public:
 
@@ -3700,7 +3670,6 @@ namespace detail {
             case TYPEID_MAP: return storage_.get<TYPEID_MAP>().unique();
             case TYPEID_FUNCTION: return storage_.get<TYPEID_FUNCTION>().unique();
             case TYPEID_REFERENCE: return storage_.get<TYPEID_REFERENCE>().unique();
-            case TYPEID_SHARED_PTR: return storage_.get<TYPEID_SHARED_PTR>().unique();
             default: return false;
         }
     }

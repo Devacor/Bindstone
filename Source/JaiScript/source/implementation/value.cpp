@@ -12,6 +12,7 @@
 #include <jaiscript/detail/float_text.hpp>
 #include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
+#include <jaiscript/detail/container_enforce.hpp>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -1000,7 +1001,6 @@ void check_instance_type_identity(engine* eng, std::string_view name, uint64_t i
 script_value script_value::make_class_object(const class_definition& cd, strong_ptr<class_instance> data, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.set_stamp(cd.get_type_info());
-    if (data && data->type_id() == UINT64_MAX) { data->set_type(cd.interned_name(), cd.get_type_id()); }
     v.storage_ = instance_storage(std::move(data));
     return v;
 }
@@ -1181,9 +1181,12 @@ script_value script_value::make_field_reference(strong_ptr<class_instance> owner
     return make_field_reference(std::move(owner), field_id, eng, std::move(field_type), *field_value);
 }
 
-// the field reference's common mint over a pinned owner
-strong_ptr<script_value::reference_holder> script_value::mint_field_holder(class_instance* owner, uint64_t field_id, engine* eng, type_info_ptr field_type,
-                                                                           uint32_t field_slot, strong_ptr<reference_holder> ref) {
+script_value script_value::make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
+                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
+                                                uint32_t field_slot) {
+    script_value v(std::monostate{}, eng);
+    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
+    auto ref = acquire_reference_holder(eng);
     if (field_slot != UINT32_MAX && !eng->parallel_region_active()) {
         if (const class_definition* cd = owner->get_class_definition()) {
             ref->field_class = cd;
@@ -1192,30 +1195,10 @@ strong_ptr<script_value::reference_holder> script_value::mint_field_holder(class
         }
     }
     owner->note_field_ref_minted();
-    ref->owner_instance = owner;
+    ref->owner_instance = owner.get();
     ref->field_id = field_id;
     ref->container_element_type = std::move(field_type);
-    return ref;
-}
-
-script_value script_value::make_field_reference(strong_ptr<class_instance> owner, uint64_t field_id,
-                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
-                                                uint32_t field_slot) {
-    script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
-    auto ref = mint_field_holder(owner.get(), field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
     ref->owner_shared = std::move(owner);          // pins the instance for the reference's lifetime
-    v.storage_ = std::move(ref);
-    return v;
-}
-
-script_value script_value::make_field_reference(const strong_ptr<object_holder>& owner_pin, class_instance* owner, uint64_t field_id,
-                                                engine* eng, type_info_ptr field_type, const script_value& field_value,
-                                                uint32_t field_slot) {
-    script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
-    auto ref = mint_field_holder(owner, field_id, eng, std::move(field_type), field_slot, acquire_reference_holder(eng));
-    ref->owner_pin = owner_pin;          // the holder's data owns the instance: pins it for the reference's lifetime
     v.storage_ = std::move(ref);
     return v;
 }
@@ -1530,8 +1513,6 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
 
         if (obj_holder->is_instance()) {
             auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
-
-            if (new_instance->type_id() == UINT64_MAX) { new_instance->set_type(obj_holder->type_name(), obj_holder->type_id()); }
             script_value result = tagged_null();
             result.storage_ = instance_storage(std::move(new_instance));
             return result;
@@ -1659,8 +1640,6 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
 
             if (obj_holder->is_instance()) {
                 auto new_instance = obj_holder->unchecked_instance()->deep_copy_level(work, depth);
-
-                if (new_instance->type_id() == UINT64_MAX) { new_instance->set_type(obj_holder->type_name(), obj_holder->type_id()); }
                 result.storage_ = instance_storage(std::move(new_instance));
             } else {
                 bool copied = false;
@@ -1989,7 +1968,6 @@ script_value script_value::parallel_detached_level(engine* eng, std::vector<type
             if (idx == TYPEID_OBJECT && eng && eng->parallel_region_active()) { return detail::parallel_shared_object(*this, *eng); }
             const char* what = idx == TYPEID_OBJECT ? "object"
                 : idx == TYPEID_FUNCTION ? "function"
-                : idx == TYPEID_SHARED_PTR ? "shared_ptr"
                 : idx == TYPEID_WEAK_PTR ? "weak_ptr"
                 : "unsupported type";
             throw runtime_error(std::string("value is not value-semantic (") + what + ")");
@@ -2064,28 +2042,24 @@ const script_function& script_value::as_function() const {
     return *val.storage_.get<strong_ptr<script_function_node>>();
 }
 
-script_value script_value::try_unwrap_transparent_wrapper() const {
-    // Only objects can be transparent wrappers
+std::optional<script_value> script_value::try_unwrap_transparent_wrapper() const {
     if (!is_object() || !payload_engine()) {
-        return *this;  // Return self unchanged
+        return std::nullopt;
     }
-
     auto holder = get_object_holder();
     if (!holder) {
-        return *this;
+        return std::nullopt;
     }
-
     auto class_def = payload_engine()->get_class_definition(holder->type_id());
     if (!class_def || !class_def->is_transparent_wrapper()) {
-        return *this;
+        return std::nullopt;
     }
-
     script_value mutable_self = *this;
     script_value unwrapped = class_def->unwrap(mutable_self);
-    if (!unwrapped.is_null()) {
-        return unwrapped;
+    if (unwrapped.is_null()) {
+        return std::nullopt;
     }
-    return *this;
+    return unwrapped;
 }
 
 std::string script_value::float_text(double v) {
@@ -2137,64 +2111,55 @@ std::string script_value::to_string() const {
 }
 
 const script_value& script_value::deref_slow() const {
-    // Use current_type() not defined_type() - references may have type_info with different base_type
-    if (current_type() == script_value_type::jai_reference_type) {
-        // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
-        // then drops the (non-atomic) refcount on every deref, which is pure overhead
-        // on this hot path.
-        const auto& refHolder = storage_.get<strong_ptr<reference_holder>>();
-        if (!refHolder) {
-            throw runtime_error("Null reference");
-        }
-        if (refHolder->has_cell) {
-            // Cell reference: the holder owns the value - always alive, no liveness check
-            return refHolder->cell()->deref();
-        }
-        if (refHolder->has_map_key) {
-            // Map-entry reference: re-resolve via find(key) (pinned map, erase-safe)
-            script_value* entry_value = refHolder->map_entry_value();
-            if (!entry_value) {
-                throw runtime_error("Reference to a removed map entry");
-            }
-            return entry_value->deref();
-        }
-        if (refHolder->container) {
-            // Vector-element reference: recompute the element address from container+index
-            // each time so it survives reallocation (push), and bounds-check so a shrink
-            // (pop/erase/clear) throws instead of reading freed memory (#41).
-            if (refHolder->container_index >= refHolder->container->size()) {
-                throw runtime_error("Reference to a removed array element");
-            }
-            if (refHolder->container->is_typed()) {
-                return refHolder->materialize_typed_element(refHolder->owner);
-            }
-            return refHolder->container->values()[refHolder->container_index].deref();
-        }
-        if (refHolder->owner_instance) {
-            // Field reference: re-resolve by id (no lazy default insert - the pinned
-            // instance IS the lifetime)
-            const script_value* field_value = refHolder->field_cell();
-            if (!field_value) {
-                throw runtime_error("Reference to a removed field");
-            }
-            return field_value->deref();
-        }
-        if (refHolder->property) {
-            // CPP-MEMBER: the live bound box (readers decode index 14 per touch);
-            // PROPERTY: the getter result, refreshed on every touch
-            return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(refHolder->owner);
-        }
-        if (refHolder->string_base) {
-            return refHolder->materialize_string_element(refHolder->owner);
-        }
-        if (refHolder->component_base) {
-            return refHolder->materialize_component(refHolder->owner);
-        }
-        throw runtime_error("Null reference");   // unreachable: every factory sets a mode
+    // Bind a reference to the held strong_ptr (do NOT copy it): copying bumps and
+    // then drops the (non-atomic) refcount on every deref, which is pure overhead
+    // on this hot path.
+    const auto& refHolder = storage_.get<strong_ptr<reference_holder>>();
+    if (refHolder->has_cell) {
+        // Cell reference: the holder owns the value - always alive, no liveness check
+        return refHolder->cell()->deref();
     }
-    // For C++ references, we don't deref here - they need special handling
-    // The interpreter will handle them specially
-    return *this;
+    if (refHolder->has_map_key) {
+        // Map-entry reference: re-resolve via find(key) (pinned map, erase-safe)
+        script_value* entry_value = refHolder->map_entry_value();
+        if (!entry_value) {
+            throw runtime_error("Reference to a removed map entry");
+        }
+        return entry_value->deref();
+    }
+    if (refHolder->container) {
+        // Vector-element reference: recompute the element address from container+index
+        // each time so it survives reallocation (push), and bounds-check so a shrink
+        // (pop/erase/clear) throws instead of reading freed memory (#41).
+        if (refHolder->container_index >= refHolder->container->size()) {
+            throw runtime_error("Reference to a removed array element");
+        }
+        if (refHolder->container->is_typed()) {
+            return refHolder->materialize_typed_element(refHolder->owner);
+        }
+        return refHolder->container->values()[refHolder->container_index].deref();
+    }
+    if (refHolder->owner_instance) {
+        // Field reference: re-resolve by id (no lazy default insert - the pinned
+        // instance IS the lifetime)
+        const script_value* field_value = refHolder->field_cell();
+        if (!field_value) {
+            throw runtime_error("Reference to a removed field");
+        }
+        return field_value->deref();
+    }
+    if (refHolder->property) {
+        // CPP-MEMBER: the live bound box (readers decode index 14 per touch);
+        // PROPERTY: the getter result, refreshed on every touch
+        return refHolder->property->live_member ? *refHolder->cell() : refHolder->materialize_property(refHolder->owner);
+    }
+    if (refHolder->string_base) {
+        return refHolder->materialize_string_element(refHolder->owner);
+    }
+    if (refHolder->component_base) {
+        return refHolder->materialize_component(refHolder->owner);
+    }
+    throw runtime_error("Null reference");   // unreachable: every factory sets a mode
 }
 
 // A typed element, a property, a string element or a component hands back a materialized VIEW: writers go through
@@ -2207,9 +2172,6 @@ script_value& script_value::deref_slow() {
 template<typename V>
 void script_value::assign_through_reference(V&& value) {
     auto refHolder = storage_.get<strong_ptr<reference_holder>>();
-    if (!refHolder) {
-        throw runtime_error("Null reference in assign_through");
-    }
     if (refHolder->has_cell) {
         if (refHolder->cell()->is_cpp_bound_primitive()) { refHolder->cell()->assign_through(value); return; }   // a boxed host-bound variable: the C++ memory
         *refHolder->cell() = std::forward<V>(value);
@@ -2230,14 +2192,11 @@ void script_value::assign_through_reference(V&& value) {
             throw runtime_error("Assignment to a removed array element");
         }
         if (refHolder->container->is_typed()) {
-            // constraint enforcement ran upstream (the tag is airtight) - defensive
-            // wall for the unreachable non-numeric case
-            const script_value& v = value.is_reference() ? value.deref() : value;
-            const size_t vi = v.raw_storage_index();
-            if (vi != TYPEID_INT && vi != TYPEID_FLOAT) {
-                throw runtime_error("Type mismatch in assignment");
-            }
-            refHolder->container->set(refHolder->container_index, v);
+            // a host's store converts as a script element store does (a script store arrives converted)
+            engine* eng = payload_engine();
+            auto converted = detail::convert_container_element(eng, value, refHolder->container_element_type);
+            if (!converted) { throw runtime_error(eng ? format_error(converted, *eng->get_symbolizer()) : std::string(converted.message())); }
+            refHolder->container->set(refHolder->container_index, std::move(converted.value()));
             return;
         }
         refHolder->container->values()[refHolder->container_index] = std::forward<V>(value);
@@ -2440,7 +2399,6 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
                     case TYPEID_MAP:        return v.storage_.get_if<TYPEID_MAP>()->get();
                     case TYPEID_OBJECT:     return v.storage_.get_if<TYPEID_OBJECT>()->get();
                     case TYPEID_FUNCTION:   return v.storage_.get_if<TYPEID_FUNCTION>()->get();
-                    case TYPEID_SHARED_PTR: return v.storage_.get_if<TYPEID_SHARED_PTR>()->get();  // holder identity; runtime-unreachable (alt 11 never constructed)
                     case TYPEID_REFERENCE:  return v.storage_.get_if<TYPEID_REFERENCE>()->get();
                     case TYPEID_WEAK_PTR:   return v.storage_.get_if<TYPEID_WEAK_PTR>()->owner_identity();
                     case TYPEID_PARALLEL_BORROW: return v.storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer();  // viewed container = stable identity (region-internal, defensive)
@@ -2493,7 +2451,6 @@ uint64_t script_value::map_key_hash() const noexcept {
                 case TYPEID_MAP:        identity = storage_.get_if<TYPEID_MAP>()->get(); break;
                 case TYPEID_OBJECT:     identity = storage_.get_if<TYPEID_OBJECT>()->get(); break;
                 case TYPEID_FUNCTION:   identity = storage_.get_if<TYPEID_FUNCTION>()->get(); break;
-                case TYPEID_SHARED_PTR: identity = storage_.get_if<TYPEID_SHARED_PTR>()->get(); break;
                 case TYPEID_REFERENCE:  identity = storage_.get_if<TYPEID_REFERENCE>()->get(); break;
                 case TYPEID_WEAK_PTR:   identity = storage_.get_if<TYPEID_WEAK_PTR>()->owner_identity(); break;
                 case TYPEID_PARALLEL_BORROW: identity = storage_.get_if<TYPEID_PARALLEL_BORROW>()->pointer(); break;

@@ -71,7 +71,6 @@ namespace jai::detail {
             case return_conv::prim_bool: return v.raw_storage_index() == script_value::TYPEID_BOOL;
             case return_conv::prim_char: return v.raw_storage_index() == script_value::TYPEID_CHAR;
             case return_conv::prim_string: return v.raw_storage_index() == script_value::TYPEID_STRING;
-            case return_conv::prim_shared: return v.raw_storage_index() == script_value::TYPEID_SHARED_PTR;
             case return_conv::prim_weak: return v.raw_storage_index() == script_value::TYPEID_WEAK_PTR;
             default: return false;
         }
@@ -126,7 +125,7 @@ namespace jai::detail {
     inline constexpr uint32_t return_plain_mask =
         (1u << script_value::TYPEID_NULL) | (1u << script_value::TYPEID_INT) | (1u << script_value::TYPEID_FLOAT) |
         (1u << script_value::TYPEID_STRING) | (1u << script_value::TYPEID_CHAR) | (1u << script_value::TYPEID_BOOL) |
-        (1u << script_value::TYPEID_FUNCTION) | (1u << script_value::TYPEID_SHARED_PTR) | (1u << script_value::TYPEID_WEAK_PTR);
+        (1u << script_value::TYPEID_FUNCTION) | (1u << script_value::TYPEID_WEAK_PTR);
     inline bool return_value_plain(const script_value& v) noexcept {
         return ((1u << v.raw_storage_index()) & return_plain_mask) != 0;
     }

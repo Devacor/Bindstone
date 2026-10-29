@@ -39,7 +39,7 @@ void construction_host::open_scope(construction_scope& scope, const std::shared_
 
 checked_result<void> bind_placeless_reference_argument(engine* eng, const function_decl& ctor, size_t i, script_value& arg, bool may_prove) {
 	const parameter& param = ctor.parameters[i];
-	if ((arg.is_reference() && arg.get_reference_holder()) || borrows_host_object(arg)) { return {}; }
+	if (arg.is_reference() || borrows_host_object(arg)) { return {}; }
 	if (is_string_reference_temporary(param, arg) || param.is_const ||
 	    (eng && ref_parameter_takes_temporary(*eng, ctor.parameters, ctor.body.get(), i, may_prove))) {
 		arg = make_reference_argument_temporary(param, arg, eng);

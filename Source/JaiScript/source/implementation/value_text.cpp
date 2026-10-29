@@ -189,9 +189,6 @@ namespace value_text_walk {
 				case script_value::TYPEID_FUNCTION:
 					out_ += "<function>";
 					return {};
-				case script_value::TYPEID_SHARED_PTR:
-					out_ += "[unknown]";
-					return {};
 				default:
 					append_scalar(out_, v, nested);
 					return {};

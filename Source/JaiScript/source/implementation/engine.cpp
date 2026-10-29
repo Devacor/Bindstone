@@ -2330,7 +2330,7 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
     if (!target.is_reference()) {
         // no script site named the argument: a reference the caller passed (a builtin hands its callback its elements)
         const script_value& received = args[index + offset];
-        if (!received.is_reference() || !received.get_reference_holder()) {
+        if (!received.is_reference()) {
             return ref;
         }
         target = received;
@@ -3051,7 +3051,6 @@ script_value engine::import_value(const script_value& value) {
                 break;
             }
             case script_value::TYPEID_OBJECT:
-            case script_value::TYPEID_SHARED_PTR:
             case script_value::TYPEID_WEAK_PTR:
                 throw_foreign_value("an object");
             case script_value::TYPEID_FUNCTION:

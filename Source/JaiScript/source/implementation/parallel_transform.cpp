@@ -4027,7 +4027,6 @@ namespace {
 		case script_value::TYPEID_CPP_BOUND:
 			return v.bound_semantic_index() != script_value::TYPEID_NULL || v.is_null() ? "bound host value" : "bound host object";
 		case script_value::TYPEID_FUNCTION: return "function";
-		case script_value::TYPEID_SHARED_PTR: return "shared_ptr";
 		case script_value::TYPEID_WEAK_PTR: return "weak_ptr";
 		default: return "unsupported type";
 		}
@@ -4741,7 +4740,7 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 	const script_value& self = receiver.deref();
 	const class_definition* cls = nullptr;
 	const class_instance* inst = nullptr;
-	if (self.raw_storage_index() == script_value::TYPEID_OBJECT || self.raw_storage_index() == script_value::TYPEID_SHARED_PTR) {
+	if (self.raw_storage_index() == script_value::TYPEID_OBJECT) {
 		const auto holder = self.get_object_holder();
 		if (holder && holder->is_instance()) {
 			inst = holder->unchecked_instance();

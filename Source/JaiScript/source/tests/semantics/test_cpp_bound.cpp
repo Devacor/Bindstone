@@ -726,6 +726,23 @@ public:
             runMatrix(true);
         });
 
+        test("a_host_store_through_a_typed_element_reference_converts_like_a_script_store", [this]() {
+            auto eng = jai::foundry::make_engine();
+            jai::stdlib::register_all(*eng);
+            script_value names = eng->execute("array<string> names = [\"a\", \"b\"]; names;");
+            script_value name_ref = script_value::make_element_reference(names.get_array_storage(), 1, eng.get(), names.get_type_info()->element_type());
+            name_ref.assign_through(script_value(std::string("z"), eng.get()));
+            check_eq(std::string("z"), names.get_array_storage()->get(1, eng.get()).as<std::string>(), "a string element takes a string");
+            script_value counts = eng->execute("array<int> counts = [1, 2]; counts;");
+            script_value count_ref = script_value::make_element_reference(counts.get_array_storage(), 0, eng.get(), counts.get_type_info()->element_type());
+            count_ref.assign_through(script_value(script_int(9), eng.get()));
+            check_eq((int64_t)9, counts.get_array_storage()->get(0, eng.get()).as_int(), "an int element takes an int");
+            bool threw = false;
+            try { count_ref.assign_through(script_value(script_float(1e300), eng.get())); } catch (const jai::runtime_error&) { threw = true; }
+            check_true(threw, "an out-of-range float into an int element raises, as the script store does");
+            check_eq((int64_t)9, counts.get_array_storage()->get(0, eng.get()).as_int(), "a refused store leaves the element");
+        });
+
         test("t2_static_gate_sizeof", [this]() {
             static_assert(sizeof(jai::script_value) == 16 && alignof(jai::script_value) == 8, "script_value layout gate");
             check_eq((size_t)16, sizeof(jai::script_value), "script_value is 16 bytes");

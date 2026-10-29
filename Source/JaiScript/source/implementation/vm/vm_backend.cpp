@@ -183,13 +183,8 @@ namespace {
 	// array<int> element enforces int on store exactly like direct element assignment
 	// (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
 	// re-resolution (realloc/shrink safe). KEEP BYTE-PARALLEL with decl_ref_alias.
-	checked_result<script_value> vm_decl_ref_alias(const script_value& source, engine* eng) {
-		(void)eng;
-		auto refHolder = source.get_reference_holder();
-		if (!refHolder) {
-			return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-		}
-		return script_value(source);
+	checked_result<script_value> vm_decl_ref_alias(const script_value& source, engine*) {
+		return source;
 	}
 
 	// The tail's destructors may run script destructors that re-enter the VM and grow the vector: they run after the
@@ -3118,7 +3113,6 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		case script_value::TYPEID_UTF8_STRING: if (target_base_type == script_value_type::jai_utf8_string_type) return arg; break;
 		case script_value::TYPEID_BOOL: if (target_base_type == script_value_type::jai_bool_type) return arg; break;
 		case script_value::TYPEID_CHAR: if (target_base_type == script_value_type::jai_char_type) return arg; break;
-		case script_value::TYPEID_SHARED_PTR: if (target_base_type == script_value_type::jai_shared_ptr_type) return arg; break;
 		case script_value::TYPEID_WEAK_PTR: if (target_base_type == script_value_type::jai_weak_ptr_type) return arg; break;
 		default: break;
 	}
@@ -6009,7 +6003,6 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
 #ifdef JAISCRIPT_VM_PROFILE
 		profile_cmp_operands_cyc_ += __rdtsc() - prof_c0; ++profile_cmp_count_;
-		if (lp && rp) { const size_t lk = lp->raw_storage_index(), rk = rp->raw_storage_index(); if (lk == script_value::TYPEID_SHARED_PTR || rk == script_value::TYPEID_SHARED_PTR) ++profile_cmp_sptr_null_; }
 #endif
 		if (rp) {
 			const int verdict = fused_cmp_rows(*lp, *rp, op);
@@ -12583,9 +12576,6 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 		                                             *environment_, *symbolizer_, frame_access_context(f))) {
 			if (!*cell) { return raise_from(*cell); }
 			script_value& storage = *cell->value();
-			if (storage.is_reference() && !storage.get_reference_holder()) {
-				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-			}
 			return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, share_env_ref(storage)));
 		}
 	}
@@ -12816,7 +12806,7 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	if (!r) return false;
 	const script_value& v = r->deref();
 	const size_t k = v.raw_storage_index();
-	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
+	if (k != script_value::TYPEID_OBJECT) return false;
 	const auto& holder = v.unchecked_object_handle();
 	if (!holder || !holder->is_instance() || holder->type_id() == coroutine_handle_type_id_) return false;
 	auto* inst = holder->unchecked_instance();
@@ -12863,7 +12853,7 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 	if (!r || !parallel_method_pins_) { note_worker_decline(worker_decline::inline_method); return false; }
 	const script_value& v = r->deref();
 	const size_t k = v.raw_storage_index();
-	if (k != script_value::TYPEID_OBJECT && k != script_value::TYPEID_SHARED_PTR) return false;
+	if (k != script_value::TYPEID_OBJECT) return false;
 	const auto& holder = v.unchecked_object_handle();
 	if (!holder || !holder->is_instance() || holder->type_id() == coroutine_handle_type_id_) return false;
 	auto* inst = holder->unchecked_instance();
@@ -12976,7 +12966,7 @@ bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
 	if (frame_scope_state(f) != detail::member_scope_state::instance || !f.locals->scope_this) return false;
 	const script_value& this_val = *f.locals->scope_this;
 	const size_t ti = this_val.raw_storage_index();
-	if (ti != script_value::TYPEID_OBJECT && ti != script_value::TYPEID_SHARED_PTR) return false;
+	if (ti != script_value::TYPEID_OBJECT) return false;
 	strong_ptr<script_value::object_holder> held;   // an object's handle is read where the frame holds it
 	if (ti != script_value::TYPEID_OBJECT) { held = const_cast<script_value&>(this_val).get_object_holder(); }
 	const strong_ptr<script_value::object_holder>& holder = ti == script_value::TYPEID_OBJECT ? this_val.unchecked_object_handle() : held;
@@ -13284,7 +13274,7 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 	}
 
 	const size_t receiver_type = objectValue.raw_storage_index();
-	if (receiver_type == script_value::TYPEID_OBJECT || receiver_type == script_value::TYPEID_SHARED_PTR) {
+	if (receiver_type == script_value::TYPEID_OBJECT) {
 		const auto holder = objectValue.get_object_holder();
 		if (holder && holder->type_id() == coroutine_handle_type_id_) {
 			if (member_id == next_id_ || member_id == done_id_ || member_id == advance_id_ || member_id == result_id_) { return {}; }
@@ -13936,7 +13926,7 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 		if (i >= site.arg_symbols.size() || i >= site.arg_slots.size() || site.arg_symbols[i] == UINT64_MAX || site.arg_slots[i] == k_invalid_u32 ||
 		    detail::deferred_argument(a)) { return false; }
 		script_value* local = frame_slot(caller, site.arg_slots[i]);
-		if (!local || (local->is_reference() && !local->get_reference_holder())) { return false; }
+		if (!local) { return false; }
 		stack_[args_base + i] = share_env_ref(*local);
 	}
 	for (size_t i = 0; i < argc; ++i) {
@@ -15594,7 +15584,6 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 				case script_value::TYPEID_STRING:
 					return script_value(self_val.unchecked_as_string() == other_val.unchecked_as_string(), eng);
 				case script_value::TYPEID_OBJECT:
-				case script_value::TYPEID_SHARED_PTR:
 					break;
 				default:
 					return script_value(false, eng);
@@ -18123,8 +18112,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 		    !(member->object && member->object->get_type() == node_type::super_expr)) {
 			script_value& objd = stack_[args_base - 1].deref();
 			const size_t receiver_type = objd.raw_storage_index();
-			if (receiver_type == script_value::TYPEID_OBJECT ||
-			    receiver_type == script_value::TYPEID_SHARED_PTR) {
+			if (receiver_type == script_value::TYPEID_OBJECT) {
 				strong_ptr<script_value::object_holder> held;   // an object's handle is read where the receiver holds it
 				if (receiver_type != script_value::TYPEID_OBJECT) { held = objd.get_object_holder(); }
 				const strong_ptr<script_value::object_holder>& holder = receiver_type == script_value::TYPEID_OBJECT ? objd.unchecked_object_handle() : held;
@@ -18388,8 +18376,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 		// ONE type query, integer compares after (each is_x re-derefs + re-reads the
 		// variant index): OBJECT + SHARED_PTR is exactly is_object()'s answer.
 		const size_t receiver_type = objv.raw_storage_index();
-		if (receiver_type == script_value::TYPEID_OBJECT ||
-		    receiver_type == script_value::TYPEID_SHARED_PTR) {
+		if (receiver_type == script_value::TYPEID_OBJECT) {
 			auto holder = objv.get_object_holder();
 			// Worker method wall (parallel-method-admission rule): an admitted method entered in the slice section above;
 			// anything unpinned keeps the wall error. Trusted scripts still opt out entirely.
@@ -19569,7 +19556,7 @@ struct vm_backend::construction_lender final : detail::construction_host {
 				continue;
 			}
 			script_value taken = detail::argument_for_binding(args[i], detail::arg_binding::reference);
-			if (i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && taken.is_reference() && taken.get_reference_holder()) {
+			if (i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && taken.is_reference()) {
 				args[i] = std::move(taken);   // a place argument its evaluation bound
 				continue;
 			}
@@ -20807,9 +20794,6 @@ op_status vm_backend::exec_ref_return_lvalue(frame& f, const vm_instruction& ins
 		                                             *symbolizer_, frame_access_context(f))) {
 			if (!*cell) { return raise_from(*cell); }
 			script_value& storage = *cell->value();
-			if (storage.is_reference() && !storage.get_reference_holder()) {
-				return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-			}
 			stack_.back() = share_env_ref(storage);
 		}
 		return {};
@@ -20945,9 +20929,6 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 				                                             frame_access_context(f))) {
 					if (!*cell) { return raise_from(*cell); }
 					script_value& storage = *cell->value();
-					if (storage.is_reference() && !storage.get_reference_holder()) {
-						return raise_(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-					}
 					operand = share_env_ref(storage);
 				}
 			}
@@ -24284,7 +24265,7 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 			deref_only = result.raw_storage_index() == script_value::TYPEID_STRING;
 			break;
 		case return_conv::prim_shared:
-			deref_only = result.raw_storage_index() == script_value::TYPEID_SHARED_PTR || detail::shared_handle_binds_in_place(result, rec.return_type);
+			deref_only = detail::shared_handle_binds_in_place(result, rec.return_type);
 			break;
 		case return_conv::prim_weak:
 			deref_only = result.raw_storage_index() == script_value::TYPEID_WEAK_PTR;
@@ -24873,11 +24854,6 @@ checked_result<script_value> vm_backend::component_reference(frame* caller_frame
 }
 
 op_status vm_backend::reference_to_storage(script_value& storage, script_value& out, bool& bound) {
-	if (storage.is_reference() && !storage.get_reference_holder()) {
-		return raise_(
-			make_error_code(runtime_error_code::invalid_reference),
-			"Reference target is null");
-	}
 	// Share the holder (zero alloc; cells alias the same box, element/field refs keep
 	// their container/instance re-resolution), boxing on demand when the variable
 	// predates its escape mark (cross-execute global, C++ define, dynamic shape)
@@ -25025,7 +25001,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			// unit, entered by the record push ahead of the binding, resumes once this parameter is bound
 			unit_sync_scope unitSync{ this };   // the callee's unit again once the argument is bound
 			enter_unit(caller_unit);
-			if (site && i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && arg.is_reference() && arg.get_reference_holder()) {
+			if (site && i < site->arg_lvalue_nodes.size() && site->arg_lvalue_nodes[i] != k_invalid_u32 && arg.is_reference()) {
 				// a place argument that evaluated to a reference (op_place_arg, an element read): the reference its evaluation bound
 				frame_slot_set(callee, param.slot_index, script_value(arg));
 			} else if (site) {
@@ -25034,7 +25010,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				VM_TRY(bind_site_reference(i, *site, caller_frame, caller_code, caller_env, site_ref, bound));
 				if (bound) {
 					frame_slot_set(callee, param.slot_index, std::move(site_ref));
-				} else if ((arg.is_reference() && arg.get_reference_holder()) || detail::borrows_host_object(arg)) {
+				} else if (arg.is_reference() || detail::borrows_host_object(arg)) {
 					// a host T& result names the host's object, an lvalue as in C++ (KEEP BYTE-PARALLEL with the interpreter)
 					// Tier 2 (general lvalues): the argument already
 					// evaluated in normal left-to-right order, and subscript/map reads over

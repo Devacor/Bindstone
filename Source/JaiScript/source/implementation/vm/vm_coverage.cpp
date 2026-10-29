@@ -577,7 +577,7 @@ namespace {
 	unsigned receiver_kind(const script_value& v, const class_definition*& cd) {
 		cd = nullptr;
 		switch (v.raw_storage_index()) {
-		case script_value::TYPEID_OBJECT: case script_value::TYPEID_SHARED_PTR: {
+		case script_value::TYPEID_OBJECT: {
 			cd = detail::cast_dynamic_class(v);
 			if (cd && cd->is_script_class()) return k_cov_recv_instance;
 			return k_cov_recv_host;
@@ -597,7 +597,7 @@ namespace {
 		case script_value::TYPEID_FLOAT: return k_cov_opnd_float;
 		case script_value::TYPEID_BOOL: return k_cov_opnd_bool;
 		case script_value::TYPEID_CHAR: case script_value::TYPEID_STRING: case script_value::TYPEID_UTF8_STRING: return k_cov_opnd_string;
-		case script_value::TYPEID_OBJECT: case script_value::TYPEID_SHARED_PTR: case script_value::TYPEID_CPP_BOUND: return k_cov_opnd_object;
+		case script_value::TYPEID_OBJECT: case script_value::TYPEID_CPP_BOUND: return k_cov_opnd_object;
 		case script_value::TYPEID_ARRAY: case script_value::TYPEID_MAP: return k_cov_opnd_container;
 		default: return k_cov_opnd_unknown;
 		}

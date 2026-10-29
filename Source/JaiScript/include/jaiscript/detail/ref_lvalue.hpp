@@ -249,9 +249,6 @@ namespace jai::detail {
 			return ref_non_lvalue_error();
 		}
 		if (field_value->is_reference()) {
-			if (!field_value->get_reference_holder()) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-			}
 			return script_value(*field_value);
 		}
 		type_info_ptr tag = m->ref_field_declared ? type_info_ptr{m->ref_field_declared} : field_value->get_type_info();
@@ -259,7 +256,7 @@ namespace jai::detail {
 		if (tag && tag->base_type != script_value_type::jai_any_type && tag->base_type != script_value_type::jai_null_type) {
 			constraint = tag;
 		}
-		return script_value::make_field_reference(receiver.unchecked_object_handle(), plain, member_id, eng, std::move(constraint), *field_value, slot);
+		return script_value::make_field_reference(plain->strong_from_this(), member_id, eng, std::move(constraint), *field_value, slot);
 	}
 
 	// Mirrors script_value::deref() with checked errors instead of throws (bind-time
@@ -268,9 +265,6 @@ namespace jai::detail {
 		const script_value* cur = &v;
 		while (cur->is_reference()) {
 			const auto* holder = cur->get_reference_holder();
-			if (!holder) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Null reference");
-			}
 			if (holder->has_cell) {
 				cur = holder->cell();
 				continue;
@@ -518,9 +512,6 @@ namespace jai::detail {
 			if (field_value->is_reference()) {
 				// Field already holds a reference: share its holder (matches
 				// set_field's write-through semantics)
-				if (!field_value->get_reference_holder()) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-				}
 				return script_value(*field_value);
 			}
 			// DECLARED field type wins as the constraint (typed fields enforce like
@@ -537,13 +528,6 @@ namespace jai::detail {
 			if (tag && tag->base_type != script_value_type::jai_any_type &&
 			    tag->base_type != script_value_type::jai_null_type) {
 				constraint = tag;
-			}
-			// the receiver's own holder pins a script instance it owns (a script instance's holder is never re-pointed to a layer); a
-			// layer reached through a C++ object keeps its shared pin
-			if (cur.raw_storage_index() == script_value::TYPEID_OBJECT && cur.unchecked_object_handle() && instance->get_class_definition() &&
-			    instance->get_class_definition()->is_script_class() &&
-			    cur.unchecked_object_handle()->object() == static_cast<void*>(instance.get())) {
-				return rooted(script_value::make_field_reference(cur.unchecked_object_handle(), instance.get(), member_id, eng, std::move(constraint), *field_value));
 			}
 			return rooted(script_value::make_field_reference(instance, member_id, eng, std::move(constraint), *field_value));
 		}
@@ -699,9 +683,6 @@ namespace jai::detail {
 						continue;
 					}
 					if (value_ref.is_reference()) {
-						if (!value_ref.get_reference_holder()) {
-							return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-						}
 						return script_value(value_ref);
 					}
 					auto map_type_info = cur.get_type_info();
@@ -722,9 +703,6 @@ namespace jai::detail {
 					if (!storage->is_typed()) {
 						script_value& element = storage->values()[static_cast<size_t>(index)];
 						if (element.is_reference()) {
-							if (!element.get_reference_holder()) {
-								return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference), "Reference target is null");
-							}
 							return script_value(element);
 						}
 					}

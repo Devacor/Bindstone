@@ -242,7 +242,7 @@ protected:
                 return false;
             }
             // a property handed out through a transparent wrapper (an observable property's reference) saves its value
-            out = result.value().try_unwrap_transparent_wrapper();
+            out = result.value().try_unwrap_transparent_wrapper().value_or(result.value());
             return true;
         }
         return false;

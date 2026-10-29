@@ -24,6 +24,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/builtin_api_arities.hpp>
+#include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
@@ -2816,10 +2817,9 @@ private:
 		if (!signature) { return; }
 		const size_t count = a_call->arguments.size();
 		if (count >= signature->minimum && count <= signature->maximum) { return; }
-		std::string expected = std::to_string(signature->minimum);
-		if (signature->minimum != signature->maximum) { expected += " to " + std::to_string(signature->maximum); }
-		diag(diag_level::error, a_call->location, "'" + std::string(a_member->member) + "' on '" +
-			ctype_name(a_receiver) + "' expects " + expected + " arguments, got " + std::to_string(count));
+		const std::string expected = signature->minimum == signature->maximum ? detail::arity_detail(signature->minimum, count)
+			: std::to_string(signature->minimum) + " to " + std::to_string(signature->maximum) + " arguments, got " + std::to_string(count);
+		diag(diag_level::error, a_call->location, "'" + std::string(a_member->member) + "' on '" + ctype_name(a_receiver) + "' expects " + expected);
 	}
 
     // The return type a callback argument declares: a lambda's spelled one, or the one overload of a named script function
@@ -3134,21 +3134,16 @@ private:
         return agree && result ? *result : ctype{};
     }
 
-    // Cls::m(args) on a host class: a count none of the binder's arities takes is the binder's run-time throw; a binding of
+    // Cls::m(args) on a host class: a count the live binding does not take is the binder's run-time throw; a binding of
     // unknown arity, or a script static of the name, keeps the call lenient
     void check_host_static_arity(std::string_view cls, std::string_view member, size_t argc, const source_location& loc) {
         auto def = engine_class(cls);
         if (!def || !def->is_cpp_class() || def->extended_ever()) { return; }
         const uint64_t id = eng_.symbolize(member);
         if (def->script_static_method_overloads().count(id)) { return; }
-        const std::vector<size_t>* bound = def->static_method_arities(id);
-        if (!bound || bound->empty() || std::find(bound->begin(), bound->end(), argc) != bound->end()) { return; }
-        std::vector<size_t> arities(*bound);
-        std::sort(arities.begin(), arities.end());
-        arities.erase(std::unique(arities.begin(), arities.end()), arities.end());
-        std::string expected;
-        for (size_t n : arities) { expected += (expected.empty() ? "" : " or ") + std::to_string(n); }
-        diag(diag_level::error, loc, "'" + std::string(cls) + "::" + std::string(member) + "' expects " + expected +
+        const size_t arity = def->static_method_arity(id);
+        if (arity == SIZE_MAX || arity == argc) { return; }
+        diag(diag_level::error, loc, "'" + std::string(cls) + "::" + std::string(member) + "' expects " + std::to_string(arity) +
              " argument(s), got " + std::to_string(argc));
     }
 

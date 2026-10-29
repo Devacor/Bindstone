@@ -1225,7 +1225,7 @@ void class_definition::add_static_method(uint64_t name_id, script_function func,
     bump_method_epoch();
 
     if (arity != SIZE_MAX) {
-        static_method_arities_[name_id].push_back(arity);
+        static_method_arities_.insert_or_assign(name_id, arity);
     } else {
         static_method_arities_.erase(name_id);
     }

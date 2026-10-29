@@ -641,10 +641,10 @@ public:
     const auto& cpp_method_overload_table() const { return cpp_method_overloads_; }
     const auto& method_values() const { return methods_; }
     const auto& static_method_values() const { return static_methods_; }
-    // the argument counts name_id's host bindings take; null when a binding of unknown arity is the live one
-    const std::vector<size_t>* static_method_arities(uint64_t name_id) const {
+    // the argument count name_id's live host binding takes (a later binding replaces it); SIZE_MAX when unknown
+    size_t static_method_arity(uint64_t name_id) const {
         auto it = static_method_arities_.find(name_id);
-        return it == static_method_arities_.end() ? nullptr : &it->second;
+        return it == static_method_arities_.end() ? SIZE_MAX : it->second;
     }
 
     void add_field(std::string_view name, const script_value& default_value);
@@ -1321,7 +1321,7 @@ private:
     std::unordered_map<uint64_t, script_value> static_methods_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> static_method_overloads_;
     std::unordered_set<uint64_t> const_statics_;
-    std::unordered_map<uint64_t, std::vector<size_t>> static_method_arities_;
+    std::unordered_map<uint64_t, size_t> static_method_arities_;
     std::unordered_map<uint64_t, script_value> field_defaults_;
     std::unordered_map<uint64_t, type_info_ptr> field_declared_types_;
     mutable std::vector<type_info_ptr> slot_declared_types_;   // per field slot, the chain walk's answer under slot_declared_epoch_

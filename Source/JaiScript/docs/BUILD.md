@@ -45,10 +45,10 @@ language server, the three example games and the embedding quickstart's host
 (`embed_quickstart`). Binaries land in `build/bin/`, the library in `build/lib/`.
 
 The library comes in two links over one set of compiled files. `jaiscript` is the VM alone: every host,
-the example games, the quickstart, the language server and `jai_spider` link it. `jaiscript_interpreter`
+the example games, the quickstart and the language server link it. `jaiscript_interpreter`
 adds the tree-walking interpreter (`source/interpreter/`), the reference the VM is checked against; only the
-programs that compare the backends link it: the test suite, the fuzzer and the runner, whose
-`--backend=interp` runs every documentation sample on both. In a program without it,
+programs that compare the backends link it: the test suite, the fuzzer, the runner, whose
+`--backend=interp` runs every documentation sample on both, and `jai_spider`, whose `--backend interp` its gate runs. In a program without it,
 `set_backend(backend_type::interpreter)` throws.
 
 `CMakePresets.json` names the same two trees: `cmake --preset release` / `cmake --build --preset release`
@@ -122,7 +122,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
-| `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer and the runner link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
+| `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer, the runner and `jai_spider` link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | Compiles the DAP-over-TCP debug listener. Turn it OFF for shipping or mobile builds and no socket code is compiled in at all |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Adds the performance suites to `jaiscript_tests` (see below) |

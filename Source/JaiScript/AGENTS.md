@@ -29,7 +29,8 @@ optimizer-dependent bugs show up only there. Other targets: `jaiscript` (library
 
 The interpreter (`source/interpreter/`) is compiled only into the programs that compare the backends: they link
 `jaiscript_interpreter` (option `JAISCRIPT_INTERPRETER`), which is `jaiscript` plus the interpreter. That is the suite,
-the fuzzer and the runner (verify_site runs every sample on both backends through it); every other program, Bindstone
+the fuzzer, the runner (verify_site runs every sample on both backends through it) and jai_spider (its `--backend interp`
+and its gate); every other program, Bindstone
 included, links `jaiscript`, where `set_backend(backend_type::interpreter)` throws. Code both backends use (the builtin
 method registries in `builtin_methods.cpp`, include resolution) never lives in the interpreter's files.
 

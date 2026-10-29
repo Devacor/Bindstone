@@ -171,6 +171,7 @@ if [ "$BUILD" = 1 ]; then
 	[ -z "$release_targets" ] || jai_build release $(echo $release_targets | tr ' ' '\n' | sort -u) || { echo "TARGETED RED: the Release build failed"; exit 1; }
 fi
 
+jai_watchdog
 FAILED=""
 SIDE_GATES=()
 TIMING_GATES=()

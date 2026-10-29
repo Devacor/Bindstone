@@ -20,6 +20,7 @@ if [ "${1:-}" = "--build" ]; then
 		{ echo "BATTERY RED: the Release build failed"; exit 1; }
 fi
 
+jai_watchdog
 FAILED=""
 export HASH_BACKENDS="vm interp"
 export FUZZ_ITERATIONS="${BATTERY_FUZZ_ITERATIONS:-3000}"

@@ -22,6 +22,10 @@ namespace jai::detail {
         static void submit_pinned_batch(thread_pool& pool, std::pair<size_t, thread_pool::task_type>* tasks, size_t count,
                                         const fault_injection* faults = nullptr);
 
+        // thread_pool::submit_batch with fault checkpoints
+        static void submit_batch(thread_pool& pool, std::vector<thread_pool::task_type> tasks, thread_pool::task_type then,
+                                 thread_pool::then_on where, const fault_injection* faults);
+
         // Every submit_to(worker, ...) task observes exactly this id from std::this_thread::get_id().
         static std::thread::id worker_thread_id(const thread_pool& pool, size_t worker);
     };

@@ -1,6 +1,9 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/thread_pool.hpp>
+#include <jaiscript/detail/fault_injection.hpp>
+#include <jaiscript/detail/thread_pool_access.hpp>
 #include <atomic>
+#include <string>
 #include <chrono>
 #include <memory>
 #include <stdexcept>
@@ -155,7 +158,7 @@ public:
                 pool.run_posted();
             });
             pool.post([&]() { order.push_back('b'); });
-            check_eq(size_t{2}, pool.run_posted());
+            check_eq(size_t{1}, pool.run_posted(), "the nested drain ran 'b'");
             check_eq(size_t{0}, pool.run_posted());
             check(order == std::vector<char>{'a', 'b'}, "each posted task runs once, in order");
         });
@@ -252,6 +255,56 @@ public:
                 }, [&]() { ++posted; }, then_on::posted);
             }
             check(wait_for([&]() { return posted.load() == tasks && chained.load() == tasks; }, [&]() { pool.run_posted(); }), "every continuation must run");
+        });
+
+        test("a_batch_that_fails_to_queue_runs_its_prefix_and_never_strands_wait_idle", [this]() {
+            // A batch whose queueing throws partway runs the tasks it queued, drops its continuation and wakes the workers: with
+            // every worker parked, the queued prefix used to sit unannounced and wait_idle never returned
+            struct fail_at_second { static void hit(void*, const char* point, size_t index) {
+                if (std::string(point) == "pool.shared_batch_enqueue" && index == 1) { throw std::runtime_error("enqueue failed"); }
+            } };
+            detail::fault_injection faults{ nullptr, &fail_at_second::hit };
+            auto pool = detail::thread_pool_access::make(2, nullptr);
+            pool->spin_budget_ns(0);
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            std::atomic<int> ran{0};
+            std::atomic<int> continued{0};
+            std::vector<thread_pool::task_type> tasks;
+            for (int i = 0; i < 4; ++i) { tasks.push_back([&ran] { ++ran; }); }
+            std::string error = "no error";
+            try {
+                detail::thread_pool_access::submit_batch(*pool, std::move(tasks), [&continued] { ++continued; }, then_on::pool, &faults);
+            } catch (const std::exception& ex) { error = ex.what(); }
+            std::atomic<bool> idle{false};
+            std::thread waiter([&] { pool->wait_idle(); idle = true; });
+            const bool returned = wait_for([&] { return idle.load(); }, [] {}, std::chrono::milliseconds(5000));
+            if (!returned) { pool->submit([] {}); }
+            waiter.join();
+            check_eq(std::string("enqueue failed"), error);
+            check_true(returned, "wait_idle returns once the queued prefix ran");
+            check_eq(1, ran.load(), "the task queued before the failure ran");
+            check_eq(0, continued.load(), "a batch that failed to queue drops its continuation");
+        });
+
+        test("submit_to_an_index_past_the_workers_throws", [this]() {
+            thread_pool pool(2);
+            std::string error = "no error";
+            try { pool.submit_to(2, [] {}); } catch (const std::out_of_range& ex) { error = ex.what(); }
+            check_eq(std::string("thread_pool::submit_to: worker 2 is out of range (the pool has 2 workers)"), error);
+        });
+
+        test("a_nested_drain_continues_the_posted_queue_in_posting_order", [this]() {
+            thread_pool pool(1);
+            std::vector<char> order;
+            pool.post([&] {
+                order.push_back('a');
+                pool.post([&] { order.push_back('c'); });
+                pool.run_posted();
+            });
+            pool.post([&] { order.push_back('b'); });
+            const size_t ran = pool.run_posted();
+            check_eq(std::string("abc"), std::string(order.begin(), order.end()));
+            check_eq(size_t(1), ran, "the outer drain counts the task it ran; the nested one ran the rest");
         });
 
         test("wait_idle_waits_for_a_task_whose_pinned_follow_up_finishes_first", [this]() {

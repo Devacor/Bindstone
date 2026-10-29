@@ -1,4 +1,5 @@
 #include "../../include/jaiscript/thread_pool.hpp"
+#include "../../include/jaiscript/jaiscript_fwd.hpp"
 #include "../../include/jaiscript/detail/fault_injection.hpp"
 #include "../../include/jaiscript/detail/thread_pool_access.hpp"
 #include <algorithm>
@@ -7,6 +8,8 @@
 #include <condition_variable>
 #include <deque>
 #include <mutex>
+#include <stdexcept>
+#include <string>
 #include <thread>
 #include <utility>
 #if defined(_M_X64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
@@ -56,6 +59,11 @@
 namespace jai {
 
     namespace {
+        [[noreturn]] JAI_NOINLINE void throw_worker_out_of_range(size_t worker, size_t workers) {
+            throw std::out_of_range("thread_pool::submit_to: worker " + std::to_string(worker) + " is out of range (the pool has " +
+                                    std::to_string(workers) + " workers)");
+        }
+
         size_t platform_performance_cores() {
 #if defined(_WIN32)
             DWORD length = 0;
@@ -207,6 +215,7 @@ namespace jai {
         // Pinned queue: runs on worker `worker`'s thread, in submission order,
         // interleaved with any shared tasks that worker also picks up.
         void submit_to(size_t worker, task_type task) {
+            if (worker >= workers_.size()) [[unlikely]] { throw_worker_out_of_range(worker, workers_.size()); }
             {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) return;
@@ -271,7 +280,7 @@ namespace jai {
             });
         }
 
-        void submit_batch(std::vector<task_type> tasks, task_type then, then_on where) {
+        void submit_batch(std::vector<task_type> tasks, task_type then, then_on where, const detail::fault_injection* faults = nullptr) {
             if (tasks.empty()) {
                 if (then && where == then_on::posted) {
                     post(std::move(then));
@@ -282,10 +291,12 @@ namespace jai {
             }
             auto batch = std::make_shared<batch_state>(tasks.size(), std::move(then), where);
             const size_t count = tasks.size();
-            {
+            size_t queued = 0;
+            try {
                 std::lock_guard<std::mutex> guard(mutex_);
                 if (stop_) return;
                 for (auto& task : tasks) {
+                    if (faults) { faults->checkpoint("pool.shared_batch_enqueue", queued); }
                     shared_.push_back([this, batch, task = std::move(task)]() mutable {
                         run_reporting(task);
                         task = nullptr;
@@ -294,9 +305,21 @@ namespace jai {
                         }
                     });
                     outstanding_.fetch_add(1, std::memory_order_relaxed);
+                    ++queued;
                 }
                 shared_pending_.store(true, std::memory_order_release);
                 note_batch();
+            } catch (...) {
+                // A batch that fails to enqueue drops its continuation and wakes workers for the accepted prefix; until the
+                // subtraction no accepted task can be the last, so none reads `then` before it is cleared
+
+                if (queued != 0) {
+                    batch->then = nullptr;
+                    batch->remaining.fetch_sub(count - queued, std::memory_order_acq_rel);
+                    shared_pending_.store(true, std::memory_order_release);
+                    work_cv_.notify_all();
+                }
+                throw;
             }
             if (count >= workers_.size()) {
                 work_cv_.notify_all();
@@ -310,28 +333,23 @@ namespace jai {
             posted_.push_back(std::move(task));
         }
 
+        // One task off the queue at a time: a posted task that calls run_posted continues the same queue in posting order,
+        // and a task's non-std exception leaves the rest queued
         size_t run_posted() {
             size_t result = 0;
-            std::deque<task_type> pending;
             for (;;) {
+                task_type task;
                 {
                     std::lock_guard<std::mutex> guard(posted_mutex_);
                     if (posted_.empty()) { return result; }
-                    pending.swap(posted_);
+                    task = std::move(posted_.front());
+                    posted_.pop_front();
                 }
-                while (!pending.empty()) {
-                    task_type task = std::move(pending.front());
-                    pending.pop_front();
-                    ++result;
-                    try {
-                        task();
-                    } catch (const std::exception&) {
-                        dispatch_exception(std::current_exception());
-                    } catch (...) {
-                        std::lock_guard<std::mutex> guard(posted_mutex_);
-                        posted_.insert(posted_.begin(), std::make_move_iterator(pending.begin()), std::make_move_iterator(pending.end()));
-                        throw;
-                    }
+                ++result;
+                try {
+                    task();
+                } catch (const std::exception&) {
+                    dispatch_exception(std::current_exception());
                 }
             }
         }
@@ -554,6 +572,11 @@ namespace jai {
         void thread_pool_access::submit_pinned_batch(thread_pool& pool, std::pair<size_t, thread_pool::task_type>* tasks, size_t count,
                                                      const fault_injection* faults) {
             pool.state_->submit_pinned_batch(tasks, count, faults);
+        }
+
+        void thread_pool_access::submit_batch(thread_pool& pool, std::vector<thread_pool::task_type> tasks, thread_pool::task_type then,
+                                              thread_pool::then_on where, const fault_injection* faults) {
+            pool.state_->submit_batch(std::move(tasks), std::move(then), where, faults);
         }
 
         std::thread::id thread_pool_access::worker_thread_id(const thread_pool& pool, size_t worker) {

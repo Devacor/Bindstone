@@ -1452,14 +1452,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             // An lvalue-shaped base allows modification, even if use_count == 1 (KEEP BYTE-PARALLEL with vm_backend::exec_index)
             const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
 
-            // Transient read (transient_read.hpp): the consumer provably discards
-            // identity, so skip the reference mint and push a shallow element copy.
-            // Overrides re-enable the mint at runtime - operand copies would be
-            // observable via use_count inside them. (KEEP BYTE-PARALLEL with
-            // vm_backend::exec_index)
-            const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
-
-            if (is_lvalue && !transient_read) {
+            if (is_lvalue) {
                 // Reallocation-safe reference to the element (container+index, not a raw
                 // pointer into the vector buffer): holding `arr[i]` as an lvalue across a
                 // push that reallocates would otherwise dangle -> heap corruption (#41).
@@ -1480,9 +1473,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             auto& map = const_cast<script_map&>(left.as_map());
 
             const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
-
-            // Transient map read: copy branch below (never inserts, never mints)
-            const bool transient_read = expr->transient_element_read && !want_lvalue_write && !has_custom_binary_ops_;
 
             // A compound's own target on a typed-value map inserts the value type's default first, on a temporary too
             // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
@@ -1522,7 +1512,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 // Map-entry mode: pins the map + re-resolves by key (temporaries/erase safe)
                 script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
                 push_value(std::move(ref_value));
-            } else if (is_lvalue && !transient_read) {
+            } else if (is_lvalue) {
                 // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
                 // of m[k][i] / m[k].field): return a reference to the EXISTING
                 // entry so nested in-place mutation still works, but NEVER

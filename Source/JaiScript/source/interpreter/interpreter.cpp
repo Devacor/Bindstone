@@ -1402,10 +1402,6 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             // Handle increment/decrement with in-place mutation (ChaiScript-style)
             if (expr->operand->get_type() == node_type::identifier_expr) {
                 auto* identifier = static_cast<identifier_expr*>(expr->operand.get());
-                // Cache symbol ID if not already cached
-                if (identifier->symbol_id == UINT64_MAX) {
-                    identifier->symbol_id = string_symbolizer_->intern(identifier->name);
-                }
 
                 // Try fast path: slot-based locals first (function params and typed locals
                 // live in call-frame slots, not the environment), then environment
@@ -1814,10 +1810,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
         // Get current value of the target
         if (expr->target->get_type() == node_type::identifier_expr) {
             auto* identifier = static_cast<identifier_expr*>(expr->target.get());
-            // Cache symbol ID if not already cached
-            if (identifier->symbol_id == UINT64_MAX) {
-                identifier->symbol_id = string_symbolizer_->intern(identifier->name);
-            }
 
             // Slot-based O(1) first, then environment fallback
             script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
@@ -2425,10 +2417,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
         // Check if target is an identifier
         if (expr->target->get_type() == node_type::identifier_expr) {
             auto* identifier = static_cast<identifier_expr*>(expr->target.get());
-            // Cache symbol ID if not already cached
-            if (identifier->symbol_id == UINT64_MAX) {
-                identifier->symbol_id = string_symbolizer_->intern(identifier->name);
-            }
 
             // ============================================================
             // SLOT-BASED FAST PATH: O(1) array indexing for locals
@@ -7647,9 +7635,6 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
 std::optional<checked_result<script_value>> interpreter::named_storage_reference(expression* value) {
     if (value->get_type() == node_type::identifier_expr) {
         auto* ident = static_cast<identifier_expr*>(value);
-        if (ident->symbol_id == UINT64_MAX) {
-            ident->symbol_id = string_symbolizer_->intern(ident->name);
-        }
         script_value* storage = nullptr;
         if (ident->global_qualified) {
             // ::name - GLOBAL env only (slots, captures, member scope all skipped)
@@ -8923,8 +8908,7 @@ struct interpreter::construction_lender final : detail::construction_host {
         if (!scope.env || !argument) { return false; }
         if (argument->get_type() == node_type::identifier_expr) {
             const auto* name = static_cast<const identifier_expr*>(argument);
-            const uint64_t id = name->symbol_id != UINT64_MAX ? name->symbol_id : self.string_symbolizer_->intern(name->name);
-            if (!scope.env->get_value_ptr(id)) { return false; }   // a name the level's scope does not hold (a field by its bare name) binds as its value did
+            if (!scope.env->get_value_ptr(name->symbol_id)) { return false; }   // a name the level's scope does not hold (a field by its bare name) binds as its value did
         }
         return self.bind_site_reference(argument, nullptr, scope.env, out);
     }
@@ -9097,11 +9081,7 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
 
     if (argExpr && argExpr->get_type() == node_type::identifier_expr) {
         auto* identExpr = static_cast<const identifier_expr*>(argExpr);
-        uint64_t symbol_id = identExpr->symbol_id;
-        if (symbol_id == UINT64_MAX) {
-            symbol_id = string_symbolizer_->intern(identExpr->name);
-            const_cast<identifier_expr*>(identExpr)->symbol_id = symbol_id;
-        }
+        const uint64_t symbol_id = identExpr->symbol_id;
 
         // ::name ref args bind against the GLOBAL env only
         if (identExpr->global_qualified) {

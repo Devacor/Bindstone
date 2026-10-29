@@ -2156,27 +2156,22 @@ private:
         }
     }
 
-    // C1: one statically resolved same-script callee, exact arity, no defaults in play, no
-    // reference params. Per-argument same_type (an untyped/var parameter binds as identity).
+    // C1: one statically resolved same-script callee, exact arity, no defaults in play: the inliner's
+    // identity and per-argument same_type (an untyped/var parameter binds as identity, a reference none).
     void stamp_call_proofs(call_expr* c, const std::vector<const function_decl*>* ov, const std::vector<ctype>& args, bool free_callee) {
         if (proofs_ == proof_mode::leave) { return; }
         const size_t n = c->arguments.size();
         const function_decl* fn = nullptr;
-        bool by_value = true;   // the identity bind's proof asks for no reference parameter; the inliner takes the decl and the per-argument proofs either way
-        const bool certain_program = !has_includes_;   // the identity bind's proof and the statistics keep the includes-free gate; the inliner's decl and its argument proofs go by the argument
+        const bool certain_program = !has_includes_;   // the statistics keep the includes-free gate; the inliner's decl and its argument proofs go by the argument
         if (stamping() && ov && ov->size() == 1) {
             fn = (*ov)[0];
             auto [lo, hi] = arity_range(fn);
-            bool ok = fn->body && !fn->is_coroutine && lo == n && hi == n && args.size() == n;
-            for (const auto& p : fn->parameters) { if (p.is_reference) { by_value = false; } }
-            if (!ok) { fn = nullptr; }
+            if (!(fn->body && !fn->is_coroutine && lo == n && hi == n && args.size() == n)) { fn = nullptr; }
         }
         c->proven_callee_decl = fn && free_callee ? fn->weak_from_this() : std::weak_ptr<const function_decl>();
         if (!fn) {
             c->static_arg_proofs.clear();
             c->proof_globals.clear();
-            c->proven_callee_body = nullptr;
-            c->proven_callee_body_owner.reset();
             return;
         }
         c->static_arg_proofs.assign(n, proof_none);
@@ -2194,9 +2189,6 @@ private:
                 for (const auto& d : deps) { if (std::find(c->proof_globals.begin(), c->proof_globals.end(), d) == c->proof_globals.end()) { c->proof_globals.push_back(d); } }
             }
         }
-        c->proven_callee_body = by_value && certain_program ? fn->body.get() : nullptr;
-        c->proven_callee_body_owner = by_value && certain_program ? std::weak_ptr<const block_stmt>(fn->body) : std::weak_ptr<const block_stmt>();
-        if (by_value && certain_program) { ++counts_.calls; }
     }
 
     // -------------------------------------------------------------- assignability
@@ -5420,10 +5412,8 @@ private:
 			check_const_bind(decl, entry);
 			warn_shadow("local", decl->name, decl->location);
 			scopes_.back().emplace(decl->name, std::move(entry));
-			stamp(decl->static_init_proof, proof_none, proof_none);
 			return;
 		}
-		uint8_t init_proof = proof_none;
 		if (decl->function_spelling) {
 			entry.type = ctype::make(ctype::function_k);
 			entry.display = "function";
@@ -5452,13 +5442,6 @@ private:
 				entry.referent = referent_type(auto_referent ? source : entry.type);
 			}
 			entry.is_handle = decl->type->base_type == script_value_type::jai_shared_ptr_type;
-			const bool plain_kind = decl->type->base_type != script_value_type::jai_shared_ptr_type &&
-									decl->type->base_type != script_value_type::jai_weak_ptr_type &&
-									decl->type->base_type != script_value_type::jai_reference_type &&
-									decl->type->base_type != script_value_type::jai_any_type;
-			if (has_init && !entry.dynamic && !is_reference_decl && plain_kind && same_type(entry.type, init)) {
-				init_proof = proof_same_type;
-			}
 			ctype binding_source = init;
 			if (is_reference_decl && decl->initializer &&
 			    decl->initializer->get_type() == node_type::identifier_expr) {
@@ -5501,8 +5484,6 @@ private:
 			// checker can't see branch order, so it stays dynamic (documented leniency)
 			entry.dynamic = true;
 		}
-		stamp(decl->static_init_proof, init_proof, proof_none);
-		if (init_proof != proof_none && stamping()) { ++counts_.decls; }
 		if (has_init && decl->slot_index != SIZE_MAX && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
 			entry.lambda = static_cast<const lambda_expr*>(decl->initializer.get());
 		}

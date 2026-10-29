@@ -340,8 +340,6 @@ namespace jai {
         // a builtin method's receiver that is a certain program-scope typed global: a graft in its arguments re-checks it, since the graft
         // runs ahead of the receiver's read
         mutable proof_global receiver_global;
-        mutable const block_stmt* proven_callee_body = nullptr;
-        mutable std::weak_ptr<const block_stmt> proven_callee_body_owner;   // proven_callee_body names that body only while this holds
         // weak: the resolved declaration may belong to a program that dies before this site compiles (a dropped jaibite, an evicted parse-cache entry, a redefinition)
         mutable std::weak_ptr<const class function_decl> proven_callee_decl;
         mutable std::weak_ptr<const class function_decl> proven_method_decl;   // `recv.m(...)` on an object receiver in a frame slot: the one overload of the receiver's class the checker resolved (the inliner's method graft)
@@ -883,7 +881,6 @@ namespace jai {
         static constexpr uint8_t decl_fast_scalar = 1 << 1; // auto/var/int/float/bool/char/string: matching payloads need no conversion
         static constexpr uint8_t decl_fast_slot_store = decl_fast_plain | decl_fast_scalar;
         uint8_t decl_fast_flags = 0;
-        mutable uint8_t static_init_proof = proof_none;
         // the VM's synthesized declarations: the typed-slot rejection spells the site the declaration stands for (a graft's
         // result converts with the callee's return text); the parser leaves the declaration site
         static constexpr uint8_t site_declaration = 0, site_parameter = 1, site_return = 2;

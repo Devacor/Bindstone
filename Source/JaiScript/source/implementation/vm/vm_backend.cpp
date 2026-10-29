@@ -53,7 +53,7 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/vm/disassembler.hpp>  // the listing sink's text
 #include <jaiscript/vm/chunk_manifest.hpp>  // the listing sink's manifest
 #include <jaiscript/detail/container_enforce.hpp>   // typed-container boundary kernel (interp parity)
-#include <jaiscript/detail/type_proofs.hpp>   // parse-time type proof guards (interp parity)
+#include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/typed_slot.hpp>   // the one typed-slot conversion table (interp parity)
 #include <jaiscript/detail/range_for_diagnostic.hpp>   // range-for texts (interp parity)
 #include <jaiscript/detail/map_entry_binding.hpp>
@@ -3724,10 +3724,9 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)
 			type_info_ptr slot_type = storage->get_type_info();
-			// V-S1: a same_type proof whose payload guard holds makes enforcement the identity
-			const bool proven_identity = (ins.c & store_flag_same_type) && slot_type &&
-			                             detail::same_type_payload(value, slot_type.get());
-			if (detail::slot_value_assign_candidate(*storage) && !proven_identity && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
+			// a payload the slot's type already names makes enforcement the identity
+			const bool identity = slot_type && detail::same_type_payload(value, slot_type.get());
+			if (detail::slot_value_assign_candidate(*storage) && !identity && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
 				// a var parameter or loop variable holds a handle under the handle's own tag: the store names a var declaration
 				const type_info* held_tag = storage->type_info_raw();
 				const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
@@ -3743,7 +3742,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					return {};
 				}
 			}
-			if (!proven_identity && slot_type && (slot_type->base_type != value.type() ||
+			if (!identity && slot_type && (slot_type->base_type != value.type() ||
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
@@ -3999,9 +3998,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			}
 		}
 
-		// V-S2: same_type proof + payload guard = identity conversion
-		if (target_type && !detail::var_slot(target_type.get()) && !((ins.c & store_flag_same_type) &&
-		      detail::same_type_payload(value, target_type.get()))) {   // no type or a var: the table is the identity
+		// no type, a var, or a payload the type already names: the table is the identity
+		if (target_type && !detail::var_slot(target_type.get()) && !detail::same_type_payload(value, target_type.get())) {
 			auto enforced = enforce_type_compatibility(std::move(value), target_type, sym);
 			if (!enforced) {
 				return raise_from(enforced);
@@ -12775,8 +12773,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 		// Exception: a 'var' decl keeps a shared_ptr-tagged initializer's marker —
 		// `var p = new P()` IS `shared_ptr<P> p = P()`, so the
 		// reference-semantics tag must survive the decl instead of flattening to 'any'
-		if (has_init && !(decl->static_init_proof == proof_same_type &&
-		                  detail::same_type_payload(value, effective_decl_type.get()))) {   // V-D1
+		if (has_init && !detail::same_type_payload(value, effective_decl_type.get())) {
 			const detail::slot_site ds = decl_site(decl);
 			auto enforced = enforce_type_compatibility(std::move(value), effective_decl_type, ds.name, ds.kind, ds.owner);
 			if (!enforced) {
@@ -14509,7 +14506,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 		try {
 			bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
 			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-			                        site_arg_proofs(site, caller.code, function.body, function.parameters().size(), argc), &function, caller_frame_unit());
+			                        &function, caller_frame_unit());
 		} catch (...) {
 			pop_script_frame_core(rec);
 			throw;
@@ -14557,7 +14554,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	try {
 		bound = bind_parameters(function.parameters(), stack_, args_base, argc, tf, *body_chunk,
 		                        environment_, site, &rec.f, rec.f.code,
-		                        site_arg_proofs(site, rec.f.code, function.body, function.parameters().size(), argc), &function, tail_caller_unit);
+		                        &function, tail_caller_unit);
 	} catch (...) {
 		frames_.pop_back();
 		throw;
@@ -16477,12 +16474,12 @@ JAI_FORCEINLINE const script_value* vm_backend::site_field_of_holder(const chunk
 	if (!rows || rows->size() <= site) { return nullptr; }
 	const auto& entry = (*rows)[site];
 	if (entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) { return inst->field_slot_value(entry.slot); }
-// A member read's field, borrowed where it lives: the site's member_ic row (its class and method epoch), the raw cell as the ladder
-// hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder: a first sight or a new
-// class fills the row, so the ladder serves that one read and hits serve from then on
 	return nullptr;
 }
 
+// A member read's field, borrowed where it lives: the site's member_ic row (its class and method epoch), the raw cell as the ladder
+// hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder: a first sight or a new
+// class fills the row, so the ladder serves that one read and hits serve from then on
 JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
 	std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
 	if (!rows || objd.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
@@ -23894,7 +23891,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	try {
 		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, function.body, function.parameters().size(), argc), &function, caller_frame_unit());
+		                        &function, caller_frame_unit());
 	} catch (...) {
 		pop_script_frame_core(rec);
 		throw;
@@ -24185,7 +24182,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		try {
 			bound = bind_parameters(rec.ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
 			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-			                        site_arg_proofs(site, caller.code, rec.ast->body, rec.ast->parameters.size(), argc), nullptr, caller_frame_unit(),
+			                        nullptr, caller_frame_unit(),
 			                        0, false, rec.ast->body.get());
 		} catch (...) {
 			pop_script_frame_core(rec);
@@ -24349,7 +24346,7 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
 		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body, ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        nullptr, caller_frame_unit(),
 		                        0, false, ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -24467,7 +24464,7 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 	op_status bound{};
 	try {
 		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code, rec.prev_env, site, &caller, caller.code,
-		                        site_arg_proofs(site, caller.code, ast->body, ast->parameters.size(), arguments.size()), nullptr, caller_frame_unit(),
+		                        nullptr, caller_frame_unit(),
 		                        0, false, ast->body.get());
 	} catch (...) {
 		pop_script_frame_core(rec);
@@ -24786,17 +24783,11 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		default:   // ref / check: full route
 			break;
 	}
-	// V-R1: a proven return whose payload guard holds is the identity - the deref-only
-	// route yields exactly what convert_return_value's identity try_convert would; so is
-	// a value already converted at its in-region return site (return_mode_converted)
-	if (!deref_only && mode != 0 && rec.return_type &&
-	    rec.return_type->base_type != script_value_type::jai_reference_type) {
-		if (mode == return_mode_converted) {
-			deref_only = true;
-		} else {
-			const script_value& probe = result.is_reference() ? result.deref() : result;
-			deref_only = detail::same_type_payload(probe, rec.return_type.get());
-		}
+	// a payload the declared type already names is the identity - the deref-only route yields exactly what convert_return_value's
+	// identity try_convert would; so is a value already converted at its in-region return site (return_mode_converted)
+	if (!deref_only && rec.return_type && rec.return_type->base_type != script_value_type::jai_reference_type) {
+		deref_only = mode == return_mode_converted ||
+		             detail::same_type_payload(result.is_reference() ? result.deref() : result, rec.return_type.get());
 	}
 	if (deref_only) {
 		if (result.is_reference()) [[unlikely]] {
@@ -24872,9 +24863,8 @@ template <bool Entry>
 op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	frame& f = *fp;
 	auto finish = [&](script_value v) -> op_status {
-		const uint32_t mode = (ins.c & load_flag_return_proven) ? 1u : 0u;
-		if constexpr (Entry) { return entry_return_finish(f, std::move(v), mode); }
-		else { return return_with_result(fp, std::move(v), mode); }
+		if constexpr (Entry) { return entry_return_finish(f, std::move(v), 0); }
+		else { return return_with_result(fp, std::move(v)); }
 	};
 	if (ins.a != k_invalid_u32 && !(ins.c & (load_flag_global_only | load_flag_type_ctor)) && has_slots(f)) {
 		if (script_value* local = frame_slot(f, ins.a)) {   // fused_ident_value's slot rung
@@ -24917,8 +24907,8 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 	stack_.pop_back();
 	const token_type op = static_cast<token_type>(ins.a);
 	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left_raw, right_raw, op)) {
-		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), ins.c); }
-		else { return return_with_result(fp, std::move(left_raw), ins.c); }
+		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), 0); }
+		else { return return_with_result(fp, std::move(left_raw)); }
 	}
 	auto result = binary_general(op, left_raw.deref(), right_raw.deref());
 	if (!result) {
@@ -24930,8 +24920,8 @@ op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) 
 		stack_.push_back(std::move(result.value()));
 		return {};
 	}
-	if constexpr (Entry) { return entry_return_finish(*fp, std::move(result.value()), ins.c); }
-	else { return return_with_result(fp, std::move(result.value()), ins.c); }
+	if constexpr (Entry) { return entry_return_finish(*fp, std::move(result.value()), 0); }
+	else { return return_with_result(fp, std::move(result.value())); }
 }
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {
@@ -25038,11 +25028,11 @@ script_value vm_backend::implicit_this_result(call_frame& locals) {
 
 // Return-site conversion, one routine for every door (op_return_convert inside try
 // regions, the native-entry / fiber completion door): none derefs, ref validates the
-// handle through the pass-through kernel, a storage-matching prim_* or a proven same-type
-// payload is the identity, everything else runs the one table. KEEP BYTE-PARALLEL with
+// handle through the pass-through kernel, a storage-matching prim_* or a payload the type
+// already names is the identity, everything else runs the one table. KEEP BYTE-PARALLEL with
 // the interpreter's visit_return_stmt.
 checked_result<script_value> vm_backend::convert_return_at_site(script_value result, const type_info_ptr& return_type,
-                                                                return_conv conv, bool proven, std::string_view callee) {
+                                                                return_conv conv, std::string_view callee) {
 	if (conv == return_conv::unclassified) {
 		conv = classify_return_conv(return_type);
 	}
@@ -25052,8 +25042,7 @@ checked_result<script_value> vm_backend::convert_return_at_site(script_value res
 	if (result.is_reference()) {
 		result = result.deref();
 	}
-	if (conv == return_conv::none || detail::return_conv_identity(conv, result) ||
-	    (proven && detail::same_type_payload(result, return_type.get()))) {
+	if (conv == return_conv::none || detail::return_conv_identity(conv, result) || detail::same_type_payload(result, return_type.get())) {
 		return result;
 	}
 	auto converted = try_convert_for_parameter(result, return_type,
@@ -25083,7 +25072,7 @@ op_status vm_backend::exec_return_convert(frame& f, const vm_instruction& ins) {
 	}
 	// Moved off the stack: a converting ctor / to_X() may grow it (the slot stays reserved)
 	script_value value = std::move(stack_.back());
-	auto converted = convert_return_at_site(std::move(value), *return_type, conv, ins.a != 0, f.code->function_name);
+	auto converted = convert_return_at_site(std::move(value), *return_type, conv, f.code->function_name);
 	if (!converted) {
 		return raise_from(converted);
 	}
@@ -25125,7 +25114,7 @@ op_status vm_backend::entry_return_finish(frame& f, script_value result, uint32_
 	}
 	if (mode != return_mode_converted && f.return_conv_class != 0) {
 		auto converted = convert_return_at_site(std::move(result), f.return_type,
-		                                        static_cast<return_conv>(f.return_conv_class), mode != 0, f.code->function_name);
+		                                        static_cast<return_conv>(f.return_conv_class), f.code->function_name);
 		if (!converted) {
 			return raise_from(converted);
 		}
@@ -25432,7 +25421,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  frame& callee, chunk& body_chunk,
                                                  const std::shared_ptr<environment>& caller_env,
                                                  const call_site* site, frame* caller_frame,
-                                                 chunk* caller_code, const uint8_t* arg_proofs,
+                                                 chunk* caller_code,
                                                  const script_defined_function* alias_fn,
                                                  unit_stamp caller_unit,
                                                  size_t first_param, bool later_taken,
@@ -25525,7 +25514,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				selected.push_back(j < parameters.size() && parameters[j].is_reference && detail::early_bound_reference(staged)
 				                   ? staged : detail::argument_for_binding(staged, detail::parameters_binding(parameters, j)));
 			}
-			return bind_parameters(parameters, selected, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, later_taken);
+			return bind_parameters(parameters, selected, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, alias_fn, caller_unit, i, later_taken);
 		}
 
 		if (param.is_reference) {
@@ -25685,17 +25674,11 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				}
 			}
 
-			// V-C1: a proven identity bind takes try_convert_for_parameter's identity returns
-			// (the arg itself; the derefed arg for exact-name objects), dereferencing exactly
-			// where it does (typed params only) (KEEP BYTE-PARALLEL with interpreter I-C1)
+			// an identity bind takes try_convert_for_parameter's identity returns (the arg itself; the derefed arg for exact-name
+			// objects), dereferencing exactly where it does (typed params only)
 			script_value converted_arg = make_null();
 			const bool untyped = !param.type || param.type->base_type == script_value_type::jai_any_type;
-			bool proven_identity = arg_proofs && arg_proofs[i] == proof_same_type;
-			if (proven_identity && param.type) {
-				const script_value& probe = arg_shield.deref();
-				proven_identity = untyped || detail::same_type_payload(probe, param.type.get());
-			}
-			if (proven_identity) {
+			if (untyped || detail::same_type_payload(arg_shield.deref(), param.type.get())) {
 				converted_arg = (!untyped && param.type->base_type == script_value_type::jai_object_type)
 				                ? script_value(arg_shield.deref()) : script_value(arg_shield);
 			} else {
@@ -25713,7 +25696,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 							detail::capture_argument(engine_, held[j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
 						}
 						VM_TRY(bind_later_places(parameters, &held, 0, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
-						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, arg_proofs, alias_fn, caller_unit, i, true, callee_body);
+						return bind_parameters(parameters, held, 0, argc, callee, body_chunk, caller_env, site, caller_frame, caller_code, alias_fn, caller_unit, i, true, callee_body);
 					}
 					for (size_t j = i + 1; j < argc; ++j) {
 						detail::capture_argument(engine_, stack_[args_base + j], detail::transient_read_marker::arg_capture_full, detail::parameters_binding(parameters, j));
@@ -25918,7 +25901,7 @@ checked_result<script_value> vm_backend::call_script_function(const script_defin
 	{
 		auto bind_result = bind_parameters(function.parameters(), args, first, argc, f, *f.code,
 	                                   env_untouched ? environment_ : previousEnv, site, caller_frame, caller_code,
-	                                   site_arg_proofs(site, caller_code, function.body, function.parameters().size(), argc), &function, caller_unit);
+	                                   &function, caller_unit);
 		if (bind_result == op_status::failed) {
 			cleanup();
 			return pending_error_;
@@ -26170,7 +26153,7 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 		op_status bound{};
 		try {
 			bound = bind_parameters(function.parameters(), args, 0, args.size(), f, *s.body,
-			                        untouched ? environment_ : swapped ? s.closure_env : previous_env, nullptr, nullptr, nullptr, nullptr, &function, caller_unit);
+			                        untouched ? environment_ : swapped ? s.closure_env : previous_env, nullptr, nullptr, nullptr, &function, caller_unit);
 		} catch (...) {
 			cleanup();
 			throw;

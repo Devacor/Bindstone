@@ -1450,7 +1450,6 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 				    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
 					flags |= load_flag_type_ctor;
 				}
-				if (rs->static_return_proof == proof_same_type) flags |= load_flag_return_proven;
 				const uint32_t symbol = add_symbol(ident->symbol_id);
 				const size_t ret_ip = emit(opcode::op_return_ident, identifier_slot_operand(ident), symbol, flags);
 				note_ident_node(ret_ip, rs->value);
@@ -1479,7 +1478,6 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
 					if (!logical && chunk_->code.back().op == opcode::op_binary) {
 						chunk_->code.back().op = opcode::op_return_binary;
-						chunk_->code.back().c = rs->static_return_proof;   // op_binary uses only a/b
 						return;
 					}
 				}
@@ -1501,11 +1499,11 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			// The typed-return conversion runs at the site, inside this frame's try
 			// records (a catch around the return sees it); the op_return after the
 			// exits lands the converted value without converting or materializing again
-			emit(opcode::op_return_convert, rs->static_return_proof, operand_class, own_slot);
+			emit(opcode::op_return_convert, 0, operand_class, own_slot);
 			operand_class = detail::return_operand_unclassified;
 		}
 		emit_region_exits(SIZE_MAX);
-		emit(opcode::op_return, 1, fuse_return ? rs->static_return_proof : return_mode_converted, operand_class);
+		emit(opcode::op_return, 1, fuse_return ? 0 : return_mode_converted, operand_class);
 		return;
 	}
 	case node_type::break_stmt:
@@ -4238,7 +4236,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (st.op == opcode::op_return_ident) {
 					if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || (st.c & (load_flag_type_ctor | load_flag_global_only))) { refuse(chunk::cell_refusal_translation, ip); break; }
 					use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
-					ret.proto = (st.c & load_flag_return_proven) ? 1u : 0u;
+					ret.proto = 0;
 					op = ret;
 				} else if (st.op == opcode::op_return || st.op == opcode::op_return_binary) {
 					refuse(chunk::cell_refusal_translation, ip); break;   // a value the stack carries
@@ -5304,7 +5302,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		loop.inline_sites = loop_inline_sites;
 		loop.math_alias_sites = loop_alias_sites;
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
-		struct ret_pad { uint32_t at, proof, origin; };   // a C_RET's copy ip, the return's proof mode and the general ip of its tail
+		struct ret_pad { uint32_t at, mode, origin; };   // a C_RET's copy ip, the return's mode and the general ip of its tail
 		std::vector<ret_pad> ret_pads;
 		std::vector<uint8_t> jump_target(back - head + 2, 0);   // an operation some branch or resume lands on
 		auto elided_jump = [&](size_t n) {   // a jump onto the next instruction (over operations that emit nothing) emits nothing
@@ -5893,7 +5891,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (const ret_pad& rp : ret_pads) {
 			// the general return of a boxed result (a frame the raw protocol does not return from): its own statement for the trace
 			code[rp.at].b = static_cast<uint32_t>(code.size());
-			code.push_back(vm_instruction{opcode::op_return, 1, rp.proof, 0});
+			code.push_back(vm_instruction{opcode::op_return, 1, rp.mode, 0});
 			c.stmt_nodes.push_back(rp.origin < c.stmt_nodes.size() ? c.stmt_nodes[rp.origin] : nullptr);
 		}
 		if (fn_mode) {

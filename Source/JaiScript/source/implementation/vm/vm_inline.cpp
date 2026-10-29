@@ -652,7 +652,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto callee = clone_expr(ce->callee, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<call_expr>(ce->location, callee, std::move(args));
-		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_body = ce->proven_callee_body; n->proven_callee_body_owner = ce->proven_callee_body_owner; n->proven_callee_decl = ce->proven_callee_decl;
+		n->static_arg_proofs = ce->static_arg_proofs; n->proof_globals = ce->proof_globals; n->proven_callee_decl = ce->proven_callee_decl;
 		n->builtin_receiver = ce->builtin_receiver; n->builtin_receiver_open = ce->builtin_receiver_open;
 		c.origins[n.get()] = ce;
 		for (auto* pins : { c.alias_pins, c.callee_probes }) {
@@ -733,8 +733,7 @@ statement_ptr clone_stmt(const statement_ptr& s, inline_context& c, bool final_p
 			if (c.in_loop && !landable(v.get(), &c.lc)) { c.fail("a return the block cannot land"); return nullptr; }
 			auto rd = c.make<variable_decl>(r->location, c.result_type, c.result->name, c.result->symbol_id, v);   // `T __h = e;`: this path's definition of the result
 			rd->slot_index = c.result->slot_index;
-			if (proven_return) { rd->static_init_proof = proof_same_type; }
-			else { rd->site_kind = variable_decl::site_return; rd->site_owner = c.callee_name; }   // the callee's return converted here, with the return's text
+			if (!proven_return) { rd->site_kind = variable_decl::site_return; rd->site_owner = c.callee_name; }   // the callee's return converted here, with the return's text
 			ds.push_back(rd);
 		}
 		if (!final_position) {
@@ -806,7 +805,6 @@ std::vector<declaration_ptr> clone_body(const std::vector<declaration_ptr>& decl
 			if (v->slot_index < c.slot_types.size()) { c.slot_types[v->slot_index] = v->type.get(); }
 			auto n = c.make<variable_decl>(v->location, v->type, v->name, v->name_id, init);
 			n->slot_index = v->slot_index + c.slot_offset;
-			n->static_init_proof = v->static_init_proof;
 			n->decl_fast_flags = v->decl_fast_flags;
 			n->alias_home = v->alias_home;
 			n->alias_index = v->alias_index;
@@ -1617,7 +1615,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			continue;
 		}
 		auto sd = std::make_shared<variable_decl>(sub->location, inline_type(kind), std::string_view("\x01inl"), inline_symbol_, sub);
-		sd->slot_index = tid->slot_index; sd->static_init_proof = proof_same_type;
+		sd->slot_index = tid->slot_index;
 		chunk_->nodes.push_back(sd);
 		compile_variable_decl(sd);
 		sc.spills.emplace_back(sub.get(), tid);
@@ -1839,7 +1837,7 @@ bool vm_compiler::try_inline_variable_decl(const std::shared_ptr<variable_decl>&
 	if (!changed) return false;
 	auto nd = std::make_shared<variable_decl>(decl->location, decl->type, decl->name, decl->name_id, h);
 	nd->slot_index = decl->slot_index; nd->is_static = decl->is_static; nd->function_spelling = decl->function_spelling; nd->ref_escaping = decl->ref_escaping;
-	nd->static_init_proof = decl->static_init_proof; nd->decl_fast_flags = decl->decl_fast_flags; nd->site_kind = decl->site_kind; nd->site_owner = decl->site_owner;
+	nd->decl_fast_flags = decl->decl_fast_flags; nd->site_kind = decl->site_kind; nd->site_owner = decl->site_owner;
 	nd->alias_home = decl->alias_home; nd->alias_index = decl->alias_index;
 	chunk_->nodes.push_back(nd);
 	compile_variable_decl(nd);

@@ -4497,6 +4497,34 @@ public:
 			check_true(e->get_type_info_array(nested) != nullptr, "the shape interns once the region is over");
 		});
 
+		test("a_name_missed_by_the_barrier_throws_instead_of_interning", [this]() {
+			// A frozen symbolizer only answers: a miss throws in every build (an insert would move the tables the other workers
+			// read), and the accessor caches are read, never filled, while frozen
+			auto e = make_engine();
+			auto* symbols = e->get_symbolizer();
+			const uint64_t member = symbols->intern("frozen_probe_member");
+			(void)symbols->intern("_get_frozen_probe_member");
+			const size_t interned = symbols->size();
+			symbols->set_frozen(true);
+			std::vector<std::string> errors;
+			const auto attempt = [&](const auto& run) {
+				try { run(); errors.push_back("no error"); } catch (const std::exception& ex) { errors.push_back(ex.what()); }
+			};
+			attempt([&]() { (void)symbols->intern("frozen_probe_never_seen"); });
+			attempt([&]() { (void)symbols->intern_with_view("frozen_probe_never_seen"); });
+			attempt([&]() { (void)symbols->get_setter_id_with_view(member); });
+			const auto getter = symbols->get_getter_id_with_view(member);
+			const size_t after = symbols->size();
+			symbols->set_frozen(false);
+			const std::string missed = "parallel_transform: name 'frozen_probe_never_seen' was not pre-warmed at the region barrier (internal) - please report this body shape";
+			check_eq(missed, errors[0]);
+			check_eq(missed, errors[1]);
+			check_eq(std::string("parallel_transform: name '_set_frozen_probe_member' was not pre-warmed at the region barrier (internal) - please report this body shape"), errors[2]);
+			check_eq(std::string("_get_frozen_probe_member"), std::string(getter.second), "an interned accessor name answers while frozen");
+			check_eq(interned, after, "nothing was interned while frozen");
+			check_eq(getter.first, symbols->get_getter_id_with_view(member).first, "and caches once thawed");
+		});
+
 		test("activation_restores_an_already_frozen_symbolizer", [this]() {
 			for (bool inject : {false, true}) {
 				auto fixture = prepare(0, true);

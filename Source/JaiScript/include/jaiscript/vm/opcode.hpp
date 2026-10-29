@@ -378,10 +378,6 @@ namespace jai::vm {
     inline constexpr uint32_t store_flag_ref_alias = 4;  // target names a reference decl (ref param /
                                                          // auto& decl): a cell in the slot stores THROUGH
                                                          // instead of writing the cell as the variable
-    inline constexpr uint32_t store_flag_type_provable = 8; // parse-proven typed slot store
-                                                         // (assignment_expr::typed_store_provable):
-                                                         // exec_store may skip type enforcement after
-                                                         // its runtime type-tag guard confirms
     inline constexpr uint32_t store_flag_global_only = 16; // ::name store target (global env only)
     // op_concat_store's target: c >> concat_store_mode_shift (the low bits are op_store's flags in the identifier mode)
     inline constexpr uint32_t concat_store_mode_shift = 24;

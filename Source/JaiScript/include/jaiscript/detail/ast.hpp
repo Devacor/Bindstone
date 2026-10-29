@@ -270,11 +270,6 @@ namespace jai {
         expression_ptr target;
         token op;
         expression_ptr value;
-        // Simple `=` whose identifier target resolves to a slot-resident int/float value
-        // decl AND whose RHS's static type provably matches it (typed-store proof pass in
-        // parser.cpp): both backends may skip store-time type enforcement. Consumers
-        // re-guard on the runtime type tags, so a stale/wrong stamp only costs the skip.
-        bool typed_store_provable = false;
         // proof_same_type: the RHS static type IS the target's declared type (identity conversion)
         mutable uint8_t static_store_proof = proof_none;
         // a compound op on a local: the class of the target's declared kind against the value's (operand_class_*), the

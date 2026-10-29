@@ -2,7 +2,6 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include "../../include/jaiscript/detail/transient_read.hpp"
-#include "../../include/jaiscript/detail/math_intrinsics.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
 #include "../../include/jaiscript/detail/expr_children.hpp"
@@ -29,33 +28,17 @@ namespace {
     // there (cross-execute globals, C++ defines) are handled at bind time instead. Class
     // FIELDS are never registered: field refs use the instance-pinned identity mode.
     struct ref_escape_marker {
-        // Typed-store proof classification (consumed by assignment_expr::typed_store_provable):
-        // the DECLARED type of a slot-resident value decl, or the provable static type of an
-        // expression. unknown = no proof (today's enforced store path).
-        enum : uint8_t { cls_unknown = 0, cls_int = 1, cls_float = 2 };
-        // cls = the decl's own class; elem_cls = a typed container's ELEMENT class
-        // (array<int>/array<float> elements are store-enforced invariants, so a
-        // subscript read of one proves — the static all-primitive rule's twin)
-        struct slot_decl_type { uint64_t symbol; uint8_t cls; uint8_t elem_cls; };
         struct scope {
             std::unordered_multimap<uint64_t, variable_decl*> vars;
             std::unordered_multimap<uint64_t, parameter*> params;
             std::unordered_multimap<uint64_t, range_for_stmt*> range_vars;
             std::unordered_multimap<uint64_t, std::pair<destructuring_decl*, size_t>> destructures;
-            // slot -> declared classification for int/float value decls of THIS function.
-            // Slot indices are unique per declaration within a function, so keying by the
-            // parser-resolved slot is exact under block shadowing; the symbol double-checks
-            // identifiers whose slot resolved to an ENCLOSING function's numbering.
-            std::unordered_map<size_t, slot_decl_type> slot_types;
             block_stmt* body = nullptr;   // the function body this scope's frame runs
         };
         std::vector<scope> scopes;
         // class bodies being walked: inside one, an unqualified name resolves to a member (a script field or a
         // native property) before a same-named program global, and fields are never registered here
         size_t class_depth = 0;
-        // program-level array<int>/array<float> decls by symbol: their elements classify a subscript
-        // read from any function (a store-enforced invariant; every consumer guards at runtime)
-        std::unordered_map<uint64_t, uint8_t> global_elem_cls;
         string_symbolizer* symbolizer = nullptr;
         bool names_execute_elapsed = false;   // the engine stamps host entries once a loaded program can read them
 
@@ -303,197 +286,6 @@ namespace {
             return hit.found && !hit.is_ref && !(hit.program_scope && class_depth > 0);
         }
 
-        // Declared classification of an identifier, looked up ONLY in the innermost
-        // function's slot map with a symbol double-check: an identifier whose slot came
-        // from an enclosing function (later neutralized by lambda capture) can never
-        // collide into a proof.
-        uint8_t declared_numeric_class(const identifier_expr* id) const {
-            if (scopes.empty() || id->slot_index == SIZE_MAX || !id->names_value_decl) {
-                return cls_unknown;
-            }
-            const auto& slot_types = scopes.back().slot_types;
-            auto found = slot_types.find(id->slot_index);
-            if (found == slot_types.end() || found->second.symbol != id->symbol_id) {
-                return cls_unknown;
-            }
-            return found->second.cls;
-        }
-
-        // Element class of a slot-resident typed-container decl: array<int>/array<float>
-        // elements are store-enforced, and an OOB read throws (it never yields a
-        // wrong-class value), so a subscript read of one classifies exactly.
-        uint8_t declared_element_class(const identifier_expr* id) const {
-            if (scopes.empty()) {
-                return cls_unknown;
-            }
-            if (id->slot_index == SIZE_MAX) {   // env-resolved: a program-level typed container
-                auto g = global_elem_cls.find(id->symbol_id);
-                return g == global_elem_cls.end() ? cls_unknown : g->second;
-            }
-            // a reference alias registers its referent's element class under its own slot, so the
-            // value-decl requirement of declared_numeric_class does not apply here
-            const auto& slot_types = scopes.back().slot_types;
-            auto found = slot_types.find(id->slot_index);
-            if (found == slot_types.end() || found->second.symbol != id->symbol_id) {
-                return cls_unknown;
-            }
-            return found->second.elem_cls;
-        }
-
-        // math:: intrinsic return classification (shared recognizer, so it agrees with
-        // what both backends will execute). Only fns whose result type is fixed - or
-        // fixed by provably-classified args (abs/min/max/clamp) - classify; wrong arity
-        // errors in the kernel before any store, so unknown is safe there too.
-        uint8_t math_intrinsic_class(const call_expr* c) const {
-            if (!c->callee || c->callee->get_type() != node_type::member_expr) {
-                return cls_unknown;
-            }
-            auto* m = static_cast<const member_expr*>(c->callee.get());
-            if (!m->is_static) {
-                return cls_unknown;
-            }
-            const detail::math_fn fn = detail::math_intrinsic_for_call(m);
-            const size_t argc = c->arguments.size();
-            // the component-wise family takes vectors too (a vector result), so it classifies float only over numeric arguments
-            auto numeric_args = [&]() {
-                for (const auto& a : c->arguments) { if (static_numeric_class(a.get()) == cls_unknown) { return false; } }
-                return true;
-            };
-            switch (fn) {
-                case detail::math_fn::itrunc:
-                case detail::math_fn::ifloor:
-                    return argc == 1 ? cls_int : cls_unknown;
-                case detail::math_fn::floor_:
-                case detail::math_fn::ceil_:
-                case detail::math_fn::round_:
-                    return argc == 1 && numeric_args() ? cls_float : cls_unknown;
-                case detail::math_fn::sqrt_:
-                case detail::math_fn::sin_:
-                case detail::math_fn::cos_:
-                case detail::math_fn::tan_:
-                case detail::math_fn::radians_to_degrees:
-                case detail::math_fn::degrees_to_radians:
-                    return argc == 1 ? cls_float : cls_unknown;
-                case detail::math_fn::pow_:
-                case detail::math_fn::atan2_:
-                    return argc == 2 ? cls_float : cls_unknown;
-                case detail::math_fn::lerp_:
-                case detail::math_fn::mix_:
-                case detail::math_fn::unmix_:
-                    return argc == 3 && numeric_args() ? cls_float : cls_unknown;
-                case detail::math_fn::remap_:
-                    return argc == 5 && numeric_args() ? cls_float : cls_unknown;
-                case detail::math_fn::distance:
-                case detail::math_fn::distance_squared:
-                    return argc == 4 ? cls_float : cls_unknown;
-                case detail::math_fn::mix_in_:
-                case detail::math_fn::mix_out_:
-                case detail::math_fn::mix_in_out_:
-                case detail::math_fn::mix_out_in_:
-                case detail::math_fn::unmix_in_:
-                case detail::math_fn::unmix_out_:
-                case detail::math_fn::unmix_in_out_:
-                case detail::math_fn::unmix_out_in_:
-                    return argc == 4 && numeric_args() ? cls_float : cls_unknown;
-                case detail::math_fn::abs_:
-                    return argc == 1 ? static_numeric_class(c->arguments[0].get()) : cls_unknown;
-                case detail::math_fn::min_:
-                case detail::math_fn::max_: {
-                    if (argc != 2) return cls_unknown;
-                    const uint8_t a = static_numeric_class(c->arguments[0].get());
-                    if (a == cls_unknown) return cls_unknown;
-                    return a == static_numeric_class(c->arguments[1].get()) ? a : cls_unknown;
-                }
-                case detail::math_fn::clamp_: {
-                    if (argc != 3) return cls_unknown;
-                    const uint8_t a = static_numeric_class(c->arguments[0].get());
-                    if (a == cls_unknown) return cls_unknown;
-                    if (a != static_numeric_class(c->arguments[1].get())) return cls_unknown;
-                    return a == static_numeric_class(c->arguments[2].get()) ? a : cls_unknown;
-                }
-                default:
-                    return cls_unknown;
-            }
-        }
-
-        // Static numeric type of an expression, for the typed-store proof: only shapes
-        // whose RUNTIME result type is guaranteed - or whose evaluation errors, which
-        // aborts the store - classify. Mirrors the arithmetic kernels: int op int stays
-        // int for + - * / % (integer division), any float operand makes all five float.
-        uint8_t static_numeric_class(const expression* e) const {
-            if (!e) {
-                return cls_unknown;
-            }
-            switch (e->get_type()) {
-                case node_type::literal_expr:
-                    switch (static_cast<const literal_expr*>(e)->value.raw_storage_index()) {
-                        case script_value::TYPEID_INT: return cls_int;
-                        case script_value::TYPEID_FLOAT: return cls_float;
-                        default: return cls_unknown;
-                    }
-                case node_type::identifier_expr:
-                    return declared_numeric_class(static_cast<const identifier_expr*>(e));
-                case node_type::unary_expr: {
-                    auto* u = static_cast<const unary_expr*>(e);
-                    if (u->op.type != token_type::minus || u->is_postfix) {
-                        return cls_unknown;
-                    }
-                    return static_numeric_class(u->operand.get());
-                }
-                case node_type::binary_expr: {
-                    auto* b = static_cast<const binary_expr*>(e);
-                    switch (b->op.type) {
-                        case token_type::plus:
-                        case token_type::minus:
-                        case token_type::star:
-                        case token_type::slash:
-                        case token_type::percent: {
-                            const uint8_t l = static_numeric_class(b->left.get());
-                            if (l == cls_unknown) return cls_unknown;
-                            const uint8_t r = static_numeric_class(b->right.get());
-                            if (r == cls_unknown) return cls_unknown;
-                            return (l == cls_int && r == cls_int) ? cls_int : cls_float;
-                        }
-                        case token_type::ampersand:
-                        case token_type::pipe:
-                        case token_type::caret:
-                        case token_type::left_shift:
-                        case token_type::right_shift:
-                            // int rows only (a shift out of range raises, and the store aborts)
-                            return static_numeric_class(b->left.get()) == cls_int && static_numeric_class(b->right.get()) == cls_int ? cls_int : cls_unknown;
-                        case token_type::left_bracket:
-                            // Subscript read of a slot-resident typed container: the
-                            // element class is a store-enforced invariant
-                            if (b->left->get_type() == node_type::identifier_expr) {
-                                return declared_element_class(
-                                    static_cast<const identifier_expr*>(b->left.get()));
-                            }
-                            return cls_unknown;
-                        default:
-                            return cls_unknown;   // comparisons/logical: no proof
-                    }
-                }
-                case node_type::ternary_expr: {
-                    auto* t = static_cast<const ternary_expr*>(e);
-                    const uint8_t a = static_numeric_class(t->then_expression.get());
-                    if (a == cls_unknown) return cls_unknown;
-                    return a == static_numeric_class(t->else_expression.get()) ? a : cls_unknown;
-                }
-                case node_type::call_expr:
-                    return math_intrinsic_class(static_cast<const call_expr*>(e));
-                case node_type::cast_expr: {
-                    // cast<int>/cast<float> yield the target or raise (the store aborts)
-                    auto* c = static_cast<const cast_expr*>(e);
-                    if (c->by_reference) return cls_unknown;
-                    if (c->target->base_type == script_value_type::jai_int_type) return cls_int;
-                    if (c->target->base_type == script_value_type::jai_float_type) return cls_float;
-                    return cls_unknown;
-                }
-                default:
-                    return cls_unknown;
-            }
-        }
-
         void walk_args(const std::vector<expression_ptr>& args) {
             for (const auto& a : args) {
                 if (a && a->get_type() == node_type::identifier_expr) { escape_reference_decl(static_cast<const identifier_expr*>(a.get())->symbol_id); }
@@ -517,28 +309,6 @@ namespace {
                     p.symbol_id = symbolizer->intern(p.name);
                 }
                 scopes.back().params.emplace(p.symbol_id, &p);
-                // a typed value parameter classifies like a typed local: the by-value boundary lands the
-                // declared kind on entry and every store to the slot is typed-checked
-                if (!p.is_reference && p.type && p.slot_index != SIZE_MAX) {
-                    uint8_t cls = cls_unknown;
-                    uint8_t elem_cls = cls_unknown;
-                    if (p.type->base_type == script_value_type::jai_int_type) {
-                        cls = cls_int;
-                    } else if (p.type->base_type == script_value_type::jai_float_type) {
-                        cls = cls_float;
-                    } else if (p.type->base_type == script_value_type::jai_array_type) {
-                        if (const auto& elem = p.type->element_type()) {
-                            if (elem->base_type == script_value_type::jai_int_type) {
-                                elem_cls = cls_int;
-                            } else if (elem->base_type == script_value_type::jai_float_type) {
-                                elem_cls = cls_float;
-                            }
-                        }
-                    }
-                    if (cls != cls_unknown || elem_cls != cls_unknown) {
-                        scopes.back().slot_types.insert_or_assign(p.slot_index, slot_decl_type{p.symbol_id, cls, elem_cls});
-                    }
-                }
                 if (p.default_value) {
                     walk_expr(p.default_value.get());
                 }
@@ -581,18 +351,6 @@ namespace {
                     auto* a = static_cast<assignment_expr*>(e);
                     walk_expr(a->target.get());
                     walk_expr(a->value.get());
-                    // Typed-store proof: simple '=' to a slot-resident int/float value
-                    // decl whose RHS statically matches the declared type (registration
-                    // is in walk order, so a store before its decl never proves)
-                    if (a->op.type == token_type::equal &&
-                        a->target->get_type() == node_type::identifier_expr) {
-                        auto* id = static_cast<identifier_expr*>(a->target.get());
-                        const uint8_t declared = declared_numeric_class(id);
-                        if (declared != cls_unknown &&
-                            declared == static_numeric_class(a->value.get())) {
-                            a->typed_store_provable = true;
-                        }
-                    }
                     break;
                 }
                 case node_type::call_expr: {
@@ -805,35 +563,6 @@ namespace {
                     }
                     if (!scopes.empty() && d->name_id != UINT64_MAX) {
                         scopes.back().vars.emplace(d->name_id, d);
-                        if (!d->is_static && d->type) {
-                            uint8_t cls = cls_unknown;
-                            uint8_t elem_cls = cls_unknown;
-                            if (d->type->base_type == script_value_type::jai_int_type) {
-                                cls = cls_int;
-                            } else if (d->type->base_type == script_value_type::jai_float_type) {
-                                cls = cls_float;
-                            } else if (d->type->base_type == script_value_type::jai_array_type) {
-                                if (const auto& elem = d->type->element_type()) {
-                                    if (elem->base_type == script_value_type::jai_int_type) {
-                                        elem_cls = cls_int;
-                                    } else if (elem->base_type == script_value_type::jai_float_type) {
-                                        elem_cls = cls_float;
-                                    }
-                                }
-                            } else if (d->type->base_type == script_value_type::jai_reference_type && d->initializer &&
-                                       d->initializer->get_type() == node_type::identifier_expr) {
-                                // `var& pix = PIX;`: the alias reads the referent's elements (a typed local or program-level container)
-                                elem_cls = declared_element_class(static_cast<const identifier_expr*>(d->initializer.get()));
-                            }
-                            if (d->slot_index != SIZE_MAX) {
-                                if (cls != cls_unknown || elem_cls != cls_unknown) {
-                                    scopes.back().slot_types.insert_or_assign(
-                                        d->slot_index, slot_decl_type{d->name_id, cls, elem_cls});
-                                }
-                            } else if (scopes.size() == 1 && elem_cls != cls_unknown) {
-                                global_elem_cls.insert_or_assign(d->name_id, elem_cls);   // a program-level typed container
-                            }
-                        }
                     }
                     break;
                 }

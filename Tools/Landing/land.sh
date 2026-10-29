@@ -14,14 +14,23 @@
 # when MutedVision compiles a changed file, and -verifyassets when the property system, the archives, the engine or the
 # assets changed. The milestone tier runs Source/JaiScript/tools/ci/battery.sh and the full client gate.
 #
-# Every heavy step waits while someone holds the timing lock. Logs go to LAND_LOG_DIR (default bindstone-land in the system
-# temp directory). JAI_DEBUG_DIR and JAI_RELEASE_DIR default to the Visual Studio build directories under Source/JaiScript.
+# Every heavy step waits while someone holds the timing lock. Logs go to LAND_LOG_DIR (default bindstone-land under
+# ../tempclaudefolders/tmp beside the checkout when that folder exists, else in the system temp directory). JAI_DEBUG_DIR and JAI_RELEASE_DIR default to the Visual Studio build directories under Source/JaiScript.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export JAI_DEBUG_DIR="${JAI_DEBUG_DIR:-out/build/x64-Debug}"
 export JAI_RELEASE_DIR="${JAI_RELEASE_DIR:-out/build/x64-Release BENCHMARKS}"
 export JAI_CMAKE_ARGS_RELEASE="${JAI_CMAKE_ARGS_RELEASE:--DJAISCRIPT_ENABLE_BENCHMARKS=ON}"
 . "$REPO/Source/JaiScript/tools/ci/ci_lib.sh"
+# A tempclaudefolders folder beside the checkout takes every temp file and log; the timing lock stays where other runs look
+LAND_TEMP_ROOT="$(dirname "$REPO")/tempclaudefolders"
+if [ -d "$LAND_TEMP_ROOT" ]; then
+	export JAI_TIMING_LOCK="$LOCKQ_LOCK"
+	mkdir -p "$LAND_TEMP_ROOT/tmp"
+	export TMPDIR="$LAND_TEMP_ROOT/tmp"
+	if command -v cygpath >/dev/null 2>&1; then export TEMP="$(cygpath -w "$TMPDIR")"; else export TEMP="$TMPDIR"; fi
+	export TMP="$TEMP"
+fi
 LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land}"
 export LAND_LOG_DIR="$LOG_DIR" JAI_CI_LOG_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"

@@ -870,6 +870,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         }
     }
 
+    class_def->declare_implicit_default_constructor();
     apply_member_access_labels(*class_def, *decl, *symbols);
 
     if (decl->base_classes.size() > 1) {

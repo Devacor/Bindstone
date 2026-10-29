@@ -3200,6 +3200,32 @@ public:
 			}
 		});
 
+		test("first_constructions_on_workers_share_the_implicit_default_constructor_the_declaration_made", [this]() {
+			// Each class's first constructions run on every worker at once: its implicit default constructor is declared with the
+			// class (workers built it on first use, one freeing another's mid-construction), so the region only reads it
+			constexpr int classes = 32;
+			for (bool vm : {false, true}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				e->set_backend(vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+				e->parallel_thread_count(8);
+				e->execute("array<int> xs; for (int i = 0; i < 64; ++i) { xs.push(i); } array<int> out; for (int i = 0; i < 64; ++i) { out.push(0); } int total = 0;");
+				std::string got;
+				for (int c = 0; c < classes && got.empty(); ++c) {
+					const std::string n = std::to_string(c);
+					const std::string program = "class B" + n + " { array<int> a = [1, 2]; int n = 3; }\n"
+					                            "class D" + n + " : B" + n + " { int m = n + 1; }\n"
+					                            "parallel_for (int x : xs) { D" + n + " d; out[x] = d.m + d.a.size(); }\n"
+					                            "total = 0; for (int v : out) { total += v; } total;";
+					try {
+						const int64_t total = e->execute(program).as_int();
+						if (total != 64 * (4 + 2)) { got = "class " + n + " totals " + std::to_string(total); }
+					} catch (const std::exception& ex) { got = "class " + n + " error " + ex.what(); }
+				}
+				check_eq(std::string(), got, vm ? "vm" : "interp");
+			}
+		});
+
 		test("host_calls_with_reference_parameters_keep_their_temporaries_per_worker", [this]() {
 			// A bound call converts a const std::vector<int>& (or a const int&) argument into a temporary in the call's parameter
 			// storage; workers calling at once each keep their own (the engine-wide storage pointer was shared: one worker's

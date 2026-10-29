@@ -51,7 +51,7 @@ public:
     // Constructor - takes pre-interned type_id from parser or runtime
     script_class_definition(std::string_view name, uint64_t type_id, engine* eng)
         : class_definition(name, type_id, class_type::script_class, eng) {
-        // That's it! Everything else is inherited from class_definition
+        declare_implicit_default_constructor();
     }
 
     // Helper to add a script method from AST
@@ -187,23 +187,27 @@ public:
     }
 
     // A constructor's initializer list as it runs: one naming none over a base that needs construction is `: super()`
-    const std::vector<constructor_initializer>& effective_initializers(const function_decl& ctor) {
+    const std::vector<constructor_initializer>& effective_initializers(const function_decl& ctor) const {
         if (ctor.initializers.empty() && base_needs_construction()) { return implicit_default_constructor()->initializers; }
         return ctor.initializers;
     }
 
-    // The implicitly-declared default constructor: no parameters, an empty body, `: super()` over a base
-    std::shared_ptr<function_decl> implicit_default_constructor() {
-        if (!implicit_default_ctor_) {
-            auto eng = get_engine();
-            auto [name_id, name_view] = eng->get_symbolizer()->intern_with_view(get_name());
-            auto ctor = std::make_shared<function_decl>(source_location{}, name_view, name_id);
-            ctor->body = std::make_shared<block_stmt>(source_location{}, std::vector<declaration_ptr>{});
-            if (!get_parent_classes().empty()) { ctor->initializers.emplace_back("super", std::vector<expression_ptr>{}); }
-            ctor->unit = unit();
-            implicit_default_ctor_ = std::move(ctor);
-        }
-        return implicit_default_ctor_;
+    // The implicitly-declared default constructor: no parameters, an empty body, `: super()` over a base. Built with the
+    // declaration and never by a construction, so the workers of a parallel region constructing at once only read it
+    const std::shared_ptr<function_decl>& implicit_default_constructor() const { return implicit_default_ctor_; }
+
+    // (Re)declares it from the class's name, unit and bases: at birth, when a reload clears the old one (a fresh identity, so
+    // the old one stops being declared) and once the declaration has set the bases and unit
+    void declare_implicit_default_constructor() {
+        auto eng = get_engine();
+        if (!eng) { return; }
+        auto [name_id, name_view] = eng->get_symbolizer()->intern_with_view(get_name());
+        auto ctor = std::make_shared<function_decl>(source_location{}, name_view, name_id);
+        ctor->body = std::make_shared<block_stmt>(source_location{}, std::vector<declaration_ptr>{});
+        if (!get_parent_classes().empty()) { ctor->initializers.emplace_back("super", std::vector<expression_ptr>{}); }
+        ctor->unit = unit();
+        ctor->shared_params_cache = std::make_shared<const std::vector<parameter>>();
+        implicit_default_ctor_ = std::move(ctor);
     }
     
     // Add field initializer AST (will be evaluated at instance construction time).
@@ -247,6 +251,7 @@ public:
     }
     bool chain_initializers_all_literal() const {
         if (literal_memo_epoch_ != method_epoch() || literal_memo_count_ != field_initializer_asts_.size()) {
+            assert(!(get_engine() && get_engine()->parallel_region_active()) && "a parallel worker writes the class's literal-chain memo (prime it at region start)");
             bool all = true;
             for (const auto& parent : get_parent_classes()) {
                 if (parent && parent->is_script_class() &&
@@ -279,7 +284,7 @@ public:
         method_asts_.clear();
         constructor_asts_.clear();
         destructor_ast_.reset();
-        implicit_default_ctor_.reset();
+        declare_implicit_default_constructor();
         field_initializer_asts_.clear();
     }
 

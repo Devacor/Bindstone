@@ -16,6 +16,8 @@
 #include <iostream>
 #include <stdexcept>
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace {
 
 // Load order matters only in that base classes execute before derived ones.
@@ -231,6 +233,7 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	jai_adapter adapter;
 	return demoreel::run_demoreel(argc, argv, adapter);
 }

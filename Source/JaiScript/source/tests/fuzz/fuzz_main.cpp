@@ -86,6 +86,8 @@
 #include <sys/wait.h>
 #endif
 
+#include <jaiscript/testing/unattended.hpp>
+
 using namespace jai::fuzz;
 
 namespace {
@@ -518,6 +520,7 @@ namespace {
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	options opt;
 	if (!parse_args(argc, argv, opt)) return 2;
 	if (opt.miss_every && !jai::engine::miss_injection_available()) { std::cerr << "--miss-every needs a build with JAISCRIPT_MISS_INJECTION defined\n"; return 2; }

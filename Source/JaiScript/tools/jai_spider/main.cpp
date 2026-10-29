@@ -34,6 +34,8 @@
 #include <unistd.h>
 #endif
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -548,6 +550,7 @@ private:
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	options opt;
 	if (int code = parse_args(argc, argv, opt); code >= 0) { return code; }
 	console_colors colors;

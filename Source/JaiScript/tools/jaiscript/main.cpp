@@ -49,6 +49,8 @@
 #include <csignal>
 #endif
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace {
 
 namespace fs = std::filesystem;
@@ -2001,6 +2003,7 @@ std::shared_ptr<jai::engine> jaiscript_runner_host_engine() {
 }
 #else
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	console_state con;
 	con.init();
 

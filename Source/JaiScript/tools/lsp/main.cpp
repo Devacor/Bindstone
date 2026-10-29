@@ -16,6 +16,8 @@
 #include <cstdlib>
 #include <iostream>
 
+#include <jaiscript/testing/unattended.hpp>
+
 std::shared_ptr<jai::engine> jaiscript_runner_host_engine();
 
 namespace {
@@ -45,6 +47,7 @@ void usage() {
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	std::string host = "runner";
 	std::vector<std::string> includes;
 	bool log = false;

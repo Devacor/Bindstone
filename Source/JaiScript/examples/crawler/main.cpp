@@ -26,6 +26,8 @@
 #include <conio.h>
 #endif
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace {
 
 struct host_options {
@@ -331,6 +333,7 @@ void print_usage() {
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	host_options opt;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];

@@ -21629,11 +21629,15 @@ void vm_backend::dump_opcode_profile() const {
 #define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
 #define JAI_DISPATCH_HERE() JAI_DISPATCH_AT(f.ip)
 #define JAI_NEXT_OP() { if (is_unwinding_) [[unlikely]] { break; } const size_t next_ip_ = f.ip + 1; f.ip = next_ip_; JAI_DISPATCH_AT(next_ip_) }
+// a frame switch (a call that pushed its callee, a return that landed in its caller) dispatches the target's instruction itself
+#define JAI_SWITCH_FRAME(target) { fp = (target); fr = fp; code_owner = fr->code; code_base = code_owner->code.data(); JAI_DISPATCH_AT(fr->ip) }
 #else
 #define JAI_OP_LABEL(o)
 #define JAI_DISPATCH_HERE() continue
 #define JAI_NEXT_OP() break
+#define JAI_SWITCH_FRAME(target) { fp = (target); continue; }
 #endif
+#define JAI_ENTER_SWITCHED() { fp = switch_to_; switch_to_ = nullptr; JAI_SWITCH_FRAME(fp); }
 #define ins (*cur)
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -21666,9 +21670,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	const chunk* code_owner = nullptr;
 	const vm_instruction* code_base = nullptr;
 	const vm_instruction* cur = nullptr;
+	// the running frame: rebound at the loop head, and by a frame switch that dispatches its target directly
+	frame* fr = fp;
+#define f (*fr)
 	for (;;) {
-		// Rebound every iteration: frame switches write fp and `continue`
-		frame& f = *fp;
+		fr = fp;
 		// the instruction base is held across ops: the fetch reads it beside f.ip instead of behind f.code
 		if (f.code != code_owner) [[unlikely]] { code_owner = f.code; code_base = f.code->code.data(); }
 		// Every chunk compiler ends its code with op_halt and no jump target passes it,
@@ -21718,7 +21724,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				// try record is still live - `continue` would run its op_try_pop first
 				VM_TRY_OP(fall_off_script_frame(fp));
 				if (is_unwinding_) [[unlikely]] { break; }
-				continue;
+				JAI_SWITCH_FRAME(fp);
 
 			case opcode::op_const: JAI_OP_LABEL(op_const) push_constant(*f.code, ins.a); JAI_NEXT_OP();
 			case opcode::op_const_folded: push_constant(*f.code, ins.a); break;
@@ -21838,7 +21844,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_call_temp: VM_TRY_OP(exec_call_temp(f, ins)); break;
 			case opcode::op_math_temp: JAI_OP_LABEL(op_math_temp)
 				VM_TRY_OP(exec_math_temp(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }   // a stdlib alias's real call entered a script frame
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }   // a stdlib alias's real call entered a script frame
 				JAI_NEXT_OP();
 			case opcode::op_math_guard: VM_TRY_OP(exec_math_guard(f, ins)); break;
 			case opcode::op_math: JAI_OP_LABEL(op_math) VM_TRY_OP(exec_math(f, ins)); JAI_NEXT_OP();
@@ -21847,7 +21853,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			// Both always retarget f.ip
 			case opcode::op_cfor_prep:
 				VM_TRY_OP(exec_cfor_prep(f, ins));
-				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }   // the block its entry ran made a call
+				if (switch_to_) [[unlikely]] { JAI_ENTER_SWITCHED(); }   // the block its entry ran made a call
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 			case opcode::op_cfor_back: JAI_OP_LABEL(op_cfor_back) VM_TRY_OP(exec_cfor_back(f, ins)); JAI_DISPATCH_HERE();
@@ -21879,7 +21885,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_call_typed: JAI_OP_LABEL(op_call_typed)
 				VM_TRY_OP(exec_call_from_scratch(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }
 				if (!is_unwinding_ && call_typed_land(f, stack_.back())) { stack_.pop_back(); ++f.ip; }   // a native callee's result: the consumer is skipped
 				break;
 			case opcode::op_call_from_scratch: JAI_OP_LABEL(op_call_from_scratch)
@@ -21887,9 +21893,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) {
 					// Enter the pushed callee; the suspended caller's ip parks on the
 					// call op (stack-trace parity with op_call)
-					fp = switch_to_;
-					switch_to_ = nullptr;
-					continue;
+					JAI_ENTER_SWITCHED();
 				}
 				// Native/opaque callee already landed its result: a statement-position
 				// call drops it here with the pop dispatch (unwinding keeps the pushed
@@ -21901,9 +21905,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) {
 					// Enter the pushed callee; skipping ++f.ip parks the suspended
 					// caller's ip on the call op (stack-trace parity)
-					fp = switch_to_;
-					switch_to_ = nullptr;
-					continue;
+					JAI_ENTER_SWITCHED();
 				}
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
@@ -21982,7 +21984,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_call_method: JAI_OP_LABEL(op_call_method)
 				VM_TRY_OP(exec_call_method(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_concat_append:
@@ -21990,16 +21992,16 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 			case opcode::op_call_builtin: JAI_OP_LABEL(op_call_builtin)
 				VM_TRY_OP(exec_call_builtin(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }
 				if (!is_unwinding_ && next_op_discards_result(f)) { stack_.pop_back(); ++f.ip; }
 				break;
 			case opcode::op_push_fused:
 				VM_TRY_OP(exec_push_fused(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }
 				break;
 			case opcode::op_t_push:
 				VM_TRY_OP(exec_typed_push(f, ins));
-				if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }
 				break;
 			case opcode::op_t_load: JAI_OP_LABEL(op_t_load)
 				VM_TRY_OP(exec_typed_load(f, ins));
@@ -22059,9 +22061,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				if (switch_to_) {
 					// op_call_method pushed an in-loop callee (flattened method or
 					// direct field-function); park the caller's ip on the call op
-					fp = switch_to_;
-					switch_to_ = nullptr;
-					continue;
+					JAI_ENTER_SWITCHED();
 				}
 				break;
 
@@ -22149,17 +22149,17 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_cells_enter:
 			case opcode::op_cells_resume:
 				VM_TRY_OP(exec_cells_back(f, ins));
-				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) [[unlikely]] { JAI_ENTER_SWITCHED(); }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 			case opcode::op_cells_cfor_back:
 				VM_TRY_OP(exec_cells_cfor_back(f, ins));
-				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) [[unlikely]] { JAI_ENTER_SWITCHED(); }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 			case opcode::op_c_land:
 				VM_TRY_OP(cells_resume(f, ins));
-				if (switch_to_) [[unlikely]] { fp = switch_to_; switch_to_ = nullptr; continue; }
+				if (switch_to_) [[unlikely]] { JAI_ENTER_SWITCHED(); }
 				if (is_unwinding_) [[unlikely]] { if (!handle_throw_unwind(fp, records_base)) { return {}; } }
 				continue;
 
@@ -22177,7 +22177,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				// A return conversion that set script unwinding falls to the loop bottom while
 				// the caller's try record is still live (see op_halt)
 				if (is_unwinding_) [[unlikely]] { break; }
-				continue;
+				JAI_SWITCH_FRAME(fp);
 			}
 
 			// Return superinstructions: entry frames mirror op_return's entry
@@ -22190,7 +22190,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				VM_TRY_OP(exec_return_ident<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
-				continue;
+				JAI_SWITCH_FRAME(fp);
 			}
 			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
 				if (call_records_top_ == records_base) {
@@ -22200,7 +22200,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				}
 				VM_TRY_OP(exec_return_binary<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
-				continue;
+				JAI_SWITCH_FRAME(fp);
 			}
 
 			case opcode::op_implicit_return: {
@@ -22253,10 +22253,13 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 	}
 }
 
+#undef f
 #undef ins
 #undef JAI_OP_LABEL
 #undef JAI_DISPATCH_HERE
 #undef JAI_NEXT_OP
+#undef JAI_SWITCH_FRAME
+#undef JAI_ENTER_SWITCHED
 #if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
 #undef JAI_HOT_OPS
 #undef JAI_HOT_CASE

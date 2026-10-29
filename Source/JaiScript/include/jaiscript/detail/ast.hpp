@@ -21,7 +21,7 @@ namespace jai {
     class statement;
     class declaration;
     struct script_defined_function;   // environment.hpp; node mint caches hold it opaquely
-    class class_definition;           // class_definition.hpp; proof stamps hold it by raw pointer
+    class class_definition;           // class_definition.hpp; node caches hold it by raw pointer
     namespace detail::regex { class compiled; }   // detail/regex.hpp; a constant pattern's compile, engine-independent
 
     using ast_node_ptr = std::shared_ptr<ast_node>;
@@ -167,8 +167,8 @@ namespace jai {
         }    };
     
     // Parse-time type proofs (internal/type_proofs_design.md). Stamped by the static checker's proof
-    // pass, never serialized (jaibite re-derives them at load), consumed behind total runtime
-    // guards (detail/type_proofs.hpp). Default = no proof.
+    // pass, never serialized (jaibite re-derives them at load), read by the VM's compiler for lanes
+    // that keep total runtime guards. Default = no proof.
     inline constexpr uint8_t proof_none = 0;
     inline constexpr uint8_t proof_same_type = 1;
     inline constexpr uint8_t operand_class_unknown = 0, operand_class_int_int = 1, operand_class_float_float = 2,
@@ -328,7 +328,7 @@ namespace jai {
         expression_ptr callee;
         std::vector<expression_ptr> arguments;
         // Per-argument proof_same_type against the ONE statically resolved same-script callee
-        // (identified by body); empty = unproven call
+        // (proven_callee_decl); empty = unproven call
         mutable std::vector<uint8_t> static_arg_proofs;
         // the program-scope names the argument proofs read (a typed global another unit declares, or this unit's)
         mutable std::vector<proof_global> proof_globals;

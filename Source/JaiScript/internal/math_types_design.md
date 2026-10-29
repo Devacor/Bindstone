@@ -318,14 +318,14 @@ of four such stores).
 Scalar replacement of a field changes what the instance holds, and every observer of an instance's fields reads that:
 the text of an instance, `to_json`/`from_json`, the binary archive, `reflect::` (field lists, reads and writes by name),
 structural `==` and copies, hot-reload migration, the debugger's instance view, host field access
-(`class_instance::get_field`, `script_extensible`), `extend`, the parallel element proofs, the member ICs and field proofs.
+(`class_instance::get_field`, `script_extensible`), `extend`, the parallel element proofs and the member ICs.
 The design that keeps them all correct is a split between logical and physical fields: the class definition records a
 vector field as one logical field over consecutive physical slots (`pos$x`, `pos$y`, `pos$z`, typed float or int),
 and the observers above go through one accessor that reads and writes the logical field (building or unpacking the
 vector), while the lowering's field reads and stores address the physical slots directly and the VM's typed rows and cells
 run them like locals. Migration maps physical slots by name, so a kind change of the field resets it like any field
 whose type changed. The work is the accessor's single entry for every observer, then the lowering of `this.pos` and
-`obj.pos` accesses behind the existing field proofs.
+`obj.pos` accesses behind the existing member ICs.
 ### 4.4 Typed vector buffers
 
 `array<math::vec3>` and the other vector kinds are typed buffers with a stride equal to the component count (5.6):

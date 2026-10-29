@@ -527,10 +527,10 @@ public:
     void set_unit(unit_stamp unit) { unit_ = unit; }
     inline void bump_method_epoch();
 
-    // Field-shape epoch (type proofs): moves only when a field proof's facts can change - field
-    // set, declared types, resolution chain, access labels, custom accessors. Unlike
-    // method_epoch it does NOT move on an identical reload. Propagates to derived like
-    // bump_method_epoch (same engine-lifetime/no-ABA contract).
+    // Field-shape epoch: moves only when a field's facts can change - field set, declared types,
+    // resolution chain, access labels, custom accessors. Unlike method_epoch it does NOT move on
+    // an identical reload. Propagates to derived like bump_method_epoch (same engine-lifetime/no-ABA
+    // contract).
     uint64_t field_shape_epoch() const { return field_shape_epoch_; }
     inline void bump_field_shape_epoch();
 
@@ -1379,8 +1379,7 @@ private:
     // See method_epoch(): per-call-site inline-cache validity stamp
     uint64_t method_epoch_ = 1;
     unit_stamp unit_{};   // the unit and execution of the class declaration: field initializers resolve in it
-    // See field_shape_epoch(): field-proof validity stamp
-    uint64_t field_shape_epoch_ = 1;
+    uint64_t field_shape_epoch_ = 1;   // see field_shape_epoch()
 
     // Destructor probe memo (see create_instance): valid while dtor_memo_epoch_
     // matches method_epoch_. mutable: create_instance is the hot mint path.

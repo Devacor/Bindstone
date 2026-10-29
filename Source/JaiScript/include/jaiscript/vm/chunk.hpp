@@ -123,7 +123,7 @@ namespace jai::vm {
         // lazily materialized - empty when no argument qualifies
         std::vector<uint32_t> arg_lvalue_nodes;
         uint32_t member_node = k_invalid_u32;      // op_call_method: member_expr node index
-        uint32_t call_node = k_invalid_u32;        // chunk::nodes index of the call_expr (static_arg_proofs, read live)
+        uint32_t call_node = k_invalid_u32;        // chunk::nodes index of the call_expr
         uint64_t receiver_symbol = UINT64_MAX;     // op_call_method: identifier receiver symbol id
         uint32_t receiver_slot = k_invalid_u32;    // op_call_method: caller frame slot of that receiver (k_invalid_u32 = env)
         // op_call_method whose receiver is a member-call chain rooted at an identifier

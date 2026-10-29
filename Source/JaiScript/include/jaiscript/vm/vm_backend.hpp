@@ -1090,9 +1090,9 @@ namespace jai::vm {
         void coverage_observe(frame& f, const vm_instruction& ins, coverage_chunk& row);
         coverage_chunk& coverage_row(const chunk& c);
 #endif
-        // Step-debugger controller (engine-owned, shared with the interpreter backend).
-        // Atomic: engine::debugger() may wire it from another thread mid-run; NOT read per
-        // op — sync_debug_hook mirrors it into the plain gate below at the sync points only.
+        // Step-debugger controller (engine-owned, shared with the interpreter backend), wired by the first engine::debugger()
+        // call, which runs before the script thread starts or on it; read only at the sync points, where sync_debug_hook
+        // mirrors it into the plain gate below.
         std::atomic<debug::controller*> debug_controller_{nullptr};
         // Script-thread cached statement-hook gate: non-null only while a session is
         // enabled; run_dispatch tests this one plain pointer per dispatch iteration.

@@ -862,8 +862,8 @@ Their property managers hold pointers into the object, so the types are delibera
 <li><strong>Reading an observable property yields a wrapper, not the raw value.</strong> In expressions it
 unwraps transparently (<code>gate.threat + 2</code> works, and <code>print(gate.threat)</code> shows the value).
 Assign it to a typed local when you want the value itself.</li>
-<li><strong>No cross-thread object sharing.</strong> An engine (and the objects registered into it) belongs to
-one thread at a time. The zero-global-state design means the alternative is cheap: one engine per thread,
+<li><strong>No cross-thread object sharing.</strong> An engine, the objects registered into it and every value it makes belong to
+one thread at a time: another thread uses or drops them only while the engine is idle, with the hand-off synchronized. The zero-global-state design means the alternative is cheap: one engine per thread,
 values copy cleanly, and nothing needs a lock. There is no binder flag that makes a single bound object
 thread-shared.</li>
 <li><strong>Auto-named registrars can't name template instantiations.</strong>

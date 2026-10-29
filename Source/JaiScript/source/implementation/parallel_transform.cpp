@@ -2422,7 +2422,7 @@ namespace {
 				if (m->member_id == UINT64_MAX) { m->member_id = sym.intern(m->member); }   // warm
 				// the accessor ids a method call probes on either backend (the user-accessor check
 				// runs before dispatch): interned here, single-threaded, so a worker's probe never
-				// misses the frozen interner - in unsafe mode too, where the pin is bypassed
+				// misses the frozen interner
 				m->getter_id = sym.get_getter_id_with_view(m->member_id).first;
 				(void)sym.get_setter_id_with_view(m->member_id);
 				// proof mode: a method on anything but the root runs no user code only as a builtin of a statically known
@@ -2857,8 +2857,7 @@ namespace {
 		if (it != state.admission_cache.end() && admission_graph_current(eng, it->second)) {
 			return &it->second;
 		}
-		auto [pos, inserted] = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root, prefix));
-		(void)inserted;
+		auto pos = state.admission_cache.insert_or_assign(key, build_admission(eng, fn, inplace_root, prefix)).first;
 		pos->second.generation = ++state.admission_generation;
 		return &pos->second;
 	}
@@ -4811,6 +4810,27 @@ namespace {
 // The out-of-range indices an index write's barrier interns for the serial loop's text (past them a worker raises the text without them)
 constexpr size_t k_index_write_texts = 256;
 
+// An entry's region flag, held while it admits and runs (a nested region is refused while it holds)
+struct region_running_guard {
+	parallel_engine_state& s;
+	explicit region_running_guard(parallel_engine_state& a_state) : s(a_state) { s.region_running = true; }
+	~region_running_guard() { s.region_running = false; }
+};
+
+// An entry's error doors: raise holds the text in the engine state the result views, usage raises an unsupported operation
+// under the entry's prefix (none: the text names its entry)
+template <class Result>
+auto region_error_doors(parallel_engine_state& a_state, std::string_view a_prefix = {}) {
+	auto raise = [&a_state](std::error_code code, std::string message) {
+		a_state.error_text = std::move(message);
+		return Result(code, std::string_view(a_state.error_text));
+	};
+	auto usage = [raise, a_prefix](std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), a_prefix.empty() ? std::move(message) : std::string(a_prefix) + ": " + std::move(message));
+	};
+	return std::pair{raise, usage};
+}
+
 struct region_plan {
 	const char* prefix = "parallel_for";
 	std::string_view counted_variable;   // the counted form's variable: a method writing it through a reference is refused
@@ -4930,13 +4950,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	recover_pending_registrations(state);
 	if (++state.region_serial == 0) { state.region_serial = 1; }   // what this region's elements and chunks own carries it
 	const std::string_view prefix = plan.prefix;
-	auto raise = [&state](std::error_code code, std::string message) {
-		state.error_text = std::move(message);
-		return checked_result<void>(code, std::string_view(state.error_text));
-	};
-	auto usage = [&raise, prefix](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), std::string(prefix) + ": " + std::move(message));
-	};
+	auto [raise, usage] = region_error_doors<checked_result<void>>(state, prefix);
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t0 = __rdtsc();
 #endif
@@ -5173,6 +5187,19 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// kind demoted like the range, an object kind addressed in place)
 	std::vector<script_array*> zip_nodes;
 	std::vector<type_info*> zip_tags;
+	// an array's elements proven exclusive, their classes joining the region's; a refusal is the text naming the element
+	auto prove_exclusive = [&](const script_value& source, script_array& array, std::vector<type_info*>* types,
+	                           std::vector<std::pair<const void*, size_t>>* objects, std::vector<type_info*>* tags) -> std::optional<std::string> {
+		element_proof proven = prove_elements(eng, source, array, reach_filter{}, plan.prefix, types, objects);
+		if (proven.failed != SIZE_MAX) {
+			return "element " + std::to_string(proven.failed) + (proven.what.empty() ? std::string(" cannot be proven exclusive") : ": " + proven.what);
+		}
+		if (tags) { tags->insert(tags->end(), proven.tags.begin(), proven.tags.end()); }
+		for (const class_definition* cd : proven.element_classes) {
+			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+		}
+		return std::nullopt;
+	};
 	for (size_t j = 1; j < containers.size(); ++j) {
 		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
 		if (!zv.is_array()) {
@@ -5189,15 +5216,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
 		if (!plan.zip_arrays_fresh) {
-			element_proof zproof = prove_elements(eng, zv, *znode, reach_filter{}, plan.prefix, nullptr, &handle_objects);
-			if (zproof.failed != SIZE_MAX) {
-				return usage("zipped array " + std::to_string(j + 1) + " element " + std::to_string(zproof.failed) +
-				             (zproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + zproof.what));
-			}
-			zip_tags.insert(zip_tags.end(), zproof.tags.begin(), zproof.tags.end());
-			for (const class_definition* cd : zproof.element_classes) {
-				if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
-			}
+			if (auto refused = prove_exclusive(zv, *znode, nullptr, &handle_objects, &zip_tags)) { return usage("zipped array " + std::to_string(j + 1) + " " + *refused); }
 		}
 		zip_nodes.push_back(znode);
 	}
@@ -5206,14 +5225,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	for (const auto& cap : captures) {
 		if (cap.kind != parallel_capture_kind::written || !cap.shares_slots) { continue; }
 		script_array* wnode = const_cast<script_array*>(cap.source->unchecked_array_node());
-		element_proof wproof = prove_elements(eng, *cap.source, *wnode, reach_filter{}, plan.prefix, nullptr, &handle_objects);
-		if (wproof.failed != SIZE_MAX) {
-			return usage("captured name '" + std::string(cap.entry->name) + "' element " + std::to_string(wproof.failed) +
-			             (wproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + wproof.what));
-		}
-		for (const class_definition* cd : wproof.element_classes) {
-			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
-		}
+		if (auto refused = prove_exclusive(*cap.source, *wnode, nullptr, &handle_objects, nullptr)) { return usage("captured name '" + std::string(cap.entry->name) + "' " + *refused); }
 	}
 	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
 		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
@@ -5230,17 +5242,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		script_array* inode = const_cast<script_array*>(cap.source->unchecked_array_node());
 		if (inode->is_typed() && inode->kind() != script_array::kind_t::obj) { continue; }
 		std::vector<std::pair<const void*, size_t>> input_objects;
-		element_proof iproof = prove_elements(eng, *cap.source, *inode, reach_filter{}, plan.prefix, &value_types, &input_objects);   // the step copies each element
-		if (iproof.failed != SIZE_MAX) {
-			return usage("input element " + std::to_string(iproof.failed) +
-			             (iproof.what.empty() ? std::string(" cannot be proven exclusive") : ": " + iproof.what));
-		}
+		if (auto refused = prove_exclusive(*cap.source, *inode, &value_types, &input_objects, nullptr)) { return usage("input " + *refused); }   // the step copies each element
 		if (const auto [repeat, original] = repeated_handle_object(input_objects); repeat != SIZE_MAX) {
 			return usage("input elements " + std::to_string(original) + " and " + std::to_string(repeat) +
 			             " hold the same object (an object the step reaches through a handle element belongs to one element)");
-		}
-		for (const class_definition* cd : iproof.element_classes) {
-			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
 		}
 	}
 	// Disjoint index writes: the loop variable indexing an enclosing array takes distinct values, so no two elements write one slot
@@ -5527,11 +5532,11 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		region_guard_t(const region_guard_t&) = delete;
 		region_guard_t& operator=(const region_guard_t&) = delete;
 
-		void activate(bool freeze_symbols) noexcept {
+		void activate() noexcept {
 			// Accepted work can create live copies even if a later submit throws.
 			// Only a complete post-join drain clears this obligation.
 			state.pending_registration_retry = true;
-			if (freeze_symbols) { eng.get_symbolizer()->set_frozen(true); }
+			eng.get_symbolizer()->set_frozen(true);
 			state.active_region = &table;
 			eng.note_parallel_region(true);
 			active = true;
@@ -5984,9 +5989,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	region_guard.prepared = true;
-	// The interner freezes in every mode: it is not thread-safe, and unsafe mode vouches for
-	// the script's sharing, not for the runtime's tables (a miss asserts in Debug, the tripwire)
-	region_guard.activate(true);
+	// The interner freezes: it is not thread-safe (a miss asserts in Debug, the tripwire)
+	region_guard.activate();
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_t1 = __rdtsc();
 #endif
@@ -6191,13 +6195,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 // nothing fn could name), and nothing else runs per element.
 checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
 	parallel_engine_state& state = eng.parallel_state();
-	auto raise = [&state](std::error_code code, std::string message) {
-		state.error_text = std::move(message);
-		return checked_result<script_value>(code, std::string_view(state.error_text));
-	};
-	auto usage = [&raise](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
-	};
+	auto [raise, usage] = region_error_doors<checked_result<script_value>>(state);
 	if (state.region_running) {
 		return usage("parallel_transform: nested parallel regions are not supported");
 	}
@@ -6220,11 +6218,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			return usage("parallel_transform: weight_fn must be a script-defined function");
 		}
 	}
-	struct running_guard {
-		parallel_engine_state& s;
-		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
-		~running_guard() { s.region_running = false; }
-	} guard(state);
+	region_running_guard guard(state);
 
 	const std::shared_ptr<script_defined_function> root_fn = script_defined_function::environment_form(fn_payload->fn, &eng);
 	const parallel_admission* adm = admit_cached(eng, state, root_fn);
@@ -6261,10 +6255,8 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			engine::external_call_guard call_guard(&eng);
 			std::vector<script_value> weight_args;
 			weight_args.emplace_back(std::monostate{}, &eng);
-			const bool typed_obj = input_node->is_typed() && input_node->kind() == script_array::kind_t::obj;
 			for (size_t i = 0; i < n; ++i) {
 				weight_args[0] = input_node->is_typed() ? input_node->get(i, &eng) : input_node->values()[i];
-				(void)typed_obj;
 				auto r = eng.get_execution_backend()->execute_callable(*weight_payload, weight_args);
 				if (!r) {
 					return raise(r.error(), "parallel_transform: weight_fn failed for element " +
@@ -6491,13 +6483,7 @@ namespace {
 
 checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<script_value>& args) {
 	parallel_engine_state& state = eng.parallel_state();
-	auto raise = [&state](std::error_code code, std::string message) {
-		state.error_text = std::move(message);
-		return checked_result<script_value>(code, std::string_view(state.error_text));
-	};
-	auto usage = [&raise](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
-	};
+	auto [raise, usage] = region_error_doors<checked_result<script_value>>(state);
 	if (state.region_running) {
 		return usage("parallel_reduce: nested parallel regions are not supported");
 	}
@@ -6530,11 +6516,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 	parallel_admission adm;
 	std::shared_ptr<function_decl> wrapper;
 	{
-		struct running_guard {
-			parallel_engine_state& s;
-			running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
-			~running_guard() { s.region_running = false; }
-		} guard(state);
+		region_running_guard guard(state);
 		const parallel_admission* step_adm = admit_cached(eng, state, step, /*inplace_root*/ true, "parallel_reduce");
 		if (!step_adm->admitted) {
 			return raise(step_adm->code, step_adm->message);
@@ -6590,11 +6572,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 	containers.push_back(accs);
 	containers.push_back(ids);
 	{
-		struct running_guard {
-			parallel_engine_state& s;
-			running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
-			~running_guard() { s.region_running = false; }
-		} guard(state);
+		region_running_guard guard(state);
 		region_plan plan;
 		plan.prefix = "parallel_reduce";
 		plan.containers = &containers;
@@ -6603,6 +6581,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		plan.chunk_wrapper = &wrapper;
 		plan.capture_env = capture_env;
 		plan.inplace = true;
+		plan.zip_arrays_fresh = true;   // the chunk ids, made above
 		plan.sliced_input = xs_id;
 		auto ran = run_region(eng, plan);
 		if (!ran) {
@@ -6633,13 +6612,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                       const std::shared_ptr<environment>& capture_env,
                                       const std::function<const script_value*(size_t)>& frame_slot) {
 	parallel_engine_state& state = eng.parallel_state();
-	auto raise = [&state](std::error_code code, std::string message) {
-		state.error_text = std::move(message);
-		return checked_result<void>(code, std::string_view(state.error_text));
-	};
-	auto usage = [&raise](std::string message) {
-		return raise(make_error_code(runtime_error_code::unsupported_operation), std::move(message));
-	};
+	auto [raise, usage] = region_error_doors<checked_result<void>>(state);
 	if (state.region_running) {
 		return usage("parallel_for: nested parallel regions are not supported");
 	}
@@ -6673,11 +6646,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	}
 	const std::shared_ptr<script_defined_function>& body_fn = stmt->body_fn_cache;
 
-	struct running_guard {
-		parallel_engine_state& s;
-		running_guard(parallel_engine_state& state_ref) : s(state_ref) { s.region_running = true; }
-		~running_guard() { s.region_running = false; }
-	} guard(state);
+	region_running_guard guard(state);
 
 	const parallel_admission* adm = admit_cached(eng, state, body_fn, /*inplace_root*/ true);
 	if (!adm->admitted) {

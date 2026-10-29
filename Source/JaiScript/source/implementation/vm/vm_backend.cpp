@@ -390,7 +390,7 @@ void vm_backend::arm_execution_deadline() {
 	if (budget_active_) {
 		execution_deadline_ = now + execution_budget_;
 	}
-	if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
+	if (engine_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
 }
 
 bool vm_backend::execution_budget_exhausted() {
@@ -2065,7 +2065,7 @@ std::optional<checked_result<bool>> vm_backend::object_comparison_via_method(con
 	}
 	auto method_val = operator_value(target, op_symbol_id);
 	const bool declared = method_val.is_function();
-	const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right);
+	const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right);
 	// an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
 	if (!declared || host_refuses || (operator_value(target, op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
 		if (script_value spaceship = operator_value(target, op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {   // KEEP BYTE-PARALLEL with the interpreter
@@ -2129,7 +2129,7 @@ std::optional<checked_result<script_value>> vm_backend::object_compound_via_meth
 		}
 		if (auto owner = resolve_member_target(target)) {
 			script_value method_val = operator_value(owner, compound_id);
-			if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
+			if (method_val.is_function() && host_operator_accepts(method_val, right)) {
 				auto result = operator_call(target, method_val, compound_id, { right });
 				if (!result) {
 					if (is_unwinding_) { return checked_result<script_value>(make_null()); }
@@ -2154,7 +2154,7 @@ std::optional<checked_result<script_value>> vm_backend::object_reflected_via_met
 	auto target = resolve_member_target(right);
 	if (!target) { return std::nullopt; }
 	script_value method_val = operator_value(target, reflected_id);
-	if (!method_val.is_function() || !host_operator_accepts(method_val, reflected_id, left)) { return std::nullopt; }
+	if (!method_val.is_function() || !host_operator_accepts(method_val, left)) { return std::nullopt; }
 	auto result = operator_call(right, method_val, reflected_id, { left });
 	if (!result) {
 		if (is_unwinding_) { return checked_result<script_value>(make_null()); }
@@ -2184,7 +2184,7 @@ std::optional<checked_result<script_value>> vm_backend::object_arithmetic_via_me
 		}
 		return std::nullopt;
 	}
-	if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right)) { return std::nullopt; }
+	if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right)) { return std::nullopt; }
 	auto result = operator_call(left, method_val, op_symbol_id, { right });
 	if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
 	if (result.has_value()) {
@@ -12341,7 +12341,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 		// shared_ptr handles share); temporaries move; a proven read-only local binds the
 		// object itself (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
 		if (lvalue_init || reference_init) {
-			if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !parallel_worker_ && !engine_->parallel_region_active())) {
+			if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !engine_->parallel_region_active())) {
 				JAI_CENSUS_F(move_hit, 5);
 				if (!parallel_worker_) { engine_->note_local_alias_bind(); }
 			} else {
@@ -13653,7 +13653,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		auto resolved = memo_holds ? checked_result<const std::shared_ptr<function_decl>*>(md.resolved_memo)
 		                           : parallel_worker_ ? md.cls->resolve_method_overload_shared(md.name_id, stack_.data() + slice_base, argc)
 		                                              : md.cls->resolve_method_overload_ref(md.name_id, stack_.data() + slice_base, argc);
-		if (!memo_holds && resolved && !parallel_worker_ && !engine_->parallel_region_active() && md.cls->method_arity_decides(md.name_id, argc)) {
+		if (!memo_holds && resolved && !engine_->parallel_region_active() && md.cls->method_arity_decides(md.name_id, argc)) {
 			md.resolved_memo = resolved.value();   // the dispatcher's own memo (script_method_dispatch::resolve's rule)
 			md.resolved_memo_epoch = md.cls->method_epoch();
 			md.resolved_memo_argc = argc;

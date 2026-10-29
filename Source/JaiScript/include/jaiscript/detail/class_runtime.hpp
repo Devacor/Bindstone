@@ -1584,9 +1584,8 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
 
     size_t script_arg_count = args.size() - 1;
 
-    auto& overloads_for_name = cls->cpp_method_overloads_[name_id];
-    auto it = overloads_for_name.find(script_arg_count);
-    if (it == overloads_for_name.end() || it->second.empty()) {
+    auto it = overloads->find(script_arg_count);
+    if (it == overloads->end() || it->second.empty()) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
                                      name_id, args.data() + 1, script_arg_count, eng);
     }
@@ -1600,13 +1599,13 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
         return result;
     }
 
-    std::vector<std::vector<param_type_info>> sigs;
-    sigs.reserve(entries.size());
+    const cpp_overload_entry* best = nullptr;
+    int best_cost = 0;
     for (const auto& e : entries) {
-        sigs.push_back(e.param_types);
+        const int cost = eng->cpp_signature_cost(args.data() + 1, e.param_types);
+        if (cost >= 0 && (!best || cost < best_cost)) { best = &e; best_cost = cost; }
     }
-    int best = eng->select_cpp_overload(args, sigs);
-    if (best < 0) {
+    if (!best) {
         return detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch),
                                      name_id, args.data() + 1, script_arg_count, eng);
     }
@@ -1622,20 +1621,16 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
 // argument conversion's own text
 inline std::optional<checked_result<script_value>> class_definition::cpp_method_dispatch::single_overload_miss(const std::vector<script_value>& args) const {
     if (args.empty()) { return std::nullopt; }
-    auto name_it = cls->cpp_method_overloads_.find(name_id);
-    if (name_it == cls->cpp_method_overloads_.end()) { return std::nullopt; }
-    auto it = name_it->second.find(args.size() - 1);
-    if (it == name_it->second.end() || it->second.size() != 1 || it->second.front().param_types.empty()) { return std::nullopt; }
+    auto it = overloads->find(args.size() - 1);
+    if (it == overloads->end() || it->second.size() != 1 || it->second.front().param_types.empty()) { return std::nullopt; }
     engine* eng = cls->get_engine();
-    if (!eng || eng->select_cpp_overload(args, {it->second.front().param_types}) >= 0) { return std::nullopt; }
+    if (!eng || eng->cpp_signature_cost(args.data() + 1, it->second.front().param_types) >= 0) { return std::nullopt; }
     return checked_result<script_value>(detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch), name_id, args.data() + 1, args.size() - 1, eng));
 }
 
 inline uint8_t class_definition::cpp_method_dispatch::argument_binding(size_t i, size_t argc) const {
     uint8_t bits = 0;
-    auto name_it = cls->cpp_method_overloads_.find(name_id);
-    if (name_it == cls->cpp_method_overloads_.end()) { return 8; }
-    for (const auto& [arity, entries] : name_it->second) {
+    for (const auto& [arity, entries] : *overloads) {
         if (argc != SIZE_MAX && arity != argc) { continue; }
         for (const auto& e : entries) {
             const auto* w = e.func.target<host_writeback_function>();

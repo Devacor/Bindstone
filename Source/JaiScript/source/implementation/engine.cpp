@@ -322,11 +322,11 @@ std::string detail::format_value_with_spec(const script_value& value, const form
     return body;
 }
 
-// Cost of matching args[first_arg .. first_arg+paramTypes.size()) against paramTypes, using the
-// same ranking as free-function overload resolution: exact 0 > int<->float small > convertible >
+// Cost of matching args[0 .. paramTypes.size()) against paramTypes, using the same ranking as
+// free-function overload resolution: exact 0 > int<->float small > convertible >
 // object/inheritance, with a non-match returning -1. Single source of truth shared by
-// OverloadSet::findBestMatch (free functions / constructors, first_arg = 0) and
-// engine::select_cpp_overload (same-arity C++ method dispatch, first_arg = 1 to skip 'this').
+// OverloadSet::findBestMatch (free functions / constructors) and engine::cpp_signature_cost
+// (C++ method dispatch, past 'this').
 // Cost of an object argument for an object, shared_ptr<T> or weak_ptr<T> parameter, or -1 when its class cannot reach T
 static int object_param_cost(
         const script_value& arg,
@@ -388,8 +388,7 @@ static int object_param_cost(
 }
 
 static int compute_param_match_cost(
-        const std::vector<script_value>& args,
-        size_t first_arg,
+        const script_value* args,
         const std::vector<param_type_info>& paramTypes,
         const conversions::conversion_registry* convReg,
         const std::unordered_map<std::type_index, std::shared_ptr<class_definition>>* classes_by_type,
@@ -398,7 +397,7 @@ static int compute_param_match_cost(
     for (size_t i = 0; i < paramTypes.size(); ++i) {
         const auto& paramInfo = paramTypes[i];
         // Lvalue call args (arr[i], obj.field) arrive as references: match their targets
-        const script_value& arg = args[first_arg + i].deref();
+        const script_value& arg = args[i].deref();
         script_value_type argType = arg.type();
 
         // A wildcard (script_value) parameter accepts any argument at a small fixed cost — low
@@ -655,7 +654,7 @@ struct engine::implementation {
                 } else if (overload.paramTypes.empty()) {
                     cost = 1000;
                 } else {
-                    cost = compute_param_match_cost(args, 0, overload.paramTypes, conversions.get(), classes_by_type, classes_by_name);
+                    cost = compute_param_match_cost(args.data(), overload.paramTypes, conversions.get(), classes_by_type, classes_by_name);
                     if (cost < 0) { continue; }
                 }
                 if (!best || cost < best_cost) {
@@ -2486,24 +2485,9 @@ execution_backend* engine::backend() const {
     return impl->backend.get();
 }
 
-int engine::select_cpp_overload(const std::vector<script_value>& args,
-                                const std::vector<std::vector<param_type_info>>& candidateParamTypes) const {
-    // args[0] is 'this'; rank each candidate's C++ parameter signature against args[1..] using the
-    // same scorer as free-function overloads. Empty signatures are untyped (legacy) entries that
-    // stay viable at a high cost so a typed overload always wins. Returns the best index, or -1.
-    int bestIdx = -1;
-    int bestCost = std::numeric_limits<int>::max();
-    for (size_t c = 0; c < candidateParamTypes.size(); ++c) {
-        const auto& sig = candidateParamTypes[c];
-        int cost = sig.empty()
-            ? 1000
-            : compute_param_match_cost(args, 1, sig, impl->conversions.get(), &impl->classesByType, &impl->classes);
-        if (cost >= 0 && cost < bestCost) {
-            bestCost = cost;
-            bestIdx = static_cast<int>(c);
-        }
-    }
-    return bestIdx;
+int engine::cpp_signature_cost(const script_value* args, const std::vector<param_type_info>& signature) const {
+    // an empty signature is an untyped (legacy) entry: viable at a high cost, so a typed overload always wins
+    return signature.empty() ? 1000 : compute_param_match_cost(args, signature, impl->conversions.get(), &impl->classesByType, &impl->classes);
 }
 
 std::optional<checked_result<script_value>> engine::parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) const {

@@ -903,13 +903,7 @@ public:
     template<bool IsConst, typename R, typename Method, typename... Args>
     static checked_result<script_value> member_method_call(const void* state, const std::vector<script_value>& args) {
         const lane_state<Method>& st = *static_cast<const lane_state<Method>*>(state);
-        if (args.empty()) {
-            throw runtime_error("Method called without 'this' object");
-        }
-        // first arg is 'this'
-        if (args.size() != sizeof...(Args) + 1) {
-            throw_binder_arity("Method expects ", sizeof...(Args), args.size() - 1);
-        }
+        // args[0] is 'this'; the class's dispatch called this overload for its arity
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
         if constexpr (IsConst) {
             return dynamic_binder<T>::callConstMethodImpl(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
@@ -922,13 +916,7 @@ public:
     static checked_result<script_value> callable_method_call(const void* state, const std::vector<script_value>& args) {
         using traits = detail::function_traits<Callable>;
         const call_state_t<Callable>& st = *static_cast<const call_state_t<Callable>*>(state);
-        // args[0] is the receiver, the rest are the script arguments
-        if (args.empty()) {
-            throw runtime_error("Method called without 'this' object");
-        }
-        if (args.size() != traits::arity) {
-            throw_binder_arity("Method expects ", traits::arity - 1, args.size() - 1);
-        }
+        // args[0] is the receiver, the rest are the script arguments (the class's dispatch called this overload for its arity)
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
         if constexpr (stateless_callable<Callable>()) {
             Callable callable{};

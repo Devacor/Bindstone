@@ -1106,7 +1106,7 @@ public:
             off->type_proofs(false);
             check_eq((int64_t)4, off->execute(src).as_int());
             const proof_stats& none = off->last_proof_stats();
-            check_eq((uint32_t)0, none.decls + none.stores + none.calls + none.args + none.returns + none.members);
+            check_eq((uint32_t)0, none.decls + none.stores + none.calls + none.args + none.returns);
         });
 
         test("proofs_not_stamped_from_uncertain_types", [this]() {
@@ -1128,7 +1128,6 @@ public:
             check_eq((uint32_t)2, st.decls, "only `int q = 0` and `Foo cp = Foo()` prove");
             check_eq((uint32_t)0, st.calls, "defaulted/by-ref callees are never proven");
             check_eq((uint32_t)0, st.args);
-            check_eq((uint32_t)0, st.members, "first execute: the class is not registered yet");
         });
 
         test("proofs_off_strips_cached_entry_and_on_restamps", [this]() {
@@ -1148,80 +1147,47 @@ public:
             check_ge(e->last_proof_stats().stores, (uint32_t)1);
         });
 
-        test("proof_field_stamps_on_second_execute_and_hold_across_identical_reload", [this]() {
+        test("proofs_restamp_after_registration_and_hold_across_identical_reload", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto e = make_engine();
             const std::string src =
                 "class Pt { int x = 1; float y = 2.0;\n"
                 "  int bump(int d) { x = x + d; this.y = this.y * 2.0; return x; } }\n"
                 "Pt p = Pt(); p.bump(3); p.x";
-            // first execute: the class is not registered when the entry is checked -> no
-            // field proofs, but same_type decl/arg/return proofs do stamp
+            // first execute: same_type decl/arg/return proofs stamp
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().members);
             check_ge(e->last_proof_stats().decls, (uint32_t)1);
             check_ge(e->last_proof_stats().args, (uint32_t)1);
             check_ge(e->last_proof_stats().returns, (uint32_t)1);
             const uint64_t epoch_after_first = shape_epoch(*e, "Pt");
-            // registering the class moved the surface: the SAME cached entry re-checks
-            // and now carries field proofs (bare x read/write, this.y read/write, p.x).
+            // registering the class moved the surface: the SAME cached entry re-checks.
             // Its class_decl then runs as the FIRST redefinition, which is a full-path
             // reload (the structural key stores lazily): shape epoch and surface move once more
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_ge(e->last_proof_stats().members, (uint32_t)5);
-            check_ge(e->last_proof_stats().stores, (uint32_t)2, "bare + member field same-type stores");
+            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked");
             check_ne(epoch_after_first, shape_epoch(*e, "Pt"));
             const uint64_t epoch_after_second = shape_epoch(*e, "Pt");
             // third execute: re-checks (surface moved), its reload is identical -> epoch holds
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_ge(e->last_proof_stats().members, (uint32_t)5);
+            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked");
             check_eq(epoch_after_second, shape_epoch(*e, "Pt"));
             const uint64_t epoch_after_third = shape_epoch(*e, "Pt");
             // from here on: identical reloads move nothing (no re-check, shape epoch holds)
             e->execute("1 + 1");
-            check_eq((uint32_t)0, e->last_proof_stats().members);
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().members, "identical reload must not re-check");
+            check_eq((uint32_t)0, e->last_proof_stats().decls, "identical reload must not re-check");
             check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
             check_eq((int64_t)4, e->execute(src).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().members);
+            check_eq((uint32_t)0, e->last_proof_stats().decls);
             check_eq(epoch_after_third, shape_epoch(*e, "Pt"));
             // non-identical reload (field retype) moves the shape epoch and the surface:
-            // the original entry re-checks at its next execute (spelling disagreement on x
-            // refuses that field's proof; y and p.x still prove)
+            // the original entry re-checks at its next execute
             e->execute("class Pt { string x = \"1\"; float y = 2.0;\n"
                        "  int bump(int d) { return d; } }");
             check_ne(epoch_after_third, shape_epoch(*e, "Pt"));
             e->execute("1 + 1");
             e->execute(src);
-            check_ge(e->last_proof_stats().members, (uint32_t)1, "re-stamped after the shape change");
-        });
-
-        test("proof_field_refusals", [this]() {
-            // statics, custom accessors, nonpublic labels, static methods, ctor initializer
-            // args and [=] lambdas never carry field proofs (design 4.4 / bare_field_context)
-            auto e = make_engine();
-            const std::string src =
-                "class R { static int count = 0; int a = 1; int b = 2;\n"
-                "  private: int hidden = 3;\n"
-                "  public:\n"
-                "  int _get_b() { return b * 10; }\n"
-                "  static int peek() { return count; }\n"
-                "  int read() { auto f = [=]() { return 1; }; return count + b + hidden + f(); } }\n"
-                "R r = R(); r.read()";
-            e->execute(src);
-            e->execute(src);   // class registered: field proofs would stamp if admissible
-            check_eq((uint32_t)0, e->last_proof_stats().members, "nonpublic chain: no field proofs at all");
-            // A user `_get_b` owns the member: q.b dispatches to it, and neither the member
-            // site nor the bare `b` sites carry a field proof (the static `count` never did).
-            const std::string plain =
-                "class Q { static int count = 0; int b = 2;\n"
-                "  int _get_b() { return b * 10; }\n"
-                "  int read() { return count + b; } }\n"
-                "Q q = Q(); q.read() + q.b";
-            check_eq((int64_t)22, e->execute(plain).as_int());
-            e->execute(plain);
-            check_eq((uint32_t)0, e->last_proof_stats().members, "a user accessor takes the field off the proof lanes");
+            check_ge(e->last_proof_stats().decls, (uint32_t)1, "re-checked after the shape change");
         });
 
         test("accessor_members_known_with_unknown_type", [this]() {
@@ -1294,9 +1260,6 @@ public:
             script_value tagged((int64_t)5, e.get());
             tagged.set_type_info(type_info_ptr{e->get_type_info_float()});
             check_false(detail::same_type_payload(tagged, e->get_type_info_int()));
-            check_true(detail::retags_on_field_write(e->get_type_info_int()));
-            check_false(detail::retags_on_field_write(e->get_type_info_void()));
-            check_null(detail::proven_field_instance(i, nullptr, 1));
         });
 
         test("proof_battery_results_equal_with_proofs_on_and_off", [this]() {
@@ -2323,7 +2286,6 @@ public:
             const proof_stats first = e->last_proof_stats();
             check_eq((uint32_t)0, first.decls, "cross-unit first check: no decl proof");
             check_eq((uint32_t)0, first.returns, "cross-unit first check: no return proof");
-            check_eq((uint32_t)0, first.members, "cross-unit first check: no field proof");
             auto one = make_engine();
             check_eq((size_t)0, error_count(one->check("class A { int hp = 3; }\nclass B : A { int tick() { int x = hp; return hp; } }\nB().tick()")));
             check_ge(one->last_proof_stats().decls, (uint32_t)1, "same-unit first check proves the decl");
@@ -2334,7 +2296,6 @@ public:
             const proof_stats later = e->last_proof_stats();
             check_ge(later.decls, (uint32_t)1, "registered: decl proof");
             check_ge(later.returns, (uint32_t)1, "registered: return proof");
-            check_ge(later.members, (uint32_t)1, "registered: field proof");
             std::filesystem::remove_all(dir);
         });
 
@@ -2740,11 +2701,10 @@ public:
             check_eq((size_t)0, error_count(e->check(setter_only + "t.hp += \"s\";")), "setter-only compound store: no getter type, lenient");
             std::string what = outcome(*e, "[[warn_mode]]; " + cls + "s.hp = \"s\"; s.hp");
             check_true(what.find("ERROR Cannot pass string to parameter 'v' of '_set_hp' (declared int)") == 0, "the runtime keeps its rejection (got: " + what + ")");
-            // never a proof source: the member stays off the field lanes after registration too
+            // never a proof source after registration either
             const std::string prog = cls + "s.hp = 4; int x = s.hp; x";
             check_eq((int64_t)4, e->execute(prog).as_int());
             check_eq((int64_t)4, e->execute(prog).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().members, "accessor member: no field proof after registration");
             check_eq((uint32_t)0, e->last_proof_stats().stores, "accessor store: no same_type proof");
         });
 
@@ -2797,11 +2757,9 @@ public:
             const std::string root = "import \"ac_a.jai\";\nimport \"ac_b.jai\";\nread_hp(A())";
             auto e = program_engine(dir);
             check_eq((size_t)0, error_count(e->check(root)));
-            check_eq((uint32_t)0, e->last_proof_stats().members, "cross-unit first check: no field proof");
             check_eq((uint32_t)0, e->last_proof_stats().decls, "cross-unit first check: no decl proof from an accessor read");
             check_eq((int64_t)4, e->execute(root).as_int());
             check_eq((int64_t)4, e->execute(root).as_int());
-            check_eq((uint32_t)0, e->last_proof_stats().members, "registered: an accessor member is still never a field proof");
             std::filesystem::remove_all(dir);
         });
 
@@ -2989,8 +2947,7 @@ public:
                                      "void f(var& w) { w.n = 3; w.put(4); }\nW w = W();\nf(w);\nW w2 = W();\nw.n + w2.n";
             plain->execute(open);
             check_eq((int64_t)4, plain->execute(open).as_int());
-            check_eq(plain->last_proof_stats().members, e->last_proof_stats().members, "a T& receiver proves what a var& receiver does");
-            check_eq(plain->last_proof_stats().stores, e->last_proof_stats().stores);
+            check_eq(plain->last_proof_stats().stores, e->last_proof_stats().stores, "a T& receiver proves what a var& receiver does");
             check_eq(plain->last_proof_stats().calls, e->last_proof_stats().calls);
         });
 

@@ -1190,17 +1190,6 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
             push_value(own->deref());
             return checked_result<void>();
         }
-        // Proven this-field read (internal/type_proofs_design.md I-I1): class object + shape
-        // epoch + present cell -> the cell copy the probe's field rung pushes; any miss
-        // runs the probe (which materializes defaults) unchanged
-        if (expr->proven_class && !parallel_worker_ &&
-            member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
-            if (script_value* cell = detail::proven_field_cell(*member_scope_.this_storage, expr->proven_class,
-                                                               expr->proven_epoch, expr->proven_slot, nullptr)) {
-                push_value(*cell);
-                return checked_result<void>();
-            }
-        }
         // a C++ member of the method's receiver reached in place (detail/host_member_access.hpp), the row filled below
         if (member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
             if (class_instance* self = detail::host_this_instance(*member_scope_.this_storage)) {
@@ -3156,41 +3145,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             bool member_wins = false;
             if (!identifier->global_qualified && member_scope_.active() &&
                 !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
-                // Proven this-field store (internal/type_proofs_design.md I-S3): the implicit-this
-                // landing below with its conversion gated by the proof (KEEP BYTE-PARALLEL with
-                // vm_backend store_popped_value's proven lane)
-                if (identifier->proven_class && identifier->proven_field_write && !parallel_worker_ &&
-                    !detail::by_value_class_type(identifier->proven_field_type) &&
-                    member_scope_.state == detail::member_scope_state::instance && member_scope_.this_storage) {
-                    if (class_instance* inst = detail::proven_field_instance(*member_scope_.this_storage,
-                                                                             identifier->proven_class, identifier->proven_epoch);
-                        inst && !detail::proven_field_holds_object(inst, identifier->proven_slot, identifier->proven_field_type)) {
-                        const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
-                        if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                            value = value.detached_for_store();
-                        }
-                        script_value incoming = is_lvalue_read ? clone_for_assignment(value) : std::move(value);
-                        if (expr->static_store_proof == proof_same_type && identifier->proven_field_type &&
-                            detail::same_type_payload(incoming, identifier->proven_field_type)) {
-                            if (detail::retags_on_field_write(identifier->proven_field_type)) {
-                                incoming.set_type_info(type_info_ptr{identifier->proven_field_type});
-                            }
-                        } else {
-                            auto enforced = inst->enforce_field_write(identifier->symbol_id, std::move(incoming));
-                            if (!enforced) {
-                                return enforced.error_value();
-                            }
-                            incoming = std::move(enforced.value());
-                        }
-                        inst->field_slot_write(identifier->proven_slot, std::move(incoming));
-                        if (is_lvalue_read) {
-                            push_value(std::move(value));
-                        } else {
-                            push_value(inst->get_field(identifier->symbol_id));
-                        }
-                        return {};
-                    }
-                }
                 const auto store_member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
                                                                      member_scope_.statics, identifier->symbol_id, /*want_methods*/ false);
                 if (store_member) {
@@ -3626,40 +3580,6 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
             if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
 
-            // Proven field store (internal/type_proofs_design.md I-M2): assign_member_value's field
-            // branch minus the ladder (KEEP BYTE-PARALLEL with vm_backend exec_set_member's
-            // proven lane)
-            if (memberExpr->proven_class && memberExpr->proven_field_write && !parallel_worker_ &&
-                !detail::by_value_class_type(memberExpr->proven_field_type)) {
-                if (class_instance* inst = detail::proven_field_instance(dereferenced, memberExpr->proven_class,
-                                                                         memberExpr->proven_epoch);
-                    inst && !detail::proven_field_holds_object(inst, memberExpr->proven_slot, memberExpr->proven_field_type)) {
-                    const uint64_t member_id = memberExpr->member_id != UINT64_MAX
-                        ? memberExpr->member_id : string_symbolizer_->intern(memberExpr->member);
-                    script_value incoming = clone_for_assignment(value);
-                    if (expr->static_store_proof == proof_same_type && memberExpr->proven_field_type &&
-                        detail::same_type_payload(incoming, memberExpr->proven_field_type)) {
-                        if (detail::retags_on_field_write(memberExpr->proven_field_type)) {
-                            incoming.set_type_info(type_info_ptr{memberExpr->proven_field_type});
-                        }
-                    } else {
-                        auto enforced = inst->enforce_field_write(member_id, std::move(incoming));
-                        if (!enforced) {
-                            return enforced.error_value();
-                        }
-                        incoming = std::move(enforced.value());
-                    }
-                    if (expression_result_needed_) {
-                        script_value stored = clone_for_assignment(incoming);   // the expression's value is a copy of the stored one
-                        inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
-                        push_value(std::move(stored));
-                    } else {
-                        inst->field_slot_write(memberExpr->proven_slot, std::move(incoming));
-                        push_value(std::move(value));
-                    }
-                    return {};
-                }
-            }
             JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value));
             if (is_unwinding_) {
                 push_value(make_value());
@@ -5960,16 +5880,6 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         }
         push_value(detail::math::component_value(objectValue, static_cast<size_t>(component), engine_));
         return {};
-    }
-
-    // Proven field read (internal/type_proofs_design.md I-M1): class object + shape epoch +
-    // present cell -> the cell copy the field rung pushes; any miss runs the ladder
-    if (expr->proven_class && !parallel_worker_) {
-        if (script_value* cell = detail::proven_field_cell(objectValue, expr->proven_class, expr->proven_epoch,
-                                                           expr->proven_slot, nullptr)) {
-            push_value(*cell);
-            return {};
-        }
     }
 
     // Handle super:: member access specially

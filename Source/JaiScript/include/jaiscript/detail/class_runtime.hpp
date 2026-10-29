@@ -2295,7 +2295,7 @@ inline std::optional<script_value> field_handle_rows(const script_value& v, cons
 }
 
 // STORE-READY field value for a resolved verdict: scalars/strings re-tag to the declared
-// type (type_proofs.hpp retags_on_field_write), pointer-ish and container values keep
+// type, pointer-ish and container values keep
 // their own tag (objects travel as object OR shared_ptr wrappers over one holder, so a
 // retag would lie about the storage). A needs_* verdict here means the caller runs
 // without script rows: no conversion. nullopt = no conversion.
@@ -2692,10 +2692,6 @@ inline std::optional<checked_result<void>> var_slot_assign_in_place(const script
 
 // A field lane writing slot directly steps aside when the field holds an object a store asks first (var_slot_assign_in_place)
 inline bool field_slot_holds_object(class_instance* inst, uint32_t slot);
-// The same for a proven write: only a field declared var (or untyped) can hold the object
-inline bool proven_field_holds_object(class_instance* inst, uint32_t slot, const type_info* proven_type) {
-    return (!proven_type || proven_type->base_type == script_value_type::jai_any_type) && field_slot_holds_object(inst, slot);
-}
 
 // The members `layout` declares (its whole chain, base first) copied from source into dest
 inline checked_result<void> implicit_copy_assign(class_instance* dest, const class_definition* layout, class_instance* source, engine* eng) {

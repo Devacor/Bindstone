@@ -3305,17 +3305,6 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 				stack_.push_back(own->deref());
 				return {};
 			}
-			// V-I1 proven bare field read: class + shape-epoch guard on the receiver, present
-			// cell (== the probe's *member.value_ptr copy); a miss falls to the probe below
-			if (bare_field_proof_frame(f)) {
-				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class) {
-					if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
-					                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
-						stack_.push_back(*cell);
-						return {};
-					}
-				}
-			}
 			const bool member_missed = member_miss_proven(f, f.ip * 3, sym);
 			if (script_value read = make_null(); !member_missed && bare_host_read(f, f.ip * 3, read)) {
 				stack_.push_back(std::move(read));
@@ -3845,35 +3834,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f) &&
 		    !detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
-			// V-S3 proven bare this-field store: == the this-field landing below with the
-			// conversion gated by the proof (KEEP BYTE-PARALLEL with interpreter I-S3)
-			if (bare_field_proof_frame(f)) {
-				if (const identifier_expr* idn = ident_node_at(f); idn && idn->proven_class && idn->proven_field_write &&
-				    !detail::by_value_class_type(idn->proven_field_type)) {
-					if (class_instance* inst = detail::proven_field_instance(*f.locals->scope_this, idn->proven_class, idn->proven_epoch);
-					    inst && !detail::proven_field_holds_object(inst, idn->proven_slot, idn->proven_field_type)) {
-						if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-							value = value.detached_for_store();
-						}
-						script_value incoming = rhs_lvalue ? clone_for_assignment(value) : std::move(value);
-						if ((ins.c & store_flag_same_type) && idn->proven_field_type &&
-						    detail::same_type_payload(incoming, idn->proven_field_type)) {
-							if (detail::retags_on_field_write(idn->proven_field_type)) {
-								incoming.set_type_info(type_info_ptr{idn->proven_field_type});
-							}
-						} else {
-							auto enforced = inst->enforce_field_write(sym, std::move(incoming));
-							if (!enforced) {
-								return raise_from(enforced);
-							}
-							incoming = std::move(enforced).value();
-						}
-						inst->field_slot_write(idn->proven_slot, std::move(incoming));
-						stack_.push_back(rhs_lvalue ? std::move(value) : script_value(inst->get_field(sym)));
-						return {};
-					}
-				}
-			}
 			const auto store_member = detail::probe_member_scope(frame_scope_state(f), f.locals->scope_this,
 			                                                     f.locals->scope_static, sym, /*want_methods*/ false);
 			if (store_member) {
@@ -5145,16 +5105,6 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 			if (script_value* own = detail::own_scope_lookup(environment_.get(), f.locals->scope_floor, sym)) {
 				return &binding_value(*own, observed);
 			}
-			if (operand.ident_node != k_invalid_u32 && bare_field_proof_frame(f)) {
-				const identifier_expr* idn = ident_node_of(*f.code, operand.ident_node);
-				if (idn->proven_class) {
-					if (script_value* cell = detail::proven_field_cell(*f.locals->scope_this, idn->proven_class,
-					                                                   idn->proven_epoch, idn->proven_slot, nullptr)) {
-						scratch.emplace(*cell);   // V-I1: == the probe's scratch copy of *member.value_ptr
-						return &scratch.value();
-					}
-				}
-			}
 			const bool member_missed = member_miss_proven(f, cache_slot, sym);
 			if (script_value read = make_null(); !member_missed && bare_host_read(f, cache_slot, read)) {
 				scratch.emplace(std::move(read));
@@ -6164,8 +6114,7 @@ JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, con
 	if (f.locals && !f.top_level) {
 		ensure_frame_member_scope(f, environment_.get());
 		if (frame_scope_active(f)) {
-			return member_scope_env_lookup(f, f.code->symbols[operand.symbol], cache_slot,
-			                               ident_node_of(*f.code, operand.ident_node));
+			return member_scope_env_lookup(f, f.code->symbols[operand.symbol], cache_slot);
 		}
 	}
 	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
@@ -16508,9 +16457,6 @@ uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* e
 	return fslot;
 }
 
-// A member read's field, borrowed where it lives: the checker's proof, else the site's member_ic row (its class and method epoch), the
-// raw cell as the ladder hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder:
-// a first sight or a new class fills the row, so the ladder serves that one read and hits serve from then on
 // An element reference into an object-typed array, its element's holder read where the array keeps it: the value a deref would
 // materialize holds this holder; null for any other reference, a removed element (the deref raises) or a null element
 static script_value::object_holder* element_object_in_place(const script_value& v) {
@@ -16521,26 +16467,23 @@ static script_value::object_holder* element_object_in_place(const script_value& 
 	return rh->container->objs()[rh->container_index].handle.get();
 }
 
-// site_field's read over a class instance's holder: the proven cell, else the site's member IC; null leaves the read to the caller
-JAI_FORCEINLINE const script_value* vm_backend::site_field_of_holder(const chunk& code, script_value::object_holder* holder, member_expr* expr, size_t site) {
+// site_field's read over a class instance's holder through the site's member IC; null leaves the read to the caller
+JAI_FORCEINLINE const script_value* vm_backend::site_field_of_holder(const chunk& code, script_value::object_holder* holder, size_t site) {
 	if (!holder || !holder->is_instance()) { return nullptr; }
 	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) { return nullptr; }
-	if (expr->proven_class && proofs_on() && cd == expr->proven_class && cd->field_shape_epoch() == expr->proven_epoch) {
-		if (script_value* cell = inst->field_slot_value(expr->proven_slot)) { return cell; }
-	}
 	std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
 	if (!rows || rows->size() <= site) { return nullptr; }
 	const auto& entry = (*rows)[site];
 	if (entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) { return inst->field_slot_value(entry.slot); }
+// A member read's field, borrowed where it lives: the site's member_ic row (its class and method epoch), the raw cell as the ladder
+// hands a field back; a bound C++ member's lane value lands in `host_value`. Null sends the read to the ladder: a first sight or a new
+// class fills the row, so the ladder serves that one read and hits serve from then on
 	return nullptr;
 }
 
 JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, const script_value& objd, member_expr* expr, size_t site, script_value& host_value) {
-	if (expr->proven_class && proofs_on()) {
-		if (script_value* cell = detail::proven_field_cell(objd, expr->proven_class, expr->proven_epoch, expr->proven_slot, nullptr)) { return cell; }
-	}
 	std::vector<chunk::member_ic_entry>* rows = member_ic_rows(code);
 	if (!rows || objd.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
 	const auto& holder = objd.unchecked_object_handle();
@@ -16735,7 +16678,7 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	if (receiver) {
 		if (!nested) {
 			if (script_value::object_holder* in_place = element_object_in_place(*receiver)) {
-				if (const script_value* cell = site_field_of_holder(*f.code, in_place, member, ip)) {
+				if (const script_value* cell = site_field_of_holder(*f.code, in_place, ip)) {
 					frame_slot_set(f, ins.b, *cell);
 					return {};
 				}
@@ -16813,7 +16756,7 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 				           index->unchecked_as_int() >= 0 && index->unchecked_as_int() < static_cast<script_int>(node->objs().size())) {
 					// an object array's element and the member read of it as one link: the field read on the holder the array keeps
 					script_value::object_holder* holder = node->objs()[static_cast<size_t>(index->unchecked_as_int())].handle.get();
-					if (const script_value* cell = site_field_of_holder(*f.code, holder, static_cast<member_expr*>(const_cast<expression*>(links[k - 1])), ip + (k - 1) * stride)) {
+					if (const script_value* cell = site_field_of_holder(*f.code, holder, ip + (k - 1) * stride)) {
 						if (k == 1) {
 							stack_.push_back(*cell);
 							return {};
@@ -17109,7 +17052,7 @@ op_status vm_backend::exec_set_member(frame& f, const vm_instruction& ins) {
 	stack_.pop_back();
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
-	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), ins.a, ins.b, std::move(objectValue), std::move(value), true);
+	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), ins.a, std::move(objectValue), std::move(value), true);
 }
 
 // `base.x = v` on a math value: the store lands in the storage the base names (detail/math_component_store.hpp; KEEP
@@ -17131,10 +17074,10 @@ op_status vm_backend::assign_math_component(frame& f, uint32_t node, script_valu
 	return {};
 }
 
-// SET_MEMBER's kernel with the operands in hand: the proven or cached field write, else the ladder (accessors, C++ properties,
+// SET_MEMBER's kernel with the operands in hand: the cached field write, else the ladder (accessors, C++ properties,
 // the texts); the statement form (want_result false) pushes nothing and reads nothing back, the expression form pushes the
 // destination's value as the assignment's value
-op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, uint32_t proof, script_value&& objectValue, script_value&& value, bool want_result) {
+op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, script_value&& objectValue, script_value&& value, bool want_result) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[node].get());
 	script_value dereferenced = objectValue.deref();
 	if (!dereferenced.is_object()) {
@@ -17153,7 +17096,7 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, ui
 	}
 	if (detail::class_temporary_member_store(member, objectValue, 2)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }   // objectValue and its dereferenced copy
 
-	if (auto landed = member_field_write_fast(f, ins_index, proof, member, dereferenced, value)) {
+	if (auto landed = member_field_write_fast(f, ins_index, member, dereferenced, value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
 		return want_result ? land_member_store_result(f, dereferenced, member, std::move(value)) : op_status{};
 	}
@@ -17218,7 +17161,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 	script_value receiver = make_null();
 	VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, receiver));
 	if (is_unwinding_) { return {}; }
-	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, p.proof, std::move(receiver), std::move(value), false);
+	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, std::move(receiver), std::move(value), false);
 }
 
 // A vector buffer's element and component for a velem site: null when the container is not a vector buffer in a frame slot, the index
@@ -17332,7 +17275,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[p.node].get());
 	const size_t ins_index = static_cast<size_t>(&ins - f.code->code.data());
 	if (!p.compound) {
-		return store_member(f, ins_index, p.node, p.proof, std::move(base), std::move(value), false);
+		return store_member(f, ins_index, p.node, std::move(base), std::move(value), false);
 	}
 	const size_t depth = stack_.size();
 	script_value current = make_null();
@@ -17340,7 +17283,7 @@ op_status vm_backend::exec_velem_store(frame& f, const vm_instruction& ins) {
 	stack_.push_back(std::move(base));
 	stack_.push_back(std::move(current));
 	stack_.push_back(std::move(value));
-	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, p.proof, p.kind & ~compound_flag_value_first}, ins_index));
+	VM_TRY(exec_member_compound(f, vm_instruction{opcode::op_member_compound, p.node, 0, p.kind & ~compound_flag_value_first}, ins_index));
 	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "vector element store across a frame switch"); }
 	while (stack_.size() > depth) { stack_.pop_back(); }
 	return {};
@@ -17362,30 +17305,8 @@ op_status vm_backend::land_member_store_result(frame& f, const script_value& obj
 	return {};
 }
 
-std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t ins_index, uint32_t proof, member_expr* member,
+std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t ins_index, member_expr* member,
                                                              const script_value& dereferenced, const script_value& value) {
-	// V-M2 proven field write: == the member_ic hit with the conversion gated by the
-	// proof (KEEP BYTE-PARALLEL with interpreter I-M2)
-	if (member->proven_class && member->proven_field_write && proofs_on() && !detail::by_value_class_type(member->proven_field_type)) {
-		if (class_instance* inst = detail::proven_field_instance(dereferenced, member->proven_class, member->proven_epoch);
-		    inst && !detail::proven_field_holds_object(inst, member->proven_slot, member->proven_field_type)) {
-			script_value incoming = clone_for_assignment(value);
-			if (proof == proof_same_type && member->proven_field_type &&
-			    detail::same_type_payload(incoming, member->proven_field_type)) {
-				if (detail::retags_on_field_write(member->proven_field_type)) {
-					incoming.set_type_info(type_info_ptr{member->proven_field_type});
-				}
-			} else {
-				auto enforced = inst->enforce_field_write(member->member_id, std::move(incoming));
-				if (!enforced) {
-					return raise_from(enforced);
-				}
-				incoming = std::move(enforced).value();
-			}
-			inst->field_slot_write(member->proven_slot, std::move(incoming));
-			return op_status{};
-		}
-	}
 	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
 	// {class, slot} skips the resolve ladder AND the synthesized setter closure —
 	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
@@ -17546,17 +17467,10 @@ op_status vm_backend::exec_set_static(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
-// The instance and field slot a member store at `ins_index` writes as a plain slot store: the proven field write, or the store site's
-// armed field row (a public script field with no user accessor); null for any other store, which runs its own path
+// The instance and field slot a member store at `ins_index` writes as a plain slot store: the store site's armed field row (a public
+// script field with no user accessor); null for any other store, which runs its own path
 class_instance* vm_backend::plain_member_store_slot(frame& f, size_t ins_index, member_expr* member, const script_value& object, uint32_t& slot) {
 	if (parallel_worker_ || member->member_id == UINT64_MAX) return nullptr;
-	if (member->proven_class && member->proven_field_write && cached_global_env_ && !detail::by_value_class_type(member->proven_field_type)) {
-		if (class_instance* inst = detail::proven_field_instance(object, member->proven_class, member->proven_epoch);
-		    inst && !detail::proven_field_holds_object(inst, member->proven_slot, member->proven_field_type)) {
-			slot = member->proven_slot;
-			return inst;
-		}
-	}
 	if (object.raw_storage_index() != script_value::TYPEID_OBJECT) return nullptr;
 	const std::vector<chunk::member_ic_entry>* rows = member_ic_rows(*f.code);
 	auto& holder = const_cast<script_value&>(object).unchecked_get_object_storage();
@@ -17879,7 +17793,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	}
 	if (detail::class_temporary_member_store(member, objectValueRaw)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }
 
-	if (auto landed = member_field_write_fast(f, ins_index, ins.b, member, objectValue, resultValue)) {
+	if (auto landed = member_field_write_fast(f, ins_index, member, objectValue, resultValue)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
 	} else {
 		VM_TRY(assign_member(f, objectValue, member, resultValue));
@@ -18327,7 +18241,7 @@ op_status vm_backend::exec_concat_store(frame& f, const vm_instruction& ins) {
 }
 
 // `recv.f = recv.f + ...;`: [snapshot, tail, receiver]; a plain field store whose field still holds the snapshot's node takes the tail
-// in place (the store's tag stamped), any other store is op_set_member's over the joined value. a = member node, b = the store proof.
+// in place (the store's tag stamped), any other store is op_set_member's over the joined value. a = member node.
 JAI_NOINLINE op_status vm_backend::exec_concat_store_member(frame& f, const vm_instruction& ins) {
 	const size_t ins_index = static_cast<size_t>(&ins - f.code->code.data());
 	script_value receiver = std::move(stack_.back());
@@ -18338,7 +18252,7 @@ JAI_NOINLINE op_status vm_backend::exec_concat_store_member(frame& f, const vm_i
 	stack_.pop_back();
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	if (snapshot.raw_storage_index() != script_value::TYPEID_STRING) {
-		return store_member(f, ins_index, ins.a, ins.b, std::move(receiver), std::move(tail), true);
+		return store_member(f, ins_index, ins.a, std::move(receiver), std::move(tail), true);
 	}
 	if (!detail::class_temporary_member_store(member, receiver)) {
 		const script_value& object = receiver.deref();
@@ -18350,7 +18264,7 @@ JAI_NOINLINE op_status vm_backend::exec_concat_store_member(frame& f, const vm_i
 		}
 	}
 	script_value joined(snapshot.unchecked_as_string() + tail.unchecked_as_string(), engine_);
-	return store_member(f, ins_index, ins.a, ins.b, std::move(receiver), std::move(joined), true);
+	return store_member(f, ins_index, ins.a, std::move(receiver), std::move(joined), true);
 }
 
 // `a[i] = a[i] + ...;`: [snapshot, tail, container, index]; an element or entry still holding the snapshot's node takes the tail in
@@ -24975,7 +24889,6 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	operand.slot = ins.a;
 	operand.symbol = ins.b;
 	operand.load_flags = ins.c;
-	operand.ident_node = f.code->ident_nodes.size() > f.ip ? f.code->ident_nodes[f.ip] : k_invalid_u32;
 	operand.this_slot = this_field_slot_at(f);
 	operand.this_global = !operand.this_slot && f.ip < f.code->this_global_ips.size() && f.code->this_global_ips[f.ip] == ins.b + 1;
 	std::optional<script_value> scratch;

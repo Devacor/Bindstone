@@ -229,7 +229,6 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c);
 std::shared_ptr<identifier_expr> copy_identifier(const identifier_expr* r, const source_location& loc, inline_context& c) {
 	auto n = c.make<identifier_expr>(loc, r->name, r->symbol_id);
 	n->slot_index = r->slot_index; n->global_qualified = r->global_qualified; n->names_value_decl = r->names_value_decl; n->names_known_value = r->names_known_value;
-	n->proven_class = r->proven_class; n->proven_slot = r->proven_slot; n->proven_epoch = r->proven_epoch; n->proven_field_type = r->proven_field_type; n->proven_field_write = r->proven_field_write;
 	return n;
 }
 
@@ -550,7 +549,6 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 			if (!id->this_field || id->global_qualified) { c.fail("a bare name in a method the graft cannot resolve"); return nullptr; }
 			if (std::find(c.field_ids.begin(), c.field_ids.end(), id->symbol_id) == c.field_ids.end()) { c.field_ids.push_back(id->symbol_id); }
 			auto n = c.make<member_expr>(id->location, copy_identifier(c.receiver.get(), id->location, c), id->name, id->symbol_id, false, false);
-			n->proven_class = id->proven_class; n->proven_slot = id->proven_slot; n->proven_epoch = id->proven_epoch; n->proven_field_type = id->proven_field_type; n->proven_field_write = id->proven_field_write;
 			return n;
 		}
 		if (id->slot_index == SIZE_MAX) { c.reads_env = true; }
@@ -626,7 +624,6 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		if (!c.ok) return nullptr;
 		auto n = c.make<member_expr>(m->location, o, m->member, m->member_id, m->is_arrow, m->is_static);
 		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant;
-		n->proven_class = m->proven_class; n->proven_slot = m->proven_slot; n->proven_epoch = m->proven_epoch; n->proven_field_type = m->proven_field_type; n->proven_field_write = m->proven_field_write;
 		return n;
 	}
 	case node_type::ternary_expr: {

@@ -65,9 +65,9 @@ namespace jai::vm {
         op_null_guard,      // a=target; if top derefs to null, replace top with null and jump
         op_get_member,      // a=node index (member_expr); b=0 pops object, b=slot+1 reads that local; pushes member/bound method
         op_get_static,      // a=node index (member_expr with ::); pushes static member
-        op_set_member,      // a=node index, b=assignment_expr::static_store_proof; stack [value, object] -> pushes value
+        op_set_member,      // a=node index; stack [value, object] -> pushes value
         op_set_static,      // a=node index; stack [value] -> pushes value
-        op_member_compound, // a=node index, b=static store proof, c=compound kind; stack [object, current, rhs] (no object for a :: target) -> pushes result
+        op_member_compound, // a=node index, c=compound kind; stack [object, current, rhs] (no object for a :: target) -> pushes result
         op_call_method,     // a=argc, b=call site (member_node/receiver_symbol); stack [object, args...]
         op_new,             // a=node index (new_expr), b=argc; pops args, pushes instance
         op_class_decl,      // a=node index (class_decl); defines/redefines the class
@@ -166,7 +166,7 @@ namespace jai::vm {
                                // ahead of its argument code: the builtin marks the temp float, anything else is the probe's
                                // outcome (a raise, or the callee parked for the real call) and marks it int
         op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
-        op_set_member_fused,   // a=nodes index (a member_expr), b=the store proof, c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
+        op_set_member_fused,   // a=nodes index (a member_expr), c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
         op_call_temp,          // a = frame slot (a compiler temp): the call's result, popped from the stack, lands in it: a call an
                                // expression consumes as an operand (the partner a literal or a private local); the door's temp consumer
         op_operand_temp,       // a=fused_binary_protos index (left = a subscript operand), b=frame
@@ -389,7 +389,7 @@ namespace jai::vm {
     // op_concat_store's target: c >> concat_store_mode_shift (the low bits are op_store's flags in the identifier mode)
     inline constexpr uint32_t concat_store_mode_shift = 24;
     inline constexpr uint32_t concat_store_ident = 0;   // a = symbols index, b = frame slot
-    inline constexpr uint32_t concat_store_member = 1;  // a = member node, b = store proof; [snapshot, tail, receiver]
+    inline constexpr uint32_t concat_store_member = 1;  // a = member node; [snapshot, tail, receiver]
     inline constexpr uint32_t concat_store_index = 2;   // a = index flags, b = string site; [snapshot, tail, container, index]
     inline constexpr uint32_t store_flag_same_type = 32; // assignment_expr::static_store_proof == proof_same_type
                                                          // (frozen at compile; exec skips enforcement only behind

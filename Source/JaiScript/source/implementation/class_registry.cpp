@@ -1171,7 +1171,7 @@ void class_definition::add_method(const std::string& name, script_function func,
         }
         method_arities_[name_id].push_back(arity);
 
-        methods_.insert_or_assign(name_id, script_value::make_function(cpp_method_dispatch{ this, name_id }, engine_));
+        methods_.insert_or_assign(name_id, script_value::make_function(cpp_method_dispatch{ this, name_id, &cpp_method_overloads_[name_id] }, engine_));
     } else {
         methods_.insert_or_assign(name_id, script_value::make_function(
             [func, eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {

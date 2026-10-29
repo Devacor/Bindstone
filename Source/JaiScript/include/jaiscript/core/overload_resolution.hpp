@@ -66,23 +66,17 @@ inline const class_definition::cpp_method_dispatch* host_operator_dispatch(const
 
 // A host operator method takes arg when one of its one-argument overloads scores it as the call's dispatch would; an
 // untyped binding takes anything
-inline bool host_operator_accepts(const script_value& method, uint64_t name_id, const script_value& arg) {
+inline bool host_operator_accepts(const script_value& method, const script_value& arg) {
     if (!method.is_function()) { return false; }
     const auto* dispatch = host_operator_dispatch(method);
     if (!dispatch) { return true; }
-    const auto& table = dispatch->cls->cpp_method_overload_table();
-    const auto by_name = table.find(name_id);
-    if (by_name == table.end()) { return true; }
-    const auto unary = by_name->second.find(1);
-    if (unary == by_name->second.end() || unary->second.empty()) { return false; }
-    std::vector<std::vector<param_type_info>> signatures;
-    signatures.reserve(unary->second.size());
-    for (const auto& entry : unary->second) {
-        if (entry.param_types.empty()) { return true; }
-        signatures.push_back(entry.param_types);
-    }
+    const auto unary = dispatch->overloads->find(1);
+    if (unary == dispatch->overloads->end() || unary->second.empty()) { return false; }
     engine* eng = dispatch->cls->get_engine();
-    return !eng || eng->select_cpp_overload(std::vector<script_value>{arg, arg}, signatures) >= 0;
+    for (const auto& entry : unary->second) {
+        if (!eng || entry.param_types.empty() || eng->cpp_signature_cost(&arg, entry.param_types) >= 0) { return true; }
+    }
+    return false;
 }
 
 // The chain's binary operator `name_id` is a candidate for `arg`: the nearest script declaration has a one-argument overload
@@ -102,7 +96,7 @@ inline bool binary_operator_accepts(const class_definition* def, uint64_t name_i
         }
     }
     const script_value* bound = def ? def->method_ptr(name_id) : nullptr;
-    return bound && host_operator_accepts(*bound, name_id, arg);
+    return bound && host_operator_accepts(*bound, arg);
 }
 
 // other is a value of def's class or a subclass

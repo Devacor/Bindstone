@@ -117,15 +117,11 @@ void register_schema_property(engine& a_engine, class_definition& class_def, ser
 	prop_meta.type = nullptr;
 	metadata.properties.push_back(prop_meta);
 
-	class_def.add_method("_get_" + name, [getter = std::move(getter), access, engine_ptr = &a_engine, native_type_id = class_def.get_type_id()](const std::vector<script_value>& args) -> script_value {
+	class_def.add_method("_get_" + name, [getter = std::move(getter), access, native_type_id = class_def.get_type_id()](const std::vector<script_value>& args) -> script_value {
 		if (args.empty()) {
 			throw runtime_error("Property getter called without 'this' object");
 		}
-		void* cpp_obj = access.extract(args[0], native_type_id);
-		if (auto eng = engine_ptr) {
-			return getter(cpp_obj);
-		}
-		throw runtime_error("Engine no longer exists");
+		return getter(access.extract(args[0], native_type_id));
 	});
 	class_def.register_property_getter(a_engine.symbolize(name), a_engine.symbolize("_get_" + name));
 
@@ -150,50 +146,40 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 	std::string observe_method_name = "on_" + prop_name + "_change";
 
 	auto method_func = [prop_name, eng, access, native_type_id = class_def.get_type_id()](const std::vector<script_value>& args) -> script_value {
-		if (args.empty()) {
-			throw runtime_error("Method called without 'this' object");
-		}
-		if (args.size() != 2) {
-			throw_binder_arity("Method expects ", 1, args.size() - 1);
-		}
-
 		void* self = access.extract(args[0], native_type_id);
 
-		if (eng) {
-			parameter_storage storage;
-			parameter_storage::scope_guard guard(eng, &storage);
+		parameter_storage storage;
+		parameter_storage::scope_guard guard(eng, &storage);
 
-			const script_value& callback = args[1];
-			if (!callback.is_function()) {
-				throw runtime_error("on_" + prop_name + "_change requires a function argument");
-			}
-
-			jai::property_manager& mgr = *access.manager(self);
-			auto* base_prop = mgr.get(prop_name);
-			if (!base_prop) {
-				throw runtime_error("Property '" + prop_name + "' not found");
-			}
-
-			auto* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
-			if (!obs_prop) {
-				throw runtime_error("Property '" + prop_name + "' is not observable");
-			}
-
-			const script_function& script_func = callback.as_function();
-			auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
-				engine::external_call_guard scope(eng);
-				script_value old_sv = script_value_from_cpp(old_val, eng);
-				script_value new_sv = script_value_from_cpp(new_val, eng);
-				throw_script_callback_failure(eng, script_func({old_sv, new_sv}));
-			};
-
-			auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
-			recv->bind_engine(eng, engine_lifetime_token(eng));
-			mgr.template track_receiver<void(const ValueT&, const ValueT&)>(recv);
-
-			return script_value(std::monostate{}, eng);
+		const script_value& callback = args[1];
+		if (!callback.is_function()) {
+			throw runtime_error("on_" + prop_name + "_change requires a function argument");
 		}
-		throw runtime_error("Engine no longer exists");
+
+		jai::property_manager& mgr = *access.manager(self);
+		auto* base_prop = mgr.get(prop_name);
+		if (!base_prop) {
+			throw runtime_error("Property '" + prop_name + "' not found");
+		}
+
+		auto* obs_prop = dynamic_cast<jai::observable_property<ValueT>*>(base_prop);
+		if (!obs_prop) {
+			throw runtime_error("Property '" + prop_name + "' is not observable");
+		}
+
+		const script_function& script_func = callback.as_function();
+		auto cpp_callback = [script_func, eng](const ValueT& old_val, const ValueT& new_val) {
+			engine::external_call_guard scope(eng);
+			script_value old_sv = script_value_from_cpp(old_val, eng);
+			script_value new_sv = script_value_from_cpp(new_val, eng);
+			throw_script_callback_failure(eng, script_func({old_sv, new_sv}));
+		};
+
+		auto recv = obs_prop->on_change.connect(std::move(cpp_callback));
+		recv->bind_engine(eng, engine_lifetime_token(eng));
+		mgr.template track_receiver<void(const ValueT&, const ValueT&)>(recv);
+
+		return script_value(std::monostate{}, eng);
 	};
 
 	class_def.add_method(observe_method_name, a_engine.guard_function(std::move(method_func), privilege::none), 1,

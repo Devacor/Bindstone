@@ -504,7 +504,7 @@ std::optional<checked_result<bool>> interpreter::object_comparison_via_method(co
     // Look for the operator method by symbol ID
     auto method_val = operator_value(target, op_symbol_id);
     const bool declared = method_val.is_function();
-    const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right);
+    const bool host_refuses = declared && host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right);
     // an explicit operator no overload of which takes the operand yields to a <=> that does (C++20: that candidate is not viable)
     if (!declared || host_refuses || (operator_value(target, op_spaceship_id_).is_function() && !binary_operator_accepts(target.class_def, op_symbol_id, right))) {
         if (script_value spaceship = operator_value(target, op_spaceship_id_); spaceship.is_function() && binary_operator_accepts(target.class_def, op_spaceship_id_, right)) {
@@ -570,7 +570,7 @@ std::optional<checked_result<script_value>> interpreter::object_compound_via_met
         }
         if (auto owner = resolve_member_target(target)) {
             script_value method_val = operator_value(owner, compound_id);
-            if (method_val.is_function() && host_operator_accepts(method_val, compound_id, right)) {
+            if (method_val.is_function() && host_operator_accepts(method_val, right)) {
                 auto result = operator_call(target, method_val, compound_id, { right });
                 if (!result) {
                     if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
@@ -595,7 +595,7 @@ std::optional<checked_result<script_value>> interpreter::object_reflected_via_me
     auto target = resolve_member_target(right);
     if (!target) { return std::nullopt; }
     script_value method_val = operator_value(target, reflected_id);
-    if (!method_val.is_function() || !host_operator_accepts(method_val, reflected_id, left)) { return std::nullopt; }
+    if (!method_val.is_function() || !host_operator_accepts(method_val, left)) { return std::nullopt; }
     auto result = operator_call(right, method_val, reflected_id, { left });
     if (!result) {
         if (is_unwinding_) { return checked_result<script_value>(script_value(std::monostate{}, engine_)); }
@@ -630,7 +630,7 @@ std::optional<checked_result<script_value>> interpreter::object_arithmetic_via_m
         return std::nullopt;  // No custom method - use default arithmetic
     }
 
-    if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, op_symbol_id, right)) { return std::nullopt; }
+    if (host_operator_dispatch(method_val) && !host_operator_accepts(method_val, right)) { return std::nullopt; }
     auto result = operator_call(left, method_val, op_symbol_id, { right });
     if (!result && !is_unwinding_) { return checked_result<script_value>(result.error_value()); }
     if (result.has_value()) {
@@ -4159,7 +4159,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // move. The kernel deep-copies values and shares shared_ptr handles; a proven
             // read-only local binds the object itself (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
             if (reference_init || is_lvalue_expression(decl->initializer.get())) {
-                if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !parallel_worker_ && !engine_->parallel_region_active())) {
+                if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !engine_->parallel_region_active())) {
                     if (!parallel_worker_) { engine_->note_local_alias_bind(); }
                 } else {
                     value = clone_for_assignment(value);
@@ -11915,7 +11915,7 @@ std::vector<stack_frame> interpreter::debug_frames() const {
 }
 
 void interpreter::note_clock_sample(std::chrono::steady_clock::time_point now) {
-    if (engine_ && !parallel_worker_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
+    if (engine_ && !engine_->parallel_region_active()) { engine_->execution_limits().note_clock_sample(now); }
 }
 
 // KEEP BYTE-PARALLEL with vm_backend::park_nested_failure / absorb_nested_trace

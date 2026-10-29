@@ -1445,8 +1445,8 @@ namespace jai {
         // The names a class value map key's class orders, compares and hashes through (core/script_map.hpp)
         struct map_key_ids { uint64_t less = 0; uint64_t spaceship = 0; uint64_t equal = 0; uint64_t hash = 0; };
         const map_key_ids& map_key_operator_ids() const noexcept;
-        int select_cpp_overload(const std::vector<script_value>& args,
-                                const std::vector<std::vector<param_type_info>>& candidateParamTypes) const;
+        // A C++ signature's match cost for the arguments at args (free-function overload ranking), -1 when it does not take them
+        int cpp_signature_cost(const script_value* args, const std::vector<param_type_info>& signature) const;
 
         // Expires when this engine is destroyed: script callbacks a host keeps (signal receivers, converted std::functions)
         // check it before they run, so a destroy order that leaves them behind never reaches the dead engine

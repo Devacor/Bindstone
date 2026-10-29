@@ -569,10 +569,19 @@ public:
     // identical reloads must keep field proofs armed)
     inline void set_auto_accessor_ids(std::unordered_set<uint64_t> ids);
 
+    // One bound C++ method overload: its parameter-type signature (empty = untyped/legacy) and the
+    // type-erased call. Multiple entries per (name, arity) are same-arity overloads resolved by type.
+    struct cpp_overload_entry {
+        std::vector<param_type_info> param_types;
+        script_function func;
+        param_type_info result;   // the C++ result kind (jai_null_type: void, script_value or unrecorded)
+    };
+    using cpp_overloads_by_arity = std::unordered_map<size_t, std::vector<cpp_overload_entry>>;
     // A host method name's callable: the C++ overload the arguments select
     struct cpp_method_dispatch {
         class_definition* cls;
         uint64_t name_id;
+        const cpp_overloads_by_arity* overloads;   // the name's table, which registration never erases
         inline checked_result<script_value> operator()(const std::vector<script_value>& raw_args) const;
         // how the overloads taking argc arguments bind argument i (detail::arg_binding bits: 4 = the lvalue, for a C++ T& the
         // call writes back; 8 = the host's)
@@ -1287,14 +1296,7 @@ private:
     engine* engine_ = nullptr;
     std::unordered_map<uint64_t, script_value> methods_;
     std::unordered_map<uint64_t, std::vector<size_t>> method_arities_;
-    // One bound C++ method overload: its parameter-type signature (empty = untyped/legacy) and the
-    // type-erased call. Multiple entries per (name, arity) are same-arity overloads resolved by type.
-    struct cpp_overload_entry {
-        std::vector<param_type_info> param_types;
-        script_function func;
-        param_type_info result;   // the C++ result kind (jai_null_type: void, script_value or unrecorded)
-    };
-    std::unordered_map<uint64_t, std::unordered_map<size_t, std::vector<cpp_overload_entry>>> cpp_method_overloads_;
+    std::unordered_map<uint64_t, cpp_overloads_by_arity> cpp_method_overloads_;
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> method_overloads_;
 
     struct overload_cache_key {

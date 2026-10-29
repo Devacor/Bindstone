@@ -3164,8 +3164,9 @@ chunk::typed_site& vm_compiler::typed_site_at(size_t ip) {
 
 // A scalar-store decl (int/float/bool/char/string/var/auto in a frame slot, not escape-boxed)
 // initialized from a plain slot identifier or a scalar literal: the LOAD or CONST just
-// emitted becomes one typed move and no DECL_VAR follows. The op's guard is the decl fast
-// path's admission; its fallback is the pair it replaced.
+// emitted becomes one typed move and no DECL_VAR follows. The move's guard is the decl fast
+// path's admission; its fallback is the pair it replaced. A literal lowers only when it lands
+// as is (or widens an int into a float declaration, folded here): any other pair converts.
 bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl, const expression* init) {
 	if (reference_ || !callable_.active) return false;
 	if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store ||
@@ -3201,14 +3202,19 @@ bool vm_compiler::try_lower_decl_move(const std::shared_ptr<variable_decl>& decl
 	}
 	if (init->get_type() == node_type::literal_expr && last.op == opcode::op_const) {
 		const size_t ci = chunk_->constants[last.a].raw_storage_index();
-		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_BOOL &&
-		    ci != script_value::TYPEID_CHAR && ci != script_value::TYPEID_STRING) return false;
+		uint32_t landed = last.a;
+		if (variable_decl::widening_payload(ci, decl->type.get())) {
+			const script_float widened = static_cast<script_float>(chunk_->constants[last.a].unchecked_as_int());
+			landed = add_constant(script_value(widened, static_cast<engine*>(nullptr)));
+		} else if (!variable_decl::identity_payload(ci, decl->type.get())) {
+			return false;
+		}
 		const vm_instruction orig = last;
 		chunk::typed_site& site = typed_site_at(ip);
 		site.orig = orig;
 		site.orig2 = vm_instruction{opcode::op_decl_var, add_node(decl), 1, 0};
 		site.stamp = decl->type.get();
-		last = vm_instruction{opcode::op_t_decl_const, static_cast<uint32_t>(decl->slot_index), orig.a, site.orig2.a};
+		code[ip] = vm_instruction{opcode::op_t_decl_const, static_cast<uint32_t>(decl->slot_index), landed, site.orig2.a};
 		return true;
 	}
 	return false;

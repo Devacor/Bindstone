@@ -13,6 +13,7 @@
 #include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/arity_diagnostic.hpp>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -39,7 +40,7 @@ namespace jai {
 }
 
 [[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got) {
-    throw runtime_error(prefix + std::to_string(expected) + " arguments, got " + std::to_string(got));
+    throw runtime_error(prefix + detail::arity_detail(expected, got));
 }
 
 [[noreturn]] JAI_NOINLINE void throw_text_with_count(const char* text, size_t count) {

@@ -641,6 +641,11 @@ public:
     const auto& cpp_method_overload_table() const { return cpp_method_overloads_; }
     const auto& method_values() const { return methods_; }
     const auto& static_method_values() const { return static_methods_; }
+    // the argument counts name_id's host bindings take; null when a binding of unknown arity is the live one
+    const std::vector<size_t>* static_method_arities(uint64_t name_id) const {
+        auto it = static_method_arities_.find(name_id);
+        return it == static_method_arities_.end() ? nullptr : &it->second;
+    }
 
     void add_field(std::string_view name, const script_value& default_value);
 

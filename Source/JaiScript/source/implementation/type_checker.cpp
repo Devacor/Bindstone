@@ -3134,6 +3134,24 @@ private:
         return agree && result ? *result : ctype{};
     }
 
+    // Cls::m(args) on a host class: a count none of the binder's arities takes is the binder's run-time throw; a binding of
+    // unknown arity, or a script static of the name, keeps the call lenient
+    void check_host_static_arity(std::string_view cls, std::string_view member, size_t argc, const source_location& loc) {
+        auto def = engine_class(cls);
+        if (!def || !def->is_cpp_class() || def->extended_ever()) { return; }
+        const uint64_t id = eng_.symbolize(member);
+        if (def->script_static_method_overloads().count(id)) { return; }
+        const std::vector<size_t>* bound = def->static_method_arities(id);
+        if (!bound || bound->empty() || std::find(bound->begin(), bound->end(), argc) != bound->end()) { return; }
+        std::vector<size_t> arities(*bound);
+        std::sort(arities.begin(), arities.end());
+        arities.erase(std::unique(arities.begin(), arities.end()), arities.end());
+        std::string expected;
+        for (size_t n : arities) { expected += (expected.empty() ? "" : " or ") + std::to_string(n); }
+        diag(diag_level::error, loc, "'" + std::string(cls) + "::" + std::string(member) + "' expects " + expected +
+             " argument(s), got " + std::to_string(argc));
+    }
+
     // a host class that opted into strict signatures holds its constructions to the constructors its binder registered
     void check_strict_host_constructor(const std::string& cls, const std::vector<ctype>& args, const source_location& loc) {
         auto def = engine_class(cls);
@@ -4484,6 +4502,7 @@ private:
                 return result;
             }
             if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
+            check_host_static_arity(recv.cls, m->member, args.size(), c->location);
             return {};
         }
         if (!want_static) {

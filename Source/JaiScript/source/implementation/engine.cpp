@@ -5442,7 +5442,7 @@ void engine::register_location_builtins() {
         [this](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    "Function expects {0} arguments, got {1}", 1, args.size());
+                    "Function expects {0} argument, got {1}", 1, args.size());
             }
             auto name = args[0].checked_as<std::string>();
             if (!name) { return name.error_value(); }
@@ -5476,7 +5476,7 @@ void engine::register_location_builtins() {
         [this](const std::vector<script_value>& args) -> checked_result<script_value> {
             if (args.size() != 1) {
                 return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch),
-                    "Function expects {0} arguments, got {1}", 1, args.size());
+                    "Function expects {0} argument, got {1}", 1, args.size());
             }
             auto name = args[0].checked_as<std::string>();
             if (!name) { return name.error_value(); }

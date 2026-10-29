@@ -465,6 +465,50 @@ public:
             check_eq((size_t)1, error_count(e->check(std::string(mk) + "p.zzz_nope;")));
         });
 
+        test("host_static_method_arity_is_a_check_error", [this]() {
+            auto fresh = [](bool use_vm) {
+                auto e = make_engine();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                dynamic_binder<probe_object>(*e, "Gate")
+                    .constructor<>()
+                    .static_method("twice", [](script_int n) -> script_int { return n * 2; })
+                    .static_method("pick", [](script_int a, script_int b) -> script_int { return a + b; })
+                    .static_method("pick", [](script_int n) -> script_int { return n; })
+                    .build();
+                e->get_class_definition("Gate")->add_static_method("any", [raw = e.get()](const std::vector<script_value>& a) -> checked_result<script_value> {
+                    return script_value(static_cast<script_int>(a.size()), raw);
+                });
+                return e;
+            };
+            auto e = fresh(false);
+            auto r = e->check("Gate::twice();");
+            check_eq((size_t)1, error_count(r));
+            check_true(has_diag(r, dlevel::error, "'Gate::twice' expects 1 argument(s), got 0"), r.format());
+            check_eq((size_t)1, error_count(e->check("Gate::twice(1, 2);")));
+            check_eq((size_t)0, error_count(e->check("Gate::twice(4);")));
+            // an overloaded static: an error only when no overload takes the count
+            check_eq((size_t)0, error_count(e->check("Gate::pick(1); Gate::pick(1, 2);")));
+            auto ov = e->check("Gate::pick();");
+            check_eq((size_t)1, error_count(ov));
+            check_true(has_diag(ov, dlevel::error, "'Gate::pick' expects 1 or 2 argument(s), got 0"), ov.format());
+            // a binding of unknown arity takes any count
+            check_eq((size_t)0, error_count(e->check("Gate::any(); Gate::any(1, 2, 3);")));
+            for (bool use_vm : {false, true}) {
+                auto s = fresh(use_vm);
+                bool static_err = false;
+                try { s->execute("Gate::twice();"); } catch (const static_check_error&) { static_err = true; } catch (...) {}
+                check_true(static_err, "strict rejects at load");
+                check_eq((int64_t)8, s->execute("Gate::twice(4)").as_int());
+                check_eq((int64_t)3, s->execute("Gate::any(1, 2, 3)").as_int());
+                // warn: a warning, and the runtime raise stands
+                auto w = s->check("[[warn_mode]];\nGate::twice();");
+                check_eq((size_t)0, error_count(w));
+                check_true(has_diag(w, dlevel::warning, "'Gate::twice' expects 1 argument(s), got 0"), w.format());
+                check_eq(std::string("Static method expects 1 argument, got 0"),
+                         s->execute("[[warn_mode]]; var m = \"\"; try { Gate::twice(); } catch (err) { m = err; } m;").to_string());
+            }
+        });
+
         test("read_only_property_store_is_a_check_error", [this]() {
             // A store to a getter-only binder property is the mistake the runtime raises
             // (`Cannot assign to 'ro': it is read-only`); on a closed class the checker

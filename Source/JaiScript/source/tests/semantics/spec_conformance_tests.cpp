@@ -868,7 +868,7 @@ private:
 		test("a_delegation_chain_runs_every_target_whole_and_a_cycle_raises", [this]() {
 			// C++: D() -> D(int) -> D(int, int) : super(a + b); field initializers run once, in the innermost target;
 			// a delegation cycle is ill-formed in C++ and raises the recursion text instead of recursing without end
-			expect("delegation chain", R"(
+			const std::string src = R"(
 				class B { int b = 0; string log = ""; B(int x) { b = x; log += "B"; } }
 				class D : B {
 					int d = 1;
@@ -884,7 +884,12 @@ private:
 					return "" + v.b + "," + v.d + "," + v.log + "|" + err;
 				}
 				run();
-			)", "105,1111,B210|Maximum recursion depth exceeded - possible infinite recursion");
+			)";
+			// a Debug run to the depth limit takes seconds, and the default budget would cut it short on a loaded machine
+			every_config("delegation chain", "105,1111,B210|Maximum recursion depth exceeded - possible infinite recursion", [&](engine& e) {
+				e.execution_budget(0);
+				return spec::render(e.execute(src));
+			});
 		});
 		test("a_throw_in_a_delegated_constructor_keeps_the_target_and_runs_no_destructor", [this]() {
 			expect("delegated throw", R"(

@@ -12,6 +12,8 @@
 #include <fstream>
 #include <stdexcept>
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace {
 
 jai::script_value call_script(jai::engine& eng, const char* fn_name,
@@ -141,6 +143,7 @@ public:
 } // namespace
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	jai_adapter adapter;
 	return gloom::run_gloom(argc, argv, adapter);
 }

@@ -30,6 +30,8 @@
 #include <thread>
 #include <vector>
 
+#include <jaiscript/testing/unattended.hpp>
+
 namespace fs = std::filesystem;
 
 struct Vec2 {
@@ -358,6 +360,7 @@ static int run(int argc, char** argv) {
 }
 
 int main(int argc, char** argv) {
+	jai::foundry::route_faults_to_stderr();
 	std::cout << std::unitbuf;
 	try {
 		return run(argc, argv);

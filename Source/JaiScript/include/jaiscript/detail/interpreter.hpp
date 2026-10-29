@@ -227,19 +227,6 @@ namespace jai {
         void set_engine_reference(engine* eng) override {
             engine_ = eng;
             if (environment_) { environment_->bind_engine(eng); }
-
-            // Initialize cached common values to avoid repeated allocations
-            cached_null_ = script_value(std::monostate{}, engine_);
-            cached_true_ = script_value(true, engine_);
-            cached_false_ = script_value(false, engine_);
-            cached_zero_int_ = script_value(static_cast<script_int>(0), engine_);
-            cached_one_int_ = script_value(static_cast<script_int>(1), engine_);
-            cached_zero_float_ = script_value(0.0, engine_);
-            cached_one_float_ = script_value(1.0, engine_);
-
-            if (cached_zero_int_.has_value()) cached_type_info_int_ = cached_zero_int_->get_type_info();
-            if (cached_zero_float_.has_value()) cached_type_info_float_ = cached_zero_float_->get_type_info();
-            if (cached_true_.has_value()) cached_type_info_bool_ = cached_true_->get_type_info();
         }
 
         // Wire (or clear) the step-debugger. The statement hook itself tests only the
@@ -255,67 +242,13 @@ namespace jai {
         }
 
         // Helper to create script_value with engine context
-        script_value make_value(script_int i) const {
-            if (engine_) {
-                // Return cached common values to avoid allocations
-                if (i == 0 && cached_zero_int_.has_value()) return *cached_zero_int_;
-                if (i == 1 && cached_one_int_.has_value()) return *cached_one_int_;
-                return script_value(i, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        script_value make_value(script_float f) const {
-            if (engine_) {
-                // Return cached common values to avoid allocations. IEEE -0.0 == 0.0, so the
-                // zero cache must exclude the negative sign or -0.0 collapses to +0.0 (vm parity)
-                if (f == 0.0 && !std::signbit(f) && cached_zero_float_.has_value()) return *cached_zero_float_;
-                if (f == 1.0 && cached_one_float_.has_value()) return *cached_one_float_;
-                return script_value(f, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        script_value make_value(const script_string& s) const {
-            if (engine_) {
-                return script_value(s, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        // Move overload for string temporaries (avoids copy)
-        script_value make_value(script_string&& s) const {
-            if (engine_) {
-                return script_value(std::move(s), engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        script_value make_value(script_bool b) const {
-            if (engine_) {
-                // Return cached common values to avoid allocations
-                if (b && cached_true_.has_value()) return *cached_true_;
-                if (!b && cached_false_.has_value()) return *cached_false_;
-                return script_value(b, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        script_value make_value(script_char c) const {
-            if (engine_) {
-                return script_value(c, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
-
-        script_value make_value() const {
-            if (engine_) {
-                // Return cached null value
-                if (cached_null_.has_value()) return *cached_null_;
-                return script_value(std::monostate{}, engine_);
-            }
-            throw runtime_error("Engine pointer is null - cannot create script_value");
-        }
+        script_value make_value(script_int i) const { return script_value(i, engine_); }
+        script_value make_value(script_float f) const { return script_value(f, engine_); }
+        script_value make_value(const script_string& s) const { return script_value(s, engine_); }
+        script_value make_value(script_string&& s) const { return script_value(std::move(s), engine_); }
+        script_value make_value(script_bool b) const { return script_value(b, engine_); }
+        script_value make_value(script_char c) const { return script_value(c, engine_); }
+        script_value make_value() const { return script_value(std::monostate{}, engine_); }
 
         // AST literals carry no engine/type_info; rebuild a real value before any slow-path
         // consumer sees them (operator-method args get cloned during param bind).
@@ -324,9 +257,6 @@ namespace jai {
         // worker copies the bytes, because the node's refcount is not atomic and the main
         // engine and the other workers hold the same literal
         script_value literal_string_value(const strong_ptr<script_string>& node) const {
-            if (!engine_) {
-                throw runtime_error("Engine pointer is null - cannot create script_value");
-            }
             return parallel_worker_ ? script_value(*node, engine_) : script_value(node, engine_);
         }
 
@@ -958,37 +888,6 @@ namespace jai {
         // The next dispatch is no new statement execution (set only while armed): a for initializer, whose header
         // stopped, or a statement a coroutine resume re-enters.
         const ast_node* debug_quiet_node_ = nullptr;
-
-        // Cached common values to avoid repeated allocations (initialized in set_engine_reference)
-        std::optional<script_value> cached_null_;
-        std::optional<script_value> cached_true_;
-        std::optional<script_value> cached_false_;
-        std::optional<script_value> cached_zero_int_;
-        std::optional<script_value> cached_one_int_;
-        std::optional<script_value> cached_zero_float_;
-        std::optional<script_value> cached_one_float_;
-
-        // Pre-cached type_info pointers for fast value construction (bypasses engine indirection)
-        type_info_ptr cached_type_info_int_ = nullptr;
-        type_info_ptr cached_type_info_float_ = nullptr;
-        type_info_ptr cached_type_info_bool_ = nullptr;
-
-        // Fast value factories — skip null checks, cache comparisons, and engine indirection
-        inline script_value make_int_fast(script_int i) const noexcept {
-            script_value v(script_value::ast_literal_tag{}, i);
-            v.set_stamp(cached_type_info_int_);
-            return v;
-        }
-        inline script_value make_float_fast(script_float f) const noexcept {
-            script_value v(script_value::ast_literal_tag{}, f);
-            v.set_stamp(cached_type_info_float_);
-            return v;
-        }
-        inline script_value make_bool_fast(script_bool b) const noexcept {
-            script_value v(script_value::ast_literal_tag{}, b);
-            v.set_stamp(cached_type_info_bool_);
-            return v;
-        }
 
         // Temporary storage for 'this' value during method/constructor execution
         script_value current_method_this_;

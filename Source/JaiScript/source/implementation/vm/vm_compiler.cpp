@@ -18,6 +18,7 @@
 #include <jaiscript/detail/map_entry_binding.hpp>
 #include <algorithm>
 #include <cassert>
+#include <stdexcept>
 #include <functional>
 
 namespace jai::detail::aggregate_lowering_impl { bool contains_yield(const statement* s); }
@@ -717,12 +718,10 @@ uint32_t vm_compiler::add_node(std::shared_ptr<ast_node> node) {
 	return static_cast<uint32_t>(chunk_->nodes.size() - 1);
 }
 
-void vm_compiler::emit_unsupported(const char* construct) {
-	std::string msg = std::string("vm backend: cannot compile ") + construct;
-	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation),
-	     add_message(std::move(msg)), k_invalid_u32);
-	// Keep the value-stack shape consistent for expression positions
-	emit(opcode::op_null);
+// a construct the parser, the jaibite reader or the compiler's own admission rules out
+void vm_compiler::unreachable_construct(const char* construct) {
+	assert(false && "vm_compiler: an unreachable construct");
+	throw std::logic_error(std::string("vm backend: cannot compile ") + construct);
 }
 
 uint32_t vm_compiler::identifier_slot_operand(identifier_expr* ident) const {
@@ -1538,17 +1537,13 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 		return;
 	case node_type::case_stmt:
 	case node_type::default_stmt:
-		emit_unsupported("a case label outside a switch");
-		emit(opcode::op_pop);
-		return;
+		unreachable_construct("a case label outside a switch");
 	default:
 		if (auto decl = std::dynamic_pointer_cast<declaration>(stmt)) {
 			compile_declaration(decl, false);
 			return;
 		}
-		emit_unsupported("this statement");
-		emit(opcode::op_pop);
-		return;
+		unreachable_construct("this statement");
 	}
 }
 
@@ -2984,8 +2979,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 		return;
 	}
 	default:
-		emit_unsupported("this expression");
-		return;
+		unreachable_construct("this expression");
 	}
 }
 
@@ -6351,8 +6345,8 @@ void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint32_t dst) {
 		++temp_next_;
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 		vm_instruction& last = chunk_->code.back();
-		if (last.op == opcode::op_binary_fused) { last.op = opcode::op_binary_fused_temp; last.b = t0; }
-		else { emit(opcode::op_call_temp, t0); }   // unreachable by construction (binary_lands_fused held): the value is on the stack
+		if (last.op != opcode::op_binary_fused) { unreachable_construct("a ternary arm that did not land fused"); }   // the arm's admission held binary_lands_fused
+		last.op = opcode::op_binary_fused_temp; last.b = t0;
 		p.left = fused_operand{};
 		p.left.slot = t0;
 		p.left.symbol = temp_symbol_index();
@@ -7022,12 +7016,7 @@ bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) 
 				else if (snap_container) { guard_container_temp(expr->left, container, guard, true); }
 				compile_expression(expr->right);
 				vm_instruction& last = chunk_->code.back();
-				if (last.op != opcode::op_binary_fused) {
-					// unreachable by construction (binary_lands_fused mirrors compile_binary's decisions); the index is on the stack
-					emit_unsupported("an index tree that did not land fused");
-					temp_next_ = temp_mark;
-					return true;
-				}
+				if (last.op != opcode::op_binary_fused) { unreachable_construct("an index tree that did not land fused"); }   // binary_lands_fused mirrors compile_binary's decisions
 				const uint32_t t = static_cast<uint32_t>(temp_next_);
 				++temp_next_;
 				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
@@ -7692,11 +7681,7 @@ bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expre
 		if (snap_container) { guard_container_temp(sub->left, container, guard, true); }
 		compile_expression(sub->right);
 		vm_instruction& last = chunk_->code.back();
-		if (last.op != opcode::op_binary_fused) {
-			emit_unsupported("an index tree that did not land fused");   // unreachable by construction, as at the read site
-			temp_next_ = temp_mark;
-			return true;
-		}
+		if (last.op != opcode::op_binary_fused) { unreachable_construct("an index tree that did not land fused"); }
 		const uint32_t t = static_cast<uint32_t>(temp_next_);
 		++temp_next_;
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }

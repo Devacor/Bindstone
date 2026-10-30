@@ -216,6 +216,7 @@
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding Condition="'$(BindstoneFastIteration)'!='true'">true</EnableCOMDATFolding>
       <OptimizeReferences Condition="'$(BindstoneFastIteration)'!='true'">true</OptimizeReferences>
+      <AdditionalOptions Condition="'$(BindstoneFastIteration)'=='true'">/PDBPAGESIZE:8192 %(AdditionalOptions)</AdditionalOptions>
       <AdditionalDependencies>external.lib;mutedvision.lib;libssl.lib;libcrypto.lib;SDL2_Static.lib;opengl32.lib;setupapi.lib;winmm.lib;imm32.lib;version.lib;Crypt32.Lib;%(AdditionalDependencies)</AdditionalDependencies>
       <AdditionalLibraryDirectories>$(SolutionDir)External\openssl\openssl-3.5.9\$(Platform)\lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
     </Link>

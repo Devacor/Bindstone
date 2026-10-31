@@ -1004,6 +1004,121 @@ public:
                          " string r = \"none\"; try { B b; } catch (e) { r = to_string(e); } r + \"|\" + LOG;"),
                      "the constructed base is destroyed");
         });
+
+        // A value a statement reads or computes on the way to its consumer is held by nothing once the consumer has it: a member
+        // read is the member itself (C++ copies it straight into the declaration), and a temporary dies with the operation that
+        // consumes it, so the object dies when its last named owner lets go
+        test("a_member_read_into_a_declaration_holds_nothing_after_it", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; var d = null; int v = 0; Token tv = Token("v"); }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    b.t = new Token("a"); shared_ptr<Token> x = b.t; x = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.t = new Token("b"); var y = b.t; y = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.t = new Token("c"); auto z = b.t; z = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.d = new Token("d"); var w = b.d; w = null; LOG = LOG + "<"; b.d = null; LOG = LOG + ">";
+                    { Token copy = b.tv; copy.name = "e"; }
+                    LOG = LOG + "|";
+                    int k = b.v + 1;
+                }
+                f(); LOG;
+            )", "<a><b><c><d>e|v");
+        });
+
+        test("a_member_read_an_operation_consumes_holds_nothing_after_it", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box(); shared_ptr<Box> c = new Box();
+                    b.t = new Token("a"); bool z = b.t == null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.t = new Token("b"); if (b.t) { LOG = LOG + "?"; } LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.t = new Token("c"); if (b.t != null) { LOG = LOG + "?"; } LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    shared_ptr<Token> x = null;
+                    b.t = new Token("d"); x = b.t; x = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    b.t = new Token("e"); c.t = b.t; c.t = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                }
+                f(); LOG;
+            )", "<a>?<b>?<c><d><e>");
+        });
+
+        test("a_member_read_dies_with_its_consumer_inside_the_full_expression", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; }
+                function clear(shared_ptr<Box> b) -> bool { b.t = null; LOG = LOG + "!"; return true; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    b.t = new Token("a"); bool z = b.t == null || clear(b); LOG = LOG + "|";
+                    b.t = new Token("b"); if (b.t != null && clear(b)) { LOG = LOG + "?"; } LOG = LOG + "|";
+                    b.t = new Token("c"); bool y = b.t != null && clear(b) && b.t == null; LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "a!|b!?|c!|");
+        });
+
+        test("a_member_read_through_a_this_field_holds_nothing_after_it", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; }
+                class Holder {
+                    shared_ptr<Box> bx = null;
+                    function run() -> void {
+                        bx = new Box(); shared_ptr<Box> other = new Box();
+                        bx.t = new Token("a"); shared_ptr<Token> x = bx.t; x = null; LOG = LOG + "<"; bx.t = null; LOG = LOG + ">";
+                        bx.t = new Token("b"); other.t = bx.t; other.t = null; LOG = LOG + "<"; bx.t = null; LOG = LOG + ">";
+                        bx.t = new Token("c"); bool z = bx.t == null; LOG = LOG + "<"; bx.t = null; LOG = LOG + ">";
+                    }
+                }
+                function f() -> void { Holder h = Holder(); h.run(); }
+                f(); LOG;
+            )", "<a><b><c>");
+        });
+
+        test("an_element_read_holds_nothing_after_its_consumer", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; int v = 0; }
+                function f() -> void {
+                    array<shared_ptr<Box>> arr = [new Box(), new Box()];
+                    arr[0].t = new Token("p"); arr[1].t = new Token("q");
+                    for (int i = 0; i < 2; i++) { bool z = arr[i].t == null; arr[i].t = null; LOG = LOG + "."; }
+                    LOG = LOG + "|";
+                    array<shared_ptr<Token>> toks = [new Token("r")];
+                    shared_ptr<Token> x = toks[0]; x = null; LOG = LOG + "<"; toks[0] = null; LOG = LOG + ">";
+                    for (int i = 0; i < 2; i++) { arr[i].t = new Token("s" + to_string(i)); shared_ptr<Token> y = arr[i].t; y = null; arr[i].t = null; LOG = LOG + "."; }
+                    LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "p.q.|<r>s0.s1.|");
+        });
+
+        test("a_temporary_dies_with_the_operation_that_consumes_it", [this]() {
+            expect_log(R"(
+                class V { int x = 0; string tag = ""; V() {} V(int a, string t) { x = a; tag = t; } ~V() { LOG = LOG + tag; } V operator+(V o) { return V(x + o.x, tag + o.tag); } }
+                function mk(string n) -> shared_ptr<Token> { return new Token(n); }
+                function f() -> void {
+                    bool z = mk("a") == null; LOG = LOG + "|";
+                    for (int i = 0; i < 2; i++) { if (mk("L" + to_string(i)) != null) { LOG = LOG + "."; } LOG = LOG + ","; }
+                    LOG = LOG + "|";
+                    V a = V(1, "x"); V b = V(2, "y"); V c = V(3, "z");
+                    V d = a + b + c; LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "a|L0.,L1.,|yzxy|xyzzyx");
+        });
+
+        test("a_member_read_in_a_loop_never_holds_the_previous_iteration_s_object", [this]() {
+            expect_log(R"(
+                class Box { shared_ptr<Token> t = null; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    for (int i = 0; i < 3; i++) {
+                        b.t = new Token(to_string(i)); shared_ptr<Token> x = b.t; x = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
+                    }
+                    int n = 0;
+                    while (n < 2) { b.t = new Token("w" + to_string(n)); if (b.t != null) { n++; } b.t = null; LOG = LOG + "."; }
+                    LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "<0><1><2>w0.w1.|");
+        });
     }
 
     // the frames of the first error a program raises, as the engine's stack trace lists them

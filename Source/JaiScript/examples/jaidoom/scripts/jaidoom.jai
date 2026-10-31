@@ -795,7 +795,7 @@ function selftest() -> int {
 		P_VIEWZ = P_FLOORZ + 41.0;
 		float offdir = -100.0;
 		for (int a1 = 0; a1 < 16 && offdir < -99.0; ++a1) {
-			float ang = a1 * TAU / 16.0;
+			float ang = a1 * math::TAU / 16.0;
 			int pf = SE_FLOORH[sector_at(P_X + math::cos(ang) * 48.0, P_Y + math::sin(ang) * 48.0)];
 			if (P_FLOORZ - pf > 8) { offdir = ang; }
 		}

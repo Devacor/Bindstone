@@ -95,7 +95,7 @@ gate_gloom() { gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"; }
 gate_gloom_workers() { gloom_hashes 300 8 "$GLOOM_FRAME" "$GLOOM_STATE"; }
 gate_gloom_long() { gloom_hashes 600 0 "$GLOOM_LONG_FRAME" "$GLOOM_LONG_STATE"; }
 
-# JaiDOOM's timedemo, where the checkout carries the example (it is optional)
+# JaiDOOM's timedemo and the game's own headless selftest (which loads jaidoom.jai, the entry point), where the checkout carries the example (it is optional)
 gate_timedemo() {
 	local dir="$ROOT/examples/jaidoom/scripts"
 	[ -f "$dir/p10_timedemo.jai" ] || { echo "timedemo: examples/jaidoom is not in this checkout, skipped"; return 0; }
@@ -105,6 +105,9 @@ gate_timedemo() {
 		rm -rf ./.cache
 		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
 		want "timedemo $backend: expected STATE_HASH $TIMEDEMO_STATE" "STATE_HASH: $TIMEDEMO_STATE\\b"
+		rm -rf ./.cache
+		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" jaidoom.jai -- selftest
+		want "jaidoom selftest $backend: expected ALL GREEN" "SELFTEST: ALL GREEN"
 	done
 	rm -rf ./.cache
 }

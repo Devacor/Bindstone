@@ -3860,10 +3860,19 @@ private:
 	}
 
     bool bare_this_field_ = false;
+    // a bare name of a method body no local and no member of the modeled class chain takes (every ancestor resolved)
+    bool bare_program_name(const identifier_expr* id) {
+        if (!bare_field_context() || id->global_qualified || id->slot_index != SIZE_MAX) { return false; }
+        size_t scope_index = 0;
+        if (find_named(id, &scope_index) && scope_index != 0) { return false; }   // a local or a namespace's name; the unit's own program scope reads as any program-scope name
+        const member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
+        return !hit.found && !hit.unresolved && hit.certain;
+    }
     ctype infer_identifier(identifier_expr* id) {
         bare_this_field_ = false;
         ctype t = infer_identifier_impl(id);
         stamp(id->this_field, bare_this_field_, false);
+        stamp(id->program_name, semantic_walk() && bare_program_name(id), false);
         if (extended_names_.count(id->name)) { return {}; }
         return t;
     }
@@ -4168,13 +4177,26 @@ private:
         stamp_call_proofs(c, lambda_ov ? lambda_ov : program_ov.empty() ? ov : &program_ov, args, free_callee || !program_ov.empty() || lambda_ov != nullptr);
         {
             const function_decl* md = nullptr;
-            if (stamping() && ov && ov->size() == 1 && c->callee && c->callee->get_type() == node_type::member_expr) {
-                auto* m = static_cast<member_expr*>(c->callee.get());
-                auto* recv = m->object && m->object->get_type() == node_type::identifier_expr ? static_cast<identifier_expr*>(m->object.get()) : nullptr;
+            if (stamping() && ov && ov->size() == 1 && c->callee) {
                 const function_decl* fn = (*ov)[0];
                 auto [lo, hi] = arity_range(fn);
-                if (!m->is_static && !m->null_safe && recv && recv->slot_index != SIZE_MAX && !recv->global_qualified &&
-                    fn->body && !fn->is_coroutine && !fn->is_static && lo == c->arguments.size() && hi == c->arguments.size()) { md = fn; }
+                const bool graftable = fn->body && !fn->is_coroutine && !fn->is_static && lo == c->arguments.size() && hi == c->arguments.size();
+                // a frame receiver's method a derived class overrides: the graft's guard would send most receivers to the real call
+                const bool overridden = !overrides_of(ov_class, fn->name).empty();
+                // a receiver of the method's own frame (`this`, a bare field, a sibling's bare call) only from a method body outside construction
+                const bool own_frame = bare_field_context() && cdtor_ctx_ == cdtor_ctx::none;
+                if (c->callee->get_type() == node_type::member_expr) {
+                    auto* m = static_cast<member_expr*>(c->callee.get());
+                    const expression* object = m->object.get();
+                    auto* recv = object && object->get_type() == node_type::identifier_expr ? static_cast<const identifier_expr*>(object) : nullptr;
+                    const bool slot_receiver = recv && recv->slot_index != SIZE_MAX && !recv->global_qualified;
+                    const bool frame_receiver = own_frame && object &&
+                        (object->get_type() == node_type::this_expr || (recv && recv->slot_index == SIZE_MAX && recv->this_field && !recv->global_qualified));
+                    if (!m->is_static && !m->null_safe && graftable && (slot_receiver || (frame_receiver && !overridden))) { md = fn; }
+                } else if (c->callee->get_type() == node_type::identifier_expr && own_frame && !free_callee && ov_class == class_ctx_name_) {
+                    auto* id = static_cast<const identifier_expr*>(c->callee.get());
+                    if (id->slot_index == SIZE_MAX && !id->global_qualified && graftable && !overridden) { md = fn; }
+                }
             }
             if (proofs_ == proof_mode::stamp) { c->proven_method_decl = md ? md->weak_from_this() : std::weak_ptr<const function_decl>(); }
             else if (proofs_ == proof_mode::clear) { c->proven_method_decl.reset(); }
@@ -4290,6 +4312,7 @@ private:
 		if (callee->get_type() == node_type::identifier_expr) {
 			auto* id = static_cast<identifier_expr*>(callee);
 			if (id->name == "weak_from_this" || id->name == "shared_from_this") { return {}; }   // call-shape builtins, resolved before any lookup
+			stamp(id->program_name, semantic_walk() && bare_program_name(id), false);
 			size_t scope_index = 0;
 			if (find_local(id->name, &scope_index) && (id->global_qualified || !member_hides_program_name(id->name, scope_index))) {
 				if (scope_index == 0) { note_global_use(id->name); }
@@ -4551,6 +4574,7 @@ private:
 			auto* id = static_cast<identifier_expr*>(target);
 			bool this_field = false;
 			auto done = [&](ctype t) { stamp(id->this_field, this_field, false); return t; };
+			stamp(id->program_name, semantic_walk() && bare_program_name(id), false);
 			size_t scope_index = 0;
 			if (var_entry* local = find_named(id, &scope_index)) {
 				if (scope_index == 0) { note_global_use(id->name); }   // top-level var write

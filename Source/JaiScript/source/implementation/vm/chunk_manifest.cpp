@@ -1,5 +1,6 @@
 #include <jaiscript/vm/chunk_manifest.hpp>
 #include <jaiscript/detail/regex.hpp>
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <sstream>
@@ -57,7 +58,7 @@ namespace {
 		std::string operand(const chunk& ch, const fused_operand& o) const {
 			std::string r = "{slot=" + u(o.slot) + " sym=" + symidx(ch, o.symbol) + " const=" + u(o.const_index) + " flags=" + std::to_string(o.load_flags) +
 			                " ident=" + u(o.ident_node) + " member=" + u(o.member_node) + " direct=" + b(o.direct) +
-			                (o.this_slot ? " this_slot=" + std::to_string(o.this_slot - 1) : std::string());
+			                (o.this_slot ? " this_slot=" + std::to_string(o.this_slot - 1) : std::string()) + (o.member_site != k_invalid_u32 ? " member_site=" + std::to_string(o.member_site) : std::string());
 			if (o.is_subscript()) {
 				r += " chain=[";
 				for (const auto& s : o.subscript_chain) {
@@ -196,6 +197,22 @@ namespace {
 			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {
 				const member_store_proto& p = ch.member_store_protos[i];
 				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << "\n";
+			}
+			if (!ch.member_folds.empty()) {
+				out << pre << "member_folds " << ch.member_folds.size() << "\n";
+				for (size_t i = 0; i < ch.member_folds.size(); ++i) {
+					const chunk::member_fold& m = ch.member_folds[i];
+					out << pre << " " << i << " kind=" << static_cast<int>(m.kind) << " consumer=" << ins(m.consumer) << " first=" << ins(m.first);
+					for (uint8_t k = 0; k < m.count; ++k) { out << " (temp=" << m.temp[k] << " " << operand(ch, m.field[k]) << ")"; }
+					out << "\n";
+				}
+			}
+			if (!ch.member_this_symbols.empty()) {
+				std::vector<std::pair<uint32_t, uint32_t>> rows(ch.member_this_symbols.begin(), ch.member_this_symbols.end());
+				std::sort(rows.begin(), rows.end());
+				out << pre << "member_this_symbols";
+				for (const auto& r : rows) { out << " " << r.first << "=" << symidx(ch, r.second); }
+				out << "\n";
 			}
 			out << pre << "velem_protos " << ch.velem_protos.size() << "\n";
 			for (size_t i = 0; i < ch.velem_protos.size(); ++i) {

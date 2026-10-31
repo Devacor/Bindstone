@@ -155,6 +155,8 @@ namespace {
 			case opcode::op_call_temp:
 			case opcode::op_take_temp:
 			case opcode::op_member_temp:
+			case opcode::op_member_temp_this:
+			case opcode::op_mfold:
 			case opcode::op_velem_load:
 			case opcode::op_velem_store:
 			case opcode::op_size_temp:
@@ -393,6 +395,8 @@ namespace {
 			case opcode::op_call_temp:
 			case opcode::op_take_temp:
 			case opcode::op_member_temp:
+			case opcode::op_member_temp_this:
+			case opcode::op_mfold:
 			case opcode::op_velem_load:
 			case opcode::op_velem_store:
 			case opcode::op_size_temp:
@@ -875,6 +879,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 		if (temp_high_ > result->local_count) { result->local_count = temp_high_; }
 		lower_typed_ops(*result);
 		lower_dynamic_ops(*result);
+		fold_member_temps(*result);
 	}
 	chunk_ = nullptr;
 	return result;
@@ -1033,6 +1038,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	if (!reference_) {
 		lower_typed_ops(*result);
 		lower_dynamic_ops(*result);
+		fold_member_temps(*result);
 	}
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
@@ -1683,12 +1689,14 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 void vm_compiler::compile_if(if_stmt* stmt) {
 	std::vector<size_t> false_jumps;
 	const size_t cond_mark = temp_next_;
-	leaf_retry_ = true;
-	const expression_ptr cond = hoisted_condition(stmt->condition);
-	leaf_retry_ = false;
-	leaf_grafts_ = true;
-	compile_branch_condition(cond, false_jumps);
-	leaf_grafts_ = false;
+	if (!try_condition_graft(stmt->condition, false_jumps)) {
+		leaf_retry_ = true;
+		const expression_ptr cond = hoisted_condition(stmt->condition);
+		leaf_retry_ = false;
+		leaf_grafts_ = true;
+		compile_branch_condition(cond, false_jumps);
+		leaf_grafts_ = false;
+	}
 	temp_next_ = cond_mark;   // the hoisted leaves' temps die at the jumps
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {
@@ -1705,7 +1713,7 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
 	const size_t cond_mark = temp_next_;
-	compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps);
+	if (!try_condition_graft(stmt->condition, exit_jumps)) { compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps); }
 	temp_next_ = cond_mark;
 
 	push_region(region_kind::loop);
@@ -2759,10 +2767,13 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 		// no result; a static member, an environment base or a value shape the temps decline keep the general form
 		if (assign->op.type == token_type::equal && assign->target->get_type() == node_type::member_expr && callable_.active) {
 			auto* member = static_cast<member_expr*>(assign->target.get());
-			const uint32_t base_slot = member->is_static ? k_invalid_u32 : member_base_slot(member);
-			if (base_slot != k_invalid_u32 && base_slot < k_typed_slot_mask) {
+			uint32_t base_slot = member->is_static ? k_invalid_u32 : member_base_slot(member);
+			const uint32_t this_base = member->is_static || base_slot != k_invalid_u32 ? 0 : member_this_base(member);
+			if (this_base) { base_slot = this_base | k_typed_env_bit; }
+			if (base_slot != k_invalid_u32 && (this_base || base_slot < k_typed_slot_mask)) {
 				const expression_ptr& value = assign->value;
 				member_store_proto mp; mp.node = add_node(assign->target); mp.base = base_slot;
+				if (this_base) { chunk_->member_this_symbols[mp.node] = add_symbol(static_cast<const identifier_expr*>(member->object.get())->symbol_id); }
 				note_component_base(mp.node, member);
 				bool value_operand = false;
 				if (value->get_type() == node_type::literal_expr || (value->get_type() == node_type::identifier_expr && identifier_slot_operand(static_cast<identifier_expr*>(value.get())) != k_invalid_u32)) {
@@ -2781,6 +2792,11 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 						last.op = opcode::op_binary_fused_temp; last.b = t0;
 						mp.value = fused_operand{}; mp.value.slot = t0; mp.value.symbol = temp_symbol_index(); mp.value.direct = true;
 						value_operand = true;
+					} else if (this_base) {
+						compile_expression(member->object);
+						emit(opcode::op_set_member, mp.node);
+						emit(opcode::op_pop);
+						return true;
 					} else {
 						// the value is on the stack: the general store consumes it
 						emit(opcode::op_set_member_fused, mp.node, 0, base_slot);
@@ -2986,7 +3002,7 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 // slot + 1 of the plain field a bare name of a method body names in the body's declaring class, 0 when the name is a local, a global
 // spelling (::name), a type constructor, or anything but a public script field there (a method, a getter or a user accessor of the
 // name, a static, a C++ property); the frame takes the slot only when its receiver lays the field out at it
-uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident) {
+uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident, bool note) {
 	const class_definition* cls = member_class_;
 	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return 0;
 	const uint64_t id = ident->symbol_id;
@@ -2997,7 +3013,7 @@ uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident) {
 	if (!cls->get_method(id, false).is_invalid()) return 0;
 	if (cls->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cls->user_accessor(symbolizer_->get_setter_id_with_view(id).first)) return 0;
 	if (const_cast<class_definition*>(cls)->find_static_field_in_chain(id) || const_cast<class_definition*>(cls)->find_static_method_in_chain(id)) return 0;
-	bool listed = false;
+	bool listed = !note;
 	for (const auto& use : chunk_->this_field_uses) { if (use.first == id) { listed = true; break; } }
 	if (!listed) { chunk_->this_field_uses.emplace_back(id, slot); }
 	return slot + 1;
@@ -3005,15 +3021,21 @@ uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident) {
 
 // a member-class body's bare name its class takes as no member (no field, method, static or host property): the frame whose receiver's
 // class says the same reads it from the environment; listed for that verdict
-bool vm_compiler::this_global_of(const identifier_expr* ident) {
+bool vm_compiler::this_global_of(const identifier_expr* ident, bool note) {
 	const class_definition* cls = member_class_;
 	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return false;
 	const uint64_t id = ident->symbol_id;
 	if (id == UINT64_MAX || id == 0 || cls->chain_has_nonpublic() || !cls->is_script_class() || cls->find_cpp_base_class()) return false;
 	if (cls->field_slot(id) != class_definition::k_no_field_slot || cls->chain_declares_field(id) || !cls->get_method(id, false).is_invalid()) return false;
 	if (const_cast<class_definition*>(cls)->find_static_field_in_chain(id) || const_cast<class_definition*>(cls)->find_static_method_in_chain(id)) return false;
-	if (std::find(chunk_->this_global_uses.begin(), chunk_->this_global_uses.end(), id) == chunk_->this_global_uses.end()) { chunk_->this_global_uses.push_back(id); }
+	if (note && std::find(chunk_->this_global_uses.begin(), chunk_->this_global_uses.end(), id) == chunk_->this_global_uses.end()) { chunk_->this_global_uses.push_back(id); }
 	return true;
+}
+
+bool vm_compiler::handle_field_of_member_class(const identifier_expr* ident) const {
+	if (!method_frame() || !ident || !ident->this_field || ident->global_qualified || ident->symbol_id == UINT64_MAX || ident->slot_index != SIZE_MAX) return false;
+	const type_info_ptr declared = member_class_->get_field_declared_type(ident->symbol_id);
+	return declared && declared->base_type == script_value_type::jai_shared_ptr_type;
 }
 
 void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
@@ -3369,6 +3391,77 @@ void vm_compiler::lower_dynamic_ops(chunk& c) {
 	}
 	if (!c.typed_sites.empty() && c.typed_sites.size() < code.size()) { c.typed_sites.resize(code.size()); }
 	chunk_ = saved;
+}
+
+// Member temps folded into the consumer that follows them (chunk::member_fold): the fold replaces the first member temp and the run skips
+// to past the consumer; a jump into the consumer, a cell region's span and a debugger's stop see the instructions as compiled
+void vm_compiler::fold_member_temps(chunk& c) {
+	if (!c.is_function_body || !ir_passes_ || reference_) return;
+	auto& code = c.code;
+	std::vector<uint8_t> held(code.size(), 0);   // 1: a cell region's span or trampoline, 2: a jump's target
+	auto hold = [&](uint32_t from, uint32_t to) { for (uint32_t i = from; i <= to && i < held.size(); ++i) held[i] |= 1; };
+	for (const auto& loop : c.cell_loops) {
+		hold(loop.head, loop.back);
+		hold(loop.copy_head, loop.copy_back);
+		if (loop.trampoline != k_invalid_u32) hold(loop.trampoline, loop.trampoline + 1);
+	}
+	for (const vm_instruction& ins : code) {
+		uint32_t target = k_invalid_u32;
+		switch (ins.op) {
+		case opcode::op_jump: case opcode::op_jump_if_false: case opcode::op_jump_if_true: case opcode::op_loop_back: case opcode::op_fused_cmp_jump: target = ins.a; break;
+		default:
+			if ((ins.op >= opcode::op_t_jlt_ii && ins.op <= opcode::op_t_jne_ff) || (ins.op >= opcode::op_d_jlt && ins.op <= opcode::op_d_jne)) { target = ins.c; }
+			break;
+		}
+		if (target < held.size()) { held[target] |= 2; }
+	}
+	auto member_temp = [&](size_t ip, uint8_t refuse) {   // the first may be a jump's target: the fold stands where it stood
+		const vm_instruction& i = code[ip];
+		return !(held[ip] & refuse) && ((i.op == opcode::op_member_temp && i.c < k_typed_slot_mask) || i.op == opcode::op_member_temp_this);
+	};
+	for (size_t ip = 0; ip + 1 < code.size(); ++ip) {
+		if (!member_temp(ip, 1)) continue;
+		size_t j = ip + 1;
+		if (j < code.size() && member_temp(j, 3)) { ++j; }
+		if (j >= code.size() || held[j]) continue;
+		const vm_instruction& consumer = code[j];
+		const opcode o = consumer.op;
+		chunk::member_fold fd;
+		uint32_t operands[2] = {k_invalid_u32, k_invalid_u32};
+		if (o >= opcode::op_t_add_ii && o <= opcode::op_t_mod_ff) { fd.kind = chunk::member_fold::typed_arith; operands[0] = consumer.b; operands[1] = consumer.c; }
+		else if (o >= opcode::op_t_jlt_ii && o <= opcode::op_t_jne_ff) { fd.kind = chunk::member_fold::typed_cmp_jump; operands[0] = consumer.a; operands[1] = consumer.b; }
+		else if (o >= opcode::op_d_add && o <= opcode::op_d_shr) { fd.kind = chunk::member_fold::dyn_arith; operands[0] = consumer.b; operands[1] = consumer.c; }
+		else if (o >= opcode::op_d_jlt && o <= opcode::op_d_jne) { fd.kind = chunk::member_fold::dyn_cmp_jump; operands[0] = consumer.a; operands[1] = consumer.b; }
+		else if (o == opcode::op_t_decl_mov) { fd.kind = chunk::member_fold::typed_decl_move; operands[0] = consumer.b; }
+		else if (o == opcode::op_set_member_value) {
+			const member_store_proto& sp = c.member_store_protos[consumer.a];
+			if (!sp.value.direct || sp.value.const_index != k_invalid_u32) continue;
+			fd.kind = chunk::member_fold::member_store; operands[0] = sp.value.slot;
+		}
+		if (!fd.kind) continue;
+		bool ok = true;
+		for (size_t m = ip; m < j && ok; ++m) {
+			const vm_instruction& mt = code[m];
+			const auto* member = static_cast<const member_expr*>(c.nodes[mt.a].get());
+			if (!member->object || member->object->get_type() != node_type::identifier_expr) { ok = false; break; }   // a prefix or an element's member: its own reads
+			int reads = 0;
+			for (int k = 0; k < 2; ++k) { if (operands[k] == mt.b) { ++reads; } }
+			if (reads == 0) { ok = false; break; }   // the consumer is not this temp's
+			fused_operand field;
+			field.member_node = mt.a;
+			field.member_site = static_cast<uint32_t>(m);
+			if (mt.op == opcode::op_member_temp_this) { field.this_slot = mt.c; } else { field.slot = mt.c; }
+			fd.temp[fd.count] = mt.b;
+			fd.field[fd.count] = field;
+			++fd.count;
+		}
+		if (!ok) continue;
+		fd.consumer = consumer;
+		fd.first = code[ip];
+		c.member_folds.push_back(fd);
+		code[ip] = vm_instruction{opcode::op_mfold, static_cast<uint32_t>(c.member_folds.size() - 1), static_cast<uint32_t>(j - ip + 1), 0};
+		ip = j;
+	}
 }
 
 void vm_compiler::lower_typed_ops(chunk& c) {
@@ -5177,7 +5270,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (line && refusal == chunk::cell_refusal_none && !ops.empty() && ops[0].kind == ir::exit) { continue; }   // a region that leaves at its first operation runs nothing
 		for (const uint32_t si : loop_inline_sites) {   // a method graft's guard runs at the entry and after each call: its receiver stays put for the block
 			const chunk::inline_site& s = c.inline_sites[si];
-			if (!s.method) continue;
+			if (s.method && s.receiver_this_field) { refuse(chunk::cell_refusal_translation, s.guard_ip); continue; }   // a store into the field the block may make
+			if (!s.method || s.receiver_slot == k_invalid_u32) continue;   // the frame's `this` stays put for the frame
 			bool held = !is_alias(s.receiver_slot);
 			for (const ir_op& o : ops) { if (o.writes == s.receiver_slot) { held = false; } }
 			if (!held) { refuse(chunk::cell_refusal_translation, s.guard_ip); }
@@ -6615,7 +6709,14 @@ uint32_t vm_compiler::member_base_slot(const expression* e) const {
 	const uint32_t slot = const_cast<vm_compiler*>(this)->identifier_slot_operand(id);
 	return slot != k_invalid_u32 && slot < k_typed_slot_mask ? slot : k_invalid_u32;
 }
-bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || size_temp_operand(e) || velem_operand(e) || elem_member_operand(e) || enum_temp_operand(e); }
+uint32_t vm_compiler::member_this_base(const expression* e) const {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return 0;
+	if (!e || e->get_type() != node_type::member_expr) return 0;
+	const auto* m = static_cast<const member_expr*>(e);
+	if (m->is_static || m->null_safe || m->place_read || !m->object || m->object->get_type() != node_type::identifier_expr) return 0;
+	return const_cast<vm_compiler*>(this)->this_field_slot_of(static_cast<const identifier_expr*>(m->object.get()));
+}
+bool vm_compiler::member_temp_operand(const expression* e) const { return member_base_slot(e) != k_invalid_u32 || member_this_base(e) != 0 || size_temp_operand(e) || velem_operand(e) || elem_member_operand(e) || enum_temp_operand(e); }
 // `Ai.summon`: a member read of an environment name (an enum's value, a map's entry by name) lands in a temp; a block reads an enum map's
 // entry through an environment cell at entry and after calls, any other base refuses the block's entry
 bool vm_compiler::enum_temp_operand(const expression* e) const {
@@ -6703,7 +6804,7 @@ bool vm_compiler::size_temp_operand(const expression* e) const {
 // The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
 // becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
 void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
-	if (enum_temp_operand(e.get())) {
+	if (enum_temp_operand(e.get()) && !member_this_base(e.get())) {
 		compile_expression(e);   // the enum's load and the member read, the value on the stack
 		const uint32_t t = static_cast<uint32_t>(temp_next_++);
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
@@ -6775,7 +6876,18 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-	emit(opcode::op_member_temp, add_node(e), t, base);
+	if (base == k_invalid_u32) {
+		const uint32_t this_slot = member_this_base(e.get());
+		const auto& object = std::static_pointer_cast<member_expr>(e)->object;
+		auto* id = static_cast<identifier_expr*>(object.get());
+		const uint32_t node = add_node(e);
+		chunk_->member_this_symbols[node] = add_symbol(id->symbol_id);
+		const size_t ip = emit(opcode::op_member_temp_this, node, t, this_slot);
+		note_ident_node(ip, object);
+		note_this_field(ip, id);
+	} else {
+		emit(opcode::op_member_temp, add_node(e), t, base);
+	}
 	out = fused_operand{};
 	out.slot = t;
 	out.symbol = temp_symbol_index();

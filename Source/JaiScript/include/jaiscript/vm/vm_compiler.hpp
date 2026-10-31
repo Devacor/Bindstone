@@ -235,10 +235,14 @@ namespace jai::vm {
         size_t temp_high_ = 0;
         bool temps_active_ = false;
         bool program_region_ = false;   // compiling a program statement whose block-scoped declarations hold slots (compile_program)
-        // a class of the program runs a script destructor: a compiler temp then never takes a value that may own one, so the operand
-        // stack carries it and it dies when its consumer is done with it, as the interpreter's value does
+        // a class of the program declares a script destructor: a compiler temp then never takes a value whose declared type may own one,
+        // and one an untyped value landed in dies at the end of its statement or condition
         bool destructor_values_ = false;
+        static constexpr uint8_t destruct_never = 0, destruct_unknown = 1, destruct_may = 2;
+        uint8_t destruct_class(const expression* e);
         bool value_may_destruct(const expression* e);
+        uint32_t object_temp_landed(const vm_instruction& ins);
+        void release_object_temps(size_t from_ip, size_t floor);
         bool classes_run_destructors() const;
         const type_info* declared_type_of(const expression* e);   // a frame slot's or a bare field's declared type (null: unknown)
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry

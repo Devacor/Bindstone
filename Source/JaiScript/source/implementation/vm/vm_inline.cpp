@@ -2017,7 +2017,9 @@ void vm_compiler::compile_hoisted_update(const expression_ptr& update) {
 	const size_t mark = temp_next_;
 	bool changed = false;
 	expression_ptr u = hoist_leaf_calls(update, true, changed);
+	const size_t start = chunk_->code.size();
 	if (u && u->get_type() != node_type::identifier_expr && !compile_no_result_expression(u)) { compile_expression(u, true); emit(opcode::op_pop); }
+	release_object_temps(start, mark);
 	temp_next_ = mark;
 }
 

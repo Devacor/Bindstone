@@ -211,6 +211,8 @@ namespace jai::vm {
         bool lift_operand_shape(const expression* e);
         bool lift_temp_only(const expression* e);
         bool lift_partners_ok(const binary_expr* b);
+        bool lift_left_snapshot_destructs(const binary_expr* b);
+        bool hoist_left_snapshot(const binary_expr* b, bool rsub);
         int lift_fusible_nodes(const expression* e);
         bool binary_lands_fused(binary_expr* b);
         bool numeric_value_binary(expression* e);
@@ -233,6 +235,12 @@ namespace jai::vm {
         size_t temp_high_ = 0;
         bool temps_active_ = false;
         bool program_region_ = false;   // compiling a program statement whose block-scoped declarations hold slots (compile_program)
+        // a class of the program runs a script destructor: a compiler temp then never takes a value that may own one, so the operand
+        // stack carries it and it dies when its consumer is done with it, as the interpreter's value does
+        bool destructor_values_ = false;
+        bool value_may_destruct(const expression* e);
+        bool classes_run_destructors() const;
+        const type_info* declared_type_of(const expression* e);   // a frame slot's or a bare field's declared type (null: unknown)
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
         uint32_t temp_symbol_index();
         // Tail-position hint for `return f(args)` with clean region exits: consumed by

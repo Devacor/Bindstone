@@ -3447,12 +3447,6 @@ void vm_compiler::fold_member_temps(chunk& c) {
 			int reads = 0;
 			for (int k = 0; k < 2; ++k) { if (operands[k] == mt.b) { ++reads; } }
 			if (reads == 0) { ok = false; break; }   // the consumer is not this temp's
-			fused_operand field;
-			field.member_node = mt.a;
-			field.member_site = static_cast<uint32_t>(m);
-			if (mt.op == opcode::op_member_temp_this) { field.this_slot = mt.c; } else { field.slot = mt.c; }
-			fd.temp[fd.count] = mt.b;
-			fd.field[fd.count] = field;
 			++fd.count;
 		}
 		if (!ok) continue;

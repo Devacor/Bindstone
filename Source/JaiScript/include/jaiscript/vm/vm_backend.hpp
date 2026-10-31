@@ -2328,14 +2328,13 @@ namespace jai::vm {
         op_status exec_binary_fused(frame& f, const vm_instruction& ins);
         op_status exec_operand_temp(frame& f, const vm_instruction& ins);
         op_status exec_call_temp(frame& f, const vm_instruction& ins);   // a call's result into a compiler temp (op_call_temp)
-        op_status exec_member_temp(frame& f, const vm_instruction& ins) { return exec_member_temp_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
-        op_status exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip);
-        op_status exec_member_temp_this(frame& f, const vm_instruction& ins) { return exec_member_temp_this_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
+        op_status exec_member_temp(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip);
+        op_status exec_member_temp_this(frame& f, const vm_instruction& ins);
         op_status exec_member_temp_this_at(frame& f, const vm_instruction& ins, size_t ip);
-        const script_value* member_operand(frame& f, const fused_operand& operand);
+        const script_value* member_temp_field(frame& f, const vm_instruction& mt, size_t ip);
         int member_fold_fast(frame& f, const chunk::member_fold& fd);
-        bool set_member_value_fast(frame& f, const member_store_proto& p, size_t row);
-        const script_value* member_store_base(frame& f, const member_store_proto& p);
+        op_status exec_mfold(frame& f, const vm_instruction& ins);
         op_status exec_get_member_path(frame& f, const vm_instruction& ins);
         const script_value* path_index_value(frame& f, const fused_operand& index);
         op_status local_member_receiver(frame& f, const member_expr* member, uint32_t slot, script_value& out);   // a member site's receiver from its base slot (a nested site's prefix read)
@@ -3028,8 +3027,8 @@ namespace jai::vm {
                                          size_t argc, const call_site* site, bool answer_as_level);
         op_status exec_super(frame& f, const vm_instruction& ins);
         op_status exec_from_this(frame& f, const vm_instruction& ins);
-        op_status exec_get_member(frame& f, const vm_instruction& ins) { return exec_get_member_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
-        op_status exec_get_member_at(frame& f, const vm_instruction& ins, size_t ip);
+        op_status exec_get_member(frame& f, const vm_instruction& ins);
+        JAI_FORCEINLINE op_status exec_get_member_at(frame& f, const vm_instruction& ins, size_t ip);   // ip: the member_ic row (a folded member temp's own)
         op_status exec_get_member_this(frame& f, const vm_instruction& ins);
         op_status exec_get_static(frame& f, const vm_instruction& ins);
         op_status exec_set_member(frame& f, const vm_instruction& ins);

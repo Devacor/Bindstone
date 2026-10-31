@@ -58,7 +58,7 @@ namespace {
 		std::string operand(const chunk& ch, const fused_operand& o) const {
 			std::string r = "{slot=" + u(o.slot) + " sym=" + symidx(ch, o.symbol) + " const=" + u(o.const_index) + " flags=" + std::to_string(o.load_flags) +
 			                " ident=" + u(o.ident_node) + " member=" + u(o.member_node) + " direct=" + b(o.direct) +
-			                (o.this_slot ? " this_slot=" + std::to_string(o.this_slot - 1) : std::string()) + (o.member_site != k_invalid_u32 ? " member_site=" + std::to_string(o.member_site) : std::string());
+			                (o.this_slot ? " this_slot=" + std::to_string(o.this_slot - 1) : std::string());
 			if (o.is_subscript()) {
 				r += " chain=[";
 				for (const auto& s : o.subscript_chain) {
@@ -202,9 +202,7 @@ namespace {
 				out << pre << "member_folds " << ch.member_folds.size() << "\n";
 				for (size_t i = 0; i < ch.member_folds.size(); ++i) {
 					const chunk::member_fold& m = ch.member_folds[i];
-					out << pre << " " << i << " kind=" << static_cast<int>(m.kind) << " consumer=" << ins(m.consumer) << " first=" << ins(m.first);
-					for (uint8_t k = 0; k < m.count; ++k) { out << " (temp=" << m.temp[k] << " " << operand(ch, m.field[k]) << ")"; }
-					out << "\n";
+					out << pre << " " << i << " kind=" << static_cast<int>(m.kind) << " count=" << static_cast<int>(m.count) << " consumer=" << ins(m.consumer) << " first=" << ins(m.first) << "\n";
 				}
 			}
 			if (!ch.member_this_symbols.empty()) {

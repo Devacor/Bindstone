@@ -1322,7 +1322,9 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 
 void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_level) {
 	const size_t start = chunk_->code.size();
+	const size_t temps = temp_next_;
 	compile_declaration_code(decl, top_level);
+	if (decl->get_type() != node_type::statement_decl) { release_object_temps(start, temps); }   // a statement releases its own
 	note_debug_span(decl.get(), start);
 }
 
@@ -1419,7 +1421,10 @@ void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top
 void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	if (!stmt) return;
 	const size_t start = chunk_->code.size();
+	const size_t temps = temp_next_;
 	compile_statement_code(stmt);
+	const node_type kind = stmt->get_type();
+	if (kind != node_type::return_stmt && kind != node_type::break_stmt && kind != node_type::continue_stmt) { release_object_temps(start, temps); }
 	note_debug_span(stmt.get(), start);
 }
 
@@ -1672,8 +1677,11 @@ void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vect
 	bool changed = false;
 	expression_ptr hoisted = grafts ? hoist_leaf_calls(cond, false, changed) : nullptr;
 	const expression_ptr& leaf = hoisted ? hoisted : cond;
+	const size_t start = chunk_->code.size();
+	const size_t temps = temp_next_;
 	compile_expression(leaf);
 	if (leaf->get_type() == node_type::member_expr) { member_tail_into_temp(leaf.get()); }
+	release_object_temps(start, temps);   // ahead of the jump: a kill there keeps the comparison and its jump apart
 	false_jumps.push_back(emit_cond_jump_false(leaf.get()));
 	leaf_grafts_ = grafts;
 }
@@ -1703,8 +1711,11 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 	bool changed = false;
 	expression_ptr hoisted = grafts ? hoist_leaf_calls(cond, false, changed) : nullptr;
 	const expression_ptr& leaf = hoisted ? hoisted : cond;
+	const size_t start = chunk_->code.size();
+	const size_t temps = temp_next_;
 	compile_expression(leaf);
 	if (leaf->get_type() == node_type::member_expr) { member_tail_into_temp(leaf.get()); }
+	release_object_temps(start, temps);
 	true_jumps.push_back(emit_cond_jump_true(leaf.get()));
 	leaf_grafts_ = grafts;
 }
@@ -6749,68 +6760,112 @@ const type_info* vm_compiler::declared_type_of(const expression* e) {
 	return this_field_slot_of(id, false) ? member_class_->get_field_declared_type(id->symbol_id).get() : nullptr;
 }
 
-// The value e computes may own a script destructor: the program has a class that runs one and the declared types do not rule it out
-// (an unknown type may hold anything; a program statement compiles before the program's classes are declared, so there only a
-// primitive is ruled out). A temp holding such a value would keep it past its consumer, so it rides the operand stack instead
-bool vm_compiler::value_may_destruct(const expression* e) {
-	if (!destructor_values_ || !e) return false;
+// Whether the value e computes may own a script destructor while a class of the program declares one: never, unknown (an untyped or
+// unproven value), or may (its declared type can hold such an object). A program statement compiles before the program's classes are
+// declared, so there only a primitive or an untyped value is told apart
+uint8_t vm_compiler::destruct_class(const expression* e) {
+	if (!destructor_values_ || !e) return destruct_never;
 	engine& eng = *const_cast<engine*>(engine_);
-	auto may_own = [&](const type_info* t) {
-		if (!t || t->is_reference()) return true;
-		return program_region_ ? !primitive_declared_type(t) : slot_may_own_destructor(eng, type_info_ptr(const_cast<type_info*>(t)));
+	auto of_type = [&](const type_info* t) -> uint8_t {
+		if (!t || t->is_reference() || t->base_type == script_value_type::jai_any_type) return destruct_unknown;
+		const bool may = program_region_ ? !primitive_declared_type(t) && t->base_type != script_value_type::jai_string_type
+		                                 : slot_may_own_destructor(eng, type_info_ptr(const_cast<type_info*>(t)));
+		return may ? destruct_may : destruct_never;
 	};
 	switch (e->get_type()) {
-	case node_type::literal_expr: return false;
+	case node_type::literal_expr: return destruct_never;
 	case node_type::identifier_expr: {
-		if (const type_info* t = declared_type_of(e)) return may_own(t);
+		if (const type_info* t = declared_type_of(e)) return of_type(t);
 		const uint32_t slot = identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e)));
-		if (slot >= callable_.slot_kinds.size()) return true;
+		if (slot >= callable_.slot_kinds.size()) return destruct_unknown;
 		const script_value_type kind = callable_.slot_kinds[slot];
-		return kind != script_value_type::jai_int_type && kind != script_value_type::jai_float_type && kind != script_value_type::jai_bool_type;
+		return kind == script_value_type::jai_int_type || kind == script_value_type::jai_float_type || kind == script_value_type::jai_bool_type ? destruct_never : destruct_unknown;
 	}
 	case node_type::unary_expr: {
 		const auto* u = static_cast<const unary_expr*>(e);
-		return u->op.type != token_type::bang && value_may_destruct(u->operand.get());
+		return u->op.type == token_type::bang ? destruct_never : destruct_class(u->operand.get());
 	}
 	case node_type::ternary_expr: {
 		const auto* t = static_cast<const ternary_expr*>(e);
-		return value_may_destruct(t->then_expression.get()) || value_may_destruct(t->else_expression.get());
+		return std::max(destruct_class(t->then_expression.get()), destruct_class(t->else_expression.get()));
 	}
 	case node_type::binary_expr: {
 		const auto* b = static_cast<const binary_expr*>(e);
 		if (b->op.type == token_type::left_bracket) {
-			if (b->static_operand_class == operand_class_vec_element) return false;
+			if (b->static_operand_class == operand_class_vec_element) return destruct_never;
 			const type_info* container = declared_type_of(b->left.get());
-			if (!container) return true;
-			if (container->base_type == script_value_type::jai_array_type) return may_own(container->element_type().get());
-			if (container->base_type == script_value_type::jai_map_type) return may_own(container->value_type().get());
-			return container->base_type != script_value_type::jai_string_type;
+			if (!container || container->base_type == script_value_type::jai_any_type) return destruct_unknown;
+			if (container->base_type == script_value_type::jai_array_type) return of_type(container->element_type().get());
+			if (container->base_type == script_value_type::jai_map_type) return of_type(container->value_type().get());
+			return container->base_type == script_value_type::jai_string_type ? destruct_never : destruct_unknown;
 		}
 		switch (b->static_operand_class) {
 		case operand_class_int_int: case operand_class_float_float: case operand_class_int_float: case operand_class_float_int:
-		case operand_class_string_string: case operand_class_bool_bool: return false;
-		default: return true;
+		case operand_class_string_string: case operand_class_bool_bool: return destruct_never;
+		default: return std::max(destruct_unknown, std::max(destruct_class(b->left.get()), destruct_class(b->right.get())));   // an operator over an object may return one
 		}
 	}
 	case node_type::member_expr: {
 		const auto* m = static_cast<const member_expr*>(e);
-		if (m->enum_constant || velem_operand(e)) return false;
-		if (m->is_static || !m->object || m->member_id == UINT64_MAX) return true;
+		if (m->enum_constant || velem_operand(e)) return destruct_never;
+		if (m->is_static || !m->object || m->member_id == UINT64_MAX) return destruct_unknown;
 		const type_info* base = declared_type_of(m->object.get());
 		if (base && base->base_type == script_value_type::jai_shared_ptr_type) base = base->element_type().get();
-		if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) return true;
+		if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) return destruct_unknown;
 		const auto cls = eng.get_class_registry().find_script_class(base->type_name);
-		if (!cls || !symbolizer_ || cls->user_accessor(symbolizer_->get_getter_id_with_view(m->member_id).first)) return true;
+		if (!cls || !symbolizer_ || cls->user_accessor(symbolizer_->get_getter_id_with_view(m->member_id).first)) return destruct_unknown;
 		const type_info_ptr field = cls->get_field_declared_type(m->member_id);
-		return !field || may_own(field.get());
+		return field ? of_type(field.get()) : destruct_unknown;
 	}
 	case node_type::call_expr: {
-		if (size_temp_operand(e) || math_temp_operand(e) != detail::math_fn::none) return false;
+		if (size_temp_operand(e) || math_temp_operand(e) != detail::math_fn::none) return destruct_never;
 		const auto decl = static_cast<const call_expr*>(e)->proven_callee_decl.lock();
-		return !decl || !decl->return_type || may_own(decl->return_type.get());
+		return decl && decl->return_type ? of_type(decl->return_type.get()) : destruct_unknown;
 	}
-	default: return true;
+	default: return destruct_unknown;
 	}
+}
+
+// A value whose declared type may own a script destructor never lands in a compiler temp: a temp would keep it past its consumer, so it
+// rides the operand stack and dies when its consumer is done with it, as the interpreter's value does
+bool vm_compiler::value_may_destruct(const expression* e) { return destruct_class(e) == destruct_may; }
+
+// the compiler temp an instruction lands a value in that may turn out to own an object at run time (k_invalid_u32: none)
+uint32_t vm_compiler::object_temp_landed(const vm_instruction& ins) {
+	const chunk& c = *chunk_;
+	switch (ins.op) {
+	case opcode::op_member_temp: case opcode::op_member_temp_this:
+		return ins.a < c.nodes.size() && destruct_class(static_cast<const expression*>(c.nodes[ins.a].get())) == destruct_never ? k_invalid_u32 : ins.b;
+	case opcode::op_call_temp: return ins.a;
+	case opcode::op_operand_temp: return ins.b;
+	case opcode::op_binary_fused_temp: return ins.a < c.fused_binary_protos.size() && c.fused_binary_protos[ins.a].typed_class != 0 ? k_invalid_u32 : ins.b;
+	case opcode::op_unary_temp: return static_cast<token_type>(ins.c) == token_type::bang ? k_invalid_u32 : ins.b;
+	case opcode::op_index_fused_decl: {
+		if (ins.a >= c.fused_index_protos.size() || !c.fused_index_protos[ins.a].decl_temp) return k_invalid_u32;
+		const fused_index_proto& p = c.fused_index_protos[ins.a];
+		return p.decl_expect == script_value::TYPEID_INT || p.decl_expect == script_value::TYPEID_FLOAT ? k_invalid_u32 : p.decl_slot;
+	}
+	default: return k_invalid_u32;
+	}
+}
+
+// The end of a statement or of a condition: each temp of slot `floor` or above the code from `from_ip` landed an untyped value in (a cell
+// block guards it to a scalar, the general form may hold an object) dies here, the last landed first, unless the code killed it already
+void vm_compiler::release_object_temps(size_t from_ip, size_t floor) {
+	if (!destructor_values_ || !temps_active_ || !chunk_ || !chunk_->is_function_body) return;
+	std::vector<uint32_t> landed;
+	for (size_t ip = from_ip; ip < chunk_->code.size(); ++ip) {
+		const vm_instruction& ins = chunk_->code[ip];
+		if (ins.op == opcode::op_kill_slot) {
+			landed.erase(std::remove(landed.begin(), landed.end(), ins.a), landed.end());
+			continue;
+		}
+		const uint32_t t = object_temp_landed(ins);
+		if (t == k_invalid_u32 || t < floor || t < chunk_->first_temp_slot || t >= k_typed_slot_mask) continue;
+		landed.erase(std::remove(landed.begin(), landed.end(), t), landed.end());
+		landed.push_back(t);
+	}
+	for (auto t = landed.rbegin(); t != landed.rend(); ++t) { emit(opcode::op_kill_slot, *t); }
 }
 // `Ai.summon`: a member read of an environment name (an enum's value, a map's entry by name) lands in a temp; a block reads an enum map's
 // entry through an environment cell at entry and after calls, any other base refuses the block's entry

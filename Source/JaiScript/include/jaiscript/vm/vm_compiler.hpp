@@ -123,8 +123,10 @@ namespace jai::vm {
         const class_definition* member_class_ = nullptr;
         const constructor_prologue* prologue_ = nullptr;
         void compile_constructor_prologue(const constructor_prologue& prologue);
-        uint32_t this_field_slot_of(const identifier_expr* ident);
-        bool this_global_of(const identifier_expr* ident);
+        uint32_t this_field_slot_of(const identifier_expr* ident, bool note = true);   // note: list the name for the frame's layout verdict
+        bool this_global_of(const identifier_expr* ident, bool note = true);
+        bool handle_field_of_member_class(const identifier_expr* ident) const;   // a bare field the method's class declares a shared_ptr
+        bool method_frame() const { return member_class_ && chunk_ && chunk_->member_class == member_class_ && !reference_; }   // the callable compiling is a method body of member_class_
         void note_this_field(size_t ip, const identifier_expr* ident);
         // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
         // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that
@@ -164,6 +166,8 @@ namespace jai::vm {
         const expression* member_path(const expression* e, member_path_proto& out);
         const expression* member_path_root(const expression* e) const;
         uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
+        uint32_t member_this_base(const expression* e) const;   // a member read or store whose base is a member-class body's bare field: its slot + 1, else 0
+        void fold_member_temps(chunk& c);
         void note_component_base(uint32_t node, const member_expr* m);   // chunk::component_base_slots for a math component store
         bool member_temp_operand(const expression* e) const;
         void compile_member_into_temp(const expression_ptr& e, fused_operand& out);
@@ -264,7 +268,7 @@ namespace jai::vm {
         std::unordered_map<const binary_expr*, std::shared_ptr<identifier_expr>> subscript_guards_;   // a graft statement's element read whose container a guard took ahead of the graft: the guard's temp
         std::shared_ptr<identifier_expr> take_subscript_guard(const binary_expr* read);
         std::unordered_map<size_t, std::vector<size_t>> capture_sites_;   // capture instruction patches owned by an emitted callee probe
-        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::vector<std::pair<expression_ptr, script_value_type>> spills; std::unordered_map<const call_expr*, size_t> argument_prefixes; std::vector<proof_global> receiver_globals; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
+        struct hoist_plan { std::shared_ptr<call_expr> call; std::shared_ptr<const function_decl> fn; std::shared_ptr<identifier_expr> receiver; std::shared_ptr<identifier_expr> receiver_field; bool receiver_this = false; std::vector<std::pair<expression_ptr, script_value_type>> spills; std::unordered_map<const call_expr*, size_t> argument_prefixes; std::vector<proof_global> receiver_globals; bool in_loop = false; bool plain_numeric = false; const char* why = nullptr; };   // why: the rule that kept the call when the plan failed
         const char* inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame = nullptr) const;   // nullptr: the graft takes the call; else the rule that keeps it
         script_value_type arg_kind(const expression* a, const std::vector<const type_info*>* frame) const;
         std::vector<script_value_type> site_kinds(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame, script_value_type* result) const;
@@ -286,6 +290,7 @@ namespace jai::vm {
         bool try_inline_variable_decl(const std::shared_ptr<variable_decl>& decl);
         bool try_inline_return(const statement_ptr& stmt);
         expression_ptr hoisted_condition(const expression_ptr& cond);
+        bool try_condition_graft(const expression_ptr& cond, std::vector<size_t>& false_jumps);
         void compile_hoisted_update(const expression_ptr& update);
 
         size_t emit(opcode op, uint32_t a = 0, uint32_t b = 0, uint32_t c = 0);

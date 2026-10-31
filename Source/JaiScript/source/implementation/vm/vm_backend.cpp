@@ -5495,6 +5495,17 @@ JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, con
 	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
 }
 
+// a folded member temp's field where it lives: the base (a frame slot or the frame's this-field), the temp's member_ic row; null = the
+// member temp runs
+const script_value* vm_backend::member_operand(frame& f, const fused_operand& operand) {
+	const script_value* base = operand.this_slot ? frame_this_field(f, operand.this_slot) : (has_slots(f) ? frame_slot(f, operand.slot) : nullptr);
+	if (!base) return nullptr;
+	if (base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) return nullptr;
+	script_value host_value{std::monostate{}, nullptr};
+	const script_value* cell = site_field(*f.code, base->deref(), static_cast<member_expr*>(f.code->nodes[operand.member_node].get()), operand.member_site, host_value);
+	return cell == &host_value ? nullptr : cell;
+}
+
 // BINARY_FUSED(comparison)+JUMP_IF_FALSE superinstruction. Contract: on success ip is
 // retargeted (fall-through = ip+1, jump = ins.a); on error or script unwinding ip is
 // left on this instruction (and the unwinding case leaves the result pushed, exactly
@@ -12384,10 +12395,12 @@ JAI_NOINLINE void vm_backend::size_worker_rows(worker_chunk_env_cache& rec) {
 // instance carries no field of the method's name; the validation is the call's own resolution (one public overload with the graft's
 // body, no user getter of the method's name, no field shadowing it), plus no user accessor owning a bare field the body names and each
 // such field declared where the method's class finds it. A worker takes the fallback (its pinned call).
-bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
+JAI_FORCEINLINE bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	if (parallel_worker_) { return worker_inline_method_holds(f, site); }
 	if (!cached_global_env_) return false;
-	const script_value* r = frame_slot(f, site.receiver_slot);
+	if (site.caller_globals && (environment_.get() != cached_global_env_ || !frame_globals_hold(f))) return false;   // the caller's names resolve as the program's
+	const script_value* r = site.receiver_slot != k_invalid_u32 ? frame_slot(f, site.receiver_slot)
+	                      : site.receiver_this_field ? frame_this_field(f, site.receiver_this_field) : current_this(f);
 	if (!r) return false;
 	const script_value& v = r->deref();
 	const size_t k = v.raw_storage_index();
@@ -12397,7 +12410,7 @@ bool vm_backend::inline_method_holds(frame& f, const chunk::inline_site& site) {
 	auto* inst = holder->unchecked_instance();
 	class_definition* cd = inst->get_class_definition();
 	if (!cd) return false;
-	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
+	if (inst->has_user_overflow_fields() && (inst->has_field(site.member_id) || !site.global_ids.empty())) return false;
 	const uint64_t epoch = cd->method_epoch();
 	for (const chunk::inline_site::holds_row& row : site.holds_rows) {
 		if (row.cd == cd && row.epoch == epoch) { return row.holds; }
@@ -12429,11 +12442,24 @@ bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const cla
 		const class_definition* at = cd->find_field_declaring_class(id);
 		if (!at || at != dispatch->cls->find_field_declaring_class(id)) return false;
 	}
+	if (!site.global_ids.empty()) {
+		// the body's bare program-scope names resolve past the members (detail::probe_member_scope misses: no field, method or static of
+		// the receiver's class or the method's) into the program scope, where the method was defined
+		if (dispatch->definition_env.get() != cached_global_env_) return false;
+		class_definition* receiver_class = const_cast<class_definition*>(cd);
+		for (const uint64_t id : site.global_ids) {
+			if (cd->field_slot(id) != class_definition::k_no_field_slot || cd->chain_declares_field(id) || !cd->get_method(id, false).is_invalid()) return false;
+			detail::member_probe_hit statics;
+			detail::probe_scope_statics(statics, dispatch->cls.get(), receiver_class, id, true);
+			if (statics) return false;
+		}
+	}
 	return true;
 }
 // a worker's method graft: the receiver's class holds the region's pin of the method, whose body is the graft's, and the bare fields the
 // body names resolve as on the main engine; validated once per class and method epoch in the worker's own row
 bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& site) {
+	if (site.receiver_slot == k_invalid_u32 || !site.global_ids.empty()) { note_worker_decline(worker_decline::inline_method); return false; }   // the pinned call answers
 	const script_value* r = frame_slot(f, site.receiver_slot);
 	if (!r || !parallel_method_pins_) { note_worker_decline(worker_decline::inline_method); return false; }
 	const script_value& v = r->deref();
@@ -12469,8 +12495,10 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 }
 op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
 	const chunk::inline_site& site = f.code->inline_sites[ins.a];
-	if (inline_site_holds(f, site)) { ++f.ip; return {}; }
-	f.ip = ins.b;
+	// a method graft's guard in place: inline_site_holds' conditions ahead of its method rows
+	const bool holds = site.method && !site.epoch_checked && !debug_hook_ && !(site.plain_numeric && has_custom_numeric_ops_) && current_call_depth_ < limits_->vm_depth_gate
+		? inline_method_holds(f, site) : inline_site_holds(f, site);
+	f.ip = holds ? f.ip + 1 : ins.b;
 	return {};
 }
 
@@ -15719,7 +15747,7 @@ JAI_NOINLINE op_status vm_backend::exec_place_arg(frame& f, const vm_instruction
 	return exec_get_member(f, ins);
 }
 
-op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
+op_status vm_backend::exec_get_member_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object{std::monostate{}, nullptr};
 	const script_value* receiver = &object;
@@ -15746,7 +15774,7 @@ op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) {
 	}
 	{
 		script_value host_value{std::monostate{}, nullptr};
-		if (const script_value* cell = site_field(*f.code, receiver->deref(), expr, static_cast<size_t>(&ins - f.code->code.data()), host_value)) {
+		if (const script_value* cell = site_field(*f.code, receiver->deref(), expr, ip, host_value)) {
 #ifdef JAISCRIPT_VM_PROFILE
 			profile_get_member_paths_[0]++;
 #endif
@@ -15821,8 +15849,7 @@ op_status vm_backend::local_member_receiver(frame& f, const member_expr* member,
 // A member read of a frame-slot base (`o.x`, `o.p.x`) into a temp: each link borrows its field where it lives (site_field: the
 // prefix at its own member_ic row past the code), and only the final value is copied into the temp. A link the site cannot serve
 // hands the read to the general path from there on: the receiver pushed as its LOAD and GET_MEMBER would have, op_get_member whole
-op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
-	const size_t ip = static_cast<size_t>(&ins - f.code->code.data());
+op_status vm_backend::exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const bool nested = member->object && member->object->get_type() == node_type::member_expr;
 	const script_value* base = frame_slot(f, ins.c);
@@ -15854,12 +15881,81 @@ op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
 	} else {
 		stack_.push_back(make_null());
 	}
-	VM_TRY(exec_get_member(f, ins));
+	VM_TRY(exec_get_member_at(f, ins, ip));
 	assert(!switch_to_);
 	script_value out = std::move(stack_.back());
 	stack_.pop_back();
 	frame_slot_set(f, ins.b, std::move(out));
 	return {};
+}
+
+// op_member_temp over a member-class body's bare field: the field's instance read where it lives; a moved layout or a member the cache
+// cannot serve runs the LOAD and GET_MEMBER the op stands for, the value into the temp
+op_status vm_backend::exec_member_temp_this_at(frame& f, const vm_instruction& ins, size_t ip) {
+	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
+	if (const script_value* base = frame_this_field(f, ins.c)) {
+		script_value host_value{std::monostate{}, nullptr};
+		if (const script_value* cell = site_field(*f.code, base->deref(), member, ip, host_value)) {
+			frame_slot_set(f, ins.b, *cell);
+			return {};
+		}
+	}
+	VM_TRY(exec_load_impl(f, vm_instruction{opcode::op_load, k_invalid_u32, f.code->member_this_symbols.at(ins.a), 0}));
+	VM_TRY(exec_get_member_at(f, ins, ip));
+	script_value out = std::move(stack_.back());
+	stack_.pop_back();
+	frame_slot_set(f, ins.b, std::move(out));
+	return {};
+}
+
+// op_mfold: the member temps' fields read where they live and landed in their temps, then the consumer's rows: 1 when the run is past the
+// consumer, 2 when it continues at f.ip (a member temp or the consumer as compiled), 0 when nothing ran (the first member temp runs)
+JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold& fd) {
+	const size_t at = f.ip;
+	for (uint8_t k = 0; k < fd.count; ++k) {
+		const script_value* cell = member_operand(f, fd.field[k]);
+		if (!cell) {
+			if (k == 0) return 0;
+			f.ip = at + k;
+			return 2;
+		}
+		frame_slot_set(f, fd.temp[k], *cell);
+	}
+	f.ip = at + fd.count;   // the consumer's own rows (its typed site, its cache slots)
+	const vm_instruction& ins = fd.consumer;
+	switch (fd.kind) {
+	case chunk::member_fold::typed_arith: if (typed_arith_fast(f, ins)) { ++f.ip; return 1; } break;
+	case chunk::member_fold::typed_cmp_jump: if (typed_cmp_jump_fast(f, ins) > 0) { return 1; } break;
+	case chunk::member_fold::dyn_arith: if (dyn_arith_fast(f, ins)) { ++f.ip; return 1; } break;
+	case chunk::member_fold::dyn_cmp_jump: {
+		if (has_custom_numeric_ops_) break;
+		const script_value* lp = dyn_operand(f, ins.a);
+		const script_value* rp = lp ? dyn_operand(f, ins.b) : nullptr;
+		if (!rp) break;
+		static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
+		                                       token_type::equal_equal, token_type::bang_equal};
+		const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
+		if (verdict < 0) break;
+		f.ip = verdict ? f.ip + 1 : ins.c;
+		return 1;
+	}
+	case chunk::member_fold::typed_decl_move: {
+		// exec_typed_decl_mov's identity row
+		const script_value* src = frame_slot(f, ins.b);
+		const type_info* stamp = f.code->typed_sites[f.ip].stamp;
+		if (!src || !variable_decl::identity_payload(src->raw_storage_index(), stamp)) break;
+		script_value v(*src);
+		if (stamp) { v.set_type_info(type_info_ptr{const_cast<type_info*>(stamp)}); }
+		frame_slot_set(f, ins.a, std::move(v));
+		++f.ip;
+		return 1;
+	}
+	case chunk::member_fold::member_store:
+		if (set_member_value_fast(f, f.code->member_store_protos[ins.a], f.ip)) { ++f.ip; return 1; }
+		break;
+	default: break;
+	}
+	return 2;
 }
 
 // A chain read through (`a.b.c`, `grid[y][x].cost`, `self.target.hp`): each inner link borrows where its value lives (a member's field
@@ -16267,44 +16363,49 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, sc
 
 // `base.member = operand;` in statement position: the value read as an operand (a slot, a temp, a constant; never a name whose
 // lookup could fail here), the base from its slot, the kernel with no result
+const script_value* vm_backend::member_store_base(frame& f, const member_store_proto& p) {
+	if (p.base & k_typed_env_bit) { return frame_this_field(f, p.base & k_typed_slot_mask); }
+	const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
+	return member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
+}
+
+// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
+bool vm_backend::set_member_value_fast(frame& f, const member_store_proto& p, size_t row) {
+	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
+	if (!store_rows || store_rows->size() < f.code->code.size()) return false;
+	const script_value* base = member_store_base(f, p);
+	if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
+	const script_value* vp = base ? fast_operand(f, p.value, f.ip * 3) : nullptr;
+	if (!vp || vp->raw_storage_index() == script_value::TYPEID_REFERENCE) return false;
+	const script_value& objd = base->deref();
+	if (objd.raw_storage_index() != script_value::TYPEID_OBJECT) return false;
+	const auto& holder = objd.unchecked_object_handle();
+	if (!holder || !holder->is_instance()) return false;
+	auto* inst = holder->unchecked_instance();
+	const auto& entry = (*store_rows)[row];
+	class_definition* cd = inst->get_class_definition();
+	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot == UINT32_MAX) return false;
+	const size_t vi = vp->raw_storage_index();
+	if (entry.scalar_type && vi == entry.scalar_kind) {
+		if (script_value* current = inst->field_slot_value(entry.slot); current && current->raw_storage_index() == vi) {
+			if (vi == script_value::TYPEID_INT) { current->unchecked_set_int_payload(vp->unchecked_as_int()); }
+			else if (vi == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(vp->unchecked_as_float()); }
+			else { current->unchecked_set_bool_payload(vp->unchecked_as_bool()); }
+			if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
+			return true;
+		}
+	} else if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot) &&
+	           (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
+	            vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
+		inst->field_slot_write(entry.slot, script_value(*vp));
+		return true;
+	}
+	return false;
+}
+
 op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins) {
 	const member_store_proto& p = f.code->member_store_protos[ins.a];
-	// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
-	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
-	if (store_rows && store_rows->size() >= f.code->code.size()) {
-		const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
-		const script_value* base = member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
-		if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
-		const script_value* vp = base ? fast_operand(f, p.value, f.ip * 3) : nullptr;
-		if (vp && vp->raw_storage_index() != script_value::TYPEID_REFERENCE) {
-			const script_value& objd = base->deref();
-			if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
-				const auto& holder = objd.unchecked_object_handle();
-				if (holder && holder->is_instance()) {
-					auto* inst = holder->unchecked_instance();
-					const auto& entry = (*store_rows)[static_cast<size_t>(&ins - f.code->code.data())];
-					class_definition* cd = inst->get_class_definition();
-					if (cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
-						const size_t vi = vp->raw_storage_index();
-						if (entry.scalar_type && vi == entry.scalar_kind) {
-							if (script_value* current = inst->field_slot_value(entry.slot); current && current->raw_storage_index() == vi) {
-								if (vi == script_value::TYPEID_INT) { current->unchecked_set_int_payload(vp->unchecked_as_int()); }
-								else if (vi == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(vp->unchecked_as_float()); }
-								else { current->unchecked_set_bool_payload(vp->unchecked_as_bool()); }
-								if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
-								return {};
-							}
-						} else if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot) &&
-						           (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
-						            vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
-							inst->field_slot_write(entry.slot, script_value(*vp));
-							return {};
-						}
-					}
-				}
-			}
-		}
-	}
+	if (set_member_value_fast(f, p, static_cast<size_t>(&ins - f.code->code.data()))) return {};
 	script_value value = make_null();
 	if (p.value.const_index != k_invalid_u32) {
 		push_constant(*f.code, p.value.const_index);   // a literal takes the engine as CONST gives it (the chunk's template carries none)
@@ -16315,7 +16416,13 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		value = *vp;
 	}
 	script_value receiver = make_null();
-	VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, receiver));
+	if (p.base & k_typed_env_bit) {
+		VM_TRY(exec_load_impl(f, vm_instruction{opcode::op_load, k_invalid_u32, f.code->member_this_symbols.at(p.node), 0}));
+		receiver = std::move(stack_.back());
+		stack_.pop_back();
+	} else {
+		VM_TRY(local_member_receiver(f, static_cast<member_expr*>(f.code->nodes[p.node].get()), p.base, receiver));
+	}
 	if (is_unwinding_) { return {}; }
 	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, std::move(receiver), std::move(value), false);
 }
@@ -21606,7 +21713,7 @@ void vm_backend::dump_opcode_profile() const {
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
 #if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_member_temp_this) X(op_mfold) X(op_inline_guard) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -21859,7 +21966,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
-			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
+			case opcode::op_inline_guard: JAI_OP_LABEL(op_inline_guard) VM_TRY_OP(exec_inline_guard(f, ins)); JAI_DISPATCH_HERE();   // the executor sets the ip: the next instruction, or the fallback
 			case opcode::op_probe_callee: JAI_OP_LABEL(op_probe_callee)
 				if (ins.b == 0 && code_base[f.ip + 1].op == opcode::op_call_from_scratch) {
 					if (frame* callee = enter_probed_call(f, ins)) { JAI_SWITCH_FRAME(callee); }
@@ -21948,6 +22055,17 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP(exec_member_temp(f, ins));
 				assert(!switch_to_);
 				JAI_NEXT_OP();
+			case opcode::op_member_temp_this: JAI_OP_LABEL(op_member_temp_this)
+				VM_TRY_OP(exec_member_temp_this(f, ins));
+				assert(!switch_to_);
+				JAI_NEXT_OP();
+			case opcode::op_mfold: JAI_OP_LABEL(op_mfold) {
+				const chunk::member_fold& fd = f.code->member_folds[ins.a];
+				if (member_fold_fast(f, fd) != 0) { JAI_DISPATCH_HERE(); }
+				if (fd.first.op == opcode::op_member_temp) { VM_TRY_OP(exec_member_temp_at(f, fd.first, f.ip)); }
+				else { VM_TRY_OP(exec_member_temp_this_at(f, fd.first, f.ip)); }
+				JAI_NEXT_OP();
+			}
 			case opcode::op_get_member_path:
 				VM_TRY_OP(exec_get_member_path(f, ins));
 				assert(!switch_to_);

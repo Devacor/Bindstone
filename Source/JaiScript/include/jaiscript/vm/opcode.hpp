@@ -338,9 +338,11 @@ namespace jai::vm {
         op_ctor_done,       // the step's class is constructed: a throw from here on destroys it
         op_ctor_literals,   // the level's literal field initializers stamped, unless nothing ran since create_instance seeded them
         op_ctor_scope,      // a=the constructor's parameter count: a prologue that evaluates charges what the interpreter's scope for it does
+        op_member_temp_this, // a=nodes index (member_expr), b=temp slot, c=the base's this-field slot + 1: op_member_temp over a member-class body's bare field
+        op_mfold,           // a=chunk::member_folds index: the member temps here folded into the consumer after them (their fields read in place); a miss runs the first member temp
     };
     inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the profile's histograms) are this long
-    static_assert(static_cast<size_t>(opcode::op_ctor_scope) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
+    static_assert(static_cast<size_t>(opcode::op_mfold) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate
     inline constexpr uint32_t capture_form_probe = 0;    // the pending callee register (op_probe_callee)
@@ -712,6 +714,8 @@ namespace jai::vm {
             case opcode::op_ctor_done: return "CTOR_DONE";
             case opcode::op_ctor_literals: return "CTOR_LITERALS";
             case opcode::op_ctor_scope: return "CTOR_SCOPE";
+            case opcode::op_member_temp_this: return "MEMBER_TEMP_THIS";
+            case opcode::op_mfold: return "MFOLD";
             case opcode::op_index_compound_operand: return "INDEX_COMPOUND_OPERAND";
             case opcode::op_halt: return "HALT";
             case opcode::op_d_add: return "D_ADD";

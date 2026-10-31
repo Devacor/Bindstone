@@ -9,6 +9,7 @@
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/host_member.hpp>
 #include <deque>
+#include <unordered_map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -67,6 +68,8 @@ namespace jai::vm {
         // A plain frame-slot identifier (or a compiler temp): the typed heads address it
         // straight off the frame, no resolution ladder (internal/typed_regions_design.md)
         bool direct = false;
+        // a field read in place by a folded consumer: base.member with the base a slot or a this-field, its member_ic row
+        uint32_t member_site = k_invalid_u32;
     };
 
     // op_push_fused: `recv.push(v);` with an identifier receiver and a slotted-identifier or
@@ -722,6 +725,19 @@ namespace jai::vm {
         std::vector<string_target_site> string_target_sites;
         std::vector<push_proto> push_protos;
         std::vector<member_store_proto> member_store_protos;
+        // member temps and the consumer of their temps run as one instruction (op_mfold): each field read where it lives through its temp's
+        // member_ic row into its temp, then the consumer's own fast rows; anything else continues with the instructions as compiled
+        struct member_fold {
+            enum : uint8_t { typed_arith = 1, typed_cmp_jump, dyn_arith, dyn_cmp_jump, typed_decl_move, member_store };
+            vm_instruction consumer;   // as compiled: its operands name the temps
+            vm_instruction first;      // the first member temp, which a miss runs
+            uint8_t kind = 0;
+            uint8_t count = 0;         // the member temps (1 or 2)
+            uint32_t temp[2] = {k_invalid_u32, k_invalid_u32};
+            fused_operand field[2];    // base.member: the base's slot or this-field slot, the member node, the temp's member_ic row
+        };
+        std::vector<member_fold> member_folds;
+        std::unordered_map<uint32_t, uint32_t> member_this_symbols;   // a this-field base's member node: its symbols index
         std::vector<velem_proto> velem_protos;
         std::vector<member_path_proto> member_path_protos;
         // an inlined leaf (internal/typed_regions_design.md, Inlined leaves): the guard at guard_ip admits [begin_ip, fallback_ip) when the callee
@@ -735,8 +751,13 @@ namespace jai::vm {
             uint32_t guard_ip = 0, begin_ip = 0, fallback_ip = 0, join_ip = 0;
             uint32_t result_slot = k_invalid_u32;  // the result temp (every return defines it, the join reads it); k_invalid_u32: a void callee
             bool method = false;                  // a method graft: the receiver slot's instance resolves member_id to the body
-            uint32_t receiver_slot = k_invalid_u32;
+            uint32_t receiver_slot = k_invalid_u32;   // k_invalid_u32 on a method graft: the receiver is the frame's `this`, or its this-field
+            uint32_t receiver_this_field = 0;         // the frame's this-field holding the receiver: its slot + 1 (0: none)
+            bool caller_globals = false;              // the body's program-scope names read in the caller's frame: its names resolve as the program's
             uint64_t member_id = 0;
+            // a method graft's body names a program-scope name (std::vector order: its ids) or calls a sibling method bare: the receiver's
+            // class resolves no member of each such name, and each such call to a method of the receiver
+            std::vector<uint64_t> global_ids;
             const class_definition* field_class = nullptr;   // the class of the bare fields the body names (the receiver's exact class); null: none
             std::vector<uint64_t> field_ids;
             bool env_reads = false;                // a free function's body reads an environment name: the guard holds only where the caller has no member scope (a field would shadow it)

@@ -203,6 +203,7 @@ namespace jai {
         // every store runs T's table (detail::declared_ref_kind), and T in declared_ref
         uint8_t declared_ref_kind = 0;
         mutable bool this_field = false;   // a bare name in a method the checker resolved to a field of the class chain (declared, no user accessor): the method graft's `recv.name`
+        mutable bool program_name = false;   // a bare name in a method the checker resolved past every member of the class chain: the method graft's program-scope read
         type_info* declared_ref = nullptr;
 
         identifier_expr(const source_location& loc, std::string_view n, uint64_t sym_id)

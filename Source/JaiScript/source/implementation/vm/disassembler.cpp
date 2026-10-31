@@ -126,6 +126,16 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				out << " node=" << ins.a << " field_slot=" << (ins.c ? ins.c - 1 : 0);
 				if (ins.b < ch.symbols.size() && symbolizer) { out << " '" << symbolizer->get_string(ch.symbols[ins.b]) << "'"; }
 				break;
+			case opcode::op_member_temp_this:
+				out << " node=" << ins.a << " temp=" << ins.b << " field_slot=" << (ins.c ? ins.c - 1 : 0);
+				break;
+			case opcode::op_mfold:
+				out << " fold=" << ins.a << " skip=" << ins.b;
+				if (ins.a < ch.member_folds.size()) {
+					const chunk::member_fold& m = ch.member_folds[ins.a];
+					out << " " << opcode_name(m.first.op) << " .. " << opcode_name(m.consumer.op);
+				}
+				break;
 			case opcode::op_get_member_path:
 				out << " node=" << ins.a << " path=" << ins.b;
 				if (ins.b < ch.member_path_protos.size()) {

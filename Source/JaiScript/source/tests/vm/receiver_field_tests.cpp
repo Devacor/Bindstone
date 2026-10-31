@@ -236,13 +236,14 @@ public:
 		});
 
 		test("a_bool_method_in_a_condition_grafts_as_branches", [this]() {
-			// `if (r.m())` and `while (r.m())` over a one-return bool body: the return's expression branches in place, a subclass override
-			// and a receiver of another class take the real call, `!r.m()` and `r.m() && x` keep their forms
+			// `if (r.m())` and `while (r.m())` over a one-return bool body: the return's expression branches in place; a method a subclass
+			// overrides keeps the call, and `!r.m()` and `r.m() && x` keep their forms
 			const std::string script = R"(
 				const int LIMIT = 3;
 				class Counter {
 					int n = 0;
 					bool more() { return n < LIMIT; }
+					bool below() { return n < LIMIT; }
 					bool odd() { return (n & 1) != 0; }
 				}
 				class Never : Counter { bool more() override { return false; } }
@@ -250,14 +251,15 @@ public:
 					shared_ptr<Counter> c = null;
 					int run() {
 						int steps = 0;
-						while (c.more()) { c.n = c.n + 1; if (c.odd()) { steps = steps + 10; } else { steps = steps + 1; } }
+						while (c.below()) { c.n = c.n + 1; if (c.odd()) { steps = steps + 10; } else { steps = steps + 1; } }
+						if (c.more()) { steps = steps + 100; }
 						if (!c.odd() && c.more()) { steps = steps + 1000; }
 						return steps;
 					}
 					bool self_check() { return c != null; }
 					int guarded() { if (self_check()) { return 1; } return 0; }
 				}
-				int count(shared_ptr<Counter> k) { int s = 0; while (k.more()) { k.n = k.n + 1; s = s + 2; } return s; }
+				int count(shared_ptr<Counter> k) { int s = 0; while (k.below()) { k.n = k.n + 1; s = s + 2; } return s; }
 				string go() {
 					shared_ptr<Loop> l = new Loop();
 					l.c = new Counter();
@@ -273,7 +275,8 @@ public:
 			)";
 			all(script, "", "condition grafts");
 			const std::string l = listing(script);
-			check_true(l.find("-- inlined more") != std::string::npos && l.find("-- inlined odd") != std::string::npos && l.find("-- inlined self_check") != std::string::npos, "the conditions graft: " + l);
+			check_true(l.find("-- inlined below") != std::string::npos && l.find("-- inlined odd") != std::string::npos && l.find("-- inlined self_check") != std::string::npos, "the conditions graft: " + l);
+			check_true(l.find("-- inlined more") == std::string::npos, "an overridden method keeps its call: " + l);
 		});
 
 		test("a_raise_inside_a_grafted_condition_reports_as_the_call", [this]() {

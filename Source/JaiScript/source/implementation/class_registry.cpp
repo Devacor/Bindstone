@@ -506,6 +506,13 @@ release_sync::~release_sync() {
 
 } // namespace detail
 
+bool script_class_declares_destructor(engine& eng) {
+    for (const auto& entry : eng.get_class_registry().script_classes_) {
+        if (entry.second && entry.second->chain_declares_destructor(eng)) { return true; }
+    }
+    return false;
+}
+
 bool slot_may_own_destructor(engine& eng, const type_info_ptr& t) {
     bool any = false;
     for (const auto& entry : eng.get_class_registry().script_classes_) {

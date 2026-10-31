@@ -45,4 +45,7 @@ namespace detail {
 // exit destroys (both backends).
 bool slot_may_own_destructor(engine& eng, const type_info_ptr& t);
 
+// A script class the engine has declared runs a destructor at some level of its chain (a value whose lifetime the program can observe)
+bool script_class_declares_destructor(engine& eng);
+
 } // namespace jai

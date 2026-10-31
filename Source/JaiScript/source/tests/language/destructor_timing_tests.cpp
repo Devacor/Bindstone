@@ -41,6 +41,33 @@ public:
         }
     }
 
+    // No prelude: lifetimes hold whether or not a class declares a destructor. The programs run in order on one engine (a later one
+    // declares what the functions an earlier one compiled never saw); the last one's result is the outcome
+    void expect_outcome(const std::vector<std::string>& programs, const std::string& expected) {
+        for (int variant = 0; variant < 2; ++variant) {
+            auto eng = make_engine();
+            jai::stdlib::register_all(eng);
+            if (variant == 1) {
+                eng->type_proofs(false);
+                eng->ir_passes(false);
+            }
+            std::string got;
+            try {
+                for (const std::string& program : programs) { got = eng->execute(program).as_string(); }
+            } catch (const std::exception& e) {
+                got = std::string("threw: ") + e.what();
+            }
+            check_eq(expected, got, variant == 0 ? "default engine" : "proofs and passes off");
+        }
+    }
+
+    static constexpr const char* k_observed = R"(
+        class P { int v = 3; }
+        class Box { shared_ptr<P> t = null; var u = null; }
+        string OUT = "";
+        function note(string s) -> void { OUT = OUT + s + " "; }
+    )";
+
     void forge_tests() override {
         test("block_locals_die_at_the_closing_brace_in_reverse", [this]() {
             expect_log(R"(
@@ -1258,6 +1285,92 @@ public:
                 }
                 f(); LOG;
             )", "<0><1><2>w0.w1.|");
+        });
+
+        test("with_no_destructor_a_block_local_dies_at_the_closing_brace", [this]() {
+            expect_outcome({std::string(k_observed) + R"(
+                function f() -> void {
+                    weak_ptr<P> w = null;
+                    { shared_ptr<P> s = new P(); w = s; }
+                    note("block:" + to_string(w.expired()));
+                    for (int i = 0; i < 2; i++) { shared_ptr<P> s = new P(); w = s; }
+                    note("loop:" + to_string(w.expired()));
+                    { var s = new P(); w = s; }
+                    note("var:" + to_string(w.expired()));
+                }
+                f(); OUT;
+            )"}, "block:true loop:true var:true ");
+        });
+
+        test("with_no_destructor_a_member_read_holds_nothing_after_its_consumer", [this]() {
+            expect_outcome({std::string(k_observed) + R"(
+                function clear_check(shared_ptr<Box> b, weak_ptr<P> w) -> bool { b.t = null; note("in:" + to_string(w.expired())); return true; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    b.t = new P(); weak_ptr<P> w = b.t;
+                    shared_ptr<P> x = b.t; x = null; b.t = null; note("decl:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t;
+                    bool z = b.t == null; b.t = null; note("cmp:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t;
+                    if (b.t != null) { } b.t = null; note("cond:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t;
+                    bool y = b.t == null || clear_check(b, w); note("full:" + to_string(w.expired()));
+                    b.t = new P();
+                    z = b.t == null; note("count:" + to_string(b.t.use_count()));
+                    b.u = new P(); w = b.u;
+                    var q = b.u; q = null; b.u = null; note("var:" + to_string(w.expired()));
+                }
+                f(); OUT;
+            )"}, "decl:true cmp:true cond:true in:true full:true count:1 var:true ");
+        });
+
+        test("with_no_destructor_a_call_result_or_an_element_read_dies_with_its_consumer", [this]() {
+            expect_outcome({std::string(k_observed) + R"(
+                function mk(weak_ptr<P>& w) -> shared_ptr<P> { shared_ptr<P> p = new P(); w = p; return p; }
+                function f() -> void {
+                    weak_ptr<P> w = null;
+                    bool z = mk(w) == null; note("call:" + to_string(w.expired()));
+                    if (mk(w) != null) { note("body:" + to_string(w.expired())); }
+                    array<shared_ptr<P>> a = [new P()]; w = a[0];
+                    shared_ptr<P> x = a[0]; x = null; a[0] = null; note("elem:" + to_string(w.expired()));
+                    a[0] = new P(); w = a[0];
+                    for (int i = 0; i < 1; i++) { bool e = a[i] == null; a[i] = null; }
+                    note("loop:" + to_string(w.expired()));
+                }
+                f(); OUT;
+            )"}, "call:true body:true elem:true loop:true ");
+        });
+
+        test("with_no_destructor_a_callee_s_parameters_and_locals_die_when_it_returns", [this]() {
+            expect_outcome({std::string(k_observed) + R"(
+                function g(shared_ptr<P> p) -> int { return p.v + 1; }
+                function h(shared_ptr<P> p) -> int { shared_ptr<P> q = p; return q.v; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    for (int i = 0; i < 2; i++) {
+                        b.t = new P(); weak_ptr<P> w = b.t;
+                        int k = g(b.t); b.t = null; note("g:" + to_string(w.expired()));
+                        b.t = new P(); w = b.t;
+                        k = h(b.t); b.t = null; note("h:" + to_string(w.expired()));
+                    }
+                }
+                f(); OUT;
+            )"}, "g:true h:true g:true h:true ");
+        });
+
+        test("a_destructor_class_declared_after_a_function_compiled_runs_on_time", [this]() {
+            expect_outcome({R"(
+                string LOG = "";
+                class Box { var t = null; }
+                function f(shared_ptr<Box> b) -> void { bool z = b.t == null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">"; }
+                function g(shared_ptr<Box> b) -> void { if (b.t != null) { LOG = LOG + "?"; } LOG = LOG + "<"; b.t = null; LOG = LOG + ">"; }
+                function k(shared_ptr<Box> b) -> void { { var x = b.t; } LOG = LOG + "<"; b.t = null; LOG = LOG + ">"; }
+                shared_ptr<Box> warm = new Box(); f(warm); g(warm); k(warm); LOG = "";
+            )", R"(
+                class D { ~D() { LOG = LOG + "d"; } }
+                shared_ptr<Box> b = new Box(); b.t = new D(); f(b); b.t = new D(); g(b); b.t = new D(); k(b);
+                LOG;
+            )"}, "<d>?<d><d>");
         });
     }
 

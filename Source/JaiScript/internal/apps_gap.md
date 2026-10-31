@@ -76,16 +76,79 @@ ordinary code over containers stays general.
   unit sync, moved the call kernel 1.7% and Richards not at all. A call costs about 40 ns spread over its push, its pop, the return's
   conversion check and landing, the receiver's count and two dispatches; no single step dominates.
 
+## Receiver fields and method grafts
+
+The general path reads a member of a frame slot's instance through a member temp (`MEMBER_TEMP`: the read's member cache, the value
+into a compiler temp, in operand order). The same read over a member-class body's bare field (`current_tcb.state` in a `Scheduler`
+method) is `MEMBER_TEMP_THIS`, where it was a stack read and a landing; a statement-position store onto such a base
+(`current_tcb.state = v;`) is one `SET_MEMBER_VALUE`, where it was a load, a store and a pop.
+
+- **Member temps fold into their consumer.** When the instruction after one or two member temps consumes their temps (a typed or dynamic
+  arithmetic, a typed or dynamic compare-jump, a typed declaration's move, a member store's value), the first member temp becomes
+  `MFOLD`: one dispatch reads each field where it lives by the member temp's own rows (an element's object in place, else the member
+  cache row: the receiver's class at its method epoch names the slot), lands it in its temp as the member temp would, and runs the
+  consumer's own fast rows (a member store runs whole). A field the rows do not serve (no instance, another class or epoch, a getter, a
+  host member) runs the member temps and the consumer as compiled; a consumer row that declines continues at the consumer. A jump into the consumer, a cell region's span and the
+  debugger see the instructions as compiled, and every temp holds what the member temp leaves in it, so lifetimes and texts are the
+  general form's.
+- **Method grafts take the frame's receiver.** Besides a local, a graft's receiver is the frame's `this` (a sibling's bare `m()`,
+  `this.m()`) or a bare field holding a handle (`current_tcb.m()`), read where it lives. The clone compiles the body's bare names as the
+  caller's own operands: on `this` the body's fields are the caller's this-field operands; on a field or a local they are member reads
+  of the receiver, which fold; a program-scope name the checker resolved past every member is the caller's this-global operand when the
+  caller's class takes no member of it, else the call stays. The guard is the call's own resolution, per receiver class at its method
+  epoch: the class resolves the method to the grafted body, each bare field to the declaration the method's class sees, and no
+  program-scope name the body reads to a member; a body that reads program-scope names holds only while the caller's frame layout holds
+  and its environment is the program's. A frame receiver grafts only a body that makes no call (a call costs the graft more than the
+  frame it saves, and could move the receiver), and a field receiver only a body that stores into no other object and into no field
+  named like the receiver's field (either could be the caller's own field). The checker stamps no frame-receiver graft for a method a
+  derived class overrides: its guard would send most receivers to the real call.
+- **A bool method in a condition grafts as branches.** `if (r.m())`, `while (r.m())` over a body that is one proven `bool` return
+  compiles the return's expression as the condition's own branches behind the guard, and the fallback branches on the real call: no
+  result temp, no landing, no truth test. A raise inside the expression names the method's frame and its return's line.
+
+Measured (Release LTCG, interleaved and pinned, against the base at an equal-length path; base2/base is the noise row; 9 rounds for the
+apps, 5 for the games, 3 for the kernels):
+
+| program | build / base | base2 / base |
+|---|---|---|
+| Richards | 0.924 | 1.002 |
+| DeltaBlue | 0.994 | 0.999 |
+| bytecode | 1.006 | 0.999 |
+| spatial | 0.986 | 0.998 |
+| field kernel (`cur.a = cur.a + cur.b` and kin in a method) | 0.839 | 0.999 |
+| setter kernel (`current.mark_held()`) | 0.778 | 1.020 |
+| condition kernel (`if (current.held_or_suspended())`) | 0.660 | 0.999 |
+| GLOOM, OSSUARY (serial and 8 workers), JaiDOOM, Gator Quest, crawler, demoreel | 0.993 to 1.009 | 0.987 to 1.007 |
+| the kernel suite | 0.97 to 1.01, string2float_dyn 1.022 | 0.987 to 1.004 |
+
+Every hash held. string2float_dyn runs none of the changed code and compiles to the same manifest; an earlier build of the same
+change measured it at 0.997. Richards' five methods inlined by hand measured 0.900 on the base, so the grafts reach most of that.
+
+The shape costs that measured:
+
+- **The member store keeps its own shape.** Restructuring `SET_MEMBER_VALUE` around a shared fast row (for the fold to call) made
+  bytecode, which runs no member store, 2.8% slower: the dispatch loop inlines the store. The fold runs a member-store consumer whole.
+- **A fold reads a field by its member temp's own rows.** Declining an element reference (`Entity& e = entities[i]`) made every
+  spatial fold miss onto the member temp: 1.025 against 0.986.
+
+What was left out, measured:
+
+- **Handle results.** DeltaBlue's `input()`/`output()` return handles. Grafting them with the result in a temp (declared by the
+  return's table, moved out where the statement reads it, the temp killed at the statement's end) and a graft in a store's target
+  made DeltaBlue about 15% slower (single runs): the temp's declaration, the move and the kills cost more than the frame. The form
+  that pays substitutes a one-return body's expression for the call in place, behind the guards, with the statement compiled once
+  more as written for a guard that fails; it needs the expression proven unable to raise or call, so a raise names the frames the
+  call's would.
+- **Bodies that call, on the frame's receiver, and overridden methods.** In single runs on a busy machine, grafting bodies that call
+  (`current_tcb.run()`, `scheduler.queue(v)`, their receiver held in a temp) cost Richards about 28%, and grafting the stubs of methods a
+  derived class overrides (the guard fails, the fallback pays the guard and the landing) about 6% more.
+
 ## Levers, by expected value
 
-1. **Method grafts as tight as the method.** Under the guard's exact receiver class the body's fields are known slots. The tight form
-   needs a typed operand for "field s of the instance in slot r" that the typed rows and the cell translation read (today a receiver
-   field is a `MEMBER_TEMP` over a `var` temp), re-validated after any call the body keeps, and a typed temp for a scalar result.
-   A bare method call on `this` needs none of it: the caller's frame holds the same receiver, so the clone can keep the body's bare
-   names and compile them as the caller's this-field and this-global operands, guarded by the receiver class resolving the method to
-   the grafted body and by the two classes resolving each bare name alike. DeltaBlue's `input()`/`output()` then need handle results
-   (outside closed loops, every return proven, no destructor in the program) and a graft in a store's target
-   (`output().value = ...`, refused today as "a call in a store's target").
+1. **Method grafts as tight as the method.** Built for the frame's receiver and for bool conditions ("Receiver fields and method
+   grafts" above). What remains is DeltaBlue's: `input()`/`output()` return handles, and their tight form substitutes a one-return
+   body's expression for the call in place (a statement compiled twice, behind the guards and as written); a result temp measured
+   slower than the call.
 2. **Builtin calls that run no user code inside cell loops.** Builtin methods carry no effect facts: none records that `contains`
    or `[]` with an int or string key, `size()` or a scalar `push` cannot run user code. With those facts a cell loop could take such a
    call as an operation (a door into the builtin, guarded on the receiver's kind); a boundary operation is not enough, since the hot

@@ -5495,14 +5495,18 @@ JAI_NOINLINE const script_value* vm_backend::fused_cmp_operand_env(frame& f, con
 	return env_lookup_cached(f, cache_slot, f.code->symbols[operand.symbol]);
 }
 
-// a folded member temp's field where it lives: the base (a frame slot or the frame's this-field), the temp's member_ic row; null = the
-// member temp runs
-const script_value* vm_backend::member_operand(frame& f, const fused_operand& operand) {
-	const script_value* base = operand.this_slot ? frame_this_field(f, operand.this_slot) : (has_slots(f) ? frame_slot(f, operand.slot) : nullptr);
+static script_value::object_holder* element_object_in_place(const script_value& v);
+
+// a folded member temp's field where it lives, by the member temp's own rows: its base (a frame slot or the frame's this-field), its
+// member_ic row; null = the member temp runs
+const script_value* vm_backend::member_temp_field(frame& f, const vm_instruction& mt, size_t ip) {
+	const script_value* base = mt.op == opcode::op_member_temp_this ? frame_this_field(f, mt.c) : frame_slot(f, mt.c);
 	if (!base) return nullptr;
-	if (base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) return nullptr;
+	if (script_value::object_holder* in_place = element_object_in_place(*base)) {
+		if (const script_value* cell = site_field_of_holder(*f.code, in_place, ip)) return cell;
+	}
 	script_value host_value{std::monostate{}, nullptr};
-	const script_value* cell = site_field(*f.code, base->deref(), static_cast<member_expr*>(f.code->nodes[operand.member_node].get()), operand.member_site, host_value);
+	const script_value* cell = site_field(*f.code, base->deref(), static_cast<member_expr*>(f.code->nodes[mt.a].get()), ip, host_value);
 	return cell == &host_value ? nullptr : cell;
 }
 
@@ -15747,7 +15751,9 @@ JAI_NOINLINE op_status vm_backend::exec_place_arg(frame& f, const vm_instruction
 	return exec_get_member(f, ins);
 }
 
-op_status vm_backend::exec_get_member_at(frame& f, const vm_instruction& ins, size_t ip) {
+op_status vm_backend::exec_get_member(frame& f, const vm_instruction& ins) { return exec_get_member_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
+
+JAI_FORCEINLINE op_status vm_backend::exec_get_member_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* expr = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	script_value object{std::monostate{}, nullptr};
 	const script_value* receiver = &object;
@@ -15849,7 +15855,9 @@ op_status vm_backend::local_member_receiver(frame& f, const member_expr* member,
 // A member read of a frame-slot base (`o.x`, `o.p.x`) into a temp: each link borrows its field where it lives (site_field: the
 // prefix at its own member_ic row past the code), and only the final value is copied into the temp. A link the site cannot serve
 // hands the read to the general path from there on: the receiver pushed as its LOAD and GET_MEMBER would have, op_get_member whole
-op_status vm_backend::exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip) {
+op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) { return exec_member_temp_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
+
+JAI_FORCEINLINE op_status vm_backend::exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const bool nested = member->object && member->object->get_type() == node_type::member_expr;
 	const script_value* base = frame_slot(f, ins.c);
@@ -15891,6 +15899,8 @@ op_status vm_backend::exec_member_temp_at(frame& f, const vm_instruction& ins, s
 
 // op_member_temp over a member-class body's bare field: the field's instance read where it lives; a moved layout or a member the cache
 // cannot serve runs the LOAD and GET_MEMBER the op stands for, the value into the temp
+JAI_NOINLINE op_status vm_backend::exec_member_temp_this(frame& f, const vm_instruction& ins) { return exec_member_temp_this_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
+
 op_status vm_backend::exec_member_temp_this_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	if (const script_value* base = frame_this_field(f, ins.c)) {
@@ -15908,18 +15918,37 @@ op_status vm_backend::exec_member_temp_this_at(frame& f, const vm_instruction& i
 	return {};
 }
 
+// op_mfold: the fold's run past its consumer, else the first member temp as compiled and the code after it
+JAI_NOINLINE op_status vm_backend::exec_mfold(frame& f, const vm_instruction& ins) {
+	const chunk::member_fold& fd = f.code->member_folds[ins.a];
+	switch (member_fold_fast(f, fd)) {
+	case 1: case 2: return {};
+	case 3: {
+		const op_status stored = exec_set_member_value(f, f.code->code[f.ip]);
+		if (stored != op_status::failed && !is_unwinding_) { ++f.ip; }
+		return stored;
+	}
+	default: break;
+	}
+	const op_status st = fd.first.op == opcode::op_member_temp ? exec_member_temp_at(f, fd.first, f.ip) : exec_member_temp_this_at(f, fd.first, f.ip);
+	if (st != op_status::failed && !is_unwinding_) { ++f.ip; }
+	return st;
+}
+
 // op_mfold: the member temps' fields read where they live and landed in their temps, then the consumer's rows: 1 when the run is past the
-// consumer, 2 when it continues at f.ip (a member temp or the consumer as compiled), 0 when nothing ran (the first member temp runs)
+// consumer, 2 when it continues at f.ip (a member temp or the consumer as compiled), 3 when the consumer, a member store, runs whole,
+// 0 when nothing ran (the first member temp runs)
 JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold& fd) {
 	const size_t at = f.ip;
 	for (uint8_t k = 0; k < fd.count; ++k) {
-		const script_value* cell = member_operand(f, fd.field[k]);
+		const vm_instruction& mt = k == 0 ? fd.first : f.code->code[at + k];
+		const script_value* cell = member_temp_field(f, mt, at + k);
 		if (!cell) {
 			if (k == 0) return 0;
 			f.ip = at + k;
 			return 2;
 		}
-		frame_slot_set(f, fd.temp[k], *cell);
+		frame_slot_set(f, mt.b, *cell);
 	}
 	f.ip = at + fd.count;   // the consumer's own rows (its typed site, its cache slots)
 	const vm_instruction& ins = fd.consumer;
@@ -15950,9 +15979,7 @@ JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold
 		++f.ip;
 		return 1;
 	}
-	case chunk::member_fold::member_store:
-		if (set_member_value_fast(f, f.code->member_store_protos[ins.a], f.ip)) { ++f.ip; return 1; }
-		break;
+	case chunk::member_fold::member_store: return 3;   // the store runs whole, its own fast row first
 	default: break;
 	}
 	return 2;
@@ -16362,50 +16389,46 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, sc
 }
 
 // `base.member = operand;` in statement position: the value read as an operand (a slot, a temp, a constant; never a name whose
-// lookup could fail here), the base from its slot, the kernel with no result
-const script_value* vm_backend::member_store_base(frame& f, const member_store_proto& p) {
-	if (p.base & k_typed_env_bit) { return frame_this_field(f, p.base & k_typed_slot_mask); }
-	const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
-	return member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
-}
-
-// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
-bool vm_backend::set_member_value_fast(frame& f, const member_store_proto& p, size_t row) {
-	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
-	if (!store_rows || store_rows->size() < f.code->code.size()) return false;
-	const script_value* base = member_store_base(f, p);
-	if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
-	const script_value* vp = base ? fast_operand(f, p.value, f.ip * 3) : nullptr;
-	if (!vp || vp->raw_storage_index() == script_value::TYPEID_REFERENCE) return false;
-	const script_value& objd = base->deref();
-	if (objd.raw_storage_index() != script_value::TYPEID_OBJECT) return false;
-	const auto& holder = objd.unchecked_object_handle();
-	if (!holder || !holder->is_instance()) return false;
-	auto* inst = holder->unchecked_instance();
-	const auto& entry = (*store_rows)[row];
-	class_definition* cd = inst->get_class_definition();
-	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot == UINT32_MAX) return false;
-	const size_t vi = vp->raw_storage_index();
-	if (entry.scalar_type && vi == entry.scalar_kind) {
-		if (script_value* current = inst->field_slot_value(entry.slot); current && current->raw_storage_index() == vi) {
-			if (vi == script_value::TYPEID_INT) { current->unchecked_set_int_payload(vp->unchecked_as_int()); }
-			else if (vi == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(vp->unchecked_as_float()); }
-			else { current->unchecked_set_bool_payload(vp->unchecked_as_bool()); }
-			if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
-			return true;
-		}
-	} else if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot) &&
-	           (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
-	            vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
-		inst->field_slot_write(entry.slot, script_value(*vp));
-		return true;
-	}
-	return false;
-}
-
+// lookup could fail here), the base from its slot or the frame's this-field, the kernel with no result
 op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins) {
 	const member_store_proto& p = f.code->member_store_protos[ins.a];
-	if (set_member_value_fast(f, p, static_cast<size_t>(&ins - f.code->code.data()))) return {};
+	// the field-store cache's scalar and var rows over the slot itself: no receiver or value copy before the write
+	std::vector<chunk::member_ic_entry>* store_rows = p.value.const_index == k_invalid_u32 ? member_ic_rows(*f.code) : nullptr;
+	if (store_rows && store_rows->size() >= f.code->code.size()) {
+		const auto* member = static_cast<const member_expr*>(f.code->nodes[p.node].get());
+		const script_value* base = (p.base & k_typed_env_bit) ? frame_this_field(f, p.base & k_typed_slot_mask)
+		                         : member->object && member->object->get_type() == node_type::member_expr ? nullptr : frame_slot(f, p.base);
+		if (base && base->raw_storage_index() == script_value::TYPEID_REFERENCE && !lane_deref_silent(*base)) { base = nullptr; }
+		const script_value* vp = base ? fast_operand(f, p.value, f.ip * 3) : nullptr;
+		if (vp && vp->raw_storage_index() != script_value::TYPEID_REFERENCE) {
+			const script_value& objd = base->deref();
+			if (objd.raw_storage_index() == script_value::TYPEID_OBJECT) {
+				const auto& holder = objd.unchecked_object_handle();
+				if (holder && holder->is_instance()) {
+					auto* inst = holder->unchecked_instance();
+					const auto& entry = (*store_rows)[static_cast<size_t>(&ins - f.code->code.data())];
+					class_definition* cd = inst->get_class_definition();
+					if (cd && entry.cd == cd && entry.epoch == cd->method_epoch() && entry.slot != UINT32_MAX) {
+						const size_t vi = vp->raw_storage_index();
+						if (entry.scalar_type && vi == entry.scalar_kind) {
+							if (script_value* current = inst->field_slot_value(entry.slot); current && current->raw_storage_index() == vi) {
+								if (vi == script_value::TYPEID_INT) { current->unchecked_set_int_payload(vp->unchecked_as_int()); }
+								else if (vi == script_value::TYPEID_FLOAT) { current->unchecked_set_float_payload(vp->unchecked_as_float()); }
+								else { current->unchecked_set_bool_payload(vp->unchecked_as_bool()); }
+								if (current->type_info_raw() != entry.scalar_type) { current->set_type_info(type_info_ptr{entry.scalar_type}); }
+								return {};
+							}
+						} else if (entry.scalar_kind == k_member_ic_var_field && !detail::field_slot_holds_object(inst, entry.slot) &&
+						           (vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT || vi == script_value::TYPEID_BOOL ||
+						            vi == script_value::TYPEID_CHAR || vi == script_value::TYPEID_STRING)) {
+							inst->field_slot_write(entry.slot, script_value(*vp));
+							return {};
+						}
+					}
+				}
+			}
+		}
+	}
 	script_value value = make_null();
 	if (p.value.const_index != k_invalid_u32) {
 		push_constant(*f.code, p.value.const_index);   // a literal takes the engine as CONST gives it (the chunk's template carries none)
@@ -16426,6 +16449,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 	if (is_unwinding_) { return {}; }
 	return store_member(f, static_cast<size_t>(&ins - f.code->code.data()), p.node, std::move(receiver), std::move(value), false);
 }
+
 
 // A vector buffer's element and component for a velem site: null when the container is not a vector buffer in a frame slot, the index
 // not an int in range or the member not a component of the buffer's kind (the general form then runs)
@@ -21713,7 +21737,7 @@ void vm_backend::dump_opcode_profile() const {
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
 #if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_member_temp_this) X(op_mfold) X(op_inline_guard) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -21966,7 +21990,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			case opcode::op_graft_depth: current_call_depth_ += ins.a ? 1 : -1; break;   // a raise unwinding out of the graft restores the depth at its handler or at the run's end
 			case opcode::op_index: VM_TRY_OP(exec_index(f, ins)); break;
 			case opcode::op_unary: VM_TRY_OP(exec_unary(f, ins)); break;
-			case opcode::op_inline_guard: JAI_OP_LABEL(op_inline_guard) VM_TRY_OP(exec_inline_guard(f, ins)); JAI_DISPATCH_HERE();   // the executor sets the ip: the next instruction, or the fallback
+			case opcode::op_inline_guard: VM_TRY_OP(exec_inline_guard(f, ins)); continue;   // the executor sets the ip: the next instruction, or the fallback
 			case opcode::op_probe_callee: JAI_OP_LABEL(op_probe_callee)
 				if (ins.b == 0 && code_base[f.ip + 1].op == opcode::op_call_from_scratch) {
 					if (frame* callee = enter_probed_call(f, ins)) { JAI_SWITCH_FRAME(callee); }
@@ -22055,17 +22079,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				VM_TRY_OP(exec_member_temp(f, ins));
 				assert(!switch_to_);
 				JAI_NEXT_OP();
-			case opcode::op_member_temp_this: JAI_OP_LABEL(op_member_temp_this)
-				VM_TRY_OP(exec_member_temp_this(f, ins));
-				assert(!switch_to_);
-				JAI_NEXT_OP();
-			case opcode::op_mfold: JAI_OP_LABEL(op_mfold) {
-				const chunk::member_fold& fd = f.code->member_folds[ins.a];
-				if (member_fold_fast(f, fd) != 0) { JAI_DISPATCH_HERE(); }
-				if (fd.first.op == opcode::op_member_temp) { VM_TRY_OP(exec_member_temp_at(f, fd.first, f.ip)); }
-				else { VM_TRY_OP(exec_member_temp_this_at(f, fd.first, f.ip)); }
-				JAI_NEXT_OP();
-			}
+			case opcode::op_member_temp_this: VM_TRY_OP(exec_member_temp_this(f, ins)); break;
+			case opcode::op_mfold:   // the executor sets the ip; a member temp's unwinding leaves it on the fold, as on the member temp
+				VM_TRY_OP(exec_mfold(f, ins));
+				if (is_unwinding_) [[unlikely]] { break; }
+				continue;
 			case opcode::op_get_member_path:
 				VM_TRY_OP(exec_get_member_path(f, ins));
 				assert(!switch_to_);

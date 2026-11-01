@@ -2789,6 +2789,11 @@ namespace jai::vm {
         op_status exec_index_fused(frame& f, const vm_instruction& ins);
         template <bool Lane> op_status exec_index_fused_decl(frame& f, const vm_instruction& ins);   // Lane: try the typed element read first
         op_status exec_index_store_fused(frame& f, const vm_instruction& ins);
+        op_status index_fused_push(frame& f, const vm_instruction& ins);
+        template <bool Lane> op_status index_fused_decl_rows(frame& f, const vm_instruction& ins);
+        op_status index_store_fused_rows(frame& f, const vm_instruction& ins);
+        op_status index_compound_operand_rows(frame& f, const vm_instruction& ins);
+        template <op_status (vm_backend::*Rows)(frame&, const vm_instruction&)> op_status index_releasing(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f, const vm_instruction& ins);
         op_status concat_step(const script_value& right, uint32_t hint, const void* site = nullptr);
@@ -2876,7 +2881,8 @@ namespace jai::vm {
         bool store_this_field_raw(frame& f, const vm_instruction& ins, size_t kind, script_int iv, script_float fv);
         op_status exec_math_kernel(size_t base, size_t argc, detail::math_fn fn);
         op_status fused_string_add(const script_value& l, const script_value& r, std::optional<script_value>& out);
-        op_status binary_fused_tail(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);
+        op_status binary_fused_tail(frame& f, const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);
+        op_status binary_fused_general_rows(const fused_binary_proto& p, token_type op, const script_value* lp, const script_value* rp, std::optional<script_value>& out);
         // Superinstruction: fused comparison + jump_if_false (always retargets f.ip on success)
         op_status exec_fused_cmp_jump(frame& f, const vm_instruction& ins);
         const script_value* fused_cmp_operand(frame& f, const fused_operand& operand, size_t cache_slot);

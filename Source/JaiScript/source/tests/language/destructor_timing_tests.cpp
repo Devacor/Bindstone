@@ -318,6 +318,38 @@ public:
             )", "bodypy|bodyqz||");
         });
 
+        // A converting constructor makes the slot's object once, and a temporary it converts is that constructor's parameter
+        // (C++17): a function's, a method's, a constructor's and new's parameter, a declaration, a return and an assignment
+        test("a_conversion_makes_one_object_from_its_source", [this]() {
+            const std::string l = R"(class L { string k = ""; L(Token t) { k = t.name; LOG = LOG + "L"; } ~L() { LOG = LOG + "~" + k; } } )";
+            expect_log(l + R"(
+                class M { void take(L l) { LOG = LOG + "m"; } }
+                class H { int k = 0; H(L l) { LOG = LOG + "h"; } }
+                function take(L l) -> void { LOG = LOG + "f"; }
+                function word(Token t) -> void { LOG = LOG + t.name; }
+                function f() -> void {
+                    take(Token("a")); LOG = LOG + "|";
+                    Token v = Token("v"); take(v); LOG = LOG + "|";
+                    word("w"); LOG = LOG + "|";
+                    M m; m.take(Token("b")); LOG = LOG + "|";
+                    H h = H(Token("c")); LOG = LOG + "|";
+                    shared_ptr<H> n = new H(Token("d")); LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "Laf~a|Lvf~v|ww|Lbm~b|Lch~c|Ldh~d|v");
+            expect_log(l + R"(
+                function ret_temp() -> L { return Token("r"); }
+                function ret_local() -> L { Token loc = Token("o"); return loc; }
+                function f() -> void {
+                    L a = Token("d"); LOG = LOG + "|";
+                    L b = ret_temp(); LOG = LOG + "|";
+                    L c = ret_local(); LOG = LOG + "|";
+                    a = Token("q"); LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "Ld|Lr|Lo|Lq~q|~o~r~q");
+        });
+
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
             expect_log(R"(
                 function f(Token p) -> void { Token l = Token("l"); LOG = LOG + "body"; }
@@ -397,13 +429,16 @@ public:
                     eng->execute(R"(
                         class T { string n = ""; T(string s) { n = s; } ~T() { note(n); } }
                         T G1 = T("1");
+                        namespace ns { T inner = T("n"); }
+                        class S { static T s = T("s"); }
                         T G2 = T("2");
+                        auto keep = [c = T("c")]() { return c.n; };
                         array<T> GA;
                         GA.push(T("a"));
                     )");
                     log.clear();
                 }
-                check_eq(std::string("a21"), log, "the last constructed dies first");
+                check_eq(std::string("ac2sn1"), log, "the last constructed dies first: namespace members, statics and captures alike");
             }
         });
 
@@ -462,6 +497,23 @@ public:
                 function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
                 f(); LOG;
             )", "|a|");
+        });
+
+        // C++ destroys the exception object as its handler exits; a rethrow carries it to the next handler
+        test("a_thrown_object_dies_as_its_handler_exits", [this]() {
+            expect_log(R"(
+                function f() -> void {
+                    try { throw Token("e"); } catch (e) { Token k = e.value; k.name = "k"; LOG = LOG + "h"; }
+                    LOG = LOG + "|";
+                    for (int i = 0; i < 2; i++) { try { throw Token(to_string(i)); } catch (e) { if (i == 0) { continue; } LOG = LOG + "h"; } }
+                    LOG = LOG + "|";
+                    try { try { throw Token("n"); } catch (e) { throw "new"; } } catch (e) { LOG = LOG + "c"; }
+                    LOG = LOG + "|";
+                    try { try { throw Token("r"); } catch (e) { LOG = LOG + "i"; throw; } } catch (e) { LOG = LOG + "o"; }
+                    LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "hke|0h1|nc|ior|");
         });
 
         test("a_coroutine_keeps_its_locals_across_yields", [this]() {
@@ -853,7 +905,7 @@ public:
                 int r = mk();
                 LOG = LOG + "|" + to_string(r) + "|" + to_string(s);
                 LOG
-            )", "cac|k|6|9");
+            )", "ac|k|6|9");
         });
 
         test("the_release_stack_keeps_destruction_order", [this]() {
@@ -1178,6 +1230,7 @@ public:
         test("a_temporary_dies_with_the_operation_that_consumes_it", [this]() {
             expect_log(R"(
                 class V { int x = 0; string tag = ""; V() {} V(int a, string t) { x = a; tag = t; } ~V() { LOG = LOG + tag; } V operator+(V o) { return V(x + o.x, tag + o.tag); } }
+                class W { string tag = ""; W(string t) { tag = t; } ~W() { LOG = LOG + tag; } W operator+(const W& o) { return W(tag + o.tag); } }
                 function mk(string n) -> shared_ptr<Token> { return new Token(n); }
                 function f() -> void {
                     bool z = mk("a") == null; LOG = LOG + "|";
@@ -1185,9 +1238,10 @@ public:
                     LOG = LOG + "|";
                     V a = V(1, "x"); V b = V(2, "y"); V c = V(3, "z");
                     V d = a + b + c; LOG = LOG + "|";
+                    W e = W("p") + W("q"); LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "a|L0.,L1.,|yzxy|xyzzyx");
+            )", "a|L0.,L1.,|yzxy|qp|pqxyzzyx");
         });
 
         test("a_member_read_in_a_loop_never_holds_the_previous_iteration_s_object", [this]() {

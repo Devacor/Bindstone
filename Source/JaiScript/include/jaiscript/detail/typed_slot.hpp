@@ -34,8 +34,10 @@ namespace jai::detail {
                                                                                            : script_value::make_utf8(std::move(text.value()), eng));
     }
 
+    // consumable: a prvalue source the caller gives up (it may alias value_in): a converting constructor takes it as its parameter
     inline checked_result<slot_conversion> convert_typed_slot_script_rows_impl(slot_conversion pending, const script_value& value_in,
-                                                                                const type_info_ptr& target_type, engine* eng) {
+                                                                                const type_info_ptr& target_type, engine* eng,
+                                                                                script_value* consumable = nullptr) {
         using verdict = slot_conversion::verdict;
         const script_value& v = value_in.is_reference() ? value_in.deref() : value_in;
         const auto target = target_type->base_type;
@@ -154,10 +156,21 @@ namespace jai::detail {
                     return slot_conversion::of(no);
                 }
                 std::vector<script_value> ctor_args;
-                ctor_args.push_back(value_in);
+                execution_backend* owner = consumable && !consumable->is_reference() ? eng->calling_backend() : nullptr;
+                if (owner) {
+                    ctor_args.push_back(std::move(*consumable));
+                } else {
+                    ctor_args.push_back(value_in);
+                }
+                struct owned_arguments_scope {
+                    execution_backend* backend;
+                    std::vector<script_value>* previous;
+                    ~owned_arguments_scope() { if (backend) { backend->exchange_owned_arguments(previous); } }
+                } owned{owner, owner ? owner->exchange_owned_arguments(&ctor_args) : nullptr};
                 auto result = ctor_result.value().as_function()(ctor_args);
                 if (!result) {
                     if (result.error() == make_error_code(runtime_error_code::no_constructor_found)) {
+                        if (owner) { *consumable = std::move(ctor_args[0]); }
                         return slot_conversion::of(no);
                     }
                     return result.error_value();
@@ -170,7 +183,8 @@ namespace jai::detail {
     }
 
     // The full table: the script-free core, then the script rows where the core asked.
-    inline checked_result<slot_conversion> convert_for_typed_slot(const script_value& value, const type_info_ptr& target_type, engine* eng) {
+    inline checked_result<slot_conversion> convert_for_typed_slot(const script_value& value, const type_info_ptr& target_type, engine* eng,
+                                                                  script_value* consumable = nullptr) {
         if (target_type && (target_type->base_type == script_value_type::jai_string_type || target_type->base_type == script_value_type::jai_utf8_string_type)) {
             const script_value& v = value.deref();
             if (!plain_text_value(v) && v.raw_storage_index() != script_value::TYPEID_OBJECT) {   // an object asks its class first
@@ -181,7 +195,7 @@ namespace jai::detail {
 		if (!result) { return result.error_value(); }
 		slot_conversion out = std::move(result.value());
         if (out.needs_script()) {
-            return convert_typed_slot_script_rows_impl(std::move(out), value, target_type, eng);
+            return convert_typed_slot_script_rows_impl(std::move(out), value, target_type, eng, consumable);
         }
         return out;
     }

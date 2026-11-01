@@ -126,6 +126,39 @@ std::optional<checked_result<void>> run_script_assign_operator(const script_valu
     return call_assign_operator(current, method, value, assign_id, eng);
 }
 
+std::optional<checked_result<void>> converting_copy_assign(const script_value& current_in, const script_value& value_in, engine* eng,
+                                                           const type_info* declared, script_value* consumable) {
+    const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
+    if (!eng || current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
+    const type_info* value_tag = value.type_info_raw();
+    if (value.is_null() || (value_tag && value_tag->base_type == script_value_type::jai_shared_ptr_type)) { return std::nullopt; }
+    class_instance* instance = held_instance(current);
+    const class_definition* def = instance ? instance->get_class_definition() : nullptr;
+    if (!def || !def->is_script_class() || def->find_cpp_base_class()) { return std::nullopt; }
+    const type_info_ptr tag = current.get_type_info();
+    const type_info* slot_type = names_class(declared) ? declared : tag.get();
+    if (!names_class(slot_type) || slot_type->dynamic_pointee) { return std::nullopt; }
+    const class_definition* slot_class = chain_class_named(def, slot_type->type_name);
+    if (!slot_class) { return std::nullopt; }
+    if (class_instance* source = held_instance(value)) {
+        const class_definition* source_def = source->get_class_definition();
+        if (!source_def || source_def == slot_class || source_def->derives_from(slot_class)) { return std::nullopt; }
+    }
+    const type_info_ptr target = slot_class->get_type_info();
+    auto core = convert_for_typed_slot_core(value, target, eng);
+    if (!core || core.value().v != slot_conversion::verdict::needs_ctor) { return std::nullopt; }
+    auto made = convert_typed_slot_script_rows_impl(std::move(core.value()), value, target, eng,
+                                                    consumable && !value_in.is_reference() ? consumable : nullptr);
+    if (!made) {
+        checked_result<void> failed = made.error_value();
+        return failed;
+    }
+    if (made.value().v != slot_conversion::verdict::converted) { return std::nullopt; }
+    script_value temporary = std::move(*made.value().value);
+    return class_copy_assign(current_in, temporary, eng, declared);
+}
+
 std::optional<checked_result<value_store>> slot_value_assign(const script_value& storage_in, const script_value& value_in, engine* eng, bool declared_var) {
     if (!eng) { return std::nullopt; }
     const script_value& storage = storage_in.is_reference() ? storage_in.deref() : storage_in;
@@ -264,6 +297,7 @@ void environment::define(uint64_t id, const script_value& value) {
     flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
     local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
+    if (engine_ && is_program_scope()) { engine_->note_program_scope_cell(this, local_storage_.size() - 1); }
 }
 
 void environment::define(uint64_t id, script_value&& value) {
@@ -286,6 +320,19 @@ void environment::define(uint64_t id, script_value&& value) {
     flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
     local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
+    if (engine_ && is_program_scope()) { engine_->note_program_scope_cell(this, local_storage_.size() - 1); }
+}
+
+bool environment::dies_at_teardown(const script_value& cell) {
+    const script_value& value = cell.deref();
+    switch (value.raw_storage_index()) {
+    case script_value::TYPEID_OBJECT: case script_value::TYPEID_ARRAY: case script_value::TYPEID_MAP: return true;
+    case script_value::TYPEID_FUNCTION: {
+        const auto* thunk = value.unchecked_as_function().target<script_callable_thunk>();
+        return thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && thunk->payload.fn->name == "<lambda>";
+    }
+    default: return false;
+    }
 }
 
 void environment::bump_env_epoch() noexcept {

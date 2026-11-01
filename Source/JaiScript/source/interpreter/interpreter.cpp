@@ -2464,7 +2464,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                         }
                         // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
                         if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
-                            if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
+                            if (auto assigned = detail::user_assign_operator(*storage, value, engine_, nullptr, nullptr, &value)) {
                                 if (!*assigned) { return assigned->error_value(); }
                                 push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
                                 return {};
@@ -2685,7 +2685,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
 
                     // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
                     if (target_type && target_type->base_type == script_value_type::jai_object_type) {
-                        if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
+                        if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_, nullptr, nullptr, &value)) {
                             if (!*assigned) { return assigned->error_value(); }
                             push_value(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
                             return {};
@@ -3755,7 +3755,8 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
             return std::move(value);
         }
     }
-    auto outcome = detail::convert_for_typed_slot(value, target_type, engine_);
+    // the value is this call's own: a temporary nothing else holds is a converting constructor's parameter
+    auto outcome = detail::convert_for_typed_slot(value, target_type, engine_, detail::uniquely_held(value) ? &value : nullptr);
     if (!outcome) {
         return outcome.error_value();
     }
@@ -5901,7 +5902,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                 }
                 continue;
             }
-            // An init-capture [x = e]: e evaluated here, in the enclosing scope, copied into the lambda's own x
+            // An init-capture [x = e]: e evaluated here, in the enclosing scope, into the lambda's own x (a temporary moves, as C++ initializes it)
             if (capture.initializer) {
                 JAISCRIPT_TRY(dispatch_expr(capture.initializer.get()));
                 script_value init = pop_value();
@@ -5909,7 +5910,7 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     push_value(make_value());
                     return {};
                 }
-                captureEnv->define(capture.symbol_id, clone_for_assignment(init.deref()));
+                captureEnv->define(capture.symbol_id, init.is_reference() ? clone_for_assignment(init.deref()) : detail::take_for_assignment(init));
                 continue;
             }
             // The capture source in the runtime's order (detail/capture_ladder.hpp): the
@@ -6696,7 +6697,7 @@ checked_result<void> interpreter::visit_yield_expr_t(yield_expr* expr, const rep
                     if (value.is_reference()) { value = value.deref(); }
                     if (!detail::return_conv_identity(conv, value)) {
                         auto converted = try_convert_for_parameter(value, fn->return_type,
-                            detail::slot_site{detail::slot_kind::yield_value, {}, fn->name});
+                            detail::slot_site{detail::slot_kind::yield_value, {}, fn->name}, detail::uniquely_held(value) ? &value : nullptr);
                         if (!converted) { return converted.error_value(); }
                         if (is_unwinding_) [[unlikely]] { return {}; }
                         value = std::move(converted.value());
@@ -7759,7 +7760,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
                 // A storage-matching primitive is the identity
                 if (!detail::return_conv_identity(conv, *out)) {
                     auto converted = try_convert_for_parameter(*out, fn->return_type,
-                        detail::slot_site{detail::slot_kind::return_value, {}, fn->name});
+                        detail::slot_site{detail::slot_kind::return_value, {}, fn->name}, detail::uniquely_held(*out) ? &*out : nullptr);
                     if (!converted) {
                         return converted.error_value();
                     }
@@ -7881,12 +7882,17 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // vm_backend::unwind_to_handler): frame slot, or a scope env popped on every exit
         // of the block. A catch resume skips the bind - the restored frame holds it.
         bool catch_env_pushed = false;
+        std::optional<caught_error_scope> caught_scope;   // the thrown value dies as the handler exits (KEEP BYTE-PARALLEL with the vm's try record)
+        if (stmt->catch_var_id != UINT64_MAX && resuming_catch && stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
+            if (const script_value* held = call_stack_.back().get_local(stmt->catch_slot_index)) { caught_scope.emplace(engine_, *held); }
+        }
         if (stmt->catch_var_id != UINT64_MAX && !resuming_catch) {
             const bool by_throw = current_exception_ && current_exception_->thrown;
             script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
                                                              by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
                                                              by_throw ? current_exception_->what() : nullptr);
             captured_trace_.clear();
+            caught_scope.emplace(engine_, caught);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
                 call_stack_.back().set_local(stmt->catch_slot_index, std::move(caught));
             } else {
@@ -7902,6 +7908,10 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         if (catch_env_pushed) {
             pop_scope();
         }
+        // The handler is done: its variable lets go of the error, so the scope's end decides the thrown value's death
+        if (caught_scope && !hasYieldRequest_ && stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
+            call_stack_.back().set_local(stmt->catch_slot_index, make_value());
+        }
         // Propagate errors from catch block
         if (!catch_result) {
             current_catch_var_id_ = saved_catch_var_id;
@@ -7911,6 +7921,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         // The catch suspended: park the caught value so the resume re-enters the catch
         // instead of re-running the try block
         if (hasYieldRequest_) [[unlikely]] {
+            if (caught_scope) { caught_scope->dismiss(); }
             if (active_coroutine_) {
                 coroutine_state(*active_coroutine_, engine_).push_replay(stmt, rp_catch, 0, {}, nullptr,
                     active_exception_value_ ? *active_exception_value_ : make_value());
@@ -9879,8 +9890,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                 }
                 argv = &held_args;
             }
+            // a prvalue argument a converting constructor takes is that constructor's parameter
             auto convert_result = try_convert_for_parameter(arg, param.type,
-                detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference});
+                detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference},
+                elide ? &const_cast<script_value&>(arg) : nullptr);
             if (!convert_result) {
                 cleanup();
                 return convert_result.error_value();
@@ -9920,6 +9933,11 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     continue;
                 }
                 if (elide && detail::same_heavy_node(shared_probe, arg)) { bind_elided(); continue; }
+                // a converting constructor's result is a temporary nothing else holds: it is the parameter
+                if (detail::converted_temporary(converted_arg, arg)) {
+                    call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(converted_arg)));
+                    continue;
+                }
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(converted_arg.clone()));
             }
         }
@@ -10075,7 +10093,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 // objects - the I-C1 lane and the exact-class lane replicate them).
 // KEEP BYTE-PARALLEL with vm_backend::try_convert_for_parameter.
 checked_result<script_value> interpreter::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
-                                                                    const detail::slot_site& site) {
+                                                                    const detail::slot_site& site, script_value* consumable) {
     if (!target_type) {
         return arg;  // No type specified = any type accepted
     }
@@ -10094,7 +10112,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
         default: break;
     }
 
-    auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_);
+    auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_, consumable);
     if (!outcome) {
         return outcome.error_value();
     }

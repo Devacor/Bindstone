@@ -470,6 +470,11 @@ namespace jai {
         // call-site context of whatever script call is in flight - reference params
         // would bind its variables. A one-pointer shelf replaces the old metadata stack.
         void begin_host_call() override;
+        std::vector<script_value>* exchange_owned_arguments(std::vector<script_value>* args) override {
+            auto* previous = const_cast<std::vector<script_value>*>(owned_args_);
+            owned_args_ = args;
+            return previous;
+        }
         void push_external_call_scope() override {
             // A host-level callback (no script in flight) is its own budgeted entry
             if (execute_depth_ == 0 && call_stack_.empty()) { arm_execution_deadline(); }
@@ -1160,7 +1165,8 @@ namespace jai {
         // Returns the converted value on success, or the original value if no conversion is needed/possible.
         // Returns checked_result with error if conversion fails.
         [[nodiscard]] checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
-                                                                            const detail::slot_site& site = detail::slot_site{});
+                                                                            const detail::slot_site& site = detail::slot_site{},
+                                                                            script_value* consumable = nullptr);
 
         // Static method registries for built-in types
         // Built-in method registries (using interned IDs for O(1) lookup)

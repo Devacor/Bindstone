@@ -1255,7 +1255,8 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			const script_value& shared_probe = converted_arg.deref();
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
 			if (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
-			script_value bound = should_share ? script_value(shared_probe) : converted_arg.clone();
+			script_value bound = should_share ? script_value(shared_probe)
+			                   : detail::converted_temporary(converted_arg, args[i]) ? std::move(converted_arg) : converted_arg.clone();
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
@@ -2608,7 +2609,8 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 			return std::move(value);
 		}
 	}
-	auto outcome = detail::convert_for_typed_slot(value, target_type, engine_);
+	// the value is this call's own: a temporary nothing else holds is a converting constructor's parameter
+	auto outcome = detail::convert_for_typed_slot(value, target_type, engine_, detail::uniquely_held(value) ? &value : nullptr);
 	if (!outcome) {
 		return outcome.error_value();
 	}
@@ -2676,7 +2678,7 @@ op_status vm_backend::compound_typed_store_back_named(script_value& target, scri
 // objects - the V-C1 lane and the exact-class lane replicate them).
 // KEEP BYTE-PARALLEL with interpreter::try_convert_for_parameter.
 checked_result<script_value> vm_backend::try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
-                                                                   const detail::slot_site& site) {
+                                                                   const detail::slot_site& site, script_value* consumable) {
 	if (!target_type) {
 		return arg;
 	}
@@ -2696,7 +2698,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 		default: break;
 	}
 
-	auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_);
+	auto outcome = detail::convert_for_typed_slot(arg, target_type, engine_, consumable);
 	if (!outcome) {
 		return outcome.error_value();
 	}
@@ -3133,7 +3135,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			}
 			// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
 			if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
-				if (auto assigned = detail::user_assign_operator(*storage, value, engine_)) {
+				if (auto assigned = detail::user_assign_operator(*storage, value, engine_, nullptr, nullptr, &value)) {
 					if (!*assigned) { return raise_from(*assigned); }
 					stack_.push_back(result_used() ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source at the pop
 					return {};
@@ -3388,7 +3390,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 
 		// A user operator= writes the held instance (KEEP BYTE-PARALLEL with interpreter::visit_assignment_expr)
 		if (target_type && target_type->base_type == script_value_type::jai_object_type && currentVal) {
-			if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_)) {
+			if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_, nullptr, nullptr, &value)) {
 				if (!*assigned) { return raise_from(*assigned); }
 				stack_.push_back(result_used() ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source at the pop
 				return {};
@@ -4406,9 +4408,10 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 		stack_.pop_back();
 		return {};
 	}
+	// left declared first: the operands die right then left, the reverse of their making (KEEP BYTE-PARALLEL with the interpreter)
+	script_value left_raw = std::move(stack_[stack_.size() - 2]);
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
-	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
 	const script_value& left = left_raw.deref();
 	const script_value& right = right_raw.deref();
@@ -11700,7 +11703,7 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 			return define_decl_value(f, decl, derefed.clone());
 		}
 	}
-	auto converted_result = try_convert_for_parameter(arg, t, decl_site(decl));
+	auto converted_result = try_convert_for_parameter(arg, t, decl_site(decl), elide ? &arg : nullptr);
 	if (!converted_result) {
 		return raise_from(converted_result);
 	}
@@ -11721,6 +11724,7 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 			JAI_CENSUS_F(move_hit, 10);
 			return define_decl_value(f, decl, std::move(arg));
 		}
+		if (detail::converted_temporary(converted, arg)) { return define_decl_value(f, decl, std::move(converted)); }
 	}
 	return define_decl_value(f, decl, converted.clone());
 }
@@ -14528,7 +14532,8 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 
 		for (const auto& capture : proto.captures) {
 			if (capture.init) {
-				captureEnv->define(capture.symbol_id, clone_for_assignment(stack_[init_next++].deref()));   // KEEP BYTE-PARALLEL with the interpreter
+				script_value& init = stack_[init_next++];   // a temporary is the lambda's own member, anything else its copy (KEEP BYTE-PARALLEL with the interpreter)
+				captureEnv->define(capture.symbol_id, init.is_reference() ? clone_for_assignment(init.deref()) : detail::take_for_assignment(init));
 				continue;
 			}
 			script_value* slot_val = nullptr;
@@ -19682,10 +19687,11 @@ op_status vm_backend::exec_try_pop(frame&, const vm_instruction&) {
 	return {};
 }
 
-op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
+op_status vm_backend::exec_catch_end(frame& f, const vm_instruction&) {
 	assert(!try_records_.empty());
 	try_record rec = std::move(try_records_.back());
 	try_records_.pop_back();
+	release_catch_variable(f, rec);
 	if (rec.catch_env_pushed) {
 		pop_scopes_pooled(1);
 	}
@@ -19708,6 +19714,11 @@ op_status vm_backend::exec_catch_end(frame&, const vm_instruction&) {
 	return {};
 }
 
+// The handler is done: its variable lets go of the error (its scope ended), so the record's end decides the thrown value's death
+void vm_backend::release_catch_variable(frame& f, const try_record& rec) {
+	if (rec.caught_scope && rec.catch_slot != k_invalid_u32 && has_slots(f)) { frame_slot_set(f, rec.catch_slot, make_null()); }
+}
+
 bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 	// Terminal errors (budget overrun, escalated memory cap) can NEVER be caught from
 	// script: pop this frame's records and keep unwinding to the host boundary
@@ -19725,6 +19736,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			return false;
 		}
 		if (rec.in_catch) {
+			release_catch_variable(f, rec);
 			// Error/throw escaping a catch block: restore the catch var and keep unwinding.
 			// A rethrow-preserved outer exception is restored only on the flag path.
 			if (!failure && is_unwinding_ && rec.saved_unwinding) {
@@ -19789,6 +19801,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			                                                 by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
 			                                                 by_throw ? current_exception_->what() : nullptr);
 			captured_trace_.clear();
+			try_records_[handler_index].caught_scope = std::make_shared<caught_error_scope>(engine_, caught);
 			if (handler.catch_slot != k_invalid_u32 && has_slots(f)) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {
@@ -24204,9 +24217,9 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 // would have produced one op earlier (same statement, same trace line).
 template <bool Entry>
 op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
+	script_value left_raw = std::move(stack_[stack_.size() - 2]);   // the operands die right then left, as exec_binary's
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
-	script_value left_raw = std::move(stack_.back());
 	stack_.pop_back();
 	const token_type op = static_cast<token_type>(ins.a);
 	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left_raw, right_raw, op)) {
@@ -24356,7 +24369,7 @@ checked_result<script_value> vm_backend::convert_return_at_site(script_value res
 		return result;
 	}
 	auto converted = try_convert_for_parameter(result, return_type,
-		detail::slot_site{detail::slot_kind::return_value, {}, callee});
+		detail::slot_site{detail::slot_kind::return_value, {}, callee}, detail::uniquely_held(result) ? &result : nullptr);
 	if (!converted) {
 		return converted.error_value();
 	}
@@ -24405,7 +24418,7 @@ op_status vm_backend::exec_yield_convert(frame& f) {
 		return {};
 	}
 	auto converted = try_convert_for_parameter(value, f.return_type,
-		detail::slot_site{detail::slot_kind::yield_value, {}, f.code->function_name});
+		detail::slot_site{detail::slot_kind::yield_value, {}, f.code->function_name}, detail::uniquely_held(value) ? &value : nullptr);
 	if (!converted) {
 		stack_.back() = std::move(value);
 		return raise_from(converted);
@@ -24457,7 +24470,7 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 	    return_type->type_name != "void" &&
 	    return_type->type_name != "auto") {
 		auto conv = try_convert_for_parameter(result, return_type,
-			detail::slot_site{detail::slot_kind::return_value, {}, callee});
+			detail::slot_site{detail::slot_kind::return_value, {}, callee}, detail::uniquely_held(result) ? &result : nullptr);
 		if (!conv) {
 			return conv.error_value();
 		}
@@ -25008,8 +25021,11 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					}
 					VM_TRY(bind_later_places(parameters, nullptr, args_base, i + 1, argc, site, caller_frame, caller_code, caller_env, caller_unit));
 				}
+				// a prvalue argument a converting constructor takes is that constructor's parameter: the shield takes the only hold
+				if (elide) { arg_shield = owned ? std::move((*owned)[args_base + i]) : std::move(stack_[args_base + i]); }
 				auto converted_result = try_convert_for_parameter(arg_shield, param.type,
-					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference});
+					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference},
+					elide ? &arg_shield : nullptr);
 				if (!converted_result) {
 					return raise_from(converted_result);
 				}
@@ -25038,7 +25054,16 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 					frame_slot_set(callee, param.slot_index, script_value(shared_probe));
 					continue;
 				}
-				if (elide && detail::same_heavy_node(shared_probe, arg_shield)) { bind_elided(); continue; }
+				if (elide && detail::same_heavy_node(shared_probe, arg_shield)) {
+					if (arg_shield.is_null()) { bind_elided(); continue; }
+					frame_slot_set(callee, param.slot_index, boxed_param(std::move(arg_shield)));
+					continue;
+				}
+				// a converting constructor's result is a temporary nothing else holds: it is the parameter
+				if (detail::converted_temporary(converted_arg, arg_shield)) {
+					frame_slot_set(callee, param.slot_index, boxed_param(std::move(converted_arg)));
+					continue;
+				}
 #ifdef JAISCRIPT_VM_COVERAGE
 				if (heavy) {
 					census::hit_named(census::site::param_clone, body_chunk.function_name.data(), body_chunk.function_name.size(),

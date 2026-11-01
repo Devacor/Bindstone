@@ -415,7 +415,10 @@ inline type_info_ptr class_definition::field_declared_type_walk(uint64_t id) con
 }
 
 inline void class_definition::add_static_field(uint64_t id, const script_value& initial_value) {
-    if (static_fields_.insert(id).second) { bump_method_epoch(); }   // a new static can shadow a global for bare names in the chain
+    if (static_fields_.insert(id).second) {
+        bump_method_epoch();   // a new static can shadow a global for bare names in the chain
+        if (engine_) { engine_->note_static_field(this, id); }
+    }
     static_field_values_.insert_or_assign(id, initial_value);
 }
 
@@ -2163,6 +2166,11 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
 // Declared here so the field kernel below can reach it from class_definition.hpp; the body
 // lives in typed_slot.hpp (defined out of line in environment.cpp).
 checked_result<slot_conversion> convert_typed_slot_script_rows(slot_conversion pending, const script_value& value, const type_info_ptr& target_type, engine* eng);
+// A class slot assigned a value its class converts from (a converting constructor): the converted temporary copy-assigns into the
+// slot's object, then dies, as C++ assigns T into an L. consumable: the store's own temporary, the constructor's parameter.
+// nullopt when no converting constructor applies (environment.cpp)
+std::optional<checked_result<void>> converting_copy_assign(const script_value& current, const script_value& value, engine* eng,
+                                                           const type_info* declared, script_value* consumable);
 
 // The pointee class a shared_ptr<T> slot judges a source by: a typed handle's static pointee (a
 // C++ shared_ptr<U> converts to shared_ptr<T> only upward; a downcast needs cast<shared_ptr<T>>), else - a var-held handle, a plain
@@ -2653,7 +2661,8 @@ inline checked_result<void> enforce_member_access(const class_definition* cls, u
 // A parallel region never dispatches a user operator or re-classes (the operator-dispatch verdict). KEEP the one kernel for
 // every plain-store site of both backends.
 inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
-                                                                const type_info* declared = nullptr, const type_info* bound = nullptr);
+                                                                const type_info* declared = nullptr, const type_info* bound = nullptr,
+                                                                script_value* consumable = nullptr);
 
 // '=' of a value into a slot whose held object decides the store (docs/site/guide/03-value-semantics.html "A var holding a
 // handle", "A var holding an object"). A slot holding a handle (shared_ptr<T> or a var holding one) and a value that is no
@@ -2840,9 +2849,12 @@ inline std::optional<checked_result<void>> script_assign_operator(const script_v
 }
 
 inline std::optional<checked_result<void>> user_assign_operator(const script_value& current_in, const script_value& value_in, engine* eng,
-                                                                const type_info* declared, const type_info* bound) {
+                                                                const type_info* declared, const type_info* bound, script_value* consumable) {
     if (auto assigned = script_assign_operator(current_in, value_in, eng)) { return assigned; }
     if (auto copied = class_copy_assign(current_in, value_in, eng, declared, bound)) { return copied; }
+    if (consumable || names_class(declared)) {
+        if (auto converted = converting_copy_assign(current_in, value_in, eng, declared, consumable)) { return converted; }
+    }
     if (!eng) { return std::nullopt; }
     const script_value& current = current_in.is_reference() ? current_in.deref() : current_in;
     if (current.raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }

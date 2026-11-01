@@ -115,6 +115,12 @@ public:
                 function f() -> void { try { g(); } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
             )", "ba!");
+            // a handler's locals die ahead of the thrown object it holds, whether the handler returns or breaks
+            expect_log(R"(
+                function r() -> int { try { throw Token("t"); } catch (e) { Token l = Token("l"); return 1; } return 0; }
+                function f() -> void { r(); for (int i = 0; i < 2; i++) { try { throw Token("u"); } catch (e) { Token m = Token("m"); break; } } }
+                f(); LOG;
+            )", "ltmu");
         });
 
         test("a_base_constructor_that_throws_leaves_no_destructor_to_run", [this]() {

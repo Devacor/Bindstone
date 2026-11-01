@@ -22397,7 +22397,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 
 			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
-				for (uint32_t n = 0; n <= ins.b; ++n) { kill_frame_slot(f, ins.a - n); }
+				if (ins.b) [[unlikely]] { kill_frame_slots(f, ins.a, ins.b); break; }
+				if (script_value* slot = frame_slot(f, ins.a)) {
+					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
+					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
+				}
 				break;
 
 			case opcode::op_error: {
@@ -24038,6 +24042,10 @@ JAI_NOINLINE void vm_backend::gather_native_frame_cells(const frame& f, call_fra
 	locals.boxed_cells = false;
 	const size_t end = std::min(stack_.size(), static_cast<size_t>(f.window_base) + f.window_live);
 	if (end > f.window_base) { script_value::gather_shared_cells(&stack_[f.window_base], end - f.window_base, cells); }
+}
+
+JAI_NOINLINE void vm_backend::kill_frame_slots(frame& f, uint32_t top, uint32_t below) {
+	for (uint32_t n = 0; n <= below; ++n) { kill_frame_slot(f, top - n); }
 }
 
 // a dying value may run script: the slots are read before the first release

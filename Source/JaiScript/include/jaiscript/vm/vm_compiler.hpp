@@ -138,7 +138,7 @@ namespace jai::vm {
         void note_kill_slot(uint32_t slot);
         void note_kill_decl(const statement* decl);
         void close_kill_scope();
-        void emit_kills_to(size_t depth);
+        void emit_kills_to(size_t depth, size_t from = SIZE_MAX);
         void push_region(region_kind kind);
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
@@ -404,9 +404,9 @@ namespace jai::vm {
         void compile_case_body(const std::vector<statement_ptr>& body);
         void compile_break();
         void compile_continue();
-        // Emits op_try_pop/op_catch_end/switch stack pops for every region between the
-        // current point and target_region (SIZE_MAX = all regions, for return)
-        void emit_region_exits(size_t target_region);
+        // Emits op_try_pop/op_catch_end/switch stack pops for every region between the current point and target_region (SIZE_MAX = all
+        // regions, for return), then kills the scopes down to kill_depth; a handler's own locals die ahead of the thrown object it holds
+        void emit_region_exits(size_t target_region, size_t kill_depth = SIZE_MAX);
         void collect_declared_symbols(const statement_ptr& stmt, std::unordered_set<uint64_t>& out) const;
         void collect_outer_slot_candidates(const statement_ptr& stmt,
                                            const std::unordered_set<uint64_t>& declared,

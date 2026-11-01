@@ -1642,9 +1642,9 @@ void vm_compiler::close_kill_scope() {
 	kill_scopes_.pop_back();
 }
 
-void vm_compiler::emit_kills_to(size_t depth) {
+void vm_compiler::emit_kills_to(size_t depth, size_t from) {
 	std::vector<uint32_t> slots;
-	for (size_t scope = kill_scopes_.size(); scope-- > depth;) { slots.insert(slots.end(), kill_scopes_[scope].rbegin(), kill_scopes_[scope].rend()); }
+	for (size_t scope = std::min(from, kill_scopes_.size()); scope-- > depth;) { slots.insert(slots.end(), kill_scopes_[scope].rbegin(), kill_scopes_[scope].rend()); }
 	kill_slots(slots);
 }
 
@@ -2000,7 +2000,8 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	return true;
 }
 
-void vm_compiler::emit_region_exits(size_t target_region) {
+void vm_compiler::emit_region_exits(size_t target_region, size_t kill_depth) {
+	size_t killed = kill_scopes_.size();
 	for (size_t idx = loops_.size(); idx-- > 0;) {
 		if (target_region != SIZE_MAX && idx <= target_region) break;
 		switch (loops_[idx].kind) {
@@ -2008,6 +2009,8 @@ void vm_compiler::emit_region_exits(size_t target_region) {
 			emit(opcode::op_try_pop);
 			break;
 		case region_kind::catch_block:
+			emit_kills_to(loops_[idx].kill_depth, killed);
+			killed = std::min(killed, loops_[idx].kill_depth);
 			emit(opcode::op_catch_end);
 			break;
 		case region_kind::switch_ctx:
@@ -2023,6 +2026,7 @@ void vm_compiler::emit_region_exits(size_t target_region) {
 			break;
 		}
 	}
+	if (kill_depth != SIZE_MAX) { emit_kills_to(kill_depth, killed); }
 }
 
 void vm_compiler::compile_break() {
@@ -2038,9 +2042,8 @@ void vm_compiler::compile_break() {
 		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::break_outside_loop), k_invalid_u32, k_invalid_u32);
 		return;
 	}
-	emit_region_exits(target);
+	emit_region_exits(target, loops_[target].kill_depth);
 	auto& region = loops_[target];
-	emit_kills_to(region.kill_depth);
 	if (scope_depth_ > region.scope_depth) {
 		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
 	}
@@ -2064,9 +2067,8 @@ void vm_compiler::compile_continue() {
 		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::continue_outside_loop), k_invalid_u32, k_invalid_u32);
 		return;
 	}
-	emit_region_exits(target);
+	emit_region_exits(target, loops_[target].kill_depth);
 	auto& region = loops_[target];
-	emit_kills_to(region.kill_depth);
 	if (scope_depth_ > region.scope_depth) {
 		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
 	}

@@ -1830,8 +1830,7 @@ void vm_compiler::compile_graft_exit() {
 	size_t target = SIZE_MAX;
 	for (size_t idx = loops_.size(); idx-- > 0;) { if (loops_[idx].kind == region_kind::graft) { target = idx; break; } }
 	if (target == SIZE_MAX) return;
-	emit_region_exits(target);
-	emit_kills_to(loops_[target].kill_depth);
+	emit_region_exits(target, loops_[target].kill_depth);
 	auto& region = loops_[target];
 	if (scope_depth_ > region.scope_depth) { emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth)); }
 	region.break_patches.push_back(emit(opcode::op_jump, k_invalid_u32));

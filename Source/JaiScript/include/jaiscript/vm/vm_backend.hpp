@@ -308,6 +308,7 @@ namespace jai::vm {
         checked_result<script_value> execute_method_from(const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
                                                          const script_value& this_obj, const std::vector<script_value>& args, size_t first) override;
         struct unwind_park;
+        struct switch_park;
         prepared_callback* prepare_callback(const script_value& callable) override;
         void release_callback(prepared_callback* prepared) override;
 
@@ -1362,7 +1363,7 @@ namespace jai::vm {
         // std::vector<script_value> passed as (vec, 0, vec.size()).
         bool args_are_stack(const value_stack& a) const noexcept { return &a == &stack_; }
         static constexpr bool args_are_stack(const std::vector<script_value>&) noexcept { return false; }
-        // A constructor's argument list the construction owns (enter_constructor_in_loop): its prvalues bind as the stack's do
+        // An argument list a call owns (arg_vector_return, enter_constructor_in_loop's captured list): its prvalues bind as the stack's do
         std::vector<script_value>* owned_args_ = nullptr;
         std::vector<script_value>* owned_args(const value_stack&) const noexcept { return nullptr; }
         std::vector<script_value>* owned_args(const std::vector<script_value>& a) const noexcept { return &a == owned_args_ ? owned_args_ : nullptr; }
@@ -1637,10 +1638,20 @@ namespace jai::vm {
         std::vector<std::vector<script_value>> arg_vector_pool_;
         std::vector<script_value> acquire_arg_vector(size_t reserve);
         void release_arg_vector(std::vector<script_value> vec);
-        // RAII: returns the vector to the pool on every exit path
+        // An argument list the call owns while the scope lives (null: the owner stays as it was)
+        struct owned_args_scope {
+            vm_backend* vm;
+            std::vector<script_value>* saved;
+            owned_args_scope(vm_backend* a_vm, std::vector<script_value>* a_args) : vm(a_vm), saved(a_vm->owned_args_) { if (a_args) { a_vm->owned_args_ = a_args; } }
+            ~owned_args_scope() { vm->owned_args_ = saved; }
+        };
+        // The arguments a call moved off the stack, owned for the call (a prvalue among them is its parameter, as on the stack), back
+        // to the pool on every exit path
         struct arg_vector_return {
             vm_backend* vm;
             std::vector<script_value>* vec;
+            owned_args_scope owned;
+            arg_vector_return(vm_backend* a_vm, std::vector<script_value>* a_vec) : vm(a_vm), vec(a_vec), owned(a_vm, a_vec) {}
             ~arg_vector_return() { vm->release_arg_vector(std::move(*vec)); }
         };
 

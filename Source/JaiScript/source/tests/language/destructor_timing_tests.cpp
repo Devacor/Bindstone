@@ -232,6 +232,92 @@ public:
             )", "bodyyx");
         });
 
+        test("a_prvalue_argument_is_the_constructor_s_parameter", [this]() {
+            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
+            expect_log(h + R"(function f() -> void { H x = H(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
+            expect_log(h + R"({ H x = H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|");
+            expect_log(h + R"(H G = H(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
+            expect_log(R"(
+                class H2 { int k = 0; H2(Token a, Token b) { LOG = LOG + "body"; } }
+                function f() -> void { H2 x = H2(Token("a"), Token("b")); LOG = LOG + "|"; } f(); LOG;
+            )", "bodyba|");
+        });
+
+        test("a_prvalue_argument_is_new_s_constructor_parameter", [this]() {
+            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
+            expect_log(h + R"({ shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|");
+            expect_log(h + R"(function f() -> void { shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } f(); LOG = LOG + "!"; LOG;)", "bodyp|!");
+            expect_log(h + R"(function f() -> shared_ptr<H> { return new H(Token("p")); } shared_ptr<H> x = f(); LOG = LOG + "|"; LOG;)", "bodyp|");
+            expect_log(h + R"(
+                function f() -> void { for (int i = 0; i < 3; i++) { shared_ptr<H> x = new H(Token(to_string(i))); LOG = LOG + "."; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "body0.body1.body2.|");
+            expect_log(R"(
+                class H2 { int k = 0; H2(Token a, Token b) { LOG = LOG + "body"; } }
+                function f() -> void { shared_ptr<H2> x = new H2(Token("a"), Token("b")); LOG = LOG + "|"; } f(); LOG;
+            )", "bodyba|");
+        });
+
+        test("a_prvalue_argument_is_a_method_s_parameter_whatever_the_receiver", [this]() {
+            const std::string m = R"(class M { void take(Token p) { LOG = LOG + "body"; } } )";
+            expect_log(m + R"(M G; G.take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
+            expect_log(m + R"(function f() -> void { M m; m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
+            expect_log(m + R"(function f() -> void { shared_ptr<M> m = new M(); m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
+            expect_log(m + R"(function f() -> void { M().take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
+            expect_log(R"(class S { static void take(Token p) { LOG = LOG + "body"; } } S::take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
+            expect_log(R"(auto lf = [](Token p) { LOG = LOG + "body"; }; lf(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
+        });
+
+        test("a_prvalue_constructor_argument_nested_in_another_call", [this]() {
+            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
+            expect_log(h + R"(
+                function g(H x) -> void { LOG = LOG + "g"; }
+                function f() -> void { g(H(Token("p"))); LOG = LOG + "|"; } f(); LOG;
+            )", "bodypg|");
+            expect_log(h + R"(
+                function g(shared_ptr<H> x, Token q) -> void { LOG = LOG + "g"; }
+                function f() -> void { g(new H(Token("p")), Token("q")); LOG = LOG + "|"; } f(); LOG;
+            )", "bodypgq|");
+            expect_log(h + R"(
+                class O { int k = 0; O(H a) { LOG = LOG + "o"; } }
+                function f() -> void { O o = O(H(Token("p"))); LOG = LOG + "|"; shared_ptr<O> n = new O(H(Token("q"))); LOG = LOG + "|"; } f(); LOG;
+            )", "bodypo|bodyqo|");
+        });
+
+        test("a_prvalue_argument_beside_a_reference_parameter_is_its_parameter", [this]() {
+            const std::string r = R"(class R { int k = 0; R(Token& r, Token p) { LOG = LOG + "body"; } } )";
+            expect_log(r + R"(function f() -> void { Token t = Token("t"); R x = R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t");
+            expect_log(r + R"(function f() -> void { Token t = Token("t"); shared_ptr<R> x = new R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t");
+            expect_log(r + R"(function f() -> void { Token t = Token("t"); Token u = Token("u"); R x = R(t, u); LOG = LOG + "|"; } f(); LOG;)", "bodyu|ut");
+        });
+
+        test("a_prvalue_initializer_list_argument_is_the_base_s_parameter", [this]() {
+            expect_log(R"(
+                class B { int b = 0; B(Token p) { LOG = LOG + "base"; } }
+                class D : B { int d = 0; D(Token q) : super(Token("p")) { LOG = LOG + "body"; } }
+                function f() -> void { D x = D(Token("q")); LOG = LOG + "|"; shared_ptr<D> y = new D(Token("r")); LOG = LOG + "|"; } f(); LOG;
+            )", "basepbodyq|basepbodyr|");
+            expect_log(R"(
+                class G { int k = 0; G(Token p) { LOG = LOG + "target"; } G(int n) : this(Token("p")) { LOG = LOG + "body"; } }
+                function f() -> void { G x = G(1); LOG = LOG + "|"; shared_ptr<G> y = new G(2); LOG = LOG + "|"; } f(); LOG;
+            )", "targetpbody|targetpbody|");
+        });
+
+        test("a_constructor_that_throws_destroys_its_prvalue_parameter_once", [this]() {
+            const std::string t = R"(class T { int k = 0; T(Token p) { LOG = LOG + "body"; throw 1; } } )";
+            expect_log(t + R"(function f() -> void { try { shared_ptr<T> x = new T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|");
+            expect_log(t + R"(function f() -> void { try { T x = T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|");
+        });
+
+        test("a_coroutine_constructs_with_prvalue_arguments", [this]() {
+            expect_log(R"(
+                class H { int k = 0; H(Token p) { LOG = LOG + "body"; } }
+                coroutine gen() -> int { shared_ptr<H> h = new H(Token("p")); LOG = LOG + "y"; yield 1; H k = H(Token("q")); LOG = LOG + "z"; yield 2; }
+                function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "bodypy|bodyqz||");
+        });
+
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
             expect_log(R"(
                 function f(Token p) -> void { Token l = Token("l"); LOG = LOG + "body"; }

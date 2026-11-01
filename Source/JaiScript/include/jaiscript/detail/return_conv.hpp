@@ -94,16 +94,20 @@ namespace jai::detail {
     inline constexpr uint8_t return_operand_temporary = 1;
     inline constexpr uint8_t return_operand_ident = 2;
     inline constexpr uint8_t return_operand_lvalue = 3;
-    inline constexpr uint8_t return_operand_temporary_member = 4;
+    inline constexpr uint8_t return_operand_temporary_member = 4;   // a member chain over a call that may yield a handle
+    inline constexpr uint8_t return_operand_value_member = 5;       // a member chain over a call that yields a class by value: an xvalue
+    inline constexpr uint8_t return_operand_parameter = 6;          // the callee's own by-value parameter
 
-    inline bool member_of_call_result(const expression* e) noexcept {
+    // the call a member chain reads through (null: the chain starts elsewhere)
+    inline const call_expr* member_chain_call(const expression* e) noexcept {
         while (e && e->get_type() == node_type::member_expr) {
             const auto* m = static_cast<const member_expr*>(e);
-            if (m->is_static) return false;
+            if (m->is_static) return nullptr;
             e = m->object.get();
         }
-        return e && e->get_type() == node_type::call_expr;
+        return e && e->get_type() == node_type::call_expr ? static_cast<const call_expr*>(e) : nullptr;
     }
+    inline bool member_of_call_result(const expression* e) noexcept { return member_chain_call(e) != nullptr; }
 
     inline uint8_t classify_return_operand(const expression* e) noexcept {
         if (!e) return return_operand_temporary;
@@ -153,14 +157,33 @@ namespace jai::detail {
         if (lvalue_read || v.is_reference() || borrows_host_object(v)) { v = clone_for_assignment(v); }
     }
 
-    // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves
-    // out: the body resumes and still owns its locals, so a named local copies like any lvalue
-    // A by-value return of this operand class copies the value it read
-    inline bool return_operand_copies(uint8_t operand_class, const script_value& v) noexcept {
-        if (operand_class == return_operand_temporary_member) { return !uniquely_held(v); }
-        return operand_class != return_operand_temporary;
+    // The operand class with C++'s category of a member chain over a call: an xvalue when the call yields a class by value
+    // (value_call(call), the backend's engine-aware test), else the chain may read through a handle
+    template <class ValueCall>
+    inline uint8_t classify_source(const expression* e, ValueCall&& value_call) {
+        const uint8_t operand_class = classify_return_operand(e);
+        if (operand_class != return_operand_temporary_member) { return operand_class; }
+        const call_expr* call = member_chain_call(e);
+        return call && value_call(*call) ? return_operand_value_member : operand_class;
     }
 
+    // A value taken in place of its copy (a by-value return, argument or capture) is the copy C++ would make or skip: a
+    // prvalue is its destination, and when the copy can be observed (a destructor or a user copy constructor in its tree)
+    // nothing but a prvalue, or an xvalue whose copy runs no user copy constructor, stands for it
+    inline bool source_skips_copy(uint8_t operand_class, const script_value& v) {
+        if (operand_class == return_operand_temporary) { return true; }
+        if (!uniquely_held(v)) { return false; }
+        if (operand_class == return_operand_value_member) { return !value_runs_copy_constructor(v); }
+        return operand_class == return_operand_temporary_member && !value_copies_observably(v);
+    }
+
+    // A by-value return of this operand class copies the value it read
+    inline bool return_operand_copies(uint8_t operand_class, const script_value& v) {
+        return !source_skips_copy(operand_class, v);
+    }
+
+    // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves
+    // out: the body resumes and still owns its locals, so a named local copies like any lvalue
     inline bool yield_operand_is_lvalue(const expression* e) noexcept {
         return classify_return_operand(e) != return_operand_temporary;
     }

@@ -1219,6 +1219,8 @@ namespace jai::vm {
         };
         std::vector<try_record> try_records_;
         void release_catch_variable(frame& f, const try_record& rec);
+        // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)
+        uint8_t source_class(const expression* e);
 
         struct iter_state {
             std::optional<script_value> container;

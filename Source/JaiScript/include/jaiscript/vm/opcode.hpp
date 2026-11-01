@@ -374,6 +374,7 @@ namespace jai::vm {
     inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
                                                          // (locals/captures/member scope all skipped)
     inline constexpr uint32_t load_flag_take = 4;        // a compiler temp's last read: its value leaves the slot
+    inline constexpr uint32_t return_flag_parameter = 8; // op_return_ident c: the name is the callee's own by-value parameter
     // op_return b: 0 plain, return_mode_converted = the value
     // was already converted at its in-region return site (op_return_convert)
     inline constexpr uint32_t return_mode_converted = 2;

@@ -3300,6 +3300,9 @@ inline strong_ptr<class_instance> class_instance::deep_copy_level(detail::deep_c
     if (class_def_ && class_def_->nocopy()) {
         throw runtime_error("Cannot copy an instance of nocopy class '" + std::string(get_class_name()) + "': hold it by reference (auto&/var&) or share it (shared_ptr)");
     }
+    if (class_def_ && dispatch_phase_ == cdtor_phase::none) {
+        if (const class_definition* level = class_def_->copy_constructor_level()) { return detail::copy_construct_instance(*this, level); }
+    }
     auto new_instance = class_def_ ? class_def_->allocate_instance() : class_instance::make(type_id_, owner_);
 #ifdef JAISCRIPT_VM_COVERAGE
     census::add_weight(flat_fields_.size());

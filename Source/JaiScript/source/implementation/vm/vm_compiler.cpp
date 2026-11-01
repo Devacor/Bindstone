@@ -985,7 +985,10 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		callable_.declared.insert(id);
 		if (p.slot_index != SIZE_MAX && (p.is_reference || p.ref_escaping)) { callable_.escaping.insert(static_cast<uint32_t>(p.slot_index)); }
 		if (p.slot_index != SIZE_MAX && !p.is_reference && primitive_declared_type(p.type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(p.slot_index)); }
-		if (p.slot_index != SIZE_MAX && !p.is_reference) { callable_.slot_types[static_cast<uint32_t>(p.slot_index)] = p.type.get(); }
+		if (p.slot_index != SIZE_MAX && !p.is_reference) {
+			callable_.slot_types[static_cast<uint32_t>(p.slot_index)] = p.type.get();
+			if (!p.type || p.type->may_own_instance()) { callable_.parameter_slots.insert(static_cast<uint32_t>(p.slot_index)); }
+		}
 #ifdef JAISCRIPT_VM_PROFILE
 		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
 #endif
@@ -1484,7 +1487,9 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 					flags |= load_flag_type_ctor;
 				}
 				const uint32_t symbol = add_symbol(ident->symbol_id);
-				const size_t ret_ip = emit(opcode::op_return_ident, identifier_slot_operand(ident), symbol, flags);
+				const uint32_t own = identifier_slot_operand(ident);
+				if (own != k_invalid_u32 && callable_.parameter_slots.count(own)) { flags |= return_flag_parameter; }
+				const size_t ret_ip = emit(opcode::op_return_ident, own, symbol, flags);
 				note_ident_node(ret_ip, rs->value);
 				note_this_field(ret_ip, ident);
 				if ((flags & (load_flag_global_only | load_flag_type_ctor)) == 0 && this_global_of(ident)) {
@@ -1523,9 +1528,12 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 		uint32_t operand_class = detail::return_operand_unclassified;
 		uint32_t own_slot = k_invalid_u32;
 		if (rs->value && !rs->binds_reference) {
-			operand_class = detail::classify_return_operand(rs->value.get());
+			operand_class = detail::classify_source(rs->value.get(), [this](const call_expr& call) {
+				return engine_ && detail::call_returns_class_value(call, const_cast<engine&>(*engine_));
+			});
 			if (operand_class == detail::return_operand_ident) {
 				own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
+				if (own_slot != k_invalid_u32 && callable_.parameter_slots.count(own_slot)) { operand_class = detail::return_operand_parameter; }
 			}
 		}
 		if (!fuse_return) {   // the reference mode takes the site conversion everywhere: it alone carries the returned local's own slot

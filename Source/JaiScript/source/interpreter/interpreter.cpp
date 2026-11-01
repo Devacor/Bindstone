@@ -5919,7 +5919,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
                     push_value(make_value());
                     return {};
                 }
-                captureEnv->define(capture.symbol_id, init.is_reference() ? clone_for_assignment(init.deref()) : detail::take_for_assignment(init));
+                const bool takes = !init.is_reference() && detail::source_skips_copy(source_class(capture.initializer.get()), init);
+                captureEnv->define(capture.symbol_id, takes ? detail::take_for_assignment(init) : clone_for_assignment(init.deref()));
                 continue;
             }
             // The capture source in the runtime's order (detail/capture_ladder.hpp): the
@@ -7720,10 +7721,19 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
     if (!detail::return_value_plain(*out) && !stmt->binds_reference && !call_stack_.empty()) {
         uint8_t operand_class = stmt->return_operand_class;
         if (operand_class == detail::return_operand_unclassified) {
-            operand_class = stmt->return_operand_class = detail::classify_return_operand(stmt->value.get());
+            operand_class = source_class(stmt->value.get());
+            if (operand_class == detail::return_operand_ident && call_stack_.back().function) {
+                const auto* ident = static_cast<const identifier_expr*>(stmt->value.get());
+                for (const auto& p : call_stack_.back().function->parameters()) {
+                    if (!p.is_reference && p.slot_index == ident->slot_index && (!p.type || p.type->may_own_instance())) { operand_class = detail::return_operand_parameter; break; }
+                }
+            }
+            stmt->return_operand_class = operand_class;
         }
         bool moved = false;
-        if (operand_class == detail::return_operand_ident) {
+        // a returned parameter moves out unless a user copy constructor would run (KEEP BYTE-PARALLEL with the vm's materialize_return)
+        if (operand_class == detail::return_operand_ident ||
+            (operand_class == detail::return_operand_parameter && !detail::value_runs_copy_constructor(*out))) {
             auto* ident = static_cast<identifier_expr*>(stmt->value.get());
             if (!ident->global_qualified && ident->slot_index != SIZE_MAX) {
                 if (script_value* payload = detail::return_own_slot_payload(call_stack_.back().get_local(ident->slot_index), *out)) {
@@ -9224,6 +9234,10 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
     return false;
 }
 
+uint8_t interpreter::source_class(const expression* e) {
+    return detail::classify_source(e, [this](const call_expr& call) { return detail::call_returns_class_value(call, *engine_); });
+}
+
 checked_result<script_value> interpreter::declared_component_reference(variable_decl* decl, script_value* temporary) {
     auto part = component_reference(decl->initializer.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_);
     if (!part) {
@@ -9847,8 +9861,12 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             };
             // A prvalue argument (the call site's only holder of its aggregate) is the parameter itself: C++17 guaranteed
             // elision (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
-            const bool elide = ((call_ctx && call_ctx->values == &args) || owned_args_ == &args) && argv == &args && &arg == &args[i] &&
-                               !arg.is_reference() && detail::uniquely_held(arg);
+            bool elide = ((call_ctx && call_ctx->values == &args) || owned_args_ == &args) && argv == &args && &arg == &args[i] &&
+                         !arg.is_reference() && detail::uniquely_held(arg);
+            // the argument stands for its parameter only as C++ allows it (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+            if (elide && call_ctx && call_ctx->values == &args && call_ctx->arg_exprs && i < call_ctx->arg_exprs->size()) {
+                elide = detail::source_skips_copy(source_class((*call_ctx->arg_exprs)[i].get()), arg);
+            }
             auto bind_elided = [&]() {
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(const_cast<script_value&>(arg))));
             };
@@ -9871,7 +9889,10 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                         continue;
                     }
                     if (elide) { bind_elided(); continue; }
-                    call_stack_[frame_index].set_local(param.slot_index, boxed_param(derefed.clone()));
+                    // the copy may run a copy constructor, which may grow call_stack_: the frame is indexed after it
+                    script_value shielded(derefed);
+                    script_value copied = shielded.clone();
+                    call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(copied)));
                     continue;
                 }
             }
@@ -9939,7 +9960,17 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
                     call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(converted_arg)));
                     continue;
                 }
-                call_stack_[frame_index].set_local(param.slot_index, boxed_param(converted_arg.clone()));
+                script_value copied = converted_arg.clone();   // a copy constructor may grow call_stack_: the frame is indexed after it
+                call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(copied)));
+            }
+        }
+    }
+    // A temporary a by-value parameter was copied from dies once the parameters are bound, as the vm's argument window lets it go
+    if (call_ctx && call_ctx->values == &args && argv == &args && !is_unwinding_) {
+        for (size_t i = 0; i < args.size() && i < function.parameters().size(); ++i) {
+            const script_value& arg = args[i];
+            if (!function.parameters()[i].is_reference && !arg.is_reference() && detail::uniquely_held(arg) && detail::value_copies_observably(arg)) {
+                script_value dying = std::move(const_cast<script_value&>(arg));
             }
         }
     }

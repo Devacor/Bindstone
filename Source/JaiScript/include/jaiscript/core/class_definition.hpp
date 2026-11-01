@@ -33,11 +33,24 @@ struct slot_site;
 }
 
 class function_decl;
+class call_expr;
 class environment;
 class class_definition;
 class class_instance;
 
 namespace detail {
+    // A copy of `source` built by the user copy constructor `level` declares (its class or a base), as C++ copy-constructs:
+    // the constructor builds `level`'s object from the source, the copy takes the source's class and the levels below
+    // `level` copy their fields. An inert instance (it never runs a destructor) stands for a copy whose constructor raised
+    strong_ptr<class_instance> copy_construct_instance(const class_instance& source, const class_definition* level);
+    // A copy of the value can be observed: an instance, element or entry whose class runs a destructor or a user copy
+    // constructor (value_tree_copies_observably), so no copy of it is skipped unless C++ skips it
+    bool value_copies_observably(const script_value& v);
+    // A copy of the value runs a user copy constructor somewhere in its tree
+    bool value_runs_copy_constructor(const script_value& v);
+    // The call yields a class instance by value (a construction, or the checker's resolved callee declared to return a class):
+    // a member read off its result is C++'s xvalue
+    bool call_returns_class_value(const call_expr& call, engine& eng);
     struct release_action;
     // The allocation's deleter for a class whose chain declares a destructor: the chain runs, then the instance dies
     // (natively, or as a release-stack frame past the native depth)
@@ -693,6 +706,15 @@ public:
     // declares a script destructor: the chain or a subclass's declares one, or a by-value field's type can hold such an
     // instance (handles share, never destroy a copy). Cached against engine::definition_epoch.
     bool value_tree_runs_destructor() const;
+    // The level whose user-declared copy constructor (T(const T&) or T(T&)) builds a copy of this class: the class itself, else
+    // the nearest base declaring one; null when the chain declares none (a copy is memberwise). Cached against
+    // engine::definition_epoch, so a reload that adds or drops a copy constructor takes effect at the next copy.
+    const class_definition* copy_constructor_level() const;
+    // A copy of a value of this class can be observed: its value tree (as value_tree_runs_destructor walks it) runs a
+    // destructor or a user copy constructor, so no copy of it may be skipped (moved or aliased instead)
+    bool value_tree_copies_observably() const;
+    // A copy of a value of this class runs a user copy constructor somewhere in its tree (the chain's, a member's, an element's)
+    bool value_tree_runs_copy_constructor() const;
     // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
     // declaration order, then its bases in reverse order
     inline void destroy_chain(class_instance* instance, const class_definition* level) const;
@@ -707,7 +729,7 @@ public:
     script_value take_field_for_destroy(class_instance* instance, uint64_t field) const;
     void run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const;
     // The same question for a declared type (null, var and unknown kinds can hold anything)
-    bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const;
+    bool type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, uint8_t mode = 0) const;
 
     inline type_info_ptr get_field_declared_type(uint64_t id) const;
     inline type_info_ptr field_declared_type_at(uint32_t slot, uint64_t id) const;   // the slot's declared type (the id answers a stale table)
@@ -1358,6 +1380,12 @@ private:
     mutable std::atomic_flag field_slots_building_;
     mutable bool destructor_tree_cached_ = false;
     mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
+    mutable bool copy_tree_cached_ = false;
+    mutable uint64_t copy_tree_epoch_ = UINT64_MAX;
+    mutable bool copy_ctor_tree_cached_ = false;
+    mutable uint64_t copy_ctor_tree_epoch_ = UINT64_MAX;
+    mutable const class_definition* copy_ctor_level_cached_ = nullptr;
+    mutable uint64_t copy_ctor_epoch_ = UINT64_MAX;
     mutable script_value null_field_value_;
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
     mutable uint64_t destructor_id_ = 0;
@@ -1438,7 +1466,9 @@ private:
     mutable uint64_t handle_slots_epoch_ = 0;
     type_info* handle_type_ = nullptr;
     bool flat_field_type(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, bool host_values = false) const;
-    bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const;
+    // mode 0: a destructor runs; 1: a destructor or a user copy constructor; 2: a user copy constructor
+    bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress, uint8_t mode = 0) const;
+    const class_definition* find_copy_constructor_level() const;
 
     inline void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref);
 

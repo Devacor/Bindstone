@@ -113,6 +113,7 @@ namespace jai::vm {
             std::unordered_set<uint32_t> primitive_slots;
             // the declared type of each value slot as its declaration compiled (null: untyped): what a store of the variable enforces
             std::unordered_map<uint32_t, const type_info*> slot_types;
+            std::unordered_set<uint32_t> parameter_slots;   // the callable's by-value parameters: a return of one copies when a user copy constructor would run
             // per frame slot: the scalar kind an untyped local certainly holds (vm_compiler::infer_local_kinds), a stamp's input
             std::vector<script_value_type> slot_kinds;
             bool active = false;

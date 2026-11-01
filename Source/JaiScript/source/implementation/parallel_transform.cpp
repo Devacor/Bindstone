@@ -631,7 +631,7 @@ namespace {
 			case script_value_type::jai_object_type: {
 				if (t->type_name.empty()) { return true; }
 				auto cls = eng.get_class_registry().find_script_class(std::string(t->type_name));
-				return cls && cls->value_tree_runs_destructor();
+				return cls && cls->value_tree_copies_observably();   // a copy that runs a copy constructor is as observable as a death
 			}
 			default:
 				return true;
@@ -2630,13 +2630,13 @@ namespace {
 		return walked && !builder.failed && !builder.adm.element_mutated && !builder.root_escaped;
 	}
 
-	// A program whose classes declare a script destructor: a copy runs it, and an instance dying anywhere in a live
-	// range runs user code the walk cannot see
+	// A program whose classes declare a script destructor or a user copy constructor: a copy runs it, and an instance dying
+	// anywhere in a live range runs user code the walk cannot see
 	bool any_script_destructor(engine& eng) {
 		for (const auto& entry : eng.get_class_registry().script_classes_) {
 			const class_definition* cls = entry.second.get();
 			if (!cls) { continue; }
-			if (cls->has_method(cls->destructor_id(eng))) { return true; }
+			if (cls->has_method(cls->destructor_id(eng)) || cls->copy_constructor_level() == cls) { return true; }
 		}
 		return false;
 	}

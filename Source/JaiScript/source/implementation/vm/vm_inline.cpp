@@ -1690,6 +1690,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			d->slot_index = base + p.slot_index;
 			d->site_kind = variable_decl::site_parameter; d->site_owner = fn->name;
 			d->graft_site = site_index; d->graft_param = static_cast<uint32_t>(i); d->graft_temp_slot = value_temp[i]->slot_index;
+			d->graft_source = a.get();
 			d->decl_fast_flags = 0;   // the declaration binds by the parameter's lane (exec_decl_var), never a declaration's fast store
 			ctx.pins.push_back(d);
 			deferred.push_back(d);

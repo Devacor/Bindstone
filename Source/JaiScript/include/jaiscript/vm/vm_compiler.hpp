@@ -250,7 +250,7 @@ namespace jai::vm {
         void drop_relanded_kill();
         void flush_kills();
         void release_temps(size_t from_ip, size_t floor);
-        void kill_temps(const std::vector<uint32_t>& temps);
+        void kill_slots(const std::vector<uint32_t>& slots);
         void kill_loop_guards(size_t start);
         void kill_on_both_edges(const std::vector<uint32_t>& owned, std::vector<size_t>& jumps, size_t first);
         void compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense);

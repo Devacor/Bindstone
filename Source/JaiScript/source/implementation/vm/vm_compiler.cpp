@@ -1638,14 +1638,14 @@ void vm_compiler::note_kill_decl(const statement* decl) {
 }
 
 void vm_compiler::close_kill_scope() {
-	for (auto slot = kill_scopes_.back().rbegin(); slot != kill_scopes_.back().rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
+	kill_slots({kill_scopes_.back().rbegin(), kill_scopes_.back().rend()});
 	kill_scopes_.pop_back();
 }
 
 void vm_compiler::emit_kills_to(size_t depth) {
-	for (size_t scope = kill_scopes_.size(); scope-- > depth;) {
-		for (auto slot = kill_scopes_[scope].rbegin(); slot != kill_scopes_[scope].rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
-	}
+	std::vector<uint32_t> slots;
+	for (size_t scope = kill_scopes_.size(); scope-- > depth;) { slots.insert(slots.end(), kill_scopes_[scope].rbegin(), kill_scopes_[scope].rend()); }
+	kill_slots(slots);
 }
 
 // A condition in branch position is jumping code all the way down: `&&`, `||` and `!` nest as jumps, no bool is
@@ -1727,21 +1727,25 @@ void vm_compiler::kill_loop_guards(size_t start) {
 		if (ins.op == opcode::op_operand_temp && (ins.c == 1 || ins.c == 2) && ins.b >= chunk_->first_temp_slot && ins.b < k_typed_slot_mask &&
 		    std::find(guards.begin(), guards.end(), ins.b) == guards.end()) { guards.push_back(ins.b); }
 	}
-	kill_temps(guards);
+	kill_slots(guards);
 }
 
-void vm_compiler::kill_temps(const std::vector<uint32_t>& temps) {
-	for (const uint32_t t : temps) { emit(opcode::op_kill_slot, t); }
+// the slots die in the order given: a run counting down by one is one instruction
+void vm_compiler::kill_slots(const std::vector<uint32_t>& slots) {
+	for (size_t i = 0, n = 1; i < slots.size(); i += n, n = 1) {
+		while (i + n < slots.size() && slots[i + n] + n == slots[i]) { ++n; }
+		emit(opcode::op_kill_slot, slots[i], static_cast<uint32_t>(n - 1));
+	}
 }
 
 // temps no compare gave up die on both edges of a condition's jumps: the fallthrough kills them and jumps past a pad the jumps now take
 void vm_compiler::kill_on_both_edges(const std::vector<uint32_t>& owned, std::vector<size_t>& jumps, size_t first) {
 	if (owned.empty()) { return; }
-	kill_temps(owned);
+	kill_slots(owned);
 	const size_t past = emit(opcode::op_jump, k_invalid_u32);
 	for (size_t k = first; k < jumps.size(); ++k) { patch_jump(jumps[k], chunk_->code.size()); }
 	jumps.resize(first);
-	kill_temps(owned);
+	kill_slots(owned);
 	jumps.push_back(emit(opcode::op_jump, k_invalid_u32));
 	patch_jump(past, chunk_->code.size());
 }
@@ -2128,7 +2132,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	}
 	loops_.pop_back();
 
-	kill_temps(loop_variable);
+	kill_slots(loop_variable);
 	emit(opcode::op_iter_pop);
 	--scope_depth_;
 }
@@ -2166,7 +2170,7 @@ void vm_compiler::compile_try(try_stmt* stmt) {
 	size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
 
 	patch_jump(try_push, chunk_->code.size());
-	for (auto slot = try_declared.rbegin(); slot != try_declared.rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
+	kill_slots({try_declared.rbegin(), try_declared.rend()});
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::catch_block;
 	loops_.back().scope_depth = scope_depth_;
@@ -4105,6 +4109,13 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		auto decl_landing = [&](uint32_t slot) -> uint8_t { return slot >= c.first_temp_slot ? k_typed_dst_temp : k_typed_dst_decl; };   // local_count is the frame's size by the end of the compile
 		uint32_t arg_temp_next = static_cast<uint32_t>(c.local_count);   // a computed argument's value: a cell with a synthetic slot above the frame's (never flushed, recomputed on a miss)
 		auto find_cell = [&](uint32_t slot) -> int { for (size_t k = cells.size(); k-- > 0;) { if (cells[k].env_operand == k_invalid_u32 && cells[k].slot == slot) return static_cast<int>(k); } return -1; };   // the slot's latest definition
+		auto kills_only_cells = [&](const vm_instruction& k) {   // every slot the kill ends is a scalar cell or a guard's snapshot
+			for (uint32_t slot = k.a - k.b; slot <= k.a; ++slot) {
+				const int cell = find_cell(slot);
+				if ((cell < 0 || cells[cell].string_borrow) && std::find(guard_slots.begin(), guard_slots.end(), slot) == guard_slots.end()) return false;
+			}
+			return true;
+		};
 		std::vector<std::pair<uint32_t, uint32_t>> defs;   // (ip, cell): each compiler value's definition in program order, the emission's binding map
 		auto stmt_of = [&](size_t at) -> const ast_node* { return at < c.stmt_nodes.size() ? c.stmt_nodes[at] : nullptr; };
 		auto caller_stmt_of = [&](size_t at) -> const ast_node* {   // a graft's statements are the caller's statement's
@@ -4651,9 +4662,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(mp.value.slot, 0, false, 0, nullptr, ip); op.b = mp.value.slot; slot_read(op, mp.value.slot);
 				} else { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.container = mp.base; op.member = mp.node;
-			} else if (st.op == opcode::op_kill_slot && st.a < k_typed_slot_mask &&
-			           ((find_cell(st.a) >= 0 && !cells[find_cell(st.a)].string_borrow) ||
-			            std::find(guard_slots.begin(), guard_slots.end(), st.a) != guard_slots.end())) {
+			} else if (st.op == opcode::op_kill_slot && st.a < k_typed_slot_mask && kills_only_cells(st)) {
 				// a body local's or a temp's end: inside the block its cell holds a scalar, an alias or nothing (an instance never lands in a
 				// cell), and a guard's snapshot is the container its name holds (the block runs no user code that could rebind it), so
 				// nothing ends early; the block keeps the cell, the general form kills the slot
@@ -6909,9 +6918,6 @@ uint32_t vm_compiler::temp_landed(size_t ip, bool& owns) {
 		owns = owns && p.decl_expect != script_value::TYPEID_INT && p.decl_expect != script_value::TYPEID_FLOAT;
 		return p.decl_slot;
 	}
-	case opcode::op_kill_slot:
-		owns = false;
-		return ins.a;
 	case opcode::op_decl_var: {   // a graft's fallback declares the call's result into the result temp, as whatever it returns
 		const auto* d = ins.a < c.nodes.size() && c.nodes[ins.a]->get_type() == node_type::variable_decl ? static_cast<const variable_decl*>(c.nodes[ins.a].get()) : nullptr;
 		if (!d || d->name_id != inline_symbol_ || inline_symbol_ == 0 || d->slot_index == SIZE_MAX) return k_invalid_u32;
@@ -6967,6 +6973,11 @@ std::vector<uint32_t> vm_compiler::take_owning_temps(size_t from_ip, size_t floo
 		for (size_t ip = from_ip; ip < chunk_->code.size(); ++ip) {
 			const opcode op = chunk_->code[ip].op;
 			if (op == opcode::op_return || op == opcode::op_return_ident || op == opcode::op_return_binary) { landed.clear(); continue; }   // the frame's end released them
+			if (op == opcode::op_kill_slot) {
+				const vm_instruction& k = chunk_->code[ip];
+				std::erase_if(landed, [&k](const auto& l) { return l.first <= k.a && l.first + k.b >= k.a; });
+				continue;
+			}
 			bool owns = false;
 			const uint32_t t = temp_landed(ip, owns);
 			if (t == k_invalid_u32 || t < floor || t < chunk_->first_temp_slot || t >= k_typed_slot_mask) continue;
@@ -7011,7 +7022,7 @@ void vm_compiler::flush_kills() {
 	drop_relanded_kill();
 	std::vector<uint32_t> kills = std::move(release_.pending);
 	release_.pending.clear();
-	kill_temps(kills);
+	kill_slots(kills);
 }
 
 // the end of a statement: what its temps still hold dies here

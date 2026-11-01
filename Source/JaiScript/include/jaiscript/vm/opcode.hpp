@@ -53,7 +53,7 @@ namespace jai::vm {
         op_scope_push,      // push a child environment
         op_scope_pop,       // pop one environment
         op_scope_pop_n,     // a=count
-        op_kill_slot,       // a=frame slot: its value dies here (a scope exit destroys a local that may own a script destructor)
+        op_kill_slot,       // a=frame slot, b=further slots below it: their values die here, a first (a scope exit destroys the locals that may own an instance)
 
         op_func_decl,       // a=function proto index; defines the thunk in the current env
         op_closure,         // a=closure proto index; pushes the closure function value

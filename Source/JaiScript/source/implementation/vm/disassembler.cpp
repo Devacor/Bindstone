@@ -159,6 +159,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				break;
 			case opcode::op_kill_slot:
 				out << " slot=" << ins.a;
+				if (ins.b) { out << " down=" << ins.b; }
 				break;
 			case opcode::op_field_init:
 				out << " field_init=" << ins.a;

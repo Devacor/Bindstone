@@ -70,8 +70,10 @@ buffer. The rules that keep this sound:
   the interpreter's `kill_scope_slot` move the value out of its slot before it dies, so a destructor that re-enters
   finds the slot already null. A scope exit kills every slot whose declared type may own an instance
   (`type_info::may_own_instance`: not a scalar, a string, a math vector, a weak_ptr or a reference), whether or not any
-  class declares a destructor, and a vm compiler temp gives up such a value once its consumer has read it
-  (`vm_compiler::free_temps`, a condition's on both edges): no lifetime depends on which classes exist when a body compiles.
+  class declares a destructor, and a vm compiler temp gives up such a value once its consumer has read it: a fused binary or
+  compare, a typed move, a member store or a fused index op releases it on the rows that can read an instance (the
+  `release` marks `vm_compiler::consumer_releases` sets, so numeric rows pay nothing), any other consumer is followed by a
+  kill (`vm_compiler::free_temps`): no lifetime depends on which classes exist when a body compiles.
 - `storage` assignment puts the new payload in place first and releases the old one last, so a
   destructor that stores to the slot being assigned keeps its store (C++ `shared_ptr` order) and one
   that moves the buffer finds the slot already written.

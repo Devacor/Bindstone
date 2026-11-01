@@ -79,6 +79,7 @@ namespace jai::vm {
         uint32_t node = k_invalid_u32;
         uint32_t base = k_invalid_u32;
         fused_operand value;
+        bool release = false;   // the value is a compiler temp the store gives up (an instance never takes the scalar rows)
     };
     // `a[i].x` (op_velem_load) and `a[i].x op= v;` (op_velem_store) where the checker proved `a` a math vector buffer, `a` a frame
     // slot and `i` a frame slot or an int literal: the subscript as a one-level fused operand, the member node, the component each
@@ -292,6 +293,9 @@ namespace jai::vm {
         // an operand is a compiler temp holding an element read: an index fold over it may take the typed
         // lane without a proof (the load's guards decide, the original instruction runs on a miss)
         bool elem_read_operand = false;
+        // the compiler temps this consumer gives up once it has read them (1 left, 2 right): a value that may own an instance never takes a
+        // numeric row, so the rows that read one release it
+        uint8_t release = 0;
         fused_operand left;
         fused_operand right;
     };
@@ -442,6 +446,7 @@ namespace jai::vm {
         // a reference-slot container guarded ahead of the index (op_operand_temp c = 1): the temp that holds its
         // materialized value when the slot's reference is not a plain cell; the readers take the slot otherwise
         uint32_t container_guard = k_invalid_u32;
+        uint8_t release = 0;   // the compiler temps the read or store gives up once it is done: 1 the guard, 2 the index, 4 the stored value
         // the guard's always form (op_operand_temp c = 2): the container's value is taken ahead of an index that may run user
         // code (a custom numeric operator, a getter, an operator[]), whatever the slot holds; the readers take the temp every time
         bool guard_always = false;
@@ -796,6 +801,7 @@ namespace jai::vm {
             bool speculative = false;
             uint32_t guard_temp = k_invalid_u32;   // fused_index_proto::container_guard, flattened
             bool guard_always = false;             // fused_index_proto::guard_always, flattened
+            bool release = false;                  // op_t_decl_mov / op_t_store_mov: the source is a compiler temp the move gives up
             // a block's copy of a read: the general instruction's own ip, whose environment cache slots the entry resolves the container
             // through (the copy's miss ip may be another instruction's: an argument's read misses onto the first argument instruction)
             uint32_t orig_ip = k_invalid_u32;

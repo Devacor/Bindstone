@@ -159,7 +159,7 @@ namespace {
 			out << pre << "fused_binary_protos " << ch.fused_binary_protos.size() << "\n";
 			for (size_t i = 0; i < ch.fused_binary_protos.size(); ++i) {
 				const fused_binary_proto& p = ch.fused_binary_protos[i];
-				out << pre << " " << i << " op=" << static_cast<int>(p.op) << " class=" << static_cast<int>(p.typed_class) << " elem=" << b(p.elem_read_operand)
+				out << pre << " " << i << " op=" << static_cast<int>(p.op) << " class=" << static_cast<int>(p.typed_class) << " elem=" << b(p.elem_read_operand) << " release=" << static_cast<int>(p.release)
 				    << " left=" << operand(ch, p.left) << " right=" << operand(ch, p.right) << "\n";
 			}
 			out << pre << "compound_fused_protos " << ch.compound_fused_protos.size() << "\n";
@@ -184,7 +184,7 @@ namespace {
 				out << pre << " " << i << " container=" << operand(ch, p.container) << " index=" << operand(ch, p.index) << " index_binary=" << u(p.index_binary) << " chain=[";
 				for (uint32_t s : p.index_chain_ext) { out << s << " "; }
 				out << "] value=" << operand(ch, p.store_value) << " decl_slot=" << u(p.decl_slot) << " expect=" << static_cast<int>(p.decl_expect) << " type=" << tn(p.decl_type)
-				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always);
+				    << " temp=" << b(p.decl_temp) << " lane=" << b(p.typed_lane) << " spec=" << b(p.speculative) << " guard=" << u(p.container_guard) << " always=" << b(p.guard_always) << " release=" << static_cast<int>(p.release);
 				if (p.compound) { out << " compound=" << p.compound_kind; }
 				out << "\n";
 			}
@@ -196,7 +196,7 @@ namespace {
 			out << pre << "member_store_protos " << ch.member_store_protos.size() << "\n";
 			for (size_t i = 0; i < ch.member_store_protos.size(); ++i) {
 				const member_store_proto& p = ch.member_store_protos[i];
-				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << "\n";
+				out << pre << " " << i << " node=" << u(p.node) << " base=" << u(p.base) << " value=" << operand(ch, p.value) << " release=" << b(p.release) << "\n";
 			}
 			if (!ch.member_folds.empty()) {
 				out << pre << "member_folds " << ch.member_folds.size() << "\n";
@@ -241,7 +241,7 @@ namespace {
 				out << " fold=";
 				for (uint8_t f : s.fold_ops) { out << static_cast<int>(f) << ","; }
 				out << static_cast<int>(s.fold_count) << " expect=" << static_cast<int>(s.decl_expect) << " proto=" << u(s.index_proto) << " temp=" << b(s.temp) << " spec=" << b(s.speculative)
-				    << " guard=" << u(s.guard_temp) << " always=" << b(s.guard_always) << "\n";
+				    << " guard=" << u(s.guard_temp) << " always=" << b(s.guard_always) << " release=" << b(s.release) << "\n";
 			}
 			if (!ch.typed_env_operands.empty()) {
 				out << pre << "typed_env_operands";

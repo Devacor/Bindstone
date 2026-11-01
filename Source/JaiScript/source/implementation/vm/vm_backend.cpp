@@ -5175,7 +5175,9 @@ op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&
 
 	// the string and general rows run out of line: the hot rows above keep no string temporary and no cookie in their frame
 	std::optional<script_value> out;
-	if (binary_fused_tail(p, op, lp, rp, out) == op_status::failed) return op_status::failed;
+	const op_status tail = binary_fused_tail(p, op, lp, rp, out);
+	if (p.release) { release_read_temps(f, p); }   // ahead of the sink: a lifted result may land in an operand's temp
+	if (tail == op_status::failed) return op_status::failed;
 	if (out) { sink(std::move(*out)); }
 	return {};
 }
@@ -5513,7 +5515,7 @@ const script_value* vm_backend::member_temp_field(frame& f, const vm_instruction
 // like the unfused pair did before its jump executed).
 // The fused compare-jump's numeric, string and null rows (custom numeric operators already excluded by the caller): 1 = the compare
 // holds, 0 = it does not, -1 = the verbatim pair decides
-JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op) {
+JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op, bool& null_lane) {
 	const size_t li = lv.raw_storage_index();
 	const size_t ri = rv.raw_storage_index();
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -5579,6 +5581,7 @@ JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const scr
 		default: break;
 		}
 		if (verdict >= 0) {
+			null_lane = true;   // an operand may be an instance the compare reads last
 			const bool truthy = (op == token_type::equal_equal) == (verdict == 1);
 			return truthy ? 1 : 0;
 		}
@@ -5602,8 +5605,10 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 		profile_cmp_operands_cyc_ += __rdtsc() - prof_c0; ++profile_cmp_count_;
 #endif
 		if (rp) {
-			const int verdict = fused_cmp_rows(*lp, *rp, op);
+			bool null_lane = false;
+			const int verdict = fused_cmp_rows(*lp, *rp, op, null_lane);
 			if (verdict >= 0) {
+				if (null_lane && p.release) [[unlikely]] { release_read_temps(f, p); }
 				f.ip = verdict ? f.ip + 1 : ins.a;
 				return {};
 			}
@@ -7043,12 +7048,15 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 #ifdef JAISCRIPT_VM_PROFILE
 		if (f.code->typed_sites[f.ip].speculative) { ++profile_typed_spec_[0]; }
 #endif
+		if (f.code->typed_sites[f.ip].release) [[unlikely]] { kill_frame_slot(f, f.code->typed_sites[f.ip].guard_temp); }   // the guard's container was read
 		return {};
 	}
 #ifdef JAISCRIPT_VM_PROFILE
 	if (f.code->typed_sites[f.ip].speculative) { ++profile_typed_spec_[1]; }
 #endif
-	return exec_index_fused_decl<false>(f, f.code->typed_sites[f.ip].orig);   // the lane just declined: the general decl read
+	const op_status st = exec_index_fused_decl<false>(f, f.code->typed_sites[f.ip].orig);   // the lane just declined: the general decl read
+	if (st != op_status::failed && f.code->typed_sites[f.ip].release) [[unlikely]] { kill_frame_slot(f, f.code->typed_sites[f.ip].guard_temp); }
+	return st;
 }
 
 #ifdef JAISCRIPT_VM_PROFILE
@@ -10730,8 +10738,10 @@ op_status vm_backend::exec_dyn_cmp_jump(frame& f, const vm_instruction& ins) {
 		if (rp) {
 			static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
 			                                       token_type::equal_equal, token_type::bang_equal};
-			const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
+			bool null_lane = false;
+			const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)], null_lane);
 			if (verdict >= 0) {
+				if (null_lane) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
 				f.ip = verdict ? f.ip + 1 : ins.c;
 				return {};
 			}
@@ -10763,6 +10773,7 @@ op_status vm_backend::exec_typed_decl_mov(frame& f, const vm_instruction& ins) {
 		}
 	}
 	VM_TRY(exec_load(f, site.orig));
+	if (site.release) { kill_frame_slot(f, ins.b); }   // the value is on the stack: the temp gives it up
 	return exec_decl_var(f, site.orig2);
 }
 
@@ -10811,6 +10822,7 @@ op_status vm_backend::exec_typed_store_mov(frame& f, const vm_instruction& ins) 
 	}
 	JAI_TYPED_INPLACE(3);
 	VM_TRY(exec_load(f, site.orig));
+	if (site.release) { kill_frame_slot(f, ins.b); }
 	return exec_store(f, site.orig2);
 }
 
@@ -15956,8 +15968,10 @@ JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold
 		if (!rp) break;
 		static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
 		                                       token_type::equal_equal, token_type::bang_equal};
-		const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
+		bool null_lane = false;
+		const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)], null_lane);
 		if (verdict < 0) break;
+		if (null_lane) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
 		f.ip = verdict ? f.ip + 1 : ins.c;
 		return 1;
 	}
@@ -16430,6 +16444,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
 		assert(vp);
 		value = *vp;
+		if (p.release) { kill_frame_slot(f, p.value.slot); }
 	}
 	script_value receiver = make_null();
 	if (p.base & k_typed_env_bit) {
@@ -22049,18 +22064,22 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				JAI_NEXT_OP();
 			case opcode::op_index_fused: JAI_OP_LABEL(op_index_fused)
 				VM_TRY_OP(exec_index_fused(f, ins));
+				if (f.code->fused_index_protos[ins.a].release) [[unlikely]] { release_index_temps(f, f.code->fused_index_protos[ins.a]); }
 				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_index_store_fused: JAI_OP_LABEL(op_index_store_fused)
 				VM_TRY_OP(exec_index_store_fused(f, ins));
+				if (f.code->fused_index_protos[ins.a].release) [[unlikely]] { release_index_temps(f, f.code->fused_index_protos[ins.a]); }
 				assert(!switch_to_);
 				JAI_NEXT_OP();
 			case opcode::op_index_compound_operand:
 				VM_TRY_OP(exec_index_compound_operand(f, ins));
+				if (f.code->fused_index_protos[ins.a].release) [[unlikely]] { release_index_temps(f, f.code->fused_index_protos[ins.a]); }
 				assert(!switch_to_);
 				break;
 			case opcode::op_index_fused_decl: JAI_OP_LABEL(op_index_fused_decl)
 				VM_TRY_OP(exec_index_fused_decl<true>(f, ins));
+				if (f.code->fused_index_protos[ins.a].release) [[unlikely]] { release_index_temps(f, f.code->fused_index_protos[ins.a]); }
 				assert(!switch_to_);
 				JAI_NEXT_OP();
 			// The member trio (GET_MEMBER 477k / CALL_METHOD 983k per 200 GLOOM ticks)
@@ -22352,10 +22371,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 
 			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
-				if (script_value* slot = frame_slot(f, ins.a)) {
-					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
-					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
-				}
+				kill_frame_slot(f, ins.a);
 				break;
 
 			case opcode::op_error: {
@@ -23999,6 +24015,29 @@ JAI_NOINLINE void vm_backend::gather_native_frame_cells(const frame& f, call_fra
 }
 
 // A scope exit kills a slot holding a cell a lambda shared: the cell is checked for a cycle once the slot lets go
+void vm_backend::kill_frame_slot(frame& f, uint32_t slot) {
+	if (script_value* s = frame_slot(f, slot)) {
+		if (s->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*s); return; }
+		script_value dying = std::move(*s);   // the destructor may reenter: the slot is null first
+	}
+}
+
+// a dying value may run script: the slots are read before the first release
+void vm_backend::release_index_temps(frame& f, const fused_index_proto& p) {
+	const uint8_t release = p.release;
+	const uint32_t guard = p.container_guard, index = p.index.slot, value = p.store_value.slot;
+	if (release & 1) { kill_frame_slot(f, guard); }
+	if (release & 2) { kill_frame_slot(f, index); }
+	if (release & 4) { kill_frame_slot(f, value); }
+}
+
+void vm_backend::release_read_temps(frame& f, const fused_binary_proto& p) {
+	const uint8_t release = p.release;
+	const uint32_t left = p.left.slot, right = p.right.slot;
+	if (release & 1) { kill_frame_slot(f, left); }
+	if (release & 2) { kill_frame_slot(f, right); }
+}
+
 void vm_backend::kill_shared_cell_slot(script_value& slot) {
 	std::vector<script_value> cells;
 	script_value::gather_shared_cells(&slot, 1, cells);

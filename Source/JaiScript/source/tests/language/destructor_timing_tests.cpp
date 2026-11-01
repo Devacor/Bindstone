@@ -1287,92 +1287,55 @@ public:
             )", "<0><1><2>w0.w1.|");
         });
 
-        test("with_no_destructor_a_block_local_dies_at_the_closing_brace", [this]() {
-            expect_outcome({std::string(k_observed) + R"(
-                function f() -> void {
-                    weak_ptr<P> w = null;
-                    { shared_ptr<P> s = new P(); w = s; }
-                    note("block:" + to_string(w.expired()));
-                    for (int i = 0; i < 2; i++) { shared_ptr<P> s = new P(); w = s; }
-                    note("loop:" + to_string(w.expired()));
-                    { var s = new P(); w = s; }
-                    note("var:" + to_string(w.expired()));
-                }
-                f(); OUT;
-            )"}, "block:true loop:true var:true ");
-        });
-
-        test("with_no_destructor_a_member_read_holds_nothing_after_its_consumer", [this]() {
+        test("with_no_destructor_class_every_local_temporary_and_parameter_dies_on_time", [this]() {
+            // weak_ptr and use_count observe what a destructor would: block locals (a lambda's too), the value a declaration, compare,
+            // condition, argument, arm, case, call or element read consumes, a switch subject a continue leaves, a callee's parameters
             expect_outcome({std::string(k_observed) + R"(
                 function clear_check(shared_ptr<Box> b, weak_ptr<P> w) -> bool { b.t = null; note("in:" + to_string(w.expired())); return true; }
-                function f() -> void {
+                function mk(weak_ptr<P>& w) -> shared_ptr<P> { shared_ptr<P> p = new P(); w = p; return p; }
+                function take(bool a, bool b) -> void { }
+                function pick(shared_ptr<Box> b) -> shared_ptr<P> { return b.t; }
+                function g(shared_ptr<P> p) -> int { return p.v + 1; }
+                function h(shared_ptr<P> p) -> int { shared_ptr<P> q = p; return q.v; }
+                function locals() -> void {
+                    weak_ptr<P> w = null;
+                    { shared_ptr<P> s = new P(); w = s; } note("block:" + to_string(w.expired()));
+                    for (int i = 0; i < 2; i++) { shared_ptr<P> s = new P(); w = s; } note("loop:" + to_string(w.expired()));
+                    { var s = new P(); w = s; } note("var:" + to_string(w.expired()));
+                    { shared_ptr<P> s = new P(); w = s; auto f = [s]() { return s.v; }; s = null; note("held:" + to_string(w.expired())); }
+                    note("lambda:" + to_string(w.expired()));
+                }
+                function reads() -> void {
                     shared_ptr<Box> b = new Box();
                     b.t = new P(); weak_ptr<P> w = b.t;
                     shared_ptr<P> x = b.t; x = null; b.t = null; note("decl:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t;
-                    bool z = b.t == null; b.t = null; note("cmp:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t;
-                    if (b.t != null) { } b.t = null; note("cond:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t;
-                    bool y = b.t == null || clear_check(b, w); note("full:" + to_string(w.expired()));
-                    b.t = new P();
-                    z = b.t == null; note("count:" + to_string(b.t.use_count()));
-                    b.u = new P(); w = b.u;
-                    var q = b.u; q = null; b.u = null; note("var:" + to_string(w.expired()));
-                }
-                f(); OUT;
-            )"}, "decl:true cmp:true cond:true in:true full:true count:1 var:true ");
-        });
-
-        test("with_no_destructor_a_call_result_or_an_element_read_dies_with_its_consumer", [this]() {
-            expect_outcome({std::string(k_observed) + R"(
-                function mk(weak_ptr<P>& w) -> shared_ptr<P> { shared_ptr<P> p = new P(); w = p; return p; }
-                function f() -> void {
-                    weak_ptr<P> w = null;
-                    bool z = mk(w) == null; note("call:" + to_string(w.expired()));
-                    if (mk(w) != null) { note("body:" + to_string(w.expired())); }
+                    b.t = new P(); w = b.t; bool z = b.t == null; b.t = null; note("cmp:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; if (b.t != null) { } b.t = null; note("cond:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; bool y = b.t == null || clear_check(b, w); note("full:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; take(b.t == null, clear_check(b, w)); note("args:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; shared_ptr<P> c = true ? b.t : null; c = null; b.t = null; note("arm:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; switch (b.t.v) { case 3: b.t = null; note("case:" + to_string(w.expired())); break; default: break; }
+                    b.t = new P(); z = b.t == null; note("count:" + to_string(b.t.use_count()));
+                    b.u = new P(); w = b.u; var q = b.u; q = null; b.u = null; note("untyped:" + to_string(w.expired()));
+                    weak_ptr<P> made = null;
+                    bool m = mk(made) == null; note("call:" + to_string(made.expired()));
+                    if (mk(made) != null) { note("body:" + to_string(made.expired())); }
                     array<shared_ptr<P>> a = [new P()]; w = a[0];
-                    shared_ptr<P> x = a[0]; x = null; a[0] = null; note("elem:" + to_string(w.expired()));
+                    x = a[0]; x = null; a[0] = null; note("elem:" + to_string(w.expired()));
                     a[0] = new P(); w = a[0];
-                    for (int i = 0; i < 1; i++) { bool e = a[i] == null; a[i] = null; }
-                    note("loop:" + to_string(w.expired()));
-                }
-                f(); OUT;
-            )"}, "call:true body:true elem:true loop:true ");
-        });
-
-        test("with_no_destructor_a_read_an_argument_or_an_arm_consumes_dies_before_the_next_runs", [this]() {
-            expect_outcome({std::string(k_observed) + R"(
-                function take(bool a, bool b) -> void { }
-                function clear_check(shared_ptr<Box> b, weak_ptr<P> w) -> bool { b.t = null; note("in:" + to_string(w.expired())); return true; }
-                function f() -> void {
-                    shared_ptr<Box> b = new Box();
-                    b.t = new P(); weak_ptr<P> w = b.t;
-                    take(b.t == null, clear_check(b, w)); note("args:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t;
-                    shared_ptr<P> c = true ? b.t : null; c = null; b.t = null; note("arm:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t;
-                    switch (b.t.v) { case 3: b.t = null; note("case:" + to_string(w.expired())); break; default: break; }
-                }
-                f(); OUT;
-            )"}, "in:true args:true arm:true case:true ");
-        });
-
-        test("with_no_destructor_a_callee_s_parameters_and_locals_die_when_it_returns", [this]() {
-            expect_outcome({std::string(k_observed) + R"(
-                function g(shared_ptr<P> p) -> int { return p.v + 1; }
-                function h(shared_ptr<P> p) -> int { shared_ptr<P> q = p; return q.v; }
-                function f() -> void {
-                    shared_ptr<Box> b = new Box();
+                    for (int i = 0; i < 1; i++) { bool e = a[i] == null; a[i] = null; } note("eloop:" + to_string(w.expired()));
                     for (int i = 0; i < 2; i++) {
-                        b.t = new P(); weak_ptr<P> w = b.t;
-                        int k = g(b.t); b.t = null; note("g:" + to_string(w.expired()));
+                        if (i == 1) { note("continue:" + to_string(w.expired())); }
                         b.t = new P(); w = b.t;
-                        k = h(b.t); b.t = null; note("h:" + to_string(w.expired()));
+                        switch (pick(b)) { case null: break; default: b.t = null; continue; }
                     }
+                    note("subject:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; int k = g(b.t); b.t = null; note("param:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; k = h(b.t); b.t = null; note("local:" + to_string(w.expired()));
                 }
-                f(); OUT;
-            )"}, "g:true h:true g:true h:true ");
+                locals(); reads(); OUT;
+            )"}, "block:true loop:true var:true held:false lambda:true decl:true cmp:true cond:true in:true full:true in:true args:true arm:true "
+                 "case:true count:1 untyped:true call:true body:true elem:true eloop:true continue:true subject:true param:true local:true ");
         });
 
         test("a_destructor_class_declared_after_a_function_compiled_runs_on_time", [this]() {

@@ -3455,6 +3455,7 @@ void vm_compiler::lower_dynamic_ops(chunk& c) {
 			uint32_t l, r;
 			if (!jump_op(static_cast<token_type>(p.op), op) || !operand(p.left, l) || !operand(p.right, r)) continue;
 			typed_site_at(ip).orig = ins;
+			typed_site_at(ip).release = p.release != 0;
 			code[ip] = vm_instruction{op, l, r, ins.a};
 			continue;
 		}

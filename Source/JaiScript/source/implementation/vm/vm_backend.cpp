@@ -5520,8 +5520,8 @@ const script_value* vm_backend::member_temp_field(frame& f, const vm_instruction
 // left on this instruction (and the unwinding case leaves the result pushed, exactly
 // like the unfused pair did before its jump executed).
 // The fused compare-jump's numeric, string and null rows (custom numeric operators already excluded by the caller): 1 = the compare
-// holds, 0 = it does not, -1 = the verbatim pair decides
-JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op, bool& null_lane) {
+// holds, 0 = it does not, -1 = the verbatim pair decides; a null row adds 2 (an operand may be an instance the compare reads last)
+JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op) {
 	const size_t li = lv.raw_storage_index();
 	const size_t ri = rv.raw_storage_index();
 	if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
@@ -5587,9 +5587,8 @@ JAI_FORCEINLINE int vm_backend::fused_cmp_rows(const script_value& lv, const scr
 		default: break;
 		}
 		if (verdict >= 0) {
-			null_lane = true;   // an operand may be an instance the compare reads last
 			const bool truthy = (op == token_type::equal_equal) == (verdict == 1);
-			return truthy ? 1 : 0;
+			return truthy ? 3 : 2;
 		}
 	}
 	return -1;
@@ -5611,11 +5610,10 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 		profile_cmp_operands_cyc_ += __rdtsc() - prof_c0; ++profile_cmp_count_;
 #endif
 		if (rp) {
-			bool null_lane = false;
-			const int verdict = fused_cmp_rows(*lp, *rp, op, null_lane);
+			const int verdict = fused_cmp_rows(*lp, *rp, op);
 			if (verdict >= 0) {
-				if (null_lane && p.release) [[unlikely]] { release_read_temps(f, p); }
-				f.ip = verdict ? f.ip + 1 : ins.a;
+				if (verdict > 1 && p.release) [[unlikely]] { release_read_temps(f, p); }
+				f.ip = (verdict & 1) ? f.ip + 1 : ins.a;
 				return {};
 			}
 		}
@@ -10768,11 +10766,10 @@ op_status vm_backend::exec_dyn_cmp_jump(frame& f, const vm_instruction& ins) {
 		if (rp) {
 			static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
 			                                       token_type::equal_equal, token_type::bang_equal};
-			bool null_lane = false;
-			const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)], null_lane);
+			const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
 			if (verdict >= 0) {
-				if (null_lane) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
-				f.ip = verdict ? f.ip + 1 : ins.c;
+				if (verdict > 1 && f.code->typed_sites[f.ip].release) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
+				f.ip = (verdict & 1) ? f.ip + 1 : ins.c;
 				return {};
 			}
 		}
@@ -15998,11 +15995,10 @@ JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold
 		if (!rp) break;
 		static constexpr token_type k_ops[] = {token_type::less, token_type::less_equal, token_type::greater, token_type::greater_equal,
 		                                       token_type::equal_equal, token_type::bang_equal};
-		bool null_lane = false;
-		const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)], null_lane);
+		const int verdict = fused_cmp_rows(*lp, *rp, k_ops[static_cast<size_t>(ins.op) - static_cast<size_t>(opcode::op_d_jlt)]);
 		if (verdict < 0) break;
-		if (null_lane) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
-		f.ip = verdict ? f.ip + 1 : ins.c;
+		if (verdict > 1 && f.code->typed_sites[f.ip].release) [[unlikely]] { release_read_temps(f, f.code->fused_binary_protos[f.code->typed_sites[f.ip].orig.b]); }
+		f.ip = (verdict & 1) ? f.ip + 1 : ins.c;
 		return 1;
 	}
 	case chunk::member_fold::typed_decl_move: {
@@ -16474,7 +16470,7 @@ op_status vm_backend::exec_set_member_value(frame& f, const vm_instruction& ins)
 		const script_value* vp = fast_operand(f, p.value, f.ip * 3);
 		assert(vp);
 		value = *vp;
-		if (p.release) { kill_frame_slot(f, p.value.slot); }
+		if (p.release) [[unlikely]] { kill_frame_slot(f, p.value.slot); }
 	}
 	script_value receiver = make_null();
 	if (p.base & k_typed_env_bit) {

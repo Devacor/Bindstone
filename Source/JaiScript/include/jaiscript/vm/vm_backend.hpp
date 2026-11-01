@@ -2723,7 +2723,7 @@ namespace jai::vm {
         bool dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, script_float fv);
         op_status exec_dyn_arith(frame& f, const vm_instruction& ins);
         op_status exec_dyn_cmp_jump(frame& f, const vm_instruction& ins);
-        int fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op, bool& null_lane);
+        int fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op);
         op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);

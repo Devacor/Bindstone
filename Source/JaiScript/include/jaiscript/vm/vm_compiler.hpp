@@ -94,6 +94,7 @@ namespace jai::vm {
             size_t kill_depth = 0;                     // kill scopes open outside the region: a jump out of it destroys the ones above
             const ast_node* stmt = nullptr;            // a loop's statement: its block verdict decides how a graft inside it lands (open_loops_)
             bool switch_stack_pair = false;            // a switch on the stack form: its [value, ft] pair sits on the value stack
+            uint32_t switch_subject = k_invalid_u32;   // a switch's subject temp that may own an instance: a jump out of the switch kills it
         };
 
         struct callable_context {
@@ -137,7 +138,6 @@ namespace jai::vm {
         void note_kill_slot(uint32_t slot);
         void note_kill_decl(const statement* decl);
         void close_kill_scope();
-        void emit_scope_kill(uint32_t slot);
         void emit_kills_to(size_t depth);
         void push_region(region_kind kind);
         bool typed_lowering_ = true;
@@ -237,26 +237,23 @@ namespace jai::vm {
         struct temp_release {
             size_t stmt_ip = 0;                       // the statement compiling begins here: its temps' landings are found from here
             std::vector<uint32_t> pending;            // temps whose consumer ran: killed ahead of the next instruction (a peephole may still fold the consumer)
-            std::unordered_set<size_t> owning_nothing;    // landings whose value the producer proved owns no instance
-            std::unordered_map<uint32_t, const ast_node*> kill_decls;   // a scope-killed slot's declaration
-            std::vector<size_t>* landing_jumps = nullptr;   // an if's, a while's or a for's false jumps: a leaf jumping there kills its temps where the statement lands them
-            std::vector<uint32_t> landing_kills;
+            std::unordered_set<size_t> owning_nothing;    // landings that need no kill: the value owns no instance, or its consumer gives it up
         };
         temp_release release_;
         void note_landing(const expression* e);
-        void note_operands_own_nothing(const fused_binary_proto& p, const binary_expr* b);
         const type_info* declared_type_of(const expression* e);   // a frame slot's or a bare field's declared type (null: unknown)
         bool value_owns_nothing(const expression* e);
         uint32_t temp_landed(size_t ip, bool& owns);
         std::vector<uint32_t> take_owning_temps(size_t from_ip, size_t floor);
+        bool consumer_releases(uint32_t t);
         void free_temps(size_t mark);
         void drop_relanded_kill();
         void flush_kills();
         void release_temps(size_t from_ip, size_t floor);
         void kill_temps(const std::vector<uint32_t>& temps);
-        void kill_on_fallthrough(const std::vector<uint32_t>& owned);
+        void kill_loop_guards(size_t start);
+        void kill_on_both_edges(const std::vector<uint32_t>& owned, std::vector<size_t>& jumps, size_t first);
         void compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense);
-        std::vector<uint32_t> compile_landed_condition(const std::function<void()>& compile, std::vector<size_t>& false_jumps, size_t start, size_t cond_mark);
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
         uint32_t temp_symbol_index();
         // Tail-position hint for `return f(args)` with clean region exits: consumed by

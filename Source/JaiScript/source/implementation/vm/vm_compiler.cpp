@@ -1422,6 +1422,7 @@ void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	const node_type kind = stmt->get_type();
 	if (kind == node_type::return_stmt || kind == node_type::break_stmt || kind == node_type::continue_stmt) { release_.pending.clear(); }   // the frame's or the enclosing construct's end releases them
 	else { release_temps(start, temps); }
+	if (kind == node_type::while_stmt || kind == node_type::for_stmt || kind == node_type::range_for_stmt) { kill_loop_guards(start); }
 	release_.stmt_ip = outer;
 	note_debug_span(stmt.get(), start);
 }
@@ -1615,6 +1616,10 @@ void vm_compiler::push_region(region_kind kind) {
 
 bool vm_compiler::slot_kill_wanted(const type_info_ptr& t, size_t slot, uint64_t symbol) const {
 	if (slot == SIZE_MAX || !callable_.active || callable_.declared.find(symbol) == callable_.declared.end()) { return false; }
+	if (slot < callable_.slot_kinds.size()) {   // an untyped local every definition of which gives one scalar kind
+		const script_value_type kind = callable_.slot_kinds[slot];
+		if (kind == script_value_type::jai_int_type || kind == script_value_type::jai_float_type || kind == script_value_type::jai_bool_type) { return false; }
+	}
 	return !t || t->may_own_instance();
 }
 
@@ -1630,25 +1635,16 @@ void vm_compiler::note_kill_decl(const statement* decl) {
 	if (!v->name.empty() && v->name[0] == '\x01') { return; }   // a graft's result: read after the graft's block closes, as the call's result is
 	if (v->is_static || v->name_id == UINT64_MAX || !slot_kill_wanted(v->type, v->slot_index, v->name_id)) { return; }
 	note_kill_slot(static_cast<uint32_t>(v->slot_index));
-	release_.kill_decls[static_cast<uint32_t>(v->slot_index)] = decl;
-}
-
-// a scope exit's kill belongs to the local's declaration, not to the statement compiled last (a block's boundary takes it alone)
-void vm_compiler::emit_scope_kill(uint32_t slot) {
-	const ast_node* stmt = current_stmt_;
-	if (const auto decl = release_.kill_decls.find(slot); decl != release_.kill_decls.end()) { current_stmt_ = decl->second; }
-	emit(opcode::op_kill_slot, slot);
-	current_stmt_ = stmt;
 }
 
 void vm_compiler::close_kill_scope() {
-	for (auto slot = kill_scopes_.back().rbegin(); slot != kill_scopes_.back().rend(); ++slot) { emit_scope_kill(*slot); }
+	for (auto slot = kill_scopes_.back().rbegin(); slot != kill_scopes_.back().rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
 	kill_scopes_.pop_back();
 }
 
 void vm_compiler::emit_kills_to(size_t depth) {
 	for (size_t scope = kill_scopes_.size(); scope-- > depth;) {
-		for (auto slot = kill_scopes_[scope].rbegin(); slot != kill_scopes_[scope].rend(); ++slot) { emit_scope_kill(*slot); }
+		for (auto slot = kill_scopes_[scope].rbegin(); slot != kill_scopes_[scope].rend(); ++slot) { emit(opcode::op_kill_slot, *slot); }
 	}
 }
 
@@ -1703,9 +1699,8 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 	compile_condition_leaf(cond, true_jumps, true);
 }
 
-// A leaf: its value and one jump into `jumps` (taken when the leaf is false, or true in the true sense). Its temps die on both edges after
-// the jump, so a compare and its jump stay one instruction: where the jump is an if's, a while's or a for's false edge the statement kills
-// them where it lands that edge (a loop's head stays a compare and its exit), otherwise the jump takes a pad that kills them
+// A leaf: its value and one jump into `jumps` (taken when the leaf is false, or true in the true sense). A compare gives up the temps it
+// reads itself; any other temp of the leaf dies on both edges after the jump, so a compare and its jump stay one instruction
 void vm_compiler::compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense) {
 	const bool grafts = leaf_grafts_;
 	leaf_grafts_ = false;
@@ -1719,62 +1714,60 @@ void vm_compiler::compile_condition_leaf(const expression_ptr& cond, std::vector
 	const std::vector<uint32_t> owned = take_owning_temps(start, temps);
 	const size_t first = jumps.size();
 	jumps.push_back(true_sense ? emit_cond_jump_true(leaf.get()) : emit_cond_jump_false(leaf.get()));
-	if (release_.landing_jumps == &jumps) { kill_on_fallthrough(owned); }
-	else if (!owned.empty()) {
-		kill_temps(owned);
-		const size_t past = emit(opcode::op_jump, k_invalid_u32);
-		for (size_t k = first; k < jumps.size(); ++k) { patch_jump(jumps[k], chunk_->code.size()); }
-		jumps.resize(first);
-		kill_temps(owned);
-		jumps.push_back(emit(opcode::op_jump, k_invalid_u32));
-		patch_jump(past, chunk_->code.size());
-	}
+	kill_on_both_edges(owned, jumps, first);
 	leaf_grafts_ = grafts;
+}
+
+// a block reads its guards' snapshots in place and keeps them, the general form gives each up as its read is done: whatever the loop's
+// guards still hold dies where the loop ends
+void vm_compiler::kill_loop_guards(size_t start) {
+	std::vector<uint32_t> guards;
+	for (size_t ip = start; ip < chunk_->code.size(); ++ip) {
+		const vm_instruction& ins = chunk_->code[ip];
+		if (ins.op == opcode::op_operand_temp && (ins.c == 1 || ins.c == 2) && ins.b >= chunk_->first_temp_slot && ins.b < k_typed_slot_mask &&
+		    std::find(guards.begin(), guards.end(), ins.b) == guards.end()) { guards.push_back(ins.b); }
+	}
+	kill_temps(guards);
 }
 
 void vm_compiler::kill_temps(const std::vector<uint32_t>& temps) {
 	for (const uint32_t t : temps) { emit(opcode::op_kill_slot, t); }
 }
 
-void vm_compiler::kill_on_fallthrough(const std::vector<uint32_t>& owned) {
+// temps no compare gave up die on both edges of a condition's jumps: the fallthrough kills them and jumps past a pad the jumps now take
+void vm_compiler::kill_on_both_edges(const std::vector<uint32_t>& owned, std::vector<size_t>& jumps, size_t first) {
+	if (owned.empty()) { return; }
 	kill_temps(owned);
-	release_.landing_kills.insert(release_.landing_kills.end(), owned.begin(), owned.end());
-}
-
-// an if's, a while's or a for's condition, its false jumps the landing: the kills its false edge needs come back
-std::vector<uint32_t> vm_compiler::compile_landed_condition(const std::function<void()>& compile, std::vector<size_t>& false_jumps, size_t start, size_t cond_mark) {
-	std::vector<size_t>* outer_jumps = std::exchange(release_.landing_jumps, &false_jumps);
-	std::vector<uint32_t> outer_kills = std::exchange(release_.landing_kills, {});
-	compile();
-	kill_on_fallthrough(take_owning_temps(start, cond_mark));   // the hoisted leaves' temps die at the jumps
-	release_.landing_jumps = outer_jumps;
-	return std::exchange(release_.landing_kills, std::move(outer_kills));
+	const size_t past = emit(opcode::op_jump, k_invalid_u32);
+	for (size_t k = first; k < jumps.size(); ++k) { patch_jump(jumps[k], chunk_->code.size()); }
+	jumps.resize(first);
+	kill_temps(owned);
+	jumps.push_back(emit(opcode::op_jump, k_invalid_u32));
+	patch_jump(past, chunk_->code.size());
 }
 
 void vm_compiler::compile_if(if_stmt* stmt) {
 	std::vector<size_t> false_jumps;
 	const size_t start = chunk_->code.size();
 	const size_t cond_mark = temp_next_;
-	const std::vector<uint32_t> landing = compile_landed_condition([&]() {
-		if (try_condition_graft(stmt->condition, false_jumps)) { return; }
+	if (!try_condition_graft(stmt->condition, false_jumps)) {
 		leaf_retry_ = true;
 		const expression_ptr cond = hoisted_condition(stmt->condition);
 		leaf_retry_ = false;
 		leaf_grafts_ = true;
 		compile_branch_condition(cond, false_jumps);
 		leaf_grafts_ = false;
-	}, false_jumps, start, cond_mark);
+	}
+	kill_on_both_edges(take_owning_temps(start, cond_mark), false_jumps, 0);   // the hoisted leaves' temps die at the jumps
 	temp_next_ = cond_mark;
 	compile_statement(stmt->then_statement);
 	if (stmt->else_statement) {
 		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
 		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
-		kill_temps(landing);
 		compile_statement(stmt->else_statement);
 		patch_jump(jump_end, chunk_->code.size());
 	} else {
 		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
-		kill_temps(landing);
 	}
 }
 
@@ -1782,9 +1775,8 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
 	const size_t cond_mark = temp_next_;
-	const std::vector<uint32_t> landing = compile_landed_condition([&]() {
-		if (!try_condition_graft(stmt->condition, exit_jumps)) { compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps); }
-	}, exit_jumps, top, cond_mark);
+	if (!try_condition_graft(stmt->condition, exit_jumps)) { compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps); }
+	kill_on_both_edges(take_owning_temps(top, cond_mark), exit_jumps, 0);
 	temp_next_ = cond_mark;
 
 	push_region(region_kind::loop);
@@ -1797,7 +1789,6 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
 	const size_t end = chunk_->code.size();
-	kill_temps(landing);
 	for (size_t at : exit_jumps) {
 		patch_jump(at, end);
 	}
@@ -1827,10 +1818,10 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
-	std::vector<uint32_t> landing;
 	if (stmt->condition) {
 		const size_t cond_mark = temp_next_;
-		landing = compile_landed_condition([&]() { compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps); }, exit_jumps, top, cond_mark);
+		compile_branch_condition(hoisted_condition(stmt->condition), exit_jumps);
+		kill_on_both_edges(take_owning_temps(top, cond_mark), exit_jumps, 0);
 		temp_next_ = cond_mark;
 	}
 
@@ -1848,7 +1839,6 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	emit(opcode::op_loop_back, static_cast<uint32_t>(top));
 
 	const size_t end = chunk_->code.size();
-	kill_temps(landing);
 	for (size_t at : exit_jumps) {
 		patch_jump(at, end);
 	}
@@ -2023,6 +2013,7 @@ void vm_compiler::emit_region_exits(size_t target_region) {
 				emit(opcode::op_pop);
 				emit(opcode::op_pop);
 			}
+			if (target_region != SIZE_MAX && loops_[idx].switch_subject != k_invalid_u32) { emit(opcode::op_kill_slot, loops_[idx].switch_subject); }
 			break;
 		default:
 			break;
@@ -2126,7 +2117,8 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	const uint32_t outer_entry_proto = std::exchange(entry_proto_, stmt->binds_map_entry ? proto_idx : k_invalid_u32);
 	compile_statement(stmt->body);
 	entry_proto_ = outer_entry_proto;
-	close_kill_scope();
+	const std::vector<uint32_t> loop_variable = std::move(kill_scopes_.back());   // the next element's binding replaces it, the last dies at the exit
+	kill_scopes_.pop_back();
 	emit(opcode::op_jump, static_cast<uint32_t>(loop_top));
 
 	const size_t exit_ip = chunk_->code.size();
@@ -2136,6 +2128,7 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	}
 	loops_.pop_back();
 
+	kill_temps(loop_variable);
 	emit(opcode::op_iter_pop);
 	--scope_depth_;
 }
@@ -2339,6 +2332,7 @@ bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::switch_ctx;
 	loops_.back().scope_depth = scope_depth_;
+	if (subject_owns) { loops_.back().switch_subject = static_cast<uint32_t>(subject_temp->slot_index); }
 	const size_t region_index = loops_.size() - 1;
 	std::vector<size_t> end_jumps;
 	bool falls_in = false;
@@ -3815,6 +3809,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			site.temp = fp.decl_temp;
 			site.speculative = fp.speculative;
 			site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
+			site.release = (fp.release & 1) != 0;
+			if (fp.release & ~1) break;   // an index temp the row would not give up
 			chunk_ = &c;
 			typed_site_at(ip) = site;
 			ins = vm_instruction{opcode::op_t_load, fp.decl_slot, 0, 0};
@@ -5468,6 +5464,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		for (const auto& cc : calls) { if (cc.raw) { loop.plans.resize(calls.size()); loop.raw_sites = true; break; } }   // a raw site's run-time plan
 		loop.inline_sites = loop_inline_sites;
 		loop.math_alias_sites = loop_alias_sites;
+		for (ir_op& o : ops) {   // a branch onto skipped kills that run into the back edge takes the back edge itself
+			if ((o.kind != ir::cmp && o.kind != ir::jump) || o.head || o.target < first || o.target >= back) continue;
+			size_t t = o.target;
+			while (t < back && t - first < ops.size() && ops[t - first].kind == ir::skip) { ++t; }
+			if (t == back) { o.target = static_cast<uint32_t>(back); }
+		}
 		size_t origin_override = SIZE_MAX;   // an argument's value records the probe as its origin
 		struct ret_pad { uint32_t at, mode, origin; };   // a C_RET's copy ip, the return's mode and the general ip of its tail
 		std::vector<ret_pad> ret_pads;
@@ -6910,15 +6912,57 @@ uint32_t vm_compiler::temp_landed(size_t ip, bool& owns) {
 	case opcode::op_kill_slot:
 		owns = false;
 		return ins.a;
+	case opcode::op_decl_var: {   // a graft's fallback declares the call's result into the result temp, as whatever it returns
+		const auto* d = ins.a < c.nodes.size() && c.nodes[ins.a]->get_type() == node_type::variable_decl ? static_cast<const variable_decl*>(c.nodes[ins.a].get()) : nullptr;
+		if (!d || d->name_id != inline_symbol_ || inline_symbol_ == 0 || d->slot_index == SIZE_MAX) return k_invalid_u32;
+		owns = owns && !value_owns_nothing(d->initializer.get());
+		return static_cast<uint32_t>(d->slot_index);
+	}
 	default: return k_invalid_u32;
 	}
 }
 
+// The instruction just emitted is the last to read the dead temp t: a fused binary or compare reads an instance only on its general rows,
+// a typed move only on its fallback, and those give the temp up there (its numeric rows pay nothing)
+bool vm_compiler::consumer_releases(uint32_t t) {
+	if (chunk_->code.empty()) return false;
+	const vm_instruction& c = chunk_->code.back();
+	auto mark = [t](fused_binary_proto& p) {
+		const uint8_t bits = static_cast<uint8_t>((p.left.direct && p.left.slot == t ? 1 : 0) | (p.right.direct && p.right.slot == t ? 2 : 0));
+		p.release |= bits;
+		return bits != 0;
+	};
+	switch (c.op) {
+	case opcode::op_binary_fused: case opcode::op_binary_fused_temp: return mark(chunk_->fused_binary_protos[c.a]);
+	case opcode::op_fused_cmp_jump: return mark(chunk_->fused_binary_protos[c.b]);
+	case opcode::op_binary_fused_decl: case opcode::op_binary_fused_store: return mark(chunk_->fused_binary_protos[chunk_->fused_binary_dst_protos[c.a].binary_proto]);
+	case opcode::op_t_decl_mov: case opcode::op_t_store_mov:
+		if (c.b != t) return false;
+		typed_site_at(chunk_->code.size() - 1).release = true;
+		return true;
+	case opcode::op_set_member_value: {
+		member_store_proto& p = chunk_->member_store_protos[c.a];
+		if (!p.value.direct || p.value.slot != t) return false;
+		p.release = true;
+		return true;
+	}
+	case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: {
+		fused_index_proto& p = chunk_->fused_index_protos[c.a];
+		if (c.op == opcode::op_index_fused_decl && p.decl_slot == t) return false;   // the read lands in the freed slot
+		const uint8_t bit = p.container_guard == t ? 1 : p.index.direct && p.index.slot == t ? 2 : p.store_value.direct && p.store_value.slot == t ? 4 : 0;
+		p.release |= bit;
+		return bit != 0;
+	}
+	default: return false;
+	}
+}
+
 // The temps of slot `floor` or above that the code from `from_ip` landed a value in that may own something and that nothing has
-// overwritten or killed since, the last landed first; the kills still pending join them and leave the pending list
+// overwritten, killed or left to its consumer to release since, the last landed first; the kills still pending join them and leave the
+// pending list
 std::vector<uint32_t> vm_compiler::take_owning_temps(size_t from_ip, size_t floor) {
 	drop_relanded_kill();
-	std::vector<uint32_t> landed;
+	std::vector<std::pair<uint32_t, size_t>> landed;   // the temp and the instruction that landed it
 	if (temps_active_ && chunk_ && chunk_->is_function_body) {
 		for (size_t ip = from_ip; ip < chunk_->code.size(); ++ip) {
 			const opcode op = chunk_->code[ip].op;
@@ -6926,14 +6970,17 @@ std::vector<uint32_t> vm_compiler::take_owning_temps(size_t from_ip, size_t floo
 			bool owns = false;
 			const uint32_t t = temp_landed(ip, owns);
 			if (t == k_invalid_u32 || t < floor || t < chunk_->first_temp_slot || t >= k_typed_slot_mask) continue;
-			landed.erase(std::remove(landed.begin(), landed.end(), t), landed.end());
-			if (owns && std::find(release_.pending.begin(), release_.pending.end(), t) == release_.pending.end()) { landed.push_back(t); }
+			std::erase_if(landed, [t](const auto& l) { return l.first == t; });
+			if (owns && std::find(release_.pending.begin(), release_.pending.end(), t) == release_.pending.end()) { landed.emplace_back(t, ip); }
 		}
 	}
-	std::reverse(landed.begin(), landed.end());
-	landed.insert(landed.begin(), release_.pending.begin(), release_.pending.end());
+	std::vector<uint32_t> result = std::move(release_.pending);
 	release_.pending.clear();
-	return landed;
+	for (auto l = landed.rbegin(); l != landed.rend(); ++l) {
+		if (consumer_releases(l->first)) { release_.owning_nothing.insert(l->second); }
+		else { result.push_back(l->first); }
+	}
+	return result;
 }
 
 // A temp's consumer has run: the temps from `mark` up give their values up ahead of the next instruction (a peephole may still fold the
@@ -6944,20 +6991,6 @@ void vm_compiler::free_temps(size_t mark) {
 		release_.pending = std::move(owned);
 	}
 	temp_next_ = mark;
-}
-
-// the checker proved the binary's operands numbers, bools or strings: the temps it reads own nothing
-void vm_compiler::note_operands_own_nothing(const fused_binary_proto& p, const binary_expr* b) {
-	const uint8_t cls = b->static_operand_class;
-	if (b->op.type == token_type::left_bracket || !(cls == operand_class_int_int || cls == operand_class_float_float || cls == operand_class_int_float ||
-	    cls == operand_class_float_int || cls == operand_class_bool_bool || cls == operand_class_string_string)) { return; }
-	for (const fused_operand* o : {&p.left, &p.right}) {
-		if (!o->direct || o->slot == k_invalid_u32 || o->slot < chunk_->first_temp_slot) continue;
-		for (size_t ip = chunk_->code.size() - 1; ip-- > release_.stmt_ip;) {
-			bool owns = false;
-			if (temp_landed(ip, owns) == o->slot) { release_.owning_nothing.insert(ip); break; }
-		}
-	}
 }
 
 // the instruction just emitted lands e's value
@@ -7237,6 +7270,8 @@ bool vm_compiler::compile_subscript_into_temp(const expression_ptr& e, uint8_t e
 	if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 	ins.op = opcode::op_index_fused_decl;
 	ins.c = k_invalid_u32;
+	if (proto.container_guard == t) { proto.release &= static_cast<uint8_t>(~1); }   // the read lands where the freed guard was: the landing replaces it
+	if (proto.index.direct && proto.index.slot == t) { proto.release &= static_cast<uint8_t>(~2); }
 	proto.decl_slot = t;
 	proto.decl_type = nullptr;
 	proto.decl_expect = expect;
@@ -7739,7 +7774,6 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			stamp_typed_class(proto, expr.get());
 			chunk_->fused_binary_protos.push_back(proto);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
-			note_operands_own_nothing(proto, expr.get());
 			free_temps(temp_mark);   // the read temps die into the binary
 			return;
 		}
@@ -7759,7 +7793,6 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
 		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
-		note_operands_own_nothing(proto, expr.get());
 		return;
 	}
 
@@ -7844,7 +7877,6 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 				++temp_next_;
 				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 				emit(opcode::op_binary_fused_temp, idx, t);
-				note_operands_own_nothing(chunk_->fused_binary_protos[idx], b);
 				note_landing(b);
 				fused_operand out;
 				out.slot = t;
@@ -7861,7 +7893,6 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			stamp_typed_class(outer, expr.get());
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
-			note_operands_own_nothing(outer, expr.get());
 			free_temps(temp_mark);   // LIFO release: temps die once the outer op consumed them
 			return;
 		}

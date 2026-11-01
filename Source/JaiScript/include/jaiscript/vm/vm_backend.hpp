@@ -1428,6 +1428,9 @@ namespace jai::vm {
         std::vector<std::vector<script_value>> cell_lists_;   // reused gathered-cell lists (a nested frame exit takes its own)
         void note_boxed_slot(const script_value& storage);
         void kill_shared_cell_slot(script_value& slot);
+        void kill_frame_slot(frame& f, uint32_t slot);
+        JAI_NOINLINE void release_read_temps(frame& f, const fused_binary_proto& p);
+        JAI_NOINLINE void release_index_temps(frame& f, const fused_index_proto& p);
         // A native entry frame's cells (shared by a lambda, or a slot boxed on demand), gathered before its window dies
         void gather_native_frame_cells(const frame& f, call_frame& locals, std::vector<script_value>& cells);
         void release_frame_shared_cells();
@@ -2719,7 +2722,7 @@ namespace jai::vm {
         bool dyn_land(frame& f, uint32_t a, size_t kind, script_int iv, script_float fv);
         op_status exec_dyn_arith(frame& f, const vm_instruction& ins);
         op_status exec_dyn_cmp_jump(frame& f, const vm_instruction& ins);
-        int fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op);
+        int fused_cmp_rows(const script_value& lv, const script_value& rv, token_type op, bool& null_lane);
         op_status exec_typed_decl_mov(frame& f, const vm_instruction& ins);
         op_status exec_typed_decl_const(frame& f, const vm_instruction& ins);
         op_status exec_typed_store_mov(frame& f, const vm_instruction& ins);

@@ -865,6 +865,7 @@ namespace jai {
         // a graft's by-value parameter (site_parameter): its inline site, its parameter index and the private temp its argument
         // was evaluated into, so the bind takes the call's read-only alias and prvalue elision (vm bind_graft_parameter)
         uint32_t graft_site = UINT32_MAX;
+        const expression* graft_source = nullptr;   // a graft's parameter: the call's argument expression (its C++ category decides the elision)
         uint32_t graft_param = UINT32_MAX;
         size_t graft_temp_slot = SIZE_MAX;
 

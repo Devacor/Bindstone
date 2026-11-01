@@ -166,7 +166,7 @@ namespace {
 		if (element.raw_storage_index() == script_value::TYPEID_OBJECT && detail::uniquely_held(element)) {
 			const auto* instance = static_cast<const class_instance*>(element.unchecked_object_handle()->object());
 			const class_definition* def = instance->get_class_definition();
-			if (def && def->is_script_class() && !def->nocopy() && !instance->has_cpp_object() && !def->value_tree_runs_destructor()) {
+			if (def && def->is_script_class() && !def->nocopy() && !instance->has_cpp_object() && !def->value_tree_copies_observably()) {
 				if (!element_type || element_type->base_type == script_value_type::jai_any_type) { return std::move(element); }
 				return detail::convert_container_element_taking(eng, element, element_type);
 			}
@@ -11724,7 +11724,7 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 		const size_t ai = arg.raw_storage_index();
 		if (ai == script_value::TYPEID_OBJECT || ai == script_value::TYPEID_ARRAY || ai == script_value::TYPEID_MAP) {
 			if (script_value* temp = frame_slot(f, decl->graft_temp_slot); temp && detail::same_heavy_node(*temp, arg)) { *temp = make_null(); }
-			elide = detail::uniquely_held(arg);
+			elide = detail::uniquely_held(arg) && (!decl->graft_source || detail::source_skips_copy(source_class(decl->graft_source), arg));
 		}
 	}
 	{
@@ -14589,7 +14589,10 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		for (const auto& capture : proto.captures) {
 			if (capture.init) {
 				script_value& init = stack_[init_next++];   // a temporary is the lambda's own member, anything else its copy (KEEP BYTE-PARALLEL with the interpreter)
-				captureEnv->define(capture.symbol_id, init.is_reference() ? clone_for_assignment(init.deref()) : detail::take_for_assignment(init));
+				const expression* source = nullptr;
+				for (const auto& declared : proto.lambda->captures) { if (declared.symbol_id == capture.symbol_id && declared.initializer) { source = declared.initializer.get(); break; } }
+				const bool takes = !init.is_reference() && (!source || detail::source_skips_copy(source_class(source), init));
+				captureEnv->define(capture.symbol_id, takes ? detail::take_for_assignment(init) : clone_for_assignment(init.deref()));
 				continue;
 			}
 			script_value* slot_val = nullptr;
@@ -19782,6 +19785,10 @@ op_status vm_backend::exec_catch_end(frame& f, const vm_instruction&) {
 	return {};
 }
 
+uint8_t vm_backend::source_class(const expression* e) {
+	return detail::classify_source(e, [this](const call_expr& call) { return detail::call_returns_class_value(call, *engine_); });
+}
+
 // The handler is done: its variable lets go of the error (its scope ended), so the record's end decides the thrown value's death
 void vm_backend::release_catch_variable(frame& f, const try_record& rec) {
 	if (rec.caught_scope && rec.catch_slot != k_invalid_u32 && has_slots(f)) { frame_slot_set(f, rec.catch_slot, make_null()); }
@@ -24131,7 +24138,10 @@ void vm_backend::copy_reference_result(script_value& result) {
 
 void vm_backend::materialize_return(frame& f, script_value& result, uint32_t operand_class, uint32_t own_slot) {
 	if (detail::return_value_plain(result) || f.top_level || operand_class == detail::return_operand_unclassified) return;
-	if (operand_class == detail::return_operand_ident && own_slot != k_invalid_u32 && f.locals) {
+	// a returned parameter moves out unless a user copy constructor would run (C++ copies a parameter; NRVO is a local's)
+	const bool own_moves = operand_class == detail::return_operand_ident ||
+	                       (operand_class == detail::return_operand_parameter && !detail::value_runs_copy_constructor(result));
+	if (own_moves && own_slot != k_invalid_u32 && f.locals) {
 		if (script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result)) {
 			JAI_CENSUS_F(move_hit, 1);
 			*payload = make_null();
@@ -24289,7 +24299,7 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 			const script_value& resolved = local->deref();
 			if (detail::return_value_plain(resolved)) { return finish(script_value(resolved)); }
 			script_value value(resolved);
-			materialize_return(f, value, detail::return_operand_ident, ins.a);
+			materialize_return(f, value, (ins.c & return_flag_parameter) ? detail::return_operand_parameter : detail::return_operand_ident, ins.a);
 			return finish(std::move(value));
 		}
 	}
@@ -25048,7 +25058,14 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			// A prvalue argument (the stack's or an owned argument list's only holder of its aggregate) is the parameter itself:
 			// C++17 guaranteed elision
 			std::vector<script_value>* const owned = owned_args(args);
-			const bool elide = (args_are_stack(args) || owned) && !arg.is_reference() && detail::uniquely_held(arg);
+			bool elide = (args_are_stack(args) || owned) && !arg.is_reference() && detail::uniquely_held(arg);
+			// the argument stands for its parameter only as C++ allows it: its source expression's category decides when the copy is observable
+			if (elide && site && site->call_node != k_invalid_u32 && caller_code && site->call_node < caller_code->nodes.size()) {
+				const auto* call = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
+				if (call && call->get_type() == node_type::call_expr && i < call->arguments.size()) {
+					elide = detail::source_skips_copy(source_class(call->arguments[i].get()), arg);
+				}
+			}
 			auto bind_elided = [&]() {
 				JAI_CENSUS_F(move_hit, 4);
 				if (in_place && param.slot_index == i && !param.ref_escaping) { return; }

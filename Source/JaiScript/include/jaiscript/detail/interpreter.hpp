@@ -1151,6 +1151,8 @@ namespace jai {
         // A reference declaration's math-component initializer as a COMPONENT reference, else the declaration's non-lvalue error
         // temporary: the initializer's value, which a `const T&` declaration owns when it names no storage
         checked_result<script_value> declared_component_reference(variable_decl* decl, script_value* temporary = nullptr);
+        // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)
+        uint8_t source_class(const expression* e);
         checked_result<bool> bind_site_reference(const expression* argExpr, call_frame* caller_locals,
                                                  const std::shared_ptr<environment>& caller_env, script_value& out,
                                                  host_slot* slot_out = nullptr, size_t caller_index = 0);

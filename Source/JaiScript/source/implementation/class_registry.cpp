@@ -153,8 +153,16 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
     }
 }
 
-bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress) const {
-    if (!t) { return true; }
+bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::vector<const class_definition*>& in_progress, uint8_t mode) const {
+    if (!t || t->base_type == script_value_type::jai_any_type) {
+        // an untyped slot holds any value: it runs what some script class runs
+        if (mode == 0 || !engine_) { return true; }
+        for (const auto& entry : engine_->get_class_registry().script_classes_) {
+            const class_definition* cls = entry.second.get();
+            if (cls && ((mode == 1 && cls->chain_declares_destructor(*engine_)) || cls->find_copy_constructor_level())) { return true; }
+        }
+        return false;
+    }
     switch (t->base_type) {
     case script_value_type::jai_null_type:
     case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
@@ -163,29 +171,29 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
     case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_ivec2_type:
     case script_value_type::jai_ivec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
         return false;
-    case script_value_type::jai_array_type: return type_tree_runs_destructor(t->element_type(), in_progress);
-    case script_value_type::jai_map_type: return type_tree_runs_destructor(t->key_type(), in_progress) || type_tree_runs_destructor(t->value_type(), in_progress);
+    case script_value_type::jai_array_type: return type_tree_runs_destructor(t->element_type(), in_progress, mode);
+    case script_value_type::jai_map_type: return type_tree_runs_destructor(t->key_type(), in_progress, mode) || type_tree_runs_destructor(t->value_type(), in_progress, mode);
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) { return true; }
         auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
-        return nested && nested->value_tree_runs_destructor_impl(in_progress);   // a host class runs no script destructor
+        return nested && nested->value_tree_runs_destructor_impl(in_progress, mode);   // a host class runs no script destructor
     }
     default: return true;
     }
 }
 
-bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress) const {
+bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress, uint8_t mode) const {
     for (const class_definition* visiting : in_progress) { if (visiting == this) { return false; } }
     in_progress.push_back(this);
-    bool runs = engine_ && chain_declares_destructor(*engine_);
+    bool runs = engine_ && ((mode != 2 && chain_declares_destructor(*engine_)) || (mode != 0 && find_copy_constructor_level()));
     const uint32_t n = field_slot_count();
     for (uint32_t slot = 0; slot < n && !runs; ++slot) {
-        runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress);
+        runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress, mode);
     }
     if (!runs && engine_) {
         for (const auto& entry : engine_->get_class_registry().script_classes_) {
             const class_definition* other = entry.second.get();
-            if (other && other != this && other->derives_from(this) && other->value_tree_runs_destructor_impl(in_progress)) { runs = true; break; }
+            if (other && other != this && other->derives_from(this) && other->value_tree_runs_destructor_impl(in_progress, mode)) { runs = true; break; }
         }
     }
     in_progress.pop_back();
@@ -505,6 +513,148 @@ release_sync::~release_sync() {
 }
 
 } // namespace detail
+
+bool class_definition::value_tree_copies_observably() const {
+    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    if (copy_tree_epoch_ == epoch && engine_) { return copy_tree_cached_; }
+    std::vector<const class_definition*> in_progress;
+    copy_tree_cached_ = value_tree_runs_destructor_impl(in_progress, 1);
+    copy_tree_epoch_ = epoch;
+    return copy_tree_cached_;
+}
+
+bool class_definition::value_tree_runs_copy_constructor() const {
+    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    if (copy_ctor_tree_epoch_ == epoch && engine_) { return copy_ctor_tree_cached_; }
+    std::vector<const class_definition*> in_progress;
+    copy_ctor_tree_cached_ = value_tree_runs_destructor_impl(in_progress, 2);
+    copy_ctor_tree_epoch_ = epoch;
+    return copy_ctor_tree_cached_;
+}
+
+namespace {
+// A constructor's one parameter names the class: T(const T&) or T(T&)
+bool declares_copy_constructor(const class_definition& cls, const function_decl& ctor) {
+    if (ctor.parameters.size() != 1) { return false; }
+    const parameter& p = ctor.parameters[0];
+    const type_info* t = p.type.get();
+    if (t && t->base_type == script_value_type::jai_reference_type) { t = t->type_params.empty() ? nullptr : t->type_params[0].get(); }
+    else if (!p.is_reference) { return false; }
+    return t && t->base_type == script_value_type::jai_object_type && cls.answers_to(t->type_name);
+}
+}
+
+const class_definition* class_definition::find_copy_constructor_level() const {
+    if (is_script_class()) {
+        for (const auto& ctor : static_cast<const script_class_definition*>(this)->get_constructor_asts()) {
+            if (ctor && declares_copy_constructor(*this, *ctor)) { return this; }
+        }
+    }
+    for (const auto& parent : get_parent_classes()) {
+        if (const class_definition* level = parent ? parent->find_copy_constructor_level() : nullptr) { return level; }
+    }
+    return nullptr;
+}
+
+const class_definition* class_definition::copy_constructor_level() const {
+    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    if (copy_ctor_epoch_ == epoch && engine_) { return copy_ctor_level_cached_; }
+    copy_ctor_level_cached_ = find_copy_constructor_level();
+    copy_ctor_epoch_ = epoch;
+    return copy_ctor_level_cached_;
+}
+
+namespace detail {
+namespace {
+// what a copy of the value runs: 1 a destructor or a user copy constructor (copy_constructor false), a user copy constructor
+// (copy_constructor true); containers answer for their elements and entries, a handle copies nothing
+bool value_copy_runs(const script_value& in, bool copy_constructor, int depth) {
+    const script_value& v = in.deref();
+    switch (v.raw_storage_index()) {
+    case script_value::TYPEID_OBJECT: {
+        const type_info* tag = v.type_info_raw();
+        if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
+        const auto& holder = v.unchecked_object_handle();
+        if (!holder || !holder->is_instance()) { return false; }
+        const class_definition* cls = holder->unchecked_instance()->get_class_definition();
+        if (!cls || !cls->is_script_class()) { return false; }
+        return copy_constructor ? cls->value_tree_runs_copy_constructor() : cls->value_tree_copies_observably();
+    }
+    case script_value::TYPEID_ARRAY: {
+        const auto& node = v.unchecked_get_array_storage();
+        if (!node || node->kind() != script_array::kind_t::obj) { return false; }
+        if (depth > 32) { return true; }
+        for (const script_value& element : node->values()) { if (value_copy_runs(element, copy_constructor, depth + 1)) { return true; } }
+        return false;
+    }
+    case script_value::TYPEID_MAP: {
+        if (depth > 32) { return true; }
+        for (const auto& [key, value] : v.as_map()) {
+            if (value_copy_runs(key, copy_constructor, depth + 1) || value_copy_runs(value, copy_constructor, depth + 1)) { return true; }
+        }
+        return false;
+    }
+    default: return false;
+    }
+}
+}
+
+bool value_copies_observably(const script_value& v) { return value_copy_runs(v, false, 0); }
+bool value_runs_copy_constructor(const script_value& v) { return value_copy_runs(v, true, 0); }
+
+bool call_returns_class_value(const call_expr& call, engine& eng) {
+    const auto by_value = [](const type_info* t) { return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty(); };
+    std::shared_ptr<const function_decl> decl = call.proven_callee_decl.lock();
+    if (!decl) { decl = call.proven_method_decl.lock(); }
+    if (decl) { return by_value(decl->return_type.get()); }
+    if (call.callee && call.callee->get_type() == node_type::identifier_expr) {
+        const auto& name = static_cast<const identifier_expr*>(call.callee.get())->name;
+        if (auto cls = eng.get_class_definition(std::string(name)); cls && cls->is_script_class()) { return true; }   // a construction
+        // a program-scope function the checker left unresolved here: its declared return type
+        if (const auto id = eng.get_symbolizer()->find(name)) {
+            if (const script_value* fn = eng.get_global_environment()->get_value_ptr(*id); fn && fn->is_function()) {
+                const auto* thunk = fn->unchecked_as_function().target<script_callable_thunk>();
+                if (thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn) { return by_value(thunk->payload.fn->return_type.get()); }
+            }
+        }
+    }
+    return false;
+}
+
+strong_ptr<class_instance> copy_construct_instance(const class_instance& source, const class_definition* level) {
+    class_definition* cls = source.get_class_definition();
+    engine* eng = source.get_engine();
+    const auto inert = [&]() {
+        auto made = cls->allocate_instance();
+        made->set_class_definition(cls);
+        made->construction_pending(true);
+        return made;
+    };
+    execution_backend* backend = eng ? eng->calling_backend() : nullptr;
+    if (!backend || backend->is_unwinding()) { return inert(); }
+    auto constructor = eng->get_global_environment()->get(level->get_name());
+    if (!constructor || !constructor.value().is_function()) { return inert(); }
+    // the source binds the constructor's const T& as itself: a reference, never a copy
+    std::vector<script_value> args{ script_value::make_cell_reference(script_value::make_class_object(*cls, source.weak_from_this().lock(), eng), eng) };
+    auto made = constructor.value().as_function()(args);
+    if (!made) { throw runtime_error(eng->format_error(made)); }
+    if (backend->is_unwinding() || !made.value().is_object()) { return inert(); }
+    strong_ptr<class_instance> copy = made.value().get_class_instance();
+    if (!copy) { return inert(); }
+    if (level != cls) {
+        // C++'s implicit copy constructor below `level`: the object becomes the source's class and the fields the levels below
+        // `level` declare are copies of the source's
+        copy->reclass(std::const_pointer_cast<class_definition>(cls->shared_from_this()), false);
+        const uint32_t n = cls->field_slot_count();
+        for (uint32_t slot = 0; slot < n; ++slot) {
+            const uint64_t id = cls->slot_field(slot);
+            if (level->field_slot(id) != class_definition::k_no_field_slot || cls->slot_is_cpp_property(slot)) { continue; }
+            if (const script_value* from = source.find_field_value(id)) { copy->set_field(id, from->deref().clone_element()); }
+        }
+    }
+    return copy;
+}
+}
 
 bool class_definition::value_tree_runs_destructor() const {
     const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;

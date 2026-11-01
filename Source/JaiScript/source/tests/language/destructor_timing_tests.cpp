@@ -393,6 +393,41 @@ public:
             )", "Ld|Lr|Lo|Lq~q|Li|Ls~s|Lu~u|~u~o~r~q");
         });
 
+        // A user copy constructor builds every copy C++ copy-constructs; a prvalue initializing a slot and a returned own local are
+        // elided; a base's copy constructor builds the base of a class that declares none; a throwing one leaves no object
+        test("a_copy_constructor_builds_every_copy", [this]() {
+            const std::string c = R"(class C { string n = ""; C(string s) { n = s; } C(const C& o) { if (o.n == "bad") { throw "x"; } n = o.n + "'"; LOG = LOG + "c" + n; } ~C() { LOG = LOG + "~" + n; } } )";
+            expect_log(c + R"(
+                C G = C("g");
+                function take(C v) -> void { LOG = LOG + "t"; }
+                function ret_glob() -> C { return G; }
+                function ret_param(C p) -> C { return p; }
+                function ret_local() -> C { C r = C("r"); return r; }
+                function f() -> void {
+                    C a = C("a"); C b = a; LOG = LOG + "|";
+                    take(a); take(C("p")); LOG = LOG + "|";
+                    C r1 = ret_glob(); C r2 = ret_param(a); C r3 = ret_local(); LOG = LOG + "|";
+                    array<C> xs = [a]; for (C e : xs) { LOG = LOG + "."; } LOG = LOG + "|";
+                    auto l = [a]() { return a.n; }; LOG = LOG + "|";
+                    b = a; LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "ca'|ca't~a't~p|cg'ca'ca''~a'|ca'ca''.~a''|ca'||~a'~a'~r~a''~g'~a~a");
+            expect_log(c + R"(
+                class B { string bn = ""; B(string s) { bn = s; } B(const B& o) { bn = o.bn + "'"; LOG = LOG + "cB"; } }
+                class D : B { C m = C("m"); D(string s) : super(s) {} }
+                function f() -> void {
+                    D d = D("d"); D e = d; LOG = LOG + "|" + e.bn + e.m.n + "|";
+                    C bad = C("bad");
+                    try { C copy = bad; } catch (err) { LOG = LOG + "caught"; }
+                    array<C> src = [C("p"), C("bad")];
+                    try { array<C> cp = src; } catch (err) { LOG = LOG + "|caught"; }
+                    LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "cBcm'|d'm'|caughtcp'~p'|caught|~p~bad~bad~m'~m");
+        });
+
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
             expect_log(R"(
                 function f(Token p) -> void { Token l = Token("l"); LOG = LOG + "body"; }
@@ -422,6 +457,15 @@ public:
                 function f() -> void { Token y = off_temporary("x"); LOG = LOG + "|"; Token z = off_kept(); z.name = "c"; LOG = LOG + "|"; }
                 f(); LOG = LOG + "|" + G.m.name; LOG;
             )", "l||cx|g");
+            // read through the handle's last owner the member is still an lvalue: returned or passed, it is copied
+            expect_log(R"(
+                class Box { Token m; Box(string s) { m.name = s; } }
+                function last(string s) -> shared_ptr<Box> { return new Box(s); }
+                function off_last(string s) -> Token { return last(s).m; }
+                function take(Token t) -> void { LOG = LOG + "t"; }
+                function f() -> void { Token y = off_last("h"); LOG = LOG + "|"; take(last("a").m); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "h|ata|h");
         });
 
         test("by_value_range_for_variable_dies_each_iteration", [this]() {
@@ -1121,7 +1165,7 @@ public:
             check_true(direct.find("Class 'D' inherits 'A' through both 'A' and 'B' (diamond inheritance is not supported)") != std::string::npos, direct);
         });
 
-        test("a_reload_replaces_and_adds_destructors", [this]() {
+        test("a_reload_replaces_and_adds_destructors_and_copy_constructors", [this]() {
             for (int variant = 0; variant < 2; ++variant) {
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
@@ -1140,10 +1184,15 @@ public:
                     eng->execute(R"(class A { int a = 1; ~A() { LOG = LOG + "new"; } })");
                     eng->execute(R"(class C { int c = 3; ~C() { LOG = LOG + "c"; } })");
                     got = eng->execute("function f() -> void { B b; A a; C c; } f(); LOG;").as_string();
+                    // a copy constructor a reload adds runs at the next copy, and one it removes no longer does
+                    eng->execute(R"(LOG = ""; class K { string n = "k"; K() {} K(const K& o) { n = o.n + "'"; LOG = LOG + "copy"; } })");
+                    got += "|" + eng->execute("function g() -> string { K a; K b = a; return b.n; } g() + LOG;").as_string();
+                    eng->execute(R"(LOG = ""; class K { string n = "k"; K() {} })");
+                    got += "|" + eng->execute("g() + LOG;").as_string();
                 } catch (const std::exception& e) {
                     got = std::string("threw: ") + e.what();
                 }
-                check_eq(std::string("cnewnew"), got, variant == 0 ? "default engine" : "proofs and passes off");
+                check_eq(std::string("cnewnew|k'copy|k"), got, variant == 0 ? "default engine" : "proofs and passes off");
             }
         });
 

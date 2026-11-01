@@ -2980,7 +2980,7 @@ inline checked_result<script_value> class_instance::enforce_field_write(uint64_t
     return detail::declared_slot_write(class_def_->get_field_declared_type(id), [&] { return find_field_value(id); }, std::move(value), owner_, id, class_def_, false);
 }
 
-inline std::optional<checked_result<void>> class_instance::assign_field_in_place(uint64_t id, const script_value& source) const {
+inline std::optional<checked_result<void>> class_instance::assign_field_in_place(uint64_t id, const script_value& source, script_value* consumable) const {
     if (!class_def_) { return std::nullopt; }
     const type_info_ptr declared = class_def_->get_field_declared_type(id);
     if (!declared || declared->base_type == script_value_type::jai_any_type) {
@@ -2990,7 +2990,7 @@ inline std::optional<checked_result<void>> class_instance::assign_field_in_place
     if (declared->base_type != script_value_type::jai_object_type || declared->type_name.empty()) { return std::nullopt; }
     const script_value* current = find_field_value(id);
     if (!current) { return std::nullopt; }
-    return detail::user_assign_operator(*current, source, owner_, declared.get());
+    return detail::user_assign_operator(*current, source, owner_, declared.get(), nullptr, consumable);
 }
 
 inline bool detail::field_slot_holds_object(class_instance* inst, uint32_t slot) {
@@ -2999,8 +2999,8 @@ inline bool detail::field_slot_holds_object(class_instance* inst, uint32_t slot)
 }
 
 template <class Copy>
-inline checked_result<script_value> class_instance::field_store(uint64_t id, const script_value& source, Copy&& copy) const {
-    if (auto in_place = assign_field_in_place(id, source)) {
+inline checked_result<script_value> class_instance::field_store(uint64_t id, const script_value& source, Copy&& copy, script_value* consumable) const {
+    if (auto in_place = assign_field_in_place(id, source, consumable)) {
         if (!*in_place) { return in_place->error_value(); }
         const script_value* kept = find_field_value(id);
         return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
@@ -3009,8 +3009,9 @@ inline checked_result<script_value> class_instance::field_store(uint64_t id, con
 }
 
 template <class Copy>
-inline checked_result<script_value> class_instance::field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy) const {
-    if (!class_def_) { return field_store(id, source, copy); }
+inline checked_result<script_value> class_instance::field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy,
+                                                                     script_value* consumable) const {
+    if (!class_def_) { return field_store(id, source, copy, consumable); }
     const type_info_ptr declared = class_def_->field_declared_type_at(slot, id);
     script_value* current = const_cast<class_instance*>(this)->field_slot_value(slot);
     if (!declared || declared->base_type == script_value_type::jai_any_type) {
@@ -3022,7 +3023,7 @@ inline checked_result<script_value> class_instance::field_store_at(uint32_t slot
             }
         }
     } else if (declared->base_type == script_value_type::jai_object_type && !declared->type_name.empty() && current) {
-        if (auto in_place = detail::user_assign_operator(*current, source, owner_, declared.get())) {
+        if (auto in_place = detail::user_assign_operator(*current, source, owner_, declared.get(), nullptr, consumable)) {
             if (!*in_place) { return in_place->error_value(); }
             const script_value* kept = const_cast<class_instance*>(this)->field_slot_value(slot);   // the operator may have run code that moved the fields
             return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);

@@ -85,19 +85,31 @@ namespace jai::detail {
     // ONE store kernel (clone_for_assignment: values deep-copy, shared_ptr handles share,
     // scalars/strings are copies already); an identifier copies too unless it names the
     // callee's OWN slot, whose payload moves out of the dying frame instead (NRVO /
-    // implicit move). A reference result (element read, ref-returning call) copies its
-    // target the same way. `-> T&` returns and the top-level program's `return` never
-    // enter here. Both backends run exactly these functions.
+    // implicit move). A member read off a call's result (`make().m`, C++'s xvalue) moves when
+    // nothing else holds the value it read (the temporary died with the read) and copies when
+    // something does (a handle's object other handles keep). A reference result (element read,
+    // ref-returning call) copies its target the same way. `-> T&` returns and the top-level
+    // program's `return` never enter here. Both backends run exactly these functions.
     inline constexpr uint8_t return_operand_unclassified = 0;
     inline constexpr uint8_t return_operand_temporary = 1;
     inline constexpr uint8_t return_operand_ident = 2;
     inline constexpr uint8_t return_operand_lvalue = 3;
+    inline constexpr uint8_t return_operand_temporary_member = 4;
+
+    inline bool member_of_call_result(const expression* e) noexcept {
+        while (e && e->get_type() == node_type::member_expr) {
+            const auto* m = static_cast<const member_expr*>(e);
+            if (m->is_static) return false;
+            e = m->object.get();
+        }
+        return e && e->get_type() == node_type::call_expr;
+    }
 
     inline uint8_t classify_return_operand(const expression* e) noexcept {
         if (!e) return return_operand_temporary;
         switch (e->get_type()) {
             case node_type::identifier_expr: return return_operand_ident;
-            case node_type::member_expr:
+            case node_type::member_expr: return member_of_call_result(e) ? return_operand_temporary_member : return_operand_lvalue;
             case node_type::assignment_expr: return return_operand_lvalue;
             case node_type::binary_expr: {
                 const auto* b = static_cast<const binary_expr*>(e);
@@ -143,6 +155,12 @@ namespace jai::detail {
 
     // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves
     // out: the body resumes and still owns its locals, so a named local copies like any lvalue
+    // A by-value return of this operand class copies the value it read
+    inline bool return_operand_copies(uint8_t operand_class, const script_value& v) noexcept {
+        if (operand_class == return_operand_temporary_member) { return !uniquely_held(v); }
+        return operand_class != return_operand_temporary;
+    }
+
     inline bool yield_operand_is_lvalue(const expression* e) noexcept {
         return classify_return_operand(e) != return_operand_temporary;
     }

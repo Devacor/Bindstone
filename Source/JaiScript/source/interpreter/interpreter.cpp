@@ -1574,7 +1574,8 @@ checked_result<script_value> interpreter::assign_math_component(script_value& ba
         detail::caller_frame_view{call_stack_.empty() ? nullptr : &call_stack_.back()}, environment_.get(), engine_, string_symbolizer_);
 }
 
-checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value) {
+checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value,
+                                                      script_value* consumable) {
     // Worker direct-field store (parallel_for v1): the setter probe below COPIES a
     // shared method value (cross-worker count race); a backing field's enforce+set is
     // exactly what the auto-setter does, on exclusively-owned instance storage. Any
@@ -1629,7 +1630,7 @@ checked_result<void> interpreter::assign_member_value(const script_value& object
     } else if (target.has_field(member_id)) {
         // Direct field assignment (deep copy for value types, share for shared_ptr);
         // typed fields enforce like locals
-        auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); });
+        auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); }, consumable);
         if (!enforced) {
             return enforced.error_value();
         }
@@ -2795,7 +2796,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
                                         }
                                         instance->set_field_unchecked(identifier->symbol_id, enforced.value());
                                     } else {
-                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return std::move(value); });
+                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return std::move(value); }, &value);
                                         if (!enforced) {
                                             return enforced.error_value();
                                         }
@@ -2942,7 +2943,7 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             }
             if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
 
-            JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value));
+            JAISCRIPT_TRY(assign_member_value(dereferenced, memberExpr, value, &value));   // the store's own operand (KEEP BYTE-PARALLEL with the vm's store_member)
             if (is_unwinding_) {
                 push_value(make_value());
                 return {};
@@ -7724,7 +7725,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
             }
         }
         if (!moved) {
-            detail::materialize_return_value(*out, operand_class != detail::return_operand_temporary);
+            detail::materialize_return_value(*out, detail::return_operand_copies(operand_class, *out));
         }
     }
 

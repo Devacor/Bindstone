@@ -13352,7 +13352,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 		if (op_status st{}; call_host_direct(pc.native_fn(), argc, st)) { return st; }
 	}
 	auto arguments = acquire_arg_vector(argc);
-	arg_vector_return arg_return{this, &arguments};
+	arg_vector_return arg_return{this, &arguments, argc};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
@@ -13854,7 +13854,7 @@ op_status vm_backend::exec_call(frame& f, const vm_instruction& ins) {
 	}
 
 	auto arguments = acquire_arg_vector(argc);
-	arg_vector_return arg_return{this, &arguments};
+	arg_vector_return arg_return{this, &arguments, argc};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
@@ -17937,7 +17937,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 	}
 
 	auto arguments = acquire_arg_vector(argc);
-	arg_vector_return arg_return{this, &arguments};
+	arg_vector_return arg_return{this, &arguments, argc};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		arguments.push_back(std::move(stack_[base + i]));
@@ -18291,7 +18291,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 #endif
 
 	auto args = acquire_arg_vector(argc);
-	arg_vector_return arg_return{this, &args};
+	arg_vector_return arg_return{this, &args, argc};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		args.push_back(std::move(stack_[base + i]));

@@ -58,7 +58,7 @@ Both backends flush at exactly these, so the logs agree:
   of the queue being non-empty.
 - The vm emits `op_flush_temporaries` only after a full-expression that can create a destructor-owning temporary,
   decided when the body compiles: a call whose declared result is a class, container or handle type that may own a
-  destructor (`slot_may_own_destructor`), a constructor call of such a class, or a callee of unknown result type while
+  destructor (`type_info::may_own_instance`), a constructor call of such a class, or a callee of unknown result type while
   any script class declares a destructor. A program without destructor classes compiles no flush and parks nothing.
 - The deleter's check is one load of the deferral depth, reached only by armed instances.
 

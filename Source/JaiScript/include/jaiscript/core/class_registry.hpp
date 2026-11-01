@@ -39,13 +39,4 @@ namespace detail {
     checked_result<void> declare_script_class(class_decl* decl, const class_declaration_host& host);
 }
 
-// A slot declared `t` can own an instance whose destruction runs a script destructor: a by-value class, array or map whose
-// value tree can hold one, a shared_ptr whose pointee's can (it may hold the last handle), a var or auto slot while any
-// script class declares a destructor; never a primitive, a string, a weak_ptr or a reference. Decides which locals a scope
-// exit destroys (both backends).
-bool slot_may_own_destructor(engine& eng, const type_info_ptr& t);
-
-// A script class the engine has declared runs a destructor at some level of its chain (a value whose lifetime the program can observe)
-bool script_class_declares_destructor(engine& eng);
-
 } // namespace jai

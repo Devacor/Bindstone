@@ -400,11 +400,10 @@ namespace jai {
         checked_result<void> visit_range_for_stmt(range_for_stmt* stmt);
         checked_result<void> run_for_stmt(for_stmt* stmt);
         checked_result<void> run_range_for_stmt(range_for_stmt* stmt);
-        // Scope exits destroy the frame-slot locals that may own a script destructor, last declared first (the vm's
-        // op_kill_slot); nothing to do until a destructor-armed instance exists
+        // Scope exits destroy the frame-slot locals that may own an instance, last declared first (the vm's op_kill_slot)
         void kill_scope_slot(const statement* decl);
         template <class Decls> void kill_scope_slots(const Decls& decls) {
-            if (call_stack_.empty() || !engine_->destructors_armed()) { return; }
+            if (call_stack_.empty()) { return; }
             for (auto decl = decls.rbegin(); decl != decls.rend(); ++decl) { kill_scope_slot(decl->get()); }
         }
         checked_result<void> visit_parallel_for_stmt(parallel_for_stmt* stmt);

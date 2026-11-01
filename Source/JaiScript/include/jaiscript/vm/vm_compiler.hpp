@@ -128,7 +128,7 @@ namespace jai::vm {
         bool handle_field_of_member_class(const identifier_expr* ident) const;   // a bare field the method's class declares a shared_ptr
         bool method_frame() const { return member_class_ && chunk_ && chunk_->member_class == member_class_ && !reference_; }   // the callable compiling is a method body of member_class_
         void note_this_field(size_t ip, const identifier_expr* ident);
-        // Scope exits destroy the frame-slot locals that may own a script destructor (C++ lifetimes): one scope per block,
+        // Scope exits destroy the frame-slot locals that may own an instance (C++ lifetimes): one scope per block,
         // case body, for initializer and range-for iteration, its slots killed in reverse at its close and by the jumps that
         // leave it; a catch entry kills what its try block declared
         std::vector<std::vector<uint32_t>> kill_scopes_;
@@ -137,9 +137,9 @@ namespace jai::vm {
         void note_kill_slot(uint32_t slot);
         void note_kill_decl(const statement* decl);
         void close_kill_scope();
+        void emit_scope_kill(uint32_t slot);
         void emit_kills_to(size_t depth);
         void push_region(region_kind kind);
-        bool graft_may_destroy(const function_decl* fn) const;
         bool typed_lowering_ = true;
         bool ir_listing_ = false;
         bool ir_passes_ = true;
@@ -211,8 +211,6 @@ namespace jai::vm {
         bool lift_operand_shape(const expression* e);
         bool lift_temp_only(const expression* e);
         bool lift_partners_ok(const binary_expr* b);
-        bool lift_left_snapshot_destructs(const binary_expr* b);
-        bool hoist_left_snapshot(const binary_expr* b, bool rsub);
         int lift_fusible_nodes(const expression* e);
         bool binary_lands_fused(binary_expr* b);
         bool numeric_value_binary(expression* e);
@@ -235,16 +233,30 @@ namespace jai::vm {
         size_t temp_high_ = 0;
         bool temps_active_ = false;
         bool program_region_ = false;   // compiling a program statement whose block-scoped declarations hold slots (compile_program)
-        // a class of the program declares a script destructor: a compiler temp then never takes a value whose declared type may own one,
-        // and one an untyped value landed in dies at the end of its statement or condition
-        bool destructor_values_ = false;
-        static constexpr uint8_t destruct_never = 0, destruct_unknown = 1, destruct_may = 2;
-        uint8_t destruct_class(const expression* e);
-        bool value_may_destruct(const expression* e);
-        uint32_t object_temp_landed(const vm_instruction& ins);
-        void release_object_temps(size_t from_ip, size_t floor);
-        bool classes_run_destructors() const;
+        // A compiler temp gives up what it holds once its consumer has read it, unless its value is proven to own no instance
+        struct temp_release {
+            size_t stmt_ip = 0;                       // the statement compiling begins here: its temps' landings are found from here
+            std::vector<uint32_t> pending;            // temps whose consumer ran: killed ahead of the next instruction (a peephole may still fold the consumer)
+            std::unordered_set<size_t> owning_nothing;    // landings whose value the producer proved owns no instance
+            std::unordered_map<uint32_t, const ast_node*> kill_decls;   // a scope-killed slot's declaration
+            std::vector<size_t>* landing_jumps = nullptr;   // an if's, a while's or a for's false jumps: a leaf jumping there kills its temps where the statement lands them
+            std::vector<uint32_t> landing_kills;
+        };
+        temp_release release_;
+        void note_landing(const expression* e);
+        void note_operands_own_nothing(const fused_binary_proto& p, const binary_expr* b);
         const type_info* declared_type_of(const expression* e);   // a frame slot's or a bare field's declared type (null: unknown)
+        bool value_owns_nothing(const expression* e);
+        uint32_t temp_landed(size_t ip, bool& owns);
+        std::vector<uint32_t> take_owning_temps(size_t from_ip, size_t floor);
+        void free_temps(size_t mark);
+        void drop_relanded_kill();
+        void flush_kills();
+        void release_temps(size_t from_ip, size_t floor);
+        void kill_temps(const std::vector<uint32_t>& temps);
+        void kill_on_fallthrough(const std::vector<uint32_t>& owned);
+        void compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense);
+        std::vector<uint32_t> compile_landed_condition(const std::function<void()>& compile, std::vector<size_t>& false_jumps, size_t start, size_t cond_mark);
         uint32_t temp_symbol_index_ = k_invalid_u32;   // shared "\x01tmp" symbols entry
         uint32_t temp_symbol_index();
         // Tail-position hint for `return f(args)` with clean region exits: consumed by

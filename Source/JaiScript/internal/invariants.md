@@ -68,9 +68,10 @@ buffer. The rules that keep this sound:
   `truncate` destroys top down, so a popped frame's locals die last declared first and its parameters
   last (C++ order; the interpreter's `call_frame::locals` destroys the same way); a scope exit's `op_kill_slot` and
   the interpreter's `kill_scope_slot` move the value out of its slot before it dies, so a destructor that re-enters
-  finds the slot already null. Which slots a scope exit kills is decided when the vm compiles the body
-  (`slot_may_own_destructor`): a destructor a hot reload adds to a class reaches the block exits of functions compiled
-  after it, and frame teardown destroys the rest at the function's end.
+  finds the slot already null. A scope exit kills every slot whose declared type may own an instance
+  (`type_info::may_own_instance`: not a scalar, a string, a math vector, a weak_ptr or a reference), whether or not any
+  class declares a destructor, and a vm compiler temp gives up such a value once its consumer has read it
+  (`vm_compiler::free_temps`, a condition's on both edges): no lifetime depends on which classes exist when a body compiles.
 - `storage` assignment puts the new payload in place first and releases the old one last, so a
   destructor that stores to the slot being assigned keeps its store (C++ `shared_ptr` order) and one
   that moves the buffer finds the slot already written.

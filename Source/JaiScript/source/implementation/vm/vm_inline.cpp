@@ -8,8 +8,6 @@
 #include <jaiscript/detail/const_rules.hpp>
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
-#include <jaiscript/core/class_registry.hpp>
-#include <functional>
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
@@ -940,43 +938,6 @@ script_value_type spill_kind(const expression* e) {
 // clone takes, every by-value parameter a scalar the checker proved or a `var` taking a literal or a value of a scalar kind, every
 // reference parameter a `var&` bound to a plain identifier or an element lvalue, an untyped result one scalar kind at the site. frame:
 // the declared types of the slots the arguments are read from, when the call is a body's (null: the caller's frame)
-bool vm_compiler::graft_may_destroy(const function_decl* fn) const {
-	if (!engine_) { return false; }
-	engine& eng = *const_cast<engine*>(engine_);
-	// a program statement compiles before the program's own classes are declared: any type but a scalar may own one there
-	auto may_own = [&](const type_info_ptr& t) { return program_region_ ? !scalar_type(t.get()) : slot_may_own_destructor(eng, t); };
-	for (const parameter& p : fn->parameters) {
-		if (!p.is_reference && may_own(p.type)) { return true; }
-	}
-	std::function<bool(const statement*)> walk = [&](const statement* st) -> bool {
-		if (!st) { return false; }
-		switch (st->get_type()) {
-		case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(st)->declarations) { if (walk(d.get())) { return true; } } return false;
-		case node_type::statement_decl: return walk(static_cast<const statement_decl*>(st)->statement.get());
-		case node_type::if_stmt: return walk(static_cast<const if_stmt*>(st)->then_statement.get()) || walk(static_cast<const if_stmt*>(st)->else_statement.get());
-		case node_type::while_stmt: return walk(static_cast<const while_stmt*>(st)->body.get());
-		case node_type::for_stmt: return walk(static_cast<const for_stmt*>(st)->initializer.get()) || walk(static_cast<const for_stmt*>(st)->body.get());
-		case node_type::range_for_stmt: {
-			const auto* rf = static_cast<const range_for_stmt*>(st);
-			return (!rf->is_reference && may_own(rf->element_type)) || walk(rf->body.get());
-		}
-		case node_type::try_stmt: return walk(static_cast<const try_stmt*>(st)->try_block.get()) || walk(static_cast<const try_stmt*>(st)->catch_block.get());
-		case node_type::switch_stmt: {
-			const auto* sw = static_cast<const switch_stmt*>(st);
-			for (const auto& c : sw->cases) { for (const auto& b : c->body) { if (walk(b.get())) { return true; } } }
-			if (sw->default_case) { for (const auto& b : sw->default_case->body) { if (walk(b.get())) { return true; } } }
-			return false;
-		}
-		case node_type::variable_decl: {
-			const auto* v = static_cast<const variable_decl*>(st);
-			return !(v->type && v->type->is_reference()) && may_own(v->type);
-		}
-		default: return false;
-		}
-	};
-	return walk(fn->body.get());
-}
-
 const char* vm_compiler::inline_eligible(const call_expr* call, const function_decl* fn, const std::vector<const type_info*>* frame) const {
 	if (!ir_passes_ || !typed_lowering_ || !callable_.active) return "the middle end is off";
 	if (!fn || !fn->body) return "a callee without a body";
@@ -985,7 +946,6 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 	if (callable_.coroutine_body && body_has_loop(fn->body.get())) return "a loop the coroutine's frame would run without its block";
 	if (fn->body.get() == callable_body_ || std::find(graft_bodies_.begin(), graft_bodies_.end(), fn->body.get()) != graft_bodies_.end()) return "a recursive call";
 	if (call->arguments.size() != fn->parameters.size()) return "an arity the callee does not declare";
-	if (graft_may_destroy(fn)) return "a callee whose parameters or locals may own a script destructor";
 	const type_info* rt = fn->return_type.get();
 	if (!(void_type(rt) || scalar_type(rt) || (!rt && fn->graft_return_kind != 0) || (any_type(rt) && untyped_result_kind(call, fn, frame) != script_value_type::jai_null_type))) return "a result the graft does not declare";   // a string result declares through the general DECL_VAR, which opens the enclosing block
 	if (!void_type(rt) && !terminates(fn->body.get())) return "a body that falls out without a return";   // the result is defined on every path or the callee is not a leaf the graft takes
@@ -1603,6 +1563,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 					const uint32_t slot = static_cast<uint32_t>(temp_next_++);
 					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 					emit(opcode::op_call_temp, slot);
+					note_landing(pc->arguments[staged].get());
 					staged_arguments_[pc].push_back(slot);
 				}
 			}
@@ -1620,6 +1581,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 				landed.slot = static_cast<uint32_t>(temp_next_++);
 				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 				emit(opcode::op_call_temp, landed.slot);
+				note_landing(sub.get());
 			}
 			if (inline_symbol_ == 0) { inline_symbol_ = symbolizer_->intern("\x01inl"); }
 			callable_.declared.insert(inline_symbol_);
@@ -1656,6 +1618,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 				if (b->op.type == token_type::left_bracket && b->left.get() == sub.get() && read_position) { read = b; }
 			}
 			emit(opcode::op_operand_temp, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), static_cast<uint32_t>(tid->slot_index), read ? 2u : 0u);
+			note_landing(sub.get());
 			if (read) { sc.container_guards.emplace_back(read, tid); }
 			else { sc.spills.emplace_back(sub.get(), tid); }
 			continue;
@@ -1753,9 +1716,10 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::graft;
 	loops_.back().scope_depth = scope_depth_;
+	kill_scopes_.emplace_back();   // the callee's frame: its parameters and its body's locals die where the call would return
 	inlining_off_ = was_off;   // a leaf in an argument grafts inside its parameter's declaration, after this guard (the callee before the arguments)
 	for (size_t k = 0; k < params.size(); ++k) {
-		if (params[k]) { compile_variable_decl(params[k]); continue; }
+		if (params[k]) { compile_variable_decl(params[k]); note_kill_decl(params[k].get()); continue; }
 		const size_t i = param_arg[k];
 		compile_expression(call->arguments[i]);
 		emit(opcode::op_call_temp, static_cast<uint32_t>(value_temp[i]->slot_index));
@@ -1764,7 +1728,10 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		compile_expression(d->initializer);
 		callable_.slot_types[static_cast<uint32_t>(d->slot_index)] = d->type.get();
 		emit(opcode::op_decl_var, add_node(d), 1, 1);
+		note_kill_decl(d.get());
+		if (!d->type || d->type->may_own_instance()) { emit(opcode::op_kill_slot, static_cast<uint32_t>(d->graft_temp_slot)); }   // the argument's temp: the parameter holds it now
 	}
+	flush_kills();
 	current_stmt_ = site.call_stmt;
 	chunk_->inline_sites[site_index].begin_ip = static_cast<uint32_t>(chunk_->code.size());   // the arguments are the caller's (a raise there names no callee)
 	graft_bodies_.push_back(fn->body.get());
@@ -1775,7 +1742,11 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		emit(opcode::op_graft_depth, 1, 0, 0);
 	}
 	inlining_off_ = false;   // a leaf the body calls grafts here, a level down, within the tree's node budget
-	for (const auto& d : body) { compile_declaration(d, false); }
+	for (const auto& d : body) {
+		compile_declaration(d, false);
+		note_kill_decl(d.get());
+	}
+	close_kill_scope();
 	inlining_off_ = true;
 	graft_bodies_.pop_back();
 	current_stmt_ = site.call_stmt;   // the fallback and the rest of the statement are the caller's
@@ -1860,6 +1831,7 @@ void vm_compiler::compile_graft_exit() {
 	for (size_t idx = loops_.size(); idx-- > 0;) { if (loops_[idx].kind == region_kind::graft) { target = idx; break; } }
 	if (target == SIZE_MAX) return;
 	emit_region_exits(target);
+	emit_kills_to(loops_[target].kill_depth);
 	auto& region = loops_[target];
 	if (scope_depth_ > region.scope_depth) { emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth)); }
 	region.break_patches.push_back(emit(opcode::op_jump, k_invalid_u32));
@@ -1873,7 +1845,7 @@ bool vm_compiler::try_inline_expression(const expression_ptr& e) {
 	expression_ptr h = hoist_leaf_calls(e, true, changed);
 	if (!changed) return false;
 	if (h && h->get_type() != node_type::identifier_expr && !compile_no_result_expression(h)) { compile_expression(h, true); emit(opcode::op_pop); }   // a bare temp: the result dropped
-	temp_next_ = mark;
+	free_temps(mark);
 	return true;
 }
 
@@ -1891,7 +1863,7 @@ bool vm_compiler::try_inline_variable_decl(const std::shared_ptr<variable_decl>&
 	nd->alias_home = decl->alias_home; nd->alias_index = decl->alias_index;
 	chunk_->nodes.push_back(nd);
 	compile_variable_decl(nd);
-	temp_next_ = mark;
+	free_temps(mark);
 	return true;
 }
 
@@ -1912,7 +1884,7 @@ bool vm_compiler::try_inline_return(const statement_ptr& stmt) {
 	drop_debug_span(nr.get());   // the return's own statement records the stop
 	for (size_t k = from; k < chunk_->stmt_nodes.size(); ++k) { if (chunk_->stmt_nodes[k] == nr.get()) { chunk_->stmt_nodes[k] = stmt.get(); } }   // one statement with its grafts: a block exit or bail at the return holds their results
 	current_stmt_ = stmt.get();
-	temp_next_ = mark;
+	free_temps(mark);
 	return true;
 }
 
@@ -2017,10 +1989,8 @@ void vm_compiler::compile_hoisted_update(const expression_ptr& update) {
 	const size_t mark = temp_next_;
 	bool changed = false;
 	expression_ptr u = hoist_leaf_calls(update, true, changed);
-	const size_t start = chunk_->code.size();
 	if (u && u->get_type() != node_type::identifier_expr && !compile_no_result_expression(u)) { compile_expression(u, true); emit(opcode::op_pop); }
-	release_object_temps(start, mark);
-	temp_next_ = mark;
+	free_temps(mark);
 }
 
 } // namespace jai::vm

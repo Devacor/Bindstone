@@ -154,6 +154,20 @@ namespace jai {
         bool is_function() const { return base_type == script_value_type::jai_function_type; }
         bool is_reference() const { return base_type == script_value_type::jai_reference_type; }
         bool is_weak_ptr() const { return base_type == script_value_type::jai_weak_ptr_type; }
+        // a value of this type can own an instance (its end observable through a destructor, a weak_ptr or a use count): anything
+        // but a scalar, a string, a math vector, a weak_ptr or a reference
+        bool may_own_instance() const {
+            switch (base_type) {
+            case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+            case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+            case script_value_type::jai_reference_type: case script_value_type::jai_weak_ptr_type:
+            case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_ivec2_type:
+            case script_value_type::jai_ivec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
+                return false;
+            default:
+                return true;
+            }
+        }
         // uint8 / int8: the one-byte element types of array<uint8> / array<int8> (a host's uint8_t stays a plain int)
         bool is_byte_element() const {
             return base_type == script_value_type::jai_int_type && native_size == 1 && (type_name == "uint8" || type_name == "int8");

@@ -506,43 +506,6 @@ release_sync::~release_sync() {
 
 } // namespace detail
 
-bool script_class_declares_destructor(engine& eng) {
-    for (const auto& entry : eng.get_class_registry().script_classes_) {
-        if (entry.second && entry.second->chain_declares_destructor(eng)) { return true; }
-    }
-    return false;
-}
-
-bool slot_may_own_destructor(engine& eng, const type_info_ptr& t) {
-    bool any = false;
-    for (const auto& entry : eng.get_class_registry().script_classes_) {
-        if (entry.second && entry.second->value_tree_runs_destructor()) { any = true; break; }
-    }
-    if (!any) { return false; }
-    if (!t) { return true; }
-    switch (t->base_type) {
-    case script_value_type::jai_any_type: return true;
-    case script_value_type::jai_reference_type: case script_value_type::jai_weak_ptr_type: return false;
-    case script_value_type::jai_shared_ptr_type: {
-        const type_info_ptr pointee = t->element_type();
-        if (!pointee) { return true; }
-        if (pointee->base_type != script_value_type::jai_object_type || pointee->type_name.empty()) { return true; }
-        auto cls = eng.get_class_registry().find_script_class(std::string(pointee->type_name));
-        return cls && cls->value_tree_runs_destructor();
-    }
-    case script_value_type::jai_object_type: case script_value_type::jai_array_type: case script_value_type::jai_map_type: {
-        for (const auto& entry : eng.get_class_registry().script_classes_) {
-            if (entry.second) {
-                std::vector<const class_definition*> in_progress;
-                return entry.second->type_tree_runs_destructor(t, in_progress);
-            }
-        }
-        return false;
-    }
-    default: return false;
-    }
-}
-
 bool class_definition::value_tree_runs_destructor() const {
     const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
     if (destructor_tree_epoch_ == epoch && engine_) { return destructor_tree_cached_; }

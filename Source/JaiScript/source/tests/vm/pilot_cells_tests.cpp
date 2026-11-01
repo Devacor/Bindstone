@@ -4221,10 +4221,10 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(vm, got, "counted loops entered at their prep under an injected miss at every " + std::to_string(every));
 			}
 		});
-		test("a_head_entry_refusal_leaves_the_loop_to_its_back_edge", [this]() {
+		test("a_body_local_dead_at_every_entry_leaves_the_loop_general", [this]() {
 			// a member site on a class local the body declares (a boundary statement): at the CFOR_PREP the local holds no instance, so the
-			// head entry refuses; the first iteration assigns it and the back edge enters, once per call (a head refusal does not refuse the
-			// loop for the call). Both backends answer the same
+			// head entry refuses, and the local dies at the end of each iteration (its own boundary), so every back edge refuses too: the
+			// loop runs general and nothing misses. Both backends answer the same
 			const std::string defs =
 				"class TD { int res = 0; int station = 0; }\n"
 				"array<TD> DEFS = [];\n"
@@ -4242,7 +4242,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				const cell_counters c0 = e->cells_counters();
 				e->execute("walk(8);");
 				const cell_counters c1 = e->cells_counters();
-				check_eq(uint64_t{1}, c1.entries - c0.entries, "call " + std::to_string(k) + ": the back edge enters once");
+				check_eq(uint64_t{0}, c1.entries - c0.entries, "call " + std::to_string(k) + ": no entry finds the local alive");
 				check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
 			}
 		});

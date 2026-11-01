@@ -1341,6 +1341,23 @@ public:
             )"}, "call:true body:true elem:true loop:true ");
         });
 
+        test("with_no_destructor_a_read_an_argument_or_an_arm_consumes_dies_before_the_next_runs", [this]() {
+            expect_outcome({std::string(k_observed) + R"(
+                function take(bool a, bool b) -> void { }
+                function clear_check(shared_ptr<Box> b, weak_ptr<P> w) -> bool { b.t = null; note("in:" + to_string(w.expired())); return true; }
+                function f() -> void {
+                    shared_ptr<Box> b = new Box();
+                    b.t = new P(); weak_ptr<P> w = b.t;
+                    take(b.t == null, clear_check(b, w)); note("args:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t;
+                    shared_ptr<P> c = true ? b.t : null; c = null; b.t = null; note("arm:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t;
+                    switch (b.t.v) { case 3: b.t = null; note("case:" + to_string(w.expired())); break; default: break; }
+                }
+                f(); OUT;
+            )"}, "in:true args:true arm:true case:true ");
+        });
+
         test("with_no_destructor_a_callee_s_parameters_and_locals_die_when_it_returns", [this]() {
             expect_outcome({std::string(k_observed) + R"(
                 function g(shared_ptr<P> p) -> int { return p.v + 1; }

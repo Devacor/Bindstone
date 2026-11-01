@@ -158,6 +158,11 @@ namespace jai::detail {
         }
     }
 
+    // A conversion's result that reads nothing of its source (a converting constructor's new object, held nowhere else)
+    inline bool converted_temporary(const script_value& converted, const script_value& source) {
+        return !converted.is_reference() && uniquely_held(converted) && !same_heavy_node(converted, source.deref());
+    }
+
     // The dying frame slot behind `return <ident>;` when it carries the returned heavy node
     // itself (unboxed) or through a cell nobody else holds (a finished ref-param bind): the
     // payload to release so the returned copy becomes a move. Null = copy (a global, a

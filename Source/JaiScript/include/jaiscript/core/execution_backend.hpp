@@ -369,6 +369,9 @@ public:
     // A host calling a script function while no script runs: the deadline arms from the current budget and the entry's
     // limits reset, as at a top-level execute or resume
     virtual void begin_host_call() = 0;
+    // The argument list a call owns from here (a prvalue in it binds as its parameter, as a call site's does); returns the
+    // previous owner for the caller to restore
+    virtual std::vector<script_value>* exchange_owned_arguments(std::vector<script_value>* args) = 0;
 
     // Coroutine resume
     virtual checked_result<script_value> resume_coroutine(coroutine_handle& handle) = 0;

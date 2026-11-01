@@ -315,6 +315,11 @@ namespace jai::vm {
         script_value get_variable(const std::string& name) const override;
         void push_external_call_scope() override;
         void begin_host_call() override;
+        std::vector<script_value>* exchange_owned_arguments(std::vector<script_value>* args) override {
+            auto* previous = owned_args_;
+            owned_args_ = args;
+            return previous;
+        }
         void pop_external_call_scope() override;
         checked_result<script_value> host_reference_argument(const std::vector<script_value>& args, size_t index, size_t offset,
                                                              host_slot& slot) override;
@@ -1210,8 +1215,10 @@ namespace jai::vm {
             size_t pending_size = 0;
             int call_depth = 0;                    // the depth at the try (no graft encloses a try): the handler restores it
             std::shared_ptr<environment> entry_env;
+            std::shared_ptr<caught_error_scope> caught_scope;   // the handler's bound error: its thrown value dies with the record
         };
         std::vector<try_record> try_records_;
+        void release_catch_variable(frame& f, const try_record& rec);
 
         struct iter_state {
             std::optional<script_value> container;
@@ -1726,7 +1733,8 @@ namespace jai::vm {
         template <class NameOf> checked_result<script_value> enforce_type_compatibility_named(script_value value, type_info_ptr target_type, NameOf&& name_of,
                                                                                               detail::slot_kind kind, std::string_view owner);
         checked_result<script_value> try_convert_for_parameter(const script_value& arg, type_info_ptr target_type,
-                                                               const detail::slot_site& site = detail::slot_site{});
+                                                               const detail::slot_site& site = detail::slot_site{},
+                                                               script_value* consumable = nullptr);
         checked_result<script_value> evaluate_arithmetic(const script_value& left_in, token_type op, const script_value& right_in, int compound = -1);
 
         checked_result<script_value> binary_general(token_type op, const script_value& left, const script_value& right);

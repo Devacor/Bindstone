@@ -244,6 +244,7 @@ namespace jai::detail {
         if (ri == script_value::TYPEID_CPP_BOUND) { v = v.detached_for_store(); return; }
         if (ri != script_value::TYPEID_OBJECT && ri != script_value::TYPEID_ARRAY && ri != script_value::TYPEID_MAP) return;
         if (v.get_type_info() && v.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) return;
+        if (uniquely_held(v)) return;   // a temporary nothing else reaches: no later code can write it, and it stays its parameter
         try { v = v.clone(); } catch (const std::exception&) {}   // a value that refuses the copy (nocopy) raises at the binding, as it always has
     }
 
@@ -336,7 +337,7 @@ namespace jai::detail {
     template<typename At>
     inline bool later_capture_candidate(size_t from, size_t argc, At&& at) {
         for (size_t j = from; j < argc; ++j) {
-            if (capture_candidate(at(j), transient_read_marker::arg_capture_full)) return true;
+            if (capture_candidate(at(j), transient_read_marker::arg_capture_full) && !uniquely_held(at(j))) return true;
         }
         return false;
     }

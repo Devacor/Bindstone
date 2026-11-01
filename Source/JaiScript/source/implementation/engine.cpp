@@ -914,6 +914,13 @@ struct engine::implementation {
         script_value value;
     };
     std::unordered_map<const void*, caught_error> caught_errors_;
+    struct program_scope_birth {
+        environment* scope = nullptr;   // a variable's cell: its scope and slot; null for a class static
+        size_t slot = 0;
+        class_definition* cls = nullptr;
+        uint64_t static_id = 0;
+    };
+    std::vector<program_scope_birth> program_scope_births_;
     size_t caught_errors_sweep_at_ = 32;   // twice the live count after a sweep: a catch per level of a deep recursion sweeps O(1) amortized
     struct resolution_entry {
         std::vector<std::string> misses;   // the earlier rungs' candidates, which held no file
@@ -2428,6 +2435,48 @@ std::weak_ptr<const void> engine_lifetime_token(engine* a_engine) {
     return a_engine ? a_engine->lifetime_token() : std::weak_ptr<const void>();
 }
 
+void engine::note_program_scope_cell(environment* scope, size_t slot) {
+    if (!impl || impl->tearing_down || parallel_region_active_ || (scope != impl->global_environment_.get() && !scope->get_parent())) { return; }
+    impl->program_scope_births_.push_back({scope, slot, nullptr, 0});
+}
+
+void engine::note_static_field(class_definition* cls, uint64_t id) {
+    if (!impl || impl->tearing_down || parallel_region_active_) { return; }
+    impl->program_scope_births_.push_back({nullptr, 0, cls, id});
+}
+
+// Program-scope variables, namespace variables and class statics die in reverse construction order (C++ statics at exit); a
+// scope or class gone since (a replaced class) is skipped, and whatever no birth names dies after, the last defined first
+void engine::release_program_scope_in_reverse() noexcept {
+    std::unordered_set<const environment*> scopes;
+    std::unordered_set<const class_definition*> classes;
+    try {
+        if (impl->global_environment_) { scopes.insert(impl->global_environment_.get()); }
+        for (const auto& [id, ns] : script_namespaces()) {
+            if (ns && ns->scope) { scopes.insert(ns->scope.get()); }
+        }
+        for (const auto& [name, def] : impl->classes) { if (def) { classes.insert(def.get()); } }
+        for (const auto& [name, def] : impl->class_registry_.script_classes_) { if (def) { classes.insert(def.get()); } }
+    } catch (...) {}
+    const std::vector<implementation::program_scope_birth> births = std::move(impl->program_scope_births_);
+    impl->program_scope_births_.clear();
+    for (size_t i = births.size(); i-- > 0;) {
+        const auto& birth = births[i];
+        try {
+            script_value* cell = nullptr;
+            if (birth.scope) {
+                if (scopes.count(birth.scope)) { cell = birth.scope->own_cell(birth.slot); }
+            } else if (classes.count(birth.cls)) {
+                cell = birth.cls->get_static_field_ptr(birth.static_id);
+            }
+            if (cell && environment::dies_at_teardown(*cell)) { script_value dying = std::move(*cell); }
+        } catch (...) {}
+    }
+    for (const environment* scope : scopes) {
+        try { const_cast<environment*>(scope)->release_values_in_reverse(); } catch (...) {}
+    }
+}
+
 // Reset the backend before impl members unwind so callable thunks (destructor deleters,
 // stored function values) firing during teardown see get_execution_backend() == nullptr
 // and fail soft instead of re-entering a half-destroyed backend.
@@ -2449,7 +2498,7 @@ engine::~engine() {
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
         if (impl->backend && destructors_armed_ && impl->global_environment_) {
-            try { impl->global_environment_->release_values_in_reverse(); } catch (...) {}
+            release_program_scope_in_reverse();
         }
         impl->tearing_down = true;
         impl->backend.reset();
@@ -5685,6 +5734,18 @@ script_value engine::make_caught_error(const script_value& thrown_in, bool by_th
     table.erase(&caught.unchecked_as_string());
     table.emplace(&caught.unchecked_as_string(), std::move(info));
     return caught;
+}
+
+void engine::end_caught_error(const script_value& caught) noexcept {
+    try {
+        if (caught.raw_storage_index() != script_value::TYPEID_STRING) { return; }
+        auto& table = impl->caught_errors_;
+        auto it = table.find(&caught.unchecked_as_string());
+        if (it == table.end()) { return; }
+        if (it->second.text.unchecked_string_handle().use_count() > 2) { return; }   // a copy outlives the handler: it keeps the value
+        script_value dying = std::move(it->second.value);
+        table.erase(it);
+    } catch (...) {}
 }
 
 std::optional<script_value> engine::caught_error_member(const script_value& receiver, uint64_t member_id) {

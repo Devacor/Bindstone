@@ -22,6 +22,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <utility>
 #include <string_view>
 #include <span>
 #include <initializer_list>
@@ -1406,6 +1407,9 @@ namespace jai {
         // A member read on a string receiver that is a caught error (nullopt: not one, or not an error member; a thrown
         // object or map answers its own fields)
         std::optional<script_value> caught_error_member(const script_value& receiver, uint64_t member_id);
+        // The handler that bound `caught` is done and its variable let go: the thrown value dies, as C++ destroys the exception
+        // object when its handler exits, unless a copy of the error (a capture, a stored e) still holds it
+        void end_caught_error(const script_value& caught) noexcept;
         
         // Import management
         void reset_imports();
@@ -1483,12 +1487,17 @@ namespace jai {
         const std::vector<load_field>& load_field_order(const class_definition& cls);
         // Queues self.post_load(version) for the outermost load, or runs it now when no load is in progress
         void defer_post_load(const script_value& self, script_int version);
+        // Program-scope storage in the order it came to be (a global's or a namespace variable's cell, a class static): the
+        // engine's teardown releases it in reverse while destructors still run
+        void note_program_scope_cell(environment* scope, size_t slot);
+        void note_static_field(class_definition* cls, uint64_t id);
 
     private:
         friend class held_value;
         void register_held(held_value* held);
         void unregister_held(held_value* held) noexcept;
         void release_held_values() noexcept;
+        void release_program_scope_in_reverse() noexcept;
         // declared ahead of impl: alive through the whole teardown, expired once the engine is gone
         std::shared_ptr<const void> lifetime_ = std::make_shared<char>('\0');
         struct implementation;
@@ -1634,6 +1643,35 @@ namespace jai {
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file,
                                                      bool for_import = false);
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
+
+    // A bound catch variable's handler, ended when this dies (both backends hold one per handler that bound a variable)
+    class caught_error_scope {
+    public:
+        caught_error_scope() = default;
+        caught_error_scope(engine* a_engine, script_value a_caught) : engine_(a_engine), caught_(std::move(a_caught)) {}
+        caught_error_scope(caught_error_scope&& other) noexcept : engine_(std::exchange(other.engine_, nullptr)), caught_(std::move(other.caught_)) {}
+        caught_error_scope& operator=(caught_error_scope&& other) noexcept {
+            if (this != &other) {
+                end();
+                engine_ = std::exchange(other.engine_, nullptr);
+                caught_ = std::move(other.caught_);
+            }
+            return *this;
+        }
+        caught_error_scope(const caught_error_scope&) = delete;
+        caught_error_scope& operator=(const caught_error_scope&) = delete;
+        ~caught_error_scope() { end(); }
+        void end() noexcept {
+            if (engine* eng = std::exchange(engine_, nullptr)) {
+                eng->end_caught_error(*caught_);
+                caught_.reset();
+            }
+        }
+        void dismiss() noexcept { engine_ = nullptr; caught_.reset(); }
+    private:
+        engine* engine_ = nullptr;
+        std::optional<script_value> caught_;
+    };
 
     // typeid(engine) taken where engine is complete; archives compare context requests against it.
     std::type_index engine_context_type_index() noexcept;

@@ -297,12 +297,13 @@ namespace jai {
         void release_values_in_reverse() {
             for (size_t i = local_storage_.size(); i-- > 0;) {
                 script_value& cell = local_storage_[i];
-                const size_t kind = cell.deref().raw_storage_index();
-                if (kind == script_value::TYPEID_OBJECT || kind == script_value::TYPEID_ARRAY || kind == script_value::TYPEID_MAP) {
-                    script_value dying = std::move(cell);
-                }
+                if (dies_at_teardown(cell)) { script_value dying = std::move(cell); }
             }
         }
+        // A program-scope value that may own an instance: an object, an array, a map, a lambda (its captures); a declared
+        // function stays for the destructors that call it
+        static bool dies_at_teardown(const script_value& cell);
+        script_value* own_cell(size_t slot) noexcept { return slot < local_storage_.size() ? &local_storage_[slot] : nullptr; }
 
         // Get parent environment (needed for method_environment handling)
         std::shared_ptr<environment> get_parent() const { return parent_; }

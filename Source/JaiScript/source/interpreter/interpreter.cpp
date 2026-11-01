@@ -3220,7 +3220,15 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             value = script_value::make_cell_reference(std::move(value), engine_);
         }
         if (value.is_reference() && detail::reference_decl_checks_admission(*decl)) [[unlikely]] {
-            if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) { return *rejected; }
+            if (auto rejected = detail::reference_decl_rejection(*decl, value, engine_)) {
+                // a const T& over another type's lvalue binds a T made from it (KEEP BYTE-PARALLEL with the vm's define_ref_decl_value)
+                if (!decl->is_const) { return *rejected; }
+                auto held = detail::const_reference_temporary(*decl, script_value(value.deref()), engine_, [&](script_value v, const type_info_ptr& t) {
+                    return enforce_type_compatibility(std::move(v), t, decl->name, detail::slot_kind::declaration);
+                });
+                if (!held) { return *rejected; }
+                value = std::move(held.value());
+            }
         }
         // `int& r = e`: a reference whose value reaches another binding (or that no slot holds) carries its declared type; a
         // slot-resident one is decided at its stores from the name (identifier_expr::declared_ref)
@@ -3507,7 +3515,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                     }
                     JAISCRIPT_TRY(define_variable(std::move(aliased.value())));
                 } else {
-                    auto part = declared_component_reference(decl);
+                    auto part = declared_component_reference(decl, &result);
                     if (!part) {
                         return part.error_value();
                     }
@@ -3518,7 +3526,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 JAISCRIPT_TRY(define_variable(script_value::make_referent_reference(result, engine_)));
             } else {
                 // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
-                auto part = declared_component_reference(decl);
+                auto part = declared_component_reference(decl, &result);
                 if (!part) {
                     return part.error_value();
                 }
@@ -6862,7 +6870,7 @@ void interpreter::kill_scope_slot(const statement* decl) {
     if (!decl || decl->get_type() != node_type::variable_decl) { return; }
     const auto* v = static_cast<const variable_decl*>(decl);
     if (v->slot_index == SIZE_MAX || v->is_static) { return; }
-    if (v->type && !v->type->may_own_instance()) { return; }
+    if (v->type && !v->type->may_own_instance() && !v->owning_reference()) { return; }
     if (script_value* slot = call_stack_.back().get_local(v->slot_index)) {
         if (slot->is_reference() && !parallel_worker_) [[unlikely]] {   // a cell a lambda shared: checked for a cycle once the slot lets go
             detail::shared_cell_release killed{engine_};
@@ -9216,10 +9224,15 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
     return false;
 }
 
-checked_result<script_value> interpreter::declared_component_reference(variable_decl* decl) {
+checked_result<script_value> interpreter::declared_component_reference(variable_decl* decl, script_value* temporary) {
     auto part = component_reference(decl->initializer.get(), call_stack_.empty() ? nullptr : &call_stack_.back(), environment_);
     if (!part) {
         return part;
+    }
+    if (!part.value().is_reference() && decl->is_const && temporary) {   // KEEP BYTE-PARALLEL with the vm's exec_decl_ref_value
+        return detail::const_reference_temporary(*decl, std::move(*temporary), engine_, [&](script_value v, const type_info_ptr& t) {
+            return enforce_type_compatibility(std::move(v), t, decl->name, detail::slot_kind::declaration);
+        });
     }
     if (!part.value().is_reference()) {
         return checked_result<script_value>(make_error_code(runtime_error_code::invalid_reference),

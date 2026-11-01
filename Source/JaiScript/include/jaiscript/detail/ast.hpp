@@ -824,6 +824,8 @@ namespace jai {
         bool is_inline = false;
         // `const T x = e;` (internal/const.md): set once by its initializer, then only read; in a class body a class-level constant
         bool is_const = false;
+        // A const T& holds the temporary it bound (C++ lifetime extension), so its death may destroy an instance
+        bool owning_reference() const noexcept { return is_const && type && type->base_type == script_value_type::jai_reference_type; }
         mutable const_site const_check;   // T& / var& / shared_ptr<T> bound to a const
         // Declared `auto`: the unit's first proof pass types the slot by its initializer's
         // STATIC type, once - a known type keeps auto (the runtime locks to the value, which has that type), a var

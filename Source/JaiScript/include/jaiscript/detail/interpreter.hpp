@@ -1149,7 +1149,8 @@ namespace jai {
         // `v.x` where a reference binds: a COMPONENT reference (detail/math_component_store.hpp), else a non-reference
         checked_result<script_value> component_reference(const expression* e, call_frame* caller_locals, const std::shared_ptr<environment>& caller_env);
         // A reference declaration's math-component initializer as a COMPONENT reference, else the declaration's non-lvalue error
-        checked_result<script_value> declared_component_reference(variable_decl* decl);
+        // temporary: the initializer's value, which a `const T&` declaration owns when it names no storage
+        checked_result<script_value> declared_component_reference(variable_decl* decl, script_value* temporary = nullptr);
         checked_result<bool> bind_site_reference(const expression* argExpr, call_frame* caller_locals,
                                                  const std::shared_ptr<environment>& caller_env, script_value& out,
                                                  host_slot* slot_out = nullptr, size_t caller_index = 0);

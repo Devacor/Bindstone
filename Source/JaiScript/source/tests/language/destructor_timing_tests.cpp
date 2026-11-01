@@ -74,6 +74,18 @@ public:
                 function f() -> void { Token a = Token("a"); { Token i = Token("i"); Token j = Token("j"); } LOG = LOG + "|"; Token b = Token("b"); }
                 f(); LOG;
             )", "ji|ba");
+            // a const reference holds the temporary it binds and dies as a local, whatever ends its scope
+            expect_log(R"(
+                function mk(string n) -> Token { return Token(n); }
+                function g() -> int {
+                    Token a = Token("a"); const Token& r = mk("r");
+                    { const Token& b = Token("b"); } LOG = LOG + "|";
+                    for (int i = 0; i < 2; i++) { const Token& c = mk(to_string(i)); LOG = LOG + "."; }
+                    Token z = Token("z"); return 1;
+                }
+                function h() -> void { const Token& t = mk("t"); throw "x"; }
+                g(); try { h(); } catch (e) { LOG = LOG + "c"; } LOG;
+            )", "b|.0.1zratc");
         });
 
         test("loop_body_locals_die_each_iteration", [this]() {

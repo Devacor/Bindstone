@@ -1729,13 +1729,16 @@ private:
 				"" + H.next();
 			)", "2");
 		});
-		test("a_reference_to_a_by_value_call_result_is_an_error", [this]() {
+		// a const reference holds the temporary instead (C++ lifetime extension)
+		test("a_reference_to_a_by_value_call_result_binds_only_when_const", [this]() {
 			expect("ref to rvalue", R"(
 				function fv() { return [1]; }
 				string r = "";
 				try { var& p = fv(); r = "bound"; } catch (e) { r = e.starts_with("Cannot take reference of non-lvalue expression") ? "raised" : e; }
-				r;
-			)", "raised", warn_region);
+				const auto& c = fv();
+				const var& v = fv();
+				r + "|" + c.size() + v[0];
+			)", "raised|11", warn_region);
 		});
 	}
 

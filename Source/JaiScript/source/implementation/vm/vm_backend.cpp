@@ -12127,7 +12127,15 @@ static bool element_of_declared_class(const variable_decl& decl, const script_va
 op_status vm_backend::define_ref_decl_value(frame& f, const vm_instruction& ins, const variable_decl* decl, script_value value) {
 	if (ins.c & 2) [[unlikely]] {   // a reference must reference
 		if (!element_of_declared_class(*decl, value)) {
-			if (auto rejected = reference_admission(*decl, value, engine_)) { return raise_from(*rejected); }
+			if (auto rejected = reference_admission(*decl, value, engine_)) {
+				// a const T& over another type's lvalue binds a T made from it (KEEP BYTE-PARALLEL with the interpreter)
+				if (!decl->is_const) { return raise_from(*rejected); }
+				auto held = detail::const_reference_temporary(*decl, script_value(value.deref()), engine_, [&](script_value v, const type_info_ptr& t) {
+					return enforce_type_compatibility(std::move(v), t, decl->name, detail::slot_kind::declaration, {});
+				});
+				if (!held) { return raise_from(*rejected); }
+				value = std::move(held.value());
+			}
 		}
 	}
 	return define_decl_value(f, decl->name_id, decl->slot_index, std::move(value), false, decl);
@@ -12250,6 +12258,14 @@ op_status vm_backend::exec_decl_ref_value(frame& f, const vm_instruction& ins) {
 	// a bound object a host returned by reference (KEEP BYTE-PARALLEL with the interpreter's ref-decl branch)
 	if (result.is_non_owning_object()) {
 		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, script_value::make_referent_reference(result, engine_)));
+	}
+	// `const T& r = make();`: the reference owns the temporary, which lives as long as r (C++ lifetime extension)
+	if (decl->is_const) {
+		auto held = detail::const_reference_temporary(*decl, std::move(result), engine_, [&](script_value v, const type_info_ptr& t) {
+			return enforce_type_compatibility(std::move(v), t, decl->name, detail::slot_kind::declaration, {});
+		});
+		if (!held) { return raise_from(held); }
+		return declared_ref_landed(f, ins, decl, define_ref_decl_value(f, ins, decl, std::move(held.value())));
 	}
 	// KEEP BYTE-PARALLEL with the interpreter's ref-decl branch
 	return raise_(make_error_code(runtime_error_code::invalid_reference),

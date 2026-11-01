@@ -127,7 +127,13 @@ namespace jai::detail {
 			}
 		}
 		if (constructor_takes_references(*ctor)) {
-			captured_out = args;
+			if (host.owns_arguments(args)) {   // the call's own list moves: a prvalue in it stays its parameter
+				captured_out.clear();
+				captured_out.reserve(args.size());
+				for (const script_value& arg : args) { captured_out.push_back(std::move(const_cast<script_value&>(arg))); }
+			} else {
+				captured_out = args;
+			}
 			if (auto bound = host.bind_reference_arguments(*ctor, captured_out); !bound) { return bound.error_value(); }
 		}
 		auto instance = cls->create_instance();

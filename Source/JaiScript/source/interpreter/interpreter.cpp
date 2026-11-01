@@ -8807,12 +8807,14 @@ struct interpreter::construction_lender final : detail::construction_host {
     interpreter& self;
     std::shared_ptr<environment> entry_env;
     const detail::call_site_context* call_ctx = nullptr;   // the constructor call's site, while it names these arguments
+    const std::vector<script_value>* call_args;
 
     explicit construction_lender(interpreter& a_self, const std::vector<script_value>* a_callArgs = nullptr) :
         detail::construction_host(a_self.engine_, a_self.string_symbolizer_, a_self.env_symbolizer_, a_self.current_call_depth_,
                                   a_self.limits_->interpreter_call_depth_limit, a_self.is_unwinding_),
         self(a_self),
-        entry_env(a_self.environment_) {
+        entry_env(a_self.environment_),
+        call_args(a_callArgs) {
         if (a_callArgs && a_self.pending_call_ctx_ && a_self.pending_call_ctx_->values == a_callArgs && a_self.pending_call_ctx_->arg_exprs) {
             call_ctx = a_self.pending_call_ctx_;
         }
@@ -8862,6 +8864,12 @@ struct interpreter::construction_lender final : detail::construction_host {
         script_defined_function body(ctor->name, shared_parameters_for(ctor.get()), ctor->return_type, ctor->body, nullptr, ctor->local_count);
         body.unit = ctor->unit;
         method_call_override method{&definition_env, &this_value, level.get()};
+        struct owned_restore {
+            interpreter& self;
+            const std::vector<script_value>* saved;
+            ~owned_restore() { self.owned_args_ = saved; }
+        } owned{self, self.owned_args_};
+        if (&args != call_args) { self.owned_args_ = &args; }   // a list the construction built, not the caller's
         auto ran = self.call_function(body, args, &method);
         if (!ran) { return ran.error_value(); }
         return {};
@@ -8881,6 +8889,7 @@ struct interpreter::construction_lender final : detail::construction_host {
         return self.evaluate_field_initializers(instance, cls, scope.members ? scope.members : scope.env, skip_parent_recursion, aggregate);
     }
 
+    bool owns_arguments(const std::vector<script_value>&) const { return call_ctx != nullptr; }
     checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
         if (!call_ctx) { return {}; }
         call_frame* caller_locals = self.call_stack_.empty() ? nullptr : &self.call_stack_.back();
@@ -9826,8 +9835,8 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             };
             // A prvalue argument (the call site's only holder of its aggregate) is the parameter itself: C++17 guaranteed
             // elision (KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
-            const bool elide = call_ctx && call_ctx->values == &args && argv == &args && &arg == &args[i] && !arg.is_reference() &&
-                               detail::uniquely_held(arg);
+            const bool elide = ((call_ctx && call_ctx->values == &args) || owned_args_ == &args) && argv == &args && &arg == &args[i] &&
+                               !arg.is_reference() && detail::uniquely_held(arg);
             auto bind_elided = [&]() {
                 call_stack_[frame_index].set_local(param.slot_index, boxed_param(std::move(const_cast<script_value&>(arg))));
             };
@@ -10555,6 +10564,7 @@ struct interpreter::interpreter_run_state : backend_run_state {
     detail::member_scope_ctx member_scope{};
     const detail::call_site_context* pending_call_ctx = nullptr;
     std::vector<const detail::call_site_context*> external_ctx_stack;
+    const std::vector<script_value>* owned_args = nullptr;
     script_valueStack values;
     std::optional<script_value> return_value;
     bool has_return_value = false;
@@ -10614,6 +10624,7 @@ void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
     swap(pending_instance_env_, s.pending_instance_env);
     swap(member_scope_, s.member_scope);
     swap(pending_call_ctx_, s.pending_call_ctx);
+    swap(owned_args_, s.owned_args);
     swap(external_ctx_stack_, s.external_ctx_stack);
     valueStack_.swap(s.values);
     swap(returnValue_, s.return_value);
@@ -10668,6 +10679,7 @@ void interpreter::reset_run_state(backend_run_state& a_state) {
     s.pending_instance_env.reset();
     s.member_scope = {};
     s.pending_call_ctx = nullptr;
+    s.owned_args = nullptr;
     s.external_ctx_stack.clear();
     s.values.clear();
     s.return_value.reset();

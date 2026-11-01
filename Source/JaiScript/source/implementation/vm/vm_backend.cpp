@@ -1968,12 +1968,6 @@ std::vector<script_value> vm_backend::acquire_arg_vector(size_t reserve) {
 }
 
 void vm_backend::release_arg_vector(std::vector<script_value> vec) {
-	if (switch_to_ && !vec.empty()) [[unlikely]] {
-		// a callee pushed but not yet entered: an argument's destructor runs its own entry, never the callee
-		frame* parked = std::exchange(switch_to_, nullptr);
-		vec.clear();
-		switch_to_ = parked;
-	}
 	if (arg_vector_pool_.size() < 32) {
 		vec.clear();   // drop value refs promptly, keep capacity
 		arg_vector_pool_.push_back(std::move(vec));
@@ -13986,12 +13980,6 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	}
 #endif
 
-	// the arguments were moved off the stack: a prvalue among them is the parameter itself, as the stack's arguments are
-	struct owned_scope {
-		vm_backend* vm; std::vector<script_value>* saved;
-		~owned_scope() { vm->owned_args_ = saved; }
-	} owned{this, owned_args_};
-	owned_args_ = &arguments;
 	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
 		try {
@@ -18302,8 +18290,8 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	const uint64_t prof_new0 = __rdtsc();
 #endif
 
-	std::vector<script_value> args;
-	args.reserve(argc);
+	auto args = acquire_arg_vector(argc);
+	arg_vector_return arg_return{this, &args};
 	const size_t base = stack_.size() - argc;
 	for (size_t i = 0; i < argc; ++i) {
 		args.push_back(std::move(stack_[base + i]));
@@ -19195,6 +19183,7 @@ struct vm_backend::construction_lender final : detail::construction_host {
 		if (!ran) { return ran.error_value(); }
 		return {};
 	}
+	bool owns_arguments(const std::vector<script_value>& args) const { return self.owned_args(args) != nullptr; }
 	checked_result<void> bind_reference_arguments(const function_decl& ctor, std::vector<script_value>& args) override {
 		if (!site) { return {}; }
 		frame* caller_frame = const_cast<frame*>(caller);
@@ -19533,6 +19522,7 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 		return pre;
 	}
 	script_value this_value = std::move(pre.value());
+	owned_args_scope owned{this, captured.empty() ? nullptr : &captured};
 #ifdef JAISCRIPT_VM_PROFILE
 	const uint64_t prof_c4 = __rdtsc();
 #endif
@@ -19557,11 +19547,7 @@ op_status vm_backend::enter_constructor_in_loop(frame& f,
 	std::vector<script_value> captured;
 	auto pre = construct_instance_pre_body(class_def, call_args, matching_ctor, captured, &f, true, site);
 	const std::vector<script_value>& args = captured.empty() ? call_args : captured;
-	struct owned_scope {
-		vm_backend* vm; std::vector<script_value>* saved;
-		~owned_scope() { vm->owned_args_ = saved; }
-	} owned{this, owned_args_};
-	if (!captured.empty()) { owned_args_ = &captured; }
+	owned_args_scope owned{this, captured.empty() ? nullptr : &captured};
 	if (!pre) {
 		return raise_from(pre);
 	}
@@ -22853,7 +22839,18 @@ struct vm_backend::unwind_park {
 	}
 };
 
+// A callee pushed and not yet entered is its dispatcher's to enter: a native entry over it (the destructor of a value released between
+// the push and the switch) runs its own frames and leaves the callee pending
+struct vm_backend::switch_park {
+	vm_backend* self;
+	frame* parked;
+	explicit switch_park(vm_backend* vm) : self(vm), parked(std::exchange(vm->switch_to_, nullptr)) {}
+	~switch_park() { self->switch_to_ = parked; }
+};
+
 checked_result<script_value> vm_backend::execute_callable_from(const script_callable& payload, const std::vector<script_value>& args, size_t first) {
+	std::optional<switch_park> parked_callee;
+	if (switch_to_) [[unlikely]] { parked_callee.emplace(this); }
 	if (first != 0 && (payload.kind != script_callable::kind_type::method || !payload.this_obj() || payload.ast()->is_coroutine)) {
 		return execution_backend::execute_callable_from(payload, args, first);
 	}
@@ -22908,6 +22905,8 @@ checked_result<script_value> vm_backend::execute_callable_from(const script_call
 
 checked_result<script_value> vm_backend::execute_method_from(const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
                                                          const script_value& this_obj, const std::vector<script_value>& args, size_t first) {
+	std::optional<switch_park> parked_callee;
+	if (switch_to_) [[unlikely]] { parked_callee.emplace(this); }
 	if (ast->is_coroutine) { return execution_backend::execute_method_from(dispatch, ast, this_obj, args, first); }
 	detail::release_sync release_first(engine_);
 	std::optional<unwind_park> park;

@@ -595,6 +595,9 @@ namespace jai {
         // variables through it. Save/restored as a single pointer by nested calls.
         const detail::call_site_context* pending_call_ctx_ = nullptr;
         std::vector<const detail::call_site_context*> external_ctx_stack_;
+        // An argument list a construction built (an initializer list's arguments, a T&-taking constructor's captured list): its
+        // prvalues bind as a call site's do (KEEP BYTE-PARALLEL with vm_backend::owned_args_)
+        const std::vector<script_value>* owned_args_ = nullptr;
         
         // Optimized stack for expression evaluation results
         class script_valueStack {

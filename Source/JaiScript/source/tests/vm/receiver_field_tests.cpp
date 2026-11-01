@@ -50,7 +50,7 @@ public:
 	void forge_tests() override {
 		test("member_temps_fold_into_their_consumers", [this]() {
 			// a this-field base and a local base, read by typed and dynamic arithmetic, a compare-jump, a declaration's move and a member
-			// store's value; a store into a this-field base's member is one instruction
+			// store's value; a store into a this-field base's member is one instruction; the untyped call compiles the grafted method on its own
 			const std::string script = R"(
 				class Node { int a = 0; int b = 1; float f = 0.5; var v = 3; shared_ptr<Node> next = null; }
 				class Walker {
@@ -78,6 +78,7 @@ public:
 					shared_ptr<Walker> w = new Walker();
 					w.cur = first;
 					for (int i = 0; i < 50; ++i) { w.step(); }
+					var untyped = w; untyped.step();
 					string out = to_string(w.sum) + "," + to_string(w.fs) + "," + to_string(first.v) + "," + to_string(first.b);
 					prev.next = null;
 					return out;

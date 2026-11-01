@@ -6861,15 +6861,7 @@ void interpreter::kill_scope_slot(const statement* decl) {
     if (!decl || decl->get_type() != node_type::variable_decl) { return; }
     const auto* v = static_cast<const variable_decl*>(decl);
     if (v->slot_index == SIZE_MAX || v->is_static) { return; }
-    if (const type_info* t = v->type.get()) {
-        switch (t->base_type) {
-        case script_value_type::jai_object_type: case script_value_type::jai_array_type: case script_value_type::jai_map_type:
-        case script_value_type::jai_shared_ptr_type: case script_value_type::jai_any_type:
-            break;
-        default:
-            return;   // a primitive, a string, a weak_ptr or a reference owns no instance
-        }
-    }
+    if (v->type && !v->type->may_own_instance()) { return; }
     if (script_value* slot = call_stack_.back().get_local(v->slot_index)) {
         if (slot->is_reference() && !parallel_worker_) [[unlikely]] {   // a cell a lambda shared: checked for a cycle once the slot lets go
             detail::shared_cell_release killed{engine_};
@@ -6884,7 +6876,7 @@ void interpreter::kill_scope_slot(const statement* decl) {
 // The initializer's variables die after the loop (KEEP BYTE-PARALLEL with vm_compiler::compile_for)
 checked_result<void> interpreter::visit_for_stmt(for_stmt* stmt) {
     auto result = run_for_stmt(stmt);
-    if (!hasYieldRequest_ && stmt->initializer && !call_stack_.empty() && engine_->destructors_armed()) { kill_scope_slot(stmt->initializer.get()); }
+    if (!hasYieldRequest_ && stmt->initializer && !call_stack_.empty()) { kill_scope_slot(stmt->initializer.get()); }
     return result;
 }
 
@@ -7137,14 +7129,9 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     if (stmt->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(stmt, stmt->const_check)); }
     auto result = run_range_for_stmt(stmt);
-    if (!hasYieldRequest_ && !stmt->is_reference && stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty() && engine_->destructors_armed()) {
-        const type_info* t = stmt->element_type.get();
-        const bool owns = !t || t->base_type == script_value_type::jai_object_type || t->base_type == script_value_type::jai_array_type ||
-                          t->base_type == script_value_type::jai_map_type || t->base_type == script_value_type::jai_shared_ptr_type ||
-                          t->base_type == script_value_type::jai_any_type;
-        if (owns) {
-            if (script_value* slot = call_stack_.back().get_local(stmt->variable_slot_index)) { script_value dying = std::move(*slot); }
-        }
+    if (!hasYieldRequest_ && !stmt->is_reference && stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty() &&
+        (!stmt->element_type || stmt->element_type->may_own_instance())) {
+        if (script_value* slot = call_stack_.back().get_local(stmt->variable_slot_index)) { script_value dying = std::move(*slot); }
     }
     return result;
 }

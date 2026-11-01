@@ -3513,7 +3513,7 @@ void vm_compiler::fold_member_temps(chunk& c) {
 	}
 	auto member_temp = [&](size_t ip, uint8_t refuse) {   // the first may be a jump's target: the fold stands where it stood
 		const vm_instruction& i = code[ip];
-		return !(held[ip] & refuse) && ((i.op == opcode::op_member_temp && i.c < k_typed_slot_mask) || i.op == opcode::op_member_temp_this);
+		return !(held[ip] & refuse) && ((i.op == opcode::op_member_temp && member_base_slot_of(i.c) < k_typed_slot_mask) || i.op == opcode::op_member_temp_this);
 	};
 	for (size_t ip = 0; ip + 1 < code.size(); ++ip) {
 		if (!member_temp(ip, 1)) continue;
@@ -4690,12 +4690,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (st.c != 2 || (cs2.receiver_slot != k_invalid_u32 && cs2.receiver_slot >= k_typed_slot_mask)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(st.a, kint, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot; op.proto = st.b;
-			} else if (st.op == opcode::op_member_temp && st.c != k_invalid_u32 && st.c < k_typed_slot_mask && st.b < k_typed_slot_mask) {
+			} else if (st.op == opcode::op_member_temp && member_base_slot_of(st.c) < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
 				// base that is an element alias (`for (auto& prt : pool)`, `var& e = list[i]`) is the rebind's dependent, resolved per element
 				use_slot(st.b, 0, true, k_typed_dst_temp, nullptr, ip);
-				op.kind = ir::load; op.a = st.b; op.writes = st.b; op.container = st.c; op.member = st.a;
+				op.kind = ir::load; op.a = st.b; op.writes = st.b; op.container = member_base_slot_of(st.c); op.member = st.a;
 			} else if (st.op == opcode::op_t_load && ip < c.typed_sites.size()) {
 				// load through a site the typed lowering flattened: the fold operands are int values; a scalar decl needs a stamp
 				// (an unstamped decl lands the element's own tag, which a raw cell loses), a compiler value takes the element's kind
@@ -7201,8 +7201,8 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 		const uint32_t at = elem_alias_temp();
 		const uint32_t t = static_cast<uint32_t>(temp_next_++);
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-		emit(opcode::op_call_temp, at);
-		emit(opcode::op_member_temp, add_node(e), t, at);
+		release_.owning_nothing.insert(emit(opcode::op_call_temp, at));   // the member read gives the alias up
+		emit(opcode::op_member_temp, add_node(e), t, at | k_member_base_release);
 		out = fused_operand{};
 		out.slot = t;
 		out.symbol = temp_symbol_index();
@@ -8752,7 +8752,8 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 		const uint32_t t = static_cast<uint32_t>(temp_next_++);
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 		code[n - 1] = vm_instruction{opcode::op_call_temp, at, 0, 0};
-		emit(opcode::op_member_temp, node, t, at);
+		release_.owning_nothing.insert(n - 1);
+		emit(opcode::op_member_temp, node, t, at | k_member_base_release);
 		emit(opcode::op_load, t, temp_symbol_index(), 0);
 		return;
 	}

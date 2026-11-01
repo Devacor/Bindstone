@@ -165,7 +165,7 @@ namespace jai::vm {
         op_math_guard,         // a=call site, b=the alias's temp, c=math_fn: the alias's callee resolves at the callee-first point
                                // ahead of its argument code: the builtin marks the temp float, anything else is the probe's
                                // outcome (a raise, or the callee parked for the real call) and marks it int
-        op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
+        op_member_temp,        // a=nodes index (a member_expr), b=frame slot (a compiler temp), c=the base's frame slot | k_member_base_release: the member read lands in the temp (op_get_member's kernel and texts, the base pushed as its LOAD would have; the value never stays on the stack)
         op_set_member_fused,   // a=nodes index (a member_expr), c=the base's frame slot: op_set_member with the object read from the slot (no LOAD dispatch); the value from the stack, the result landed as op_set_member lands it
         op_call_temp,          // a = frame slot (a compiler temp): the call's result, popped from the stack, lands in it: a call an
                                // expression consumes as an operand (the partner a literal or a private local); the door's temp consumer
@@ -365,6 +365,9 @@ namespace jai::vm {
     inline constexpr uint32_t k_typed_dst_compound = 3;   // `x op= y` on an int-holding slot: in place, int rows only
     inline constexpr uint32_t k_typed_env_bit = 0x40000000u;   // an operand that is an environment value: the bit | its chunk::typed_env_operands index
     inline constexpr uint32_t k_dyn_dst_push = 3;   // an op_d_* arithmetic result pushed onto the operand stack (op_binary_fused's landing)
+
+    inline constexpr uint32_t k_member_base_release = 0x80000000u;   // op_member_temp c: the base is an element's alias temp the read is the last to read
+    inline constexpr uint32_t member_base_slot_of(uint32_t c) { return c & ~k_member_base_release; }
 
     // op_load c flags
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<

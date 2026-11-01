@@ -1429,6 +1429,7 @@ namespace jai::vm {
         void note_boxed_slot(const script_value& storage);
         void kill_shared_cell_slot(script_value& slot);
         void kill_frame_slot(frame& f, uint32_t slot);
+        void kill_frame_slots(frame& f, uint32_t top, uint32_t below);   // op_kill_slot's run: top first, then the `below` slots under it
         JAI_NOINLINE void release_read_temps(frame& f, const fused_binary_proto& p);
         JAI_NOINLINE void release_index_temps(frame& f, const fused_index_proto& p);
         // A native entry frame's cells (shared by a lambda, or a slot boxed on demand), gathered before its window dies

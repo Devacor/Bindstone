@@ -5488,10 +5488,10 @@ private:
 					binding_source = ctype_from_type_info(source->declared);
 				}
 			}
-			const bool init_ok = is_reference_decl
-				? reference_type_compatible(binding_source, entry.type)
-				: assignable(init, entry.type);
-			stamp(decl->reference_admission_proven, is_reference_decl && has_init && init_ok && !binding_source.is_unknown() &&
+			const bool reference_ok = is_reference_decl && reference_type_compatible(binding_source, entry.type);
+			// a const T& binds a temporary T made from what a T declaration takes (C++ lifetime extension)
+			const bool init_ok = is_reference_decl ? reference_ok || (decl->is_const && assignable(init, entry.type)) : assignable(init, entry.type);
+			stamp(decl->reference_admission_proven, is_reference_decl && has_init && reference_ok && !binding_source.is_unknown() &&
 			      !binding_source.tentative && binding_source.kind != ctype::null_k &&
 			      binding_source.kind != ctype::object_k, false);   // a class binding checks at run time (a reload may change the chain)
 			if (has_init && (!entry.dynamic || is_reference_decl) && !init_ok) {

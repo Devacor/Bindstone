@@ -167,6 +167,20 @@ namespace jai::detail {
 		return typed_slot_rejection(value.deref(), *t, slot_site{slot_kind::declaration, decl.name, {}}, eng);
 	}
 
+	// `const T& r = e;` over a temporary: the temporary, converted to T as a declaration of T would convert it, held in a cell only r
+	// holds, so it dies when r does (C++ lifetime extension); convert(value, T) is the backend's declaration conversion
+	template <class Convert>
+	inline checked_result<script_value> const_reference_temporary(const variable_decl& decl, script_value value, engine* eng, Convert&& convert) {
+		const type_info* t = decl.type.get();
+		const type_info* referent = t && t->base_type == script_value_type::jai_reference_type && !t->type_params.empty() ? t->type_params[0].get() : nullptr;
+		if (referent && referent->base_type != script_value_type::jai_any_type && referent->type_name != "auto") {
+			auto converted = convert(std::move(value), t->type_params[0]);
+			if (!converted) { return converted; }
+			value = std::move(converted.value());
+		}
+		return script_value::make_cell_reference(std::move(value), eng);
+	}
+
 	inline bool reference_decl_checks_admission(const variable_decl& decl) {
 		const type_info* t = decl.type.get();
 		if (!t || t->base_type != script_value_type::jai_reference_type || t->type_params.empty()) { return false; }

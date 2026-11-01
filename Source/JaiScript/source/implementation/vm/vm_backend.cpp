@@ -5506,7 +5506,7 @@ static script_value::object_holder* element_object_in_place(const script_value& 
 // a folded member temp's field where it lives, by the member temp's own rows: its base (a frame slot or the frame's this-field), its
 // member_ic row; null = the member temp runs
 const script_value* vm_backend::member_temp_field(frame& f, const vm_instruction& mt, size_t ip) {
-	const script_value* base = mt.op == opcode::op_member_temp_this ? frame_this_field(f, mt.c) : frame_slot(f, mt.c);
+	const script_value* base = mt.op == opcode::op_member_temp_this ? frame_this_field(f, mt.c) : frame_slot(f, member_base_slot_of(mt.c));
 	if (!base) return nullptr;
 	if (script_value::object_holder* in_place = element_object_in_place(*base)) {
 		if (const script_value* cell = site_field_of_holder(*f.code, in_place, ip)) return cell;
@@ -15888,12 +15888,16 @@ op_status vm_backend::local_member_receiver(frame& f, const member_expr* member,
 // A member read of a frame-slot base (`o.x`, `o.p.x`) into a temp: each link borrows its field where it lives (site_field: the
 // prefix at its own member_ic row past the code), and only the final value is copied into the temp. A link the site cannot serve
 // hands the read to the general path from there on: the receiver pushed as its LOAD and GET_MEMBER would have, op_get_member whole
-op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) { return exec_member_temp_at(f, ins, static_cast<size_t>(&ins - f.code->code.data())); }
+op_status vm_backend::exec_member_temp(frame& f, const vm_instruction& ins) {
+	const op_status st = exec_member_temp_at(f, ins, static_cast<size_t>(&ins - f.code->code.data()));
+	if ((ins.c & k_member_base_release) && st != op_status::failed) [[unlikely]] { kill_frame_slot(f, member_base_slot_of(ins.c)); }
+	return st;
+}
 
 JAI_FORCEINLINE op_status vm_backend::exec_member_temp_at(frame& f, const vm_instruction& ins, size_t ip) {
 	auto* member = static_cast<member_expr*>(f.code->nodes[ins.a].get());
 	const bool nested = member->object && member->object->get_type() == node_type::member_expr;
-	const script_value* base = frame_slot(f, ins.c);
+	const script_value* base = frame_slot(f, member_base_slot_of(ins.c));
 	const script_value* receiver = base;
 	script_value prefix_host{std::monostate{}, nullptr};
 	if (receiver && nested) {
@@ -15916,7 +15920,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_member_temp_at(frame& f, const vm_ins
 		stack_.push_back(*receiver);
 	} else if (nested) {
 		script_value prefix = make_null();
-		VM_TRY(local_member_receiver(f, member, ins.c, prefix));
+		VM_TRY(local_member_receiver(f, member, member_base_slot_of(ins.c), prefix));
 		if (is_unwinding_) { frame_slot_set(f, ins.b, make_null()); return {}; }
 		stack_.push_back(std::move(prefix));
 	} else {
@@ -15964,6 +15968,7 @@ JAI_NOINLINE op_status vm_backend::exec_mfold(frame& f, const vm_instruction& in
 	default: break;
 	}
 	const op_status st = fd.first.op == opcode::op_member_temp ? exec_member_temp_at(f, fd.first, f.ip) : exec_member_temp_this_at(f, fd.first, f.ip);
+	if (fd.first.op == opcode::op_member_temp && (fd.first.c & k_member_base_release) && st != op_status::failed) [[unlikely]] { kill_frame_slot(f, member_base_slot_of(fd.first.c)); }
 	if (st != op_status::failed && !is_unwinding_) { ++f.ip; }
 	return st;
 }
@@ -15982,6 +15987,7 @@ JAI_NOINLINE int vm_backend::member_fold_fast(frame& f, const chunk::member_fold
 			return 2;
 		}
 		frame_slot_set(f, mt.b, *cell);
+		if (mt.op == opcode::op_member_temp && (mt.c & k_member_base_release)) [[unlikely]] { kill_frame_slot(f, member_base_slot_of(mt.c)); }
 	}
 	f.ip = at + fd.count;   // the consumer's own rows (its typed site, its cache slots)
 	const vm_instruction& ins = fd.consumer;
@@ -22394,15 +22400,12 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 
 			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
-				if (ins.b | ins.c) [[unlikely]] {
-					kill_frame_slots(f, ins.a, ins.b);
-					if (ins.c && !is_unwinding_) { f.ip = ins.c - 1; JAI_DISPATCH_HERE(); }
-					break;
+				if (ins.b) [[unlikely]] { kill_frame_slots(f, ins.a, ins.b); }
+				else if (script_value* slot = frame_slot(f, ins.a)) {
+					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); }
+					else { script_value dying = std::move(*slot); }   // the destructor may reenter: the slot is null first
 				}
-				if (script_value* slot = frame_slot(f, ins.a)) {
-					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
-					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
-				}
+				if (ins.c && !is_unwinding_) { f.ip = ins.c - 1; JAI_DISPATCH_HERE(); }
 				break;
 
 			case opcode::op_error: {

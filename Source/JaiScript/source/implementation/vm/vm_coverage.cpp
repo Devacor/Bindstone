@@ -630,7 +630,7 @@ void vm_backend::coverage_observe(frame& f, const vm_instruction& ins, coverage_
 	case opcode::op_get_member: recv = ins.b ? slot_at(ins.b - 1) : stack_at(0); break;
 	case opcode::op_get_member_path: if (ins.b < c.member_path_protos.size()) { recv = c.member_path_protos[ins.b].root_slot != k_invalid_u32 ? slot_at(c.member_path_protos[ins.b].root_slot) : stack_at(0); } break;
 	case opcode::op_set_member: case opcode::op_probe_member: recv = stack_at(0); break;
-	case opcode::op_member_temp: case opcode::op_set_member_fused: recv = slot_at(ins.c); break;
+	case opcode::op_member_temp: case opcode::op_set_member_fused: recv = slot_at(member_base_slot_of(ins.c)); break;
 	case opcode::op_set_member_value: if (ins.a < c.member_store_protos.size()) { recv = slot_at(c.member_store_protos[ins.a].base); } break;
 	case opcode::op_member_compound: recv = stack_at(2); break;
 	case opcode::op_call_method: case opcode::op_call_builtin: recv = stack_at(ins.a); break;

@@ -2258,12 +2258,15 @@ namespace jai::vm {
         op_status member_access_value(frame& f, const script_value& raw_object, member_expr* expr, script_value& out,
                                       bool as_callee = false);
         op_status static_member_value(frame& f, member_expr* expr, script_value& out);
-        op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value);
+        // consumable: the store's own operand, which a converting constructor may take as its parameter
+        op_status assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value,
+                                script_value* consumable = nullptr);
         // The field-write landing op_set_member and op_member_compound share: the proven
         // field write, then the write-side site IC (member_ic at ins_index). nullopt = the
         // general assign_member ladder runs; a value is the landed store's status.
         std::optional<op_status> member_field_write_fast(frame& f, size_t ins_index, member_expr* member,
-                                                         const script_value& dereferenced, const script_value& value);
+                                                         const script_value& dereferenced, const script_value& value,
+                                                         script_value* consumable = nullptr);
         op_status store_static_target(frame& f, member_expr* member, const script_value& result, script_value* stored_out = nullptr);
         // ns::x = v / op= / ++ on a namespace variable's cell, and a namespace's variable declaration run in its scope
         // (detail/namespace_scope.hpp)

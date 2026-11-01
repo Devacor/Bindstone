@@ -1100,7 +1100,8 @@ namespace jai {
         // Writes 'value' to a member of 'objectValue' (deref'd, object-typed): C++ property
         // setters (including on cpp_bound receivers) take precedence over instance fields.
         // Raises a script exception (is_unwinding_) for non-existent members.
-        checked_result<void> assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value);
+        checked_result<void> assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value,
+                                                 script_value* consumable = nullptr);
         // `base.x = v` on a math value: the store lands in the storage the base names (detail/math_component_store.hpp)
         checked_result<script_value> assign_math_component(script_value& base, member_expr* memberExpr, const script_value& value);
         // The member read on an already-evaluated receiver (visit_member_expr's tail; the

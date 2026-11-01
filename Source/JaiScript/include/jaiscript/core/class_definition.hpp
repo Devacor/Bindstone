@@ -144,11 +144,13 @@ public:
     // user operator=; the field keeps its object, which is the result); otherwise copy() makes the stored value and the
     // field's conversion runs (enforce_field_write). The source is the store's own operand, never a copy of it, so an lvalue
     // source runs no extra destructor
-    inline std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source) const;
-    template <class Copy> checked_result<script_value> field_store(uint64_t id, const script_value& source, Copy&& copy) const;
+    // consumable: the store's own operand, which a converting constructor may take as its parameter
+    inline std::optional<checked_result<void>> assign_field_in_place(uint64_t id, const script_value& source, script_value* consumable = nullptr) const;
+    template <class Copy> checked_result<script_value> field_store(uint64_t id, const script_value& source, Copy&& copy, script_value* consumable = nullptr) const;
     // field_store for a field whose slot the caller holds (a site cache under the class's epoch): the same steps by the slot, no lookup
     // of the id; id names the field only in a conversion's error text
-    template <class Copy> checked_result<script_value> field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy) const;
+    template <class Copy> checked_result<script_value> field_store_at(uint32_t slot, uint64_t id, const script_value& source, Copy&& copy,
+                                                                      script_value* consumable = nullptr) const;
 
     inline const script_value& get_field(uint64_t id, bool throw_if_missing = true) const;
     inline script_value& get_field(uint64_t id, bool throw_if_missing = true);

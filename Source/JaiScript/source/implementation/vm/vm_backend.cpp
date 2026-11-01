@@ -3462,7 +3462,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 							}
 							instance->set_field_unchecked(sym, enforced.value());
 						} else {
-							auto enforced = instance->field_store(sym, value, [&] { return std::move(value); });
+							auto enforced = instance->field_store(sym, value, [&] { return std::move(value); }, &value);
 							if (!enforced) {
 								return raise_from(enforced);
 							}
@@ -16300,7 +16300,8 @@ void vm_backend::prefold_parallel_reads(uint64_t fold_epoch) {
 	}
 }
 
-op_status vm_backend::assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value) {
+op_status vm_backend::assign_member(frame& f, const script_value& object_value, member_expr* member, const script_value& value,
+                                    script_value* consumable) {
 	// Worker direct-field store (parallel_for v1): the setter probe below COPIES a
 	// shared method value (cross-worker count race); a backing field's enforce+set is
 	// exactly what the auto-setter does, on exclusively-owned instance storage. Any
@@ -16354,7 +16355,7 @@ op_status vm_backend::assign_member(frame& f, const script_value& object_value, 
 		}
 	} else if (target.has_field(member_id)) {
 		// Typed fields enforce like locals
-		auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); });
+		auto enforced = target.instance->field_store(member_id, value, [&] { return clone_for_assignment(value); }, consumable);
 		if (!enforced) {
 			return raise_from(enforced);
 		}
@@ -16415,12 +16416,14 @@ op_status vm_backend::store_member(frame& f, size_t ins_index, uint32_t node, sc
 	}
 	if (detail::class_temporary_member_store(member, objectValue, 2)) [[unlikely]] { return raise_from(detail::class_temporary_member_error()); }   // objectValue and its dereferenced copy
 
-	if (auto landed = member_field_write_fast(f, ins_index, member, dereferenced, value)) {
+	// the operand is this store's own: a converting constructor takes it as its parameter (a field reads back, so a consumed
+	// operand is never the expression's result)
+	if (auto landed = member_field_write_fast(f, ins_index, member, dereferenced, value, &value)) {
 		if (*landed == op_status::failed) { return op_status::failed; }
 		return want_result ? land_member_store_result(f, dereferenced, member, std::move(value)) : op_status{};
 	}
 
-	VM_TRY(assign_member(f, dereferenced, member, value));
+	VM_TRY(assign_member(f, dereferenced, member, value, &value));
 	if (is_unwinding_) {
 		if (want_result) { stack_.push_back(make_null()); }
 		return {};
@@ -16634,7 +16637,8 @@ op_status vm_backend::land_member_store_result(frame& f, const script_value& obj
 }
 
 std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t ins_index, member_expr* member,
-                                                             const script_value& dereferenced, const script_value& value) {
+                                                             const script_value& dereferenced, const script_value& value,
+                                                             script_value* consumable) {
 	// Field-store site IC (write-side twin of exec_get_member's): epoch-validated
 	// {class, slot} skips the resolve ladder AND the synthesized setter closure —
 	// the auto-setter body IS enforce_field_write + set_field_unchecked, replayed
@@ -16673,7 +16677,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 								return op_status{};
 							}
 						}
-						auto enforced = inst->field_store_at(entry.slot, member->member_id, value, [&] { return clone_for_assignment(value); });
+						auto enforced = inst->field_store_at(entry.slot, member->member_id, value, [&] { return clone_for_assignment(value); }, consumable);
 						if (!enforced) {
 							return raise_from(enforced);
 						}
@@ -24121,7 +24125,7 @@ void vm_backend::materialize_return(frame& f, script_value& result, uint32_t ope
 #ifdef JAISCRIPT_VM_COVERAGE
 	if (operand_class == detail::return_operand_temporary && !result.is_reference()) { census::hit(census::site::move_hit, 2); }
 #endif
-	detail::materialize_return_value(result, operand_class != detail::return_operand_temporary);
+	detail::materialize_return_value(result, detail::return_operand_copies(static_cast<uint8_t>(operand_class), result));
 }
 
 op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {

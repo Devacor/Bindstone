@@ -365,6 +365,7 @@ public:
                 f(); LOG;
             )", "Laf~a|Lvf~v|ww|Lbm~b|Lch~c|Ldh~d|v");
             expect_log(l + R"(
+                class Hold { L f = L(Token("i")); void set() { f = Token("u"); } }
                 function ret_temp() -> L { return Token("r"); }
                 function ret_local() -> L { Token loc = Token("o"); return loc; }
                 function f() -> void {
@@ -372,9 +373,12 @@ public:
                     L b = ret_temp(); LOG = LOG + "|";
                     L c = ret_local(); LOG = LOG + "|";
                     a = Token("q"); LOG = LOG + "|";
+                    Hold h; LOG = LOG + "|";
+                    h.f = Token("s"); LOG = LOG + "|";
+                    h.set(); LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "Ld|Lr|Lo|Lq~q|~o~r~q");
+            )", "Ld|Lr|Lo|Lq~q|Li|Ls~s|Lu~u|~u~o~r~q");
         });
 
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
@@ -395,6 +399,17 @@ public:
                 function f() -> void { Token x = make(); LOG = LOG + "|"; }
                 f(); LOG;
             )", "|m");
+            // a member read off a call's result moves when the read was its last hold (C++'s xvalue), and copies a member another
+            // owner keeps
+            expect_log(R"(
+                class Box { Token m; Box(string s) { m.name = s; } }
+                shared_ptr<Box> G = new Box("g");
+                function off_temporary(string s) -> Token { Token loc = Token("l"); return Box(s).m; }
+                function shared_box() -> shared_ptr<Box> { return G; }
+                function off_kept() -> Token { return shared_box().m; }
+                function f() -> void { Token y = off_temporary("x"); LOG = LOG + "|"; Token z = off_kept(); z.name = "c"; LOG = LOG + "|"; }
+                f(); LOG = LOG + "|" + G.m.name; LOG;
+            )", "l||cx|g");
         });
 
         test("by_value_range_for_variable_dies_each_iteration", [this]() {

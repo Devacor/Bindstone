@@ -2778,6 +2778,7 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 #endif
 	if (ins.a != k_invalid_u32 && !(ins.c & load_flag_global_only) && has_slots(f)) {
 		if (auto* local = frame_slot(f, ins.a)) {
+			if (ins.c & load_flag_take) [[unlikely]] { take_temp_value(*local); return {}; }
 			// a live typed element's snapshot straight from its buffer (no scratch view refresh then copy); a removed element and every
 			// other reference mode dereference as before
 			if (local->raw_storage_index() == script_value::TYPEID_REFERENCE) {
@@ -22393,7 +22394,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				break;
 
 			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
-				if (ins.b) [[unlikely]] { kill_frame_slots(f, ins.a, ins.b); break; }
+				if (ins.b | ins.c) [[unlikely]] {
+					kill_frame_slots(f, ins.a, ins.b);
+					if (ins.c && !is_unwinding_) { f.ip = ins.c - 1; JAI_DISPATCH_HERE(); }
+					break;
+				}
 				if (script_value* slot = frame_slot(f, ins.a)) {
 					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); break; }
 					script_value dying = std::move(*slot);   // the destructor may reenter: the slot is null first
@@ -24042,6 +24047,12 @@ JAI_NOINLINE void vm_backend::gather_native_frame_cells(const frame& f, call_fra
 
 JAI_NOINLINE void vm_backend::kill_frame_slots(frame& f, uint32_t top, uint32_t below) {
 	for (uint32_t n = 0; n <= below; ++n) { kill_frame_slot(f, top - n); }
+}
+
+JAI_NOINLINE void vm_backend::take_temp_value(script_value& slot) {
+	if (slot.is_reference()) { stack_.push_back(slot.deref()); }
+	else { stack_.push_back(std::move(slot)); }
+	script_value dying = std::move(slot);   // a reference's holder goes too
 }
 
 // a dying value may run script: the slots are read before the first release

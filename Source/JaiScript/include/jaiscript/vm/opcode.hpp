@@ -53,7 +53,7 @@ namespace jai::vm {
         op_scope_push,      // push a child environment
         op_scope_pop,       // pop one environment
         op_scope_pop_n,     // a=count
-        op_kill_slot,       // a=frame slot, b=further slots below it: their values die here, a first (a scope exit destroys the locals that may own an instance)
+        op_kill_slot,       // a=frame slot, b=further slots below it: their values die here, a first (a scope exit destroys the locals that may own an instance); c=the jump that follows it, its target + 1 (0: none)
 
         op_func_decl,       // a=function proto index; defines the thunk in the current env
         op_closure,         // a=closure proto index; pushes the closure function value
@@ -370,6 +370,7 @@ namespace jai::vm {
     inline constexpr uint32_t load_flag_type_ctor = 1;   // name begins with weak_ptr</shared_ptr<
     inline constexpr uint32_t load_flag_global_only = 2; // ::name - resolve in the GLOBAL env only
                                                          // (locals/captures/member scope all skipped)
+    inline constexpr uint32_t load_flag_take = 4;        // a compiler temp's last read: its value leaves the slot
     // op_return b: 0 plain, return_mode_converted = the value
     // was already converted at its in-region return site (op_return_convert)
     inline constexpr uint32_t return_mode_converted = 2;

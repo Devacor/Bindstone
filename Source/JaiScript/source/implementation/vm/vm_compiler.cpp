@@ -886,6 +886,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 		lower_typed_ops(*result);
 		lower_dynamic_ops(*result);
 		fold_member_temps(*result);
+		fuse_kill_jumps(*result);
 	}
 	chunk_ = nullptr;
 	return result;
@@ -1046,6 +1047,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		lower_typed_ops(*result);
 		lower_dynamic_ops(*result);
 		fold_member_temps(*result);
+		fuse_kill_jumps(*result);
 	}
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
@@ -3476,6 +3478,17 @@ void vm_compiler::lower_dynamic_ops(chunk& c) {
 	chunk_ = saved;
 }
 
+// a kill the fall-through takes into a jump makes the jump itself (the jump stays for the branches that land on it); a block's spans keep
+// theirs, since a boundary resumes the block where its statement ends
+void vm_compiler::fuse_kill_jumps(chunk& c) {
+	auto in_block = [&c](size_t ip) {
+		return std::any_of(c.cell_loops.begin(), c.cell_loops.end(), [ip](const chunk::cell_loop& l) { return (ip >= l.head && ip <= l.back) || (ip >= l.copy_head && ip <= l.copy_back); });
+	};
+	for (size_t ip = 0; ip + 1 < c.code.size(); ++ip) {
+		if (c.code[ip].op == opcode::op_kill_slot && c.code[ip + 1].op == opcode::op_jump && !in_block(ip)) { c.code[ip].c = c.code[ip + 1].a + 1; }
+	}
+}
+
 // Member temps folded into the consumer that follows them (chunk::member_fold): the fold replaces the first member temp and the run skips
 // to past the consumer; a jump into the consumer, a cell region's span and a debugger's stop see the instructions as compiled
 void vm_compiler::fold_member_temps(chunk& c) {
@@ -4083,7 +4096,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (ci.op >= opcode::op_t_jlt_ii && ci.op <= opcode::op_t_jne_ff && ci.c == back + 1) break;
 				if (ci.op == opcode::op_fused_cmp_jump && ci.a == back + 1 && ci.b < c.fused_binary_protos.size()) break;
 				// a truth test on a local as the head (`while (n)`): the load and its exit jump
-				if (ci.op == opcode::op_load && (ci.a == k_invalid_u32 || ci.a < k_typed_slot_mask) && ci.c == 0 && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;
+				if (ci.op == opcode::op_load && (ci.a == k_invalid_u32 || ci.a < k_typed_slot_mask) && (ci.c & ~load_flag_take) == 0 && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;
 				if (cmp_ip == head && always_true(ci) && cmp_ip + 1 < back && code[cmp_ip + 1].op == opcode::op_jump_if_false && code[cmp_ip + 1].a == back + 1) break;   // `while (true)`: exits only through its breaks and returns
 			}
 			if (cmp_ip >= back) { refuse(chunk::cell_refusal_head, head); cmp_ip = head; }
@@ -4849,7 +4862,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				use_slot(st.a, kind, false, 0, nullptr, ip); use_slot(st.b, kind, false, 0, nullptr, ip);
 				op.kind = ir::cmp; op.fast = st.op; op.a = st.a; op.b = st.b; op.target = st.c; slot_read(op, st.a); slot_read(op, st.b);
 				if (true_sense_leaf(ip, st.c)) { op.target = code[ip + 1].a; op.sense = true; ops.push_back(op); op = ir_op{}; op.kind = ir::skip; ++ip; }
-			} else if (st.op == opcode::op_load && (st.a == k_invalid_u32 || st.a < k_typed_slot_mask) && st.c == 0 && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false)) {
+			} else if (st.op == opcode::op_load && (st.a == k_invalid_u32 || st.a < k_typed_slot_mask) && (st.c & ~load_flag_take) == 0 && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false)) {
 				// a truth test on a local or an environment value inside the body (`if (x)`, `if (!x)` through its sense, `if (NIGHTMARE)`):
 				// the truthiness of its int, float or bool with the jump's sense; a slot of another kind refuses at the entry
 				const vm_instruction& j = code[ip + 1];
@@ -4972,7 +4985,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::arith; op.tok = static_cast<uint8_t>((st.c & incdec_flag_increment) ? token_type::plus : token_type::minus); op.a = e; op.b = e; op.c = k_typed_const_bit | int_one();
 			} else if ((st.op == opcode::op_load || st.op == opcode::op_const) && ip + 1 < back && (code[ip + 1].op == opcode::op_store || code[ip + 1].op == opcode::op_decl_var) &&
 			           (code[ip + 1].op == opcode::op_decl_var ? (code[ip + 1].b != 0 && (code[ip + 1].c == 0 || st.op == opcode::op_load) && code[ip + 1].a < c.nodes.size()) : ((code[ip + 1].b == k_invalid_u32 || code[ip + 1].b < k_typed_slot_mask) && !(code[ip + 1].c & (store_flag_ref_alias | store_flag_global_only)) && (code[ip + 1].c & store_flag_no_result))) &&
-			           (st.op == opcode::op_const ? (st.a < c.constants.size() && st.a < k_typed_slot_mask && (c.constants[st.a].raw_storage_index() == script_value::TYPEID_INT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_FLOAT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_BOOL)) : (st.c == 0 && (st.a != k_invalid_u32 ? st.a < k_typed_slot_mask : st.b < c.symbols.size())))) {
+			           (st.op == opcode::op_const ? (st.a < c.constants.size() && st.a < k_typed_slot_mask && (c.constants[st.a].raw_storage_index() == script_value::TYPEID_INT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_FLOAT || c.constants[st.a].raw_storage_index() == script_value::TYPEID_BOOL)) : ((st.c & ~load_flag_take) == 0 && (st.a != k_invalid_u32 ? st.a < k_typed_slot_mask : st.b < c.symbols.size())))) {
 				// a general move the typed rows left alone (`painted = true;`, `bool b = other;`, `g = x;` onto an environment value): the
 				// pair (a push, a store or a declaration) is one move by the declared-type rule
 				const vm_instruction& sn = code[ip + 1];
@@ -5071,7 +5084,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				for (size_t a = ip + 1; a < call_ip && refusal == chunk::cell_refusal_none; ++a) {
 					const vm_instruction& ai = code[a];
 					ir_op ao; ao.kind = ir::skip; ao.origin = static_cast<uint32_t>(ip + 1);   // a miss between the probe and the pushes re-runs from the first argument instruction, the callee parked
-					const bool slot_load = ai.op == opcode::op_load && ai.a != k_invalid_u32 && ai.a < k_typed_slot_mask && ai.c == 0;
+					const bool slot_load = ai.op == opcode::op_load && ai.a != k_invalid_u32 && ai.a < k_typed_slot_mask && (ai.c & ~load_flag_take) == 0;
 					const vm_instruction* next = a + 1 < call_ip ? &code[a + 1] : nullptr;
 					if (slot_load && next && next->op == opcode::op_math && next->b == 1) {
 						// math::fn(slot) as an argument: the intrinsic into an argument value (the math arm's rows)
@@ -6123,7 +6136,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		chunk::cell_loop& loop = c.cell_loops[li];
 		if (loop.straight || loop.frame_program || loop.counted != k_invalid_u32 || loop.trampoline != k_invalid_u32) continue;
 		const vm_instruction& h = code[loop.head];
-		const bool head_ok = (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || (h.op == opcode::op_load && h.c == 0) || always_true(h) || entry_op(h) || (h.op == opcode::op_iter_next && loop.iter_proto != k_invalid_u32);
+		const bool head_ok = (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || (h.op == opcode::op_load && (h.c & ~load_flag_take) == 0) || always_true(h) || entry_op(h) || (h.op == opcode::op_iter_next && loop.iter_proto != k_invalid_u32);
 		if (!head_ok) continue;
 		loop.trampoline = entry_trampoline(loop.head, li);
 	}
@@ -6941,7 +6954,14 @@ bool vm_compiler::consumer_releases(uint32_t t) {
 		p.release |= bits;
 		return bits != 0;
 	};
+	auto take = [t](vm_instruction& load) {
+		if (load.op != opcode::op_load || load.a != t || (load.c & load_flag_global_only)) return false;
+		load.c |= load_flag_take;
+		return true;
+	};
 	switch (c.op) {
+	case opcode::op_load: return take(chunk_->code.back());
+	case opcode::op_decl_var: case opcode::op_store: return chunk_->code.size() >= 2 && take(chunk_->code[chunk_->code.size() - 2]);
 	case opcode::op_binary_fused: case opcode::op_binary_fused_temp: return mark(chunk_->fused_binary_protos[c.a]);
 	case opcode::op_fused_cmp_jump: return mark(chunk_->fused_binary_protos[c.b]);
 	case opcode::op_binary_fused_decl: case opcode::op_binary_fused_store: return mark(chunk_->fused_binary_protos[chunk_->fused_binary_dst_protos[c.a].binary_proto]);

@@ -168,6 +168,7 @@ namespace jai::vm {
         uint32_t member_base_slot(const expression* e) const;   // a member read or store whose base is a frame-slot identifier: the base's slot, else invalid
         uint32_t member_this_base(const expression* e) const;   // a member read or store whose base is a member-class body's bare field: its slot + 1, else 0
         void fold_member_temps(chunk& c);
+        void fuse_kill_jumps(chunk& c);
         void note_component_base(uint32_t node, const member_expr* m);   // chunk::component_base_slots for a math component store
         bool member_temp_operand(const expression* e) const;
         void compile_member_into_temp(const expression_ptr& e, fused_operand& out);

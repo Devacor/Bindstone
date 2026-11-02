@@ -40,7 +40,7 @@ namespace jai {
     // the payload mix of script_value::map_key_hash (seeded by the type rank); hashes stay 64-bit on a 32-bit host, so a map
     // keyed by numbers lays out (and destroys its entries) in the same order there
     inline uint64_t map_key_mix(script_value_type t, uint64_t x) noexcept {
-        x ^= static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
+        x ^= static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull ^ detail::k_process_hash_seed;
         x ^= x >> 33; x *= 0xff51afd7ed558ccdull; x ^= x >> 33; x *= 0xc4ceb9fe1a85ec53ull; x ^= x >> 33;
         return x;
     }

@@ -1,6 +1,31 @@
 #include <jaiscript/serialization/archive_impl.hpp>
 
+#include <charconv>
+#include <cmath>
+#include <string>
+
 namespace jai::serialization {
+
+void throw_archive_expected(const char* expected, std::string_view found) {
+    throw serialization_error(std::string("Expected ") + expected + " in the archive, found " + std::string(found));
+}
+
+void throw_archive_value_range(std::string_view value_text, const char* field) {
+    throw serialization_error("Archive value " + std::string(value_text) + " does not fit " + field);
+}
+
+void throw_archive_value_range(int64_t value, const char* field) { throw_archive_value_range(std::to_string(value), field); }
+
+void throw_archive_value_range(uint64_t value, const char* field) { throw_archive_value_range(std::to_string(value), field); }
+
+void throw_archive_value_range(double value, const char* field) {
+    if (std::isnan(value)) { throw_archive_value_range("nan", field); }
+    if (std::isinf(value)) { throw_archive_value_range(value > 0 ? "inf" : "-inf", field); }
+    char buf[64];
+    const auto res = std::to_chars(buf, buf + sizeof(buf), value);
+    throw_archive_value_range(std::string_view(buf, static_cast<size_t>(res.ptr - buf)), field);
+}
+
 
 archive_writer_core::archive_writer_core(engine* eng) : engine_ref_(eng) {
     context_stack_.push(SerializationContext::Root);

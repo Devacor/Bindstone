@@ -211,216 +211,13 @@ namespace property_serialization {
 			read_primitive_templated(ar, temp);
 			value = static_cast<T>(temp);
 		} else if constexpr (std::is_integral_v<T>) {
-			value = static_cast<T>(ar.read_int64());
+			value = serialization::archive_integer<T>(ar.read_int64());
 		} else if constexpr (std::is_floating_point_v<T>) {
 			value = static_cast<T>(ar.read_float64());
 		} else {
 			static_assert(sizeof(T) == 0, "Unsupported primitive type for deserialization");
 		}
 	}
-
-	template<typename T>
-	void dispatch_save_erased(serialization::any_archive_writer& ar, const T& value) {
-		if constexpr (is_direct_serializable_v<T>) {
-			write_primitive_templated(ar, value);
-		}
-		else if constexpr (is_std_vector_v<T>) {
-			using elem_type = vector_element_t<T>;
-			ar.begin_array(value.size());
-			for (const auto& elem : value) {
-				dispatch_save_erased(ar, elem);
-			}
-			ar.end_array();
-		}
-		else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
-			using key_type = typename T::key_type;
-			ar.begin_map(value.size());
-			for (const auto& [k, v] : value) {
-				std::string key_str;
-				if constexpr (std::is_same_v<key_type, std::string>) {
-					key_str = k;
-				} else if constexpr (std::is_arithmetic_v<key_type>) {
-					key_str = std::to_string(k);
-				}
-				ar.write_map_key(key_str);
-				dispatch_save_erased(ar, v);
-			}
-			ar.end_map();
-		}
-		else if constexpr (is_std_array_v<T>) {
-			constexpr size_t N = array_size_v<T>;
-			ar.begin_array(N);
-			for (const auto& elem : value) {
-				dispatch_save_erased(ar, elem);
-			}
-			ar.end_array();
-		}
-		else if constexpr (is_std_pair_v<T>) {
-			ar.begin_array(2);
-			dispatch_save_erased(ar, value.first);
-			dispatch_save_erased(ar, value.second);
-			ar.end_array();
-		}
-		else if constexpr (is_std_shared_ptr_v<T>) {
-			auto [id, is_new] = ar.get_or_assign_shared_id(value.get());
-			ar.write_uint32(id);
-			if (is_new && value) {
-				dispatch_save_erased(ar, *value);
-			}
-		}
-		else if constexpr (is_std_unique_ptr_v<T>) {
-			ar.write_bool(value != nullptr);
-			if (value) {
-				dispatch_save_erased(ar, *value);
-			}
-		}
-		else if constexpr (is_std_weak_ptr_v<T>) {
-			ar.write_bool(!value.expired());
-		}
-		else if constexpr (is_property_owner_v<T>) {
-			ar.begin_object("", 0);  // Type name not needed in type-erased context
-			value.visit_owned_properties([&ar](const std::string&, property_base* prop) {
-				if (prop->allow_save()) {
-					prop->serialize(ar);
-				}
-			});
-			ar.end_object();
-		}
-		else {
-			throw std::runtime_error("Type is not serializable via type-erased archive (use JAI_STATIC_BINDER, property_owner, or mark property as transient)");
-		}
-	}
-
-	template<typename T>
-	void dispatch_load_erased(serialization::any_archive_reader& ar, T& value) {
-		if constexpr (is_direct_serializable_v<T>) {
-			read_primitive_templated(ar, value);
-		}
-		else if constexpr (is_std_vector_v<T>) {
-			using elem_type = vector_element_t<T>;
-			size_t size = ar.begin_array();
-			value.clear();
-			value.reserve(size);
-			for (size_t i = 0; i < size; ++i) {
-				elem_type elem;
-				dispatch_load_erased(ar, elem);
-				value.push_back(std::move(elem));
-			}
-			ar.end_array();
-		}
-		else if constexpr (is_std_map_v<T> || is_std_unordered_map_v<T>) {
-			using key_type = typename T::key_type;
-			using val_type = typename T::mapped_type;
-			size_t size = ar.begin_map();
-			value.clear();
-			if constexpr (is_std_unordered_map_v<T>) { value.reserve(size); }
-			for (size_t i = 0; i < size; ++i) {
-				std::string key_str;
-				if (!ar.read_map_key(key_str)) break;
-				key_type key;
-				if constexpr (std::is_same_v<key_type, std::string>) {
-					key = key_str;
-				} else if constexpr (std::is_integral_v<key_type>) {
-					key = static_cast<key_type>(std::stoll(key_str));
-				} else if constexpr (std::is_floating_point_v<key_type>) {
-					key = static_cast<key_type>(std::stod(key_str));
-				}
-				val_type val;
-				dispatch_load_erased(ar, val);
-				value[std::move(key)] = std::move(val);
-			}
-			ar.end_map();
-		}
-		else if constexpr (is_std_array_v<T>) {
-			constexpr size_t N = array_size_v<T>;
-			size_t size = ar.begin_array();
-			for (size_t i = 0; i < N && i < size; ++i) {
-				dispatch_load_erased(ar, value[i]);
-			}
-			ar.end_array();
-		}
-		else if constexpr (is_std_pair_v<T>) {
-			size_t size = ar.begin_array();
-			if (size >= 1) dispatch_load_erased(ar, value.first);
-			if (size >= 2) dispatch_load_erased(ar, value.second);
-			ar.end_array();
-		}
-		else if constexpr (is_std_shared_ptr_v<T>) {
-			using elem_type = shared_ptr_element_t<T>;
-			uint32_t id = ar.read_uint32();
-
-			if (id == 0) {
-				value.reset();
-				return;
-			}
-
-			if (ar.has_deserialized_shared(id)) {
-				value = ar.get_deserialized_shared<elem_type>(id);
-				return;
-			}
-
-			if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
-				value = ::jai::serialization::make_default_for_load<elem_type>();
-				dispatch_load_erased(ar, *value);
-				ar.register_deserialized_shared(id, value);
-			} else {
-				throw std::runtime_error("Cannot deserialize shared_ptr<T>: element type is not default constructible");
-			}
-		}
-		else if constexpr (is_std_unique_ptr_v<T>) {
-			using elem_type = unique_ptr_element_t<T>;
-			bool has_value = ar.read_bool();
-			if (has_value) {
-				if constexpr (::jai::serialization::load_default_constructible<elem_type>) {
-					value = ::jai::serialization::make_unique_default_for_load<elem_type>();
-					dispatch_load_erased(ar, *value);
-				} else {
-					throw std::runtime_error("Cannot deserialize unique_ptr<T>: element type is not default constructible");
-				}
-			} else {
-				value.reset();
-			}
-		}
-		else if constexpr (is_std_weak_ptr_v<T>) {
-			ar.read_bool();
-			value.reset();
-		}
-		else if constexpr (is_property_owner_v<T>) {
-			std::string type_name;
-			uint32_t version;
-			ar.begin_object(type_name, version);
-			std::string property_name;
-			while (ar.read_property_name(property_name)) {
-				auto* prop = value.find_owned_property(property_name);
-				if (prop) {
-					prop->serialize(ar);
-				}
-			}
-			ar.end_object();
-		}
-		else {
-			throw std::runtime_error("Type is not deserializable via type-erased archive (use JAI_STATIC_BINDER, property_owner, or mark property as transient)");
-		}
-	}
-
-	// ============================================================================
-	// Smart pointer serialization (with ID-based de-duplication)
-	// ============================================================================
-	// shared_ptr: Uses ID tracking - same object serialized once, referenced by ID
-	// weak_ptr: Saves the ID of the shared_ptr it references (for reconstruction)
-	// unique_ptr: Always serializes the object (no sharing possible)
-
-	template<typename T>
-	inline constexpr bool is_element_serializable_v =
-		is_direct_serializable_v<T> ||
-		has_static_type_v<T> ||
-		is_property_owner_v<T>;
-
-	template<typename T>
-	inline constexpr bool is_element_deserializable_v =
-		is_direct_serializable_v<T> ||
-		has_static_type_v<T> ||
-		is_property_owner_v<T>;
 
 } // namespace property_serialization
 } // namespace jai
@@ -470,8 +267,10 @@ namespace jai {
 	template<typename T>
 	inline void deleted_property<T>::serialize(serialization::any_archive_reader& ar) {
 		if constexpr (std::is_default_constructible_v<T>) {
-			T dummy{};
-			property_serialization::dispatch_load_erased(ar, dummy);
+			ar.dispatch([](auto& concrete_ar) {
+				T dummy{};
+				concrete_ar.read_custom(dummy);
+			});
 		} else {
 			// For non-default-constructible types, read as a generic script_value to
 			// advance the stream past this property's data and prevent corruption

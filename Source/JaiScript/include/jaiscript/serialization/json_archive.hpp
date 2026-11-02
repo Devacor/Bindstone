@@ -183,9 +183,9 @@ public:
 
     std::vector<uint8_t> read_binary(size_t /*size*/);
 
-    bool begin_object();
+    void begin_object();
 
-    bool begin_object(std::string& type_name, uint32_t& version);
+    void begin_object(std::string& type_name, uint32_t& version);
 
     void end_object();
 
@@ -222,12 +222,13 @@ private:
     // ---- Flat arena DOM ----------------------------------------------------------------
     // Objects/arrays are 16-byte nodes in one contiguous arena; string bytes live in one
     // char arena. Composites become script_values only on demand (read_value/materialize).
-    enum class JTag : uint8_t { Null, Bool, Int, Double, Str, Arr, Obj };
+    enum class JTag : uint8_t { Null, Bool, Int, UInt, Double, Str, Arr, Obj };
     struct JNode {
         JTag tag = JTag::Null;
         uint32_t key = 0;   // an object member key's place among the distinct keys, plus one (0: not a key)
         union UVal {
             int64_t  i;                              // Int, Bool (0/1)
+            uint64_t u;                              // UInt: an integer past int64's range that fits uint64
             double   d;                              // Double
             struct { uint32_t off, len; } str;       // Str: [off,len) into chars_
             struct { uint32_t first, count; } agg;   // Arr: count elems; Obj: count members ([k,v]*)
@@ -257,6 +258,8 @@ private:
     // object depth where it was set; arrays advance an element cursor. Returns false only
     // when an open array is exhausted (callers either skip or fall back to the root).
     bool next_node(uint32_t& out, bool peek_only = false);
+    const char* found_kind(bool present, uint32_t n) const;
+    template<typename T> T read_integer();
 
     // Builds an engine-bound script_value for a primitive flat node (the hot path; no recursion).
     script_value materialize_primitive(const JNode& node, engine* eng);

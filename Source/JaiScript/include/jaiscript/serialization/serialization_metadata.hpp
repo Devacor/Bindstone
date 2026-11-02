@@ -181,7 +181,7 @@ struct reader_operations {
     double (*read_float64)(void*);
     bool (*read_bool)(void*);
     std::string (*read_string)(void*);
-    bool (*begin_object)(void*, std::string&, uint32_t&);
+    void (*begin_object)(void*, std::string&, uint32_t&);
     void (*end_object)(void*);
     size_t (*begin_array)(void*);
     void (*end_array)(void*);
@@ -217,7 +217,7 @@ struct archive_reader_thunks {
     static double read_float64(void* p) { return static_cast<Archive*>(p)->read_float64(); }
     static bool read_bool(void* p) { return static_cast<Archive*>(p)->read_bool(); }
     static std::string read_string(void* p) { return static_cast<Archive*>(p)->read_string(); }
-    static bool begin_object(void* p, std::string& t, uint32_t& v) { return static_cast<Archive*>(p)->begin_object(t, v); }
+    static void begin_object(void* p, std::string& t, uint32_t& v) { static_cast<Archive*>(p)->begin_object(t, v); }
     static void end_object(void* p) { static_cast<Archive*>(p)->end_object(); }
     static size_t begin_array(void* p) { return static_cast<Archive*>(p)->begin_array(); }
     static void end_array(void* p) { static_cast<Archive*>(p)->end_array(); }
@@ -297,7 +297,7 @@ public:
     double read_float64() { return operations_->read_float64(ptr_); }
     bool read_bool() { return operations_->read_bool(ptr_); }
     std::string read_string() { return operations_->read_string(ptr_); }
-    bool begin_object(std::string& type, uint32_t& version) { return operations_->begin_object(ptr_, type, version); }
+    void begin_object(std::string& type, uint32_t& version) { operations_->begin_object(ptr_, type, version); }
     void end_object() { operations_->end_object(ptr_); }
     size_t begin_array() { return operations_->begin_array(ptr_); }
     void end_array() { operations_->end_array(ptr_); }

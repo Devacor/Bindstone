@@ -22,7 +22,10 @@ namespace jai::detail { bool native_stack_low() noexcept; }
 #include <jaiscript/core/type_info.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_extensible.hpp>
+#include <cmath>
+#include <limits>
 #include <string>
+#include <string_view>
 #include <vector>
 #include <array>
 #include <memory>
@@ -70,6 +73,59 @@ namespace serialization {
 [[noreturn]] JAI_NOINLINE inline void throw_host_record_stack() {
     throw serialization_error("Record nesting depth exceeds the host thread's stack");
 }
+// A reader met another kind of data where it expects an object, an array, a map or an integer
+[[noreturn]] void throw_archive_expected(const char* expected, std::string_view found);
+[[noreturn]] void throw_archive_value_range(std::string_view value_text, const char* field);
+[[noreturn]] void throw_archive_value_range(int64_t value, const char* field);
+[[noreturn]] void throw_archive_value_range(uint64_t value, const char* field);
+[[noreturn]] void throw_archive_value_range(double value, const char* field);
+
+template<typename T>
+constexpr const char* archive_integer_field() {
+    constexpr bool is_signed = std::is_signed_v<T>;
+    if constexpr (sizeof(T) == 1) { return is_signed ? "int8" : "uint8"; }
+    else if constexpr (sizeof(T) == 2) { return is_signed ? "int16" : "uint16"; }
+    else if constexpr (sizeof(T) == 4) { return is_signed ? "int32" : "uint32"; }
+    else { return is_signed ? "int64" : "uint64"; }
+}
+
+// Every integer a reader loads lands here: a value outside the field's range, or a number with a fraction, is refused
+// rather than wrapped or truncated
+template<typename T>
+T archive_integer(int64_t value) {
+    if constexpr (std::is_signed_v<T>) {
+        if (value < static_cast<int64_t>(std::numeric_limits<T>::min()) || value > static_cast<int64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
+            throw_archive_value_range(value, archive_integer_field<T>());
+        }
+    } else if (value < 0 || static_cast<uint64_t>(value) > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
+        throw_archive_value_range(value, archive_integer_field<T>());
+    }
+    return static_cast<T>(value);
+}
+
+template<typename T>
+T archive_integer(uint64_t value) {
+    if (value > static_cast<uint64_t>(std::numeric_limits<T>::max())) [[unlikely]] {
+        throw_archive_value_range(value, archive_integer_field<T>());
+    }
+    return static_cast<T>(value);
+}
+
+template<typename T>
+T archive_integer(double value) {
+    if (!(value >= -9223372036854775808.0 && value < 18446744073709551616.0) || value != std::trunc(value)) [[unlikely]] {
+        throw_archive_value_range(value, archive_integer_field<T>());
+    }
+    return value < 0 ? archive_integer<T>(static_cast<int64_t>(value)) : archive_integer<T>(static_cast<uint64_t>(value));
+}
+
+// A count read from the data reserves at most 1 MiB ahead; elements past it grow the container as they actually load
+template<typename Container>
+void reserve_for_load(Container& container, size_t count) {
+    constexpr size_t most = (size_t{1} << 20) / sizeof(typename Container::value_type) + 1;
+    container.reserve(count < most ? count : most);
+}
+
 // Before an archive opens a record: open_records are the ones already open
 inline void enter_host_record(size_t open_records) {
     if (open_records >= JAI_MAX_HOST_RECORD_DEPTH) [[unlikely]] { throw_host_record_depth(); }
@@ -1023,7 +1079,7 @@ public:
             using elem_type = vector_element_t<T>;
             size_t size = self()->begin_array();
             value.clear();
-            value.reserve(size);
+            reserve_for_load(value, size);
             for (size_t i = 0; i < size; ++i) {
                 elem_type elem{};
                 read_element(elem);
@@ -1097,9 +1153,7 @@ public:
                 value.reset();
                 return;
             }
-            if (!self()->begin_object()) {
-                throw serialization_error("shared_ptr begin_object failed for " + std::string(typeid(elem_type).name()));
-            }
+            self()->begin_object();
             uint32_t id{};
             self()->serialize("$id", id);
             if (self()->has_deserialized_shared(id)) {
@@ -1247,7 +1301,8 @@ private:
         else if constexpr (std::is_same_v<T, bool>) value = self()->read_bool();
         else if constexpr (std::is_same_v<T, std::string>) value = self()->read_string();
         else if constexpr (std::is_enum_v<T>) { std::underlying_type_t<T> underlying; read_primitive(underlying); value = static_cast<T>(underlying); }
-        else if constexpr (std::is_integral_v<T>) value = static_cast<T>(self()->read_int64());
+        else if constexpr (std::is_integral_v<T> && std::is_unsigned_v<T> && sizeof(T) == 8) value = static_cast<T>(self()->read_int64());   // the writer's bit pattern
+        else if constexpr (std::is_integral_v<T>) value = archive_integer<T>(self()->read_int64());
         else if constexpr (std::is_floating_point_v<T>) value = static_cast<T>(self()->read_float64());
     }
 

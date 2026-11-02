@@ -72,6 +72,19 @@ public:
     container_object() = default;
 };
 
+// A shared object's first occurrence in a property a later version deletes, referenced again by a property it keeps
+class retired_link_v1 : public property_owner<retired_link_v1> {
+public:
+    JAI_PROPERTY((std::shared_ptr<container_object>), a_retired);
+    JAI_PROPERTY((std::shared_ptr<container_object>), b_kept);
+};
+
+class retired_link_v2 : public property_owner<retired_link_v2> {
+public:
+    JAI_DELETED_PROPERTY((std::shared_ptr<container_object>), a_retired);
+    JAI_PROPERTY((std::shared_ptr<container_object>), b_kept);
+};
+
 // ==== Custom Construction Test Classes ====
 
 // Context for dependency injection during deserialization
@@ -976,6 +989,37 @@ public:
 
             // "label" is handled by deleted_property and discarded
             // "oldField" is not in property_mgr and is automatically skipped
+
+            // a deleted property reads its value as the property wrote it, so the object it shares stays defined
+            retired_link_v1 old_links;
+            auto shared = std::make_shared<container_object>();
+            shared->numbers = std::vector<int>{ 4, 5 };
+            old_links.a_retired = shared;
+            old_links.b_kept = shared;
+            serialization::json_archive_writer json_writer(0, eng.get());
+            json_writer.begin_object("links", 1);
+            old_links.property_mgr.save(json_writer);
+            json_writer.end_object();
+            retired_link_v2 from_json;
+            serialization::json_archive_reader json_reader(json_writer.str(), eng.get());
+            json_reader.begin_object();
+            from_json.property_mgr.load(json_reader);
+            json_reader.end_object();
+            check(from_json.b_kept.get() != nullptr, "the kept property resolves the id the deleted one defined (JSON)");
+            check_eq((size_t)2, from_json.b_kept.get()->numbers.get().size());
+
+            std::vector<uint8_t> bytes;
+            serialization::binary_archive_writer binary_writer(bytes, eng.get());
+            binary_writer.begin_object("links", 1);
+            old_links.property_mgr.save(binary_writer);
+            binary_writer.end_object();
+            retired_link_v2 from_binary;
+            serialization::binary_archive_reader binary_reader(bytes, eng.get());
+            binary_reader.begin_object();
+            from_binary.property_mgr.load(binary_reader);
+            binary_reader.end_object();
+            check(from_binary.b_kept.get() != nullptr, "the kept property resolves the id the deleted one defined (binary)");
+            check_eq(5, from_binary.b_kept.get()->numbers.get()[1]);
         });
 
         // ===== CLONE TESTS =====

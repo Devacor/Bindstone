@@ -459,43 +459,14 @@ namespace jai::detail {
         // main's blocked cycles go per region. wait = the straggler window after main's
         // own chunk; wake = submit-end -> worker-chunk-start per pool worker (kernel
         // wake latency), clamped at 0 for workers that started mid-submit-loop.
+        // A region's phases (region_run in parallel_transform.cpp), each timed whole
+        enum class region_phase : size_t { captures, elements, methods, partition, slots, prewarm, fan_out, drain, count };
         struct region_phase_prof {
             uint64_t regions = 0;
-            uint64_t setup_cyc = 0;        // entry -> submit loop (admission/slots/captures/prewarm)
-            uint64_t submit_cyc = 0;       // the submit_to loop
-            uint64_t main_chunk_cyc = 0;   // main's own chunk 0
-            uint64_t wait_cyc = 0;         // wait_idle tail
-            uint64_t join_cyc = 0;         // accounting + error scan + assembly (success path)
-            uint64_t wake_lat_sum = 0;
-            uint64_t wake_lat_max = 0;
-            uint64_t wake_samples = 0;
-            uint64_t worker_span_sum = 0;  // pool-worker compute spans
-            uint64_t region_span_max_sum = 0;   // per region: the slowest pool worker's span (the critical path), summed
-            uint64_t region_span_min_sum = 0;   // per region: the fastest pool worker's span, summed
-            uint64_t capture_cyc = 0;      // slice of setup: capture provisioning (all slots)
-            uint64_t capture_count = 0;    // captures provisioned
-            uint64_t setup_admit_cyc = 0;    // setup slice: method admission (after normalize)
-            uint64_t setup_slots_cyc = 0;    // setup slice: slot reset/provision, alias restamp, cursors
-            uint64_t setup_caps_cyc = 0;     // setup slice: capture provisioning + node rebuild
-            uint64_t setup_pins_cyc = 0;     // setup slice: method pins
-            uint64_t setup_prewarm_cyc = 0;  // setup slice: type prewarm
-            uint64_t setup_rest_cyc = 0;     // setup slice: table, pool, activation
-            uint64_t slot_reset_cyc = 0;     // slots slice: slot_matches + reset_worker_slot / provision_worker
-            uint64_t slot_restamp_cyc = 0;   // slots slice: restamp_alias_proofs
-            uint64_t slot_cursor_cyc = 0;    // slots slice: cursor mint + call_args
-            uint64_t admit_pool_cyc = 0;     // admit slice: thread count, pool acquire, cost cap, partition
-            uint64_t admit_guard_cyc = 0;    // admit slice: region guard, type metadata
-            // the steady state: regions that built no slot, their admission (method admission through the guard), slots, pins, prewarm,
-            // the rest of setup and the submit
-            uint64_t steady_regions = 0, steady_admit_cyc = 0, steady_slots_cyc = 0, steady_pins_cyc = 0, steady_prewarm_cyc = 0, steady_rest_cyc = 0,
-                     steady_submit_cyc = 0;
+            uint64_t phase_cyc[static_cast<size_t>(region_phase::count)] = {};
             uint64_t pins_kept = 0, pins_built = 0;   // slots whose pins were kept from the record they last ran under, or built
             uint64_t slot_resets = 0;      // slots reused for a region (the provisioning fingerprint held)
             uint64_t slot_provisions = 0;  // slots built for a region (no slot, or another body's)
-            uint64_t claims = 0;           // block claims (one fetch_add each) over every worker
-            uint64_t claim_cyc = 0;        // cycles inside those fetch_adds (the counter's contention)
-            uint64_t claim_cyc_max = 0;    // the slowest single claim
-            uint64_t join_lat_sum = 0;     // per region: the last chunk's end (main's or a worker's) -> main past the join
             uint64_t cache_hits = 0;       // snapshot cache: content-matched reuses
             uint64_t cache_stores = 0;     // snapshot cache: records (re)stored
             uint64_t cache_misses = 0;     // snapshot cache: validate failed or no record

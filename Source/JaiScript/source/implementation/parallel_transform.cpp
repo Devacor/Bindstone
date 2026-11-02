@@ -183,12 +183,6 @@ namespace jai::detail {
 		struct host_copy { const void* identity = nullptr; script_value source{std::monostate{}, nullptr}; script_value copy{std::monostate{}, nullptr}; };
 		std::unordered_map<uint64_t, host_copy> host_copies;
 
-#ifdef JAISCRIPT_VM_PROFILE
-		// Worker thread stamps chunk entry/exit; main reads after wait_idle (the pool
-		// mutex/CV sequence orders the accesses; invariant TSC compares across cores)
-		uint64_t prof_start_tsc = 0;
-		uint64_t prof_end_tsc = 0;
-#endif
 	};
 
 	parallel_engine_state::parallel_engine_state() = default;
@@ -196,37 +190,12 @@ namespace jai::detail {
 	parallel_engine_state::~parallel_engine_state() {
 		auto dump = [](const char* name, const region_phase_prof& p) {
 			if (!p.regions) return;
-			fprintf(stderr,
-				"[region-profile] %s: %llu regions | per region: setup %.0f (captures %.0f, %llu/region) | submit %.0f | main-chunk %.0f | wait %.0f | join %.0f cyc\n"
-				"  wake latency avg %.0f max %llu cyc (%llu samples) | pool-worker span avg %.0f cyc\n",
-				name, (unsigned long long)p.regions,
-				(double)p.setup_cyc / p.regions, (double)p.capture_cyc / p.regions,
-				(unsigned long long)(p.capture_count / p.regions),
-				(double)p.submit_cyc / p.regions,
-				(double)p.main_chunk_cyc / p.regions, (double)p.wait_cyc / p.regions,
-				(double)p.join_cyc / p.regions,
-				p.wake_samples ? (double)p.wake_lat_sum / p.wake_samples : 0.0,
-				(unsigned long long)p.wake_lat_max, (unsigned long long)p.wake_samples,
-				p.wake_samples ? (double)p.worker_span_sum / p.wake_samples : 0.0);
-			fprintf(stderr, "  worker span per region: slowest avg %.0f | fastest avg %.0f | main chunk avg %.0f cyc\n",
-				(double)p.region_span_max_sum / p.regions, (double)p.region_span_min_sum / p.regions, (double)p.main_chunk_cyc / p.regions);
-			fprintf(stderr, "  slots: reused %llu | built %llu | pins kept %llu | pins built %llu\n", (unsigned long long)p.slot_resets, (unsigned long long)p.slot_provisions,
-				(unsigned long long)p.pins_kept, (unsigned long long)p.pins_built);
-			fprintf(stderr, "  block claims %llu (%.1f/region), avg %.0f max %llu cyc per claim | join latency (last chunk end -> joined) avg %.0f cyc\n",
-				(unsigned long long)p.claims, (double)p.claims / p.regions, p.claims ? (double)p.claim_cyc / p.claims : 0.0,
-				(unsigned long long)p.claim_cyc_max, (double)p.join_lat_sum / p.regions);
-			fprintf(stderr, "  slots split per region: reset %.0f | restamp %.0f | cursors %.0f cyc; admit split: pool %.0f | guard %.0f cyc\n",
-				(double)p.slot_reset_cyc / p.regions, (double)p.slot_restamp_cyc / p.regions, (double)p.slot_cursor_cyc / p.regions,
-				(double)p.admit_pool_cyc / p.regions, (double)p.admit_guard_cyc / p.regions);
-			fprintf(stderr, "  setup split per region: admit %.0f | slots %.0f | captures %.0f | pins %.0f | prewarm %.0f | rest %.0f cyc\n",
-				(double)p.setup_admit_cyc / p.regions, (double)p.setup_slots_cyc / p.regions, (double)p.setup_caps_cyc / p.regions,
-				(double)p.setup_pins_cyc / p.regions, (double)p.setup_prewarm_cyc / p.regions, (double)p.setup_rest_cyc / p.regions);
-			if (p.steady_regions) {
-				const double r = (double)p.steady_regions;
-				fprintf(stderr, "  steady per region (%llu regions built no slot): admit %.0f | slots %.0f | pins %.0f | prewarm %.0f | rest %.0f | submit %.0f cyc\n",
-					(unsigned long long)p.steady_regions, p.steady_admit_cyc / r, p.steady_slots_cyc / r, p.steady_pins_cyc / r, p.steady_prewarm_cyc / r,
-					p.steady_rest_cyc / r, p.steady_submit_cyc / r);
-			}
+			static const char* const phases[] = { "captures", "elements", "methods", "partition", "slots", "prewarm", "fan-out", "drain" };
+			static_assert(std::size(phases) == static_cast<size_t>(region_phase::count));
+			fprintf(stderr, "[region-profile] %s: %llu regions, per region:", name, (unsigned long long)p.regions);
+			for (size_t i = 0; i < std::size(phases); ++i) { fprintf(stderr, " %s %.0f", phases[i], (double)p.phase_cyc[i] / p.regions); }
+			fprintf(stderr, " cyc\n  slots: reused %llu | built %llu | pins kept %llu | pins built %llu\n", (unsigned long long)p.slot_resets,
+				(unsigned long long)p.slot_provisions, (unsigned long long)p.pins_kept, (unsigned long long)p.pins_built);
 			if (p.cache_hits + p.cache_misses + p.cache_unprovable) {
 				fprintf(stderr, "  snapshot cache: hits %llu | misses %llu | stores %llu | unprovable %llu\n",
 					(unsigned long long)p.cache_hits, (unsigned long long)p.cache_misses,
@@ -3667,11 +3636,6 @@ namespace {
 	// references, and instances of non-flat classes.
 	// reach: what the body can reach below the element - a field no worker can name is never
 	// copied by one, so its shared handles need no detach.
-#ifdef JAISCRIPT_VM_PROFILE
-	inline uint64_t prof_norm_nodes_[32] = {};
-	inline uint64_t prof_norm_detach_ = 0;
-	inline uint64_t prof_obj_sec_[4] = {};
-#endif
 	// The member ids the body names on element-rooted chains (null = every field) and the
 	// chain terminals it uses whole (copied or replaced - every handle in that subtree is
 	// touched, so the filter opens below them); nested objects are walked with the same filter.
@@ -3811,9 +3775,6 @@ namespace {
 	// admits the handle when no other element names that object, and the object is walked in place, never cloned apart
 	bool normalize_element_inplace(script_value& v, engine& eng, reach_filter reach, bool unreferenced_array, const class_definition* string_free_class, std::vector<type_info*>* types, const void** shared_key) {
 		if (types && v.get_type_info().get()) { types->push_back(v.get_type_info().get()); }
-#ifdef JAISCRIPT_VM_PROFILE
-		++prof_norm_nodes_[v.raw_storage_index() < 16 ? v.raw_storage_index() : 15];
-#endif
 		switch (v.raw_storage_index()) {
 		case script_value::TYPEID_NULL:
 		case script_value::TYPEID_INT:
@@ -3826,9 +3787,6 @@ namespace {
 			if (handle && handle.use_count() > 1) {
 				eng.execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
 				handle = make_strong<script_string>(*handle);
-#ifdef JAISCRIPT_VM_PROFILE
-				++prof_norm_detach_;
-#endif
 			}
 			return true;
 		}
@@ -3890,12 +3848,6 @@ namespace {
 			return true;
 		}
 		case script_value::TYPEID_OBJECT: {
-#ifdef JAISCRIPT_VM_PROFILE
-			uint64_t po0 = __rdtsc();
-#define JAI_OBJ_SEC(i) { const uint64_t po1 = __rdtsc(); prof_obj_sec_[i] += po1 - po0; po0 = po1; }
-#else
-#define JAI_OBJ_SEC(i)
-#endif
 			auto& handle = v.unchecked_get_object_storage();
 			if (!handle || !handle->is_instance()) {
 				return false;   // bound host object wrapper
@@ -3917,7 +3869,6 @@ namespace {
 			if (!cd || !(cd->flat_value_semantics() || cd->flat_over_host_values())) {
 				return false;
 			}
-			JAI_OBJ_SEC(0);
 			// A shared_ptr-tagged instance aliases by script-visible design: a top-level element hands its object to the
 			// distinctness check; a nested one must be its object's only holder, since nothing proves its aliases apart
 			const bool shared = v.is_shared_ptr_type();
@@ -3946,15 +3897,10 @@ namespace {
 				v = v.clone();   // engine-internal aliasing: fresh exclusive instance
 				auto& fresh = v.unchecked_get_object_storage();
 				inst = fresh->unchecked_instance();
-#ifdef JAISCRIPT_VM_PROFILE
-				++prof_obj_sec_[3];
-#endif
 			}
-			JAI_OBJ_SEC(1);
 			// Only slots whose declared type can reach a refcount need the walk (strings detach,
 			// containers and nested objects alias-check); scalar slots are exclusive by type
 			const bool fields_ok = normalize_instance_fields(inst, cd, eng, reach, unreferenced_array, types);
-			JAI_OBJ_SEC(2);
 			return fields_ok;
 		}
 		case script_value::TYPEID_WEAK_PTR: {
@@ -4074,18 +4020,8 @@ namespace {
 				if (!declared_class_exclusive(cd, reach, eng, /*with_subclasses*/ false, visited)) { declared_exclusive = false; }
 				if (proof.tags.size() == 1 && cd->flat_value_semantics() && !class_reach_touches_string(cd, reach, eng)) { string_free_class = cd; }
 			}
-#ifdef JAISCRIPT_VM_PROFILE
-			fprintf(stderr, "[region-profile] %s verdict: typed-obj array, %zu class(es), first %s, reach_all=%d reached=%zu whole=%zu live_elem_refs=%u -> %s\n",
-			        prefix, proof.tags.size(), proof.element_classes.empty() ? "?" : proof.element_classes[0]->get_name().c_str(), (int)!reach.members,
-			        reach.members ? reach.members->size() : (size_t)0, reach.whole ? reach.whole->size() : (size_t)0, node.live_elem_refs,
-			        declared_exclusive ? "declared-type proof, no element walk" : "per-element walk");
-#endif
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		fprintf(stderr, "[region-profile] %s source: typed=%d kind=%d live_elem_refs=%u n=%zu\n", prefix, (int)node.is_typed(), (int)node.kind(), node.live_elem_refs, n);
-#else
 		(void)prefix;
-#endif
 		if (declared_exclusive || statically_all_scalar(array_value)) {
 			return proof;
 		}
@@ -4434,7 +4370,7 @@ namespace {
 	                                std::vector<const void*>& fresh_nodes,
 	                                bool& any_snapshot_miss
 #ifdef JAISCRIPT_VM_PROFILE
-	                                , parallel_engine_state::region_phase_prof& prof
+	                                , parallel_engine_state::region_phase_prof* prof
 	                                , std::string_view prof_name
 #endif
 	                                ) {
@@ -4448,7 +4384,7 @@ namespace {
 			if (proven || flat_snapshot_equal(source, cached->value)) {
 				if (!proven) { validated[name_id] = cached->built_serial; }
 #ifdef JAISCRIPT_VM_PROFILE
-				++prof.cache_hits;
+				if (prof) { ++prof->cache_hits; }
 #endif
 				value_types.insert(value_types.end(), cached->types.begin(), cached->types.end());
 				provisioned = cached->value;
@@ -4457,21 +4393,20 @@ namespace {
 		}
 		any_snapshot_miss = true;
 #ifdef JAISCRIPT_VM_PROFILE
-		++prof.cache_misses;
-		++prof.cache_miss_names[std::string(prof_name)];
+		if (prof) { ++prof->cache_misses; ++prof->cache_miss_names[std::string(prof_name)]; }
 		const uint64_t prof_detach0 = __rdtsc();
 #endif
 		std::vector<const void*> capture_nodes;
 		std::vector<type_info*> fresh_types;
 		provisioned = source.parallel_detached_copy(&eng, &fresh_types, &capture_nodes);
 #ifdef JAISCRIPT_VM_PROFILE
-		prof.cache_miss_cyc[std::string(prof_name)] += __rdtsc() - prof_detach0;
+		if (prof) { prof->cache_miss_cyc[std::string(prof_name)] += __rdtsc() - prof_detach0; }
 #endif
 		value_types.insert(value_types.end(), fresh_types.begin(), fresh_types.end());
 		fresh_nodes.insert(fresh_nodes.end(), capture_nodes.begin(), capture_nodes.end());
 		if (flat_snapshot_equal(source, provisioned)) {
 #ifdef JAISCRIPT_VM_PROFILE
-			++prof.cache_stores;
+			if (prof) { ++prof->cache_stores; }
 #endif
 			parallel_worker_slot::snapshot_capture_cache_entry rec;
 			rec.name_id = name_id;
@@ -4483,7 +4418,7 @@ namespace {
 			else { slot.snapshot_cache.push_back(std::move(rec)); }
 		} else {
 #ifdef JAISCRIPT_VM_PROFILE
-			++prof.cache_unprovable;
+			if (prof) { ++prof->cache_unprovable; }
 #endif
 			if (cached) {
 				// Shape stopped being provable: the record can never hit again - drop its pins
@@ -4947,39 +4882,183 @@ struct region_plan {
 		}
 	}
 
-checked_result<void> run_region(engine& eng, region_plan& plan) {
-	parallel_engine_state& state = eng.parallel_state();
-	recover_pending_registrations(state);
-	if (++state.region_serial == 0) { state.region_serial = 1; }   // what this region's elements and chunks own carries it
-	const std::string_view prefix = plan.prefix;
-	auto [raise, usage] = region_error_doors<checked_result<void>>(state, prefix);
+// One owner for activation, the thread table, join obligations and borrowed storage.
+// A failed setup discards partial reusable slots; a completed setup keeps their caches.
+struct region_guard_t {
+	engine& eng;
+	parallel_engine_state& state;
+	std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
+	size_t count;
+	parallel_region_table table;
+	parallel_region_table* previous_region;
+	bool previous_frozen;
+	jai::thread_pool* pending_pool = nullptr;
+	bool active = false;
+	bool prepared = false;
+
+	region_guard_t(engine& e, parallel_engine_state& s,
+	               std::vector<std::unique_ptr<parallel_worker_slot>>& workers, size_t n)
+		: eng(e), state(s), slots(workers), count(n),
+		  previous_region(s.active_region), previous_frozen(e.get_symbolizer()->frozen()) {}
+	region_guard_t(const region_guard_t&) = delete;
+	region_guard_t& operator=(const region_guard_t&) = delete;
+
+	void activate() noexcept {
+		// Accepted work can create live copies even if a later submit throws.
+		// Only a complete post-join drain clears this obligation.
+		state.pending_registration_retry = true;
+		eng.get_symbolizer()->set_frozen(true);
+		state.active_region = &table;
+		eng.note_parallel_region(true);
+		active = true;
+	}
+	void join() {
+		if (pending_pool) {
+			pending_pool->wait_idle();
+			pending_pool = nullptr;
+		}
+	}
+	void restore() noexcept {
+		if (active) {
+			state.active_region = previous_region;
+			eng.note_parallel_region(previous_region != nullptr);
+			eng.get_symbolizer()->set_frozen(previous_frozen);
+			active = false;
+		}
+	}
+	~region_guard_t() {
+		join();                 // accepted work must finish before table/cursor destruction
+		restore();
+		for (size_t k = 0; k < count && k < slots.size(); ++k) {
+			if (!prepared) {
+				slots[k].reset();    // includes an environment whose publication only partly succeeded
+				continue;
+			}
+			parallel_worker_slot* slot = slots[k].get();
+			if (!slot) { continue; }
+			for (uint64_t id : slot->capture_name_ids) {
+				if (script_value* value = slot->root_env->get_own_value_ptr(id)) {
+					*value = script_value(std::monostate{}, &eng);   // existing storage, no allocation
+				}
+				if (slot->method_env) {
+					if (script_value* value = slot->method_env->get_own_value_ptr(id)) {
+						*value = script_value(std::monostate{}, &eng);
+					}
+				}
+			}
+			slot->capture_name_ids.clear();
+			slot->element_refs.clear();
+			slot->cursors.clear();
+			slot->call_args.clear();
+			slot->raw_input = nullptr;
+			slot->typed_input = nullptr;
+			slot->backend->set_parallel_method_pins(nullptr);
+		}
+	}
+};
+
 #ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t0 = __rdtsc();
+// One phase's cycles, added to the region profile when the phase ends
+struct region_phase_timer {
+	uint64_t* cycles;
+	uint64_t start = __rdtsc();
+	~region_phase_timer() { if (cycles) { *cycles += __rdtsc() - start; } }
+};
+#define JAI_REGION_PHASE(phase) region_phase_timer phase_timer{ plan.prof ? &plan.prof->phase_cyc[static_cast<size_t>(parallel_engine_state::region_phase::phase)] : nullptr }
+#else
+#define JAI_REGION_PHASE(phase)
 #endif
-	std::vector<script_value>& containers = *plan.containers;
-	const parallel_admission* adm = plan.adm;
-	const script_value& array_value = containers.front().is_reference() ? containers.front().deref() : containers.front();
-	const script_array* source_node = array_value.unchecked_array_node();
+
+// One region, phase by phase: each phase reads what the earlier ones settled, and a refusal returns its text
+struct region_run {
+	engine& eng;
+	region_plan& plan;
+	parallel_engine_state& state;
+	std::vector<script_value>& containers;
+	const parallel_admission* adm;
+	const script_value& array_value;
+	const script_array* source_node;
+
+	std::vector<resolved_capture> captures;
+	std::vector<std::pair<const void*, std::string_view>> captured_objects;   // every instance a captured object holds, by its name
+	size_t scanned_objects = 0;
+
+	script_value boxed_range;
+	script_array* node = nullptr;
+	size_t n = 0;
+	std::vector<type_info*> value_types;
+	std::vector<std::pair<const void*, size_t>> handle_objects;   // (object, element) of every handle element, range and zips
+	element_proof proof;
+	std::vector<script_array*> zip_nodes;
+	std::vector<type_info*> zip_tags;
+
+	std::vector<const class_definition*> captured_classes;
+	method_admission_record* record = nullptr;
+
+	size_t worker_count = 1;
+	std::chrono::nanoseconds budget{};
+	bool use_vm = false;
+	parallel_engine_state::parallel_region_pool* pool = nullptr;
+	std::vector<size_t> bounds;
+	std::vector<size_t> chunk_begin, chunk_count;
+	parallel_block_schedule schedule;
+	std::vector<parallel_worker_slot*> contexts;
+	type_info_ptr element_type;
+	const parallel_worker_error* winner = nullptr;
+	std::optional<region_guard_t> guard;   // last: it joins and restores before anything above it dies
+
+	region_run(engine& a_engine, region_plan& a_plan) :
+		eng(a_engine),
+		plan(a_plan),
+		state(a_engine.parallel_state()),
+		containers(*a_plan.containers),
+		adm(a_plan.adm),
+		array_value(containers.front().is_reference() ? containers.front().deref() : containers.front()),
+		source_node(array_value.unchecked_array_node()),
+		boxed_range(std::monostate{}, &a_engine) {
+	}
+
+	checked_result<void> raise(std::error_code code, std::string message) {
+		state.error_text = std::move(message);
+		return checked_result<void>(code, std::string_view(state.error_text));
+	}
+	checked_result<void> usage(std::string message) {
+		return raise(make_error_code(runtime_error_code::unsupported_operation), std::string(plan.prefix) + ": " + std::move(message));
+	}
+	admission_builder& method_adm() { return *record->builder; }
+
+	checked_result<void> run() {
+		recover_pending_registrations(state);
+		if (++state.region_serial == 0) { state.region_serial = 1; }   // what this region's elements and chunks own carries it
+#ifdef JAISCRIPT_VM_PROFILE
+		if (plan.prof) { ++plan.prof->regions; }
+#endif
+		if (auto resolved = resolve_captures(); !resolved) { return resolved; }
+		if (auto proven = prove_range_and_zip(); !proven) { return proven; }
+		if (auto disjoint = prove_index_writes(); !disjoint) { return disjoint; }
+		if (n == 0) { return {}; }
+		if (auto admitted = admit_methods(); !admitted) { return admitted; }
+		partition();
+		if (auto provisioned = provision_slots(); !provisioned) { return provisioned; }
+		prewarm();
+		fan_out_and_join();
+		return drain();
+	}
 
 	// CAPTURED READS resolve through the statement's environment chain (its walk reaches the
 	// global env; slot-resident function locals are not env-visible and correctly error as
 	// undefined) or, for the builtin, the global env. A BORROW of an array the body WRITES
 	// would read racing content (borrow indexes any element, writes own chunks only) -
 	// contract A errors instead of silently demoting; snapshots of it stay legal.
-	std::vector<resolved_capture> captures;
-	state.last_captures.clear();
-	state.faults.checkpoint("region.capture_storage");
-	captures.reserve(adm->captures.size());
-	auto written_container = [&](const script_value& v) {
+	bool written_container(const script_value& v) const {
 		if (v.raw_storage_index() != script_value::TYPEID_ARRAY) { return false; }
 		for (size_t j = plan.inplace ? 0 : 1; j < containers.size(); ++j) {
 			const script_value& cj = containers[j].is_reference() ? containers[j].deref() : containers[j];
 			if (cj.is_array() && cj.unchecked_array_node() == v.unchecked_array_node()) { return true; }
 		}
 		return false;
-	};
-	std::vector<std::pair<const void*, std::string_view>> captured_objects;   // every instance a captured object holds, by its name
-	auto classify_and_add = [&](const parallel_admission::capture_entry& entry, bool method_scope = false) -> checked_result<void> {
+	}
+	checked_result<void> classify_and_add(const parallel_admission::capture_entry& entry, bool method_scope = false) {
 		// a local of the frame the statement runs in reads from that frame's slot: no environment
 		// chain can see it, and a global of the same name must not shadow it; a method's capture
 		// is a global by construction (its class's scope), never the caller's local
@@ -5092,11 +5171,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		state.faults.checkpoint("region.capture_collect", captures.size());
 		captures.push_back(std::move(cap));
 		return {};
-	};
+	}
 	// No captured object may be one an element reaches: the element's lane writes it while every worker reads its own view.
 	// Walked before the element proof (which would part an aliased element from its object), and only when objects are captured
-	size_t scanned_objects = 0;
-	auto refuse_captured_aliases = [&]() -> checked_result<void> {
+	checked_result<void> refuse_captured_aliases() {
 		if (captured_objects.size() == scanned_objects || !plan.inplace) { return {}; }
 		scanned_objects = captured_objects.size();
 		std::vector<const void*> objects;
@@ -5105,10 +5183,10 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		for (size_t j = 0; j < containers.size(); ++j) {
 			const script_value& cj = containers[j].is_reference() ? containers[j].deref() : containers[j];
 			if (!cj.is_array()) { continue; }
-			const script_array* node = cj.unchecked_array_node();
-			if (node->is_typed() && node->kind() != script_array::kind_t::obj) { continue; }
-			for (size_t i = 0; i < node->size(); ++i) {
-				const void* hit = element_reaches_object(node->get(i, &eng), objects, eng);
+			const script_array* cj_node = cj.unchecked_array_node();
+			if (cj_node->is_typed() && cj_node->kind() != script_array::kind_t::obj) { continue; }
+			for (size_t i = 0; i < cj_node->size(); ++i) {
+				const void* hit = element_reaches_object(cj_node->get(i, &eng), objects, eng);
 				if (!hit) { continue; }
 				std::string_view name;
 				for (const auto& [object, captured] : captured_objects) { if (object == hit) { name = captured; break; } }
@@ -5117,13 +5195,32 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 		}
 		return {};
-	};
-	for (const auto& entry : adm->captures) {
-		auto classified = classify_and_add(entry);
-		if (!classified) { return classified; }
 	}
-	if (auto checked = refuse_captured_aliases(); !checked) { return checked; }
+	checked_result<void> resolve_captures() {
+		JAI_REGION_PHASE(captures);
+		state.last_captures.clear();
+		state.faults.checkpoint("region.capture_storage");
+		captures.reserve(adm->captures.size());
+		for (const auto& entry : adm->captures) {
+			auto classified = classify_and_add(entry);
+			if (!classified) { return classified; }
+		}
+		return refuse_captured_aliases();
+	}
 
+	// an array's elements proven exclusive, their classes joining the region's; a refusal is the text naming the element
+	std::optional<std::string> prove_exclusive(const script_value& source, script_array& array, std::vector<type_info*>* types,
+	                                           std::vector<std::pair<const void*, size_t>>* objects, std::vector<type_info*>* tags) {
+		element_proof proven = prove_elements(eng, source, array, reach_filter{}, plan.prefix, types, objects);
+		if (proven.failed != SIZE_MAX) {
+			return "element " + std::to_string(proven.failed) + (proven.what.empty() ? std::string(" cannot be proven exclusive") : ": " + proven.what);
+		}
+		if (tags) { tags->insert(tags->end(), proven.tags.begin(), proven.tags.end()); }
+		for (const class_definition* cd : proven.element_classes) {
+			if (std::find(proof.element_classes.begin(), proof.element_classes.end(), cd) == proof.element_classes.end()) { proof.element_classes.push_back(cd); }
+		}
+		return std::nullopt;
+	}
 	// THE RANGE. A primitive-kind typed range the body may write demotes IN PLACE at the
 	// barrier (node identity preserved; internal/typed_array_design.md) so the hetero kernel
 	// below, which has no raw typed worker reads or writes, stays correct;
@@ -5131,20 +5228,6 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// cursor can address instead. An OBJECT-kind range keeps its slots: element references
 	// materialize the slot's handle per touch and the declared class carries the exclusivity
 	// proof (the declared type of a typed array is a proven fact about every element).
-	const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
-	script_value boxed_range(std::monostate{}, &eng);
-	state.faults.checkpoint("region.input_storage");
-	if (source_node->is_typed() && !typed_obj) {
-		if (plan.inplace) {
-			const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
-		} else {
-			boxed_range = script_value::make_array(nullptr, &eng);
-			boxed_range.unchecked_get_array_storage()->values() = const_cast<script_array*>(source_node)->materialize_values(&eng);
-		}
-	}
-	script_array& node = boxed_range.is_array() ? *boxed_range.unchecked_get_array_storage() : *const_cast<script_array*>(source_node);
-	const size_t n = plan.counted ? plan.counted->n : node.size();
-
 	// ELEMENT PROOF + NORMALIZATION (prove_elements): every element must end this pass
 	// exclusively-mutable - shared strings detach in place, the declared class of an
 	// object-kind source proves it without one element read (the body's element reach
@@ -5152,296 +5235,178 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	// read-only by-value parameter) reaches only the members it names; a body that copies the
 	// element (a mutating by-value parameter clones every field) reaches it whole. The
 	// builtin's all-primitive input is exclusive by construction (typed proof, zero scans;
-	// untyped pay ONE content scan).
-	const bool binds_in_place = plan.inplace || (!adm->element_reach_all && !adm->element_mutated);
-	const reach_filter reach = binds_in_place
-		? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
-		: reach_filter{};
-	std::vector<type_info*> value_types;
-	std::vector<std::pair<const void*, size_t>> handle_objects;   // (object, element) of every handle element, range and zips
-	element_proof proof;
-	state.element_host_values.clear();
-	state.element_host_field = UINT64_MAX;
-	const bool skip_proof = plan.counted || (!plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value)));
-	if (!skip_proof) {
-		state.faults.checkpoint("region.element_proof");
-		proof = prove_elements(eng, array_value, node, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
-		if (proof.failed != SIZE_MAX) {
-			if (!proof.what.empty()) {
-				return usage("element " + std::to_string(proof.failed) + ": " + proof.what);
-			}
+	// untyped pay ONE content scan). The counted form's range is its sequence of ints.
+	checked_result<void> prove_range_and_zip() {
+		JAI_REGION_PHASE(elements);
+		const bool typed_obj = source_node->is_typed() && source_node->kind() == script_array::kind_t::obj;
+		state.faults.checkpoint("region.input_storage");
+		if (source_node->is_typed() && !typed_obj) {
 			if (plan.inplace) {
-				return usage("element " + std::to_string(proof.failed) +
-				             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
-				             " value containers, flat value-class instances and distinct handles to them)");
+				const_cast<script_array*>(source_node)->demote_to_hetero(&eng);
+			} else {
+				boxed_range = script_value::make_array(nullptr, &eng);
+				boxed_range.unchecked_get_array_storage()->values() = const_cast<script_array*>(source_node)->materialize_values(&eng);
 			}
-			const script_value failed_element = typed_obj ? node.get(proof.failed, &eng) : node.values()[proof.failed];
-			const char* what = non_value_semantic_what(failed_element);
-			return usage("element " + std::to_string(proof.failed) +
-			             ": value is not value-semantic (" + (what ? what : "object") + ")");
 		}
-	}
-	const std::vector<type_info*>& tags = proof.tags;
-	std::vector<const class_definition*>& element_classes = proof.element_classes;
+		node = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage().get() : const_cast<script_array*>(source_node);
+		n = plan.counted ? plan.counted->n : node->size();
 
-	// THE ZIP'S ARRAYS: arrays of the range's length, each proven exclusive like the range
-	// (whole reach: the body may write anything through their loop variables; a typed primitive
-	// kind demoted like the range, an object kind addressed in place)
-	std::vector<script_array*> zip_nodes;
-	std::vector<type_info*> zip_tags;
-	// an array's elements proven exclusive, their classes joining the region's; a refusal is the text naming the element
-	auto prove_exclusive = [&](const script_value& source, script_array& array, std::vector<type_info*>* types,
-	                           std::vector<std::pair<const void*, size_t>>* objects, std::vector<type_info*>* tags) -> std::optional<std::string> {
-		element_proof proven = prove_elements(eng, source, array, reach_filter{}, plan.prefix, types, objects);
-		if (proven.failed != SIZE_MAX) {
-			return "element " + std::to_string(proven.failed) + (proven.what.empty() ? std::string(" cannot be proven exclusive") : ": " + proven.what);
+		const bool binds_in_place = plan.inplace || (!adm->element_reach_all && !adm->element_mutated);
+		const reach_filter reach = binds_in_place
+			? reach_filter{ adm->element_reach_all ? nullptr : &adm->element_reached_members, &adm->element_reached_whole }
+			: reach_filter{};
+		state.element_host_values.clear();
+		state.element_host_field = UINT64_MAX;
+		const bool skip_proof = plan.counted || (!plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value)));
+		if (!skip_proof) {
+			state.faults.checkpoint("region.element_proof");
+			proof = prove_elements(eng, array_value, *node, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
+			if (proof.failed != SIZE_MAX) {
+				if (!proof.what.empty()) {
+					return usage("element " + std::to_string(proof.failed) + ": " + proof.what);
+				}
+				if (plan.inplace) {
+					return usage("element " + std::to_string(proof.failed) +
+					             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
+					             " value containers, flat value-class instances and distinct handles to them)");
+				}
+				const script_value failed_element = typed_obj ? node->get(proof.failed, &eng) : node->values()[proof.failed];
+				const char* what = non_value_semantic_what(failed_element);
+				return usage("element " + std::to_string(proof.failed) +
+				             ": value is not value-semantic (" + (what ? what : "object") + ")");
+			}
 		}
-		if (tags) { tags->insert(tags->end(), proven.tags.begin(), proven.tags.end()); }
-		for (const class_definition* cd : proven.element_classes) {
-			if (std::find(element_classes.begin(), element_classes.end(), cd) == element_classes.end()) { element_classes.push_back(cd); }
+
+		// THE ZIP'S ARRAYS: arrays of the range's length, each proven exclusive like the range
+		// (whole reach: the body may write anything through their loop variables; a typed primitive
+		// kind demoted like the range, an object kind addressed in place)
+		for (size_t j = 1; j < containers.size(); ++j) {
+			const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+			if (!zv.is_array()) {
+				return usage("zipped array " + std::to_string(j + 1) + " is not an array");
+			}
+			state.faults.checkpoint("region.zip_storage", j);
+			script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
+			if (znode->size() != n) {
+				return usage("zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
+				             " elements, the range has " + std::to_string(n) + " (zipped arrays must have the same length)");
+			}
+			if (znode == source_node || znode == node) {
+				return usage("zipped array " + std::to_string(j + 1) + " is the range itself");
+			}
+			if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
+			if (!plan.zip_arrays_fresh) {
+				if (auto refused = prove_exclusive(zv, *znode, nullptr, &handle_objects, &zip_tags)) { return usage("zipped array " + std::to_string(j + 1) + " " + *refused); }
+			}
+			zip_nodes.push_back(znode);
 		}
-		return std::nullopt;
-	};
-	for (size_t j = 1; j < containers.size(); ++j) {
-		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
-		if (!zv.is_array()) {
-			return usage("zipped array " + std::to_string(j + 1) + " is not an array");
+		// An index-written array of objects: its slots are proven exclusive like a zipped array's (their objects distinct, shared strings
+		// detached), since every worker's copy shares them
+		for (const auto& cap : captures) {
+			if (cap.kind != parallel_capture_kind::written || !cap.shares_slots) { continue; }
+			script_array* wnode = const_cast<script_array*>(cap.source->unchecked_array_node());
+			if (auto refused = prove_exclusive(*cap.source, *wnode, nullptr, &handle_objects, nullptr)) { return usage("captured name '" + std::string(cap.entry->name) + "' " + *refused); }
 		}
-		state.faults.checkpoint("region.zip_storage", j);
-		script_array* znode = const_cast<script_array*>(zv.unchecked_array_node());
-		if (znode->size() != n) {
-			return usage("zipped array " + std::to_string(j + 1) + " has " + std::to_string(znode->size()) +
-			             " elements, the range has " + std::to_string(n) + " (zipped arrays must have the same length)");
+		if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
+			return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
+			             " hold the same object (an object a body reaches through a handle element belongs to one element)");
 		}
-		if (znode == source_node || znode == &node) {
-			return usage("zipped array " + std::to_string(j + 1) + " is the range itself");
+		if (plan.inplace) {
+			if (const auto* shared = shared_element_host_value(state.element_host_values)) {
+				return usage(shared_element_host_value_text(eng, shared[0], shared[1]));
+			}
 		}
-		if (znode->is_typed() && znode->kind() != script_array::kind_t::obj) { znode->demote_to_hetero(&eng); }
-		if (!plan.zip_arrays_fresh) {
-			if (auto refused = prove_exclusive(zv, *znode, nullptr, &handle_objects, &zip_tags)) { return usage("zipped array " + std::to_string(j + 1) + " " + *refused); }
+		// The sliced input: every element read whole by the one worker its chunk runs on, so each must be exclusive like a zipped array's
+		for (const auto& cap : captures) {
+			if (!cap.sliced) { continue; }
+			script_array* inode = const_cast<script_array*>(cap.source->unchecked_array_node());
+			if (inode->is_typed() && inode->kind() != script_array::kind_t::obj) { continue; }
+			std::vector<std::pair<const void*, size_t>> input_objects;
+			if (auto refused = prove_exclusive(*cap.source, *inode, &value_types, &input_objects, nullptr)) { return usage("input " + *refused); }   // the step copies each element
+			if (const auto [repeat, original] = repeated_handle_object(input_objects); repeat != SIZE_MAX) {
+				return usage("input elements " + std::to_string(original) + " and " + std::to_string(repeat) +
+				             " hold the same object (an object the step reaches through a handle element belongs to one element)");
+			}
 		}
-		zip_nodes.push_back(znode);
+		return {};
 	}
-	// An index-written array of objects: its slots are proven exclusive like a zipped array's (their objects distinct, shared strings
-	// detached), since every worker's copy shares them
-	for (const auto& cap : captures) {
-		if (cap.kind != parallel_capture_kind::written || !cap.shares_slots) { continue; }
-		script_array* wnode = const_cast<script_array*>(cap.source->unchecked_array_node());
-		if (auto refused = prove_exclusive(*cap.source, *wnode, nullptr, &handle_objects, nullptr)) { return usage("captured name '" + std::string(cap.entry->name) + "' " + *refused); }
-	}
-	if (const auto [repeat, original] = repeated_handle_object(handle_objects); repeat != SIZE_MAX) {
-		return usage("elements " + std::to_string(original) + " and " + std::to_string(repeat) +
-		             " hold the same object (an object a body reaches through a handle element belongs to one element)");
-	}
-	if (plan.inplace) {
-		if (const auto* shared = shared_element_host_value(state.element_host_values)) {
-			return usage(shared_element_host_value_text(eng, shared[0], shared[1]));
-		}
-	}
-	// The sliced input: every element read whole by the one worker its chunk runs on, so each must be exclusive like a zipped array's
-	for (const auto& cap : captures) {
-		if (!cap.sliced) { continue; }
-		script_array* inode = const_cast<script_array*>(cap.source->unchecked_array_node());
-		if (inode->is_typed() && inode->kind() != script_array::kind_t::obj) { continue; }
-		std::vector<std::pair<const void*, size_t>> input_objects;
-		if (auto refused = prove_exclusive(*cap.source, *inode, &value_types, &input_objects, nullptr)) { return usage("input " + *refused); }   // the step copies each element
-		if (const auto [repeat, original] = repeated_handle_object(input_objects); repeat != SIZE_MAX) {
-			return usage("input elements " + std::to_string(original) + " and " + std::to_string(repeat) +
-			             " hold the same object (an object the step reaches through a handle element belongs to one element)");
-		}
-	}
+
 	// Disjoint index writes: the loop variable indexing an enclosing array takes distinct values, so no two elements write one slot
 	// (a value that is no int in range raises in its own iteration, as the serial loop's store does). The counted form's values
 	// are distinct by construction
-	auto index_node_of = [&](size_t index_param) -> const script_array* {
-		if (index_param == 0) { return &node; }
+	const script_array* index_node_of(size_t index_param) const {
+		if (index_param == 0) { return node; }
 		return index_param - 1 < zip_nodes.size() ? zip_nodes[index_param - 1] : nullptr;
-	};
-	auto index_at = [&](const script_array& index_node, size_t index_param, size_t p) -> script_value {
+	}
+	script_value index_at(const script_array& index_node, size_t index_param, size_t p) {
 		if (plan.counted && index_param == 0) { return script_value(static_cast<script_int>(plan.counted->at(p)), &eng); }
 		return index_node.get(p, &eng).deref();
-	};
-	auto index_count = [&](const script_array& index_node, size_t index_param) { return plan.counted && index_param == 0 ? n : index_node.size(); };
-	auto written_capture = [&](uint64_t name_id) -> const resolved_capture* {
+	}
+	size_t index_count(const script_array& index_node, size_t index_param) const { return plan.counted && index_param == 0 ? n : index_node.size(); }
+	const resolved_capture* written_capture(uint64_t name_id) const {
 		for (const auto& cap : captures) {
 			if (cap.kind == parallel_capture_kind::written && cap.entry->name_id == name_id) { return &cap; }
 		}
 		return nullptr;
-	};
-	for (size_t w = 0; w < adm->index_writes.size(); ++w) {
-		const auto& iw = adm->index_writes[w];
-		bool repeated = false;
-		for (size_t v = 0; v < w; ++v) { repeated = repeated || adm->index_writes[v].name_id == iw.name_id; }
-		const script_array* index_node = index_node_of(iw.index_param);
-		const resolved_capture* target = written_capture(iw.name_id);
-		if (repeated || !index_node || !target) { continue; }
-		const size_t slot_count = target->source->unchecked_array_node()->size();
-		auto intern_out_of_range = [&](script_int index) {   // the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
-			(void)eng.get_symbolizer()->intern(std::to_string(index));
-			(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
-		};
-		if (plan.counted && iw.index_param == 0) {
-			// a monotonic sequence leaves the slots at its start, its end or both: the first texts in element order, jumping the run inside
-			const parallel_counted_sequence& seq = *plan.counted;
-			const auto in_range = [&](size_t p) { const script_int v = seq.at(p); return v >= 0 && static_cast<uint64_t>(v) < slot_count; };
-			size_t interned = 0;
-			for (size_t p = 0; p < n && interned < k_index_write_texts;) {
-				if (!in_range(p)) {
-					intern_out_of_range(seq.at(p));
-					++interned;
-					++p;
-					continue;
+	}
+	checked_result<void> prove_index_writes() {
+		JAI_REGION_PHASE(elements);
+		for (size_t w = 0; w < adm->index_writes.size(); ++w) {
+			const auto& iw = adm->index_writes[w];
+			bool repeated = false;
+			for (size_t v = 0; v < w; ++v) { repeated = repeated || adm->index_writes[v].name_id == iw.name_id; }
+			const script_array* index_node = index_node_of(iw.index_param);
+			const resolved_capture* target = written_capture(iw.name_id);
+			if (repeated || !index_node || !target) { continue; }
+			const size_t slot_count = target->source->unchecked_array_node()->size();
+			auto intern_out_of_range = [&](script_int index) {   // the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
+				(void)eng.get_symbolizer()->intern(std::to_string(index));
+				(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
+			};
+			if (plan.counted && iw.index_param == 0) {
+				// a monotonic sequence leaves the slots at its start, its end or both: the first texts in element order, jumping the run inside
+				const parallel_counted_sequence& seq = *plan.counted;
+				const auto in_range = [&](size_t p) { const script_int v = seq.at(p); return v >= 0 && static_cast<uint64_t>(v) < slot_count; };
+				size_t interned = 0;
+				for (size_t p = 0; p < n && interned < k_index_write_texts;) {
+					if (!in_range(p)) {
+						intern_out_of_range(seq.at(p));
+						++interned;
+						++p;
+						continue;
+					}
+					// the first element past the slots: the value moving up crosses slot_count, moving down crosses 0
+					const uint64_t from = static_cast<uint64_t>(seq.at(p));
+					const uint64_t room = seq.up ? slot_count - 1 - from : from;
+					const uint64_t steps = room / seq.size + 1;
+					p = steps > n - p ? n : p + static_cast<size_t>(steps);
 				}
-				// the first element past the slots: the value moving up crosses slot_count, moving down crosses 0
-				const uint64_t from = static_cast<uint64_t>(seq.at(p));
-				const uint64_t room = seq.up ? slot_count - 1 - from : from;
-				const uint64_t steps = room / seq.size + 1;
-				p = steps > n - p ? n : p + static_cast<size_t>(steps);
-			}
-			continue;
-		}
-		std::vector<size_t> writer(slot_count, SIZE_MAX);
-		size_t out_of_range = 0;
-		for (size_t p = 0; p < n && p < index_node->size(); ++p) {
-			const script_value at = index_node->get(p, &eng);
-			const script_value& index = at.deref();
-			if (index.is_int() && (index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count)) {
-				if (out_of_range++ < k_index_write_texts) { intern_out_of_range(index.unchecked_as_int()); }
 				continue;
 			}
-			if (!index.is_int()) { continue; }
-			const size_t slot = static_cast<size_t>(index.unchecked_as_int());
-			if (writer[slot] != SIZE_MAX) {
-				return usage("elements " + std::to_string(writer[slot]) + " and " + std::to_string(p) + " write '" + std::string(iw.name) +
-				             "' at the same index " + std::to_string(slot));
+			std::vector<size_t> writer(slot_count, SIZE_MAX);
+			size_t out_of_range = 0;
+			for (size_t p = 0; p < n && p < index_node->size(); ++p) {
+				const script_value at = index_node->get(p, &eng);
+				const script_value& index = at.deref();
+				if (index.is_int() && (index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count)) {
+					if (out_of_range++ < k_index_write_texts) { intern_out_of_range(index.unchecked_as_int()); }
+					continue;
+				}
+				if (!index.is_int()) { continue; }
+				const size_t slot = static_cast<size_t>(index.unchecked_as_int());
+				if (writer[slot] != SIZE_MAX) {
+					return usage("elements " + std::to_string(writer[slot]) + " and " + std::to_string(p) + " write '" + std::string(iw.name) +
+					             "' at the same index " + std::to_string(slot));
+				}
+				writer[slot] = p;
 			}
-			writer[slot] = p;
 		}
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_norm1 = __rdtsc();
-#endif
-	if (n == 0) {
 		return {};
 	}
 
-	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
-	// classes the proof found; their captures classify like the body's
-	auto& registry = eng.get_class_registry();
-	const uint64_t registry_key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
-	{
-		if (state.host_method_names_key != registry_key) {
-			admission_builder lister(eng);
-			state.host_method_names.clear();
-			state.host_method_names_key = registry_key;
-			lister.for_each_registered_class([&](const class_definition* cls) {
-				std::vector<const class_definition*> chain{ cls };
-				while (!chain.empty()) {
-					const class_definition* level = chain.back();
-					chain.pop_back();
-					if (!level->is_script_class()) {
-						for (const auto& [id, value] : level->method_values()) { state.host_method_names.insert(id); }
-					}
-					for (const auto& parent : level->get_parent_classes()) { if (parent) { chain.push_back(parent.get()); } }
-				}
-			});
-		}
-	}
-	state.faults.checkpoint("region.method_admission");
-	const bool element_methods = plan.inplace && !element_classes.empty();
-	// a worker's copy of an index-written array holds objects that can die on it: the declared element type, or each held value's
-	std::vector<type_info_ptr> written_types;
-	if (state.program_destructors_key != registry_key) {
-		state.program_destructors = admission_builder(eng).any_program_destructor();
-		state.program_destructors_key = registry_key;
-	}
-	const bool program_destructors = state.program_destructors;
-	for (const auto& cap : captures) {
-		if (!program_destructors || cap.kind != parallel_capture_kind::written) { continue; }
-		const type_info_ptr declared = cap.source->get_type_info() ? cap.source->get_type_info()->element_type() : type_info_ptr(nullptr);
-		if (declared && declared->base_type != script_value_type::jai_any_type) {
-			written_types.push_back(declared);
-			continue;
-		}
-		const script_array* held = cap.source->unchecked_array_node();
-		for (size_t j = 0; j < held->size(); ++j) {
-			const type_info_ptr t = held->get(j, &eng).deref().get_type_info();
-			if (t && std::find(written_types.begin(), written_types.end(), t) == written_types.end()) { written_types.push_back(t); }
-		}
-	}
-	// the method admission of this region shape, kept while nothing it read changed: the body's admission, the element classes, the
-	// written types, the class registry and the program's definitions
-	auto* admissions = static_cast<method_admission_cache*>(state.method_admissions.get());
-	if (!admissions) {
-		auto made = std::make_shared<method_admission_cache>();
-		admissions = made.get();
-		state.method_admissions = std::move(made);
-	}
-	std::vector<type_info*> written_raw;
-	for (const auto& t : written_types) { written_raw.push_back(t.get()); }
-	// a captured object's classes: their methods are pinned like a constructed object's (the record keys them after a null)
-	std::vector<const class_definition*> captured_classes;
-	for (const auto& cap : captures) {
-		for (const class_definition* cd : cap.classes) {
-			if (std::find(captured_classes.begin(), captured_classes.end(), cd) == captured_classes.end()) { captured_classes.push_back(cd); }
-		}
-	}
-	std::vector<const class_definition*> record_classes = element_classes;
-	if (!captured_classes.empty()) {
-		record_classes.push_back(nullptr);
-		record_classes.insert(record_classes.end(), captured_classes.begin(), captured_classes.end());
-	}
-	method_admission_record* record = admissions->find(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace,
-	                                                   registry_key, eng.definition_epoch());
-	if (record && !admission_graph_current(eng, record->builder->adm)) {
-		admissions->records.erase(std::find_if(admissions->records.begin(), admissions->records.end(), [record](const auto& r) { return r.get() == record; }));
-		record = nullptr;
-	}
-	const bool admitted_before = record != nullptr;
-	if (!record) {
-		record = &admissions->make(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
-		record->builder->inplace_root = true;
-		record->builder->prefix = plan.prefix;
-		record->builder->host_names = &state.host_method_names;
-	}
-	admission_builder& method_adm = *record->builder;
-	if (admitted_before && !record->ok) {
-		state.error_text = record->message;
-		return checked_result<void>(record->code, std::string_view(state.error_text));
-	}
-	if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
-	    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty()) {
-		if (!admitted_before) {
-			method_adm.adm.element_method_calls = adm->element_method_calls;
-			method_adm.adm.constructions = adm->constructions;
-			method_adm.captured_classes = captured_classes;
-			method_adm.region_body = adm;
-			method_adm.counted_variable = plan.counted_variable;
-			// the methods' captures are their own set: the same name is the body's capture in the
-			// region's enclosing scope and a method's in its class's scope
-			const bool classes_admitted = method_adm.admit_region_classes(element_classes, element_methods, written_types, program_destructors);
-			method_adm.region_body = nullptr;
-			if (!classes_admitted) {
-				record->ok = false;
-				record->code = method_adm.adm.code;
-				record->message = method_adm.adm.message;
-				state.error_text = method_adm.adm.message;
-				return checked_result<void>(method_adm.adm.code, std::string_view(state.error_text));
-			}
-			std::vector<const class_definition*> object_classes = element_classes;
-			object_classes.insert(object_classes.end(), captured_classes.begin(), captured_classes.end());
-			admit_region_extras(method_adm, *adm, object_classes, element_methods, written_types, program_destructors);
-			method_adm.finish_const_ref_touches();
-			record->ok = true;
-		}
-		for (const auto& entry : method_adm.adm.captures) {
-			auto classified = classify_and_add(entry, /*method_scope*/ true);
-			if (!classified) { return classified; }
-		}
-	}
 	// A method called on a captured object reads it: one that writes its object (a worker's view of it) is refused, and so is a
 	// container's mutating builtin
-	auto check_captured_calls = [&](const std::vector<parallel_admission::captured_method_call>& calls, bool method_scope) -> checked_result<void> {
+	checked_result<void> check_captured_calls(const std::vector<parallel_admission::captured_method_call>& calls, bool method_scope) {
 		for (const auto& call : calls) {
 			const resolved_capture* cap = nullptr;
 			for (const auto& c : captures) { if (c.entry->name_id == call.capture_id && c.method_scope == method_scope) { cap = &c; break; } }
@@ -5472,502 +5437,514 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 		}
 		return {};
-	};
-	if (auto checked = check_captured_calls(adm->captured_method_calls, false); !checked) { return checked; }
-	if (auto checked = check_captured_calls(method_adm.adm.captured_method_calls, true); !checked) { return checked; }
-	if (auto checked = refuse_captured_aliases(); !checked) { return checked; }
+	}
+	// ELEMENT METHODS (in-place statement): admitted at the barrier against the element
+	// classes the proof found; their captures classify like the body's
+	checked_result<void> admit_methods() {
+		JAI_REGION_PHASE(methods);
+		const std::vector<const class_definition*>& element_classes = proof.element_classes;
+		auto& registry = eng.get_class_registry();
+		const uint64_t registry_key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
+		if (state.host_method_names_key != registry_key) {
+			admission_builder lister(eng);
+			state.host_method_names.clear();
+			state.host_method_names_key = registry_key;
+			lister.for_each_registered_class([&](const class_definition* cls) {
+				std::vector<const class_definition*> chain{ cls };
+				while (!chain.empty()) {
+					const class_definition* level = chain.back();
+					chain.pop_back();
+					if (!level->is_script_class()) {
+						for (const auto& [id, value] : level->method_values()) { state.host_method_names.insert(id); }
+					}
+					for (const auto& parent : level->get_parent_classes()) { if (parent) { chain.push_back(parent.get()); } }
+				}
+			});
+		}
+		state.faults.checkpoint("region.method_admission");
+		const bool element_methods = plan.inplace && !element_classes.empty();
+		// a worker's copy of an index-written array holds objects that can die on it: the declared element type, or each held value's
+		std::vector<type_info_ptr> written_types;
+		if (state.program_destructors_key != registry_key) {
+			state.program_destructors = admission_builder(eng).any_program_destructor();
+			state.program_destructors_key = registry_key;
+		}
+		const bool program_destructors = state.program_destructors;
+		for (const auto& cap : captures) {
+			if (!program_destructors || cap.kind != parallel_capture_kind::written) { continue; }
+			const type_info_ptr declared = cap.source->get_type_info() ? cap.source->get_type_info()->element_type() : type_info_ptr(nullptr);
+			if (declared && declared->base_type != script_value_type::jai_any_type) {
+				written_types.push_back(declared);
+				continue;
+			}
+			const script_array* held = cap.source->unchecked_array_node();
+			for (size_t j = 0; j < held->size(); ++j) {
+				const type_info_ptr t = held->get(j, &eng).deref().get_type_info();
+				if (t && std::find(written_types.begin(), written_types.end(), t) == written_types.end()) { written_types.push_back(t); }
+			}
+		}
+		// the method admission of this region shape, kept while nothing it read changed: the body's admission, the element classes, the
+		// written types, the class registry and the program's definitions
+		auto* admissions = static_cast<method_admission_cache*>(state.method_admissions.get());
+		if (!admissions) {
+			auto made = std::make_shared<method_admission_cache>();
+			admissions = made.get();
+			state.method_admissions = std::move(made);
+		}
+		std::vector<type_info*> written_raw;
+		for (const auto& t : written_types) { written_raw.push_back(t.get()); }
+		// a captured object's classes: their methods are pinned like a constructed object's (the record keys them after a null)
+		for (const auto& cap : captures) {
+			for (const class_definition* cd : cap.classes) {
+				if (std::find(captured_classes.begin(), captured_classes.end(), cd) == captured_classes.end()) { captured_classes.push_back(cd); }
+			}
+		}
+		std::vector<const class_definition*> record_classes = element_classes;
+		if (!captured_classes.empty()) {
+			record_classes.push_back(nullptr);
+			record_classes.insert(record_classes.end(), captured_classes.begin(), captured_classes.end());
+		}
+		record = admissions->find(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace,
+		                          registry_key, eng.definition_epoch());
+		if (record && !admission_graph_current(eng, record->builder->adm)) {
+			method_admission_record* stale = record;
+			admissions->records.erase(std::find_if(admissions->records.begin(), admissions->records.end(), [stale](const auto& r) { return r.get() == stale; }));
+			record = nullptr;
+		}
+		const bool admitted_before = record != nullptr;
+		if (!record) {
+			record = &admissions->make(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
+			record->builder->inplace_root = true;
+			record->builder->prefix = plan.prefix;
+			record->builder->host_names = &state.host_method_names;
+		}
+		if (admitted_before && !record->ok) {
+			return raise(record->code, record->message);
+		}
+		if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
+		    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty()) {
+			if (!admitted_before) {
+				admission_builder& builder = method_adm();
+				builder.adm.element_method_calls = adm->element_method_calls;
+				builder.adm.constructions = adm->constructions;
+				builder.captured_classes = captured_classes;
+				builder.region_body = adm;
+				builder.counted_variable = plan.counted_variable;
+				// the methods' captures are their own set: the same name is the body's capture in the
+				// region's enclosing scope and a method's in its class's scope
+				const bool classes_admitted = builder.admit_region_classes(element_classes, element_methods, written_types, program_destructors);
+				builder.region_body = nullptr;
+				if (!classes_admitted) {
+					record->ok = false;
+					record->code = builder.adm.code;
+					record->message = builder.adm.message;
+					return raise(builder.adm.code, builder.adm.message);
+				}
+				std::vector<const class_definition*> object_classes = element_classes;
+				object_classes.insert(object_classes.end(), captured_classes.begin(), captured_classes.end());
+				admit_region_extras(builder, *adm, object_classes, element_methods, written_types, program_destructors);
+				builder.finish_const_ref_touches();
+				record->ok = true;
+			}
+			for (const auto& entry : method_adm().adm.captures) {
+				auto classified = classify_and_add(entry, /*method_scope*/ true);
+				if (!classified) { return classified; }
+			}
+		}
+		if (auto checked = check_captured_calls(adm->captured_method_calls, false); !checked) { return checked; }
+		if (auto checked = check_captured_calls(method_adm().adm.captured_method_calls, true); !checked) { return checked; }
+		return refuse_captured_aliases();
+	}
 
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t pf_adm1 = __rdtsc();
-#endif
 	// THREAD COUNT: the engine's count (the host's, else min(performance cores, hardware_concurrency - 1)), one context below
-	// k_parallel_small_n, then the measured-cost cap (internal/parallel_design.md section 3)
-	size_t worker_count = eng.parallel_thread_count();
-	if (worker_count < 1) { worker_count = 1; }
-	if (worker_count > n) { worker_count = n; }
-	if (n < k_parallel_small_n) { worker_count = 1; }
-	const std::chrono::nanoseconds budget =
-		std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
-	const backend_type engine_backend = eng.get_backend_type();
-	const bool use_vm = engine_backend == backend_type::vm;
-	state.faults.checkpoint("region.pool_storage");
-	parallel_engine_state::parallel_region_pool* pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
-	worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
+	// k_parallel_small_n, then the measured-cost cap (internal/parallel_design.md section 3).
 	// THE PARTITION (results never depend on it): without a weight hint the elements go out in blocks of max(1, n / 8W)
 	// consecutive elements, each worker's first block its own and every later block to whichever worker finishes first, so a
 	// cost that varies along the range (a wall-heavy band of screen rows) or a busy core spreads over every worker instead of
 	// holding the region on one; large n means blocks of hundreds, so no two workers write neighbouring scalars. A weight hint
 	// keeps its contiguous cumulative split. `bounds` publishes the cumulative element counts per chunk (the elements each
 	// worker ran, read at the join)
-	std::vector<size_t> bounds;
-	std::vector<size_t> chunk_begin, chunk_count;
-	size_t chunk_block = 0, chunk_stride = 1;
-	parallel_block_schedule schedule;
-	state.faults.checkpoint("region.bounds");
-	if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
-		bounds = plan.bounds;                       // the caller's weighted partition
-		worker_count = bounds.size() - 1;
-		for (size_t k = 0; k < worker_count; ++k) { chunk_begin.push_back(bounds[k]); chunk_count.push_back(bounds[k + 1] - bounds[k]); }
-	} else if (worker_count > 1) {
-		schedule.block = std::max<size_t>(1, n / (8 * worker_count));
-		schedule.n = n;
-		schedule.blocks = (n + schedule.block - 1) / schedule.block;
-		schedule.owner.assign(schedule.blocks, 0);
-		schedule.next.store(worker_count, std::memory_order_relaxed);
-		bounds.assign(worker_count + 1, 0);
-		for (size_t k = 0; k < worker_count; ++k) {
-			chunk_begin.push_back(std::min(k * schedule.block, n));
-			chunk_count.push_back(k < schedule.blocks ? n : 0);   // the chunk loop's bound: the schedule ends it
-		}
-	} else {
-		bounds = partition_flat(n, worker_count);
-		chunk_begin.push_back(0); chunk_count.push_back(n);
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t pf_provisions0 = plan.prof ? plan.prof->slot_provisions : 0;
-#endif
-	state.faults.checkpoint("region.bounds_metadata");
-	state.last_chunk_bounds = bounds;
-	if (pool->worker_slots.size() < worker_count) {
-		state.faults.checkpoint("region.worker_storage");
-		pool->worker_slots.resize(worker_count);
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t pf_adm2 = __rdtsc();
-#endif
-	std::vector<parallel_worker_slot*> contexts;
-	state.faults.checkpoint("region.context_storage");
-	contexts.reserve(worker_count);
-
-	// One owner for activation, the thread table, join obligations and borrowed storage.
-	// A failed setup discards partial reusable slots; a completed setup keeps their caches.
-	struct region_guard_t {
-		engine& eng;
-		parallel_engine_state& state;
-		std::vector<std::unique_ptr<parallel_worker_slot>>& slots;
-		size_t count;
-		parallel_region_table table;
-		parallel_region_table* previous_region;
-		bool previous_frozen;
-		jai::thread_pool* pending_pool = nullptr;
-		bool active = false;
-		bool prepared = false;
-
-		region_guard_t(engine& e, parallel_engine_state& s,
-		               std::vector<std::unique_ptr<parallel_worker_slot>>& workers, size_t n)
-			: eng(e), state(s), slots(workers), count(n),
-			  previous_region(s.active_region), previous_frozen(e.get_symbolizer()->frozen()) {}
-		region_guard_t(const region_guard_t&) = delete;
-		region_guard_t& operator=(const region_guard_t&) = delete;
-
-		void activate() noexcept {
-			// Accepted work can create live copies even if a later submit throws.
-			// Only a complete post-join drain clears this obligation.
-			state.pending_registration_retry = true;
-			eng.get_symbolizer()->set_frozen(true);
-			state.active_region = &table;
-			eng.note_parallel_region(true);
-			active = true;
-		}
-		void join() {
-			if (pending_pool) {
-				pending_pool->wait_idle();
-				pending_pool = nullptr;
-			}
-		}
-		void restore() noexcept {
-			if (active) {
-				state.active_region = previous_region;
-				eng.note_parallel_region(previous_region != nullptr);
-				eng.get_symbolizer()->set_frozen(previous_frozen);
-				active = false;
-			}
-		}
-		~region_guard_t() {
-			join();                 // accepted work must finish before table/cursor destruction
-			restore();
-			for (size_t k = 0; k < count && k < slots.size(); ++k) {
-				if (!prepared) {
-					slots[k].reset();    // includes an environment whose publication only partly succeeded
-					continue;
-				}
-				parallel_worker_slot* slot = slots[k].get();
-				if (!slot) { continue; }
-				for (uint64_t id : slot->capture_name_ids) {
-					if (script_value* value = slot->root_env->get_own_value_ptr(id)) {
-						*value = script_value(std::monostate{}, &eng);   // existing storage, no allocation
-					}
-					if (slot->method_env) {
-						if (script_value* value = slot->method_env->get_own_value_ptr(id)) {
-							*value = script_value(std::monostate{}, &eng);
-						}
-					}
-				}
-				slot->capture_name_ids.clear();
-				slot->element_refs.clear();
-				slot->cursors.clear();
-				slot->call_args.clear();
-				slot->raw_input = nullptr;
-				slot->typed_input = nullptr;
-				slot->backend->set_parallel_method_pins(nullptr);
-			}
-		}
-	} region_guard{ eng, state, pool->worker_slots, worker_count };
-	std::unordered_map<uint64_t, uint64_t>& snapshot_validated = state.snapshot_validated;
-	snapshot_validated.clear();
-
-	auto& range_handle = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage()
-	                                            : const_cast<script_value&>(array_value).unchecked_get_array_storage();
-	type_info_ptr element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
-	if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
-	state.faults.checkpoint("region.type_metadata");
-	value_types.insert(value_types.end(), tags.begin(), tags.end());   // subclass slots carry their own tags
-	value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
-	for (size_t j = 1; j < containers.size(); ++j) {
-		const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
-		if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t pf_loop0 = __rdtsc();
-	uint64_t pf_a = pf_loop0, pf_slots = 0, pf_caps = 0, pf_pins = 0, pf_reset = 0, pf_restamp = 0, pf_cursor = 0;
-#endif
-	for (size_t k = 0; k < worker_count; ++k) {
-		auto& slot = pool->worker_slots[k];
-		state.faults.checkpoint("region.worker_slot", k);
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t pf_s0 = __rdtsc();
-#endif
-		const bool slot_fresh = !(slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm));
-		if (!slot_fresh) {
-			reset_worker_slot(eng, *slot, budget);
-#ifdef JAISCRIPT_VM_PROFILE
-			if (plan.prof) { ++plan.prof->slot_resets; }
-#endif
-		} else {
-			slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
-#ifdef JAISCRIPT_VM_PROFILE
-			if (plan.prof) { ++plan.prof->slot_provisions; }
-#endif
-		}
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t pf_s1 = __rdtsc();
-#endif
-		restamp_alias_proofs(eng, *slot);
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t pf_s2 = __rdtsc();
-		pf_reset += pf_s1 - pf_s0; pf_restamp += pf_s2 - pf_s1;
-#endif
-		slot->begin = chunk_begin[k];
-		slot->end = n;
-		slot->count = chunk_count[k];
-		slot->block = chunk_block;
-		slot->stride_blocks = chunk_stride;
-		slot->sched = parallel_schedule_cursor{};
-		if (schedule.blocks) {
-			slot->sched.schedule = &schedule;
-			slot->sched.worker = static_cast<uint32_t>(k);
-			slot->sched.take(k);   // its own first block (no worker runs yet)
-		}
-		slot->element_refs.clear();
-		slot->raw_input = nullptr;
-		slot->typed_input = nullptr;
-		// ONE cursor reference per array per chunk, minted here (the array pin and the
-		// live_elem_refs count are main-thread facts) and re-pointed per element by the worker's
-		// chunk loop: a by-ref loop variable binds it, a by-value one copies through it exactly
-		// as it would the element (normalization made every element exclusive, so those copies
-		// touch no cross-thread counts). An admitted body cannot retain it past its iteration
-		// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
-		state.faults.checkpoint("region.cursor_storage", k);
-		slot->counted.reset();
-		if (plan.counted) { slot->counted = *plan.counted; }
-		if (slot->count > 0) {
-			// the counted form's cursor rides its one-element anchor: only its index moves, and no read goes through it
-			slot->element_refs.push_back(script_value::make_element_reference(range_handle, plan.counted ? 0 : slot->begin, &eng, element_type));
-			if (plan.counted) { slot->element_refs.back().element_cursor_set(slot->begin); }
-			for (size_t j = 0; j < zip_nodes.size(); ++j) {
-				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
-				auto& zhandle = zc.unchecked_get_array_storage();
-				type_info_ptr zet = zc.get_type_info().get() ? zc.get_type_info()->element_type() : type_info_ptr(nullptr);
-				slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
-			}
-		}
-		// Argument storage also belongs to the region guard. Build it before fan-out so an
-		// allocation failure cannot escape the worker's entry and be swallowed by the pool.
-		slot->call_args.clear();
-		state.faults.checkpoint("region.worker_arguments", slot->begin);
-		slot->call_args.reserve(slot->element_refs.size() + 1);
-		for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
-		if (plan.counted && !slot->call_args.empty()) { slot->call_args.front() = script_value(static_cast<script_int>(0), &eng); }   // the chunk's by-value variable
-		slot->call_args.emplace_back(static_cast<script_int>(slot->count), &eng);
-#ifdef JAISCRIPT_VM_PROFILE
-		pf_cursor += __rdtsc() - pf_s2;
-#endif
-
-		// Provision the captured reads into THIS worker's root env (single-threaded, charged
-		// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
-		// cross-region cache (content-proven against the live source), borrows mint the
-		// zero-copy view. Defines are per call and nulled at the join.
-		slot->capture_name_ids.clear();
-		bool any_snapshot_miss = false;
-		std::vector<const void*> fresh_nodes;
-#ifdef JAISCRIPT_VM_PROFILE
-		{ const uint64_t now = __rdtsc(); pf_slots += now - pf_a; pf_a = now; }
-#endif
-		for (auto& cap : captures) {
-			state.faults.checkpoint("region.capture_value", k);
-			script_value provisioned(std::monostate{}, &eng);
-			try {
-				switch (cap.kind) {
-				case parallel_capture_kind::scalar:
-					provisioned = *cap.source;
-					break;
-				case parallel_capture_kind::string:
-				case parallel_capture_kind::snapshot:
-					provision_snapshot_capture(*slot, cap.cache_key(), *cap.source, eng,
-					                           value_types, provisioned,
-					                           state.region_use_counter, snapshot_validated,
-					                           fresh_nodes, any_snapshot_miss
-#ifdef JAISCRIPT_VM_PROFILE
-					                           , *plan.prof, cap.entry->name
-#endif
-					                           );
-					break;
-				case parallel_capture_kind::borrow:
-					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = script_value::make_parallel_borrow(*cap.source, &eng, cap.sliced);
-					break;
-				case parallel_capture_kind::object:
-					provisioned = captured_object_view(*cap.source, cap.host, eng, value_types);
-					break;
-				case parallel_capture_kind::stream:
-					provisioned = stdlib::random_detail::region_copy(*cap.source, &eng, &slot->cursors, 0);
-					if (auto holder = provisioned.get_object_holder(); holder && holder->is_instance()) {
-						holder->unchecked_instance()->region_tag(state.region_serial);   // the worker's own copy takes its draws
-					}
-					cap.stream_copies.emplace_back(provisioned, &slot->cursors);
-					break;
-				case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
-					if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
-					provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy(&eng);
-					break;
-				}
-			} catch (const std::exception& e) {
-				return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
-			}
-			state.faults.checkpoint("region.capture_track", k);
-			slot->capture_name_ids.push_back(cap.entry->name_id);
-			state.faults.checkpoint("region.capture_publish", k);
-			(cap.method_scope ? slot->method_env : slot->root_env)->define(cap.entry->name_id, std::move(provisioned));
-		}
-		state.faults.checkpoint("region.snapshot_metadata", k);
-		rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
-#ifdef JAISCRIPT_VM_PROFILE
-		{ const uint64_t now = __rdtsc(); pf_caps += now - pf_a; pf_a = now; }
-#endif
-		// A reused slot keeps the pins of the record it last ran under (a capture of one of their names provisions over them: rebuild)
-		bool keep_pins = record->serial != 0 && !slot_fresh && slot->pins_serial == record->serial;
-		for (uint64_t id : slot->capture_name_ids) {
-			keep_pins = keep_pins && std::find(slot->pinned_name_ids.begin(), slot->pinned_name_ids.end(), id) == slot->pinned_name_ids.end();
-		}
-#ifdef JAISCRIPT_VM_PROFILE
-		if (plan.prof) { ++(keep_pins ? plan.prof->pins_kept : plan.prof->pins_built); }
-#endif
-		if (keep_pins) {
-			if (slot->vm) {
-				for (const auto& [name_id, name] : method_adm.adm.host_functions) {
-					if (const script_value* copy = slot->method_env->get_own_value_ptr(name_id)) { slot->vm->adopt_math_alias(name_id, *copy); }
-				}
-				slot->vm->prefold_parallel_reads(eng.fold_epoch());
+	void partition() {
+		JAI_REGION_PHASE(partition);
+		worker_count = eng.parallel_thread_count();
+		if (worker_count < 1) { worker_count = 1; }
+		if (worker_count > n) { worker_count = n; }
+		if (n < k_parallel_small_n) { worker_count = 1; }
+		budget = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(eng.execution_budget()));
+		use_vm = eng.get_backend_type() == backend_type::vm;
+		state.faults.checkpoint("region.pool_storage");
+		pool = &acquire_region_pool(state, static_cast<const void*>(plan.root_fn->body.get()), use_vm);
+		worker_count = cap_workers_by_cost(worker_count, n, state, *pool);
+		state.faults.checkpoint("region.bounds");
+		if (!plan.bounds.empty() && plan.bounds.size() >= 2 && worker_count > 1) {
+			bounds = plan.bounds;                       // the caller's weighted partition
+			worker_count = bounds.size() - 1;
+			for (size_t k = 0; k < worker_count; ++k) { chunk_begin.push_back(bounds[k]); chunk_count.push_back(bounds[k + 1] - bounds[k]); }
+		} else if (worker_count > 1) {
+			schedule.block = std::max<size_t>(1, n / (8 * worker_count));
+			schedule.n = n;
+			schedule.blocks = (n + schedule.block - 1) / schedule.block;
+			schedule.owner.assign(schedule.blocks, 0);
+			schedule.next.store(worker_count, std::memory_order_relaxed);
+			bounds.assign(worker_count + 1, 0);
+			for (size_t k = 0; k < worker_count; ++k) {
+				chunk_begin.push_back(std::min(k * schedule.block, n));
+				chunk_count.push_back(k < schedule.blocks ? n : 0);   // the chunk loop's bound: the schedule ends it
 			}
 		} else {
-			for (uint64_t id : slot->pinned_name_ids) {
-				if (script_value* value = slot->root_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
-				if (script_value* value = slot->method_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
+			bounds = partition_flat(n, worker_count);
+			chunk_begin.push_back(0); chunk_count.push_back(n);
+		}
+		state.faults.checkpoint("region.bounds_metadata");
+		state.last_chunk_bounds = bounds;
+		if (pool->worker_slots.size() < worker_count) {
+			state.faults.checkpoint("region.worker_storage");
+			pool->worker_slots.resize(worker_count);
+		}
+		state.faults.checkpoint("region.context_storage");
+		contexts.reserve(worker_count);
+		guard.emplace(eng, state, pool->worker_slots, worker_count);
+	}
+
+	// Method pins: each worker gets a dispatcher copy per admitted element method, operator, host method, static, construction
+	// and function the class code calls, all in its method sandbox
+	checked_result<void> pin_methods(parallel_worker_slot& slot, size_t k) {
+		admission_builder& builder = method_adm();
+		for (uint64_t id : slot.pinned_name_ids) {
+			if (script_value* value = slot.root_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
+			if (script_value* value = slot.method_env->get_own_value_ptr(id)) { *value = script_value(std::monostate{}, &eng); }
+		}
+		slot.pinned_name_ids.clear();
+		slot.pins_serial = 0;
+		slot.method_pins.entries.clear();
+		for (const auto& am : builder.admitted_methods) {
+			state.faults.checkpoint("region.method_pin", k);
+			const script_value shared_method = am.cls->get_method(am.name_id, false);
+			const script_method_dispatch* src = shared_method.is_function()
+				? shared_method.as_function().target<script_method_dispatch>() : nullptr;
+			if (!src) {
+				return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
 			}
-			slot->pinned_name_ids.clear();
-			slot->pins_serial = 0;
-			// Method pins: each worker gets a dispatcher copy per admitted element method
-			slot->method_pins.entries.clear();
-			for (const auto& am : method_adm.admitted_methods) {
-				state.faults.checkpoint("region.method_pin", k);
-				const script_value shared_method = am.cls->get_method(am.name_id, false);
-				const script_method_dispatch* src = shared_method.is_function()
-					? shared_method.as_function().target<script_method_dispatch>() : nullptr;
-				if (!src) {
-					return usage("method '" + std::string(am.name) + "' has no script dispatcher (internal)");
-				}
+			script_method_dispatch wd;
+			wd.eng = src->eng;
+			wd.cls = src->cls;
+			wd.name_id = src->name_id;
+			// The worker's method sandbox, not the class's defining scope: a method body's captured
+			// reads resolve to this worker's provisioned copies (a borrowed string table read through
+			// the live global copied the shared literal's handle across threads; safe mode too), and
+			// not to the body's captures, which may be the caller's locals under the same names
+			wd.definition_env = slot.method_env;
+			detail::parallel_method_pin pin;
+			pin.method_value = script_value::make_function(std::move(wd), &eng);
+			pin.resolved = am.decl;
+			slot.method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
+			if (slot.vm) { slot.vm->precompile_parallel_method(*am.decl); }
+		}
+		// Operators: a script operator's dispatcher in the worker's method sandbox (its overloads precompiled with the admitted
+		// bodies), a C++ operator's worker copy with its arities
+		slot.method_pins.operators.clear();
+		slot.method_pins.refused_operators = builder.operator_refusals;
+		for (const auto& op : builder.operator_pins) {
+			const script_value* shared_method = op.cls->method_ptr(op.name_id);
+			if (!shared_method || !shared_method->is_function()) { continue; }
+			detail::parallel_method_pin pin;
+			if (op.script) {
+				const script_method_dispatch* src = shared_method->as_function().target<script_method_dispatch>();
+				if (!src) { continue; }
 				script_method_dispatch wd;
 				wd.eng = src->eng;
 				wd.cls = src->cls;
 				wd.name_id = src->name_id;
-				// The worker's method sandbox, not the class's defining scope: a method body's captured
-				// reads resolve to this worker's provisioned copies (a borrowed string table read through
-				// the live global copied the shared literal's handle across threads; safe mode too), and
-				// not to the body's captures, which may be the caller's locals under the same names
-				wd.definition_env = slot->method_env;
-				detail::parallel_method_pin pin;
+				wd.definition_env = slot.method_env;
 				pin.method_value = script_value::make_function(std::move(wd), &eng);
-				pin.resolved = am.decl;
-				slot->method_pins.entries.push_back({ am.cls, am.name_id, std::move(pin) });
-				if (slot->vm) { slot->vm->precompile_parallel_method(*am.decl); }
-			}
-			// Operators: a script operator's dispatcher in the worker's method sandbox (its overloads precompiled with the admitted
-			// bodies), a C++ operator's worker copy with its arities
-			slot->method_pins.operators.clear();
-			slot->method_pins.refused_operators = method_adm.operator_refusals;
-			for (const auto& op : method_adm.operator_pins) {
-				const script_value* shared_method = op.cls->method_ptr(op.name_id);
-				if (!shared_method || !shared_method->is_function()) { continue; }
-				detail::parallel_method_pin pin;
-				if (op.script) {
-					const script_method_dispatch* src = shared_method->as_function().target<script_method_dispatch>();
-					if (!src) { continue; }
-					script_method_dispatch wd;
-					wd.eng = src->eng;
-					wd.cls = src->cls;
-					wd.name_id = src->name_id;
-					wd.definition_env = slot->method_env;
-					pin.method_value = script_value::make_function(std::move(wd), &eng);
-				} else {
-					pin.method_value = script_value::make_function(script_function(shared_method->as_function()), &eng);
-					const class_definition* owner = op.owner ? op.owner : op.cls;
-					if (const auto* overloads = owner->host_overloads(op.name_id)) {
-						for (const auto& overload : *overloads) {
-							if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
-						}
-					}
-					if (const serial_overloads* marked = owner->serial_method(op.name_id)) {
-						pin.serial_arities = *marked == serial_overloads::every || !owner->host_overloads(op.name_id) ? ~uint64_t(0) : pin.mutating_arities;
-					}
-				}
-				slot->method_pins.operators.push_back({ op.cls, op.name_id, std::move(pin) });
-			}
-			// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
-			for (const auto& host : method_adm.host_pins) {
-				state.faults.checkpoint("region.host_method_pin", k);
-				const script_value shared_method = host.cls->get_method(host.name_id, false);
-				if (!shared_method.is_function()) { continue; }
-				detail::parallel_method_pin pin;
-				pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
-				const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
-				if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
+			} else {
+				pin.method_value = script_value::make_function(script_function(shared_method->as_function()), &eng);
+				const class_definition* owner = op.owner ? op.owner : op.cls;
+				if (const auto* overloads = owner->host_overloads(op.name_id)) {
 					for (const auto& overload : *overloads) {
 						if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
 					}
-				} else if (name.starts_with("_set_")) {
-					pin.mutating_arities = ~uint64_t(0);
 				}
-				if (const serial_overloads* marked = host.owner->serial_method(host.name_id)) {
-					pin.serial_arities = *marked == serial_overloads::every || !host.owner->host_overloads(host.name_id) ? ~uint64_t(0) : pin.mutating_arities;
-				}
-				slot->method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
-			}
-			slot->method_pins.statics.clear();
-			for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &method_adm.adm }) {
-				for (const auto& call : source->static_calls) {
-					const auto& host_classes = eng.get_class_registry().cpp_classes_;
-					const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
-					const script_value* entry = host == host_classes.end()
-						? namespace_host_entry(eng, eng.get_symbolizer()->get_string(call.class_name_id), eng.get_symbolizer()->get_string(call.name_id)) : nullptr;
-					if (host == host_classes.end() && !entry) { continue; }
-					const script_value shared_method = entry ? *entry : host->second->static_method_in_chain(call.name_id);
-					if (!shared_method.is_function() || slot->method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
-					slot->method_pins.statics.push_back({ call.class_name_id, call.name_id,
-					                                      script_value::make_function(script_function(shared_method.as_function()), &eng) });
-				}
-				for (const auto& read : source->const_static_reads) {
-					if (slot->method_pins.find_static(read.class_name_id, read.name_id)) { continue; }
-					std::optional<script_value> constant = class_constant_value(eng, read.class_name_id, read.name_id);
-					if (!constant) {
-						return usage("'" + std::string(eng.get_symbolizer()->get_string(read.class_name_id)) + "::" + std::string(eng.get_symbolizer()->get_string(read.name_id)) +
-						             "' is no longer a constant (a parallel body reads only const statics of a primitive value)");
-					}
-					slot->method_pins.statics.push_back({ read.class_name_id, read.name_id, std::move(*constant) });
+				if (const serial_overloads* marked = owner->serial_method(op.name_id)) {
+					pin.serial_arities = *marked == serial_overloads::every || !owner->host_overloads(op.name_id) ? ~uint64_t(0) : pin.mutating_arities;
 				}
 			}
-			// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
-			// sandbox, its constructor and destructor bodies compiled here
-			for (const auto& made : method_adm.constructed_classes) {
-				state.faults.checkpoint("region.constructor_pin", k);
-				if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
-					script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
-					slot->pinned_name_ids.push_back(made.name_id);
-					slot->root_env->define(made.name_id, host_ctor);
-					slot->method_env->define(made.name_id, std::move(host_ctor));
-					continue;
-				}
-				script_callable payload;
-				payload.kind = script_callable::kind_type::constructor;
-				payload.more().cls = made.cls;
-				if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.more().definition_env = slot->method_env; }
-				script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
-				slot->pinned_name_ids.push_back(made.name_id);
-				slot->root_env->define(made.name_id, ctor);
-				slot->method_env->define(made.name_id, std::move(ctor));
-			}
-			// The functions and host functions class code calls, worker-private copies in the method sandbox
-			for (const auto& [name_id, source_fn] : method_adm.adm.script_functions) {
-				if (name_id == UINT64_MAX) { continue; }
-				state.faults.checkpoint("region.method_function", k);
-				auto copy = std::make_shared<script_defined_function>(source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
-				                                                      source_fn->body, slot->method_env, source_fn->local_count);
-				copy->unit = source_fn->unit;
-				if (slot->vm) { slot->vm->precompile_parallel_function(*copy); }
-				script_callable payload;
-				payload.kind = script_callable::kind_type::function;
-				payload.fn = std::move(copy);
-				slot->pinned_name_ids.push_back(name_id);
-				slot->method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
-			}
-			for (const auto& [name_id, name] : method_adm.adm.host_functions) {
-				script_value copy = parallel_host_copy(eng, *slot, name_id, std::string(name));
-				if (slot->vm) { slot->vm->adopt_math_alias(name_id, copy); }
-				slot->pinned_name_ids.push_back(name_id);
-				slot->method_env->define(name_id, std::move(copy));
-			}
-			if (slot->vm) {
-				for (const auto& body : method_adm.admitted_bodies) { slot->vm->precompile_parallel_method(*body); }
-				for (const auto& expr : method_adm.admitted_expressions) { slot->vm->precompile_parallel_expression(expr); }
-				slot->vm->prefold_parallel_reads(eng.fold_epoch());
-			}
-			slot->pins_serial = record->serial;
+			slot.method_pins.operators.push_back({ op.cls, op.name_id, std::move(pin) });
 		}
-		slot->method_pins.definition_env = slot->method_env;
-		const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !slot->method_pins.operators.empty() ||
-		                    !slot->method_pins.refused_operators.empty() || !method_adm.constructed_classes.empty() ||
-		                    !method_adm.destructor_levels.empty();
-		slot->backend->set_parallel_method_pins(pinned ? &slot->method_pins : nullptr);
-		contexts.push_back(slot.get());
+		// Host methods and accessors: worker copies of the bound method values (a copy shares only the binding's own state)
+		for (const auto& host : builder.host_pins) {
+			state.faults.checkpoint("region.host_method_pin", k);
+			const script_value shared_method = host.cls->get_method(host.name_id, false);
+			if (!shared_method.is_function()) { continue; }
+			detail::parallel_method_pin pin;
+			pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
+			const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
+			if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
+				for (const auto& overload : *overloads) {
+					if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
+				}
+			} else if (name.starts_with("_set_")) {
+				pin.mutating_arities = ~uint64_t(0);
+			}
+			if (const serial_overloads* marked = host.owner->serial_method(host.name_id)) {
+				pin.serial_arities = *marked == serial_overloads::every || !host.owner->host_overloads(host.name_id) ? ~uint64_t(0) : pin.mutating_arities;
+			}
+			slot.method_pins.entries.push_back({ host.cls, host.name_id, std::move(pin) });
+		}
+		slot.method_pins.statics.clear();
+		for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &builder.adm }) {
+			for (const auto& call : source->static_calls) {
+				const auto& host_classes = eng.get_class_registry().cpp_classes_;
+				const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
+				const script_value* entry = host == host_classes.end()
+					? namespace_host_entry(eng, eng.get_symbolizer()->get_string(call.class_name_id), eng.get_symbolizer()->get_string(call.name_id)) : nullptr;
+				if (host == host_classes.end() && !entry) { continue; }
+				const script_value shared_method = entry ? *entry : host->second->static_method_in_chain(call.name_id);
+				if (!shared_method.is_function() || slot.method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
+				slot.method_pins.statics.push_back({ call.class_name_id, call.name_id,
+				                                     script_value::make_function(script_function(shared_method.as_function()), &eng) });
+			}
+			for (const auto& read : source->const_static_reads) {
+				if (slot.method_pins.find_static(read.class_name_id, read.name_id)) { continue; }
+				std::optional<script_value> constant = class_constant_value(eng, read.class_name_id, read.name_id);
+				if (!constant) {
+					return usage("'" + std::string(eng.get_symbolizer()->get_string(read.class_name_id)) + "::" + std::string(eng.get_symbolizer()->get_string(read.name_id)) +
+					             "' is no longer a constant (a parallel body reads only const statics of a primitive value)");
+				}
+				slot.method_pins.statics.push_back({ read.class_name_id, read.name_id, std::move(*constant) });
+			}
+		}
+		// Constructions: the class's constructor value resolves to a worker-private one whose code reads the worker's method
+		// sandbox, its constructor and destructor bodies compiled here
+		for (const auto& made : builder.constructed_classes) {
+			state.faults.checkpoint("region.constructor_pin", k);
+			if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
+				script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
+				slot.pinned_name_ids.push_back(made.name_id);
+				slot.root_env->define(made.name_id, host_ctor);
+				slot.method_env->define(made.name_id, std::move(host_ctor));
+				continue;
+			}
+			script_callable payload;
+			payload.kind = script_callable::kind_type::constructor;
+			payload.more().cls = made.cls;
+			if (!std::static_pointer_cast<script_class_definition>(made.cls)->get_constructor_asts().empty()) { payload.more().definition_env = slot.method_env; }
+			script_value ctor = script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng);
+			slot.pinned_name_ids.push_back(made.name_id);
+			slot.root_env->define(made.name_id, ctor);
+			slot.method_env->define(made.name_id, std::move(ctor));
+		}
+		// The functions and host functions class code calls, worker-private copies in the method sandbox
+		for (const auto& [name_id, source_fn] : builder.adm.script_functions) {
+			if (name_id == UINT64_MAX) { continue; }
+			state.faults.checkpoint("region.method_function", k);
+			auto copy = std::make_shared<script_defined_function>(source_fn->name, std::vector<parameter>(source_fn->parameters()), source_fn->return_type,
+			                                                      source_fn->body, slot.method_env, source_fn->local_count);
+			copy->unit = source_fn->unit;
+			if (slot.vm) { slot.vm->precompile_parallel_function(*copy); }
+			script_callable payload;
+			payload.kind = script_callable::kind_type::function;
+			payload.fn = std::move(copy);
+			slot.pinned_name_ids.push_back(name_id);
+			slot.method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
+		}
+		for (const auto& [name_id, name] : builder.adm.host_functions) {
+			script_value copy = parallel_host_copy(eng, slot, name_id, std::string(name));
+			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
+			slot.pinned_name_ids.push_back(name_id);
+			slot.method_env->define(name_id, std::move(copy));
+		}
+		if (slot.vm) {
+			for (const auto& body : builder.admitted_bodies) { slot.vm->precompile_parallel_method(*body); }
+			for (const auto& expr : builder.admitted_expressions) { slot.vm->precompile_parallel_expression(expr); }
+			slot.vm->prefold_parallel_reads(eng.fold_epoch());
+		}
+		slot.pins_serial = record->serial;
+		return {};
+	}
+	checked_result<void> provision_slots() {
+		JAI_REGION_PHASE(slots);
+		std::unordered_map<uint64_t, uint64_t>& snapshot_validated = state.snapshot_validated;
+		snapshot_validated.clear();
+		auto& range_handle = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage()
+		                                            : const_cast<script_value&>(array_value).unchecked_get_array_storage();
+		element_type = array_value.get_type_info().get() ? array_value.get_type_info()->element_type() : type_info_ptr(nullptr);
+		if (type_info* t = array_value.get_type_info().get()) { value_types.push_back(t); }
+		state.faults.checkpoint("region.type_metadata");
+		value_types.insert(value_types.end(), proof.tags.begin(), proof.tags.end());   // subclass slots carry their own tags
+		value_types.insert(value_types.end(), zip_tags.begin(), zip_tags.end());
+		for (size_t j = 1; j < containers.size(); ++j) {
+			const script_value& zv = containers[j].is_reference() ? containers[j].deref() : containers[j];
+			if (type_info* t = zv.get_type_info().get()) { value_types.push_back(t); }
+		}
+		admission_builder& builder = method_adm();
+		for (size_t k = 0; k < worker_count; ++k) {
+			auto& slot = pool->worker_slots[k];
+			state.faults.checkpoint("region.worker_slot", k);
+			const bool slot_fresh = !(slot && slot_matches(*slot, *adm, *plan.root_fn, use_vm));
+			if (!slot_fresh) {
+				reset_worker_slot(eng, *slot, budget);
+			} else {
+				slot = provision_worker(eng, *adm, budget, use_vm, plan.chunk_wrapper);
+			}
 #ifdef JAISCRIPT_VM_PROFILE
-		{ const uint64_t now = __rdtsc(); pf_pins += now - pf_a; pf_a = now; }
+			if (plan.prof) { ++(slot_fresh ? plan.prof->slot_provisions : plan.prof->slot_resets); }
 #endif
+			restamp_alias_proofs(eng, *slot);
+			slot->begin = chunk_begin[k];
+			slot->end = n;
+			slot->count = chunk_count[k];
+			slot->block = 0;
+			slot->stride_blocks = 1;
+			slot->sched = parallel_schedule_cursor{};
+			if (schedule.blocks) {
+				slot->sched.schedule = &schedule;
+				slot->sched.worker = static_cast<uint32_t>(k);
+				slot->sched.take(k);   // its own first block (no worker runs yet)
+			}
+			slot->element_refs.clear();
+			slot->raw_input = nullptr;
+			slot->typed_input = nullptr;
+			// ONE cursor reference per array per chunk, minted here (the array pin and the
+			// live_elem_refs count are main-thread facts) and re-pointed per element by the worker's
+			// chunk loop: a by-ref loop variable binds it, a by-value one copies through it exactly
+			// as it would the element (normalization made every element exclusive, so those copies
+			// touch no cross-thread counts). An admitted body cannot retain it past its iteration
+			// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
+			state.faults.checkpoint("region.cursor_storage", k);
+			slot->counted.reset();
+			if (plan.counted) { slot->counted = *plan.counted; }
+			if (slot->count > 0) {
+				// the counted form's cursor rides its one-element anchor: only its index moves, and no read goes through it
+				slot->element_refs.push_back(script_value::make_element_reference(range_handle, plan.counted ? 0 : slot->begin, &eng, element_type));
+				if (plan.counted) { slot->element_refs.back().element_cursor_set(slot->begin); }
+				for (size_t j = 0; j < zip_nodes.size(); ++j) {
+					script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
+					auto& zhandle = zc.unchecked_get_array_storage();
+					type_info_ptr zet = zc.get_type_info().get() ? zc.get_type_info()->element_type() : type_info_ptr(nullptr);
+					slot->element_refs.push_back(script_value::make_element_reference(zhandle, slot->begin, &eng, zet));
+				}
+			}
+			// Argument storage also belongs to the region guard. Build it before fan-out so an
+			// allocation failure cannot escape the worker's entry and be swallowed by the pool.
+			slot->call_args.clear();
+			state.faults.checkpoint("region.worker_arguments", slot->begin);
+			slot->call_args.reserve(slot->element_refs.size() + 1);
+			for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
+			if (plan.counted && !slot->call_args.empty()) { slot->call_args.front() = script_value(static_cast<script_int>(0), &eng); }   // the chunk's by-value variable
+			slot->call_args.emplace_back(static_cast<script_int>(slot->count), &eng);
+
+			// Provision the captured reads into THIS worker's root env (single-threaded, charged
+			// to the enclosing execute): scalars copy, strings/snapshots detach OR reuse the slot's
+			// cross-region cache (content-proven against the live source), borrows mint the
+			// zero-copy view. Defines are per call and nulled at the join.
+			slot->capture_name_ids.clear();
+			bool any_snapshot_miss = false;
+			std::vector<const void*> fresh_nodes;
+			for (auto& cap : captures) {
+				state.faults.checkpoint("region.capture_value", k);
+				script_value provisioned(std::monostate{}, &eng);
+				try {
+					switch (cap.kind) {
+					case parallel_capture_kind::scalar:
+						provisioned = *cap.source;
+						break;
+					case parallel_capture_kind::string:
+					case parallel_capture_kind::snapshot:
+						provision_snapshot_capture(*slot, cap.cache_key(), *cap.source, eng,
+						                           value_types, provisioned,
+						                           state.region_use_counter, snapshot_validated,
+						                           fresh_nodes, any_snapshot_miss
+#ifdef JAISCRIPT_VM_PROFILE
+						                           , plan.prof, cap.entry->name
+#endif
+						                           );
+						break;
+					case parallel_capture_kind::borrow:
+						if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
+						provisioned = script_value::make_parallel_borrow(*cap.source, &eng, cap.sliced);
+						break;
+					case parallel_capture_kind::object:
+						provisioned = captured_object_view(*cap.source, cap.host, eng, value_types);
+						break;
+					case parallel_capture_kind::stream:
+						provisioned = stdlib::random_detail::region_copy(*cap.source, &eng, &slot->cursors, 0);
+						if (auto holder = provisioned.get_object_holder(); holder && holder->is_instance()) {
+							holder->unchecked_instance()->region_tag(state.region_serial);   // the worker's own copy takes its draws
+						}
+						cap.stream_copies.emplace_back(provisioned, &slot->cursors);
+						break;
+					case parallel_capture_kind::written:   // a fresh copy each region: the join reads back what this worker wrote
+						if (type_info* t = cap.source->get_type_info().get()) { value_types.push_back(t); }
+						provisioned = cap.shares_slots ? shared_slot_copy(*cap.source, eng) : cap.source->parallel_detached_copy(&eng);
+						break;
+					}
+				} catch (const std::exception& e) {
+					return usage("captured name '" + std::string(cap.entry->name) + "': " + e.what());
+				}
+				state.faults.checkpoint("region.capture_track", k);
+				slot->capture_name_ids.push_back(cap.entry->name_id);
+				state.faults.checkpoint("region.capture_publish", k);
+				(cap.method_scope ? slot->method_env : slot->root_env)->define(cap.entry->name_id, std::move(provisioned));
+			}
+			state.faults.checkpoint("region.snapshot_metadata", k);
+			rebuild_provisioned_nodes(*slot, any_snapshot_miss, fresh_nodes);
+			// A reused slot keeps the pins of the record it last ran under (a capture of one of their names provisions over them: rebuild)
+			bool keep_pins = record->serial != 0 && !slot_fresh && slot->pins_serial == record->serial;
+			for (uint64_t id : slot->capture_name_ids) {
+				keep_pins = keep_pins && std::find(slot->pinned_name_ids.begin(), slot->pinned_name_ids.end(), id) == slot->pinned_name_ids.end();
+			}
+#ifdef JAISCRIPT_VM_PROFILE
+			if (plan.prof) { ++(keep_pins ? plan.prof->pins_kept : plan.prof->pins_built); }
+#endif
+			if (keep_pins) {
+				if (slot->vm) {
+					for (const auto& [name_id, name] : builder.adm.host_functions) {
+						if (const script_value* copy = slot->method_env->get_own_value_ptr(name_id)) { slot->vm->adopt_math_alias(name_id, *copy); }
+					}
+					slot->vm->prefold_parallel_reads(eng.fold_epoch());
+				}
+			} else if (auto pinned = pin_methods(*slot, k); !pinned) {
+				return pinned;
+			}
+			slot->method_pins.definition_env = slot->method_env;
+			const bool pinned = !slot->method_pins.entries.empty() || !slot->method_pins.statics.empty() || !slot->method_pins.operators.empty() ||
+			                    !slot->method_pins.refused_operators.empty() || !builder.constructed_classes.empty() ||
+			                    !builder.destructor_levels.empty();
+			slot->backend->set_parallel_method_pins(pinned ? &slot->method_pins : nullptr);
+			contexts.push_back(slot.get());
+		}
+		return {};
 	}
 
-	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze
-	state.faults.checkpoint("region.prewarm");
-	{
+	// PRE-WARM: every type shape a worker can mint, interned before the tables freeze; STREAMS: one draw from each captured random
+	// seeds every worker's copy of it, so a region's draws, and the generator after it, are the same at every worker count
+	void prewarm() {
+		JAI_REGION_PHASE(prewarm);
+		state.faults.checkpoint("region.prewarm");
+		admission_builder& builder = method_adm();
 		std::vector<type_info*> seed = adm->referenced_types;
 		if (plan.extra_seed_adm) { seed.insert(seed.end(), plan.extra_seed_adm->referenced_types.begin(), plan.extra_seed_adm->referenced_types.end()); }
 		seed.insert(seed.end(), value_types.begin(), value_types.end());
 		seed.push_back(array_value.get_type_info().get());
 		seed.push_back(element_type.get());
-		for (const class_definition* cd : element_classes) { seed.push_back(cd->get_type_info().get()); }
+		for (const class_definition* cd : proof.element_classes) { seed.push_back(cd->get_type_info().get()); }
 		std::vector<class_definition*> made;   // every class a chunk can construct, copy or destroy
-		for (const auto& c : method_adm.constructed_classes) { made.push_back(c.cls.get()); }
-		for (const class_definition* cd : method_adm.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
-		for (const class_definition* cd : element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (const auto& c : builder.constructed_classes) { made.push_back(c.cls.get()); }
+		for (const class_definition* cd : builder.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (const class_definition* cd : proof.element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
 		for (const class_definition* cd : captured_classes) { made.push_back(const_cast<class_definition*>(cd)); }
 		// a C++ call can hand a chunk an object of any bound class (a result, a method's receiver)
-		if (!adm->host_functions.empty() || !method_adm.adm.host_functions.empty() || !method_adm.host_pins.empty() ||
-		    !adm->static_calls.empty() || !method_adm.adm.static_calls.empty()) {
-			method_adm.for_each_registered_class([&](const class_definition* cd) { made.push_back(const_cast<class_definition*>(cd)); });
+		if (!adm->host_functions.empty() || !builder.adm.host_functions.empty() || !builder.host_pins.empty() ||
+		    !adm->static_calls.empty() || !builder.adm.static_calls.empty()) {
+			builder.for_each_registered_class([&](const class_definition* cd) { made.push_back(const_cast<class_definition*>(cd)); });
 		}
 		for (class_definition* cd : made) {
 			prime_construction_memos(*cd);
 			seed.push_back(cd->get_type_info().get());
 		}
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
-		seed_classes_by_member(eng, method_adm.adm.element_reached_members, seed);
+		seed_classes_by_member(eng, builder.adm.element_reached_members, seed);
 		// the same seed over the same interner, symbols and classes interns nothing new: the last region's prewarm stands
 		const size_t types = eng.interned_type_count(), symbols = eng.get_symbolizer()->size(), classes = eng.get_class_registry().script_classes_.size();
 		if (seed != pool->prewarm_seed || types != pool->prewarm_types || symbols != pool->prewarm_symbols || classes != pool->prewarm_classes) {
@@ -5977,199 +5954,154 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			pool->prewarm_symbols = eng.get_symbolizer()->size();
 			pool->prewarm_classes = eng.get_class_registry().script_classes_.size();
 		}
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t pf_prewarm1 = __rdtsc();
-#endif
-
-	// STREAMS: one draw from each captured random seeds every worker's copy of it, so a region's draws, and the generator after
-	// it, are the same at every worker count
-	for (resolved_capture& cap : captures) {
-		if (cap.kind != parallel_capture_kind::stream) { continue; }
-		const uint64_t seed = stdlib::random_detail::draw_region_seed(*cap.source);
-		for (auto& [copy, cursors] : cap.stream_copies) { stdlib::random_detail::begin_region(copy, cursors, seed); }
-		cap.stream_copies.clear();
+		for (resolved_capture& cap : captures) {
+			if (cap.kind != parallel_capture_kind::stream) { continue; }
+			const uint64_t stream_seed = stdlib::random_detail::draw_region_seed(*cap.source);
+			for (auto& [copy, cursors] : cap.stream_copies) { stdlib::random_detail::begin_region(copy, cursors, stream_seed); }
+			cap.stream_copies.clear();
+		}
 	}
 
 	// REGION: pinned pool workers for chunks 1..W-1 (submit_to fixes each chunk's thread so
 	// the limits table can be built before fan-out), the calling thread runs chunk 0. The pool
 	// is built once per engine at the engine's worker count (calibrated then).
-	auto& table = region_guard.table;
-	state.faults.checkpoint("region.table_entry", 0);
-	table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
-	                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors,
-	                          &contexts[0]->borrows });
-	if (worker_count > 1) {
-		const size_t pool_workers_needed = worker_count - 1;
-		if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
-			const auto build_start = std::chrono::steady_clock::now();
-			state.faults.checkpoint("region.pool_create");
-			state.pool = detail::thread_pool_access::make(
-				std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults,
-				thread_pool::fast_threads);
-			state.pool->spin_budget_ns(static_cast<int64_t>(state.spin_wait_us) * 1000);
-			region_guard.pending_pool = state.pool.get();
-			calibrate_pool_overhead(state);
-			region_guard.pending_pool = nullptr;   // calibration joined each completed batch
-			// Starting threads is the engine's cost, not the script's: an oversubscribed host can take seconds, so the
-			// execution budget (the caller's deadline and the workers' armed ones) does not count it
-			const auto built_in = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - build_start);
-			eng.time().extend_execution_deadline(built_in);
-			for (size_t k = 0; k < worker_count; ++k) { contexts[k]->backend->extend_execution_deadline(built_in); }
+	void fan_out_and_join() {
+		JAI_REGION_PHASE(fan_out);
+		auto& table = guard->table;
+		state.faults.checkpoint("region.table_entry", 0);
+		table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
+		                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors,
+		                          &contexts[0]->borrows });
+		if (worker_count > 1) {
+			const size_t pool_workers_needed = worker_count - 1;
+			if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
+				const auto build_start = std::chrono::steady_clock::now();
+				state.faults.checkpoint("region.pool_create");
+				state.pool = detail::thread_pool_access::make(
+					std::max(pool_workers_needed, eng.parallel_thread_count() > 1 ? eng.parallel_thread_count() - 1 : size_t(1)), &state.faults,
+					thread_pool::fast_threads);
+				state.pool->spin_budget_ns(static_cast<int64_t>(state.spin_wait_us) * 1000);
+				guard->pending_pool = state.pool.get();
+				calibrate_pool_overhead(state);
+				guard->pending_pool = nullptr;   // calibration joined each completed batch
+				// Starting threads is the engine's cost, not the script's: an oversubscribed host can take seconds, so the
+				// execution budget (the caller's deadline and the workers' armed ones) does not count it
+				const auto built_in = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::steady_clock::now() - build_start);
+				eng.time().extend_execution_deadline(built_in);
+				for (size_t k = 0; k < worker_count; ++k) { contexts[k]->backend->extend_execution_deadline(built_in); }
+			}
+			for (size_t k = 1; k < worker_count; ++k) {
+				state.faults.checkpoint("region.table_entry", k);
+				table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
+				                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
+				                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->borrows });
+			}
 		}
+		guard->prepared = true;
+		// The interner freezes: it is not thread-safe (a miss asserts in Debug, the tripwire)
+		guard->activate();
+		auto& region_tasks = state.region_tasks;
+		region_tasks.clear();
+		state.faults.checkpoint("region.tasks_reserve");
+		region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
 		for (size_t k = 1; k < worker_count; ++k) {
-			state.faults.checkpoint("region.table_entry", k);
-			table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
-			                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
-			                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->borrows });
+			parallel_worker_slot* ctx = contexts[k];
+			engine* eng_ptr = &eng;
+			state.faults.checkpoint("region.task_build", k);
+			region_tasks.emplace_back(k - 1, [ctx, eng_ptr] { run_worker_chunk(*ctx, *eng_ptr); });
+		}
+		if (!region_tasks.empty()) {
+			guard->pending_pool = state.pool.get();   // BEFORE a possibly partial submission
+			detail::thread_pool_access::submit_pinned_batch(*state.pool, region_tasks.data(), region_tasks.size(), &state.faults);
+		}
+		const auto main_chunk_t0 = std::chrono::steady_clock::now();
+		run_worker_chunk(*contexts[0], eng);
+		note_region_cost(*pool, main_chunk_t0, schedule.blocks ? contexts[0]->sched.ran : bounds[1] - bounds[0]);
+		guard->join();
+		if (schedule.blocks) {
+			for (size_t k = 0; k < worker_count; ++k) { bounds[k + 1] = bounds[k] + (k < contexts.size() ? contexts[k]->sched.ran : 0); }
+			state.last_chunk_bounds = bounds;
 		}
 	}
-	region_guard.prepared = true;
-	// The interner freezes: it is not thread-safe (a miss asserts in Debug, the tripwire)
-	region_guard.activate();
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t1 = __rdtsc();
-#endif
-	auto& region_tasks = state.region_tasks;
-	region_tasks.clear();
-	state.faults.checkpoint("region.tasks_reserve");
-	region_tasks.reserve(worker_count > 1 ? worker_count - 1 : 0);
-	for (size_t k = 1; k < worker_count; ++k) {
-		parallel_worker_slot* ctx = contexts[k];
-		engine* eng_ptr = &eng;
-		state.faults.checkpoint("region.task_build", k);
-		region_tasks.emplace_back(k - 1, [ctx, eng_ptr] {
-#ifdef JAISCRIPT_VM_PROFILE
-			ctx->prof_start_tsc = __rdtsc();
-#endif
-			run_worker_chunk(*ctx, *eng_ptr);
-#ifdef JAISCRIPT_VM_PROFILE
-			ctx->prof_end_tsc = __rdtsc();
-#endif
-		});
-	}
-	if (!region_tasks.empty()) {
-		region_guard.pending_pool = state.pool.get();   // BEFORE a possibly partial submission
-		detail::thread_pool_access::submit_pinned_batch(*state.pool, region_tasks.data(), region_tasks.size(), &state.faults);
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t2 = __rdtsc();
-#endif
-	const auto main_chunk_t0 = std::chrono::steady_clock::now();
-	run_worker_chunk(*contexts[0], eng);
-	note_region_cost(*pool, main_chunk_t0, schedule.blocks ? contexts[0]->sched.ran : bounds[1] - bounds[0]);
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t3 = __rdtsc();
-#endif
-	region_guard.join();
-	if (schedule.blocks) {
-		for (size_t k = 0; k < worker_count; ++k) { bounds[k + 1] = bounds[k] + (k < contexts.size() ? contexts[k]->sched.ran : 0); }
-		state.last_chunk_bounds = bounds;
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t4 = __rdtsc();
-	if (plan.prof) {
-		auto& p = *plan.prof;
-		++p.regions;
-		p.setup_cyc += prof_t1 - prof_t0;
-		p.setup_admit_cyc += pf_loop0 - prof_norm1;
-		p.setup_slots_cyc += pf_slots;
-		p.setup_caps_cyc += pf_caps;
-		p.setup_pins_cyc += pf_pins;
-		p.setup_prewarm_cyc += pf_prewarm1 - pf_a;
-		p.setup_rest_cyc += prof_t1 - pf_prewarm1;
-		p.slot_reset_cyc += pf_reset;
-		p.slot_restamp_cyc += pf_restamp;
-		p.slot_cursor_cyc += pf_cursor;
-		p.admit_pool_cyc += pf_adm2 - pf_adm1;
-		p.admit_guard_cyc += pf_loop0 - pf_adm2;
-		p.submit_cyc += prof_t2 - prof_t1;
-		if (p.slot_provisions == pf_provisions0) {
-			++p.steady_regions;
-			p.steady_admit_cyc += pf_loop0 - prof_norm1;
-			p.steady_slots_cyc += pf_slots;
-			p.steady_pins_cyc += pf_pins;
-			p.steady_prewarm_cyc += pf_prewarm1 - pf_a;
-			p.steady_rest_cyc += prof_t1 - pf_prewarm1;
-			p.steady_submit_cyc += prof_t2 - prof_t1;
+
+	// JOIN: what the chunks deferred runs on the calling thread in element order, memory rolls up, index writes come back in element
+	// order up to the first failing element, and iteration order picks the error a region reports
+	checked_result<void> drain() {
+		JAI_REGION_PHASE(drain);
+		guard->restore();   // registration below can allocate or throw
+		drain_pending_instances(state, contexts);   // chunk-created instances join the class registries now, unlocked, in element order
+		{
+			std::vector<std::vector<deferred_release>*> deferred;
+			for (auto* ctx : contexts) { deferred.push_back(&ctx->deferred_releases); }
+			release_deferred_in_order(deferred);
 		}
-		p.main_chunk_cyc += prof_t3 - prof_t2;
-		p.wait_cyc += prof_t4 - prof_t3;
-		uint64_t span_max = 0, span_min = UINT64_MAX;
-		for (size_t k = 1; k < worker_count; ++k) {
-			const parallel_worker_slot* ctx = contexts[k];
-			if (!ctx->prof_start_tsc) continue;
-			p.wake_lat_sum += ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0;
-			p.wake_lat_max = std::max(p.wake_lat_max,
-				ctx->prof_start_tsc > prof_t2 ? ctx->prof_start_tsc - prof_t2 : 0);
-			const uint64_t span = ctx->prof_end_tsc - ctx->prof_start_tsc;
-			p.worker_span_sum += span;
-			span_max = std::max(span_max, span);
-			span_min = std::min(span_min, span);
-			++p.wake_samples;
+		for (auto* ctx : contexts) {
+			for (const auto& [object, owner] : ctx->pending_script_layers) {
+				if (!owner.expired()) { eng.note_script_layer(object, owner); }
+			}
+			ctx->pending_script_layers.clear();
+			const cell_counters now = ctx->backend->cells_counters();
+			state.worker_cells.entries += now.entries - ctx->cells_folded.entries;
+			state.worker_cells.boundaries += now.boundaries - ctx->cells_folded.boundaries;
+			state.worker_cells.resumes += now.resumes - ctx->cells_folded.resumes;
+			state.worker_cells.misses += now.misses - ctx->cells_folded.misses;
+			state.worker_cells.row_entries += now.row_entries - ctx->cells_folded.row_entries;
+			ctx->cells_folded = now;
 		}
-		if (span_max) { p.region_span_max_sum += span_max; p.region_span_min_sum += span_min; }
-		uint64_t last_end = prof_t3;
-		for (size_t k = 1; k < worker_count; ++k) { last_end = std::max(last_end, contexts[k]->prof_end_tsc); }
-		p.join_lat_sum += prof_t4 > last_end ? prof_t4 - last_end : 0;
-		for (size_t k = 0; k < worker_count && schedule.blocks; ++k) {
-			p.claims += contexts[k]->sched.claims;
-			p.claim_cyc += contexts[k]->sched.claim_cyc;
-			p.claim_cyc_max = std::max(p.claim_cyc_max, contexts[k]->sched.claim_cyc_max);
+		{
+			std::vector<std::vector<deferred_report>*> reports;
+			for (auto* ctx : contexts) { reports.push_back(&ctx->deferred_reports); }
+			std::vector<size_t> at(reports.size(), 0);
+			for (size_t i = next_in_element_order(reports, at); i != SIZE_MAX; i = next_in_element_order(reports, at)) {
+				const deferred_report& r = (*reports[i])[at[i]++];
+				eng.report_script_error(r.message, r.code);
+			}
+			for (auto* list : reports) { list->clear(); }
 		}
-	}
-#endif
-	region_guard.restore();   // registration below can allocate or throw
-	drain_pending_instances(state, contexts);   // chunk-created instances join the class registries now, unlocked, in element order
-	{
-		std::vector<std::vector<deferred_release>*> deferred;
-		for (auto* ctx : contexts) { deferred.push_back(&ctx->deferred_releases); }
-		release_deferred_in_order(deferred);
-	}
-	for (auto* ctx : contexts) {
-		for (const auto& [object, owner] : ctx->pending_script_layers) {
-			if (!owner.expired()) { eng.note_script_layer(object, owner); }
+		state.pending_registration_retry = false;
+		size_t rolled_up = 0;
+		for (const auto& ctx : contexts) {
+			rolled_up += ctx->limits.memory_used;
 		}
-		ctx->pending_script_layers.clear();
-		const cell_counters now = ctx->backend->cells_counters();
-		state.worker_cells.entries += now.entries - ctx->cells_folded.entries;
-		state.worker_cells.boundaries += now.boundaries - ctx->cells_folded.boundaries;
-		state.worker_cells.resumes += now.resumes - ctx->cells_folded.resumes;
-		state.worker_cells.misses += now.misses - ctx->cells_folded.misses;
-		state.worker_cells.row_entries += now.row_entries - ctx->cells_folded.row_entries;
-		ctx->cells_folded = now;
-	}
-	{
-		std::vector<std::vector<deferred_report>*> reports;
-		for (auto* ctx : contexts) { reports.push_back(&ctx->deferred_reports); }
-		std::vector<size_t> at(reports.size(), 0);
-		for (size_t i = next_in_element_order(reports, at); i != SIZE_MAX; i = next_in_element_order(reports, at)) {
-			const deferred_report& r = (*reports[i])[at[i]++];
-			eng.report_script_error(r.message, r.code);
+		if (rolled_up) {
+			eng.execution_limits().memory_charge_deferred(rolled_up);
 		}
-		for (auto* list : reports) { list->clear(); }
-	}
-	state.pending_registration_retry = false;
-	// JOIN: memory roll-up, then ITERATION order picks the error a region reports
-	size_t rolled_up = 0;
-	for (const auto& ctx : contexts) {
-		rolled_up += ctx->limits.memory_used;
-	}
-	if (rolled_up) {
-		eng.execution_limits().memory_charge_deferred(rolled_up);
-	}
-	const parallel_worker_error* winner = nullptr;
-	for (const auto& ctx : contexts) {
-		if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
-			winner = &*ctx->error;
+		for (const auto& ctx : contexts) {
+			if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
+				winner = &*ctx->error;
+			}
 		}
+		copy_back_index_writes();
+		// A shared object a worker stored where the caller sees it (an element, out[i], an output) leaves the region as its handle
+		if (std::any_of(contexts.begin(), contexts.end(), [](const parallel_worker_slot* ctx) { return !ctx->borrows.records.empty(); })) {
+			std::unordered_set<const void*> seen;
+			for (auto& container : *plan.containers) { parallel_swap_borrows(const_cast<script_value&>(container.deref()), eng, seen); }
+			for (const auto& iw : adm->index_writes) {
+				if (const resolved_capture* target = written_capture(iw.name_id)) { parallel_swap_borrows(const_cast<script_value&>(target->source->deref()), eng, seen); }
+			}
+			for (auto* ctx : contexts) { ctx->borrows.clear(); }
+		}
+		if (winner) {
+			if (winner->escaped) {
+				std::exception_ptr escaped = winner->escaped;
+				for (auto* ctx : contexts) { ctx->error.reset(); }
+				std::rethrow_exception(escaped);
+			}
+			if (winner->terminal) {
+				eng.execution_limits().terminal_error = true;
+			}
+			std::error_code code = winner->code ? winner->code
+				: make_error_code(runtime_error_code::unsupported_operation);
+			return raise(code, winner->message.empty() ? std::string(plan.prefix) + ": worker failed" : winner->message);
+		}
+		return {};
 	}
 	// Index writes: each element's slot comes back from the worker that ran the element, in element order up to the first failing
 	// element (the serial loop's stores before it)
-	if (!adm->index_writes.empty()) {
+	void copy_back_index_writes() {
+		if (adm->index_writes.empty()) { return; }
 		auto owner = [&](size_t p) -> size_t {
 			if (schedule.blocks) { return schedule.owner[p / schedule.block]; }
-			if (chunk_block) { return (p / chunk_block) % chunk_stride; }
 			for (size_t k = 0; k < chunk_begin.size(); ++k) {
 				if (p >= chunk_begin[k] && p < chunk_begin[k] + chunk_count[k]) { return k; }
 			}
@@ -6193,33 +6125,13 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 		}
 	}
-	// A shared object a worker stored where the caller sees it (an element, out[i], an output) leaves the region as its handle
-	if (std::any_of(contexts.begin(), contexts.end(), [](const parallel_worker_slot* ctx) { return !ctx->borrows.records.empty(); })) {
-		std::unordered_set<const void*> seen;
-		for (auto& container : *plan.containers) { parallel_swap_borrows(const_cast<script_value&>(container.deref()), eng, seen); }
-		for (const auto& iw : adm->index_writes) {
-			if (const resolved_capture* target = written_capture(iw.name_id)) { parallel_swap_borrows(const_cast<script_value&>(target->source->deref()), eng, seen); }
-		}
-		for (auto* ctx : contexts) { ctx->borrows.clear(); }
-	}
-	if (winner) {
-		if (winner->escaped) {
-			std::exception_ptr escaped = winner->escaped;
-			for (auto* ctx : contexts) { ctx->error.reset(); }
-			std::rethrow_exception(escaped);
-		}
-		if (winner->terminal) {
-			eng.execution_limits().terminal_error = true;
-		}
-		std::error_code code = winner->code ? winner->code
-			: make_error_code(runtime_error_code::unsupported_operation);
-		return raise(code, winner->message.empty() ? std::string(prefix) + ": worker failed" : winner->message);
-	}
-#ifdef JAISCRIPT_VM_PROFILE
-	if (plan.prof) { plan.prof->join_cyc += __rdtsc() - prof_t4; }
-#endif
-	return {};
+};
+
+checked_result<void> run_region(engine& eng, region_plan& plan) {
+	region_run run(eng, plan);
+	return run.run();
 }
+#undef JAI_REGION_PHASE
 
 } // namespace
 

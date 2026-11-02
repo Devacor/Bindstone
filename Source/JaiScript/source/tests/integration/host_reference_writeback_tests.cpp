@@ -170,8 +170,8 @@ public:
 			auto caught = [](const std::string& call) {
 				return "[[warn_mode]]; var m = \"\"; try { " + call + "; } catch (err) { m = err; } m";
 			};
-			expect(caught("Gate::twice()"), "Static method expects 1 argument, got 0", "a static lambda");
-			expect(caught("Gate::halved(1, 2)"), "Static method expects 1 argument, got 2", "a static function pointer");
+			expect(caught("Gate::twice()"), "'Gate::twice' expects 1 argument, got 0", "a static lambda");
+			expect(caught("Gate::halved(1, 2)"), "'Gate::halved' expects 1 argument, got 2", "a static function pointer");
 			// a script call meets the overload set first: the bound callable's own count check answers a host's direct call
 			auto e = host(true);
 			auto text = [](const checked_result<script_value>& r) { return format_error_message_numeric(r.message(), r.symbol_id(), r.symbol_id2()); };

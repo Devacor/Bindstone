@@ -772,7 +772,7 @@ class engine;
     template<typename Func>
     class FunctionBinder {
     public:
-        explicit FunctionBinder(Func f, engine* eng) : func_(std::forward<Func>(f)), engine_(eng) {}
+        explicit FunctionBinder(Func f, engine* eng) : func_(std::move(f)), engine_(eng) {}
         
         script_function bind() {
             using traits = detail::function_traits<Func>;
@@ -1040,9 +1040,12 @@ class engine;
     };
     
     // Helper function to create a binder
+    // The binding owns a copy of the callable: an lvalue argument is copied, never referenced
     template<typename Func>
-    FunctionBinder<Func> make_functionBinder(Func&& f, engine* eng) {
-        return FunctionBinder<Func>(std::forward<Func>(f), eng);
+    FunctionBinder<std::decay_t<Func>> make_functionBinder(Func&& f, engine* eng) {
+        return FunctionBinder<std::decay_t<Func>>(std::forward<Func>(f), eng);
     }
     
 } // namespace jai
+
+#endif // __JAISCRIPT_CORE_FUNCTION_BINDER_HPP__

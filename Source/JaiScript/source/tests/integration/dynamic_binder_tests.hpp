@@ -1181,19 +1181,44 @@ public:
         
         test("static_methods", [this]() {
             auto eng = make_engine();
-            
+
+            // a static method marshals like add_function: class values, handles, containers and callbacks both ways, and a
+            // stateful callable passed as an lvalue is copied into the binding
+            int64_t scale = 3;
+            auto scaled = [&scale](int64_t n) { return n * scale; };
+            auto scaled_copy = [scale](int64_t n) { return n * scale; };
             dynamic_binder<Point>(*eng, "Point")
                 .constructor<double, double>()
                 .property("x", &Point::x)
                 .property("y", &Point::y)
+                .static_method("origin", &Point::origin)
+                .static_method("shared", []() { return std::make_shared<Point>(1, 2); })
+                .static_method("range", [](int64_t n) { std::vector<int64_t> result; for (int64_t i = 0; i < n; ++i) { result.push_back(i); } return result; })
+                .static_method("sum", [](std::vector<int64_t> values) { int64_t result = 0; for (int64_t v : values) { result += v; } return result; })
+                .static_method("apply", [](std::function<int64_t(int64_t)> f) { return f(20); })
+                .static_method("distance", [](const Point& a, const Point& b) { return (a - b).length(); })
+                .static_method("scaled", scaled)
+                .static_method("scaled_copy", scaled_copy)
                 .build();
-            
-            // Register static method as a global function
+            scale = 100;
             eng->add_function("Point_origin", &Point::origin);
-            
+
             eng->execute("auto p = Point_origin();");
             check_eq(eng->execute("p.x").as<double>(), 0.0);
             check_eq(eng->execute("p.y").as<double>(), 0.0);
+            check_eq(5.0, eng->execute("Point::origin().x + Point::shared().y + 3.0").as<double>(), "a class value and a shared_ptr return");
+            check_eq(std::string("0,1,2"), eng->execute("Point::range(3).join(\",\")").to_string(), "a vector return");
+            check_eq((int64_t)6, eng->execute("Point::sum([1, 2, 3])").as_int(), "a vector parameter");
+            check_eq((int64_t)21, eng->execute("Point::apply([](int x) { return x + 1; })").as_int(), "a callback parameter");
+            check_eq(5.0, eng->execute("Point::distance(Point(3.0, 4.0), Point(0.0, 0.0))").as<double>(), "const class& parameters");
+            check_eq((int64_t)700, eng->execute("Point::scaled(7)").as_int(), "an lvalue callable is copied, its by-reference capture still live");
+            check_eq((int64_t)21, eng->execute("Point::scaled_copy(7)").as_int(), "an lvalue callable keeps its own copy");
+            auto doomed = std::make_unique<std::function<int64_t(int64_t)>>([offset = int64_t{40}](int64_t n) { return n + offset; });
+            eng->add_function("offset_by", *doomed);
+            doomed.reset();
+            check_eq((int64_t)42, eng->execute("offset_by(2)").as_int(), "add_function copies an lvalue callable that dies after the registration");
+            check_eq(std::string("'Point::sum' expects 1 argument, got 2"),
+                eng->execute("[[warn_mode]]; var m = \"\"; try { Point::sum([1], [2]); } catch (err) { m = err; } m").to_string(), "the arity text names the method");
         });
         
         test("static_properties", [this]() {

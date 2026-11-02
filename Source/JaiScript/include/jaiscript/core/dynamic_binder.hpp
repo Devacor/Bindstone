@@ -1064,72 +1064,15 @@ public:
         return method(name, std::forward<Callable>(callable), std::span(names.begin(), names.size()));
     }
 
-    // Add static method binding - for regular function pointers
-    template<typename R, typename... Args>
-    dynamic_binder& static_method(const std::string& name, R(*func)(Args...)) {
-        constexpr uint64_t writeback = detail::host_writeback_mask<Args...>();
-        auto static_method_func = [func, engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-            // Validate argument count (no 'this' for static methods)
-            if (args.size() != sizeof...(Args)) {
-                throw_binder_arity("Static method expects ", sizeof...(Args), args.size());
-            }
-            if constexpr (writeback != 0) {
-                return callWithWriteback<R, std::tuple<Args...>, 0, 0>(func, args, std::index_sequence_for<Args...>{}, engine_ptr);
-            }
-            
-            // Call the static function directly
-            if constexpr (std::is_void_v<R>) {
-                callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
-                
-                return script_value::make_null(engine_ptr);
-            } else {
-                auto result = callStaticFunctionImpl(func, args, std::make_index_sequence<sizeof...(Args)>{});
-                
-                return script_value(result, engine_ptr);
-            }
-        };
-        
-        // Add static method to the class definition with arity
-        class_def_->add_static_method(name, writeback_tagged<writeback>(script_function(static_method_func)), sizeof...(Args));
-
-        return *this;
-    }
-    
-    // Add static method binding - for lambdas and callables
+    // A static method marshals exactly like engine::add_function; the class adds the receiver-free call and its arity text
     template<typename Callable>
     dynamic_binder& static_method(const std::string& name, Callable&& callable) {
-        // Detect accidental use of member pointers
         static_assert(!std::is_member_pointer_v<std::decay_t<Callable>>,
             "Member pointers cannot be passed to static_method(). Use method() or property() instead.");
-
+        binding_traits::check_binding_validity<Callable>(name);
         using traits = detail::function_traits<std::decay_t<Callable>>;
-        
         constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value;
-        auto static_method_func = [callable = std::forward<Callable>(callable), engine_ptr = &engine_](const std::vector<script_value>& args) -> detail::host_call_result_t<writeback> {
-            // Validate argument count
-            if (args.size() != traits::arity) {
-                throw_binder_arity("Static method expects ", traits::arity, args.size());
-            }
-            if constexpr (writeback != 0) {
-                return callWithWriteback<typename traits::return_type, typename traits::argument_types, 0, 0>(callable, args, std::make_index_sequence<traits::arity>{}, engine_ptr);
-            }
-            
-            // Call the callable directly (no 'this' parameter)
-            using return_type = typename traits::return_type;
-            if constexpr (std::is_void_v<return_type>) {
-                callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
-                
-                return script_value::make_null(engine_ptr);
-            } else {
-                auto result = callStaticCallableImpl(callable, args, std::make_index_sequence<traits::arity>{});
-                
-                return script_value(result, engine_ptr);
-            }
-        };
-
-        // Add static method to the class definition with arity
-        class_def_->add_static_method(name, writeback_tagged<writeback>(script_function(static_method_func)), traits::arity);
-
+        class_def_->add_static_method(name, writeback_tagged<writeback>(make_functionBinder(std::forward<Callable>(callable), &engine_).bind()), traits::arity);
         return *this;
     }
 
@@ -2063,31 +2006,6 @@ private:
             R result = (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
             return detail::value_converter<R>::to(result, eng);
         }
-    }
-    
-    // Helper method for calling static functions
-    template<typename R, typename... Args, size_t... Is>
-    static R callStaticFunctionImpl(R(*func)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>) {
-        // Create parameter storage on stack - note: no engine, so storage won't be set
-        // This is fine for basic types but will fail for containers
-        detail::parameter_storage storage;
-        detail::parameter_storage::scope_guard guard(nullptr, &storage);
-
-        return func(detail::value_converter<Args>::from(args[Is], nullptr)...);
-    }
-    
-    // Helper method for calling static callables/lambdas
-    template<typename Callable, size_t... Is>
-    static auto callStaticCallableImpl(Callable&& callable, const std::vector<script_value>& args, std::index_sequence<Is...>) {
-        // Create parameter storage on stack - note: no engine, so storage won't be set
-        // This is fine for basic types but will fail for containers
-        detail::parameter_storage storage;
-        detail::parameter_storage::scope_guard guard(nullptr, &storage);
-
-        using traits = detail::function_traits<std::decay_t<Callable>>;
-        using args_tuple = typename traits::argument_types;
-
-        return callable(detail::value_converter<std::tuple_element_t<Is, args_tuple>>::from(args[Is], nullptr)...);
     }
     
     // Helper method for calling lambdas/callables

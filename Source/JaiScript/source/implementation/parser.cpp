@@ -3502,7 +3502,7 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     auto resolved = resolve_include_path(path, engine_, decl->location.filename);
     if (!resolved) return false;
     if (splice_depth_ >= 32 || std::find(splice_active_.begin(), splice_active_.end(), resolved.value()) != splice_active_.end()) {
-        errors_.push_back(decl->location.to_string() + ": include '" + path + "' includes itself or nests too deep");
+        report_error_at("include '" + path + "' includes itself or nests too deep", decl->location);
         return true;
     }
     std::ifstream file(resolved.value(), std::ios::binary);

@@ -275,12 +275,12 @@ namespace jai::vm {
         // each began, which name them to the first compile's verdicts
         std::unordered_set<const ast_node*> open_loops_;
         std::vector<std::pair<const ast_node*, uint32_t>> loop_marks_;
-        bool graft_in_loop_ = true;
+        bool graft_in_loop_ = true;   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
         // an if's condition: each leaf between the short-circuit jumps hoists its own leaf calls, so a graft behind && or || runs only on
         // the path that reaches its operand
         bool leaf_grafts_ = false;
         uint32_t entry_proto_ = k_invalid_u32;   // the structured range-for whose body compiles: its iter proto
-        bool leaf_retry_ = false;   // the if's whole condition hoists first: a call behind && or || is retried at its leaf, so the listing names it there   // the graft being planned or compiled lands by the block rules: a leaf its body calls is held to them too
+        bool leaf_retry_ = false;   // the if's whole condition hoists first: a call behind && or || is retried at its leaf, so the listing names it there
         void mark_loop(const ast_node* stmt) { loops_.back().stmt = stmt; loop_marks_.emplace_back(stmt, static_cast<uint32_t>(chunk_->code.size())); }
         bool in_closable_loop() const;
         std::shared_ptr<chunk> compile_callable_once(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);

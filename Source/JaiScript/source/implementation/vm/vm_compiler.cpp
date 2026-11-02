@@ -49,11 +49,10 @@ namespace {
 	// all report false compile without op_scope_push/pop (hot for loop bodies).
 	// slot_decls_env_free: inside a callable body, slot-resident variable decls write
 	// the frame slot and never touch the environment (define_decl_value), so they
-	// don't need the scope either - and the scope they used to force is not free:
-	// every env push/reset bumps the GLOBAL env epoch, poisoning every vm lookup
-	// cache in the engine (measured: ~6.5k scope cycles/tick in GLOOM for scopes
-	// holding nothing). Top-level decls define into the environment even when
-	// slotted, so top-level blocks keep their scopes.
+	// don't need the scope either; a scope is not free, since every env push/reset
+	// bumps the global env epoch and so invalidates every vm lookup cache. Top-level
+	// decls define into the environment even when slotted, so top-level blocks keep
+	// their scopes.
 	bool declares_in_current_scope(const ast_node* node, bool slot_decls_env_free) {
 		if (!node) return false;
 		switch (node->get_type()) {
@@ -754,8 +753,8 @@ bool vm_compiler::symbol_is_env_only(uint64_t symbol_id) const {
 
 // Callee-first (C++17 [expr.call]): the callee's lookup error must beat any argument
 // error or side effect. Literals, this and frame-slot locals can do neither, so a call
-// whose arguments are all of that shape keeps its exact old code; anything else gets
-// the callee probed before the arguments.
+// whose arguments are all of that shape needs no probe; anything else gets the callee
+// probed before the arguments.
 bool vm_compiler::call_args_need_probe(const call_expr& call) const {
 	for (const auto& arg : call.arguments) {
 		switch (arg->get_type()) {
@@ -3942,7 +3941,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	auto array_site = [&](const fused_index_proto& fp) { return fp.receiver != 3 && container_operand(fp.container); };   // a container the checker proved a map is no element site: its statement stays general (a boundary)
 	auto array_target = [&](const fused_index_proto& fp) { return fp.receiver != 1 && array_site(fp); };   // a string's element is written through its base, never a cell site
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
-	// straight-line regions (plan B, internal/typed_regions_design.md "Straight-line regions"): after the loops, the spans of translatable
+	// straight-line regions: after the loops, the spans of translatable
 	// instructions outside every closed loop, cut at the caller's statement boundaries, become regions of their own; a span the
 	// translation refuses splits around the refusing statement
 	std::vector<std::pair<uint32_t, uint32_t>> straight;   // [head, end)
@@ -6271,14 +6270,14 @@ static bool primitive_declared_type(const type_info* t) {
 	return t && (t->base_type == script_value_type::jai_int_type || t->base_type == script_value_type::jai_float_type || t->base_type == script_value_type::jai_bool_type);
 }
 
-// a frame slot no user code can rebind: a value declaration (not a reference) that no reference or capture reaches; it may
-// stay an in-op operand ahead of any hoisted read (an operand resolved inside its operation only
-// when nothing evaluated after it in the source can run user code)
 // a graft's result or a spilled operand standing in a statement's clone: a value, never an lvalue a reference parameter binds
 bool vm_compiler::graft_value(const expression* e) const {
 	return inline_symbol_ != 0 && e && e->get_type() == node_type::identifier_expr && static_cast<const identifier_expr*>(e)->symbol_id == inline_symbol_;
 }
 
+// a frame slot no user code can rebind: a value declaration (not a reference) that no reference or capture reaches; it may
+// stay an in-op operand ahead of any hoisted read (an operand resolved inside its operation only
+// when nothing evaluated after it in the source can run user code)
 bool vm_compiler::private_local(const expression* e) {
 	if (!e || e->get_type() != node_type::identifier_expr) return false;
 	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
@@ -8418,9 +8417,8 @@ bool vm_compiler::push_value_temp(const std::shared_ptr<call_expr>& expr, identi
 	return true;
 }
 
-// `recv.push(v);` as a statement (GLOOM profile: 95% of method calls, ~440 cycles as
-// LOAD, LOAD, CALL_METHOD, POP): receiver an identifier, value a slotted identifier or a
-// literal, so no probe is owed (call_args_need_probe's exact admission) and the receiver
+// `recv.push(v);` as a statement (otherwise LOAD, LOAD, CALL_METHOD, POP): receiver an
+// identifier, value a slotted identifier or a literal, so no probe is owed (call_args_need_probe's exact admission) and the receiver
 // resolves before the value exactly as the unfused pair reads them. The call site is built
 // as compile_call builds it: the exec replays through it on any guard miss.
 bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {

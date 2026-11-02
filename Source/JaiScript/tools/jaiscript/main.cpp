@@ -130,6 +130,7 @@ struct options {
 	bool warnings = false;                 // --warnings: list a clean load's warnings on stderr before it runs
 	bool time_runs = false;
 	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
+	bool announce_debug = false;           // --debug: a file run names the listener's port on stderr
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
 	bool local_alias = true;               // engine::local_alias (--no-local-alias: every by-value local declaration clones)
 	bool type_proofs = true;               // engine::type_proofs (--no-proofs: no proofs, typed ops or cell blocks; the general form)
@@ -227,6 +228,7 @@ void print_usage() {
 		"                        always fail the load and print)\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
 		"  --no-debug            do not stand up the DAP debug listener\n"
+		"  --debug               name the DAP listener's port on stderr (a file run is otherwise silent about it)\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --no-proofs           run without type proofs and the typed instructions they enable (the general form)\n"
@@ -340,6 +342,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--warnings") { opt.warnings = true; }
 		else if (a == "--no-debug") { opt.debug = false; }
+		else if (a == "--debug") { opt.debug = true; opt.announce_debug = true; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--no-proofs") { opt.type_proofs = false; }
@@ -1181,6 +1184,7 @@ int wire_debugger(const options& opt, jai::engine& eng, const console_state& con
 	if (!opt.debug) { return 0; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 	int port = attach_debugger(eng, opt.debug_port);
+	if (!opt.announce_debug) { return port; }
 	if (port != 0) {
 		out << con.dim("debugger: DAP listening on 127.0.0.1:" + std::to_string(port)
 			+ " (VS Code: Attach to JaiScript)") << "\n";

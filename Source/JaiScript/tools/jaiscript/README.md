@@ -136,6 +136,7 @@ a catchable error at the import, and the program keeps its old code
 --no-proofs           run without type proofs and the typed instructions they enable (the
                       general form)
 --no-debug            don't stand up the DAP debug listener
+--debug               name the listener's port on stderr (a file run is otherwise silent about it)
 --debug-port=N        first port the listener tries (default 52477, probing +10)
 --pause / --no-pause  force / suppress the exit hold after a file run
 --selftest            built-in smoke tests (balancer, file mode, scripted REPL session)
@@ -159,9 +160,8 @@ error below), and the opt-in `web::` library (`jai::stdlib::register_web`: `web:
 `spider::sling(content, url[, options])`, also spelled `spider::post(url, content[, options])`, each answering a
 `spider::Response`) with the `network` permission granted and the transport of `tools/jaiscript/http_transport.hpp`:
 WinHTTP on Windows, sockets elsewhere with HTTPS through OpenSSL when the build found it (plain HTTP otherwise);
-`JAISCRIPT_HTTP_TRANSPORT=socket` picks the socket transport on Windows. (The bare engine only ships concatenating `print`, `thread_count`,
-`parallel_transform`, `parallel_reduce` and the builtin container/string methods — the runner opts into
-everything.) On top, the host binds file IO so scripts can actually save things:
+`JAISCRIPT_HTTP_TRANSPORT=socket` picks the socket transport on Windows. (A bare engine has far less, listed in the reference's "What a bare engine has"
+(`docs/site/reference/index.html#bare-engine`); the runner opts into everything.) On top, the host binds file IO so scripts can actually save things:
 
 ```
 read_file(path) -> string      write_file(path, text) -> bool   (creates missing folders)
@@ -220,4 +220,5 @@ The strings after `--` are the global `ARGS`.
 A DAP listener is on by default (localhost only, costs nothing until a session attaches) in
 file and REPL modes — you can attach VS Code to a *running REPL session* and set breakpoints
 in files you `:load`. Install `tools/vscode-jaiscript`, F5 → "Attach to JaiScript" with the
-logged port. Opt out with `--no-debug`.
+port: 52477, or the next free one in steps of 10, which `--debug` (and the REPL's banner) names. Opt out
+with `--no-debug`.

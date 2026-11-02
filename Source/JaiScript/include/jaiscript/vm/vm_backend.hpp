@@ -357,6 +357,7 @@ namespace jai::vm {
         // Named slot locals of a parked frame, reconstructed lazily from the chunk's
         // decl/load/store operands (no name table baked into release chunks).
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
+        script_value* debug_local_storage(const std::string& name) override;
         int debug_depth() const override { return static_cast<int>(call_records_top_ + static_cast<size_t>(current_call_depth_)); }
         // Debug sync point (prepare_for_execution, every 1024 budget ticks, a sleep, an armed
         // session's pending change, park exit via the controller): mirrors

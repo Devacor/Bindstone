@@ -479,6 +479,9 @@ namespace jai::vm {
         struct debug_span { uint32_t start; uint32_t end; const ast_node* node; uint32_t parent; };
         mutable std::vector<debug_span> debug_spans;
         mutable std::vector<uint32_t> debug_innermost;   // per instruction: 1 + the innermost span holding it, 0 for none
+        // The debugger's locals, outermost declaration first: the name `symbol` lives in `slot` while the frame's ip is in [first_ip, end_ip)
+        struct debug_local { uint32_t slot; uint32_t first_ip; uint32_t end_ip; uint64_t symbol; };
+        std::vector<debug_local> debug_locals;
 
         std::vector<script_value> constants;               // engine-less AST-literal templates
         // regex(pattern[, flags]) sites with literal texts (op_regex_constant): the pattern the checker compiled, and how many

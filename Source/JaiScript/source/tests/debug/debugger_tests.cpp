@@ -694,6 +694,77 @@ public:
         return result + script_error;
     }
 
+    // Each stop's frames as name:line(local=value,...): only what is in scope at the frame's statement, an inner name hiding
+    // an outer one, a parameter whether or not the body reads it; then reads, writes and evaluations through the stop's scope
+    std::string scoped_locals(jai::backend_type type) {
+        auto eng = make_backend_engine(type);
+        eng->add_global("host_value", eng->make_value(1));
+        auto& dbg = eng->debugger();
+        stop_waiter stops(dbg);
+        dbg.set_breakpoints("<script>", {4, 9, 13});
+        dbg.set_enabled(true);
+        const std::string src =
+            "int g = 5;\n"                                                   // line 1
+            "class Token { string n; Token(string a) { n = a; } }\n"         // line 2
+            "function take(Token t) -> string {\n"                           // line 3
+            "    return t.n;\n"                                              // line 4  (breakpoint)
+            "}\n"                                                            // line 5
+            "function f(int x) -> int {\n"                                   // line 6
+            "    int v = 1;\n"                                               // line 7
+            "    { int v = 2;\n"                                             // line 8
+            "        g = v; }\n"                                             // line 9  (breakpoint)
+            "    for (int i = 0; i < 1; i++) { int t = i; g += t; }\n"       // line 10
+            "    for (int i = 5; i < 6; i++) { string t = \"s\"; g += 1; }\n" // line 11
+            "    string s = take(Token(\"tk\"));\n"                          // line 12
+            "    return v;\n"                                                // line 13 (breakpoint)
+            "}\n"                                                            // line 14
+            "auto r = f(3);\n";                                              // line 15
+        std::string script_error;
+        std::thread script([&] {
+            try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
+        });
+        auto attempt = [&](auto&& step) -> std::string {
+            try { return step(); } catch (const std::exception& e) { return std::string("error: ") + e.what(); }
+        };
+        std::string result;
+        for (int stop = 0; stop < 3; ++stop) {
+            const auto at = stops.wait();
+            if (!at) { result += "<no stop>"; break; }
+            auto seen = parked_read(dbg, [&] {
+                std::string text;
+                const auto stack = read_stack(dbg);
+                for (size_t i = 0; i < stack.frames.size(); ++i) {
+                    text += (i ? " " : "") + stack.frames[i].name + ":" + std::to_string(stack.frames[i].line) + "(";
+                    for (size_t j = 0; j < stack.locals[i].size(); ++j) { text += (j ? "," : "") + stack.locals[i][j].name + "=" + stack.locals[i][j].value; }
+                    text += ")";
+                }
+                text += " globals(";
+                for (const auto& g : stack.globals) { text += g.name + ","; }
+                text += ")";
+                if (at->line == 4) {
+                    text += " t.n=" + attempt([&] { const auto v = dbg.evaluate("t.n"); return v.value + ":" + v.type; });
+                    text += " t.m=" + attempt([&] { return dbg.evaluate("t.m").value; });
+                } else if (at->line == 9) {
+                    text += " v=" + attempt([&] { return dbg.get_variable("v").to_string(); });
+                    text += " x=" + attempt([&] { return dbg.get_variable("x").to_string(); });
+                    text += " g=" + attempt([&] { return dbg.get_variable("g").to_string(); });
+                    text += " set v=" + attempt([&] { dbg.set_variable("v", eng->make_value(20)); return dbg.get_variable("v").to_string(); });
+                } else {
+                    text += " set v=" + attempt([&] { dbg.set_variable("v", eng->make_value(7)); return std::string("7"); });
+                    text += " nope=" + attempt([&] { dbg.set_variable("nope", eng->make_value(1)); return std::string("set"); });
+                }
+                return text;
+            });
+            result += (seen ? *seen : std::string("<no read>")) + " | ";
+            dbg.resume();
+        }
+        dbg.detach();
+        script.join();
+        result += "r=" + attempt([&] { return eng->get_variable("r").to_string(); }) + " g=" + attempt([&] { return eng->get_variable("g").to_string(); });
+        result += " nope=" + attempt([&] { return eng->get_variable("nope").to_string(); }).substr(0, 5);
+        return result + script_error;
+    }
+
     // a reserved word naming a method or a field is a member like any other: the frame names it, its reads show in the locals
     void keyword_named_members_in_frames_and_locals(jai::backend_type type) {
         auto eng = make_backend_engine(type);
@@ -1086,13 +1157,18 @@ public:
         });
         test("a_construction_stops_in_each_level_with_its_frames", [this]() {
             // each constructor's activation is a frame with its parameters, the level answering at its argument's or field's line
-            // (the vm lists no locals for hook's raw frame)
-            const std::string levels[] = {"B:12(y) <script>:16()", "A:5(x) B:12(y) <script>:16()", "A:7(x) B:12(y) <script>:16()", "B:11(y) <script>:16()",
-                                          "B:13(y) <script>:16()"};
-            const std::string interp = std::string("hook:2(v) ") + levels[0] + " | hook:2(v) " + levels[1] + " | " + levels[2] + " | hook:2(v) " + levels[3] + " | " + levels[4] + " | ";
-            const std::string vm = std::string("hook:2() ") + levels[0] + " | hook:2() " + levels[1] + " | " + levels[2] + " | hook:2() " + levels[3] + " | " + levels[4] + " | ";
-            check_eq(interp, construction_stops(jai::backend_type::interpreter), "interpreter");
-            check_eq(vm, construction_stops(jai::backend_type::vm), "vm");
+            const std::string levels = "hook:2(v) B:12(y) <script>:16() | hook:2(v) A:5(x) B:12(y) <script>:16() | A:7(x) B:12(y) <script>:16() | "
+                                       "hook:2(v) B:11(y) <script>:16() | B:13(y) <script>:16() | ";
+            check_eq(levels, construction_stops(jai::backend_type::interpreter), "interpreter");
+            check_eq(levels, construction_stops(jai::backend_type::vm), "vm");
+        });
+        test("locals_follow_scope_and_reads_resolve_through_it_alike_on_both_backends", [this]() {
+            const std::string interp = scoped_locals(jai::backend_type::interpreter);
+            check_eq(interp, scoped_locals(jai::backend_type::vm), "the vm's locals table answers as the interpreter's scopes do");
+            check_eq(std::string("f:9(v=2,x=3) <script>:15() globals(g,) v=2 x=3 g=5 set v=20 | "
+                                    "take:4(t=Token{n: \"tk\"}) f:12(v=1,x=3) <script>:15() globals(g,) t.n=\"tk\":string t.m=error: 't' has no field 'm' | "
+                                    "f:13(s=\"tk\",v=1,x=3) <script>:15() globals(g,) set v=7 nope=error: No variable 'nope' is in scope at this stop | "
+                                    "r=7 g=21 nope=error"), interp);
         });
         test("keyword_named_members_in_frames_and_locals", [this]() {
             keyword_named_members_in_frames_and_locals(jai::backend_type::interpreter);

@@ -337,6 +337,9 @@ namespace jai::vm {
         void compile_declaration_code(const declaration_ptr& decl, bool top_level);
         void compile_statement_code(const statement_ptr& stmt);
         void note_debug_span(const ast_node* node, size_t start);
+        void note_debug_local(size_t slot, std::string_view name);
+        void note_debug_locals(const statement* decl);
+        void close_debug_locals(size_t mark);
         void drop_debug_span(const ast_node* node);
         void compile_block(block_stmt* block);
         void compile_expression(const expression_ptr& expr, bool as_statement = false);

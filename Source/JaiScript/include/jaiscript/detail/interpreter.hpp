@@ -400,6 +400,9 @@ namespace jai {
         checked_result<void> visit_range_for_stmt(range_for_stmt* stmt);
         checked_result<void> run_for_stmt(for_stmt* stmt);
         checked_result<void> run_range_for_stmt(range_for_stmt* stmt);
+        // A loop's header runs as the loop's own statement (a frame's trace line and in-scope locals), as the vm's ip has it
+        void note_running_statement(statement* stmt);
+        std::vector<std::pair<size_t, const for_stmt*>> updating_loops_;   // (call depth, loop) whose update is running, for the debugger's locals
         // Scope exits destroy the frame-slot locals that may own an instance, last declared first (the vm's op_kill_slot)
         void kill_scope_slot(const statement* decl);
         template <class Decls> void kill_scope_slots(const Decls& decls) {
@@ -452,6 +455,8 @@ namespace jai {
         // Debugger: named slot-locals (params + reached body decls) of a call frame, reconstructed
         // from the frame's function AST. Empty at global scope / for foreign frames.
         std::vector<std::pair<std::string, script_value>> get_frame_locals(size_t frame) const override;
+        script_value* debug_local_storage(const std::string& name) override;
+        std::vector<std::pair<size_t, std::string_view>> frame_scope_slots(size_t frame_index) const;
         int debug_depth() const override { return static_cast<int>(call_stack_.size()); }
         // Debug sync point (out of line: needs the controller type). Refreshes
         // debug_hook_ + the controller's hot cache, and hands a session-end a fresh

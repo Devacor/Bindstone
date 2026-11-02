@@ -475,131 +475,37 @@ void vm_backend::debug_stop_at(const ast_node* node) {
 
 std::vector<std::pair<std::string, script_value>> vm_backend::frame_slot_locals(const frame* f) const {
 	std::vector<std::pair<std::string, script_value>> out;
-	if (!f || !has_slots(*f) || !f->code) { return out; }   // global scope without slots: env fallback
-
-	// slot -> name from the chunk's operands: decls carry their variable_decl node
-	// (exact name + slot); load/store/incdec name any slot the body touches (parameters
-	// included — a parameter the body never reads is invisible here, documented).
-	std::vector<std::pair<size_t, std::string_view>> slot_names;
-	for (size_t ip = 0; ip < f->code->code.size(); ++ip) {
-		const vm_instruction& ins = f->code->code[ip];
-		switch (ins.op) {
-		case opcode::op_decl_var:
-		case opcode::op_decl_ref_ident:
-		case opcode::op_decl_ref_value: {
-			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.a].get());
-			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
-			break;
-		}
-		// typed moves replaced a LOAD/CONST + DECL_VAR/STORE pair: name what the pair named
-		case opcode::op_t_decl_mov:
-		case opcode::op_t_decl_const: {
-			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.c].get());
-			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
-			if (ins.op == opcode::op_t_decl_mov && ip < f->code->typed_sites.size()) {
-				const vm_instruction& load = f->code->typed_sites[ip].orig;
-				if (load.a != k_invalid_u32 && load.b < f->code->symbols.size()) { slot_names.emplace_back(load.a, symbolizer_->get_string(f->code->symbols[load.b])); }
-			}
-			break;
-		}
-		case opcode::op_t_load: {
-			if (ip < f->code->typed_sites.size()) {
-				const vm_instruction& orig = f->code->typed_sites[ip].orig;
-				const auto* vd = static_cast<const variable_decl*>(f->code->nodes[orig.c].get());
-				if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
-			}
-			break;
-		}
-		case opcode::op_t_store_mov:
-		case opcode::op_t_store_const: {
-			if (ip < f->code->typed_sites.size()) {
-				const auto& site = f->code->typed_sites[ip];
-				if (site.orig2.a < f->code->symbols.size()) { slot_names.emplace_back(ins.a, symbolizer_->get_string(f->code->symbols[site.orig2.a])); }
-				if (ins.op == opcode::op_t_store_mov && site.orig.a != k_invalid_u32 && site.orig.b < f->code->symbols.size()) {
-					slot_names.emplace_back(site.orig.a, symbolizer_->get_string(f->code->symbols[site.orig.b]));
-				}
-			}
-			break;
-		}
-		case opcode::op_index_fused_decl: {
-			if (ins.c == k_invalid_u32) break;   // a compiler temp landing has no name
-			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[ins.c].get());
-			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
-			break;
-		}
-		case opcode::op_load:
-			if (ins.a != k_invalid_u32 && ins.b < f->code->symbols.size()) {
-				slot_names.emplace_back(ins.a, symbolizer_->get_string(f->code->symbols[ins.b]));
-			}
-			break;
-		case opcode::op_store:
-		case opcode::op_compound_store:
-		case opcode::op_incdec:
-		case opcode::op_concat_store:
-			if (ins.b != k_invalid_u32 && ins.a < f->code->symbols.size()) {
-				slot_names.emplace_back(ins.b, symbolizer_->get_string(f->code->symbols[ins.a]));
-			}
-			break;
-		default: break;
-		}
-	}
-	// Fused superinstructions carry identifier operands in side tables, not op_loads —
-	// a parameter referenced only inside `a + b` is named here.
-	auto note_operand = [&](const fused_operand& o) {
-		if (o.slot != k_invalid_u32 && o.symbol != k_invalid_u32 && o.symbol < f->code->symbols.size()) {
-			slot_names.emplace_back(o.slot, symbolizer_->get_string(f->code->symbols[o.symbol]));
-		}
-	};
-	for (const auto& p : f->code->fused_binary_protos) { note_operand(p.left); note_operand(p.right); }
-	for (const auto& cs : f->code->call_sites) { note_operand(cs.callee); }
-	for (const auto& p : f->code->counted_for_protos) { note_operand(p.var); note_operand(p.end); note_operand(p.step); }
-	for (const auto& p : f->code->concat_protos) { for (const auto& o : p.pieces) { note_operand(o); } }
-	for (const auto& p : f->code->compound_fused_protos) {
-		if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
-			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
-		}
-		note_operand(p.rhs);   // bare-mode identifier rhs (binary-mode protos leave it invalid)
-	}
-	for (const auto& p : f->code->fused_index_protos) { note_operand(p.container); note_operand(p.index); }
-	for (const auto& p : f->code->fused_binary_dst_protos) {
-		// dest-addressed binaries: decl mode names via the decl node, store mode via
-		// symbol+slot (their operands are fused_binary_protos entries, named above)
-		if (p.node_index != k_invalid_u32) {
-			const auto* vd = static_cast<const variable_decl*>(f->code->nodes[p.node_index].get());
-			if (vd && vd->slot_index != SIZE_MAX) { slot_names.emplace_back(vd->slot_index, vd->name); }
-		} else if (p.slot != k_invalid_u32 && p.symbol < f->code->symbols.size()) {
-			slot_names.emplace_back(p.slot, symbolizer_->get_string(f->code->symbols[p.symbol]));
-		}
-	}
-	for (const auto& p : f->code->iter_protos) {
-		if (p.slot != SIZE_MAX && p.var_symbol != UINT64_MAX) {
-			slot_names.emplace_back(p.slot, symbolizer_->get_string(p.var_symbol));
-		}
-	}
-	for (const auto& p : f->code->destructure_protos) {
-		for (const auto& [sym_id, slot] : p.names) {
-			if (slot != SIZE_MAX) { slot_names.emplace_back(slot, symbolizer_->get_string(sym_id)); }
-		}
-	}
-	std::sort(slot_names.begin(), slot_names.end(),
-	          [](const auto& a, const auto& b) { return a.first < b.first; });
-	// a converted closure's capture slots are its captures, not its locals (the environment form lists none)
-	size_t capture_first = SIZE_MAX, capture_end = SIZE_MAX;
-	if (!f->code->code.empty() && f->code->code[0].op == opcode::op_bind_captures) {
-		capture_first = f->code->code[0].a;
-		capture_end = capture_first + f->code->code[0].b;
-	}
-	size_t last = SIZE_MAX;
-	for (const auto& [slot, name] : slot_names) {
-		if (slot == last) { continue; }
-		last = slot;
-		if (slot >= capture_first && slot < capture_end) { continue; }
-		const script_value* v = frame_slot(*f, slot);
-		if (!v) { continue; }                            // reserved capacity only: not live yet
-		out.emplace_back(std::string(name), *v);
+	if (!f || !has_slots(*f) || !f->code) { return out; }
+	for (const auto& local : f->code->debug_locals) {
+		if (f->ip < local.first_ip || f->ip >= local.end_ip) { continue; }
+		if (const script_value* v = frame_slot(*f, local.slot)) { out.emplace_back(std::string(symbolizer_->get_string(local.symbol)), *v); }
 	}
 	detail::fold_lowered_locals(out, engine_);
 	return out;
+}
+
+script_value* vm_backend::debug_local_storage(const std::string& name) {
+	if (frames_.empty()) { return nullptr; }
+	std::vector<const frame*> slot_frames;
+	debug_frame_walk(&slot_frames);
+	const uint64_t id = symbolizer_->intern(name);
+	if (frame* inner = slot_frames.empty() ? nullptr : const_cast<frame*>(slot_frames.front()); inner && has_slots(*inner) && inner->code) {
+		const auto& locals = inner->code->debug_locals;
+		for (size_t k = locals.size(); k-- > 0;) {   // an inner declaration of the name comes after an outer one
+			const auto& local = locals[k];
+			if (local.symbol == id && inner->ip >= local.first_ip && inner->ip < local.end_ip) { return frame_slot(*inner, local.slot); }
+		}
+	}
+	frame* top = frames_.back();
+	if (top && top->captures && top->code && !top->code->code.empty() && top->code->code[0].op == opcode::op_bind_captures) {
+		const auto& ids = *top->captures->ids;
+		for (size_t k = 0; k < ids.size(); ++k) {
+			if (ids[k] != id) { continue; }
+			script_value* bound = frame_slot(*top, top->code->code[0].a + k);
+			return bound ? bound : const_cast<script_value*>(&top->captures->cells[k]);
+		}
+	}
+	return nullptr;
 }
 
 JAI_NOINLINE bool vm_backend::execution_limit_exhausted_slow() {

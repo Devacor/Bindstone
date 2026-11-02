@@ -518,6 +518,7 @@ struct engine::implementation {
     std::unordered_map<const void*, weaker_ptr<class_instance>> script_layers_;
     std::unordered_set<std::string> serial_functions_;
     std::unordered_set<std::string> host_function_names_;
+    std::unordered_set<std::string> host_global_names_;
     int library_registration_depth_ = 0;
     size_t script_layer_sweep_watermark_ = 64;
     // Layers of slotless objects extended through this engine: nothing else can own them,
@@ -1210,7 +1211,7 @@ struct engine::implementation {
             stamp_spliced(*cached, prs.spliced_files());
             if (identity) { cached->identity = *identity; cached->identity_known = true; }
         }
-        if (debugger_) { debugger_->note_source(sourcePath); }
+        if (debugger_) { debugger_->note_source(sourcePath, &cached->declarations); }
         return cached;
     }
 
@@ -3800,6 +3801,7 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     // Intern the name and get a stable string_view for tracking
     uint64_t id = impl->string_symbolizer_.intern(name);
     if (value.is_function()) { impl->host_function_names_.insert(name); }
+    impl->host_global_names_.insert(name);
     if (value.is_function() && numeric_operator_takes_numbers(name, 2, {})) { set_has_custom_numeric_operators(true); }
     if (impl->library_registration_depth_ > 0 && value.is_function() && !detail::parallel_pure_function(name)) { impl->serial_functions_.insert(name); }
     impl->global_environment_->define(id, std::move(value));
@@ -3911,6 +3913,7 @@ void engine::serial_function(const std::string& name) { impl->serial_functions_.
 bool engine::host_function_serial(const std::string& name) const { return impl->serial_functions_.count(name) != 0; }
 
 bool engine::host_function_registered(const std::string& name) const { return impl->host_function_names_.count(name) != 0; }
+bool engine::host_global_registered(const std::string& name) const { return impl->host_global_names_.count(name) != 0; }
 
 uint64_t engine::host_function_writeback(const std::string& name) const {
     uint64_t result = 0;
@@ -4983,7 +4986,7 @@ size_t engine::max_call_depth(backend_type type) const {
 debug::controller& engine::debugger() {
     if (!impl->debugger_) {
         impl->debugger_ = std::make_unique<debug::controller>(this);
-        for (const auto& node : impl->script_cache) { impl->debugger_->note_source(node.path); }
+        for (const auto& node : impl->script_cache) { impl->debugger_->note_source(node.path, node.entry ? &node.entry->declarations : nullptr); }
         // Wire the active backend's statement hook (backend() constructs it lazily).
         backend()->set_debug_controller(impl->debugger_.get());
     }

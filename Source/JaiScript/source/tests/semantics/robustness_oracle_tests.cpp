@@ -403,6 +403,19 @@ private:
 			check_eq(std::string(""), strict_load_error("int later(int x) { return x; }\nlater(2);\n"), "declared first");
 			expect("warn keeps the run-time text", "string out = \"\"; try { later(2); } catch (e) { out = e; } int later(int x) { return x; } out;",
 			       "Undefined variable 'later'", true);
+			// a variable, a class or a function value is the same: top-level code runs in order
+			const std::pair<const char*, const char*> uses[] = {
+				{"print(G);\nint G = 4;\n", "'G' is used before its declaration (line 2): top-level code runs in order, so declare it above the use or make the use after it"},
+				{"auto a = A();\nclass A { int v = 1; }\n", "'A' is used before its declaration (line 2)"},
+				{"var f = fib2;\nint fib2() { return 1; }\n", "'fib2' is used before its declaration (line 2)"},
+				{"if (true) { print(G); }\nint G = 4;\n", "'G' is used before its declaration (line 2)"},
+			};
+			for (const auto& [src, text] : uses) { check_true(strict_load_error(src).find(text) != std::string::npos, std::string(src) + ": " + strict_load_error(src)); }
+			check_eq(std::string(""), strict_load_error("int f() { return G + A().v; }\nint G = 4;\nclass A { int v = 1; }\nf();\n"), "a body may use names further down");
+			// a name the engine already holds (an earlier run, another unit) is there when the use runs
+			auto e = robustness::make(robustness::configs()[0]);
+			e->execute("int G = 1; int fib2() { return 1; } class A { int v = 1; }");
+			check_eq(std::string("1|1|1"), e->execute("string r = G + \"|\" + fib2() + \"|\" + A().v; int G = 2; int fib2() { return 2; } class A { int v = 2; } r;").as_string());
 		});
 		test("a_host_overload_miss_names_the_function_and_the_arguments", [this]() {
 			for (const auto& c : robustness::configs()) {

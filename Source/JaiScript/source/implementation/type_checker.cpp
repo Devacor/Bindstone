@@ -396,6 +396,7 @@ private:
     void collect_program_name(std::string_view name) {
         if (collect_depth_ == 0) { (collecting_namespace_names_ ? namespace_names_ : all_names_).insert(name); }
     }
+    std::unordered_map<std::string_view, source_location> program_vars_;   // this unit's program-scope variables: the first declaration's place
     bool program_or_derived_name(std::string_view name) {
         return all_names_.count(name) || (!namespace_scopes_.empty() && namespace_names_.count(name)) || derived_class_member(name);
     }
@@ -3906,11 +3907,22 @@ private:
 			}
 			if (hit.unresolved) { return {}; }   // an ancestor nowhere to be found can define anything
 		}
-		if (functions_.count(id->name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
-		if (find_sclass(id->name)) { return ctype{ctype::class_ref_k, id->name}; }
+		if (auto fns = functions_.find(id->name); fns != functions_.end()) {
+			note_global_use(id->name);
+			if (top_level_code()) { report_function_before_declaration(id->name, fns->second, id->location, false); }
+			return ctype::make(ctype::function_k);
+		}
+		if (const sclass* sc = find_sclass(id->name)) {
+			if (top_level_code()) { report_class_before_declaration(id->name, *sc, id->location); }
+			return ctype{ctype::class_ref_k, id->name};
+		}
 		if (enums_.count(id->name)) { return ctype{ctype::enum_ref_k, id->name}; }
 		if (namespaces_.count(id->name)) { return {}; }
 		std::string name(id->name);
+		if (auto later = program_vars_.find(id->name); later != program_vars_.end() && top_level_code() && declared_after(later->second, id->location) &&
+		    !eng_.has_variable(name)) {
+			report_use_before_declaration(id->name, later->second.line, id->location, false);
+		}
 		if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
 		if (extra_global(name)) { note_global_use(id->name); return {}; }
 		if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
@@ -4285,17 +4297,29 @@ private:
 		else if (proofs_ == proof_mode::clear) { c->regex_constant.reset(); }
 	}
 
-	// Top-level code runs in order: a call there to a function this file declares only further down finds nothing yet
-	void report_call_before_declaration(std::string_view name, const std::vector<const function_decl*>& decls, const source_location& at) {
+	// Top-level code runs in order: a use there of a name this file declares at program scope only further down finds nothing yet (a
+	// name the engine already holds, from an earlier run of the unit or another unit, is there)
+	bool top_level_code() const { return fn_stack_.empty() && !class_ctx_; }
+	static bool declared_after(const source_location& decl, const source_location& at) {
+		return decl.filename == at.filename && (decl.line > at.line || (decl.line == at.line && decl.column > at.column));
+	}
+	void report_use_before_declaration(std::string_view name, size_t decl_line, const source_location& at, bool call) {
+		const char* use = call ? "call" : "use";
+		diag(diag_level::error, at, "'" + std::string(name) + "' is " + (call ? "called" : "used") + " before its declaration (line " + std::to_string(decl_line) +
+		                            "): top-level code runs in order, so declare it above the " + use + " or make the " + use + " after it");
+	}
+	void report_function_before_declaration(std::string_view name, const std::vector<const function_decl*>& decls, const source_location& at, bool call) {
 		const function_decl* first = nullptr;
 		for (const auto* fn : decls) {
-			if (fn->location.filename != at.filename) { return; }
-			if (fn->location.line < at.line || (fn->location.line == at.line && fn->location.column < at.column)) { return; }
+			if (!declared_after(fn->location, at)) { return; }
 			if (!first || fn->location.line < first->location.line) { first = fn; }
 		}
 		if (!first || eng_.has_function(std::string(name))) { return; }
-		diag(diag_level::error, at, "'" + std::string(name) + "' is called before its declaration (line " + std::to_string(first->location.line) +
-		                            "): top-level code runs in order, so declare it above the call or make the call after it");
+		report_use_before_declaration(name, first->location.line, at, call);
+	}
+	void report_class_before_declaration(std::string_view name, const sclass& sc, const source_location& at) {
+		if (!sc.decl || !declared_after(sc.decl->location, at) || eng_.get_class_registry().find_script_class(std::string(name))) { return; }
+		report_use_before_declaration(name, sc.decl->location.line, at, false);
 	}
 
 	ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
@@ -4325,11 +4349,12 @@ private:
 			}
 			if (auto it = functions_.find(id->name); it != functions_.end()) {
 				note_global_use(id->name);
-				if (fn_stack_.empty() && !class_ctx_) { report_call_before_declaration(id->name, it->second, c->location); }
+				if (top_level_code()) { report_function_before_declaration(id->name, it->second, c->location, true); }
 				ov = &it->second;
 				return check_script_overloads(id->name, it->second, args, c->location).result;
 			}
 			if (const sclass* sc = find_sclass(id->name)) {
+				if (top_level_code()) { report_class_before_declaration(id->name, *sc, c->location); }
 				check_ctor_call(id->name, *sc, args, c->location);
 				if (sc->provable) { ov = &sc->ctors; }
 				return object_of(id->name);
@@ -5825,6 +5850,7 @@ void static_checker::collect_names(const statement* node) {
         case node_type::variable_decl: {
             auto* v = static_cast<const variable_decl*>(node);
             collect_program_name(v->name);
+            if (collect_depth_ == 0 && !collecting_namespace_names_) { program_vars_.emplace(v->name, v->location); }
             layout_inits_[v->name].push_back(binary_call(v->initializer.get(), "layout") ? v->initializer.get() : nullptr);
             if (v->type && v->type->base_type == script_value_type::jai_reference_type && v->initializer &&
                 v->initializer->get_type() == node_type::identifier_expr) {

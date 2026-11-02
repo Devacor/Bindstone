@@ -37,7 +37,11 @@ namespace jai {
     private:
         std::vector<declaration_ptr> recovered_;
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
+        std::vector<token> namespace_stream_;   // the program's stream with its namespaces' bare class names qualified
         std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
+        // Inside a namespace's blocks a class that namespace declares (here or in a unit the engine ran) reads by its bare name
+        // as ns::Name, its one name (C++); false when the stream opens no namespace that names one
+        bool qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out);
         // `using ns::name;` (a comma list) at a statement's start: the rest of THIS token stream reads each name as its qualified
         // spelling (file-local, not transitive, any namespace); false when the stream names no using
         bool apply_using_declarations(const std::vector<token>& in, std::vector<token>& out);
@@ -70,9 +74,6 @@ namespace jai {
 
         // Current namespace context for nested namespace declarations
         std::vector<std::string> current_namespace_path_;
-        // ns::Class for every class this unit declared inside a namespace: that qualified type spelling names the class's
-        // own (bare) name; any other qualified type names a class registered under the qualified name (binary::writer)
-        std::unordered_set<std::string> namespace_class_names_;
         
         // Error handling
         void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector
@@ -97,7 +98,7 @@ namespace jai {
         // declaration parsing
         checked_result<declaration_ptr> declaration();
         checked_result<declaration_ptr> declaration_body();
-        checked_result<declaration_ptr> class_declaration(bool nocopy = false);
+        checked_result<declaration_ptr> class_declaration(bool nocopy = false, std::string_view space = {});
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
         bool bare_coroutine_head() const;   // coroutine IDENT '(' / coroutine operator<sym>: no type, no 'function'

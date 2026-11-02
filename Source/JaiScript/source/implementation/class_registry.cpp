@@ -3,7 +3,6 @@
 #include "jaiscript/core/engine.hpp"
 #include "jaiscript/detail/class_runtime.hpp"
 #include "jaiscript/detail/release_machine.hpp"
-#include "jaiscript/detail/namespace_scope.hpp"
 #include "jaiscript/detail/ast_serializer.hpp"
 #include "jaiscript/detail/builtin_methods.hpp"
 #include "jaiscript/detail/parallel_transform.hpp"
@@ -762,6 +761,7 @@ checked_result<void> class_registry::register_script_class(std::shared_ptr<scrip
     auto& slot = script_classes_[class_def->get_name()];
     const bool first_definition = slot != class_def;   // redefinitions re-register the same object
     slot = class_def;
+    script_classes_by_type_id_[class_def->get_type_id()] = class_def;
 
     validate_class_hierarchy(class_def->get_name());
 
@@ -784,6 +784,11 @@ checked_result<void> class_registry::register_cpp_class(std::shared_ptr<class_de
 std::shared_ptr<script_class_definition> class_registry::find_script_class(const std::string& name) {
     auto it = script_classes_.find(name);
     return (it != script_classes_.end()) ? it->second : nullptr;
+}
+
+std::shared_ptr<script_class_definition> class_registry::find_script_class(uint64_t type_id) const {
+    auto it = script_classes_by_type_id_.find(type_id);
+    return it != script_classes_by_type_id_.end() ? it->second : nullptr;
 }
 
 void class_registry::validate_class_hierarchy(const std::string& class_name) {
@@ -959,8 +964,6 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                 } else {
                     return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
                 }
-            } else if (auto ns_class = namespace_class(*eng, base_name)) {
-                base_class_def = std::move(ns_class);
             } else if (host.class_lookup) {
                 if (auto cpp_class_def = host.class_lookup(std::string(base_name))) {
                     base_class_def = cpp_class_def;

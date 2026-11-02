@@ -1382,8 +1382,31 @@ private:
 				var a1 = geometry::area(3, 4);
 				geometry::scale = 10;
 				var a2 = geometry::area(3, 4);
-				"" + a1 + "|" + a2 + "|" + geometry::calls + "|" + geometry::Rect().w + Rect().h;
-			)", "24|120|2|11");
+				string bare = "";
+				try { var r = Rect(); } catch (e) { bare = e; }
+				"" + a1 + "|" + a2 + "|" + geometry::calls + "|" + geometry::Rect().w + geometry::Rect().h + "|" + bare;
+			)", "24|120|2|11|Undefined variable 'Rect'", warn_region);
+		});
+		test("a_namespace_class_is_named_by_its_qualified_name", [this]() {
+			// C++: a::K, b::K and a global K are three classes. Inside a namespace's blocks the bare name reads as the innermost
+			// namespace's class (a reopened namespace too, in a later unit); a redeclaration reloads only its own class
+			every_config("qualified class identity", "1271|a::K b::K K a::K|3 outer::inner::D 3|11 2 7|11 2", [&](engine& e) {
+				e.execute(R"(
+					namespace a { class K { int v = 1; int who() { return 1; } K self() { return K(); } } K build() { return K(); } }
+					namespace b { class K { string s = "b"; int who() { return 2; } } }
+					class K { int g = 7; }
+					namespace outer { class P { int p = 3; } namespace inner { int read() { return P().p; } class D : P { D() {} ~D() {} } } }
+					var x = a::K(); var y = b::K(); K z;
+				)");
+				e.execute("namespace a { int again() { return K().who(); } }");
+				std::string out = spec::render(e.execute(R"(
+					"" + x.who() + y.who() + z.g + a::again() + "|" + type_of(x) + " " + type_of(y) + " " + type_of(z) + " " + type_of(a::build().self()) + "|" +
+					outer::inner::read() + " " + type_of(outer::inner::D()) + " " + outer::inner::D().p;
+				)"));
+				e.execute("namespace a { class K { int v = 1; int who() { return 11; } } }");
+				out += "|" + spec::render(e.execute(R"("" + x.who() + " " + y.who() + " " + z.g;)"));
+				return out + "|" + spec::render(e.execute(R"("" + a::K().who() + " " + b::K().who();)"));
+			});
 		});
 		test("namespace_functions_write_the_namespace_cell_by_bare_name", [this]() {
 			expect("bare name", R"(

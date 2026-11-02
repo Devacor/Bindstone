@@ -15485,7 +15485,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 
 		auto class_it = ns_data->classes.find(expr->member_id);
 		if (class_it != ns_data->classes.end()) {
-			auto ctor_result = environment_->get(expr->member_id);
+			auto ctor_result = environment_->get(class_it->second->interned_name_id());
 			if (!ctor_result) {
 				return raise_from(ctor_result);
 			}
@@ -18922,17 +18922,7 @@ op_status vm_backend::exec_namespace_decl_node(namespace_decl* decl) {
 
 			if (debug_hook_) [[unlikely]] { debug_stop_at(class_decl_ptr); }
 			VM_TRY(exec_class_decl_node(class_decl_ptr));
-
-			auto [class_var_id, class_var_name] = symbolizer_->get_class_var_id_with_view(class_decl_ptr->name_id);
-			if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
-				if (class_def_var->is_object()) {
-					auto obj_holder = class_def_var->get_object_holder();
-					if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
-						detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
-						                                 std::static_pointer_cast<class_definition>(obj_holder->host_object()));
-					}
-				}
-			}
+			detail::register_namespace_class(*engine_, *ns_data, *class_decl_ptr);
 
 		} else {
 			arm_listing();

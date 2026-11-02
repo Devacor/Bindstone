@@ -668,7 +668,8 @@ namespace jai {
 
     namespace detail {
         // work: values to destroy, back first; a nested last-handle array<var> or map hands its elements on instead of
-        // destroying them inside its own destructor, so nesting costs no native depth and the order is unchanged
+        // destroying them inside its own destructor, so nesting costs no native depth and the order is unchanged (an array's
+        // elements last to first)
         inline void release_work(std::vector<script_value>& work) noexcept {
             while (!work.empty()) {
                 script_value v = std::move(work.back());
@@ -676,7 +677,7 @@ namespace jai {
                 if (!v.release_flattens()) { continue; }
                 if (v.raw_storage_index() == script_value::TYPEID_ARRAY) {
                     auto& vals = v.unchecked_get_array_storage()->values();
-                    for (size_t i = vals.size(); i-- > 0;) { work.push_back(std::move(vals[i])); }
+                    for (script_value& element : vals) { work.push_back(std::move(element)); }
                     vals.clear();
                 } else {
                     v.unchecked_get_map_storage()->hand_off_entries(work);
@@ -686,7 +687,7 @@ namespace jai {
         inline void release_values_flattened(std::vector<script_value>& values) noexcept {
             std::vector<script_value> work;
             work.reserve(values.size());
-            for (size_t i = values.size(); i-- > 0;) { work.push_back(std::move(values[i])); }
+            for (script_value& element : values) { work.push_back(std::move(element)); }
             values.clear();
             release_work(work);
         }

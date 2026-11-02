@@ -171,10 +171,12 @@ namespace {
 #else
 #define JAI_VM_COLD_PATH __attribute__((noinline, cold))
 #endif
+	// the doomed records die innermost (last) first on every standard library, which leaves a vector's own order unspecified
 	template <class V>
 	JAI_VM_COLD_PATH void truncate_detached_tail(V& v, size_t n) {
 		V doomed(std::make_move_iterator(v.begin() + static_cast<std::ptrdiff_t>(n)), std::make_move_iterator(v.end()));
 		v.erase(v.begin() + static_cast<std::ptrdiff_t>(n), v.end());
+		while (!doomed.empty()) { doomed.pop_back(); }
 	}
 	template <class V>
 	inline void truncate_detached(V& v, size_t n) {
@@ -687,6 +689,18 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 	// handler it suspended in holds its thrown value only through its catch variable
 	~vm_coroutine_state() override {
 		if (parked_counted && parked_counter) { --*parked_counter; }
+		// a suspended loop's interior dies before its range, the innermost loop first (vm_backend::release_loops)
+		while (!iter_storage.empty()) {
+			const iter_state& st = iter_storage.back();
+			if (st.body_frame == &f && st.first_slot != UINT32_MAX && f.window_backed) {
+				const size_t end = std::min(stack_storage.size(), f.window_base + f.window_live);
+				for (size_t at = end; at-- > f.window_base + st.first_slot;) {
+					if (!stack_storage[at].is_reference()) { script_value dying = std::move(stack_storage[at]); }
+				}
+			}
+			auto dying = std::move(iter_storage.back());
+			iter_storage.pop_back();
+		}
 		if (!f.window_backed) { return; }
 		for (auto& record : try_storage) { if (record.caught_scope) { record.caught_scope->dismiss(); } }
 		parked_exception_value.reset();
@@ -1065,7 +1079,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	if (!state.started) {
 		auto function = handle.get_function();
 		auto* body_chunk = state.body_chunk.get();
-		const auto& args = handle.get_args();
+		auto& args = handle.binding_args();
 		for (size_t i = 0; i < function->parameters.size(); ++i) {
 			const auto& param = function->parameters[i];
 			if (i >= args.size()) {
@@ -1141,13 +1155,23 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			const script_value& shared_probe = converted_arg.deref();
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
 			if (shared_probe.get_type_info() && shared_probe.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) { should_share = true; }
-			script_value bound = should_share ? script_value(shared_probe)
-			                   : detail::converted_temporary(converted_arg, args[i]) ? std::move(converted_arg) : converted_arg.clone();
+			script_value bound{std::monostate{}, engine_};
+			if (should_share) {
+				bound = script_value(shared_probe);
+			} else if (detail::converted_temporary(converted_arg, args[i])) {
+				bound = std::move(converted_arg);
+			} else if (!args[i].is_reference()) {   // the handle's own capture is the parameter: it moves in (a conversion made its own value)
+				converted_arg = make_null();
+				bound = detail::uniquely_held(args[i]) ? std::move(args[i]) : args[i].clone();
+			} else {
+				bound = converted_arg.clone();
+			}
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
 			frame_slot_set(state.f, param.slot_index, std::move(bound));
 		}
+		handle.release_args();
 		// Body slots exist behind window_live so operand temps start above the window
 		{
 			const size_t window_slots = std::max(function->local_count, body_chunk->local_count);
@@ -13117,7 +13141,7 @@ op_status vm_backend::tail_splice_frame(call_record& rec, const script_defined_f
 	const size_t window_extent = stack_.size() - args_base;
 	// The dying frame's loop state dies at the boundary pop would have killed it
 	// (cfor fast-state pointers into the old window die BEFORE the window is reused)
-	truncate_detached(iter_states_, rec.iter_base);
+	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
 	if (cfor_states_.size() > rec.cfor_base) {
 		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
 	}
@@ -18922,6 +18946,19 @@ void vm_backend::pop_scopes_through(const environment* scope) {
 	}
 }
 
+// The try body's locals (the kills the handler opens with) die with the unwinding that leaves them, ahead of the handler: a
+// destructor's error goes to the script error handler and the exception in flight still reaches this handler. The handler's
+// own kills then find the slots empty
+void vm_backend::kill_unwound_try_locals(frame& f, size_t handler_ip) {
+	const bool unwinding = std::exchange(is_unwinding_, true);
+	for (size_t ip = handler_ip; ip < f.code->code.size(); ++ip) {
+		const vm_instruction& kill = f.code->code[ip];
+		if (kill.op != opcode::op_kill_slot || kill.c) { break; }
+		kill_frame_slots(f, kill.a, kill.b);
+	}
+	is_unwinding_ = unwinding;
+}
+
 // The handler is done: its variable lets go of the error (its scope ended), so the record's end decides the thrown value's death
 void vm_backend::release_catch_variable(frame& f, const try_record& rec) {
 	if (rec.caught_scope && rec.catch_slot != k_invalid_u32 && has_slots(f)) { frame_slot_set(f, rec.catch_slot, make_null()); }
@@ -18969,6 +19006,8 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		const size_t handler_index = try_records_.size() - 1;
 		const try_record handler = rec;
 		if (failure) {
+			// a destructor that threw while the error left its scope: the error goes on to this handler, the throw to the script error handler
+			if (is_unwinding_ && current_exception_) { engine_->report_script_error(current_exception_->what(), {}); }
 			std::string message = format_error(*failure, *symbolizer_);
 			active_exception_value_ = script_value(message, engine_);
 			current_exception_ = script_exception(message);
@@ -18980,9 +19019,12 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 		if (stack_.size() > handler.stack_size) {
 			stack_.truncate(handler.stack_size);
 		}
+		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
+		if (f.cells) { f.cells->park_at = k_invalid_u32; }   // a block parked for a statement that raised stays closed
 		if (iter_states_.size() > handler.iter_size) {
-			release_iter_slots(f, handler.iter_size);
-			truncate_detached(iter_states_, handler.iter_size);
+			const bool unwinding = std::exchange(is_unwinding_, true);   // a destructor's error goes to the script error handler
+			release_loops(f, handler.iter_size);
+			is_unwinding_ = unwinding;
 		}
 		if (cfor_states_.size() > handler.cfor_size) {
 			cfor_states_.erase(cfor_states_.begin() + handler.cfor_size, cfor_states_.end());
@@ -19023,8 +19065,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 				try_records_[handler_index].catch_env = environment_.get();
 			}
 		}
-		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
-		if (f.cells) { f.cells->park_at = k_invalid_u32; }   // a block parked for a statement that raised stays closed
+		kill_unwound_try_locals(f, handler.handler_ip);
 		current_call_depth_ = handler.call_depth;   // a raise out of a graft whose body makes calls left its level counted
 		f.ip = handler.handler_ip;
 		try_records_[handler_index].in_catch = true;
@@ -19164,8 +19205,13 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	const iter_proto& proto = f.code->iter_protos[ins.a];
 	iter_state state;
 	state.env_pushed = proto.slot == SIZE_MAX || !has_slots(f);
+	if (!state.env_pushed) {
+		state.body_frame = &f;
+		state.first_slot = static_cast<uint32_t>(proto.slot);
+	}
 	if (state.env_pushed) {
 		environment_ = acquire_block_env(environment_);
+		state.scope = environment_.get();
 	} else if (proto.is_reference || proto.binds_map_entry) {
 		state.slot = proto.slot;
 		state.owner = &f;
@@ -19408,6 +19454,24 @@ JAI_NOINLINE op_status vm_backend::iter_next_map_entry(frame& f, const iter_prot
 }
 
 // KEEP BYTE-PARALLEL with the interpreter's visit_range_for_stmt slot release
+// The loops a return, an unwind or a frame's end leaves (f's iter states above `base`) die as C++ ends their scopes: the innermost
+// first, each loop's interior (its variable's slot and the slots above it) before its range
+JAI_NOINLINE void vm_backend::release_loops(frame& f, size_t base) {
+	while (iter_states_.size() > base) {
+		const iter_state& st = iter_states_.back();
+		if (st.body_frame == &f && st.first_slot != UINT32_MAX && has_slots(f)) {
+			const uint32_t first = st.first_slot;
+			const uint32_t live = static_cast<uint32_t>(f.window_backed ? f.window_live : f.locals->local_count());
+			for (uint32_t s = live; s-- > first;) { kill_frame_slot(f, s); }
+		} else if (st.env_pushed && st.scope) {
+			pop_scopes_through(st.scope);
+		}
+		if (iter_states_.size() <= base) { break; }
+		release_iter_slots(f, iter_states_.size() - 1);
+		pop_back_detached(iter_states_);
+	}
+}
+
 void vm_backend::release_iter_slots(frame& f, size_t from) {
 	for (size_t i = from; i < iter_states_.size(); ++i) {
 		const iter_state& st = iter_states_[i];
@@ -19418,15 +19482,14 @@ void vm_backend::release_iter_slots(frame& f, size_t from) {
 	}
 }
 
+// the loop variable's scope ends inside the range's: an environment loop variable dies before the range
 op_status vm_backend::exec_iter_pop(frame& f, const vm_instruction&) {
-	bool env_pushed = true;
+	if (iter_states_.empty() || iter_states_.back().env_pushed) {
+		pop_scopes_pooled(1);
+	}
 	if (!iter_states_.empty()) {
-		env_pushed = iter_states_.back().env_pushed;
 		release_iter_slots(f, iter_states_.size() - 1);
 		pop_back_detached(iter_states_);
-	}
-	if (env_pushed) {
-		pop_scopes_pooled(1);
 	}
 	return {};
 }
@@ -21052,7 +21115,8 @@ std::shared_ptr<chunk> vm_backend::chunk_for_body(std::string_view name,
 }
 
 // A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
-// destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with interpreter::execute_callable)
+// destructors run during unwinding); what the destructor raised goes to the script error handler, where C++ would terminate
+// (KEEP BYTE-PARALLEL with interpreter::execute_callable)
 struct vm_backend::unwind_park {
 	vm_backend* self;
 	std::optional<script_exception> exception;
@@ -21074,6 +21138,7 @@ struct vm_backend::unwind_park {
 		self->is_unwinding_ = false;
 	}
 	~unwind_park() {
+		if (self->is_unwinding_ && self->current_exception_) { self->engine_->report_script_error(self->current_exception_->what(), {}); }
 		self->current_exception_ = std::move(exception);
 		self->active_exception_value_ = std::move(value);
 		self->captured_trace_ = std::move(trace);
@@ -21599,6 +21664,7 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
 	JAI_COVERAGE_FRAME_EXIT(rec.f);
 	rec.lean = false;
+	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
 	if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
 	truncate_detached(try_records_, rec.try_base);
 	truncate_detached(iter_states_, rec.iter_base);
@@ -21643,6 +21709,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
+	if (iter_states_.size() > rec.iter_base) [[unlikely]] { release_loops(rec.f, rec.iter_base); }
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE, at the frame's end
 		stack_.truncate(rec.f.stack_base);

@@ -175,15 +175,15 @@ function reads(int k, var j) {
 	return a + b + c + d + e + f2 + h + i2;
 }
 0;)JAI", "var r = reads(0, 1); to_string(r) + \":\" + to_string(log);", "log = []; int t = make_top().mid.peek.v; to_string(log);" },
-				"0|54:[\"a\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
+				"0|54:[\"a\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
 				"\"b\", \"peek\", \"~Leaf\", \"~Mid:b\", \"~Leaf\", "
-				"\"c\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
-				"\"d\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
-				"\"e\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"op[]\", \"peek\", \"~Mid:z\", \"~Leaf\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
-				"\"f\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", \"peek\", \"~Leaf\", \"~Mid:g\", \"~Leaf\", "
-				"\"h\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
-				"\"i\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"peek\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", \"end\"]|"
-				"[\"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:t\", \"~Leaf\"]|", "temporaries");
+				"\"c\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
+				"\"d\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
+				"\"e\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"op[]\", \"peek\", \"~Mid:z\", \"~Leaf\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
+				"\"f\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", \"peek\", \"~Leaf\", \"~Mid:g\", \"~Leaf\", "
+				"\"h\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", "
+				"\"i\", \"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"peek\", \"~Leaf\", \"~Mid:t\", \"~Leaf\", \"end\"]|"
+				"[\"~Mid:x\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:z\", \"~Leaf\", \"made\", \"peek\", \"~Leaf\", \"~Top\", \"~Mid:z\", \"~Leaf\", \"~Mid:y\", \"~Leaf\", \"~Mid:x\", \"~Leaf\", \"~Mid:t\", \"~Leaf\"]|", "temporaries");
 		});
 
 		test("an_argument_temporary_with_a_destructor_is_the_parameter_of_a_call_through_a_value", [this]() {

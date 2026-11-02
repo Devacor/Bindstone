@@ -122,6 +122,16 @@ public:
                 function f() -> void { Token a = Token("a"); { Token b = Token("b"); if (true) { Token c = Token("c"); return; } } }
                 f(); LOG;
             )", "cba");
+            // a range-for's range is the loop's outermost local: the body's locals and the loop variable die before it, the
+            // locals declared ahead of the loop after it; nested loops end innermost first, and a range dies last to first
+            expect_log(R"(
+                function arr(string a, string b) -> array<Token> { array<Token> r = [Token(a), Token(b)]; return r; }
+                function g() -> int { Token a = Token("a"); for (auto t : arr("x", "y")) { Token b = Token("b"); return 1; } return 0; }
+                function h() -> int { for (auto o : arr("x", "y")) { for (auto i : arr("m", "n")) { return 1; } } return 0; }
+                g(); LOG = LOG + "|"; h(); LOG = LOG + "|";
+                for (auto t : arr("x", "y")) { LOG = LOG + "["; } LOG = LOG + "|";
+                for (auto t : arr("x", "y")) { LOG = LOG + "["; break; } LOG;
+            )", "bxyxa|mnmxyx|[x[yyx|[xyx");
         });
 
         test("throw_destroys_the_scopes_it_leaves", [this]() {
@@ -134,6 +144,15 @@ public:
                 function f() -> void { try { g(); } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
             )", "ba!");
+            // a range dies inside the scopes the throw leaves, after its loop's interior, in the same function or a callee
+            expect_log(R"(
+                function arr() -> array<Token> { array<Token> r = [Token("x"), Token("y")]; return r; }
+                function boom() -> int { throw "boom"; return 0; }
+                function f() -> void { try { Token a = Token("a"); for (auto t : arr()) { Token b = Token("b"); boom(); } } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; }
+                function g() -> void { Token a = Token("a"); for (auto t : arr()) { Token b = Token("b"); boom(); } }
+                function k() -> void { try { g(); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; }
+                f(); k(); LOG;
+            )", "bxyxac|bxyxac|");
         });
 
         test("a_base_constructor_that_throws_leaves_no_destructor_to_run", [this]() {
@@ -432,7 +451,7 @@ public:
                     LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "cBcm'|d'm'|caughtcp'~p'|caught|~p~bad~bad~m'~m");
+            )", "cBcm'|d'm'|caughtcp'~p'|caught|~bad~p~bad~m'~m");
             // a returned parameter moves an array's storage (no element copies) and moves a class memberwise, copying a field
             // whose class declares a copy constructor
             expect_log(c + R"(
@@ -595,6 +614,27 @@ public:
             }
             check_false(threw, "teardown does not propagate");
             check_true(reported.find("teardown") != std::string::npos, "reported: " + reported);
+            // so is one a destructor raises while another error unwinds (C++ would terminate): the first error reaches its handler,
+            // whether the dying local is the try body's, a callee's or a grafted callee's, and whether a throw or a run-time error unwinds
+            for (const char* unwinds : {"boom();", "throw \"t\";", "int z = 1 / (LOG.size() - LOG.size());"}) {
+                for (const bool in_callee : {false, true}) {
+                    std::string during;
+                    auto eng = make_engine();
+                    eng->set_script_error_handler([&during](const std::string& message) { during += message; });
+                    const std::string body = std::string("Bad b = Bad(\"b\"); ") + unwinds;
+                    const std::string program = std::string(R"(
+                        string LOG = "";
+                        class Bad { string name = ""; Bad(string n) { name = n; } ~Bad() { LOG = LOG + name; throw "d" + name; } }
+                        function boom() -> int { throw "boom"; return 0; }
+                    )") + (in_callee ? "function g() -> void { " + body + " } function f() -> void { try { g(); }" : "function f() -> void { try { " + body + " }") +
+                        R"( catch (e) { LOG = LOG + "|c"; } LOG = LOG + "|after"; }
+                        try { f(); } catch (e) { LOG = LOG + "|outer:" + e.message; }
+                        LOG;
+                    )";
+                    check_eq(std::string("b|c|after"), eng->execute(program).as_string(), program);
+                    check_true(during.find("db") != std::string::npos, "reported while unwinding: " + during);
+                }
+            }
         });
 
         // A destructor that runs while an expression releases a temporary leaves nothing of its own body on the value stack
@@ -641,6 +681,19 @@ public:
                 function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
                 f(); LOG;
             )", "|hta|");
+            // a suspended range-for ends as a return would end it: its interior, its range, then the locals ahead of it
+            expect_log(R"(
+                function arr() -> array<Token> { array<Token> r = [Token("x"), Token("y")]; return r; }
+                coroutine gen() -> int { Token a = Token("a"); for (auto t : arr()) { Token b = Token("b"); yield 1; } }
+                function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|bxyxa|");
+            // a by-value parameter is one object: the argument the call made moves into it at the first resume
+            expect_log(R"(
+                coroutine gen(Token p) -> int { Token a = Token("a"); Token b = Token("b"); yield 1; yield 2; }
+                function f() -> void { var g = gen(Token("p")); LOG = LOG + "<"; g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
+                f(); LOG;
+            )", "p<|bap|");
         });
 
         // C++ destroys the exception object as its handler exits; a rethrow carries it to the next handler
@@ -939,7 +992,7 @@ public:
                     LOG = LOG + "4";
                 }
                 f(); LOG;
-            )", "q123qa4qqq");
+            )", "q123aq4qqq");
         });
 
         test("push_takes_a_temporary_only_where_no_destructor_sees_it", [this]() {

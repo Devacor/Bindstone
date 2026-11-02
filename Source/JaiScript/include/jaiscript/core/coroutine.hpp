@@ -54,6 +54,9 @@ public:
 
     std::shared_ptr<function_decl> get_function() const { return function_; }
     const std::vector<script_value>& get_args() const { return initial_args_; }
+    // The first resume moves the arguments into the body's parameters and lets the rest go: no second copy outlives it
+    std::vector<script_value>& binding_args() { return initial_args_; }
+    void release_args() noexcept { std::vector<script_value>().swap(initial_args_); }
     std::shared_ptr<environment> get_closure_env() const { return closure_env_; }
 
     // Method coroutines pin their receiver here: the handle keeps the instance alive

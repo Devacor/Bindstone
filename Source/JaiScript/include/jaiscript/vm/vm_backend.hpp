@@ -1031,6 +1031,8 @@ namespace jai::vm {
         };
         std::vector<try_record> try_records_;
         void release_catch_variable(frame& f, const try_record& rec);
+        void release_loops(frame& f, size_t base);
+        void kill_unwound_try_locals(frame& f, size_t handler_ip);
         void pop_scopes_through(const environment* scope);
         // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)
         uint8_t source_class(const expression* e);
@@ -1054,6 +1056,11 @@ namespace jai::vm {
             size_t slot = SIZE_MAX;
             const frame* owner = nullptr;
             std::shared_ptr<coroutine_handle> coroutine;   // set = coroutine-driven range-for
+            // a slotted loop variable's frame and slot: the loop's interior holds that slot and the ones above it, which die before
+            // the range when a return, an unwind or an abandoned coroutine leaves the loop
+            const frame* body_frame = nullptr;
+            uint32_t first_slot = UINT32_MAX;
+            const environment* scope = nullptr;   // an environment loop variable's scope (env_pushed), which dies before the range
         };
         std::vector<iter_state> iter_states_;
 

@@ -65,10 +65,11 @@ public:
 
         test("class_typed_reference_declaration_parses_as_a_declaration", [this]() {
             // `Base& b = derived;` and `Base& b;` at statement level are reference
-            // declarations (they read as bitwise-and plus assignment before); `Box& get(`
-            // stays the reference-return function; a bitwise-and statement keeps its meaning
+            // declarations (they read as bitwise-and plus assignment before), and one without its
+            // initializer is an error; `Box& get(` stays the reference-return function; a bitwise-and
+            // statement keeps its meaning
             check_parse_succeeds("class A { int x = 1; } class B : A {} B b = B(); A& a = b; a.x = 5;");
-            check_parse_succeeds("class A {} A& r;");
+            check_parse_fails("class A {} A& r;");
             check_parse_succeeds("class Box { int v = 0; } Box b = Box(); Box& get() { return b; }");
             auto eng = make_engine();
             auto* symbolizer = eng->get_symbolizer();

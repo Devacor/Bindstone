@@ -11,7 +11,10 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <filesystem>
 #include <fstream>
+#include <algorithm>
 #include <functional>
+#include <optional>
+#include <sstream>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -85,6 +88,45 @@ namespace jaibite_test_detail {
             out.error = ex.what();
         }
         return out;
+    }
+
+    inline std::string read_text(const std::filesystem::path& path) {
+        std::ifstream in(path, std::ios::binary);
+        std::string result((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+        std::erase(result, '\r');
+        return result;
+    }
+
+    // Every jaiscript sample on the site (docs/site) and every source of the examples, as (name, text)
+    inline std::vector<std::pair<std::string, std::string>> corpus_sources() {
+        static const std::pair<std::string_view, std::string_view> entities[] = {
+            {"&lt;", "<"}, {"&gt;", ">"}, {"&quot;", "\""}, {"&#x27;", "'"}, {"&#39;", "'"}, {"&#8203;", ""}, {"&amp;", "&"}};
+        std::vector<std::pair<std::string, std::string>> result;
+        const std::filesystem::path root(JAISCRIPT_TESTS_SOURCE_ROOT);
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root / "docs" / "site")) {
+            if (entry.path().extension() != ".html") { continue; }
+            const std::string page = read_text(entry.path());
+            const std::string_view open = "class=\"lang-jai\">";
+            for (size_t at = page.find(open); at != std::string::npos; at = page.find(open, at)) {
+                at += open.size();
+                const std::string_view html(page.data() + at, page.find("</code>", at) - at);
+                std::string code;
+                bool in_tag = false;
+                for (size_t i = 0; i < html.size(); ++i) {
+                    if (html[i] == '<') { in_tag = true; continue; }
+                    if (in_tag) { in_tag = html[i] != '>'; continue; }
+                    auto entity = std::find_if(std::begin(entities), std::end(entities), [&](const auto& e) { return html.substr(i).starts_with(e.first); });
+                    if (entity == std::end(entities)) { code += html[i]; continue; }
+                    code += entity->second;
+                    i += entity->first.size() - 1;
+                }
+                result.emplace_back(entry.path().filename().string() + " sample " + std::to_string(result.size()), std::move(code));
+            }
+        }
+        for (const auto& entry : std::filesystem::recursive_directory_iterator(root / "examples")) {
+            if (entry.path().extension() == ".jai") { result.emplace_back(entry.path().string(), read_text(entry.path())); }
+        }
+        return result;
     }
 
 } // namespace jaibite_test_detail
@@ -516,6 +558,70 @@ public:
             }
         });
 
+        // The corpus: every site sample and example source parses into bytes that load back to the same bytes, and every
+        // one a plain engine accepts runs from its loaded bite as from its fresh one (output, result and error) on both
+        // backends, so no token, type or node a real program uses is missing from the format
+        test("corpus_round_trip", [this]() {
+            using namespace jaibite_test_detail;
+            size_t structural = 0;
+            size_t behavioral = 0;
+            auto author = fresh_engine(false, {});
+            auto reader = fresh_engine(false, {});
+            const auto quiet = [](engine& e) {   // a step budget cuts the long samples short at the same step on every run
+                e.set_output_stream(std::make_shared<std::ostringstream>());
+                e.execution_budget(0);
+                e.execution_step_budget(8);
+            };
+            const auto captured = [](engine& e, jai::jaibite& bite) {
+                auto stream = std::make_shared<std::ostringstream>();
+                e.set_output_stream(stream);
+                run_output out = run_once(bite);
+                out.value = stream->str() + "|" + out.value;
+                return out;
+            };
+            for (const auto& [name, source] : corpus_sources()) {
+                lexer lex(source, author->get_symbolizer());
+                auto tokens = lex.tokenize();
+                parser syntax(tokens, author->get_symbolizer(), author.get(), author->get_registered_template_types());
+                auto declarations = syntax.parse();
+                if (!declarations) { continue; }
+                const auto bytes = detail::serialize_jaibite(declarations.value(), *author->get_symbolizer(), 0);
+                std::vector<uint8_t> again;
+                try {
+                    uint64_t fingerprint = 0;
+                    again = detail::serialize_jaibite(detail::deserialize_jaibite(bytes.data(), bytes.size(), reader.get(), fingerprint), *reader->get_symbolizer(), 0);
+                } catch (const std::exception& ex) {
+                    check_true(false, name + ": " + ex.what());
+                    continue;
+                }
+                check_true(bytes == again, name + ": the loaded program writes the bytes it was read from");
+                ++structural;
+                // a run that reads the clock, sleeps or draws randomness differs from itself
+                const bool repeatable = !name.ends_with(".jai") && source.find("sleep(") == std::string::npos && source.find("time::") == std::string::npos &&
+                                        source.find("random") == std::string::npos;
+                for (bool use_vm : { false, true }) {
+                    if (!repeatable) { break; }
+                    auto fresh = fresh_engine(use_vm, quiet);
+                    std::optional<jai::jaibite> direct;
+                    try { direct.emplace(fresh->jaibite(source)); } catch (const std::exception&) { break; }
+                    const auto saved = direct->save_bytes();
+                    const run_output expected = captured(*fresh, *direct);
+                    auto loader = fresh_engine(use_vm, quiet);
+                    std::optional<jai::jaibite> loaded;
+                    try { loaded.emplace(loader->jaibite_load_bytes(saved)); } catch (const std::exception& ex) {
+                        check_true(false, name + ": " + ex.what());
+                        break;
+                    }
+                    const run_output actual = captured(*loader, *loaded);
+                    check_eq(expected.error, actual.error, name);
+                    check_eq(expected.value, actual.value, name);
+                    behavioral += use_vm ? 1 : 0;
+                }
+            }
+            check_true(structural > 600, "the corpus parsed: " + std::to_string(structural));
+            check_true(behavioral > 300, "the corpus ran: " + std::to_string(behavioral));
+        });
+
         test("class_and_lambda_bytes_stable_before_and_after_execute", [this]() {
             using namespace jaibite_test_detail;
             const char* src = R"(
@@ -637,6 +743,67 @@ public:
             auto bytes = e->jaibite("1 + 1;").save_bytes();
             bytes.push_back(0);
             check_throws([&]() { e->jaibite_load_bytes(bytes); });
+        });
+
+        // A count or a slot the file's own syntax does not account for is refused at load: a frame's local count, a parallel
+        // body's capture of its enclosing frame, a check mode attribute, a break or continue with nothing to leave
+        test("load_rejects_claims_the_syntax_does_not_name", [this]() {
+            using namespace jaibite_test_detail;
+            const std::string source = "string pad = \"" + std::string(2000, 'p') + "\";\n"
+                "int f(int a) {\n    array<int> xs = [1, 2, 3];\n    int k = a;\n    parallel_for (auto& x : xs) { x += k; }\n    return xs[0];\n}\nf(1);";
+            auto author = fresh_engine(false, {});
+            const auto parse = [&]() {
+                lexer lex(source, author->get_symbolizer());
+                auto tokens = lex.tokenize();
+                parser syntax(tokens, author->get_symbolizer(), author.get(), author->get_registered_template_types());
+                auto declarations = syntax.parse();
+                check_true(bool(declarations), "fixture must parse");
+                return declarations.value();
+            };
+            const auto function_of = [](const std::vector<declaration_ptr>& declarations) {
+                return std::static_pointer_cast<function_decl>(declarations[1]);
+            };
+            const auto parallel_of = [&](const std::vector<declaration_ptr>& declarations) {
+                for (const auto& d : function_of(declarations)->body->declarations) {
+                    if (d->get_type() == node_type::statement_decl && static_cast<statement_decl*>(d.get())->statement->get_type() == node_type::parallel_for_stmt) {
+                        return static_cast<parallel_for_stmt*>(static_cast<statement_decl*>(d.get())->statement.get());
+                    }
+                }
+                return static_cast<parallel_for_stmt*>(nullptr);
+            };
+            const auto load = [&](const std::vector<declaration_ptr>& declarations) {
+                const auto bytes = detail::serialize_jaibite(declarations, *author->get_symbolizer(), author->registration_fingerprint());
+                fresh_engine(false, {})->jaibite_load_bytes(bytes);
+            };
+            const auto refused = [&](const std::vector<declaration_ptr>& declarations, const std::string& text) {
+                std::string what;
+                try { load(declarations); } catch (const jai::runtime_error& ex) { what = ex.what(); }
+                check_eq(text, what);
+            };
+            load(parse());
+            auto inflated = parse();
+            function_of(inflated)->local_count = 1000;
+            refused(inflated, "jaibite: invalid program: local count exceeds encoded storage");
+            auto captured = parse();
+            check_false(parallel_of(captured)->frame_captures.empty(), "the body captures k");
+            parallel_of(captured)->frame_captures[0].second = 500;
+            refused(captured, "jaibite: invalid program: local slot out of range");
+            auto moded = parse();
+            parallel_of(moded)->check_mode_attr = 9;
+            refused(moded, "jaibite: corrupt check mode attribute");
+            auto stray_break = parse();
+            stray_break.push_back(std::make_shared<statement_decl>(stray_break.back()->location, std::make_shared<break_stmt>(stray_break.back()->location)));
+            refused(stray_break, "jaibite: invalid program: 'break' outside a loop or switch");
+            auto stray_continue = parse();
+            const auto at = function_of(stray_continue)->location;
+            auto in_switch = std::make_shared<switch_stmt>(at, std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, script_int(1))));
+            in_switch->default_case = std::make_shared<default_stmt>(at);
+            in_switch->default_case->body.push_back(std::make_shared<continue_stmt>(at));
+            function_of(stray_continue)->body->declarations.insert(function_of(stray_continue)->body->declarations.begin(), std::make_shared<statement_decl>(at, in_switch));
+            refused(stray_continue, "jaibite: invalid program: 'continue' outside a loop");
+            auto parallel_break = parse();
+            static_cast<block_stmt*>(parallel_of(parallel_break)->body.get())->declarations.push_back(std::make_shared<statement_decl>(at, std::make_shared<break_stmt>(at)));
+            refused(parallel_break, "jaibite: invalid program: 'break' outside a loop or switch");
         });
 
         // Registration fingerprint: advisory warning only — a mismatched engine still loads.

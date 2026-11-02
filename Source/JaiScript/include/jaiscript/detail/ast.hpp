@@ -156,8 +156,6 @@ namespace jai {
     // Base expression node
     class expression : public ast_node {
     public:
-        type_info_ptr result_type;  // Type of the expression result
-
         expression(const source_location& loc, node_type t) : ast_node(loc, t) {}
     };
     

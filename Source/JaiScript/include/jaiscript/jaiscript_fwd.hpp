@@ -74,6 +74,7 @@ namespace jai {
         jai_vec4_type,           // math::vec4 (4 x f32)
         jai_color_type           // math::color (r, g, b, a f32, straight alpha)
     };
+    inline constexpr script_value_type k_last_script_value_type = script_value_type::jai_color_type;   // the bound a .jaibite's type numbers are read against: move it with a new last member
     
     // The unit whose code is running and the execution that compiled it (internal/global_shadowing.md):
     // id numbers units by first execution (0 = the host), seq numbers executions engine-wide

@@ -15,7 +15,7 @@
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
-// both backends, so a faithful round trip preserves behavior (save-after-execute test).
+// both backends, so a faithful round trip preserves behavior.
 
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
@@ -99,8 +99,6 @@ namespace jai::detail {
         throw jai::runtime_error("jaibite: " + why);
     }
 
-    // ---------------------------------------------------------------- writer
-
     class ast_writer {
     public:
         // include_locations = false produces a POSITION-INSENSITIVE encoding (structural
@@ -149,7 +147,6 @@ namespace jai::detail {
         }
 
     private:
-        // --- primitives ---
         static void fixed_u32(std::vector<uint8_t>& v, uint32_t x) {
             for (int i = 0; i < 4; ++i) v.push_back(uint8_t(x >> (i * 8)));
         }
@@ -259,7 +256,6 @@ namespace jai::detail {
             for (const auto& [sym, s] : plan) { symbol(sym, UINT64_MAX); slot(s); }
         }
 
-        // --- node dispatch (exhaustive over node_type; unknown = loud failure) ---
         void node(const ast_node* n) {
             if (!n) { u8(0xFF); return; }
             ++depth_;
@@ -270,13 +266,11 @@ namespace jai::detail {
             switch (n->get_type()) {
                 case node_type::literal_expr: {
                     auto* e = static_cast<const literal_expr*>(n);
-                    type(e->result_type);
                     literal(e->value);
                     break;
                 }
                 case node_type::identifier_expr: {
                     auto* e = static_cast<const identifier_expr*>(n);
-                    type(e->result_type);
                     str(e->name);
                     symbol(e->symbol_id, UINT64_MAX);
                     slot(e->slot_index);
@@ -285,7 +279,6 @@ namespace jai::detail {
                 }
                 case node_type::binary_expr: {
                     auto* e = static_cast<const binary_expr*>(n);
-                    type(e->result_type);
                     node(e->left.get());
                     tok(e->op);
                     node(e->right.get());
@@ -293,7 +286,6 @@ namespace jai::detail {
                 }
                 case node_type::unary_expr: {
                     auto* e = static_cast<const unary_expr*>(n);
-                    type(e->result_type);
                     tok(e->op);
                     node(e->operand.get());
                     flag(e->is_postfix);
@@ -301,7 +293,6 @@ namespace jai::detail {
                 }
                 case node_type::assignment_expr: {
                     auto* e = static_cast<const assignment_expr*>(n);
-                    type(e->result_type);
                     node(e->target.get());
                     tok(e->op);
                     node(e->value.get());
@@ -310,7 +301,6 @@ namespace jai::detail {
                 }
                 case node_type::call_expr: {
                     auto* e = static_cast<const call_expr*>(n);
-                    type(e->result_type);
                     node(e->callee.get());
                     varint(e->arguments.size());
                     for (const auto& a : e->arguments) node(a.get());
@@ -318,7 +308,6 @@ namespace jai::detail {
                 }
                 case node_type::member_expr: {
                     auto* e = static_cast<const member_expr*>(n);
-                    type(e->result_type);
                     node(e->object.get());
                     str(e->member);
                     symbol(e->member_id, UINT64_MAX);
@@ -331,7 +320,6 @@ namespace jai::detail {
                 case node_type::lambda_expr: {
                     auto* e = static_cast<const lambda_expr*>(n);
                     ++frame_depth_;
-                    type(e->result_type);
                     u8(uint8_t(e->default_capture));
                     varint(e->captures.size());
                     for (const auto& c : e->captures) {
@@ -355,7 +343,6 @@ namespace jai::detail {
                 }
                 case node_type::new_expr: {
                     auto* e = static_cast<const new_expr*>(n);
-                    type(e->result_type);
                     type(e->type);
                     varint(e->arguments.size());
                     for (const auto& a : e->arguments) node(a.get());
@@ -363,7 +350,6 @@ namespace jai::detail {
                 }
                 case node_type::ternary_expr: {
                     auto* e = static_cast<const ternary_expr*>(n);
-                    type(e->result_type);
                     node(e->condition.get());
                     node(e->then_expression.get());
                     node(e->else_expression.get());
@@ -371,38 +357,31 @@ namespace jai::detail {
                 }
                 case node_type::array_literal_expr: {
                     auto* e = static_cast<const array_literal_expr*>(n);
-                    type(e->result_type);
                     varint(e->elements.size());
                     for (const auto& el : e->elements) node(el.get());
                     break;
                 }
                 case node_type::map_literal_expr: {
                     auto* e = static_cast<const map_literal_expr*>(n);
-                    type(e->result_type);
                     varint(e->entries.size());
                     for (const auto& [k, v] : e->entries) { node(k.get()); node(v.get()); }
                     break;
                 }
                 case node_type::this_expr:
-                case node_type::super_expr: {
-                    type(static_cast<const expression*>(n)->result_type);
+                case node_type::super_expr:
                     break;
-                }
                 case node_type::throw_expr: {
                     auto* e = static_cast<const throw_expr*>(n);
-                    type(e->result_type);
                     node(e->value.get());
                     break;
                 }
                 case node_type::yield_expr: {
                     auto* e = static_cast<const yield_expr*>(n);
-                    type(e->result_type);
                     node(e->value.get());
                     break;
                 }
                 case node_type::cast_expr: {
                     auto* e = static_cast<const cast_expr*>(n);
-                    type(e->result_type);
                     type(e->target);
                     u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0) | (e->binding_ref ? 4 : 0)));
                     node(e->operand.get());
@@ -651,8 +630,6 @@ namespace jai::detail {
         int depth_ = 0;
     };
 
-    // ---------------------------------------------------------------- reader
-
     // Only the trusted in-memory parallel body copier supplies this context. A
     // public saved program always starts without locals or an enclosing frame.
     struct ast_frame_context {
@@ -678,6 +655,7 @@ namespace jai::detail {
                 frames_[0].local_count = SIZE_MAX;
                 enter_frame(context->parameters);
                 frames_[current_frame_].local_count = context->local_count;
+                frames_[current_frame_].supplied = true;
             }
         }
 
@@ -685,7 +663,7 @@ namespace jai::detail {
         size_t frame_count() const noexcept { return frames_.size(); }
 
         std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr) {
-            if (size_ < 20) jaibite_fail("truncated header");
+            if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
             if (std::memcmp(data_, k_jaibite_magic, 4) != 0) jaibite_fail("not a jaibite file (bad magic)");
             pos_ = 4;
             uint32_t version = fixed_u32();
@@ -695,12 +673,10 @@ namespace jai::detail {
             uint32_t flags = fixed_u32();
             if (flags_out) *flags_out = flags;
             fingerprint_out = fixed_u64();
-            if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
             pos_ += 16;   // the source identity, which read_jaibite_header reads
 
             uint64_t table_count = varint();
             check_count(table_count);
-            table_.reserve(size_t(table_count));
             for (uint64_t i = 0; i < table_count; ++i) {
                 uint64_t len = varint();
                 if (len > remaining()) jaibite_fail("truncated string table");
@@ -712,7 +688,6 @@ namespace jai::detail {
             uint64_t decl_count = varint();
             check_count(decl_count);
             std::vector<declaration_ptr> decls;
-            decls.reserve(size_t(decl_count));
             for (uint64_t i = 0; i < decl_count; ++i) decls.push_back(decl_req());
             if (remaining() != 0) jaibite_fail("trailing bytes after declarations");
             const auto valid = validate_program();
@@ -726,6 +701,8 @@ namespace jai::detail {
             size_t local_count = 0;
             std::unordered_set<uint64_t> declared;
             bool allows_parent_slots = true;
+            bool supplied = false;   // the copier's context frame, whose count the caller knows
+            size_t slots_read = 0;   // the slots the frame's own syntax names
         };
         struct slot_record {
             size_t index;
@@ -736,6 +713,7 @@ namespace jai::detail {
 
         void track_slot(size_t index, uint64_t symbol, bool identifier = false, bool declares = false) {
             if (index == SIZE_MAX) { return; }
+            ++frames_[current_frame_].slots_read;
             slots_.push_back({index, current_frame_, symbol, identifier});
             if (declares) { frames_[current_frame_].declared.insert(symbol); }
         }
@@ -747,20 +725,36 @@ namespace jai::detail {
             for (const auto& p : params) { track_slot(p.slot_index, p.symbol_id, false, true); }
         }
 
+        // What a break and a continue may leave from the body being read: a loop gives both, a switch a break, a parallel_for
+        // body only a continue (its iterations are independent), and a function's body starts from neither
+        struct jump_scope {
+            ast_reader& reader;
+            int breakable;
+            int continuable;
+            jump_scope(ast_reader& a_reader, int a_breakable, int a_continuable) : reader(a_reader), breakable(a_reader.breakable_), continuable(a_reader.continuable_) {
+                reader.breakable_ = a_breakable;
+                reader.continuable_ = a_continuable;
+            }
+            jump_scope(const jump_scope&) = delete;
+            ~jump_scope() { reader.breakable_ = breakable; reader.continuable_ = continuable; }
+        };
+        jump_scope loop_body() { return jump_scope(*this, breakable_ + 1, continuable_ + 1); }
+        jump_scope switch_body() { return jump_scope(*this, breakable_ + 1, continuable_); }
+        jump_scope parallel_body() { return jump_scope(*this, 0, 1); }
+        jump_scope function_body() { return jump_scope(*this, 0, 0); }
+
         void leave_frame(size_t local_count) {
             frames_[current_frame_].local_count = local_count;
             current_frame_ = frames_[current_frame_].parent;
         }
 
-        // The decoder's existing complete traversal records fields with their
-        // lexical frame. Counts occur after bodies on the wire, so validate the
-        // decoded records together before any marking/checking/compilation pass.
+        // The traversal records every slot with its lexical frame; counts follow bodies on the wire, so the records are
+        // validated together, before any marking, checking or compiling pass.
         checked_result<void> validate_program() const {
             for (size_t i = 1; i < frames_.size(); ++i) {
-                // Each parser-allocated slot requires encoded syntax. This loose
-                // byte bound permits synthetic slots but rejects enormous claims
-                // before allocation or the VM's narrower operand conversion.
-                if (frames_[i].local_count > size_ || frames_[i].local_count >= UINT32_MAX) {
+                // Each parser-allocated slot is named by encoded syntax; the slack admits the synthetic slots a lowering adds, so a
+                // count never claims storage the file does not describe
+                if (!frames_[i].supplied && frames_[i].local_count > 2 * frames_[i].slots_read + 64) {
                     return checked_result<void>(make_error_code(runtime_error_code::invalid_operation),
                         "invalid program: local count exceeds encoded storage");
                 }
@@ -774,9 +768,8 @@ namespace jai::detail {
                         return checked_result<void>(make_error_code(runtime_error_code::invalid_operation),
                             "invalid program: local slot out of range");
                     }
-                    // Match the existing callable/capture classifier: an identifier
-                    // not declared in this frame may carry its immediate parent's
-                    // slot. Saved SIZE_MAX runtime patches were skipped above.
+                    // As the callable/capture classifier reads it: an identifier not declared in this frame may carry its
+                    // immediate parent's slot (a saved SIZE_MAX patch is never tracked)
                     frame = frames_[frame].parent;
                 }
                 if (slot.index >= frames_[frame].local_count) {
@@ -787,7 +780,6 @@ namespace jai::detail {
             return {};
         }
 
-        // --- primitives ---
         size_t remaining() const { return size_ - pos_; }
         void need(size_t n) { if (remaining() < n) jaibite_fail("unexpected end of data"); }
         void check_count(uint64_t n) { if (n > remaining()) jaibite_fail("corrupt count"); }
@@ -864,7 +856,7 @@ namespace jai::detail {
         type_info_ptr type() {
             if (!u8()) return type_info_ptr(nullptr);
             uint8_t bt = u8();
-            if (bt > uint8_t(script_value_type::jai_utf8_string_type)) jaibite_fail("corrupt type_info");
+            if (bt > uint8_t(k_last_script_value_type)) jaibite_fail("corrupt type_info");
             ++depth_;
             if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("type nesting too deep");
             type_info temp(static_cast<script_value_type>(bt));
@@ -917,7 +909,7 @@ namespace jai::detail {
 
         token tok() {
             uint8_t tt = u8();
-            if (tt > uint8_t(token_type::right_shift_equal)) jaibite_fail("corrupt token type");
+            if (tt > uint8_t(k_last_token_type)) jaibite_fail("corrupt token type");
             token t;
             t.type = static_cast<token_type>(tt);
             t.lexeme = view();
@@ -938,7 +930,6 @@ namespace jai::detail {
             uint64_t n = varint();
             check_count(n);
             std::vector<parameter> params;
-            params.reserve(size_t(n));
             for (uint64_t i = 0; i < n; ++i) {
                 type_info_ptr t = type();
                 std::string name = str();
@@ -957,7 +948,6 @@ namespace jai::detail {
             built = flag();
             uint64_t n = varint();
             check_count(n);
-            plan.reserve(size_t(n));
             for (uint64_t i = 0; i < n; ++i) {
                 uint64_t sym = symbol(UINT64_MAX);
                 size_t s = slot_val();
@@ -966,11 +956,10 @@ namespace jai::detail {
             }
         }
 
-        // --- typed child readers ---
         expression_ptr expr_opt() {
             auto n = node();
             if (!n) return nullptr;
-            if (uint8_t(n->get_type()) >= 20) jaibite_fail("expected expression node");
+            if (n->get_type() >= node_type::expression_stmt) jaibite_fail("expected expression node");
             return std::static_pointer_cast<expression>(n);
         }
         expression_ptr expr_req() {
@@ -982,7 +971,7 @@ namespace jai::detail {
             auto n = node();
             if (!n) return nullptr;
             // a case label is a switch's own node, never a statement of its own
-            if (uint8_t(n->get_type()) < 20 || n->get_type() == node_type::case_stmt || n->get_type() == node_type::default_stmt) {
+            if (n->get_type() < node_type::expression_stmt || n->get_type() == node_type::case_stmt || n->get_type() == node_type::default_stmt) {
                 jaibite_fail("expected statement node");
             }
             return std::static_pointer_cast<statement>(n);
@@ -995,7 +984,7 @@ namespace jai::detail {
         declaration_ptr decl_opt() {
             auto n = node();
             if (!n) return nullptr;
-            if (uint8_t(n->get_type()) < 40) jaibite_fail("expected declaration node");
+            if (n->get_type() < node_type::variable_decl) jaibite_fail("expected declaration node");
             return std::static_pointer_cast<declaration>(n);
         }
         declaration_ptr decl_req() {
@@ -1022,21 +1011,18 @@ namespace jai::detail {
             if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("AST nesting too deep");
             source_location loc = location();
             const uint8_t check_mode_attr = tag >= uint8_t(node_type::expression_stmt) ? u8() : 0;
+            if (check_mode_attr > check_mode_attr_strict) jaibite_fail("corrupt check mode attribute");
             ast_node_ptr result;
             switch (static_cast<node_type>(tag)) {
                 case node_type::literal_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<literal_expr>(loc, literal());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::identifier_expr: {
-                    auto rt = type();
                     std::string_view name = view();
                     uint64_t sym = symbol(UINT64_MAX);
                     auto e = std::make_shared<identifier_expr>(loc, name, sym);
-                    e->result_type = rt;
                     e->slot_index = slot_val();
                     e->global_qualified = flag();
                     if (capture_slots_ && !e->global_qualified) {
@@ -1047,46 +1033,37 @@ namespace jai::detail {
                     break;
                 }
                 case node_type::binary_expr: {
-                    auto rt = type();
                     auto l = expr_req();
                     token op = tok();
                     auto r = expr_req();
                     auto e = std::make_shared<binary_expr>(loc, l, op, r);
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::unary_expr: {
-                    auto rt = type();
                     token op = tok();
                     auto operand = expr_req();
                     bool postfix = flag();
                     auto e = std::make_shared<unary_expr>(loc, op, operand, postfix);
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::assignment_expr: {
-                    auto rt = type();
                     auto t = expr_req();
                     token op = tok();
                     auto v = expr_req();
                     auto e = std::make_shared<assignment_expr>(loc, t, op, v);
-                    e->result_type = rt;
                     { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->yields_reference = (fl & 4) != 0; }
                     result = e;
                     break;
                 }
                 case node_type::call_expr: {
-                    auto rt = type();
                     auto callee = expr_req();
                     auto e = std::make_shared<call_expr>(loc, callee, expr_list());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::member_expr: {
-                    auto rt = type();
                     auto obj = expr_req();
                     std::string_view member = view();
                     uint64_t member_id = symbol(UINT64_MAX);
@@ -1096,20 +1073,16 @@ namespace jai::detail {
                     auto e = std::make_shared<member_expr>(loc, obj, member, member_id, arrow, is_static);
                     e->getter_id = getter_id;
                     e->null_safe = flag();
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::lambda_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<lambda_expr>(loc);
-                    e->result_type = rt;
                     uint8_t cd = u8();
                     if (cd > uint8_t(lambda_expr::capture_default::by_reference)) jaibite_fail("corrupt capture default");
                     e->default_capture = static_cast<lambda_expr::capture_default>(cd);
                     uint64_t nc = varint();
                     check_count(nc);
-                    e->captures.reserve(size_t(nc));
                     for (uint64_t i = 0; i < nc; ++i) {
                         std::string_view cname = view();
                         bool by_ref = flag();
@@ -1123,7 +1096,10 @@ namespace jai::detail {
                     e->parameters = parameters();
                     e->return_type = type();
                     enter_frame(e->parameters);
-                    e->body = block_req();
+                    {
+                        auto body = function_body();
+                        e->body = block_req();
+                    }
                     e->local_count = size_t(varint());
                     leave_frame(e->local_count);
                     bool built = false;
@@ -1131,7 +1107,6 @@ namespace jai::detail {
                     e->outer_slot_plan_built = built;
                     uint64_t nchain = varint();
                     check_count(nchain);
-                    e->chained_outer_slots.reserve(size_t(nchain));
                     for (uint64_t i = 0; i < nchain; ++i) {
                         uint64_t sym = symbol(UINT64_MAX);
                         size_t s = slot_val();
@@ -1140,88 +1115,68 @@ namespace jai::detail {
                     }
                     uint64_t nnames = varint();
                     check_count(nnames);
-                    e->chained_outer_names.reserve(size_t(nnames));
                     for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol(UINT64_MAX));
                     result = e;
                     break;
                 }
                 case node_type::new_expr: {
-                    auto rt = type();
                     auto t = type();
                     auto e = std::make_shared<new_expr>(loc, t, expr_list());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::ternary_expr: {
-                    auto rt = type();
                     auto c = expr_req();
                     auto t = expr_req();
                     auto f = expr_req();
                     auto e = std::make_shared<ternary_expr>(loc, c, t, f);
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::array_literal_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<array_literal_expr>(loc, expr_list());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::map_literal_expr: {
-                    auto rt = type();
                     uint64_t n = varint();
                     check_count(n);
                     std::vector<std::pair<expression_ptr, expression_ptr>> entries;
-                    entries.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) {
                         auto k = expr_req();
                         auto v = expr_req();
                         entries.emplace_back(k, v);
                     }
                     auto e = std::make_shared<map_literal_expr>(loc, std::move(entries));
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::this_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<this_expr>(loc);
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::super_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<super_expr>(loc);
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::throw_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<throw_expr>(loc, expr_opt());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::yield_expr: {
-                    auto rt = type();
                     auto e = std::make_shared<yield_expr>(loc, expr_opt());
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
                 case node_type::cast_expr: {
-                    auto rt = type();
                     auto target = type();
                     const uint8_t cast_flags = u8();
                     auto e = std::make_shared<cast_expr>(loc, target, (cast_flags & 1) != 0, expr_req());
                     e->implicit_ref = (cast_flags & 2) != 0;
                     e->binding_ref = (cast_flags & 4) != 0;
-                    e->result_type = rt;
                     result = e;
                     break;
                 }
@@ -1232,7 +1187,6 @@ namespace jai::detail {
                     uint64_t n = varint();
                     check_count(n);
                     std::vector<declaration_ptr> decls;
-                    decls.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) decls.push_back(decl_req());
                     result = std::make_shared<block_stmt>(loc, std::move(decls));
                     break;
@@ -1246,7 +1200,7 @@ namespace jai::detail {
                 }
                 case node_type::while_stmt: {
                     auto c = expr_req();
-                    auto b = stmt_req();
+                    auto b = [&] { auto body = loop_body(); return stmt_req(); }();
                     result = std::make_shared<while_stmt>(loc, c, b);
                     break;
                 }
@@ -1258,7 +1212,7 @@ namespace jai::detail {
                     }
                     auto c = expr_opt();
                     auto u = expr_opt();
-                    auto b = stmt_req();
+                    auto b = [&] { auto body = loop_body(); return stmt_req(); }();
                     result = std::make_shared<for_stmt>(loc, i, c, u, b);
                     break;
                 }
@@ -1270,7 +1224,7 @@ namespace jai::detail {
                     bool is_ref = flag();
                     bool is_const = flag();
                     auto cont = expr_req();
-                    auto body = stmt_req();
+                    auto body = [&] { auto scope = loop_body(); return stmt_req(); }();
                     auto s = std::make_shared<range_for_stmt>(loc, et, vname, vid, is_ref, is_const, cont, body);
                     s->variable_slot_index = vslot;
                     track_slot(vslot, vid, false, true);
@@ -1280,22 +1234,27 @@ namespace jai::detail {
                 }
                 case node_type::parallel_for_stmt: {
                     auto params = parameters();
-                    if (params.empty()) jaibite_fail("parallel_for_stmt parameter count");
+                    if (params.empty()) jaibite_fail("invalid program: parallel_for has no loop variable");
                     size_t locals = size_t(varint());
-                    const size_t frame_capture_count = size_t(varint());
-                    if (frame_capture_count > 65536) jaibite_fail("parallel_for_stmt frame capture count");
-                    std::vector<std::pair<uint64_t, size_t>> frame_captures(frame_capture_count);
-                    for (auto& [sym, slot] : frame_captures) { sym = symbol(UINT64_MAX); slot = size_t(varint()); }
+                    const uint64_t frame_capture_count = varint();
+                    check_count(frame_capture_count);
+                    std::vector<std::pair<uint64_t, size_t>> frame_captures;
+                    for (uint64_t i = 0; i < frame_capture_count; ++i) {
+                        const uint64_t sym = symbol(UINT64_MAX);
+                        const size_t slot = size_t(varint());
+                        track_slot(slot, sym);
+                        frame_captures.emplace_back(sym, slot);
+                    }
                     auto cont = expr_req();
                     auto extras = expr_list();
-                    if (extras.size() + 1 != params.size()) jaibite_fail("parallel_for_stmt zip arity");
+                    if (extras.size() + 1 != params.size()) jaibite_fail("invalid program: parallel_for zips one array per loop variable");
                     for (size_t i = 0; i < params.size(); ++i) {
                         if (params[i].slot_index != i) {
                             jaibite_fail("invalid program: parallel parameter slot does not match its position");
                         }
                     }
                     enter_frame(params, false);
-                    auto body = block_req();
+                    auto body = [&] { auto scope = parallel_body(); return block_req(); }();
                     leave_frame(locals);
                     auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
                     s->extra_params.assign(params.begin() + 1, params.end());
@@ -1309,9 +1268,11 @@ namespace jai::detail {
                     result = std::make_shared<return_stmt>(loc, expr_opt());
                     break;
                 case node_type::break_stmt:
+                    if (breakable_ == 0) jaibite_fail("invalid program: 'break' outside a loop or switch");
                     result = std::make_shared<break_stmt>(loc);
                     break;
                 case node_type::continue_stmt:
+                    if (continuable_ == 0) jaibite_fail("invalid program: 'continue' outside a loop");
                     result = std::make_shared<continue_stmt>(loc);
                     break;
                 case node_type::try_stmt: {
@@ -1329,9 +1290,9 @@ namespace jai::detail {
                 }
                 case node_type::switch_stmt: {
                     auto s = std::make_shared<switch_stmt>(loc, expr_req());
+                    auto cases = switch_body();
                     uint64_t n = varint();
                     check_count(n);
-                    s->cases.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) {
                         auto c = node();
                         if (!c || c->get_type() != node_type::case_stmt) jaibite_fail("expected case statement node");
@@ -1349,7 +1310,6 @@ namespace jai::detail {
                     auto s = std::make_shared<case_stmt>(loc, expr_req());
                     uint64_t n = varint();
                     check_count(n);
-                    s->body.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
                     s->has_fallthrough = flag();
                     bool terminal_fallthrough = false;
@@ -1371,7 +1331,6 @@ namespace jai::detail {
                     auto s = std::make_shared<default_stmt>(loc);
                     uint64_t n = varint();
                     check_count(n);
-                    s->body.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
                     result = s;
                     break;
@@ -1403,14 +1362,16 @@ namespace jai::detail {
                     d->parameters = parameters();
                     d->return_type = type();
                     enter_frame(d->parameters);
-                    d->body = block_req();
+                    {
+                        auto body = function_body();
+                        d->body = block_req();
+                    }
                     // Constructor initializers, like parameter defaults, are parsed
                     // in the surrounding scope, not in the function body frame.
                     const size_t body_frame = current_frame_;
                     current_frame_ = frames_[body_frame].parent;
                     uint64_t ni = varint();
                     check_count(ni);
-                    d->initializers.reserve(size_t(ni));
                     for (uint64_t i = 0; i < ni; ++i) {
                         std::string target = str();
                         d->initializers.emplace_back(target, expr_list());
@@ -1433,11 +1394,9 @@ namespace jai::detail {
                     d->nocopy = u8() != 0;
                     uint64_t nb = varint();
                     check_count(nb);
-                    d->base_classes.reserve(size_t(nb));
                     for (uint64_t i = 0; i < nb; ++i) d->base_classes.push_back(view());
                     uint64_t nm = varint();
                     check_count(nm);
-                    d->members.reserve(size_t(nm));
                     for (uint64_t i = 0; i < nm; ++i) {
                         uint8_t vis = u8();
                         if (vis > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
@@ -1457,7 +1416,6 @@ namespace jai::detail {
                     auto d = std::make_shared<namespace_decl>(loc, name, nid);
                     uint64_t n = varint();
                     check_count(n);
-                    d->declarations.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) d->declarations.push_back(decl_req());
                     result = d;
                     break;
@@ -1519,7 +1477,6 @@ namespace jai::detail {
                     auto d = std::make_shared<enum_decl>(loc, name, nid);
                     uint64_t n = varint();
                     check_count(n);
-                    d->values.reserve(size_t(n));
                     for (uint64_t i = 0; i < n; ++i) {
                         std::string_view vname = view();
                         uint64_t vid = symbol(UINT64_MAX);
@@ -1532,7 +1489,6 @@ namespace jai::detail {
 					std::vector<std::pair<std::string_view, uint64_t>> names;
 					uint64_t n = varint();
 					check_count(n);
-					names.reserve(size_t(n));
 					for (uint64_t i = 0; i < n; ++i) {
 						std::string_view nm = view();
 						uint64_t id = symbol(UINT64_MAX);
@@ -1544,7 +1500,6 @@ namespace jai::detail {
 						jaibite_fail("destructuring name/slot count mismatch");
 					}
 					std::vector<size_t> slots;
-					slots.reserve(size_t(ns));
 					for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
 					const bool is_const = flag();
 					auto d = std::make_shared<destructuring_decl>(loc, expr_req());
@@ -1569,7 +1524,6 @@ namespace jai::detail {
             uint64_t n = varint();
             check_count(n);
             std::vector<expression_ptr> list;
-            list.reserve(size_t(n));
             for (uint64_t i = 0; i < n; ++i) list.push_back(expr_req());
             return list;
         }
@@ -1585,6 +1539,8 @@ namespace jai::detail {
         std::vector<slot_record> slots_;
         size_t current_frame_ = 0;
         int depth_ = 0;
+        int breakable_ = 0;
+        int continuable_ = 0;
         std::string own_path_;
         size_t remap_from_ = SIZE_MAX;
         size_t remap_shift_ = 0;

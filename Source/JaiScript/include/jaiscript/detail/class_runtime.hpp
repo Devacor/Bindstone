@@ -50,7 +50,7 @@ inline void class_instance::free_allocation(class_instance* instance) noexcept {
 
 namespace detail {
 static_assert(cb_storage_offset<class_instance> == k_instance_cb_offset, "object_ref finds an instance's control block a fixed distance before it");
-static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 72, "an instance's header stays within 72 bytes (internal/object_layout.md)");
+static_assert(sizeof(void*) != 8 || sizeof(class_instance) <= 72, "an instance's header stays within 72 bytes");
 
 // An instance handed to its own destructor body as `this`: a dying one (its last strong reference gone, its chain running) holds
 // a count for the span that goes back without a second death; a living one (a re-class) is pinned as usual

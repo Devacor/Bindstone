@@ -212,8 +212,7 @@ interpreter::member_target interpreter::resolve_member_target(const script_value
         target.instance = holder->instance_handle();
         if (target.instance) {
             target.class_def = target.instance->get_class_definition();
-            // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
-            // S1): the access reads the layer through the object's slot (a handle is the wrapper itself, so it
+            // A plain wrapper of an extended object IS the object's layer: the access reads the layer through the object's slot (a handle is the wrapper itself, so it
             // cannot be re-pointed); getters, setters, bound methods and the vm's caches see the layer the same way.
             if (target.class_def && target.class_def->wrapped_object_has_layer(*target.instance)) {
                 if (auto hooks = target.class_def->slot_hooks()) {

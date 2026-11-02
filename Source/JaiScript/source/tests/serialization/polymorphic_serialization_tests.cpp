@@ -1751,7 +1751,7 @@ public:
             check_throws([&]() { eng->execute("extend(p, Pt);"); }, "a class that does not derive the instance's class is refused");
         });
 
-        // extend and add_global agree in every order (Dev 2026-10-14): extend before or after the object is bound, from C++ or
+        // extend and add_global agree in every order: extend before or after the object is bound, from C++ or
         // script, and every entry (add_global, make_object, add_global_ref, a container element, a callback argument) hands
         // script the one object, re-classed in place
         test("extend_and_add_global_agree_in_every_order", [&]() {

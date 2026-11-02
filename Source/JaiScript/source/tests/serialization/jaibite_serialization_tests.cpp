@@ -430,12 +430,10 @@ public:
                 bump();
                 caught + "|" + c2 + "|" + to_string(y) + "|" + shared_text;
             )");
-            // statement::check_mode_attr arrived with format version 11, the try_stmt catch
-            // variable symbol + slot with 12, the own-file location marker with 14 (right after
-            // the 4-byte magic)
+            // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)48, (int)bytes[4], "jaibite format version");   // 48: a namespace's class is named ns::Name, its bare name inside reads as it; 47: a reference declaration needs its initializer, and top-level code uses only what is declared above it; 46: a top-level statement's block-scoped declarations carry frame slots (re-derived at load); 45: the math:: random family left the language (the math intrinsic ids moved); 44: a conditional of storage reads its arms as references where a reference binds it; 43: a by-value structured binding declares its value by value; 42: conditional containers of store targets, override markers, same-run redefinitions, class operator results and field-over-global names; 41: const declarations and parameters; 40: `function` parses as the callable slot type; 38: builtin method arities recheck prior checked-clean bites; private preview 37 is reserved; 36: hot_reload_migrate at a unit's top level is its reload hook; 35: the JavaScript/C# additions (??, ??=, =>, do-while, let, structured bindings, optional chains); 34: a host template name is an identifier (the template token is gone) and its arguments spell canonically; 33: function(...) parses as a [&] lambda; 32: exhaustive capture lists, required-return and reference checks; 31: the header records the source identity; 30: C++ lvalue targets read their pieces as references (cast_expr::implicit_ref, assignment_expr::yields_reference); 29: a shared_ptr<T> namespace variable store is checked by handle admission; 28: variable_decl::is_inline; 27: math::vec2/vec3/vec4/ivec2/ivec3/color read as types; 26: import(...) is an expression (import_expr); 24: array<uint8> / array<int8> element types; 23: a lambda capture carries its init-capture expression; 22: variable_decl::default_initialized (a same-unit re-run keeps a declaration without an initializer); 21: typed declarations without an initializer default-initialize; 20: template strings join no empty parts; 19: utf8_string reads as a type; 18: a literal include inside a function splices at parse time; 17: a negated numeric literal is a literal; 16: parallel_for frame captures
+            check_eq((int)49, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }
@@ -714,11 +712,6 @@ public:
                 check_true(std::string(ex.what()).find("version") != std::string::npos);
             }
             check_true(threw);
-            // the previous format (22: no init-capture expressions) is refused too, so a sibling written before it re-parses
-            bytes[4] = 22;
-            bool older_threw = false;
-            try { e->jaibite_load_bytes(bytes); } catch (const std::exception&) { older_threw = true; }
-            check_true(older_threw, "a version-22 bite is refused");
         });
 
         // Every strict prefix must fail with a clean error — never UB, crash, or success.

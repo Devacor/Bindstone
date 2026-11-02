@@ -45,7 +45,7 @@
 >   property getter or setter, or static the binder registered (`class_definition::add_method`,
 >   `add_static_method`) returns its C++ exception as the catchable runtime error `cpp_exception` with the
 >   exception's text, so a store `obj.v = x`, a read `obj.v`, an operator `a * b` and a compound `obj.v += x` raise it
->   where they stand, at top level or in a function, like a bound free function (`FunctionBinder`). An archive skips a
+>   where they stand, at top level or in a function, like a bound free function (`function_binder`). An archive skips a
 >   host property that refuses a read or a store, and passes a host exception on (`to_json`, `from_json`, the
 >   binary archive).
 > - **A native exception is the running function's exception, on both backends.** A C++ exception raised while a

@@ -63,6 +63,17 @@ eng-&gt;add_variadic_function(&quot;label&quot;, [e = eng.get()](const std::vect
 });
 eng-&gt;add_host_direct(&quot;label&quot;, 1, &amp;label_of, eng.get());   // after the function: it keys on the function &quot;label&quot; binds now
 eng-&gt;execute(&quot;label(2.5)&quot;).as_string();                  // &quot;float&quot;</code></pre></div>
+<p>A typed binding takes the fast path whenever no parameter is a non-const reference to a value (a <code>T&amp;</code> that writes back): <code>const T&amp;</code> parameters take it too, and a <code>const std::string&amp;</code>, a bound object&#x27;s <code>T&amp;</code> or <code>const T&amp;</code>, a <code>const std::vector&lt;jai::script_value&gt;&amp;</code> and a <code>const jai::script_value&amp;</code> are the script&#x27;s own values, never copies. A static method a <code>dynamic_binder</code> binds converts exactly as <code>add_function</code> does.</p>
+<h3 id="more-registration-calls">More registration and inspection calls<a class="hlink" href="#more-registration-calls" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th>Call</th><th>What it does</th></tr></thead><tbody>
+<tr><td><code>add_function_with_arity(name, fn, arity)</code></td><td>Registers a raw <code>jai::script_function</code> (it receives the argument vector) that takes exactly <code>arity</code> arguments; <code>SIZE_MAX</code> takes any count.</td></tr>
+<tr><td><code>add_overloaded_function(name, arg_count, fn)</code></td><td>Adds a raw <code>script_function</code> of <code>arg_count</code> arguments to <code>name</code>&#x27;s overload set, creating the set on the first call.</td></tr>
+<tr><td><code>add_custom_conversion&lt;T&gt;(from, to)</code></td><td>Teaches the engine to cross a C++ <code>T</code> it has no binding for: <code>from(const script_value&amp;) -&gt; T</code> and <code>to(const T&amp;) -&gt; script_value</code> are what the engine uses wherever it converts a <code>T</code>.</td></tr>
+<tr><td><code>add_vector_conversion&lt;T&gt;()</code>, <code>add_map_conversion&lt;K, V&gt;()</code></td><td>Registers the <code>std::vector&lt;T&gt;</code> or <code>std::map&lt;K, V&gt;</code> conversion ahead of the first binding that names it (bindings register the shapes they name by themselves).</td></tr>
+<tr><td><code>registered_class_names()</code></td><td>Every class the engine can name, host-bound and script-declared, sorted.</td></tr>
+<tr><td><code>has_registered_class&lt;T&gt;()</code></td><td>Whether a <code>dynamic_binder</code> bound the C++ type <code>T</code> on this engine.</td></tr>
+<tr><td><code>get_backend_type()</code>, <code>get_backend_name()</code></td><td>The engine&#x27;s backend (<code>jai::backend_type::vm</code> unless <code>set_backend</code> chose another) and its name.</td></tr>
+</tbody></table></div>
 <p>Every <code>script_value</code> you construct yourself needs the engine pointer: <code>jai::script_value(3.14159, eng.get())</code>, or use the convenience factories <code>eng-&gt;make_value(v)</code> / <code>eng-&gt;make_null()</code> / <code>eng-&gt;make_array()</code> / <code>eng-&gt;make_map()</code>.</p>
 <h2 id="globals-copies-vs-live-bindings">Globals: copies vs live bindings<a class="hlink" href="#globals-copies-vs-live-bindings" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp" data-sample="host-api-live-global"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;add_global(&quot;PI&quot;, jai::script_value(3.14159, eng.get()));   // copied in

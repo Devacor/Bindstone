@@ -2871,10 +2871,10 @@ void engine::initialize_engine_reference() {
     add_variadic_function("parallel_transform", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_transform(*this, args);
     });
-    add_functionWithArity("parallel_reduce", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+    add_function_with_arity("parallel_reduce", [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::run_parallel_reduce(*this, args);
     }, 4);
-    add_functionWithArity(std::string(parallel_for_stmt::k_counted_range), [this](const std::vector<script_value>& args) -> checked_result<script_value> {
+    add_function_with_arity(std::string(parallel_for_stmt::k_counted_range), [this](const std::vector<script_value>& args) -> checked_result<script_value> {
         return detail::parallel_counted_range(*this, args);
     }, 5);
 
@@ -3846,7 +3846,7 @@ void engine::add_variadic_function(const std::string& name, script_function func
         add_overloaded_function(name, VARIADIC, func);
     } else {
         // Register with SIZE_MAX to mark it as variadic
-        add_functionWithArity(name, func, VARIADIC);
+        add_function_with_arity(name, func, VARIADIC);
     }
 }
 
@@ -3974,7 +3974,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
     impl->refresh_operator_entry(name);
 }
 
-void engine::add_functionWithArity(const std::string& name, script_function func, size_t arity) {
+void engine::add_function_with_arity(const std::string& name, script_function func, size_t arity) {
     register_overload_impl(name, arity, std::move(func), {}, /*createSetOnFirst=*/false);
 }
 

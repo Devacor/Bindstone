@@ -42,16 +42,16 @@ public:
 				engine* raw_engine = eng.get();
 				if (raw) {
 					auto num = [](const script_value& v) { return v.deref().is_int() ? static_cast<double>(v.deref().as_int()) : v.deref().as_float(); };
-					eng->add_functionWithArity("<", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+					eng->add_function_with_arity("<", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
 						return script_value(num(a[0]) > num(a[1]), raw_engine);
 					}, 2);
-					eng->add_functionWithArity("==", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+					eng->add_function_with_arity("==", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
 						return script_value(num(a[0]) != num(a[1]), raw_engine);
 					}, 2);
-					eng->add_functionWithArity("%", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
+					eng->add_function_with_arity("%", [raw_engine, num](const std::vector<script_value>& a) -> checked_result<script_value> {
 						return script_value(static_cast<script_int>(num(a[0]) + num(a[1])) + 1000, raw_engine);
 					}, 2);
-					eng->add_functionWithArity("<=>", [raw_engine](const std::vector<script_value>&) -> checked_result<script_value> {
+					eng->add_function_with_arity("<=>", [raw_engine](const std::vector<script_value>&) -> checked_result<script_value> {
 						return script_value(static_cast<script_int>(77), raw_engine);
 					}, 2);
 				} else {

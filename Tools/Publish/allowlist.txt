@@ -23,6 +23,7 @@
 + examples/embed_quickstart/**
 + examples/gatorquest/**
 + examples/gloom/**
++ examples/gloom_idiomatic/**
 + examples/jaidoom/**
 
 # Internal notes and Bindstone-only material
@@ -31,7 +32,6 @@
 - bench/**
 - CMakeSettings.json
 - tools/publish/**
-- examples/gloom_idiomatic/**
 
 # Never shipped, whatever the include
 - **/.cache/**

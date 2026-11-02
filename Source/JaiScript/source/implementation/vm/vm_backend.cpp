@@ -3194,7 +3194,13 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				cell = nullptr;
 			}
 		}
-		if (cell || (cell = this_field_store_probe(f, f.ip * 3, sym, ic_declared))) {
+		if (!cell && (cell = this_field_store_probe(f, f.ip * 3, sym, ic_declared))) {
+			// a field holding an instance by value takes the store in place (operator= or the implicit copy): the member path below
+			const script_value& held = cell->is_reference() ? cell->deref() : *cell;
+			const type_info* held_tag = held.type_info_raw();
+			if (detail::slot_value_assign_candidate(held) && !(held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type)) { cell = nullptr; }
+		}
+		if (cell) {
 			if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 				value = value.detached_for_store();
 			}
@@ -19789,6 +19795,18 @@ uint8_t vm_backend::source_class(const expression* e) {
 	return detail::classify_source(e, [this](const call_expr& call) { return detail::call_returns_class_value(call, *engine_); });
 }
 
+// Pops the scopes inside `scope` and `scope` itself, when the current chain holds it
+void vm_backend::pop_scopes_through(const environment* scope) {
+	uint32_t count = 0;
+	for (const environment* e = environment_.get(); e; e = e->get_parent().get()) {
+		++count;
+		if (e == scope) {
+			pop_scopes_pooled(count);
+			return;
+		}
+	}
+}
+
 // The handler is done: its variable lets go of the error (its scope ended), so the record's end decides the thrown value's death
 void vm_backend::release_catch_variable(frame& f, const try_record& rec) {
 	if (rec.caught_scope && rec.catch_slot != k_invalid_u32 && has_slots(f)) { frame_slot_set(f, rec.catch_slot, make_null()); }
@@ -19811,14 +19829,18 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			return false;
 		}
 		if (rec.in_catch) {
+			// Error/throw escaping a catch block: the handler's scopes close (its caught value dies with the record after them),
+			// the catch var is restored and the unwind goes on. A rethrow-preserved outer exception is restored only on the flag path.
+			const size_t index = try_records_.size() - 1;
+			const environment* catch_env = rec.catch_env_pushed ? rec.catch_env : nullptr;
 			release_catch_variable(f, rec);
-			// Error/throw escaping a catch block: restore the catch var and keep unwinding.
-			// A rethrow-preserved outer exception is restored only on the flag path.
-			if (!failure && is_unwinding_ && rec.saved_unwinding) {
-				current_exception_ = rec.saved_exception;
-				active_exception_value_ = rec.saved_exception_value;
+			if (catch_env) { pop_scopes_through(catch_env); }   // destructors may grow try_records_: the record is found again by index
+			try_record& done = try_records_[index];
+			if (!failure && is_unwinding_ && done.saved_unwinding) {
+				current_exception_ = done.saved_exception;
+				active_exception_value_ = done.saved_exception_value;
 			}
-			current_catch_var_id_ = rec.saved_catch_var_id;
+			current_catch_var_id_ = done.saved_catch_var_id;
 			pop_back_detached(try_records_);
 			continue;
 		}
@@ -19883,6 +19905,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 				JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
 				environment_->define(handler.catch_var, std::move(caught));
 				try_records_[handler_index].catch_env_pushed = true;
+				try_records_[handler_index].catch_env = environment_.get();
 			}
 		}
 		if (f.cells && f.cells->loop != k_invalid_u32) [[unlikely]] { cells_flush(f, f.code->cell_loops[f.cells->loop]); }   // a callee raised into an active block: the handler sees materialized slots
@@ -24138,11 +24161,17 @@ void vm_backend::copy_reference_result(script_value& result) {
 
 void vm_backend::materialize_return(frame& f, script_value& result, uint32_t operand_class, uint32_t own_slot) {
 	if (detail::return_value_plain(result) || f.top_level || operand_class == detail::return_operand_unclassified) return;
-	// a returned parameter moves out unless a user copy constructor would run (C++ copies a parameter; NRVO is a local's)
-	const bool own_moves = operand_class == detail::return_operand_ident ||
-	                       (operand_class == detail::return_operand_parameter && !detail::value_runs_copy_constructor(result));
-	if (own_moves && own_slot != k_invalid_u32 && f.locals) {
-		if (script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result)) {
+	if (operand_class == detail::return_operand_ident && own_slot != k_invalid_u32 && f.locals) {
+		script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result);
+		// a returned parameter (the compiler stamps its return statement) copies when a user copy constructor would run:
+		// C++ elides only a local's return
+		if (payload) {
+			const ast_node* stmt = frame_statement(f);
+			if (stmt && stmt->get_type() == node_type::return_stmt &&
+			    static_cast<const return_stmt*>(stmt)->return_operand_class == detail::return_operand_parameter &&
+			    detail::move_runs_copy_constructor(result)) { payload = nullptr; }
+		}
+		if (payload) {
 			JAI_CENSUS_F(move_hit, 1);
 			*payload = make_null();
 			return;
@@ -24299,7 +24328,7 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 			const script_value& resolved = local->deref();
 			if (detail::return_value_plain(resolved)) { return finish(script_value(resolved)); }
 			script_value value(resolved);
-			materialize_return(f, value, (ins.c & return_flag_parameter) ? detail::return_operand_parameter : detail::return_operand_ident, ins.a);
+			materialize_return(f, value, detail::return_operand_ident, ins.a);
 			return finish(std::move(value));
 		}
 	}

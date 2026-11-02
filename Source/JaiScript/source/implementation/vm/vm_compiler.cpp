@@ -1488,7 +1488,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 				}
 				const uint32_t symbol = add_symbol(ident->symbol_id);
 				const uint32_t own = identifier_slot_operand(ident);
-				if (own != k_invalid_u32 && callable_.parameter_slots.count(own)) { flags |= return_flag_parameter; }
+				if (own != k_invalid_u32 && callable_.parameter_slots.count(own)) { rs->return_operand_class = detail::return_operand_parameter; }
 				const size_t ret_ip = emit(opcode::op_return_ident, own, symbol, flags);
 				note_ident_node(ret_ip, rs->value);
 				note_this_field(ret_ip, ident);
@@ -1533,7 +1533,7 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 			});
 			if (operand_class == detail::return_operand_ident) {
 				own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
-				if (own_slot != k_invalid_u32 && callable_.parameter_slots.count(own_slot)) { operand_class = detail::return_operand_parameter; }
+				if (own_slot != k_invalid_u32 && callable_.parameter_slots.count(own_slot)) { rs->return_operand_class = detail::return_operand_parameter; }
 			}
 		}
 		if (!fuse_return) {   // the reference mode takes the site conversion everywhere: it alone carries the returned local's own slot
@@ -2010,8 +2010,9 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	return true;
 }
 
-void vm_compiler::emit_region_exits(size_t target_region, size_t kill_depth) {
+size_t vm_compiler::emit_region_exits(size_t target_region, size_t kill_depth) {
 	size_t killed = kill_scopes_.size();
+	size_t depth = scope_depth_;
 	for (size_t idx = loops_.size(); idx-- > 0;) {
 		if (target_region != SIZE_MAX && idx <= target_region) break;
 		switch (loops_[idx].kind) {
@@ -2021,6 +2022,11 @@ void vm_compiler::emit_region_exits(size_t target_region, size_t kill_depth) {
 		case region_kind::catch_block:
 			emit_kills_to(loops_[idx].kill_depth, killed);
 			killed = std::min(killed, loops_[idx].kill_depth);
+			// the handler's own scopes close before it ends, so its caught value dies after them, the catch scope innermost
+			if (depth > loops_[idx].scope_depth) {
+				emit(opcode::op_scope_pop_n, static_cast<uint32_t>(depth - loops_[idx].scope_depth));
+				depth = loops_[idx].scope_depth;
+			}
 			emit(opcode::op_catch_end);
 			break;
 		case region_kind::switch_ctx:
@@ -2037,6 +2043,7 @@ void vm_compiler::emit_region_exits(size_t target_region, size_t kill_depth) {
 		}
 	}
 	if (kill_depth != SIZE_MAX) { emit_kills_to(kill_depth, killed); }
+	return depth;
 }
 
 void vm_compiler::compile_break() {
@@ -2052,10 +2059,10 @@ void vm_compiler::compile_break() {
 		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::break_outside_loop), k_invalid_u32, k_invalid_u32);
 		return;
 	}
-	emit_region_exits(target, loops_[target].kill_depth);
+	const size_t depth = emit_region_exits(target, loops_[target].kill_depth);
 	auto& region = loops_[target];
-	if (scope_depth_ > region.scope_depth) {
-		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
+	if (depth > region.scope_depth) {
+		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(depth - region.scope_depth));
 	}
 	if (region.kind == region_kind::switch_ctx && region.switch_stack_pair) {
 		emit(opcode::op_pop);
@@ -2077,10 +2084,10 @@ void vm_compiler::compile_continue() {
 		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::continue_outside_loop), k_invalid_u32, k_invalid_u32);
 		return;
 	}
-	emit_region_exits(target, loops_[target].kill_depth);
+	const size_t depth = emit_region_exits(target, loops_[target].kill_depth);
 	auto& region = loops_[target];
-	if (scope_depth_ > region.scope_depth) {
-		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(scope_depth_ - region.scope_depth));
+	if (depth > region.scope_depth) {
+		emit(opcode::op_scope_pop_n, static_cast<uint32_t>(depth - region.scope_depth));
 	}
 	if (region.kind == region_kind::range_for) {
 		emit(opcode::op_jump, static_cast<uint32_t>(region.continue_target));

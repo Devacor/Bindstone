@@ -426,6 +426,19 @@ public:
                 }
                 f(); LOG;
             )", "cBcm'|d'm'|caughtcp'~p'|caught|~p~bad~bad~m'~m");
+            // a returned parameter moves an array's storage (no element copies) and moves a class memberwise, copying a field
+            // whose class declares a copy constructor
+            expect_log(c + R"(
+                class E { C c = C("e"); }
+                function pass(array<C> p) -> array<C> { return p; }
+                function passe(E e) -> E { return e; }
+                function f() -> void {
+                    C a = C("a"); array<C> xs = [a]; LOG = LOG + "|";
+                    array<C> r = pass(xs); LOG = LOG + "|" + r[0].n + "|";
+                    E e = E(); E e2 = passe(e); LOG = LOG + "|" + e2.c.n + "|";
+                }
+                f(); LOG;
+            )", "ca'|ca''|a''|ce'ce''~e'|e''|~e''~e~a''~a'~a");
         });
 
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
@@ -618,6 +631,18 @@ public:
                 function f() -> void { r(); for (int i = 0; i < 2; i++) { try { throw Token("u"); } catch (e) { Token m = Token("m"); break; } } }
                 f(); LOG;
             )", "ltmu");
+            // at program scope too, where the handler's scopes are environments: a break, a continue from a nested block, a new
+            // throw and a rethrow each close the handler's scopes, then the thrown object dies
+            expect_log(R"(
+                for (int i = 0; i < 1; i++) { try { throw Token("a"); } catch (e) { Token h = Token("h"); break; } }
+                LOG = LOG + "|";
+                for (int i = 0; i < 2; i++) { try { throw Token(to_string(i)); } catch (e) { Token h = Token("h"); { Token k = Token("k"); continue; } } }
+                LOG = LOG + "|";
+                try { try { throw Token("n"); } catch (e) { Token h = Token("h"); throw "new"; } } catch (e) { LOG = LOG + "c"; }
+                LOG = LOG + "|";
+                try { try { throw Token("r"); } catch (e) { throw; } } catch (e) { LOG = LOG + "o"; }
+                LOG;
+            )", "ha|kh0kh1|hnc|or");
         });
 
         test("a_coroutine_keeps_its_locals_across_yields", [this]() {
@@ -643,6 +668,15 @@ public:
                 function f() -> void { Token x = Token("a"); Token y = (x = Token("b")); LOG = LOG + to_string(same_object(x, y)) + "|"; }
                 f(); LOG;
             )", "bfalse|bb");
+            // a field a method or constructor body names, on every run of the site
+            expect_log(R"(
+                class W { Token d = Token("i"); W(string s) { d = Token(s); } function set(string s) -> void { d = Token(s); } }
+                function f() -> void {
+                    for (int i = 0; i < 2; i++) { W k = W("k" + to_string(i)); LOG = LOG + "|"; }
+                    W w = W("w"); w.set("a"); LOG = LOG + "|"; w.set("b"); LOG = LOG + "|"; w.set("c"); LOG = LOG + "|";
+                }
+                f(); LOG;
+            )", "k0|k0k1|k1wa|b|c|c");
         });
 
         test("assignment_keeps_the_object_references_and_handles_name", [this]() {

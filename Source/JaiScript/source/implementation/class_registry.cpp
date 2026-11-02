@@ -171,8 +171,9 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
     case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_ivec2_type:
     case script_value_type::jai_ivec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
         return false;
-    case script_value_type::jai_array_type: return type_tree_runs_destructor(t->element_type(), in_progress, mode);
-    case script_value_type::jai_map_type: return type_tree_runs_destructor(t->key_type(), in_progress, mode) || type_tree_runs_destructor(t->value_type(), in_progress, mode);
+    case script_value_type::jai_array_type: return mode != 2 && type_tree_runs_destructor(t->element_type(), in_progress, mode);
+    case script_value_type::jai_map_type:
+        return mode != 2 && (type_tree_runs_destructor(t->key_type(), in_progress, mode) || type_tree_runs_destructor(t->value_type(), in_progress, mode));
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) { return true; }
         auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
@@ -566,31 +567,37 @@ const class_definition* class_definition::copy_constructor_level() const {
 
 namespace detail {
 namespace {
-// what a copy of the value runs: 1 a destructor or a user copy constructor (copy_constructor false), a user copy constructor
-// (copy_constructor true); containers answer for their elements and entries, a handle copies nothing
-bool value_copy_runs(const script_value& in, bool copy_constructor, int depth) {
+// a copy of the value runs a destructor or a user copy constructor (move false: containers answer for their elements and
+// entries), or a move of it runs a user copy constructor (move true: a container moves its storage); a handle copies nothing
+bool object_copy_runs(const type_info* tag, const strong_ptr<script_value::object_holder>& holder, bool move) {
+    if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
+    if (!holder || !holder->is_instance()) { return false; }
+    const class_definition* cls = holder->unchecked_instance()->get_class_definition();
+    if (!cls || !cls->is_script_class()) { return false; }
+    return move ? cls->value_tree_runs_copy_constructor() : cls->value_tree_copies_observably();
+}
+
+bool value_copy_runs(const script_value& in, bool move, int depth) {
     const script_value& v = in.deref();
     switch (v.raw_storage_index()) {
-    case script_value::TYPEID_OBJECT: {
-        const type_info* tag = v.type_info_raw();
-        if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) { return false; }
-        const auto& holder = v.unchecked_object_handle();
-        if (!holder || !holder->is_instance()) { return false; }
-        const class_definition* cls = holder->unchecked_instance()->get_class_definition();
-        if (!cls || !cls->is_script_class()) { return false; }
-        return copy_constructor ? cls->value_tree_runs_copy_constructor() : cls->value_tree_copies_observably();
-    }
+    case script_value::TYPEID_OBJECT: return object_copy_runs(v.type_info_raw(), v.unchecked_object_handle(), move);
     case script_value::TYPEID_ARRAY: {
         const auto& node = v.unchecked_get_array_storage();
-        if (!node || node->kind() != script_array::kind_t::obj) { return false; }
+        if (!node || move) { return false; }
+        if (node->kind() == script_array::kind_t::obj) {
+            for (const obj_slot& element : node->objs()) { if (object_copy_runs(element.tag.get(), element.handle, false)) { return true; } }
+            return false;
+        }
+        if (node->kind() != script_array::kind_t::hetero) { return false; }
         if (depth > 32) { return true; }
-        for (const script_value& element : node->values()) { if (value_copy_runs(element, copy_constructor, depth + 1)) { return true; } }
+        for (const script_value& element : node->values()) { if (value_copy_runs(element, false, depth + 1)) { return true; } }
         return false;
     }
     case script_value::TYPEID_MAP: {
+        if (move) { return false; }
         if (depth > 32) { return true; }
         for (const auto& [key, value] : v.as_map()) {
-            if (value_copy_runs(key, copy_constructor, depth + 1) || value_copy_runs(value, copy_constructor, depth + 1)) { return true; }
+            if (value_copy_runs(key, false, depth + 1) || value_copy_runs(value, false, depth + 1)) { return true; }
         }
         return false;
     }
@@ -600,7 +607,7 @@ bool value_copy_runs(const script_value& in, bool copy_constructor, int depth) {
 }
 
 bool value_copies_observably(const script_value& v) { return value_copy_runs(v, false, 0); }
-bool value_runs_copy_constructor(const script_value& v) { return value_copy_runs(v, true, 0); }
+bool move_runs_copy_constructor(const script_value& v) { return value_copy_runs(v, true, 0); }
 
 bool call_returns_class_value(const call_expr& call, engine& eng) {
     const auto by_value = [](const type_info* t) { return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty(); };

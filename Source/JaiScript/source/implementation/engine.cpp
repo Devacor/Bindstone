@@ -931,6 +931,21 @@ struct engine::implementation {
     std::unordered_map<std::string, resolution_entry> resolution_memo_;
     std::optional<std::array<std::unordered_set<uint64_t>, 4>> builtin_method_ids_;
     std::unordered_set<std::string> importing_;   // resolved paths mid-execution: a cyclic import's back edge is a no-op
+    std::vector<std::string> running_roots_;      // the root files the host is running (execute_file, execute_file_source): an import of one is a back edge too
+    bool import_in_progress(const std::string& path) const {
+        return importing_.count(path) || std::find(running_roots_.begin(), running_roots_.end(), path) != running_roots_.end();
+    }
+    // a suspended run keeps its root marked, and runs finish in any order: the scope removes its own entry
+    struct running_root_scope {
+        std::vector<std::string>& roots;
+        std::string path;
+        running_root_scope(std::vector<std::string>& a_roots, std::string a_path) : roots(a_roots), path(std::move(a_path)) { roots.push_back(path); }
+        ~running_root_scope() {
+            if (auto it = std::find(roots.rbegin(), roots.rend(), path); it != roots.rend()) { roots.erase(std::next(it).base()); }
+        }
+        running_root_scope(const running_root_scope&) = delete;
+        running_root_scope& operator=(const running_root_scope&) = delete;
+    };
     std::unordered_map<std::string, std::string> import_vanished_;   // resolution key -> the module whose file the ladder lost
     struct import_frame {
         std::vector<closure_stamp> files;    // the files its run included
@@ -3126,6 +3141,9 @@ held_value engine::execute(const std::string& scriptContent, const instance_vari
 }
 
 script_value engine::execute_file_source(const std::string& resolvedPath, const std::string& content) {
+    std::error_code ec;
+    const std::filesystem::path canonical = is_enabled(privilege::filesystem) ? std::filesystem::weakly_canonical(resolvedPath, ec) : std::filesystem::path();
+    implementation::running_root_scope running_root(impl->running_roots_, canonical.empty() || ec ? resolvedPath : canonical.string());
     return execute_source(content, instance_variables{}, resolvedPath);
 }
 
@@ -3685,6 +3703,7 @@ script_value engine::execute_file_unheld(const std::string& scriptPath, const in
     }
     const std::string& attributed = canon.empty() ? scriptPath : canon;
     impl->note_root_source(attributed);
+    implementation::running_root_scope running_root(impl->running_roots_, attributed);
     if (statOk) {
         auto it = impl->file_script_cache.find(canon);
         if (it != impl->file_script_cache.end()) {
@@ -5895,7 +5914,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         while (!walking.empty()) {
             const std::string child = std::move(walking.back());
             walking.pop_back();
-            if (I.importing_.count(child)) { continue; }
+            if (I.import_in_progress(child)) { continue; }
             auto crec = I.import_cache.find(child);
             if (crec == I.import_cache.end() || crec->second.checked_pass == I.import_pass_id_) { continue; }
             crec->second.checked_pass = I.import_pass_id_;
@@ -5923,7 +5942,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
         import_unit& m = mods[i];
         bool dup = false;
         for (const size_t c : changed) { dup = dup || mods[c].resolved == m.resolved; }
-        if (dup || I.importing_.count(m.resolved)) { continue; }
+        if (dup || I.import_in_progress(m.resolved)) { continue; }
         auto rec = I.import_cache.find(m.resolved);
         if (rec == I.import_cache.end()) {
             auto stamped = stamp(m);
@@ -6440,7 +6459,7 @@ script_value engine::execute_import(const std::string& resolved_path) {
     }
     
     if (should_import) {
-        if (!impl->importing_.insert(resolved_path).second) {
+        if (impl->import_in_progress(resolved_path) || !impl->importing_.insert(resolved_path).second) {
             return make_null();
         }
         struct importing_scope {

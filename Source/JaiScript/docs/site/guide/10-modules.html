@@ -97,6 +97,7 @@ print("import caches (default: re-run only if the file changed): load_count = {}
 bool again = import("mod_math.jai");
 print("first reach ran it: {}, the next one: {}", first, again);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">first reach ran it: true, the next one: false</code></pre></div>
+<p>Imports may form cycles. An import of a module that is still running, one that imported this file directly or through others, does nothing, and the file the program started with counts as one: a module that imports the root file never runs it a second time. Code after an import sees everything the module declared, whichever way the cycle closes.</p>
 <h3 id="reloading-from-a-running-program">Reloading from a running program<a class="hlink" href="#reloading-from-a-running-program" aria-label="link">&#8203;</a></h3>
 <p>A running program reloads its modules by reaching their imports again, and the loop that does it guards the import: <strong>a rejected reload raises a catchable error at the import, and the program keeps its old code.</strong> An unguarded import in a loop ends the run at the first mistake in an edited file. This is the guarded reload a game loop makes once per frame (the group form is described below):</p>
 <div class="codeblock cb-jai" data-host="the game&#x27;s loop (DEV_MODE, step_world)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; MODULES = ["rules.jai", "monsters.jai", "items.jai"];

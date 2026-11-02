@@ -397,6 +397,11 @@ public:
             check_eq((int64_t)6, eng->execute("int run2(int x) { include \"splice_local.jai\"; return x; } run2(5);").as_int());
             check_eq((int64_t)125, eng->execute("int both(int x) { include \"splice_lib.jai\"; return y + twice(x) + z; } both(5);").as_int());   // 10 + 10 + 105
             check_eq((int64_t)7, eng->execute("int blk(int x) { { include \"splice_local.jai\"; } { include \"splice_local.jai\"; } return x; } blk(5);").as_int());   // each block's include writes the parameter
+            auto self = create_temp_file("splice_self.jai", "int g() {\n    include \"splice_self.jai\";\n    return 1;\n}\n");
+            std::string cycle;
+            try { eng->execute_file(self); } catch (const std::exception& ex) { cycle = ex.what(); }
+            check_true(cycle.find("splice_self.jai:2:13: include 'splice_self.jai' includes itself or nests too deep") != std::string::npos, "the error names the include itself: " + cycle);
+            cleanup_temp_file(self);
             cleanup_temp_file(local);
             cleanup_temp_file(lib);
             cleanup_temp_file(inner);
@@ -1880,6 +1885,22 @@ public:
                 check_true(unknown.find("unknown import directive 'jai::forse' (the directive is jai::force)") != std::string::npos, unknown);
             }
             for (const char* f : {"ir_a.jai", "ir_b.jai"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
+        test("the_running_root_file_counts_as_imported", [=, this]() {
+            // a module that imports the root file meets a cycle's back edge: the root's top level runs once, and the module
+            // defines what the root calls after its import
+            auto root = create_temp_file("rc_root.jai", "trace.push(\"root\");\nimport \"rc_mod.jai\";\nf();\n");
+            auto mod = create_temp_file("rc_mod.jai", "trace.push(\"mod\");\nimport \"rc_root.jai\";\nint f() { return 2; }\n");
+            auto eng = make_engine();
+            eng->add_include_path(jai::foundry::test_temp_directory().string());
+            eng->execute("array<string> trace;");
+            check_eq((int64_t)2, eng->execute_file(root).as_int());
+            check_eq(std::string("root,mod"), eng->execute("trace.join(\",\");").to_string());
+            check_eq((int64_t)2, eng->execute("import \"rc_root.jai\";\nf();").as_int(), "once the root has finished, an import of its file runs it as a module");
+            check_eq(std::string("root,mod,root"), eng->execute("trace.join(\",\");").to_string());
+            cleanup_temp_file(root);
+            cleanup_temp_file(mod);
         });
 
         test("one_check_pass_covers_every_import_a_frame_reaches", [=, this]() {

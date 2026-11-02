@@ -3254,7 +3254,7 @@ inline std::shared_ptr<void> class_instance::extract_cpp_object_impl(const scrip
     if (val.type() == script_value_type::jai_object_type) {
         auto obj_holder = val.get_object_holder();
         if (!obj_holder) {
-            throw runtime_error("script_value is not an object type");
+            detail::throw_conversion_error(val, "object");
         }
         if (obj_holder->holds_object()) { return obj_holder->host_object(); }
         // an extended object's non-owning holder: hand the pointer out as an unowned alias

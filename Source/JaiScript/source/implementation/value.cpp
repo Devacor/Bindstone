@@ -14,6 +14,7 @@
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
+#include <array>
 #include <atomic>
 #include <optional>
 #include <thread>
@@ -38,6 +39,65 @@ namespace jai {
     if (eng && message == "{0}") { throw runtime_error(std::string(eng->get_symbolizer()->get_string(id1))); }
     throw runtime_error(format_error_message_numeric(message, id1, id2));
 }
+
+namespace detail {
+
+namespace {
+    constexpr std::string_view k_conversion_targets[] = {
+        "int", "float", "bool", "char", "string", "array", "map", "object", "script class instance", "weak_ptr", "function"};
+    constexpr size_t k_conversion_sources = static_cast<size_t>(script_value_type::jai_color_type) + 1;
+    struct conversion_text {
+        char bytes[64]{};
+        size_t size = 0;
+    };
+    // Every builtin source spelling against every target, built at compile time: a conversion error of a value with no class name
+    // needs no engine to name it
+    constexpr auto k_conversion_texts = [] {
+        std::array<std::array<conversion_text, std::size(k_conversion_targets)>, k_conversion_sources> result{};
+        for (size_t source = 0; source < k_conversion_sources; ++source) {
+            for (size_t target = 0; target < std::size(k_conversion_targets); ++target) {
+                conversion_text& text = result[source][target];
+                for (std::string_view part : {std::string_view("Cannot convert "), base_type_spelling(static_cast<script_value_type>(source)),
+                                              std::string_view(" to "), k_conversion_targets[target]}) {
+                    for (char c : part) { text.bytes[text.size++] = c; }
+                }
+            }
+        }
+        return result;
+    }();
+
+    size_t conversion_target_index(const char* target) {
+        for (size_t i = 0; i < std::size(k_conversion_targets); ++i) {
+            if (k_conversion_targets[i] == target) { return i; }
+        }
+        return 0;
+    }
+
+    std::string_view builtin_conversion_text(script_value_type source, const char* target) {
+        const auto& text = k_conversion_texts[static_cast<size_t>(source) < k_conversion_sources ? static_cast<size_t>(source) : 0][conversion_target_index(target)];
+        return std::string_view(text.bytes, text.size);
+    }
+}
+
+[[noreturn]] JAI_NOINLINE void throw_conversion_error(const script_value& value, const char* target) {
+    throw runtime_error("Cannot convert " + container_value_type_name(value) + " to " + target);
+}
+
+// A value whose type has a class name (or a typed container's spelling) parks its text in the error's {0}; a builtin type's text is static
+JAI_NOINLINE error_propagator conversion_error(const script_value& value, const char* target, runtime_error_code code) {
+    const script_value& held = value.deref();
+    const std::string name = container_value_type_name(held);
+    const std::string_view builtin = builtin_conversion_text(held.current_type(), target);
+    engine* eng = held.payload_engine();
+    if (name != base_type_spelling(held.current_type()) && eng) {
+        if (const uint64_t id = eng->park_error_text("Cannot convert " + name + " to " + target)) {
+            return error_propagator{make_error_code(code), "{0}", id, 0};
+        }
+    }
+    return error_propagator{make_error_code(code), builtin, 0, 0};
+}
+
+} // namespace detail
 
 [[noreturn]] JAI_NOINLINE void throw_binder_arity(const char* prefix, size_t expected, size_t got) {
     throw runtime_error(prefix + detail::arity_detail(expected, got));
@@ -2042,7 +2102,7 @@ const script_map* script_value::parallel_borrow_map() const noexcept {
 const script_function& script_value::as_function() const {
     const script_value& val = deref();
     if (val.current_type() != script_value_type::jai_function_type) {
-        throw runtime_error("script_value is not a function");
+        detail::throw_conversion_error(val, "function");
     }
     return *val.storage_.get<strong_ptr<script_function_node>>();
 }

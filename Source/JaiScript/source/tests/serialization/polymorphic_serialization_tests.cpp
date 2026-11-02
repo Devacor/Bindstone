@@ -1667,7 +1667,9 @@ public:
             check(message.find("NoSuchClass") != std::string::npos, "unknown script class is named: " + message);
 
             std::shared_ptr<SlotCreature> null_object;
-            check_throws([&]() { (void)eng->extend(null_object, "Slotkin"); }, "extending null throws");
+            message.clear();
+            try { (void)eng->extend(null_object, "Slotkin"); } catch (const std::exception& e) { message = e.what(); }
+            check_eq(std::string("extend: 'Slotkin' needs an object to extend"), message, "the host and the script builtin refuse null alike");
 
             // the script builtin reports through the error channel: catchable in script
             eng->add_global("rawSlot", eng->make_object(slot));

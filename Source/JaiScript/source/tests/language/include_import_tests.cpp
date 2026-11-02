@@ -400,7 +400,7 @@ public:
             auto self = create_temp_file("splice_self.jai", "int g() {\n    include \"splice_self.jai\";\n    return 1;\n}\n");
             std::string cycle;
             try { eng->execute_file(self); } catch (const std::exception& ex) { cycle = ex.what(); }
-            check_true(cycle.find("splice_self.jai:2:13: include 'splice_self.jai' includes itself or nests too deep") != std::string::npos, "the error names the include itself: " + cycle);
+            check_true(cycle.find("splice_self.jai:2:13: error: include 'splice_self.jai' includes itself or nests too deep") != std::string::npos, "the error names the include itself: " + cycle);
             cleanup_temp_file(self);
             cleanup_temp_file(local);
             cleanup_temp_file(lib);

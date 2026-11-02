@@ -66,10 +66,7 @@ namespace detail {
         static constexpr size_t pin_bytes = sizeof(std::shared_ptr<class_definition>);
         inline static void release(control_block_base* cb) noexcept;
         inline static void release_pinned(control_block_base* cb) noexcept;
-        static std::shared_ptr<class_definition>* definition_pin(control_block_base* cb) noexcept {
-            return cb->dealloc_fn == &release_pinned
-                ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(cb) - pin_bytes) : nullptr;
-        }
+        inline static std::shared_ptr<class_definition>* definition_pin(control_block_base* cb) noexcept;
     };
 }
 
@@ -303,7 +300,7 @@ public:
     inline void set_native_view(const script_value& value);
     // The parallel region whose chunk made this instance's C++ object (0: none): a non-const C++ method runs on a parallel
     // chunk only over an object that chunk made
-    void region_tag(uint32_t tag) { if (tag || extras_) { extras().region_tag = tag; } }
+    inline void region_tag(uint32_t tag);
     uint32_t region_tag() const { return extras_ ? extras_->region_tag : 0; }
     inline bool native_lookup_enabled() const;
 

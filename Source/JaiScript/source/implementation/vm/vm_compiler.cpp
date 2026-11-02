@@ -6867,7 +6867,9 @@ static bool type_owns_nothing(const type_info* t) {
 	return t && !t->may_own_instance();
 }
 
-// The value e computes is proven to own no instance (an int, a float, a bool, a string): a temp holding it needs no release
+// The value e computes owns no instance (an int, a float, a bool, a string), by facts this unit owns: a literal, a slot this frame declares
+// so, a container slot's element or count, a math intrinsic, and the operators over those; a callee's return type and a class's field type
+// belong to units a reload may replace while this chunk lives, so a value read through one keeps its release
 bool vm_compiler::value_owns_nothing(const expression* e) {
 	if (!e) return false;
 	switch (e->get_type()) {
@@ -6876,8 +6878,10 @@ bool vm_compiler::value_owns_nothing(const expression* e) {
 		return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT || k == script_value::TYPEID_BOOL || k == script_value::TYPEID_STRING;
 	}
 	case node_type::identifier_expr: {
+		auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+		const uint32_t slot = identifier_slot_operand(id);
+		if (slot == k_invalid_u32 || id->global_qualified) return false;
 		if (const type_info* t = declared_type_of(e)) return type_owns_nothing(t);
-		const uint32_t slot = identifier_slot_operand(static_cast<identifier_expr*>(const_cast<expression*>(e)));
 		if (slot >= callable_.slot_kinds.size()) return false;
 		const script_value_type kind = callable_.slot_kinds[slot];
 		return kind == script_value_type::jai_int_type || kind == script_value_type::jai_float_type || kind == script_value_type::jai_bool_type;
@@ -6891,39 +6895,44 @@ bool vm_compiler::value_owns_nothing(const expression* e) {
 		return value_owns_nothing(t->then_expression.get()) && value_owns_nothing(t->else_expression.get());
 	}
 	case node_type::binary_expr: {
-		const auto* b = static_cast<const binary_expr*>(e);
-		const uint8_t cls = b->static_operand_class;
-		if (b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return true;
-		if (b->op.type == token_type::left_bracket) return cls == operand_class_int_int || cls == operand_class_float_float;
-		return cls == operand_class_int_int || cls == operand_class_float_float || cls == operand_class_int_float || cls == operand_class_float_int ||
-		       cls == operand_class_bool_bool || cls == operand_class_string_string;
-	}
-	case node_type::member_expr: {
-		const auto* m = static_cast<const member_expr*>(e);
-		if (m->enum_constant) return true;
-		if (m->is_static || !m->object || m->member_id == UINT64_MAX || !engine_ || !symbolizer_) return false;
-		const expression* object = m->object.get();
-		const type_info* base = nullptr;
-		if (object->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(object)->op.type == token_type::left_bracket) {
-			const type_info* container = declared_type_of(static_cast<const binary_expr*>(object)->left.get());
-			if (container && container->is_reference()) container = container->element_type().get();
-			if (container && container->base_type == script_value_type::jai_array_type) base = container->element_type().get();
-		} else {
-			base = declared_type_of(object);
+		for (const auto* b = static_cast<const binary_expr*>(e);;) {   // down the left spine: a long chain needs no deep native stack
+			if (b->op.type == token_type::ampersand_ampersand || b->op.type == token_type::pipe_pipe) return true;
+			if (b->op.type == token_type::left_bracket) {
+				const type_info* container = slot_declared_type(b->left.get());
+				if (!container) return false;
+				if (container->base_type == script_value_type::jai_string_type) return true;
+				if (container->base_type == script_value_type::jai_array_type) return type_owns_nothing(container->element_type().get());
+				return container->base_type == script_value_type::jai_map_type && type_owns_nothing(container->value_type().get());
+			}
+			if (!value_owns_nothing(b->right.get())) return false;
+			if (b->left->get_type() != node_type::binary_expr) return value_owns_nothing(b->left.get());
+			b = static_cast<const binary_expr*>(b->left.get());
 		}
-		if (base && (base->is_reference() || base->base_type == script_value_type::jai_shared_ptr_type)) base = base->element_type().get();
-		if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) return false;
-		const auto cls = const_cast<engine*>(engine_)->get_class_registry().find_script_class(base->type_name);
-		if (!cls || cls->user_accessor(symbolizer_->get_getter_id_with_view(m->member_id).first)) return false;
-		return type_owns_nothing(cls->get_field_declared_type(m->member_id).get());
 	}
+	case node_type::member_expr: return static_cast<const member_expr*>(e)->enum_constant;
 	case node_type::call_expr: {
-		if (size_temp_operand(e) || math_temp_operand(e) != detail::math_fn::none) return true;
-		const auto decl = static_cast<const call_expr*>(e)->proven_callee_decl.lock();
-		return decl && type_owns_nothing(decl->return_type.get());
+		const auto* call = static_cast<const call_expr*>(e);
+		if (size_temp_operand(e)) {
+			const type_info* receiver = slot_declared_type(static_cast<const member_expr*>(call->callee.get())->object.get());
+			return receiver && (receiver->base_type == script_value_type::jai_string_type || receiver->base_type == script_value_type::jai_array_type ||
+			                    receiver->base_type == script_value_type::jai_map_type);
+		}
+		if (call->callee->get_type() == node_type::member_expr && math_temp_operand(e) != detail::math_fn::none) {
+			for (const auto& a : call->arguments) { if (!value_owns_nothing(a.get())) return false; }
+			return true;
+		}
+		return false;
 	}
 	default: return false;
 	}
+}
+// a frame slot's declared type (a reference's referent), null for anything else
+const type_info* vm_compiler::slot_declared_type(const expression* e) {
+	if (!e || e->get_type() != node_type::identifier_expr) return nullptr;
+	auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+	if (id->global_qualified || identifier_slot_operand(id) == k_invalid_u32) return nullptr;
+	const type_info* t = declared_type_of(e);
+	return t && t->is_reference() ? t->element_type().get() : t;
 }
 
 // the compiler temp the instruction lands a value in (k_invalid_u32: none), and whether that value may own an instance

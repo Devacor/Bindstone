@@ -245,6 +245,7 @@ namespace jai::vm {
         void note_landing(const expression* e);
         const type_info* declared_type_of(const expression* e);   // a frame slot's or a bare field's declared type (null: unknown)
         bool value_owns_nothing(const expression* e);
+        const type_info* slot_declared_type(const expression* e);   // a frame slot's declared type (a reference's referent)
         uint32_t temp_landed(size_t ip, bool& owns);
         std::vector<uint32_t> take_owning_temps(size_t from_ip, size_t floor);
         bool consumer_releases(uint32_t t);

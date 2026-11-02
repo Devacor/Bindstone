@@ -1945,7 +1945,7 @@ int run_selftest(const console_state& con) {
 				expect(run("var s = load_sound(snd + \"/tone.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
 					"s.stop(); seen += \" \" + to_string(s.playing()); s.play(true); seen += \" \" + to_string(s.playing()); stop_sounds(); seen + \" \" + to_string(s.playing());") ==
 					"false true true false true false", name("play, stop, a loop and stop_sounds set the play state").c_str());
-				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 15000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
+				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
 					name("a sound played once stops playing when it ends").c_str());
 			}
 		}

@@ -541,7 +541,7 @@ bool declares_copy_constructor(const class_definition& cls, const function_decl&
     const type_info* t = p.type.get();
     if (t && t->base_type == script_value_type::jai_reference_type) { t = t->type_params.empty() ? nullptr : t->type_params[0].get(); }
     else if (!p.is_reference) { return false; }
-    return t && t->base_type == script_value_type::jai_object_type && cls.answers_to(t->type_name);
+    return t && t->base_type == script_value_type::jai_object_type && cls.get_name() == t->type_name;
 }
 }
 

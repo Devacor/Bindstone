@@ -446,6 +446,12 @@ public:
                 }
                 f(); LOG;
             )", "ca'|ca''|a''|ce'ce''~e'|e''|~e''~e~a''~a'~a");
+            // a class a namespace declares is ns::N: its T(const T&), spelled with the bare name inside, is its copy constructor
+            expect_log(R"(
+                namespace ns { class N { string n = ""; N(string s) { n = s; } N(const N& o) { n = o.n + "'"; LOG = LOG + "c" + n; } ~N() { LOG = LOG + "~" + n; } } }
+                function f() -> void { ns::N a = ns::N("a"); ns::N b = a; LOG = LOG + "|"; }
+                f(); LOG;
+            )", "ca'|~a'~a");
         });
 
         test("parameters_die_at_the_callee_end_after_its_locals", [this]() {

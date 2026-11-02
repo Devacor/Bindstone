@@ -4,6 +4,7 @@
 #include "jaiscript/core/script_class.hpp"
 #include <memory>
 #include <map>
+#include <unordered_map>
 #include <string>
 
 namespace jai {
@@ -13,8 +14,10 @@ public:
     checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def);
     checked_result<void> register_cpp_class(std::shared_ptr<class_definition> class_def);
     std::shared_ptr<script_class_definition> find_script_class(const std::string& name);
+    std::shared_ptr<script_class_definition> find_script_class(uint64_t type_id) const;
 
     std::map<std::string, std::shared_ptr<script_class_definition>> script_classes_;
+    std::unordered_map<uint64_t, std::shared_ptr<script_class_definition>> script_classes_by_type_id_;
     std::map<std::string, std::shared_ptr<class_definition>> cpp_classes_;
 
 private:

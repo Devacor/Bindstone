@@ -1210,20 +1210,7 @@ private:
         return 2;   // src class not visible: relationship unknowable
     }
 
-    // `ns::C` from a unit that did not declare it names the class C a script namespace declares, as a same-unit spelling parses
-    std::string_view canonical_class(std::string_view cls) {
-        if (cls.find("::") == std::string_view::npos) { return cls; }
-        if (auto def = eng_.get_class_definition(std::string(cls))) { return def->get_name() == cls ? cls : def->interned_name(); }
-        if (program_classes_) {
-            if (auto it = program_classes_->find(std::string(cls)); it != program_classes_->end() && it->second) { return it->second->name; }
-        }
-        return cls;
-    }
-    ctype ctype_from_type_info(const type_info* ti) {
-        ctype t = spelled_ctype_from_type_info(ti);
-        if (t.kind == ctype::object_k) { t.cls = canonical_class(t.cls); }
-        return t;
-    }
+    ctype ctype_from_type_info(const type_info* ti) { return spelled_ctype_from_type_info(ti); }
     // Function-variable spelling is checker metadata; the runtime slot remains auto.
     ctype declared_variable_type(const variable_decl* decl) {
         return decl->function_spelling ? ctype::make(ctype::function_k) : ctype_from_type_info(decl->type.get());
@@ -6156,25 +6143,17 @@ void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::st
     }
 }
 
-namespace {
-// a namespace's class lists under its bare name and its qualified spelling too, the one another unit writes
-void collect_classes_in(const std::vector<declaration_ptr>& decls, std::string_view ns, program_class_map& out) {
+// a namespace's class is named by its qualified spelling (ns::Name)
+void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
     for (const auto& d : decls) {
         if (!d) { continue; }
         if (d->get_type() == node_type::class_decl) {
             auto cd = std::static_pointer_cast<class_decl>(d);
-            if (!ns.empty()) { out[std::string(ns) + "::" + std::string(cd->name)] = cd; }
             out[std::string(cd->name)] = std::move(cd);
         } else if (d->get_type() == node_type::namespace_decl) {
-            const auto* n = static_cast<const namespace_decl*>(d.get());
-            collect_classes_in(n->declarations, n->name, out);
+            collect_unit_classes(static_cast<const namespace_decl*>(d.get())->declarations, out);
         }
     }
-}
-}
-
-void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
-    collect_classes_in(decls, {}, out);
 }
 
 } // namespace detail

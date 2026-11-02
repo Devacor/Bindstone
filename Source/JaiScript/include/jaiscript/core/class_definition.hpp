@@ -1028,15 +1028,6 @@ public:
     inline void set_unwrap_function(std::function<script_value(script_value&, engine*)> fn);
 
     const std::string& get_name() const { return name_; }
-    // a script namespace's class keeps its bare name and answers to `ns::Name` too: a unit that never saw it parses that spelling
-    void set_namespace_spelling(std::string spelling, uint64_t spelling_id) {
-        namespace_spelling_ = std::move(spelling);
-        namespace_spelling_id_ = spelling_id;
-    }
-    bool answers_to(std::string_view name) const {
-        return name_ == name || (!namespace_spelling_.empty() && namespace_spelling_ == name);
-    }
-    bool answers_to_id(uint64_t name_id) const { return type_id_ == name_id || (namespace_spelling_id_ != UINT64_MAX && namespace_spelling_id_ == name_id); }
     // the name's view in the engine's interned table, looked up once (instances and handles name their type by it)
     std::string_view interned_name() const { intern_name_once(); return interned_name_; }
     uint64_t interned_name_id() const { intern_name_once(); return interned_name_id_; }
@@ -1302,8 +1293,6 @@ public:
 
 private:
     std::string name_;
-    std::string namespace_spelling_;
-    uint64_t namespace_spelling_id_ = UINT64_MAX;
     mutable std::string_view interned_name_;
     mutable uint64_t interned_name_id_ = UINT64_MAX;
     uint64_t type_id_;

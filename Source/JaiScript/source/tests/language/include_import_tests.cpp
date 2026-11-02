@@ -2241,9 +2241,10 @@ public:
         });
 
         test("an_imported_namespace_class_is_named_by_its_qualified_spelling", [=, this]() {
-            // the importer never saw `namespace nq { class Box }`: nq::Box types its declarations, parameters, returns, fields,
-            // containers, handles and references, default-constructs and converts as the bare name does, the checker reads it as
-            // Box, and after a re-import the spelling reaches the redefined class
+            // the importer never saw `namespace nq { class Box }`: the class is nq::Box (C++), the name that types declarations,
+            // parameters, returns, fields, containers, handles and references, that type_of and the checker report, and that
+            // reaches the redefined class after a re-import. Inside its namespace the bare name reads as nq::Box, outside it only
+            // through using, and another namespace's Box is another class
             const auto dir = jai::foundry::test_temp_directory();
             const auto path = dir / "nq_mod.jai";
             int tick = 400;
@@ -2254,8 +2255,9 @@ public:
             };
             const std::string module_v1 =
                 "namespace nq {\nclass Box {\n\tint n = 3;\n\tBox() {}\n\tBox(int v) { n = v; }\n}\n"
-                "class Holder {\n\tnq::Box box;\n\tHolder() {}\n\tHolder(int v) { box = nq::Box(v); }\n}\n}\n"
-                "namespace nq::deep { class Leaf { int d = 7; } }\n";
+                "class Holder {\n\tBox box;\n\tHolder() {}\n\tHolder(int v) { box = Box(v); }\n}\n}\n"
+                "namespace nq::deep { class Leaf { int d = 7; } }\n"
+                "namespace other { class Box { string s = \"o\"; } Box make() { return Box(); } }\n";
             const std::string uses =
                 "import \"nq_mod.jai\";\n"
                 "nq::Box a = nq::Box(5);\n"
@@ -2276,26 +2278,28 @@ public:
                 "nq::Box& ref = a;\n"
                 "ref.n += 1;\n"
                 "nq::Box converted = 8;\n"
+                "using nq::Box;\n"
                 "Box bare = nq::Box(4);\n"
                 "nq::deep::Leaf leaf;\n"
                 "array<int> got = [a.n, h.box.n, d.n, twice(a).n, bag.b.n, sum, named[\"k\"].n, weak.lock()->n, converted.n, cast<nq::Box>(bare).n, leaf.d];\n"
                 "string out = \"\";\n"
                 "for (int v : got) { out += to_string(v) + \" \"; }\n"
-                "out + type_of(a) + \" \" + type_of(handle);\n";
+                "out + type_of(a) + \" \" + type_of(handle) + \" \" + type_of(other::make()) + \" \" + other::make().s;\n";
             for (bool proofs : {true, false}) {
                 write_module(module_v1);
                 auto eng = make_engine();
                 jai::stdlib::register_all(*eng);
                 eng->type_proofs(proofs);
                 eng->add_include_path(dir.string());
-                check_eq(std::string("6 6 3 12 9 6 12 11 8 4 7 Box Box"), eng->execute(uses).to_string(), "every qualified spelling of an imported class");
+                check_eq(std::string("6 6 3 12 9 6 12 11 8 4 7 nq::Box nq::Box other::Box o"), eng->execute(uses).to_string(), "every qualified spelling of an imported class");
                 check_eq(std::string("Cannot initialize 'bad' (declared nq::Box) with string|Cannot convert string to nq::Box (no suitable single-argument constructor)"),
                          eng->execute("var s = \"s\";\nstring r = \"\";\ntry { nq::Box bad = s; } catch (e) { r = e; }\n"
                                       "void take(nq::Box b) { }\ntry { take(s); } catch (e) { r += \"|\" + e; }\nr;").to_string(),
                          "a value the class does not take is still refused");
                 for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
                          {"nq::Box bad2 = \"s\";", "cannot initialize 'bad2' declared 'nq::Box' with 'string'"},
-                         {"nq::Box b2 = nq::Box(1);\nb2.nope;", "no member 'nope' in class 'Box'"},
+                         {"nq::Box b2 = nq::Box(1);\nb2.nope;", "no member 'nope' in class 'nq::Box'"},
+                         {"Box b4;", "Box"},
                          {"nq::Box b3 = nq::Box(1);\nb3.n = \"x\";", "cannot assign 'string' to field 'n' declared 'int'"}}) {
                     auto fresh = make_engine();
                     jai::stdlib::register_all(*fresh);

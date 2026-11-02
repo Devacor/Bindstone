@@ -22,31 +22,12 @@
 
 namespace jai::detail {
 
-	// A class a script namespace declares, by its qualified spelling (`ns::Base`, `a::b::C`): a qualified base class names it
-	inline std::shared_ptr<class_definition> namespace_class(engine& eng, std::string_view qualified) {
-		const size_t cut = qualified.rfind("::");
-		if (cut == std::string_view::npos) { return nullptr; }
-		auto& namespaces = eng.script_namespaces();
-		auto ns = namespaces.find(eng.symbolize(qualified.substr(0, cut)));
-		if (ns == namespaces.end() || !ns->second) { return nullptr; }
-		auto cls = ns->second->classes.find(eng.symbolize(qualified.substr(cut + 2)));
-		return cls != ns->second->classes.end() ? cls->second : nullptr;
-	}
-
-	// `ns::C` reaches the class's constructor and definition as its bare name does: an importer never saw the declaration
-	inline void register_namespace_class(engine& eng, script_namespace_data& ns, std::string_view ns_name, uint64_t class_name_id,
-	                                     const std::shared_ptr<class_definition>& def) {
-		ns.classes[class_name_id] = def;
-		std::string qualified = std::string(ns_name) + "::" + def->get_name();
-		if (auto owner = eng.get_class_definition(qualified); owner && owner->get_name() == qualified) { return; }   // a host class registered under that spelling keeps it
-		auto& symbols = *eng.get_symbolizer();
-		const auto globals = eng.get_global_environment();
-		const uint64_t qualified_id = symbols.intern(qualified);
-		if (const script_value* ctor = globals->get_value_ptr(class_name_id)) { globals->define(qualified_id, *ctor); }
-		if (const script_value* cls = globals->get_value_ptr(symbols.get_class_var_id_with_view(class_name_id).first)) {
-			globals->define(symbols.get_class_var_id_with_view(qualified_id).first, *cls);
-		}
-		def->set_namespace_spelling(std::move(qualified), qualified_id);
+	// A class a namespace declares is named ns::Name (C++); the namespace lists it under its bare name, the one its blocks read
+	inline void register_namespace_class(engine& eng, script_namespace_data& ns, const class_decl& decl) {
+		auto def = eng.get_class_definition(std::string(decl.name));
+		if (!def) { return; }
+		const size_t cut = decl.name.rfind("::");
+		ns.classes[eng.get_symbolizer()->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2))] = std::move(def);
 	}
 
 	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {

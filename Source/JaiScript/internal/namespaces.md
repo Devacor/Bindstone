@@ -55,9 +55,13 @@ it does not see the caller's locals or `this`.
 
 ## Classes
 
-A class declared inside a namespace is defined the way a program-scope class is and is recorded as the
-namespace's member: `ns::Rect()` constructs it, and `ns::Rect::method()` reaches its statics. The bare
-class name is defined too, so `Rect()` also constructs it; a namespace does not hide its classes.
+A class declared inside a namespace is named `ns::Rect` (C++): its type id, class variable, constructor, `type_of` and
+archive `$type` all carry the qualified name, and it is recorded as the namespace's member under its bare name.
+`ns::Rect()` constructs it and `ns::Rect::method()` reaches its statics. Inside the namespace's blocks (and a nested
+namespace's, innermost first) the bare `Rect` reads as `ns::Rect`: the parser rewrites it before parsing, as a using
+declaration does, from the classes the file declares in that namespace and those the engine already holds for it
+(a namespace reopened by a later unit). Outside, the bare name reaches it only through `using ns::Rect;`, so two
+namespaces' `Rect`s are two classes and a global `Rect` is a third.
 
 ## Host-registered entries
 

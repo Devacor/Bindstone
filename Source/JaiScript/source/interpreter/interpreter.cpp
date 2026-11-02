@@ -4743,8 +4743,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
             // Note: namespace::class::static_member is handled earlier (before namespace lookup)
             auto class_it = ns_data->classes.find(expr->member_id);
             if (class_it != ns_data->classes.end()) {
-                // Found a class in the namespace - return the constructor
-                auto ctor_result = environment_->get(expr->member_id);
+                auto ctor_result = environment_->get(class_it->second->interned_name_id());
                 if (!ctor_result) {
                     return ctor_result.error_value();
                 }
@@ -8486,21 +8485,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 class_decl_ptr->name_id = string_symbolizer_->intern(class_decl_ptr->name);
             }
 
-            // Process class declaration normally to register it globally
-            // Then also store reference in namespace
             JAISCRIPT_TRY(dispatch_decl(class_decl_ptr));
-
-            // Look up the registered class definition using __class_ prefix (cached)
-            auto [class_var_id, class_var_name] = string_symbolizer_->get_class_var_id_with_view(class_decl_ptr->name_id);
-            if (auto* class_def_var = environment_->get_value_ptr(class_var_id)) {
-                if (class_def_var->is_object()) {
-                    auto obj_holder = class_def_var->get_object_holder();
-                    if (obj_holder && obj_holder->type_id() == class_definition_type_id_) {
-                        detail::register_namespace_class(*engine_, *ns_data, decl->name, class_decl_ptr->name_id,
-                                                         std::static_pointer_cast<class_definition>(obj_holder->host_object()));
-                    }
-                }
-            }
+            detail::register_namespace_class(*engine_, *ns_data, *class_decl_ptr);
 
         } else {
             // Other declaration types (expressions, includes, etc.) - execute normally

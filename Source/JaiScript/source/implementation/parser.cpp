@@ -1,5 +1,6 @@
 #include "../../include/jaiscript/detail/parser.hpp"
 #include "../../include/jaiscript/core/engine.hpp"
+#include "../../include/jaiscript/core/script_namespace.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
@@ -732,6 +733,137 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
     return true;
 }
 
+namespace {
+    // The block a token sits in: a namespace's (its qualified name), a class body's (its bare name) or any other
+    struct name_scope { enum kind_t { other, space, klass } kind; std::string name; };
+
+    struct name_scope_walk {
+        std::vector<name_scope> scopes;
+        name_scope pending{name_scope::other, {}};
+
+        std::string enclosing_namespace() const {
+            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) { if (it->kind == name_scope::space) { return it->name; } }
+            return {};
+        }
+        // the parser's namespace-name rule: any token but these
+        static bool namespace_name_token(token_type k) {
+            return k != token_type::eof && k != token_type::left_brace && k != token_type::right_brace && k != token_type::left_paren &&
+                   k != token_type::right_paren && k != token_type::semicolon && k != token_type::colon_colon;
+        }
+        void step(const std::vector<token>& in, size_t i) {
+            const token& t = in[i];
+            switch (t.type) {
+                case token_type::namespace_keyword: {
+                    std::string path;
+                    size_t j = i + 1;
+                    while (j < in.size() && namespace_name_token(in[j].type)) {
+                        path += in[j].lexeme;
+                        if (j + 1 < in.size() && in[j + 1].type == token_type::colon_colon) { path += "::"; j += 2; } else { ++j; break; }
+                    }
+                    if (j < in.size() && in[j].type == token_type::left_brace && !path.empty()) {
+                        const std::string outer = enclosing_namespace();
+                        pending = {name_scope::space, outer.empty() ? path : outer + "::" + path};
+                    }
+                    break;
+                }
+                case token_type::class_keyword:
+                    if (i + 1 < in.size() && in[i + 1].type == token_type::identifier) { pending = {name_scope::klass, std::string(in[i + 1].lexeme)}; }
+                    break;
+                case token_type::semicolon:
+                    pending = {name_scope::other, {}};
+                    break;
+                case token_type::left_brace:
+                    scopes.push_back(std::move(pending));
+                    pending = {name_scope::other, {}};
+                    break;
+                case token_type::right_brace:
+                    if (!scopes.empty()) { scopes.pop_back(); }
+                    break;
+                default:
+                    break;
+            }
+        }
+    };
+}
+
+bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out) {
+    if (std::none_of(in.begin(), in.end(), [](const token& t) { return t.type == token_type::namespace_keyword; })) return false;
+    std::unordered_map<std::string, std::unordered_set<std::string_view>> declared;   // namespace -> the classes this stream declares in it
+    {
+        name_scope_walk walk;
+        for (size_t i = 0; i < in.size(); ++i) {
+            if (in[i].type == token_type::class_keyword && i + 1 < in.size() && in[i + 1].type == token_type::identifier &&
+                !walk.scopes.empty() && walk.scopes.back().kind == name_scope::space) {
+                declared[walk.scopes.back().name].insert(in[i + 1].lexeme);
+            }
+            walk.step(in, i);
+        }
+    }
+    auto& spaces = engine_->script_namespaces();
+    auto names_class = [&](const std::string& space, std::string_view name) {
+        if (auto d = declared.find(space); d != declared.end() && d->second.count(name)) { return true; }
+        const auto space_id = symbolizer_->find(space);
+        const auto name_id = space_id ? symbolizer_->find(name) : std::nullopt;
+        if (!name_id) { return false; }
+        auto ns = spaces.find(*space_id);
+        return ns != spaces.end() && ns->second && ns->second->classes.count(*name_id) != 0;
+    };
+    // the innermost namespace that declares the name, its enclosing ones after it (C++ lookup); empty when none does
+    auto qualifier_for = [&](const name_scope_walk& walk, std::string_view name) -> std::string {
+        for (auto it = walk.scopes.rbegin(); it != walk.scopes.rend(); ++it) {
+            if (it->kind != name_scope::space) { continue; }
+            for (std::string space = it->name;;) {
+                if (names_class(space, name)) { return space; }
+                const size_t cut = space.rfind("::");
+                if (cut == std::string::npos) { break; }
+                space.resize(cut);
+            }
+        }
+        return {};
+    };
+    out.clear();
+    out.reserve(in.size());
+    name_scope_walk walk;
+    bool any = false;
+    for (size_t i = 0; i < in.size(); ++i) {
+        const token& t = in[i];
+        if (t.type == token_type::identifier && !walk.scopes.empty()) {
+            const token_type before = out.empty() ? token_type::eof : out.back().type;
+            const token_type after = i + 1 < in.size() ? in[i + 1].type : token_type::eof;
+            const bool return_type = before == token_type::arrow && (after == token_type::left_brace || after == token_type::ampersand || after == token_type::semicolon);
+            const bool member_name = before == token_type::dot || before == token_type::question_dot || before == token_type::colon_colon ||
+                                     (before == token_type::arrow && !return_type);
+            const bool declared_name = before == token_type::class_keyword || before == token_type::tilde || before == token_type::namespace_keyword;
+            // ClassName( at a member's start in its own body is the constructor, named by the class's own spelling
+            const bool after_visibility = before == token_type::colon && out.size() >= 2 &&
+                (out[out.size() - 2].type == token_type::public_keyword || out[out.size() - 2].type == token_type::private_keyword ||
+                 out[out.size() - 2].type == token_type::protected_keyword);
+            const bool constructor = walk.scopes.back().kind == name_scope::klass && walk.scopes.back().name == t.lexeme &&
+                after == token_type::left_paren && (before == token_type::left_brace || before == token_type::semicolon ||
+                                                    before == token_type::right_brace || after_visibility);
+            if (!member_name && !declared_name && !constructor) {
+                if (const std::string space = qualifier_for(walk, t.lexeme); !space.empty()) {
+                    for (size_t start = 0;;) {
+                        const size_t cut = space.find("::", start);
+                        const std::string_view segment = std::string_view(space).substr(start, cut == std::string::npos ? std::string::npos : cut - start);
+                        const auto [segment_id, segment_view] = symbolizer_->intern_with_view(segment);
+                        out.emplace_back(token_type::identifier, segment_view, segment_id, t.location);
+                        out.emplace_back(token_type::colon_colon, "::", t.location);
+                        if (cut == std::string::npos) { break; }
+                        start = cut + 2;
+                    }
+                    out.push_back(t);
+                    any = true;
+                    continue;
+                }
+            }
+        }
+        out.push_back(t);
+        walk.step(in, i);
+    }
+    return any;
+}
+
 // A declaration's name: never a using name (the name stands for its qualified spelling) nor a qualified spelling
 bool parser::reject_using_name(const token& t, const char* what) {
     if (t.type != token_type::identifier) return false;
@@ -778,6 +910,7 @@ void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
 checked_result<std::vector<declaration_ptr>> parser::parse() {
     std::vector<declaration_ptr> declarations;
     bool reload_hook_seen = false;
+    if (qualify_namespace_classes(*stream_, namespace_stream_)) { stream_ = &namespace_stream_; }
     if (apply_using_declarations(*stream_, using_stream_)) { stream_ = &using_stream_; }
 
     while (!is_at_end()) {
@@ -1669,17 +1802,13 @@ checked_result<type_info_ptr> parser::parse_type() {
     // User-defined type (potentially templated)
     if (match(token_type::identifier)) {
         std::string type_name(previous().lexeme);
-        // ns::Type names a class registered under its qualified name (time::date); a class this unit declared inside a
-        // namespace is defined under its bare name
-        std::string last_name(previous().lexeme);
+        // ns::Type names a class by its qualified name: a host's (time::date) or one a script namespace declares
         while (check(token_type::colon_colon) &&
                current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::identifier) {
             advance();
             type_name += "::";
-            last_name = std::string(advance().lexeme);
-            type_name += last_name;
+            type_name += advance().lexeme;
         }
-        if (namespace_class_names_.count(type_name)) { type_name = last_name; }
 
         // A host template's base name followed by '<' is a template (Point<int>); the bare name stays an ordinary identifier
         if (check(token_type::less) && is_registered_template_type(type_name)) {
@@ -3367,8 +3496,10 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
     lexer lex(content, symbolizer_, resolved.value());
     const std::vector<token> lexed = lex.tokenize();
+    std::vector<token> qualified;
+    const std::vector<token>& own = qualify_namespace_classes(lexed, qualified) ? qualified : lexed;
     std::vector<token> used;   // the included file's own using declarations apply to its own text only
-    const std::vector<token>& tokens = apply_using_declarations(lexed, used) ? used : lexed;
+    const std::vector<token>& tokens = apply_using_declarations(own, used) ? used : own;
     const std::vector<token>* saved_stream = stream_;
     const size_t saved_current = current_;
     const std::optional<token> saved_pushed_back = pushed_back_token_;
@@ -3918,7 +4049,7 @@ checked_result<statement_ptr> parser::try_statement() {
 }
 
 // declaration parsing implementations
-checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
+checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::string_view space) {
     if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::unexpected_token); }
     JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
     if (check(token_type::identifier) && peek().lexeme == "extends") {
@@ -3948,9 +4079,9 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
     JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before class body"));
     const size_t class_open_index = current_ - 1;
 
-    // Intern the class name at parse time for fast comparisons later
-    // Use intern_with_view to ensure we get a string_view pointing to symbolizer storage
-    auto [class_name_id, class_name_view] = symbolizer_->intern_with_view(className.lexeme);
+    // a class a namespace declares is named ns::Name (C++); its constructors and destructor carry that name
+    auto [class_name_id, class_name_view] = space.empty() ? symbolizer_->intern_with_view(className.lexeme)
+                                                          : symbolizer_->intern_with_view(std::string(space) + "::" + std::string(className.lexeme));
     auto classDecl = std::make_shared<class_decl>(className.location, class_name_view, class_name_id);
     classDecl->base_classes = std::move(base_classes);
     classDecl->nocopy = nocopy;
@@ -4072,8 +4203,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
         if (check(token_type::identifier) && peek().lexeme == className.lexeme &&
             current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
             advance(); // consume class name
-            auto [ctor_name_id, ctor_name_view] = symbolizer_->intern_with_view(className.lexeme);
-            auto body_result = parse_function_body(ctor_name_view, ctor_name_id, nullptr, /*allow_ctor_initializers=*/true);
+            auto body_result = parse_function_body(class_name_view, class_name_id, nullptr, /*allow_ctor_initializers=*/true);
             if (!body_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4085,8 +4215,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 synchronize_class_member(class_open_index);
                 continue;
             }
-            // Intern destructor name (e.g., "~ClassName")
-            std::string dtor_name_str = "~" + std::string(className.lexeme);
+            std::string dtor_name_str = "~" + std::string(class_name_view);
             auto [dtor_name_id, dtor_name_view] = symbolizer_->intern_with_view(dtor_name_str);
             auto body_result = parse_function_body(dtor_name_view, dtor_name_id, nullptr);
             if (!body_result) {
@@ -4330,10 +4459,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                         continue;
                     }
 
-                    if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == className.lexeme) {
-                        report_error("'" + std::string(className.lexeme) + " " + std::string(name.lexeme) + ";' would build a " + std::string(className.lexeme) +
-                                     " inside every " + std::string(className.lexeme) + ": write '" + std::string(className.lexeme) + " " + std::string(name.lexeme) +
-                                     " = null;' for a link, or 'shared_ptr<" + std::string(className.lexeme) + "> " + std::string(name.lexeme) + ";' to share one", name);
+                    if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == class_name_view) {
+                        report_error("'" + std::string(class_name_view) + " " + std::string(name.lexeme) + ";' would build a " + std::string(class_name_view) +
+                                     " inside every " + std::string(class_name_view) + ": write '" + std::string(class_name_view) + " " + std::string(name.lexeme) +
+                                     " = null;' for a link, or 'shared_ptr<" + std::string(class_name_view) + "> " + std::string(name.lexeme) + ";' to share one", name);
                         synchronize_class_member(class_open_index);
                         continue;
                     }
@@ -4361,7 +4490,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy) {
                 synchronize_class_member(class_open_index);
                 continue;
             }
-            if (func_member->name == className.lexeme ||
+            if (func_member->name == class_name_view ||
                 (func_member->name.size() > 1 && func_member->name[0] == '~')) {
                 report_error("constructors and destructors cannot be coroutines", peek());
                 synchronize_class_member(class_open_index);
@@ -4473,15 +4602,12 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         bool nested_nocopy = !const_member && match(token_type::nocopy_keyword);
         if (nested_nocopy || match(token_type::class_keyword)) {
             if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'")); }
-            auto class_result = class_declaration(nested_nocopy);
+            auto class_result = class_declaration(nested_nocopy, full_namespace_name);
             if (!class_result) {
                 synchronize();
                 continue;
             }
             member_decl = std::move(class_result.value());
-            if (auto* cls = dynamic_cast<class_decl*>(member_decl.get())) {
-                namespace_class_names_.insert(full_namespace_name + "::" + std::string(cls->name));
-            }
             match(token_type::semicolon);  // Consume optional semicolon after class
         } else if (!inline_member && !const_member && match(token_type::coroutine_keyword)) {
             // a coroutine member: the program-scope spellings (internal/grammar.md: a namespace body is declaration*)

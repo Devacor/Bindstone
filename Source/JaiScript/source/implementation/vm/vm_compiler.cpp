@@ -170,17 +170,14 @@ namespace {
 			case opcode::op_kill_slot:
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
-			case opcode::op_c_arith:
 			case opcode::op_c_mload:
 			case opcode::op_c_size:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
-			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
-			case opcode::op_c_jcmp:
 			case opcode::op_c_jump:
 			case opcode::op_c_guard:
 			case opcode::op_c_arith_any:
@@ -215,7 +212,7 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
-			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
+			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 			case opcode::op_c_append:
 			case opcode::op_c_push:
 			case opcode::op_call:
@@ -227,7 +224,6 @@ namespace {
 			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
-			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
 			case opcode::op_call_builtin:
@@ -409,17 +405,14 @@ namespace {
 			case opcode::op_kill_slot:
 			case opcode::op_cells_back:
 			case opcode::op_cells_enter:
-			case opcode::op_c_arith:
 			case opcode::op_c_mload:
 			case opcode::op_c_size:
 			case opcode::op_c_mstore:
 			case opcode::op_set_member_value:
-			case opcode::op_c_cmp:
 			case opcode::op_c_load:
 			case opcode::op_c_load_any:
 			case opcode::op_c_index_store:
 			case opcode::op_c_back:
-			case opcode::op_c_jcmp:
 			case opcode::op_c_jump:
 			case opcode::op_c_guard:
 			case opcode::op_c_arith_any:
@@ -454,7 +447,7 @@ namespace {
 			case opcode::op_c_arith_p:
 			case opcode::op_c_cmp_p:
 			case opcode::op_c_jcmp_p:
-			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
+			case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 			case opcode::op_c_append:
 			case opcode::op_c_push:
 			case opcode::op_call:
@@ -466,7 +459,6 @@ namespace {
 			case opcode::op_probe_member:
 			case opcode::op_return:
 			case opcode::op_return_ident:
-			case opcode::op_return_binary:
 			case opcode::op_return_convert:
 			case opcode::op_call_method:
 			case opcode::op_call_builtin:
@@ -554,7 +546,7 @@ namespace {
 
 size_t vm_compiler::emit(opcode op, uint32_t a, uint32_t b, uint32_t c) {
 	if (!release_.pending.empty()) {
-		if (op == opcode::op_return || op == opcode::op_return_ident || op == opcode::op_return_binary) { release_.pending.clear(); }   // the frame's end releases them
+		if (op == opcode::op_return || op == opcode::op_return_ident) { release_.pending.clear(); }   // the frame's end releases them
 		else { flush_kills(); }
 	}
 	chunk_->code.push_back({op, a, b, c});
@@ -1519,19 +1511,6 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 					pending_tail_call_ = true;
 				}
 				compile_expression(rs->value);
-				// BINARY+RETURN tail fusion (2191c59b double gate: the return VALUE
-				// node's own shape AND the tail opcode must both agree - a logical
-				// && / || root ends in an arm's op, never rewrite those). Non-logical
-				// binary roots always emit their own op_binary LAST.
-				if (fuse_return && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
-					const auto* bin = static_cast<const binary_expr*>(rs->value.get());
-					const token_type bop = bin->op.type;
-					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
-					if (!logical && chunk_->code.back().op == opcode::op_binary) {
-						chunk_->code.back().op = opcode::op_return_binary;
-						return;
-					}
-				}
 			}
 		} else {
 			emit(opcode::op_null);
@@ -3698,6 +3677,16 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		default: return false;
 		}
 	};
+	auto cmp_token_of = [](opcode o) -> uint8_t {
+		switch (o) {
+		case opcode::op_t_jlt_ii: case opcode::op_t_jlt_ff: return static_cast<uint8_t>(token_type::less);
+		case opcode::op_t_jle_ii: case opcode::op_t_jle_ff: return static_cast<uint8_t>(token_type::less_equal);
+		case opcode::op_t_jgt_ii: case opcode::op_t_jgt_ff: return static_cast<uint8_t>(token_type::greater);
+		case opcode::op_t_jge_ii: case opcode::op_t_jge_ff: return static_cast<uint8_t>(token_type::greater_equal);
+		case opcode::op_t_jeq_ii: case opcode::op_t_jeq_ff: return static_cast<uint8_t>(token_type::equal_equal);
+		default: return static_cast<uint8_t>(token_type::bang_equal);
+		}
+	};
 	auto arith_token_of = [](opcode o) -> uint8_t {
 		switch (o) {
 		case opcode::op_t_add_ii: case opcode::op_t_add_ff: return static_cast<uint8_t>(token_type::plus);
@@ -3997,7 +3986,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
 		case opcode::op_jump: case opcode::op_jump_if_true: case opcode::op_jump_if_false: case opcode::op_load: case opcode::op_const: case opcode::op_store:
 		case opcode::op_decl_var: case opcode::op_operand_temp: case opcode::op_compound_fused: case opcode::op_incdec: case opcode::op_pop:
-		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_kill_slot:
+		case opcode::op_return: case opcode::op_return_ident: case opcode::op_null: case opcode::op_true: case opcode::op_false: case opcode::op_kill_slot:
 			return true;
 		default: return false;
 		}
@@ -4437,7 +4426,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					bool terminal = false;
 					for (; end < back && end < c.stmt_nodes.size() && c.stmt_nodes[end] == sn; ++end) {
 						const opcode o = code[end].op;
-						if (is_return && (o == opcode::op_return || o == opcode::op_return_ident || o == opcode::op_return_binary)) { terminal = true; ++end; break; }
+						if (is_return && (o == opcode::op_return || o == opcode::op_return_ident)) { terminal = true; ++end; break; }
 						if (is_break && o == opcode::op_jump) { terminal = code[end].a > back; ++end; break; }   // a break out of a switch stays inside
 					}
 					if (terminal) {
@@ -4460,7 +4449,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					}
 				}
 			}
-			if (fn_mode && (st.op == opcode::op_return_ident || st.op == opcode::op_return || st.op == opcode::op_return_binary ||
+			if (fn_mode && (st.op == opcode::op_return_ident || st.op == opcode::op_return ||
 			                (ip + 1 < back && code[ip + 1].op == opcode::op_return && (st.op == opcode::op_binary_fused || st.op == opcode::op_const || st.op == opcode::op_load)))) {
 				// a frame program's return: the value is a cell or a constant (a returned binary lands in an argument value first); a miss, or a
 				// return the raw protocol does not take, re-runs the return's tail from its first instruction, so the tail's operands stay live
@@ -4470,7 +4459,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
 					ret.proto = 0;
 					op = ret;
-				} else if (st.op == opcode::op_return || st.op == opcode::op_return_binary) {
+				} else if (st.op == opcode::op_return) {
 					refuse(chunk::cell_refusal_translation, ip); break;   // a value the stack carries
 				} else {
 					const vm_instruction& rn = code[ip + 1];
@@ -5506,7 +5495,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// write lands it or misses, and the verifier proved no read ahead of a first declaration), or a constant of that kind;
 		// the operation then needs no per-read kind check
 		auto pinned_operand = [&](uint32_t cellop, uint8_t k) -> bool {
-			if (!ir_passes_) return false;   // the switch off: the checked forms only
 			if (cellop & k_typed_const_bit) { const uint32_t ci = cellop & ~k_typed_const_bit; return ci < c.constants.size() && static_cast<uint8_t>(c.constants[ci].raw_storage_index()) == k; }
 			return cellop < cells.size() && cells[cellop].kind == k;
 		};
@@ -5625,7 +5613,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik:
 				if (k != ki || pi.a != t) return false;
 				pi.a = d; return true;
-			case opcode::op_c_arith_p: case opcode::op_c_arith: {
+			case opcode::op_c_arith_p: {
 				const opcode fast = static_cast<opcode>(pi.a >> k_cell_op_shift);
 				if ((pi.a & k_cell_index_mask) != t || k != (fast <= opcode::op_t_shr_ii ? ki : kf)) return false;
 				pi.a = (pi.a & ~k_cell_index_mask) | d; return true;
@@ -5665,10 +5653,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				}
 				if (fast != opcode::op_halt) {
 					const uint8_t k = fast <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-					const bool pinned = pinned_operand(b2, k) && pinned_operand(c2, k);
-					const opcode direct = pinned ? cell_arith_by_kind(fast, (c2 & k_typed_const_bit) != 0) : opcode::op_halt;
+					if (!pinned_operand(b2, k) || !pinned_operand(c2, k)) { fast = opcode::op_halt; }   // kinds known only at run time: the any-kind form
+				}
+				if (fast != opcode::op_halt) {
+					const opcode direct = cell_arith_by_kind(fast, (c2 & k_typed_const_bit) != 0);
 					if (direct != opcode::op_halt) { append(vm_instruction{direct, dst_of(op.a), b2, c2 & ~k_typed_const_bit}, ip); }
-					else { append(vm_instruction{pinned ? opcode::op_c_arith_p : opcode::op_c_arith, (static_cast<uint32_t>(fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
+					else { append(vm_instruction{opcode::op_c_arith_p, (static_cast<uint32_t>(fast) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
 				}
 				else { append(vm_instruction{opcode::op_c_arith_any, (static_cast<uint32_t>(op.tok != 0 ? op.tok : arith_token_of(op.fast)) << k_cell_op_shift) | dst_of(op.a), b2, c2}, ip); }
 				break;
@@ -5695,9 +5685,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (ir_passes_ && !op.head && tok == static_cast<uint8_t>(token_type::bang) && !(a2 & k_typed_const_bit)) { append(vm_instruction{opcode::op_c_jtruth, a2, 1, bits}, ip); break; }   // a truth test inline (b = 1: its miss re-runs the test)
 				if (fast != opcode::op_halt) {
 					const uint8_t k = fast <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-					const bool p = pinned_operand(a2, k) && pinned_operand(b2, k);
-					append(vm_instruction{op.head ? (p ? opcode::op_c_cmp_p : opcode::op_c_cmp) : (p ? opcode::op_c_jcmp_p : opcode::op_c_jcmp), (static_cast<uint32_t>(fast) << k_cell_op_shift) | a2, b2, target}, ip);
+					if (!pinned_operand(a2, k) || !pinned_operand(b2, k)) {   // kinds known only at run time: the any-kind form
+						if (tok == 0) { tok = cmp_token_of(fast); }
+						fast = opcode::op_halt;
+					}
 				}
+				if (fast != opcode::op_halt) { append(vm_instruction{op.head ? opcode::op_c_cmp_p : opcode::op_c_jcmp_p, (static_cast<uint32_t>(fast) << k_cell_op_shift) | a2, b2, target}, ip); }
 				else { append(vm_instruction{op.head ? opcode::op_c_cmp_any : opcode::op_c_jcmp_any, (static_cast<uint32_t>(tok) << k_cell_op_shift) | a2, b2, target}, ip); }
 				break;
 			}
@@ -6110,7 +6103,6 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				else if (a1 == opcode::op_c_load && b1 == opcode::op_c_load) { fused = opcode::op_c_load2; }
 				else if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_load) { fused = opcode::op_c_arith_load; }
 				else if (a1 == opcode::op_c_load && b1 == opcode::op_c_jcmp_p) { fused = opcode::op_c_load_jcmp; }
-				else if (a1 == opcode::op_c_arith_p && b1 == opcode::op_c_jump) { fused = opcode::op_c_arith_jump; }
 				if (fused != opcode::op_halt) { code[ip2].op = fused; ++ip2; }
 			}
 		}
@@ -7055,7 +7047,7 @@ std::vector<uint32_t> vm_compiler::take_owning_temps(size_t from_ip, size_t floo
 	if (temps_active_ && chunk_ && chunk_->is_function_body) {
 		for (size_t ip = from_ip; ip < chunk_->code.size(); ++ip) {
 			const opcode op = chunk_->code[ip].op;
-			if (op == opcode::op_return || op == opcode::op_return_ident || op == opcode::op_return_binary) { landed.clear(); continue; }   // the frame's end released them
+			if (op == opcode::op_return || op == opcode::op_return_ident) { landed.clear(); continue; }   // the frame's end released them
 			if (op == opcode::op_kill_slot) {
 				const vm_instruction& k = chunk_->code[ip];
 				std::erase_if(landed, [&k](const auto& l) { return l.first <= k.a && l.first + k.b >= k.a; });

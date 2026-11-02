@@ -68,7 +68,7 @@ namespace {
 			return fam::call;
 		case opcode::op_call_method: case opcode::op_probe_member: return fam::method;
 		case opcode::op_call_builtin: case opcode::op_size_temp: case opcode::op_push_fused: return fam::builtin;
-		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_return_convert: case opcode::op_implicit_return:
+		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_convert: case opcode::op_implicit_return:
 		case opcode::op_halt: case opcode::op_ref_return_bind: case opcode::op_ref_return_lvalue:
 			return fam::ret;
 		case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_get_member_this: case opcode::op_place_arg: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
@@ -103,12 +103,12 @@ namespace {
 		case opcode::op_func_decl: case opcode::op_class_decl: case opcode::op_namespace_decl: case opcode::op_enum_decl: case opcode::op_extern_decl: case opcode::op_field_init:
 		case opcode::op_include: case opcode::op_import: case opcode::op_parallel_for: case opcode::op_error: case opcode::op_const_guard:
 			return fam::decl;
-		case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any: case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump:
+		case opcode::op_c_arith_p: case opcode::op_c_arith_any: case opcode::op_c_arith2: case opcode::op_c_arith_load:
 		case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 		case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_neg: case opcode::op_c_bnot:
 		case opcode::op_c_lnot: case opcode::op_c_cmpval: case opcode::op_c_append:
 			return fam::cell_arith;
-		case opcode::op_c_cmp: case opcode::op_c_cmp_p: case opcode::op_c_jcmp: case opcode::op_c_jcmp_p: case opcode::op_c_jcmp2: case opcode::op_c_cmp_any:
+		case opcode::op_c_cmp_p: case opcode::op_c_jcmp_p: case opcode::op_c_jcmp2: case opcode::op_c_cmp_any:
 		case opcode::op_c_jcmp_any: case opcode::op_c_jump: case opcode::op_c_back: case opcode::op_c_back_step: case opcode::op_c_cfor_back: case opcode::op_c_range:
 		case opcode::op_c_exit: case opcode::op_c_bail:
 			return fam::cell_branch;
@@ -138,7 +138,7 @@ namespace {
 		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
 		case opcode::op_jump: case opcode::op_jump_if_true: case opcode::op_jump_if_false: case opcode::op_load: case opcode::op_const: case opcode::op_store:
 		case opcode::op_decl_var: case opcode::op_operand_temp: case opcode::op_compound_fused: case opcode::op_incdec: case opcode::op_pop:
-		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_null: case opcode::op_true: case opcode::op_false:
+		case opcode::op_return: case opcode::op_return_ident: case opcode::op_null: case opcode::op_true: case opcode::op_false:
 			return true;
 		default: return false;
 		}
@@ -490,7 +490,7 @@ namespace {
 	}
 
 	bool pair_first_falls(opcode o) {
-		return o == opcode::op_c_arith2 || o == opcode::op_c_load2 || o == opcode::op_c_arith_load || o == opcode::op_c_load_jcmp || o == opcode::op_c_arith_jump;
+		return o == opcode::op_c_arith2 || o == opcode::op_c_load2 || o == opcode::op_c_arith_load || o == opcode::op_c_load_jcmp;
 	}
 
 } // namespace

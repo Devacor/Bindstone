@@ -3,35 +3,6 @@
 
 namespace jai {
 
-// Initialize the flat binary operator handler array (indexed by detail::op_slot)
-void interpreter::init_dispatch_table() {
-    auto set = [this](detail::op_slot s, binary_op_handler h) {
-        binary_handlers_[static_cast<size_t>(s)] = h;
-    };
-    // Arithmetic operators
-    set(detail::op_slot::plus, &interpreter::handle_add);
-    set(detail::op_slot::minus, &interpreter::handle_subtract);
-    set(detail::op_slot::star, &interpreter::handle_multiply);
-    set(detail::op_slot::slash, &interpreter::handle_divide);
-    set(detail::op_slot::percent, &interpreter::handle_modulo);
-
-    // Comparison operators
-    set(detail::op_slot::less, &interpreter::handle_less);
-    set(detail::op_slot::less_equal, &interpreter::handle_less_equal);
-    set(detail::op_slot::greater, &interpreter::handle_greater);
-    set(detail::op_slot::greater_equal, &interpreter::handle_greater_equal);
-    set(detail::op_slot::equal_equal, &interpreter::handle_equal);
-    set(detail::op_slot::bang_equal, &interpreter::handle_not_equal);
-    set(detail::op_slot::spaceship, &interpreter::handle_spaceship);
-
-    // Bitwise operators
-    set(detail::op_slot::ampersand, &interpreter::handle_bitwise_and);
-    set(detail::op_slot::pipe, &interpreter::handle_bitwise_or);
-    set(detail::op_slot::caret, &interpreter::handle_bitwise_xor);
-    set(detail::op_slot::left_shift, &interpreter::handle_left_shift);
-    set(detail::op_slot::right_shift, &interpreter::handle_right_shift);
-}
-
 struct interpreter::binary_host {
     interpreter& in;
     script_value make_int(script_int v) const noexcept { return in.make_value(v); }
@@ -65,7 +36,7 @@ struct interpreter::binary_host {
     checked_result<script_value> spaceship_member(const script_value& a, const script_value& b, detail::order_walk* walk) {
         return detail::spaceship_operands(*this, in.ops_.spaceship, a, b, walk);
     }
-    checked_result<script_value> equal(const script_value& l, const script_value& r) { return in.handle_equal(l, r); }
+    checked_result<script_value> equal(const script_value& l, const script_value& r) { return in.binary_operator(token_type::equal_equal, l, r); }
     member_target resolve_member_target(const script_value& v) const { return in.resolve_member_target(v); }
     script_value operator_value(const member_target& target, uint64_t id) const { return in.operator_value(target, id); }
     checked_result<script_value> operator_call(const script_value& self, const script_value& method, uint64_t id, std::vector<script_value> args) { return in.operator_call(self, method, id, std::move(args)); }
@@ -81,6 +52,11 @@ struct interpreter::binary_host {
 checked_result<script_value> interpreter::evaluate_arithmetic(const script_value& left, token_type op, const script_value& right, int compound) {
     binary_host h{*this};
     return detail::evaluate_arithmetic(h, left, op, right, compound);
+}
+checked_result<script_value> interpreter::compound_value(token_type a_op, const script_value& a_current, const script_value& a_right, bool a_incdec,
+                                                         bool a_text_slot) {
+    binary_host h{*this};
+    return detail::compound_value(h, a_op, a_current, a_right, a_incdec, a_text_slot);
 }
 std::optional<checked_result<script_value>> interpreter::object_compound_operand(const script_value& left, token_type op, const script_value& right) {
     binary_host h{*this};
@@ -99,73 +75,28 @@ script_value interpreter::call_operator_of(const script_value& callee) {
     return detail::call_operator_of(h, callee);
 }
 
-checked_result<script_value> interpreter::handle_add(const script_value& left, const script_value& right) {
+checked_result<script_value> interpreter::binary_operator(token_type op, const script_value& left, const script_value& right) {
     binary_host h{*this};
-    return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
-}
-checked_result<script_value> interpreter::handle_subtract(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_arithmetic<detail::arith_op::sub>(h, ops_.minus, left, right);
-}
-checked_result<script_value> interpreter::handle_multiply(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_arithmetic<detail::arith_op::mul>(h, ops_.star, left, right);
-}
-checked_result<script_value> interpreter::handle_divide(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_arithmetic<detail::arith_op::div>(h, ops_.slash, left, right);
-}
-checked_result<script_value> interpreter::handle_modulo(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_arithmetic<detail::arith_op::mod>(h, ops_.percent, left, right);
-}
-checked_result<script_value> interpreter::handle_less(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_ordering<detail::order_op::less>(h, ops_.less, left, right);
-}
-checked_result<script_value> interpreter::handle_less_equal(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_ordering<detail::order_op::less_equal>(h, ops_.less_equal, left, right);
-}
-checked_result<script_value> interpreter::handle_greater(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_ordering<detail::order_op::greater>(h, ops_.greater, left, right);
-}
-checked_result<script_value> interpreter::handle_greater_equal(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_ordering<detail::order_op::greater_equal>(h, ops_.greater_equal, left, right);
-}
-checked_result<script_value> interpreter::handle_equal(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_equal(h, left, right);
-}
-checked_result<script_value> interpreter::handle_not_equal(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_not_equal(h, left, right);
-}
-checked_result<script_value> interpreter::handle_spaceship(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_spaceship(h, ops_.spaceship, left, right);
-}
-checked_result<script_value> interpreter::handle_bitwise_and(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_and>(h, ops_.ampersand, left, right);
-}
-checked_result<script_value> interpreter::handle_bitwise_or(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_or>(h, ops_.pipe, left, right);
-}
-checked_result<script_value> interpreter::handle_bitwise_xor(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::bit_xor>(h, ops_.caret, left, right);
-}
-checked_result<script_value> interpreter::handle_left_shift(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::shift_left>(h, ops_.left_shift, left, right);
-}
-checked_result<script_value> interpreter::handle_right_shift(const script_value& left, const script_value& right) {
-    binary_host h{*this};
-    return detail::binary_bitwise<detail::bit_op::shift_right>(h, ops_.right_shift, left, right);
+    switch (op) {
+        case token_type::plus: return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
+        case token_type::minus: return detail::binary_arithmetic<detail::arith_op::sub>(h, ops_.minus, left, right);
+        case token_type::star: return detail::binary_arithmetic<detail::arith_op::mul>(h, ops_.star, left, right);
+        case token_type::slash: return detail::binary_arithmetic<detail::arith_op::div>(h, ops_.slash, left, right);
+        case token_type::percent: return detail::binary_arithmetic<detail::arith_op::mod>(h, ops_.percent, left, right);
+        case token_type::less: return detail::binary_ordering<detail::order_op::less>(h, ops_.less, left, right);
+        case token_type::less_equal: return detail::binary_ordering<detail::order_op::less_equal>(h, ops_.less_equal, left, right);
+        case token_type::greater: return detail::binary_ordering<detail::order_op::greater>(h, ops_.greater, left, right);
+        case token_type::greater_equal: return detail::binary_ordering<detail::order_op::greater_equal>(h, ops_.greater_equal, left, right);
+        case token_type::equal_equal: return detail::binary_equal(h, left, right);
+        case token_type::bang_equal: return detail::binary_not_equal(h, left, right);
+        case token_type::spaceship: return detail::binary_spaceship(h, ops_.spaceship, left, right);
+        case token_type::ampersand: return detail::binary_bitwise<detail::bit_op::bit_and>(h, ops_.ampersand, left, right);
+        case token_type::pipe: return detail::binary_bitwise<detail::bit_op::bit_or>(h, ops_.pipe, left, right);
+        case token_type::caret: return detail::binary_bitwise<detail::bit_op::bit_xor>(h, ops_.caret, left, right);
+        case token_type::left_shift: return detail::binary_bitwise<detail::bit_op::shift_left>(h, ops_.left_shift, left, right);
+        case token_type::right_shift: return detail::binary_bitwise<detail::bit_op::shift_right>(h, ops_.right_shift, left, right);
+        default: return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
+    }
 }
 
 } // namespace jai

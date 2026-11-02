@@ -20,6 +20,7 @@
 #include <jaiscript/detail/numeric_conversion.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
+#include <jaiscript/detail/scalar_ops.hpp>
 #include <vector>
 
 namespace jai::detail {
@@ -1266,6 +1267,45 @@ namespace jai::detail {
 		return clone_for_assignment(v);
 	}
 
+	// x++ and x--: x += 1 on an int, a float or a char (which promotes, so the result is its int); the stepped value, or the
+	// operator's error on any other kind
+	inline checked_result<script_value> incdec_step(const script_value& current_in, bool increment, engine* eng) {
+		const script_value& current = current_in.deref();
+		switch (current.raw_storage_index()) {
+			case script_value::TYPEID_CPP_BOUND: {
+				const script_value decoded = current.bound_decoded_temp();
+				if (decoded.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { return incdec_mismatch(increment, current, eng); }
+				return incdec_step(decoded, increment, eng);
+			}
+			case script_value::TYPEID_INT: {
+				script_int out;
+				if (increment ? !ints::try_add(current.unchecked_as_int(), 1, out) : !ints::try_sub(current.unchecked_as_int(), 1, out)) {
+					return checked_result<script_value>(make_error_code(runtime_error_code::invalid_numeric_operand),
+						compound_overflow_text(increment ? k_compound_increment : k_compound_decrement));
+				}
+				return script_value(out, eng);
+			}
+			case script_value::TYPEID_FLOAT: return script_value(current.unchecked_as_float() + (increment ? 1.0 : -1.0), eng);
+			case script_value::TYPEID_CHAR: {
+				const script_int code = static_cast<unsigned char>(current.unchecked_as_char());
+				return script_value(code + (increment ? 1 : -1), eng);
+			}
+			default: return incdec_mismatch(increment, current, eng);
+		}
+	}
+
+	// the value a postfix ++ or -- yields: the number as it was (a bound variable's decoded), untagged
+	inline script_value incdec_old_value(const script_value& current_in, engine* eng) {
+		const script_value& current = current_in.deref();
+		switch (current.raw_storage_index()) {
+			case script_value::TYPEID_CPP_BOUND: return incdec_old_value(current.bound_decoded_temp(), eng);
+			case script_value::TYPEID_INT: return script_value(current.unchecked_as_int(), eng);
+			case script_value::TYPEID_FLOAT: return script_value(current.unchecked_as_float(), eng);
+			case script_value::TYPEID_CHAR: return script_value(current.unchecked_as_char(), eng);
+			default: return current;
+		}
+	}
+
 	// cast<T&>(e) = v, op= v, ++ and --: a store through the reference the target evaluated to, by the rules of the storage
 	// it names (a variable's declared type, a typed element, a field, a static, a property's setter, a component). `op` is
 	// the compound's base operator, or token_type::equal. The expression's value: the old value for a postfix, else the
@@ -1281,15 +1321,19 @@ namespace jai::detail {
 			auto stored = ref_store_through(ref, incoming, eng, symbolizer, declared_static, declared_ref_kind(declared_static));
 			if (!stored) { return stored.error_value(); }
 			if (!result_needed) { return incoming; }
+		} else if (incdec) {
+			auto current = ref_checked_deref(ref);
+			if (!current) { return current; }
+			auto stepped = incdec_step(current.value(), op == token_type::plus, eng);
+			if (!stepped) { return stepped; }
+			if (old_result) { outcome = ref_detached_value(std::move(current.value())); }
+			auto stored = ref_store_through(ref, stepped.value(), eng, symbolizer, declared_static, declared_ref_kind(declared_static));
+			if (!stored) { return stored.error_value(); }
+			if (old_result) { return outcome; }
+			if (!result_needed) { return std::move(stepped.value()); }
 		} else {
 			auto current = ref_checked_deref(ref);
 			if (!current) { return current; }
-			if (incdec) {
-				const size_t ci = current.value().raw_storage_index();
-				if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-					return incdec_mismatch(op == token_type::plus, current.value(), eng);
-				}
-			}
 			if (old_result) { outcome = ref_detached_value(std::move(current.value())); }
 			auto result = ref_compound_store_constrained(ref, value, op, binary_op_name(op), op_table, eng, symbolizer, arith, declared_static);
 			if (!result) { return result; }

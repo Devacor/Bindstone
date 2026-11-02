@@ -2060,8 +2060,11 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             script_value result(std::monostate{}, ctx.get_engine());
 
             // Preserve the original type info (including shared_ptr marker if present)
+            // the handle type: a declared weak_ptr<T> names T itself
             auto weak_type_info = self.get_type_info();
-            if (weak_type_info && weak_type_info->element_type()) {
+            if (weak_type_info && weak_type_info->element_type() && weak_type_info->element_type()->base_type == script_value_type::jai_object_type) {
+                result.set_type_info(type_info_ptr{ctx.get_engine()->get_type_info_shared_ptr(weak_type_info->element_type().get())});
+            } else if (weak_type_info && weak_type_info->element_type()) {
                 result.set_type_info(weak_type_info->element_type());
             } else {
                 // Fallback: use the object type

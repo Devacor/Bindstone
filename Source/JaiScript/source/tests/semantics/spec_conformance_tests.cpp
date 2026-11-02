@@ -3313,7 +3313,7 @@ private:
 				t([]() { shared_ptr<B> s = new D(); GD = s; }) + "|" +
 				t([]() { var s = new E(); H h = H(); h.d = s; });
 			)", "Cannot initialize shared_ptr<D> with B: type must match or be a subclass|Cannot assign B to 'd' (declared shared_ptr<D>)|"
-			    "Cannot assign shared_ptr<B> to shared_ptr<D>|Cannot assign E to field 'd' of H (declared shared_ptr<D>)", warn_region);
+			    "Cannot assign B to 'GD' (declared shared_ptr<D>)|Cannot assign E to field 'd' of H (declared shared_ptr<D>)", warn_region);
 		});
 		test("the_checker_reports_a_static_downcast_or_an_unrelated_handle_at_load", [this]() {
 			// strict: a load error at every site (a shared_ptr<T> namespace variable store included); warn: the unit loads, the runtime raises

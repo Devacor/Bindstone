@@ -15,6 +15,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/integer_ops.hpp>   // kCheckedOverflow + jai::ints overflow policy
+#include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/body_walker.hpp>   // nested-coroutine capture analysis
 #include <jaiscript/detail/math_intrinsics.hpp>   // math:: language intrinsics (shared kernel)
 #include <jaiscript/detail/aggregate_lowering.hpp>
@@ -154,11 +155,6 @@ void interpreter::init_builtin_methods() {
     weak_ptr_methods_ = std::move(registries.weak_ptr_methods);
     shared_ptr_methods_ = std::move(registries.shared_ptr_methods);
 }
-
-// interpreter implementation
-
-// Note: Direct engine implementation access removed
-// Import tracking will be handled by the engine's public API
 
 // Helper to create a bound method - binds 'this' as the first argument
 script_value interpreter::create_bound_method(const script_value& this_obj, const script_value& method) {
@@ -326,7 +322,7 @@ checked_result<bool> interpreter::language_less(const script_value& a_left, cons
 			return is_truthy(result.value());
 		}
 	}
-	auto result = handle_less(left, right);
+	auto result = binary_operator(token_type::less, left, right);
 	if (!result) { return result.error_value(); }
 	return is_truthy(result.value());
 }
@@ -342,7 +338,7 @@ checked_result<bool> interpreter::language_equal(const script_value& left, const
             return is_truthy(result.value());
         }
     }
-    auto equal = handle_equal(l, r);
+    auto equal = binary_operator(token_type::equal_equal, l, r);
     if (!equal) { return equal.error_value(); }
     return is_truthy(equal.value());
 }
@@ -375,17 +371,9 @@ interpreter::interpreter(string_symbolizer* external_symbolizer, std::shared_ptr
     initialize();
 }
 
-// Every constructor's shared setup: the pools, the cached symbol ids, the builtin registries and the dispatch table
+// Every constructor's shared setup: the cached symbol ids and the builtin registries
 void interpreter::initialize() {
     env_symbolizer_ = string_symbolizer_;
-    // Initialize optimization pools
-    argument_pool_.reserve(16);  // Reasonable default for most function calls
-    environment_pool_.reserve(8);  // For nested function calls
-
-    // Pre-populate environment pool
-    for (size_t i = 0; i < 8; ++i) {
-        environment_pool_.emplace_back(std::make_shared<environment>(nullptr, string_symbolizer_));
-    }
 
     // Initialize cached type IDs for fast object type comparison
     class_definition_type_id_ = string_symbolizer_->intern("class_definition");
@@ -414,7 +402,6 @@ void interpreter::initialize() {
     init_builtin_methods();
 
     // Initialize binary operator dispatch table
-    init_dispatch_table();
 }
 
 void interpreter::add_global(const std::string& name, const script_value& value) {
@@ -472,12 +459,8 @@ void interpreter::prepare_for_execution() {
     active_exception_value_.reset();  // No need to create a value here either
     current_catch_var_id_ = 0;
 
-    // Reentrant execute (include/import or a host callback calling execute() mid-run):
-    // the outer run's live state - value stack, return value, environment - must
-    // survive; interpreter::execute isolates the nested program at top level
-    // itself. Clearing here used to hand the outer frame the GLOBAL env to release
-    // into the pool, which later recycled (and wiped) it. Mirrors the vm backend's
-    // frames_-based reentrancy guard.
+    // a reentrant execute (an include or import, a host callback) keeps the outer run's value stack, return value and
+    // environment: execute isolates the nested program itself (the vm's frames_ guard)
     if (is_executing()) {
         return;
     }
@@ -500,9 +483,7 @@ void interpreter::prepare_for_execution() {
         active_coroutine_ = nullptr;
     }
 
-    // Reset to the engine's global environment directly
-    // This fixes issues where the interpreter's environment_ can become disconnected
-    // from the engine's actual global (e.g., due to pooled environments or exception unwinding)
+    // a run starts in the engine's global environment (an unwound run can leave environment_ elsewhere)
     if (execute_depth_ == 0) {
         instance_scope_saved_.clear();
         pending_instance_env_.reset();
@@ -520,7 +501,7 @@ void interpreter::prepare_for_execution() {
 }
 
 void interpreter::push_scope() {
-    environment_ = get_block_environment(environment_);
+    environment_ = block_environment(environment_);
 }
 
 void interpreter::pop_scope() {
@@ -529,7 +510,7 @@ void interpreter::pop_scope() {
         // This is crucial for script class destructors to run at scope exit
         auto current_env = environment_;
         environment_ = environment_->get_parent();
-        release_environment(current_env);
+        end_scope(current_env);
     }
 }
 
@@ -539,7 +520,7 @@ void interpreter::define_variable(const std::string& name, const script_value& v
 
 void interpreter::push_instance_scope() {
     instance_scope_saved_.push_back(environment_);
-    environment_ = get_pooled_environment(get_global_environment());
+    environment_ = std::make_shared<environment>(get_global_environment(), env_symbolizer_);
     pending_instance_env_ = environment_;
 }
 
@@ -549,7 +530,7 @@ void interpreter::pop_instance_scope() {
     auto instance_env = environment_;
     environment_ = std::move(instance_scope_saved_.back());
     instance_scope_saved_.pop_back();
-    if (instance_env != environment_) { release_environment(instance_env); }
+    if (instance_env != environment_) { end_scope(instance_env); }
 }
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations, bool textual) {
@@ -565,12 +546,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         }
     }
 
-    // Reentrant execute (a host callback firing mid-script, e.g. hot reload): the
-    // nested program must run at TOP LEVEL - global environment, fresh call/value
-    // stacks - and restore the in-flight run's state afterwards. Without this,
-    // top-level definitions land in the running frame's pooled env (and evaporate
-    // with it), the outer run's value stack gets cleared, and the pool reset below
-    // recycles environments the outer frames still hold.
+    // A reentrant execute (a host callback firing mid-script, a hot reload) runs the nested program at top level - the global
+    // environment, fresh call and value stacks - and restores the in-flight run's state afterwards
     struct reentry_isolation {
         interpreter* self;
         bool reentrant;
@@ -691,17 +668,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         
         // If we hit a return statement, break out of execution
         if (hasReturnValue_) {
-            if (!isolation.reentrant) {
-                reset_environment_pool();  // Reset pool for next execution
-            }
             return returnValue_.value();
         }
-    }
-
-
-
-    if (!isolation.reentrant) {
-        reset_environment_pool();  // Reset pool for next execution
     }
     return last_script_value;
 }
@@ -788,11 +756,7 @@ checked_result<void> interpreter::visit_identifier_expr(identifier_expr* expr) {
         return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
             environment_->undefined_text(expr->symbol_id), expr->symbol_id);
     }
-    // ============================================================
-    // SLOT-BASED LOCAL ACCESS: O(1) array indexing
-    // ============================================================
-    // Parser assigns slot indices to local variables and parameters.
-    // This avoids hash map lookup overhead for the most common variable accesses.
+    // a local or a parameter reads its frame slot
     if (expr->slot_index != SIZE_MAX && !call_stack_.empty()) {
         script_value* local = call_stack_.back().get_local(expr->slot_index);
         if (local) {
@@ -1104,7 +1068,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
             if (is_lvalue) {
                 // Reallocation-safe reference to the element (container+index, not a raw
                 // pointer into the vector buffer): holding `arr[i]` as an lvalue across a
-                // push that reallocates would otherwise dangle -> heap corruption (#41).
+                // push that reallocates would otherwise dangle.
                 auto array_type_info = left.get_type_info();
                 type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
                 script_value ref_value = script_value::make_element_reference(
@@ -1294,20 +1258,11 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
         return {};
     }
 
-    // Flat handler dispatch for built-in operators with already-evaluated operands
-    // (direct op_slot index - no hash on the generic path)
-    const detail::op_slot handler_slot = detail::binary_op_slot(expr->op.type);
-    binary_op_handler handler_fn = handler_slot != detail::op_slot::none
-        ? binary_handlers_[static_cast<size_t>(handler_slot)] : nullptr;
-    if (handler_fn) {
-        auto result = (this->*handler_fn)(left, right);
-        if (!result) [[unlikely]] {
-            return result.error_value();
-        }
-        push_value(std::move(result.value()));
-    } else {
-        return checked_result<void>(make_error_code(runtime_error_code::unknown_operator), "Unknown binary operator");
+    auto result = binary_operator(expr->op.type, left, right);
+    if (!result) [[unlikely]] {
+        return result.error_value();
     }
+    push_value(std::move(result.value()));
     return {};
 }
 template<bool Replaying>
@@ -1337,16 +1292,15 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
         return checked_result<void>{};
     };
 
-    // `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
-    // full, and decoding an OPAQUE bound to null would lie about its truthiness
-    // (an opaque bound is truthy while its pointer is live). Identical result for bound primitives. Byte-parallel with exec_unary.
+    // `!` reads truthiness before a bound operand decodes: an opaque bound is truthy while its pointer is live, and decoding it
+    // reads null (KEEP BYTE-PARALLEL with vm_backend::exec_unary)
     if (expr->op.type == token_type::bang) {
         push_value(make_value(!is_truthy(operand)));
         return {};
     }
 
     size_t oi = operand.raw_storage_index();
-    // S8: bound operand decodes in place to a detached temp (byte-parallel with vm_backend::exec_unary)
+    // a bound operand decodes to a detached temporary (KEEP BYTE-PARALLEL with vm_backend::exec_unary)
     if (oi == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
         operand = operand.bound_decoded_temp();
         oi = operand.raw_storage_index();
@@ -1397,170 +1351,88 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             break;
             
         case token_type::plus_plus:
-        case token_type::minus_minus: {
-            // Handle increment/decrement with in-place mutation (ChaiScript-style)
-            if (expr->operand->get_type() == node_type::identifier_expr) {
-                auto* identifier = static_cast<identifier_expr*>(expr->operand.get());
-
-                // Try fast path: slot-based locals first (function params and typed locals
-                // live in call-frame slots, not the environment), then environment
-                script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
-                if (varPtr) {
-                    if (const uint8_t kind = identifier->declared_ref_kind && varPtr->is_reference() ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
-                        kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the VM exec_incdec)
-                        auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)),
-                            expr->op.type == token_type::plus_plus ? token_type::plus : token_type::minus, true, expr->is_postfix, true,
-                            operator_table_, engine_, string_symbolizer_,
-                            [this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); },
-                            identifier->declared_ref);
-                        if (!stepped) { return stepped.error_value(); }
-                        push_value(std::move(stepped.value()));
-                        return {};
-                    }
-                    // Scratch-backed ref (typed element, C++ property): deref hands back the
-                    // holder scratch - the in-place mutation below must commit it (buffer
-                    // store / setter) (KEEP BYTE-PARALLEL with the VM exec_incdec twin)
-                    auto* scratch_ref = varPtr->scratch_ref_holder();
-                    // Fast path: direct in-place mutation for local variables
-                    script_value& target = varPtr->deref();
-
-                    const bool isIncrement = (expr->op.type == token_type::plus_plus);
-                    // Write-through: ++/-- on a bound VARIABLE decodes the live value and
-                    // stores back through assign_through (the type() switch below would mutate a
-                    // dead shadow). KEEP BYTE-PARALLEL with the VM exec_incdec bound branch.
-                    if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                        if (target.is_int()) {
-                            const script_int oldVal = target.unchecked_as_int();
-                            script_int newVal;
-                            if (isIncrement) {
-                                if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
-                            } else {
-                                if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
-                            }
-                            target.assign_through(make_value(newVal));
-                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
-                            return {};
-                        }
-                        if (target.is_float()) {
-                            const script_float oldVal = target.unchecked_as_float();
-                            const script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-                            target.assign_through(make_value(newVal));
-                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
-                            return {};
-                        }
-                        return detail::incdec_mismatch(isIncrement, target, engine_);
-                    }
-                    switch (target.type()) {
-                        case script_value_type::jai_int_type: {
-                            // Overflow policy applies to plain ++/-- like every other int
-                            // op (INCDEC-WRAPS-SILENTLY); wrap builds fold the check away.
-                            script_int& tref = target.unchecked_as_int_ref();
-                            const script_int oldVal = tref;
-                            script_int newVal;
-                            if (isIncrement) {
-                                if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
-                            } else {
-                                if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
-                            }
-                            tref = newVal;
-                            if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
-                            push_value(make_value(expr->is_postfix ? oldVal : newVal));
-                            return {};
-                        }
-                        case script_value_type::jai_float_type: {
-                            if (expr->is_postfix) {
-                                push_value(make_value(target.unchecked_as_float()));
-                                if (isIncrement) target.unchecked_as_float_ref() += 1.0;
-                                else target.unchecked_as_float_ref() -= 1.0;
-                            } else {
-                                if (isIncrement) target.unchecked_as_float_ref() += 1.0;
-                                else target.unchecked_as_float_ref() -= 1.0;
-                                push_value(make_value(target.unchecked_as_float()));
-                            }
-                            if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
-                            return {};
-                        }
-                        default:
-                            return detail::incdec_mismatch(isIncrement, target, engine_);
-                    }
-                } else {
-                    // ::name targets never reach the implicit this.member fallback
-                    if (identifier->global_qualified) {
-                        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                            environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
-                    }
-                    // Fallback: identifier is an implicit this.member access
-                    // Check if 'this' exists and has this field
-                    script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
-                    if (this_ptr && this_ptr->is_object()) {
-                        script_value& this_val = *this_ptr;
-                        strong_ptr<class_instance> instance = this_val.get_class_instance();
-
-                        if (instance && instance->has_field(identifier->symbol_id)) {
-                            if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
-                                JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
-                            }
-                            // A hybrid's C++ property reads through its getter and stores through
-                            // its setter (KEEP BYTE-PARALLEL with the VM exec_incdec this-tail)
-                            const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
-                            const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
-                            script_value currentVal = make_value();
-                            if (prop_getter) {
-                                JAISCRIPT_TRY_ASSIGN(currentVal, detail::read_bare_cpp_property(this_val, instance.get(),
-                                    instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
-                            } else {
-                                currentVal = instance->get_field(identifier->symbol_id);
-                            }
-                            const bool isIncrement = (expr->op.type == token_type::plus_plus);
-                            // S8: a bound-alias field decodes live; set_field stores the detached
-                            // result. KEEP BYTE-PARALLEL with the VM this-field fallback.
-                            if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                                currentVal = currentVal.bound_decoded_temp();
-                            const size_t ti = currentVal.raw_storage_index();
-
-                            if (ti == script_value::TYPEID_INT) {
-                                script_int oldVal = currentVal.unchecked_as_int();
-                                script_int newVal;
-                                if (isIncrement) {
-                                    if (!ints::try_add(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '++'");
-                                } else {
-                                    if (!ints::try_sub(oldVal, 1, newVal)) return int_overflow_v("Integer overflow in '--'");
-                                }
-                                if (prop_setter) {
-                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, make_value(newVal)));
-                                } else {
-                                    instance->set_field(identifier->symbol_id, make_value(newVal));
-                                }
-                                push_value(make_value(expr->is_postfix ? oldVal : newVal));
-                                return {};
-                            } else if (ti == script_value::TYPEID_FLOAT) {
-                                script_float oldVal = currentVal.unchecked_as_float();
-                                script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-                                if (prop_setter) {
-                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, make_value(newVal)));
-                                } else {
-                                    instance->set_field(identifier->symbol_id, make_value(newVal));
-                                }
-                                push_value(make_value(expr->is_postfix ? oldVal : newVal));
-                                return {};
-                            } else {
-                                return detail::incdec_mismatch(isIncrement, currentVal, engine_);
-                            }
-                        }
-                    }
-                    uint64_t name_id = string_symbolizer_->intern(identifier->name);
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        environment_->undefined_text(name_id), name_id);
-                }
-            } else {
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
-            }
-            break;
-        }
+        case token_type::minus_minus:
+            return increment_variable(expr);
 
         default:
             return checked_result<void>(make_error_code(runtime_error_code::unknown_operator));  // [ErrorText] Unknown operator
     }
+    return {};
+}
+
+// ++x, x++, --x and x-- on a named variable (a member, an element or a reference target is a desugared compound): x += 1 on its
+// storage (detail::incdec_step), the value stored back through the variable's table; a field of this takes the field store (KEEP
+// BYTE-PARALLEL with vm_backend::exec_incdec)
+checked_result<void> interpreter::increment_variable(unary_expr* expr) {
+    if (expr->operand->get_type() != node_type::identifier_expr) {
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target));
+    }
+    auto* identifier = static_cast<identifier_expr*>(expr->operand.get());
+    const bool increment = expr->op.type == token_type::plus_plus;
+    if (script_value* varPtr = variable_cell(identifier)) {
+        if (const uint8_t kind = identifier->declared_ref_kind && varPtr->is_reference() ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
+            kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table
+            auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)), increment ? token_type::plus : token_type::minus,
+                true, expr->is_postfix, true, operator_table_, engine_, string_symbolizer_,
+                [this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); },
+                identifier->declared_ref);
+            if (!stepped) { return stepped.error_value(); }
+            push_value(std::move(stepped.value()));
+            return {};
+        }
+        // a scratch-backed reference (a typed element, a C++ property) commits what the step wrote into its scratch
+        auto* scratch_ref = varPtr->scratch_ref_holder();
+        script_value& target = varPtr->deref();
+        JAISCRIPT_TRY_ASSIGN(script_value stepped, detail::incdec_step(target, increment, engine_));
+        script_value old = expr->is_postfix ? detail::incdec_old_value(target, engine_) : make_value();
+        if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            target.assign_through(stepped);
+        } else if (target.raw_storage_index() == script_value::TYPEID_INT && stepped.raw_storage_index() == script_value::TYPEID_INT) {
+            target.unchecked_as_int_ref() = stepped.unchecked_as_int();
+        } else if (target.raw_storage_index() == script_value::TYPEID_FLOAT) {
+            target.unchecked_as_float_ref() = stepped.unchecked_as_float();
+        } else {
+            JAISCRIPT_TRY(compound_typed_store_back(target, stepped, identifier->name));
+        }
+        if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
+        push_value(expr->is_postfix ? std::move(old) : std::move(stepped));
+        return {};
+    }
+    if (identifier->global_qualified) {
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+            environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
+    }
+    script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+    strong_ptr<class_instance> instance = this_ptr && this_ptr->is_object() ? this_ptr->get_class_instance() : strong_ptr<class_instance>{};
+    if (!instance || !instance->has_field(identifier->symbol_id)) {
+        return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+            environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
+    }
+    if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+        JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
+    }
+    // a hybrid's C++ property reads through its getter and stores through its setter
+    script_value& this_val = *this_ptr;
+    const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
+    const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
+    script_value current = make_value();
+    if (prop_getter) {
+        JAISCRIPT_TRY_ASSIGN(current, detail::read_bare_cpp_property(this_val, instance.get(), instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+    } else {
+        current = instance->get_field(identifier->symbol_id);
+    }
+    JAISCRIPT_TRY_ASSIGN(script_value stepped, detail::incdec_step(current, increment, engine_));
+    script_value old = expr->is_postfix ? detail::incdec_old_value(current, engine_) : make_value();
+    if (prop_setter) {
+        JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, stepped));
+    } else {
+        auto enforced = instance->field_store(identifier->symbol_id, stepped, [&] { return clone_for_assignment(stepped); });
+        if (!enforced) {
+            return enforced.error_value();
+        }
+        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
+    }
+    push_value(expr->is_postfix ? std::move(old) : std::move(stepped));
     return {};
 }
 
@@ -1575,10 +1447,8 @@ checked_result<script_value> interpreter::assign_math_component(script_value& ba
 
 checked_result<void> interpreter::assign_member_value(const script_value& objectValue, member_expr* memberExpr, const script_value& value,
                                                       script_value* consumable) {
-    // Worker direct-field store (parallel_for v1): the setter probe below COPIES a
-    // shared method value (cross-worker count race); a backing field's enforce+set is
-    // exactly what the auto-setter does, on exclusively-owned instance storage. Any
-    // non-field member store needs method machinery - wall it.
+    // A worker stores a field directly: the setter probe below copies a shared method value (a cross-worker count race), and a
+    // backing field's enforce and set is what the auto-setter does on the worker's own instance; any other member store is refused
     if (parallel_worker_ && objectValue.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
         auto& holder = const_cast<script_value&>(objectValue).unchecked_get_object_storage();
         if (holder && holder->is_instance()) {
@@ -1652,99 +1522,848 @@ checked_result<void> interpreter::non_lvalue_target(const expression* target) {
                                 string_symbolizer_->intern(detail::non_lvalue_target_text(target)));
 }
 
-// A member's compound arithmetic, a bound operand decoded LIVE first (the store takes the detached result). KEEP
-// BYTE-PARALLEL with the VM exec_member_compound and implicit-this compound normalization
-checked_result<void> interpreter::member_compound_result(token_type a_op, script_value& currentValue, script_value& rightValue, script_value& result) {
-    if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-        currentValue = currentValue.bound_decoded_temp();
-    if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-        rightValue = rightValue.bound_decoded_temp();
-    // Cache type indices for fast checking
-    const size_t ci = currentValue.raw_storage_index();
-    const size_t ri = rightValue.raw_storage_index();
-    const detail::compound_text text_pair = a_op == token_type::plus_equal ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
-    if (text_pair == detail::compound_text::mismatch) { return detail::compound_mismatch(0, currentValue, rightValue, engine_); }
-    if (text_pair == detail::compound_text::append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the VM)
-        JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-    } else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
-        auto math_result = detail::math::binary(detail::math::bop_of(a_op), currentValue, rightValue, engine_);
-        if (!math_result) {
-            return math_result.error_value();
-        }
-        result = std::move(math_result.value());
-    } else
-    switch (a_op) {
-        case token_type::plus_equal: {
-            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                { script_int rr; if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '+='"); result = make_value(rr); }
-            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                result = make_value(cf + rf);
-            } else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-                // engine::memory_cap chokepoint: deny the concat result before it exists
-                if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-                    return detail::raise_memory_cap(*limits_);
+// a op= b, ++ and -- on a named target: a local, a capture, a global or a field of this
+template<bool Replaying>
+checked_result<void> interpreter::assign_compound_identifier(assignment_expr* expr, const replay_point* rs) {
+    auto* identifier = static_cast<identifier_expr*>(expr->target.get());
+
+    script_value* varPtr = variable_cell(identifier);
+    if (varPtr) {
+        // Constrained element/field ref: route through the shared
+        // helper so the compound result honors the constraint like subscript
+        // compounds do (vm parity). A C++ PROPERTY ref takes the same route: its
+        // deref is a scratch, the write must reach the setter.
+        if (varPtr->is_reference()) {
+            const auto* refHolder = varPtr->get_reference_holder();
+            if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
+                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
+                if (is_unwinding_) {
+                    push_value(make_value());
+                    return {};
                 }
-                result = make_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string());
-            } else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
-                if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
-                    return detail::raise_memory_cap(*limits_);
+                script_value rightValue = pop_value();
+                const token_type op = detail::compound_base(expr->op.type);
+                const char* opName = detail::binary_op_name(op);
+                auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
+                    operator_table_, engine_, string_symbolizer_,
+                    [this](const script_value& l, token_type o, const script_value& r) {
+                        return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+                    }, identifier->declared_ref);
+                if (!result) {
+                    return result.error_value();
                 }
-                result = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
+                push_value(std::move(result.value()));
+                return {};
+            }
+        }
+        // an element, map-entry or property reference is dereferenced only after the right-hand side has run (a
+        // reference to a removed element raises when the store resolves, not before the right side's calls; KEEP
+        // BYTE-PARALLEL with the VM's compound store, whose right value is already on the stack)
+        const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
+        const uint8_t declared_kind = !target_holder ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
+        const bool deferred_target = target_holder != nullptr && (!target_holder->plain_cell() ||
+                                     (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
+        if (is_unwinding_) {
+            // The RHS raised: surface the ORIGINAL exception instead of running the
+            // compound arithmetic on the placeholder, whose follow-on type error
+            // clobbered the catch value (KEEP BYTE-PARALLEL with the constrained-ref
+            // branch above and the vm's compound store)
+            push_value(make_value());
+            return {};
+        }
+        script_value rightValue = pop_value();
+        // a bound rhs decodes to a detached temporary
+        if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            script_value decoded = rightValue.deref().bound_decoded_temp();
+            rightValue = std::move(decoded);
+        }
+        auto& derefRight = rightValue.deref();
+
+        // Get type for RHS
+        auto rightType = derefRight.type();
+
+        // The right side ran user code: a by-reference argument may have boxed the variable into a cell in
+        // place, so the slot's representation changed under the reference taken above (the wrapper read as a
+        // Type mismatch). The rest of the path runs against the binding read again HERE, where the language's
+        // order puts the target's read (the right operand before the left, as for every compound assignment;
+        // KEEP BYTE-PARALLEL with the VM's compound store, which reads the slot after the right side)
+        auto apply = [&](script_value& target, script_value_type leftType) -> checked_result<void> {
+        if (expr->incdec_desugar) {   // a desugared ++/-- steps like the named form (increment_variable)
+            JAISCRIPT_TRY_ASSIGN(script_value stepped, detail::incdec_step(target, expr->op.type == token_type::plus_equal, engine_));
+            if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                target.assign_through(stepped);
             } else {
-                return detail::compound_mismatch(0, currentValue, rightValue, engine_);
+                JAISCRIPT_TRY(compound_typed_store_back(target, std::move(stepped), identifier->name));
             }
-            break;
+            push_value(expression_result_needed_ ? target.clone() : target);
+            return {};
         }
-        case token_type::minus_equal: {
-            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                { script_int rr; if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '-='"); result = make_value(rr); }
-            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                result = make_value(cf - rf);
+        // Check for custom operators first (rare path; flat table, no env probe)
+        if (has_custom_numeric_ops_) [[unlikely]] {
+            detail::op_slot op_slot = detail::op_slot::none;
+            switch (expr->op.type) {
+                case token_type::plus_equal: op_slot = detail::op_slot::plus; break;
+                case token_type::minus_equal: op_slot = detail::op_slot::minus; break;
+                case token_type::star_equal: op_slot = detail::op_slot::star; break;
+                default: if (detail::compound_is_bitwise(expr->op.type)) { op_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
+            }
+            if (operator_table_) {
+                if (const script_value* opFunc = operator_table_->entry(op_slot)) {
+                    const script_function& func = opFunc->as_function();
+                    std::vector<script_value> args = {target.clone(), rightValue};
+                    auto result = call_value(func, args);
+                    if (!result) {
+                        return result.error_value();
+                    }
+                    target = std::move(result.value());
+                    push_value(expression_result_needed_ ? target.clone() : target);
+                    return {};
+                }
+            }
+        }
+
+        // Check for custom arithmetic operators on class instances
+        if (leftType == script_value_type::jai_object_type) {
+            uint64_t op_symbol_id = 0;
+            op_symbol_id = compound_op_symbol(expr->op.type);
+            if (op_symbol_id != 0) {
+                auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
+                if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                std::optional<script_value> custom_result;
+                if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
+                if (custom_result.has_value()) {
+                    JAISCRIPT_TRY(detail::compound_slot_store(target, std::move(custom_result.value()), engine_));
+                    push_value(expression_result_needed_ ? target.clone() : target);
+                    return {};
+                }
+            }
+        }
+
+        // &= |= ^= <<= >>=: the binary operator's kernel, stored back through the slot's own table
+        // (KEEP BYTE-PARALLEL with the VM exec_compound_store)
+        if (detail::compound_is_bitwise(expr->op.type)) [[unlikely]] {
+            const token_type baseOp = detail::compound_base(expr->op.type);
+            JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
+            if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { target.assign_through(std::move(promoted)); }
+            else { JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name)); }
+            push_value(expression_result_needed_ ? target.clone() : target);
+            return {};
+        }
+
+        // + - * / % on numbers and += on text, in place where the kind holds; a bound variable stores back through
+        // assign_through. A zero divisor raises before the operands' kinds are read, an overflow names the compound, and
+        // a script value's char, utf8 or math operand and its %= take the general arithmetic (KEEP BYTE-PARALLEL with the
+        // VM exec_compound_store)
+        const bool bound = target.raw_storage_index() == script_value::TYPEID_CPP_BOUND;
+        const token_type op = expr->op.type;
+        const token_type baseOp = detail::compound_base(op);
+        const size_t rightIdx = derefRight.raw_storage_index();
+        const bool zero_divisor = (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) ||
+                                  (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0);
+        if (bound && op == token_type::percent_equal) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
+        if (!bound) {
+            if (op == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
+                return detail::compound_mismatch(0, target, derefRight, engine_);   // one '+=' table for every destination
+            }
+            const size_t leftIdx = target.raw_storage_index();
+            const bool general = detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx);
+            if (!general && op == token_type::percent_equal && rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
+                return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+            }
+            if (general || op == token_type::percent_equal) [[unlikely]] {
+                JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
+                JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
+                push_value(expression_result_needed_ ? target.clone() : target);
+                return {};
+            }
+        }
+        if (op == token_type::slash_equal && zero_divisor) { return checked_result<void>(make_error_code(runtime_error_code::division_by_zero)); }
+        // a bound target is read by its kind (the storage is the binding); a script value by its storage (a typed null reads none)
+        const size_t leftIdx = !bound ? target.raw_storage_index() : target.is_int() ? script_value::TYPEID_INT : target.is_float() ? script_value::TYPEID_FLOAT
+                             : target.is_string() ? script_value::TYPEID_STRING : script_value::TYPEID_NULL;
+        const size_t index = detail::compound_index(baseOp);
+        if (op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
+            // engine::memory_cap chokepoint: deny the append before it exists
+            if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
+            target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
+        } else if (!bound && op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
+            // string += char appends the char as text (a char is a text unit; string += int stays an error)
+            if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
+            target.unchecked_as_string_ref(engine_).push_back(derefRight.unchecked_as_char());
+        } else if (!detail::numeric_storage(leftIdx) || !detail::numeric_storage(rightIdx)) {
+            return detail::compound_mismatch(index, target, derefRight, engine_);
+        } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
+            constexpr const char* overflow_text[] = { "Integer overflow in '+='", "Integer overflow in '-='", "Integer overflow in '*='", "Integer overflow in '/='" };
+            script_int out;
+            if (detail::int_arith(baseOp, target.unchecked_as_int(), derefRight.unchecked_as_int(), out) != detail::scalar_fault::none) { return int_overflow_v(overflow_text[index]); }
+            if (bound) { target.assign_through(make_value(out)); }
+            else { target.unchecked_as_int_ref() = out; }
+        } else {
+            const script_float a = leftIdx == script_value::TYPEID_INT ? static_cast<script_float>(target.unchecked_as_int()) : target.unchecked_as_float();
+            const script_float b = rightIdx == script_value::TYPEID_INT ? static_cast<script_float>(derefRight.unchecked_as_int()) : derefRight.unchecked_as_float();
+            script_float out;
+            (void)detail::float_arith(baseOp, a, b, out);   // its one fault, a zero divisor, raised above
+            if (bound) { target.assign_through(make_value(out)); }
+            else if (leftIdx == script_value::TYPEID_FLOAT) { target.unchecked_as_float_ref() = out; }
+            else { JAISCRIPT_TRY(compound_typed_store_back(target, make_value(out), identifier->name)); }
+        }
+        push_value(expression_result_needed_ ? target.clone() : target);
+        return {};
+        };
+        varPtr = variable_cell(identifier);
+        if (!varPtr) [[unlikely]] {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
+        }
+        if (deferred_target) {
+            // the target's reference is read here, after the right side: a removed element or map entry is the
+            // language's error at this point (the checked twin of deref, so the error takes the ordinary flow)
+            auto alive = detail::ref_checked_deref(*varPtr);
+            if (!alive) [[unlikely]] { return alive.error_value(); }
+        }
+        // `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP
+        // BYTE-PARALLEL with the vm's compound store)
+        if (const uint8_t kind = !varPtr->is_reference() ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
+            kind && !detail::ref_declared_compound_keeps(kind, detail::ref_declared_current(*varPtr), derefRight, detail::compound_base(expr->op.type))) [[unlikely]] {
+            const token_type op = detail::compound_base(expr->op.type);
+            auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, detail::binary_op_name(op),
+                operator_table_, engine_, string_symbolizer_,
+                [this](const script_value& l, token_type o, const script_value& r) {
+                    return evaluate_arithmetic(l, o, r, detail::compound_index(o));
+                }, identifier->declared_ref);
+            if (!result) {
+                return result.error_value();
+            }
+            push_value(std::move(result.value()));
+            return {};
+        }
+        return apply(varPtr->deref(), varPtr->deref().type());
+    } else {
+        // VM parity (C++17 sequencing): the rhs of a compound assignment is
+        // evaluated BEFORE the target resolves, so rhs errors and side effects
+        // (e.g. an undefined rhs identifier) surface first
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
+        if (is_unwinding_) {
+            push_value(make_value());
+            return {};
+        }
+        script_value rightValue = pop_value();
+
+        // ::name targets never reach the implicit this.member fallback
+        if (identifier->global_qualified) {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
+        }
+        // Fallback: identifier is an implicit this.member access
+        // Check if 'this' exists and has this field
+        script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+        if (!this_ptr || !this_ptr->is_object()) {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (no 'this' in scope)"), identifier->symbol_id);
+        }
+
+        script_value& this_val = *this_ptr;
+        strong_ptr<class_instance> instance = this_val.get_class_instance();
+
+        if (!instance || !instance->has_field(identifier->symbol_id)) {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (not a field of 'this')"), identifier->symbol_id);
+        }
+        if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+            JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
+        }
+
+        // Get current field value. A hybrid's C++ property reads through its getter and
+        // stores through its setter (KEEP BYTE-PARALLEL with the VM exec_compound_store this-tail)
+        const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
+        const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
+        script_value currentValue = make_value();
+        if (prop_getter) {
+            JAISCRIPT_TRY_ASSIGN(currentValue, detail::read_bare_cpp_property(this_val, instance.get(),
+                instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+        } else {
+            currentValue = instance->get_field(identifier->symbol_id);
+        }
+
+        // Check for custom arithmetic operators on class instances
+        if (!expr->incdec_desugar && currentValue.is_object()) {
+            const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
+            if (op_symbol_id != 0) {
+                auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+                if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+                std::optional<script_value> custom_result;
+                if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
+                if (custom_result.has_value()) {
+                    if (prop_setter) {
+                        JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
+                    } else {
+                        auto enforced = instance->field_store(identifier->symbol_id, custom_result.value(), [&] { return clone_for_assignment(custom_result.value()); });
+                        if (!enforced) {
+                            return enforced.error_value();
+                        }
+                        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
+                    }
+                    push_value(std::move(custom_result.value()));
+                    return {};
+                }
+            }
+        }
+
+        JAISCRIPT_TRY_ASSIGN(script_value resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar));
+
+        // Store the enforced (declared-type converted) value; a consumed expression's
+        // value is the stored one, read back through a property getter
+        if (prop_setter) {
+            JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
+            if (expression_result_needed_) {
+                JAISCRIPT_TRY_ASSIGN(resultValue, detail::read_bare_cpp_property(this_val, instance.get(),
+                    instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
+            }
+        } else {
+            auto enforced = instance->field_store(identifier->symbol_id, resultValue, [&] { return clone_for_assignment(resultValue); });
+            if (!enforced) {
+                return enforced.error_value();
+            }
+            if (expression_result_needed_) { resultValue = clone_for_assignment(enforced.value()); }
+            instance->set_field_unchecked(identifier->symbol_id, enforced.value());
+        }
+        push_value(std::move(resultValue));
+    }
+    return {};
+}
+
+// a op= b on a member or a static, the receiver evaluated once
+template<bool Replaying>
+checked_result<void> interpreter::assign_compound_member(assignment_expr* expr, const replay_point* rs) {
+    auto* memberExpr = static_cast<member_expr*>(expr->target.get());
+    // C::s op= v writes back through the shared static-store kernel (vm parity)
+    auto store_static_target = [&](const script_value& result) -> checked_result<script_value> {
+        if (auto ns_target = detail::resolve_namespace_store(*engine_, memberExpr, *string_symbolizer_)) {
+            return store_namespace_cell(*ns_target, memberExpr, clone_for_assignment(result));
+        }
+        auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
+                                                      environment_->find_access_context());
+        if (!cls) {
+            return cls.error_value();
+        }
+        auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, result, [&] { return clone_for_assignment(result); });
+        if (!stored) {
+            return stored.error_value();
+        }
+        return std::move(stored.value());
+    };
+    // Handle compound assignment to member expression (e.g., obj.value += 10)
+    // C++17: the right-hand side is sequenced before the target, then the
+    // receiver is evaluated ONCE and held raw (a reference receiver re-resolves by mode at the store)
+    // across the read and the store-back; a :: target has no receiver (replay: rhs 0, receiver 1,
+    // partial {rhs}). KEEP BYTE-PARALLEL with the vm's value-first member compound.
+    script_value rightValue;
+    script_value objectValue;
+    script_value currentValue;
+    script_value postfix_old;
+    if (parked<Replaying>(rs, 0)) {
+        rightValue = rs->partial[0];
+    } else {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_member_compound, 0, {});
+        if (is_unwinding_) {
+            // RHS raised: surface the original exception, never touch the target
+            push_value(make_value());
+            return {};
+        }
+        rightValue = pop_value();
+        if (rightValue.is_reference()) {   // an element or map read: its value, taken now (KEEP BYTE-PARALLEL with the vm's member compound)
+            script_value derefed = rightValue.deref();
+            rightValue = std::move(derefed);
+        }
+    }
+    if (memberExpr->is_static) {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
+    } else {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
+        objectValue = pop_value();
+        if (is_unwinding_) {
+            push_value(make_value());
+            return {};
+        }
+        JAISCRIPT_TRY(member_read_on(memberExpr, objectValue, false));
+    }
+    currentValue = pop_value().deref();
+    if (is_unwinding_) {
+        // Target read raised: surface it, not the ++/-- gate's error on the placeholder
+        push_value(make_value());
+        return {};
+    }
+    postfix_old = expr->postfix_old_result ? currentValue : make_value();
+
+    // Check for custom arithmetic operators on class instances
+    if (!expr->incdec_desugar && currentValue.is_object()) {
+        const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
+        if (op_symbol_id != 0) {
+            auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+            if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
+            std::optional<script_value> custom_result;
+            if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
+            if (custom_result.has_value()) {
+                if (memberExpr->is_static) {
+                    script_value stored_static;
+                    JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(custom_result.value()));
+                    push_value(expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(custom_result.value()));
+                    return {};
+                }
+                // Assign the result back to the property
+                script_value target_obj = objectValue.deref();
+                if (target_obj.is_object()) {
+                    JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, custom_result.value()));
+                    if (is_unwinding_) {
+                        push_value(make_value());
+                        return {};
+                    }
+                    if (expression_result_needed_ &&
+                        detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
+                        JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));
+                        if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
+                        return {};
+                    }
+                    push_value(std::move(custom_result.value()));
+                    return {};
+                }
+            }
+        }
+    }
+
+    JAISCRIPT_TRY_ASSIGN(script_value resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar));
+
+    if (memberExpr->is_static) {
+        script_value stored_static;
+        JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(resultValue));
+        push_value(expr->postfix_old_result ? std::move(postfix_old)
+                   : expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(resultValue));
+        return {};
+    }
+
+    // Now assign the result back to the property (the receiver evaluated once above)
+    script_value target_obj = objectValue.deref();
+
+    // A math value's component (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
+    if (detail::math::is_kind(target_obj.raw_storage_index())) {
+        auto stored = assign_math_component(objectValue, memberExpr, resultValue);
+        if (!stored) {
+            return stored.error_value();
+        }
+        push_value(expr->postfix_old_result ? std::move(postfix_old)
+                   : expression_result_needed_ ? std::move(stored.value()) : std::move(resultValue));
+        return {};
+    }
+
+    // Check if it's an object
+    if (!target_obj.is_object()) {
+        if (target_obj.parallel_object_borrow()) [[unlikely]] { return detail::parallel_shared_store_refusal(memberExpr->member_id).error_value(); }
+        // Set exception state instead of throwing
+        raise_script_text(non_object_member_store_text({}, {}), memberExpr->location);
+        push_value(make_value());
+        return {};
+    }
+    if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
+
+    JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, resultValue));
+    if (is_unwinding_) {
+        push_value(make_value());
+        return {};
+    }
+    if (expression_result_needed_ && !expr->postfix_old_result &&
+        detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
+        JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));   // the stored value, through a user _get_
+        if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
+        return {};
+    }
+    push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
+    return {};
+}
+
+// a op= b on any other lvalue (a subscript, an element of a call's result): through the reference its read minted
+template<bool Replaying>
+checked_result<void> interpreter::assign_compound_element(assignment_expr* expr, const replay_point* rs) {
+    // General compound assignment for any expression
+    // This handles subscripts, function calls that return references, etc.
+
+    // C++17: the right-hand side is sequenced before the target: the value first, then the
+    // subscript's container and index and the element's read (replay: rhs 0, target 1, partial {rhs}). KEEP
+    // BYTE-PARALLEL with the vm's value-first index compound.
+    script_value rightValue;
+    if (parked<Replaying>(rs, 0)) {
+        rightValue = rs->partial[0];
+    } else {
+        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_general, 0, {});
+        if (is_unwinding_) {
+            // RHS raised: surface the original exception, never touch the target
+            push_value(make_value());
+            return {};
+        }
+        rightValue = pop_value();
+    }
+    string_target_context_ = expr->target->get_type() == node_type::binary_expr &&
+                             static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket;
+    compound_map_target_ = expr->target.get();   // a missing key of a typed-value map takes its default (visit_binary)
+    auto target_read = eval_child<Replaying>(expr->target.get(), rs, 1);
+    compound_map_target_ = nullptr;
+    string_target_context_ = false;
+    JAISCRIPT_TRY_OPERAND(std::move(target_read), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
+    script_value currentValue = pop_value();
+    if (is_unwinding_) {
+        push_value(make_value());
+        return {};
+    }
+    script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
+    script_value resultValue = make_value();
+    // a global operator answers first (the flat table; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound); ++ and --
+    // step numbers only
+    const script_value* compound_op_fn = operator_table_ && !expr->incdec_desugar
+        ? operator_table_->entry(detail::binary_op_slot(detail::compound_base(expr->op.type))) : nullptr;
+    if (compound_op_fn) {
+        auto result = call_value(compound_op_fn->as_function(), {currentValue, rightValue});
+        if (!result) {
+            return result.error_value();
+        }
+        resultValue = std::move(result.value());
+    } else {
+        // a bound rhs decodes before the zero divisor's check, which comes ahead of the operands' kinds
+        if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+            rightValue = rightValue.bound_decoded_temp();
+        }
+        const size_t ri = rightValue.raw_storage_index();
+        if (expr->op.type == token_type::slash_equal && ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
+                                                        (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0))) {
+            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+        }
+        if (expr->op.type == token_type::percent_equal && ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+        }
+        const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
+        JAISCRIPT_TRY_ASSIGN(resultValue, compound_value(detail::compound_base(expr->op.type), currentValue, rightValue, expr->incdec_desugar, text_slot));
+    }
+
+    if (currentValue.is_reference()) {
+        // The target read minted the element reference: store through it, never
+        // re-evaluate the subscript (its side effects, and any yield, ran once)
+        JAISCRIPT_TRY(store_through_subscript_reference(currentValue, std::move(resultValue)));
+        if (expr->postfix_old_result) {
+            valueStack_.discard();
+            push_value(std::move(postfix_old));
+        }
+    } else {
+        // No lvalue came back (rvalue base, string subscript, missing map key): the
+        // vm's exec_index_compound position and text (KEEP BYTE-PARALLEL)
+        return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
+    }
+    return {};
+}
+
+// x = v on a named target: its frame slot, an environment cell, a member of this or a static
+checked_result<void> interpreter::assign_identifier(assignment_expr* expr, script_value value) {
+    auto* identifier = static_cast<identifier_expr*>(expr->target.get());
+
+    // a local or a parameter stores into its frame slot
+    if (identifier->slot_index != SIZE_MAX && !call_stack_.empty()) {
+        script_value* frameLocal = call_stack_.back().get_local(identifier->slot_index);
+        if (frameLocal) {
+            // A cell in the slot IS the variable's storage when the name is the
+            // value decl itself (escape-boxed local): write the cell with the same
+            // typed enforcement a plain slot gets. Ref-alias names (ref params /
+            // auto& decls) and non-cell references keep store-through semantics.
+            script_value* storage = frameLocal;
+            bool store_through = false;
+            if (frameLocal->is_reference()) {
+                auto* holder = frameLocal->get_reference_holder();
+                if (holder && holder->has_cell && identifier->names_value_decl) {
+                    storage = holder->cell();
+                } else {
+                    store_through = true;
+                }
+            }
+            if (store_through) {
+                JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
             } else {
-                return detail::compound_mismatch(1, currentValue, rightValue, engine_);
+                // Slot locals enforce their locked type like the environment path does
+                // (same-type fast guard keeps the hot store path call-free)
+                type_info_ptr slot_type = storage->get_type_info();
+                if (detail::slot_value_assign_candidate(*storage) && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
+                    const type_info* held_tag = storage->type_info_raw();
+                    const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
+                                              identifier->names_var_decl;
+                    if (auto stored = detail::slot_value_assign(*storage, value, engine_, declared_var)) {   // the held object decides (KEEP BYTE-PARALLEL with vm_backend::held_object_store)
+                        if (!*stored) { return stored->error_value(); }
+                        if (stored->value() == detail::value_store::assigned) {
+                            push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));
+                        } else {
+                            script_value rebound = clone_for_assignment(value);
+                            detail::var_stamp(rebound, nullptr, engine_);
+                            *storage = std::move(rebound);
+                            push_value(std::move(value));
+                        }
+                        return {};
+                    }
+                }
+                // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
+                if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
+                    if (auto assigned = detail::user_assign_operator(*storage, value, engine_, nullptr, nullptr, &value)) {
+                        if (!*assigned) { return assigned->error_value(); }
+                        push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
+                        return {};
+                    }
+                }
+                JAISCRIPT_TRY_ASSIGN(value, converted_for_variable(slot_type, std::move(value), identifier->name));
+                if (detail::uniquely_held(value)) {   // a prvalue is the stored object (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
+                    *storage = std::move(value);
+                    push_value(expression_result_needed_ ? clone_for_assignment(*storage) : script_value(*storage));
+                    return {};
+                }
+                // Direct assignment to call frame local (or its cell); the
+                // kernel deep-copies values and shares shared_ptr handles
+                *storage = clone_for_assignment(value);
             }
-            break;
+            push_value(std::move(value));
+            return {};
         }
-        case token_type::star_equal: {
-            if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-                { script_int rr; if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return int_overflow_v("Integer overflow in '*='"); result = make_value(rr); }
-            } else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-                       (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-                script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-                script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-                result = make_value(cf * rf);
+    }
+
+    // Member scope: a member (field, static, or method - shadowing is by NAME)
+    // outranks everything past the function's own scopes, so an env hit that
+    // could only be a global must yield to the member-store kernel below.
+    bool member_wins = false;
+    if (!identifier->global_qualified && member_scope_.active() &&
+        !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
+        const auto store_member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
+                                                             member_scope_.statics, identifier->symbol_id, /*want_methods*/ false);
+        if (store_member) {
+            JAISCRIPT_TRY(detail::bare_member_access(store_member, identifier->symbol_id, environment_->find_access_context()));
+        }
+        member_wins = store_member.what != detail::member_probe_hit::kind::miss ||
+                      detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
+                                                      member_scope_.statics, identifier->symbol_id);
+    }
+
+    // ::name resolves and stores against the GLOBAL env only
+    environment* ident_env = identifier->global_qualified
+        ? get_global_environment().get() : environment_.get();
+
+    // Get the current value to check if it's a reference (environment path)
+    if (!member_wins && ident_env->contains(identifier->symbol_id)) {
+        script_value* currentVal = ident_env->get_value_ptr(identifier->symbol_id);
+        bool boxed_cell = false;
+        bool store_through = false;
+        if (currentVal && currentVal->is_reference()) {
+            // Escape-boxed variable (cell) named as itself: redirect to the cell
+            // inner and run the full assignment semantics on it; anything else
+            // stores through
+            auto* holder = currentVal->get_reference_holder();
+            if (holder && holder->has_cell && identifier->names_value_decl) {
+                currentVal = holder->cell();
+                boxed_cell = true;
             } else {
-                return detail::compound_mismatch(2, currentValue, rightValue, engine_);
+                store_through = true;
             }
-            break;
         }
-        case token_type::slash_equal: {
-            // the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-            break;
-        }
-        case token_type::percent_equal: {
-            if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
-                    "Modulo by zero");
+        // Boxed storage writes the cell inner directly (an env assign would
+        // replace the handle and detach every alias)
+        auto store_back = [&](script_value&& v) -> checked_result<void> {
+            if (boxed_cell) {
+                *currentVal = std::move(v);
+                return {};
             }
-            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-            break;
-        }
-        default:
-            if (!detail::compound_is_bitwise(a_op)) {
-                return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                    "Unsupported compound assignment operator");
+            return ident_env->assign(identifier->symbol_id, std::move(v));
+        };
+        // The value of a store through an alias, a bound variable or a handle: a consumed one is the destination's
+        // stored value; the statement root hands the host its right-hand side
+        const bool handle_rows = store_through || (currentVal && (currentVal->is_cpp_bound() || currentVal->is_weak_ptr() ||
+            (currentVal->get_type_info() && currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type)));
+        std::optional<script_value> host_result;
+        if (handle_rows && !expression_result_needed_) { host_result = value; }
+        script_value* const stored_cell = boxed_cell ? currentVal : nullptr;
+        auto push_stored = [&]() {
+            if (host_result) { push_value(std::move(*host_result)); return; }
+            const script_value* stored = stored_cell ? stored_cell : ident_env->get_value_ptr(identifier->symbol_id);
+            push_value(stored ? clone_for_assignment(stored->deref()) : make_value());
+        };
+        if (store_through) {
+            // This is a reference - assign through it (deep copy the value)
+            JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
+        } else if (currentVal && currentVal->is_cpp_bound()) {
+            // This is a C++ bound value - use assign_through
+            currentVal->assign_through(value);
+        } else {
+            // the declared type converts the value (a var's or a handle's held object may take it first, a class value's
+            // operator= runs); a handle's expression value is push_stored's
+            type_info_ptr target_type = currentVal->get_type_info();
+            auto push_result = [&](script_value result) {
+                if (handle_rows) { push_stored(); } else { push_value(std::move(result)); }
+            };
+            if (!detail::handle_rebinds(*currentVal, value) && detail::slot_value_assign_candidate(*currentVal) &&
+                (!target_type || target_type->base_type != script_value_type::jai_object_type)) {
+                if (auto stored = detail::slot_value_assign(*currentVal, value, engine_)) {   // the held object decides
+                    if (!*stored) { return stored->error_value(); }
+                    if (stored->value() == detail::value_store::rebind) {
+                        script_value rebound = clone_for_assignment(value);
+                        detail::var_stamp(rebound, nullptr, engine_);
+                        JAISCRIPT_TRY(store_back(std::move(rebound)));
+                        push_result(std::move(value));
+                    } else {
+                        push_result(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));
+                    }
+                    return {};
+                }
             }
-            JAISCRIPT_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, detail::compound_base(a_op), rightValue,
-                                                                  detail::compound_index(detail::compound_base(a_op))));
-            break;
+            // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
+            if (target_type && target_type->base_type == script_value_type::jai_object_type) {
+                if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_, nullptr, nullptr, &value)) {
+                    if (!*assigned) { return assigned->error_value(); }
+                    push_result(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
+                    return {};
+                }
+            }
+            JAISCRIPT_TRY_ASSIGN(value, converted_for_variable(target_type, std::move(value), identifier->name));
+            // an lvalue right-hand side is copied (the kernel deep-copies values and shares handles), a temporary moves in
+            if (is_lvalue_expression(expr->value.get())) {
+                JAISCRIPT_TRY(store_back(clone_for_assignment(value)));
+                push_result(std::move(value));
+            } else if (boxed_cell) {
+                JAISCRIPT_TRY(store_back(std::move(value)));
+                push_result(*currentVal);   // the cell inner IS the stored value
+            } else {
+                JAISCRIPT_TRY(ident_env->assign(identifier->symbol_id, std::move(value)));
+                script_value* stored = ident_env->get_value_ptr(identifier->symbol_id);
+                push_result(stored ? *stored : make_value());   // shallow: the stored value, as C++ yields the lvalue
+            }
+            return {};
+        }
+        if (handle_rows) {
+            if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
+        }
+    } else {
+        // ::name targets never reach members - a global miss is an error
+        if (identifier->global_qualified) {
+            return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
+                environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
+        }
+        // Variable doesn't exist in environment
+        // Try static_method_environment's assign (which handles static fields)
+        // or instance method's 'this' field assignment
+        bool assigned_to_member = false;
+
+        // Determine if RHS is lvalue (needs clone) or temporary (can move)
+        const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
+
+        script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
+        if (this_ptr) {
+            script_value& this_val = *this_ptr;
+            if (this_val.is_object()) {
+                auto obj_holder = this_val.get_object_holder();
+                if (obj_holder->is_instance()) {
+                    auto instance = obj_holder->instance_handle();
+
+                    // First try instance fields
+                    if (instance->has_field(identifier->symbol_id)) {
+                        // A hybrid's C++ property stores through its setter, exactly like
+                        // this.name = v (a same-named script field shadows it)
+                        if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), identifier->symbol_id)) {
+                            JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), setter_id, value));
+                            assigned_to_member = true;
+                        }
+                        // Not a C++ property or no setter - use regular field assignment
+                        // (typed fields enforce like locals)
+                        if (!assigned_to_member) {
+                            // All-detach rule: the implicit-this
+                            // MOVE path stores a detached snapshot like the
+                            // explicit o.f = spelling
+                            if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                                value = value.detached_for_store();
+                            }
+                            if (is_lvalue_read) {
+                                auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
+                                if (!enforced) {
+                                    return enforced.error_value();
+                                }
+                                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
+                            } else {
+                                auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return std::move(value); }, &value);
+                                if (!enforced) {
+                                    return enforced.error_value();
+                                }
+                                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
+                                value = instance->get_field(identifier->symbol_id);  // Shallow copy for return
+                            }
+                            assigned_to_member = true;
+                        }
+                    }
+                    // Then try static fields (typed statics enforce like fields)
+                    else {
+                        class_definition* class_def = detail::bare_static_owner(bare_declaring_class(), instance->get_class_definition(),
+                                                                                identifier->symbol_id);
+                        if (class_def) {
+                            // an implicit static store stores a detached snapshot too
+                            if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                                value = value.detached_for_store();
+                            }
+                            if (is_lvalue_read) {
+                                auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
+                                if (!stored) {
+                                    return stored.error_value();
+                                }
+                                if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
+                            } else {
+                                auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return std::move(value); });
+                                if (!stored) {
+                                    return stored.error_value();
+                                }
+                                value = std::move(stored.value());
+                            }
+                            assigned_to_member = true;
+                        }
+                    }
+                }
+            }
+        }
+
+        // Static-method scope: no 'this' to route through, and a nested block's env
+        // assign would raw-write the static cell it finds through the scope env - land
+        // the store on the scope's class (KEEP BYTE-PARALLEL with vm_backend
+        // store_popped_value's statics tail)
+        class_definition* static_owner = !assigned_to_member && member_scope_.state == detail::member_scope_state::statics
+            ? detail::bare_static_owner(member_scope_.statics, nullptr, identifier->symbol_id) : nullptr;
+        if (static_owner) {
+            if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
+                value = value.detached_for_store();
+            }
+            if (is_lvalue_read) {
+                auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
+                if (!stored) {
+                    return stored.error_value();
+                }
+                if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
+            } else {
+                auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return std::move(value); });
+                if (!stored) {
+                    return stored.error_value();
+                }
+                value = std::move(stored.value());
+            }
+            assigned_to_member = true;
+        }
+
+        if (!assigned_to_member) {
+            // Use environment->assign() which will:
+            // - For static_method_environment: check static fields, then return error if not found
+            // - For method_environment: check 'this' fields, then define locally if not found
+            // - For regular environment: return error if variable doesn't exist
+            if (is_lvalue_read) {
+                JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, clone_for_assignment(value)));
+            } else {
+                JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
+                // Get back the stored value for the return (shallow copy)
+                script_value* stored = environment_->get_value_ptr(identifier->symbol_id);
+                value = stored ? *stored : make_value();  // Shallow copy, not clone
+            }
+        }
+        push_value(std::move(value));
     }
     return {};
 }
@@ -1805,590 +2424,15 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
         return {};
     }
 
-    // For compound assignment operators, we need the current value
     if (expr->op.type != token_type::equal) {
-        // Get current value of the target
         if (expr->target->get_type() == node_type::identifier_expr) {
-            auto* identifier = static_cast<identifier_expr*>(expr->target.get());
-
-            // Slot-based O(1) first, then environment fallback
-            script_value* varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
-            if (varPtr) {
-                // Constrained element/field ref (Tier 1 bind): route through the shared
-                // helper so the compound result honors the constraint like subscript
-                // compounds do (vm parity). A C++ PROPERTY ref takes the same route: its
-                // deref is a scratch, the write must reach the setter.
-                if (varPtr->is_reference()) {
-                    const auto* refHolder = varPtr->get_reference_holder();
-                    if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
-                        JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
-                        if (is_unwinding_) {
-                            push_value(make_value());
-                            return {};
-                        }
-                        script_value rightValue = pop_value();
-                        const token_type op = detail::compound_base(expr->op.type);
-                        const char* opName = detail::binary_op_name(op);
-                        auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
-                            operator_table_, engine_, string_symbolizer_,
-                            [this](const script_value& l, token_type o, const script_value& r) {
-                                return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-                            }, identifier->declared_ref);
-                        if (!result) {
-                            return result.error_value();
-                        }
-                        push_value(std::move(result.value()));
-                        return {};
-                    }
-                }
-                // an element, map-entry or property reference is dereferenced only after the right-hand side has run (a
-                // reference to a removed element raises when the store resolves, not before the right side's calls; KEEP
-                // BYTE-PARALLEL with the VM's compound store, whose right value is already on the stack)
-                const auto* target_holder = varPtr->is_reference() ? varPtr->get_reference_holder() : nullptr;
-                const uint8_t declared_kind = !target_holder ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
-                const bool deferred_target = target_holder != nullptr && (!target_holder->plain_cell() ||
-                                             (declared_kind && declared_kind != target_holder->cell()->raw_storage_index()));
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
-                if (is_unwinding_) {
-                    // The RHS raised: surface the ORIGINAL exception instead of running the
-                    // compound arithmetic on the placeholder, whose follow-on type error
-                    // clobbered the catch value (KEEP BYTE-PARALLEL with the constrained-ref
-                    // branch above and the vm's compound store)
-                    push_value(make_value());
-                    return {};
-                }
-                script_value rightValue = pop_value();
-                // S8: a bound rhs decodes to a detached temp (the old shadow-index operand behavior)
-                if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                    script_value decoded = rightValue.deref().bound_decoded_temp();
-                    rightValue = std::move(decoded);
-                }
-                auto& derefRight = rightValue.deref();
-
-                // Get type for RHS
-                auto rightType = derefRight.type();
-
-                // The right side ran user code: a by-reference argument may have boxed the variable into a cell in
-                // place, so the slot's representation changed under the reference taken above (the wrapper read as a
-                // Type mismatch). The rest of the path runs against the binding read again HERE, where the language's
-                // order puts the target's read (the right operand before the left, as for every compound assignment;
-                // KEEP BYTE-PARALLEL with the VM's compound store, which reads the slot after the right side)
-                auto apply = [&](script_value& target, script_value_type leftType) -> checked_result<void> {
-                // Check for custom operators first (rare path; flat table, no env probe)
-                if (has_custom_numeric_ops_) [[unlikely]] {
-                    detail::op_slot op_slot = detail::op_slot::none;
-                    switch (expr->op.type) {
-                        case token_type::plus_equal: op_slot = detail::op_slot::plus; break;
-                        case token_type::minus_equal: op_slot = detail::op_slot::minus; break;
-                        case token_type::star_equal: op_slot = detail::op_slot::star; break;
-                        default: if (detail::compound_is_bitwise(expr->op.type)) { op_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
-                    }
-                    if (operator_table_) {
-                        if (const script_value* opFunc = operator_table_->entry(op_slot)) {
-                            const script_function& func = opFunc->as_function();
-                            std::vector<script_value> args = {target.clone(), rightValue};
-                            auto result = call_value(func, args);
-                            if (!result) {
-                                return result.error_value();
-                            }
-                            target = std::move(result.value());
-                            push_value(expression_result_needed_ ? target.clone() : target);
-                            return {};
-                        }
-                    }
-                }
-
-                // Check for custom arithmetic operators on class instances
-                if (leftType == script_value_type::jai_object_type) {
-                    uint64_t op_symbol_id = 0;
-                    op_symbol_id = compound_op_symbol(expr->op.type);
-                    if (op_symbol_id != 0) {
-                        auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
-                        if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
-                        std::optional<script_value> custom_result;
-                        if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
-                        if (custom_result.has_value()) {
-                            JAISCRIPT_TRY(detail::compound_slot_store(target, std::move(custom_result.value()), engine_));
-                            push_value(expression_result_needed_ ? target.clone() : target);
-                            return {};
-                        }
-                    }
-                }
-
-                // &= |= ^= <<= >>=: the binary operator's kernel, stored back through the slot's own table
-                // (KEEP BYTE-PARALLEL with the VM exec_compound_store)
-                if (detail::compound_is_bitwise(expr->op.type)) [[unlikely]] {
-                    const token_type baseOp = detail::compound_base(expr->op.type);
-                    JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
-                    if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) { target.assign_through(std::move(promoted)); }
-                    else { JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name)); }
-                    push_value(expression_result_needed_ ? target.clone() : target);
-                    return {};
-                }
-
-                // + - * / % on numbers and += on text, in place where the kind holds; a bound variable stores back through
-                // assign_through. A zero divisor raises before the operands' kinds are read, an overflow names the compound, and
-                // a script value's char, utf8 or math operand and its %= take the general arithmetic (KEEP BYTE-PARALLEL with the
-                // VM exec_compound_store)
-                const bool bound = target.raw_storage_index() == script_value::TYPEID_CPP_BOUND;
-                const token_type op = expr->op.type;
-                const token_type baseOp = detail::compound_base(op);
-                const size_t rightIdx = derefRight.raw_storage_index();
-                const bool zero_divisor = (rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) ||
-                                          (rightIdx == script_value::TYPEID_FLOAT && derefRight.unchecked_as_float() == 0.0);
-                if (bound && op == token_type::percent_equal) { return checked_result<void>(make_error_code(runtime_error_code::unknown_operator)); }
-                if (!bound) {
-                    if (op == token_type::plus_equal && detail::compound_plus_text(target, derefRight) == detail::compound_text::mismatch) {
-                        return detail::compound_mismatch(0, target, derefRight, engine_);   // one '+=' table for every destination
-                    }
-                    const size_t leftIdx = target.raw_storage_index();
-                    const bool general = detail::char_operands_promote(leftIdx, rightIdx) || detail::utf8_operands(leftIdx, rightIdx) || detail::math::owns_arithmetic(leftIdx, rightIdx);
-                    if (!general && op == token_type::percent_equal && rightIdx == script_value::TYPEID_INT && derefRight.unchecked_as_int() == 0) {
-                        return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-                    }
-                    if (general || op == token_type::percent_equal) [[unlikely]] {
-                        JAISCRIPT_TRY_ASSIGN(script_value promoted, evaluate_arithmetic(target, baseOp, derefRight, detail::compound_index(baseOp)));
-                        JAISCRIPT_TRY(compound_typed_store_back(target, std::move(promoted), identifier->name));
-                        push_value(expression_result_needed_ ? target.clone() : target);
-                        return {};
-                    }
-                }
-                if (op == token_type::slash_equal && zero_divisor) { return checked_result<void>(make_error_code(runtime_error_code::division_by_zero)); }
-                // a bound target is read by its kind (the storage is the binding); a script value by its storage (a typed null reads none)
-                const size_t leftIdx = !bound ? target.raw_storage_index() : target.is_int() ? script_value::TYPEID_INT : target.is_float() ? script_value::TYPEID_FLOAT
-                                     : target.is_string() ? script_value::TYPEID_STRING : script_value::TYPEID_NULL;
-                const size_t index = detail::compound_index(baseOp);
-                if (op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_STRING) {
-                    // engine::memory_cap chokepoint: deny the append before it exists
-                    if (!limits_->memory_charge(derefRight.unchecked_as_string().size())) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
-                    target.unchecked_as_string_ref(engine_) += derefRight.unchecked_as_string();
-                } else if (!bound && op == token_type::plus_equal && leftIdx == script_value::TYPEID_STRING && rightIdx == script_value::TYPEID_CHAR) {
-                    // string += char appends the char as text (a char is a text unit; string += int stays an error)
-                    if (!limits_->memory_charge(sizeof(script_value) + target.unchecked_as_string().size() + 1)) [[unlikely]] { return detail::raise_memory_cap(*limits_); }
-                    target.unchecked_as_string_ref(engine_).push_back(derefRight.unchecked_as_char());
-                } else if (!detail::numeric_storage(leftIdx) || !detail::numeric_storage(rightIdx)) {
-                    return detail::compound_mismatch(index, target, derefRight, engine_);
-                } else if (leftIdx == script_value::TYPEID_INT && rightIdx == script_value::TYPEID_INT) {
-                    constexpr const char* overflow_text[] = { "Integer overflow in '+='", "Integer overflow in '-='", "Integer overflow in '*='", "Integer overflow in '/='" };
-                    script_int out;
-                    if (detail::int_arith(baseOp, target.unchecked_as_int(), derefRight.unchecked_as_int(), out) != detail::scalar_fault::none) { return int_overflow_v(overflow_text[index]); }
-                    if (bound) { target.assign_through(make_value(out)); }
-                    else { target.unchecked_as_int_ref() = out; }
-                } else {
-                    const script_float a = leftIdx == script_value::TYPEID_INT ? static_cast<script_float>(target.unchecked_as_int()) : target.unchecked_as_float();
-                    const script_float b = rightIdx == script_value::TYPEID_INT ? static_cast<script_float>(derefRight.unchecked_as_int()) : derefRight.unchecked_as_float();
-                    script_float out;
-                    (void)detail::float_arith(baseOp, a, b, out);   // its one fault, a zero divisor, raised above
-                    if (bound) { target.assign_through(make_value(out)); }
-                    else if (leftIdx == script_value::TYPEID_FLOAT) { target.unchecked_as_float_ref() = out; }
-                    else { JAISCRIPT_TRY(compound_typed_store_back(target, make_value(out), identifier->name)); }
-                }
-                push_value(expression_result_needed_ ? target.clone() : target);
-                return {};
-                };
-                varPtr = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
-                if (!varPtr) [[unlikely]] {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
-                }
-                if (deferred_target) {
-                    // the target's reference is read here, after the right side: a removed element or map entry is the
-                    // language's error at this point (the checked twin of deref, so the error takes the ordinary flow)
-                    auto alive = detail::ref_checked_deref(*varPtr);
-                    if (!alive) [[unlikely]] { return alive.error_value(); }
-                }
-                // `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP
-                // BYTE-PARALLEL with the vm's compound store)
-                if (const uint8_t kind = !varPtr->is_reference() ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
-                    kind && !detail::ref_declared_compound_keeps(kind, detail::ref_declared_current(*varPtr), derefRight, detail::compound_base(expr->op.type))) [[unlikely]] {
-                    const token_type op = detail::compound_base(expr->op.type);
-                    auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, detail::binary_op_name(op),
-                        operator_table_, engine_, string_symbolizer_,
-                        [this](const script_value& l, token_type o, const script_value& r) {
-                            return evaluate_arithmetic(l, o, r, detail::compound_index(o));
-                        }, identifier->declared_ref);
-                    if (!result) {
-                        return result.error_value();
-                    }
-                    push_value(std::move(result.value()));
-                    return {};
-                }
-                return apply(varPtr->deref(), varPtr->deref().type());
-            } else {
-                // VM parity (C++17 sequencing): the rhs of a compound assignment is
-                // evaluated BEFORE the target resolves, so rhs errors and side effects
-                // (e.g. an undefined rhs identifier) surface first
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_rhs, 0, {});
-                if (is_unwinding_) {
-                    push_value(make_value());
-                    return {};
-                }
-                script_value rightValue = pop_value();
-
-                // ::name targets never reach the implicit this.member fallback
-                if (identifier->global_qualified) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
-                }
-                // Fallback: identifier is an implicit this.member access
-                // Check if 'this' exists and has this field
-                script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
-                if (!this_ptr || !this_ptr->is_object()) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (no 'this' in scope)"), identifier->symbol_id);
-                }
-
-                script_value& this_val = *this_ptr;
-                strong_ptr<class_instance> instance = this_val.get_class_instance();
-
-                if (!instance || !instance->has_field(identifier->symbol_id)) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        environment_->undefined_text(identifier->symbol_id, "Undefined variable '{0}' (not a field of 'this')"), identifier->symbol_id);
-                }
-                if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
-                    JAISCRIPT_TRY(detail::enforce_member_access(field_class, identifier->symbol_id, environment_->find_access_context()));
-                }
-
-                // Get current field value. A hybrid's C++ property reads through its getter and
-                // stores through its setter (KEEP BYTE-PARALLEL with the VM exec_compound_store this-tail)
-                const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), identifier->symbol_id);
-                const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), identifier->symbol_id) : 0;
-                script_value currentValue = make_value();
-                if (prop_getter) {
-                    JAISCRIPT_TRY_ASSIGN(currentValue, detail::read_bare_cpp_property(this_val, instance.get(),
-                        instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
-                } else {
-                    currentValue = instance->get_field(identifier->symbol_id);
-                }
-
-                // Check for custom arithmetic operators on class instances
-                if (currentValue.is_object()) {
-                    const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
-                    if (op_symbol_id != 0) {
-                        auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
-                        if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
-                        std::optional<script_value> custom_result;
-                        if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
-                        if (custom_result.has_value()) {
-                            if (prop_setter) {
-                                JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, custom_result.value()));
-                            } else {
-                                auto enforced = instance->field_store(identifier->symbol_id, custom_result.value(), [&] { return clone_for_assignment(custom_result.value()); });
-                                if (!enforced) {
-                                    return enforced.error_value();
-                                }
-                                instance->set_field_unchecked(identifier->symbol_id, enforced.value());
-                            }
-                            push_value(std::move(custom_result.value()));
-                            return {};
-                        }
-                    }
-                }
-
-                script_value resultValue = make_value();
-                JAISCRIPT_TRY(member_compound_result(expr->op.type, currentValue, rightValue, resultValue));
-
-                // Store the enforced (declared-type converted) value; a consumed expression's
-                // value is the stored one, read back through a property getter
-                if (prop_setter) {
-                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
-                    if (expression_result_needed_) {
-                        JAISCRIPT_TRY_ASSIGN(resultValue, detail::read_bare_cpp_property(this_val, instance.get(),
-                            instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
-                    }
-                } else {
-                    auto enforced = instance->field_store(identifier->symbol_id, resultValue, [&] { return clone_for_assignment(resultValue); });
-                    if (!enforced) {
-                        return enforced.error_value();
-                    }
-                    if (expression_result_needed_) { resultValue = clone_for_assignment(enforced.value()); }
-                    instance->set_field_unchecked(identifier->symbol_id, enforced.value());
-                }
-                push_value(std::move(resultValue));
-            }
-        } else if (expr->target->get_type() == node_type::member_expr) {
-            auto* memberExpr = static_cast<member_expr*>(expr->target.get());
-            // C::s op= v writes back through the shared static-store kernel (vm parity)
-            auto store_static_target = [&](const script_value& result) -> checked_result<script_value> {
-                if (auto ns_target = detail::resolve_namespace_store(*engine_, memberExpr, *string_symbolizer_)) {
-                    return store_namespace_cell(*ns_target, memberExpr, clone_for_assignment(result));
-                }
-                auto cls = detail::resolve_static_store_class(memberExpr, *environment_, *string_symbolizer_,
-                                                              environment_->find_access_context());
-                if (!cls) {
-                    return cls.error_value();
-                }
-                auto stored = detail::store_static_member(*cls.value(), memberExpr->member_id, result, [&] { return clone_for_assignment(result); });
-                if (!stored) {
-                    return stored.error_value();
-                }
-                return std::move(stored.value());
-            };
-            // Handle compound assignment to member expression (e.g., obj.value += 10)
-            // C++17: the right-hand side is sequenced before the target, then the
-            // receiver is evaluated ONCE and held raw (a reference receiver re-resolves by mode at the store)
-            // across the read and the store-back; a :: target has no receiver (replay: rhs 0, receiver 1,
-            // partial {rhs}). KEEP BYTE-PARALLEL with the vm's value-first member compound.
-            script_value rightValue;
-            script_value objectValue;
-            script_value currentValue;
-            script_value postfix_old;
-            if (parked<Replaying>(rs, 0)) {
-                rightValue = rs->partial[0];
-            } else {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_member_compound, 0, {});
-                if (is_unwinding_) {
-                    // RHS raised: surface the original exception, never touch the target
-                    push_value(make_value());
-                    return {};
-                }
-                rightValue = pop_value();
-                if (rightValue.is_reference()) {   // an element or map read: its value, taken now (KEEP BYTE-PARALLEL with the vm's member compound)
-                    script_value derefed = rightValue.deref();
-                    rightValue = std::move(derefed);
-                }
-            }
-            if (memberExpr->is_static) {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr, rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
-            } else {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(memberExpr->object.get(), rs, 1), expr, rp_asg_member_compound, 1, (std::vector<script_value>{rightValue}));
-                objectValue = pop_value();
-                if (is_unwinding_) {
-                    push_value(make_value());
-                    return {};
-                }
-                JAISCRIPT_TRY(member_read_on(memberExpr, objectValue, false));
-            }
-            currentValue = pop_value().deref();
-            if (is_unwinding_) {
-                // Target read raised: surface it, not the ++/-- gate's error on the placeholder
-                push_value(make_value());
-                return {};
-            }
-            postfix_old = expr->postfix_old_result ? currentValue : make_value();
-            if (expr->incdec_desugar) {
-                const size_t ci = currentValue.raw_storage_index();
-                if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-                    return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue, engine_);
-                }
-            }
-
-            // Check for custom arithmetic operators on class instances
-            if (currentValue.is_object()) {
-                const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
-                if (op_symbol_id != 0) {
-                    auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
-                    if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
-                    std::optional<script_value> custom_result;
-                    if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
-                    if (custom_result.has_value()) {
-                        if (memberExpr->is_static) {
-                            script_value stored_static;
-                            JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(custom_result.value()));
-                            push_value(expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(custom_result.value()));
-                            return {};
-                        }
-                        // Assign the result back to the property
-                        script_value target_obj = objectValue.deref();
-                        if (target_obj.is_object()) {
-                            JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, custom_result.value()));
-                            if (is_unwinding_) {
-                                push_value(make_value());
-                                return {};
-                            }
-                            if (expression_result_needed_ &&
-                                detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
-                                JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));
-                                if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
-                                return {};
-                            }
-                            push_value(std::move(custom_result.value()));
-                            return {};
-                        }
-                    }
-                }
-            }
-
-            script_value resultValue = make_value();
-            JAISCRIPT_TRY(member_compound_result(expr->op.type, currentValue, rightValue, resultValue));
-            
-            if (memberExpr->is_static) {
-                script_value stored_static;
-                JAISCRIPT_TRY_ASSIGN(stored_static, store_static_target(resultValue));
-                push_value(expr->postfix_old_result ? std::move(postfix_old)
-                           : expression_result_needed_ ? clone_for_assignment(stored_static) : std::move(resultValue));
-                return {};
-            }
-
-            // Now assign the result back to the property (the receiver evaluated once above)
-            script_value target_obj = objectValue.deref();
-
-            // A math value's component (KEEP BYTE-PARALLEL with vm_backend::exec_member_compound)
-            if (detail::math::is_kind(target_obj.raw_storage_index())) {
-                auto stored = assign_math_component(objectValue, memberExpr, resultValue);
-                if (!stored) {
-                    return stored.error_value();
-                }
-                push_value(expr->postfix_old_result ? std::move(postfix_old)
-                           : expression_result_needed_ ? std::move(stored.value()) : std::move(resultValue));
-                return {};
-            }
-
-            // Check if it's an object
-            if (!target_obj.is_object()) {
-                if (target_obj.parallel_object_borrow()) [[unlikely]] { return detail::parallel_shared_store_refusal(memberExpr->member_id).error_value(); }
-                // Set exception state instead of throwing
-                raise_script_text(non_object_member_store_text({}, {}), memberExpr->location);
-                push_value(make_value());
-                return {};
-            }
-            if (detail::class_temporary_member_store(memberExpr, objectValue, 2)) [[unlikely]] { return detail::class_temporary_member_error(); }   // objectValue and its dereferenced copy
-
-            JAISCRIPT_TRY(assign_member_value(target_obj, memberExpr, resultValue));
-            if (is_unwinding_) {
-                push_value(make_value());
-                return {};
-            }
-            if (expression_result_needed_ && !expr->postfix_old_result &&
-                detail::member_reads_back(target_obj, memberExpr->member_id, string_symbolizer_->get_getter_id_with_view(memberExpr->member_id).first, engine_)) {
-                JAISCRIPT_TRY(member_read_on(memberExpr, target_obj, false));   // the stored value, through a user _get_
-                if (!is_unwinding_) { script_value got = pop_value(); push_value(clone_for_assignment(got.deref())); }
-                return {};
-            }
-            push_value(expr->postfix_old_result ? std::move(postfix_old) : std::move(resultValue));
-        } else {
-            // General compound assignment for any expression
-            // This handles subscripts, function calls that return references, etc.
-
-            // C++17: the right-hand side is sequenced before the target: the value first, then the
-            // subscript's container and index and the element's read (replay: rhs 0, target 1, partial {rhs}). KEEP
-            // BYTE-PARALLEL with the vm's value-first index compound.
-            script_value rightValue;
-            if (parked<Replaying>(rs, 0)) {
-                rightValue = rs->partial[0];
-            } else {
-                JAISCRIPT_TRY_OPERAND(eval_child<Replaying>(expr->value.get(), rs, 0), expr, rp_asg_general, 0, {});
-                if (is_unwinding_) {
-                    // RHS raised: surface the original exception, never touch the target
-                    push_value(make_value());
-                    return {};
-                }
-                rightValue = pop_value();
-            }
-            string_target_context_ = expr->target->get_type() == node_type::binary_expr &&
-                                     static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket;
-            compound_map_target_ = expr->target.get();   // a missing key of a typed-value map takes its default (visit_binary)
-            auto target_read = eval_child<Replaying>(expr->target.get(), rs, 1);
-            compound_map_target_ = nullptr;
-            string_target_context_ = false;
-            JAISCRIPT_TRY_OPERAND(std::move(target_read), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
-            script_value currentValue = pop_value();
-            if (is_unwinding_) {
-                push_value(make_value());
-                return {};
-            }
-            script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
-            if (expr->incdec_desugar) {
-                // ++/-- gate: numeric targets only, the identifier path's exact error
-                const size_t ci = currentValue.deref().raw_storage_index();
-                if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-                    return detail::incdec_mismatch(expr->op.type == token_type::plus_equal, currentValue.deref(), engine_);
-                }
-            }
-
-            // Perform the compound operation
-            script_value resultValue = make_value();
-            
-            // Custom operator consult through the flat table (was a per-store
-            // string-construction + env-chain walk; KEEP BYTE-PARALLEL with
-            // vm_backend::exec_index_compound)
-            detail::op_slot compound_slot = detail::op_slot::none;
-            switch (expr->op.type) {
-                case token_type::plus_equal: compound_slot = detail::op_slot::plus; break;
-                case token_type::minus_equal: compound_slot = detail::op_slot::minus; break;
-                case token_type::star_equal: compound_slot = detail::op_slot::star; break;
-                case token_type::slash_equal: compound_slot = detail::op_slot::slash; break;
-                case token_type::percent_equal: compound_slot = detail::op_slot::percent; break;
-                default: if (detail::compound_is_bitwise(expr->op.type)) { compound_slot = detail::binary_op_slot(detail::compound_base(expr->op.type)); } break;
-            }
-            const script_value* compound_op_fn = operator_table_ ? operator_table_->entry(compound_slot) : nullptr;
-            if (compound_op_fn) {
-                const script_function& func = compound_op_fn->as_function();
-                std::vector<script_value> args = {currentValue, rightValue};
-                auto result = call_value(func, args);
-                if (!result) {
-                    // Function returned error - propagate it up
-                    return result.error_value();
-                }
-                resultValue = std::move(result.value());
-            } else {
-                // S8: a bound rhs decodes before the zero pre-checks so /= and %= keep
-                // today's error codes/texts (byte-parallel with the VM exec_index_compound)
-                if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-                    rightValue = rightValue.bound_decoded_temp();
-                // Fall back to built-in operators
-                switch (expr->op.type) {
-                    case token_type::plus_equal: {
-                        // one '+=' table for every destination: a text target appends text, a text operand never stringifies
-                        const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
-                        if (detail::compound_plus_text(currentValue.deref(), rightValue.deref(), text_slot) == detail::compound_text::mismatch) {
-                            return detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_);
-                        }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-                        break;
-                    }
-                    case token_type::minus_equal: {
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue, 1));
-                        break;
-                    }
-                    case token_type::star_equal: {
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue, 2));
-                        break;
-                    }
-                    case token_type::slash_equal: {
-                        const size_t ri = rightValue.raw_storage_index();
-                        if ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
-                            (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0)) {
-                            return checked_result<void>(make_error_code(runtime_error_code::division_by_zero),
-                                "Division by zero");
-                        }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-                        break;
-                    }
-                    case token_type::percent_equal: {
-                        if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-                            return checked_result<void>(make_error_code(runtime_error_code::modulo_by_zero),
-                                "Modulo by zero");
-                        }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-                        break;
-                    }
-                    default:
-                        if (!detail::compound_is_bitwise(expr->op.type)) {
-                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                                "Unknown compound assignment operator");
-                        }
-                        JAISCRIPT_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, detail::compound_base(expr->op.type), rightValue,
-                                                                              detail::compound_index(detail::compound_base(expr->op.type))));
-                        break;
-                }
-            }
-            
-            if (currentValue.is_reference()) {
-                // The target read minted the element reference: store through it, never
-                // re-evaluate the subscript (its side effects, and any yield, ran once)
-                JAISCRIPT_TRY(store_through_subscript_reference(currentValue, std::move(resultValue)));
-                if (expr->postfix_old_result) {
-                    valueStack_.discard();
-                    push_value(std::move(postfix_old));
-                }
-            } else {
-                // No lvalue came back (rvalue base, string subscript, missing map key): the
-                // vm's exec_index_compound position and text (KEEP BYTE-PARALLEL)
-                return checked_result<void>(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to rvalue expression");
-            }
+            return assign_compound_identifier<Replaying>(expr, rs);
         }
+        if (expr->target->get_type() == node_type::member_expr) {
+            return assign_compound_member<Replaying>(expr, rs);
+        }
+        return assign_compound_element<Replaying>(expr, rs);
     } else {
-        // Regular assignment
 
         script_value value;
         if (parked<Replaying>(rs, 0)) {
@@ -2414,471 +2458,10 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             value = std::move(derefed);
         }
 
-        // Check if target is an identifier
         if (expr->target->get_type() == node_type::identifier_expr) {
-            auto* identifier = static_cast<identifier_expr*>(expr->target.get());
-
-            // ============================================================
-            // SLOT-BASED FAST PATH: O(1) array indexing for locals
-            // ============================================================
-            // If the variable is a local with a slot, assign directly
-            if (identifier->slot_index != SIZE_MAX && !call_stack_.empty()) {
-                script_value* frameLocal = call_stack_.back().get_local(identifier->slot_index);
-                if (frameLocal) {
-                    // A cell in the slot IS the variable's storage when the name is the
-                    // value decl itself (escape-boxed local): write the cell with the same
-                    // typed enforcement a plain slot gets. Ref-alias names (ref params /
-                    // auto& decls) and non-cell references keep store-through semantics.
-                    script_value* storage = frameLocal;
-                    bool store_through = false;
-                    if (frameLocal->is_reference()) {
-                        auto* holder = frameLocal->get_reference_holder();
-                        if (holder && holder->has_cell && identifier->names_value_decl) {
-                            storage = holder->cell();
-                        } else {
-                            store_through = true;
-                        }
-                    }
-                    if (store_through) {
-                        JAISCRIPT_TRY(detail::ref_store_through(*frameLocal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
-                    } else {
-                        // Slot locals enforce their locked type like the environment path does
-                        // (same-type fast guard keeps the hot store path call-free)
-                        type_info_ptr slot_type = storage->get_type_info();
-                        if (detail::slot_value_assign_candidate(*storage) && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
-                            const type_info* held_tag = storage->type_info_raw();
-                            const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
-                                                      identifier->names_var_decl;
-                            if (auto stored = detail::slot_value_assign(*storage, value, engine_, declared_var)) {   // the held object decides (KEEP BYTE-PARALLEL with vm_backend::held_object_store)
-                                if (!*stored) { return stored->error_value(); }
-                                if (stored->value() == detail::value_store::assigned) {
-                                    push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));
-                                } else {
-                                    script_value rebound = clone_for_assignment(value);
-                                    detail::var_stamp(rebound, nullptr, engine_);
-                                    *storage = std::move(rebound);
-                                    push_value(std::move(value));
-                                }
-                                return {};
-                            }
-                        }
-                        // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
-                        if (slot_type && slot_type->base_type == script_value_type::jai_object_type) {   // a proven same-class store copy-assigns too
-                            if (auto assigned = detail::user_assign_operator(*storage, value, engine_, nullptr, nullptr, &value)) {
-                                if (!*assigned) { return assigned->error_value(); }
-                                push_value(expression_result_needed_ ? clone_for_assignment(*storage) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
-                                return {};
-                            }
-                        }
-                        if (slot_type && (slot_type->base_type != value.type() ||
-                                          slot_type->base_type == script_value_type::jai_object_type ||
-                                          slot_type->base_type == script_value_type::jai_array_type ||
-                                          slot_type->base_type == script_value_type::jai_map_type ||
-                                          (slot_type->base_type == script_value_type::jai_shared_ptr_type && value.get_type_info().get() != slot_type.get()))) {
-                            auto enforced = enforce_type_compatibility(std::move(value), slot_type, identifier->name);
-                            if (!enforced) {
-                                return enforced.error_value();
-                            }
-                            value = std::move(enforced.value());
-                            detail::keep_handle_slot_type(value, slot_type);
-                            // var slots keep a shared_ptr-tagged rhs's marker (decl
-                            // parity; flattening to 'any' would detach at the copy)
-                            if (detail::var_slot(slot_type.get()) &&
-                                (!value.get_type_info() ||
-                                 value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                                detail::var_stamp(value, slot_type, engine_);
-                            } else if (detail::var_slot(slot_type.get()) && value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
-                                // var target adopting a handle: mark it rebindable (the environment row's twin)
-                                value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
-                            }
-                        }
-                        if (detail::uniquely_held(value)) {   // a prvalue is the stored object (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
-                            *storage = std::move(value);
-                            push_value(expression_result_needed_ ? clone_for_assignment(*storage) : script_value(*storage));
-                            return {};
-                        }
-                        // Direct assignment to call frame local (or its cell); the
-                        // kernel deep-copies values and shares shared_ptr handles
-                        *storage = clone_for_assignment(value);
-                    }
-                    push_value(std::move(value));
-                    return {};
-                }
-            }
-
-            // Member scope: a member (field, static, or method - shadowing is by NAME)
-            // outranks everything past the function's own scopes, so an env hit that
-            // could only be a global must yield to the member-store kernel below.
-            bool member_wins = false;
-            if (!identifier->global_qualified && member_scope_.active() &&
-                !detail::own_scope_lookup(environment_.get(), member_scope_.floor, identifier->symbol_id)) {
-                const auto store_member = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage,
-                                                                     member_scope_.statics, identifier->symbol_id, /*want_methods*/ false);
-                if (store_member) {
-                    JAISCRIPT_TRY(detail::bare_member_access(store_member, identifier->symbol_id, environment_->find_access_context()));
-                }
-                member_wins = store_member.what != detail::member_probe_hit::kind::miss ||
-                              detail::member_scope_has_method(member_scope_.state, member_scope_.this_storage,
-                                                              member_scope_.statics, identifier->symbol_id);
-            }
-
-            // ::name resolves and stores against the GLOBAL env only
-            environment* ident_env = identifier->global_qualified
-                ? get_global_environment().get() : environment_.get();
-
-            // Get the current value to check if it's a reference (environment path)
-            if (!member_wins && ident_env->contains(identifier->symbol_id)) {
-                script_value* currentVal = ident_env->get_value_ptr(identifier->symbol_id);
-                bool boxed_cell = false;
-                bool store_through = false;
-                if (currentVal && currentVal->is_reference()) {
-                    // Escape-boxed variable (cell) named as itself: redirect to the cell
-                    // inner and run the full assignment semantics on it; anything else
-                    // stores through
-                    auto* holder = currentVal->get_reference_holder();
-                    if (holder && holder->has_cell && identifier->names_value_decl) {
-                        currentVal = holder->cell();
-                        boxed_cell = true;
-                    } else {
-                        store_through = true;
-                    }
-                }
-                // Boxed storage writes the cell inner directly (an env assign would
-                // replace the handle and detach every alias)
-                auto store_back = [&](script_value&& v) -> checked_result<void> {
-                    if (boxed_cell) {
-                        *currentVal = std::move(v);
-                        return {};
-                    }
-                    return ident_env->assign(identifier->symbol_id, std::move(v));
-                };
-                // The value of a store through an alias, a bound variable or a handle: a consumed one is the destination's
-                // stored value; the statement root hands the host its right-hand side
-                const bool handle_rows = store_through || (currentVal && (currentVal->is_cpp_bound() || currentVal->is_weak_ptr() ||
-                    (currentVal->get_type_info() && currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type)));
-                std::optional<script_value> host_result;
-                if (handle_rows && !expression_result_needed_) { host_result = value; }
-                script_value* const stored_cell = boxed_cell ? currentVal : nullptr;
-                auto push_stored = [&]() {
-                    if (host_result) { push_value(std::move(*host_result)); return; }
-                    const script_value* stored = stored_cell ? stored_cell : ident_env->get_value_ptr(identifier->symbol_id);
-                    push_value(stored ? clone_for_assignment(stored->deref()) : make_value());
-                };
-                if (store_through) {
-                    // This is a reference - assign through it (deep copy the value)
-                    JAISCRIPT_TRY(detail::ref_store_through(*currentVal, value, engine_, string_symbolizer_, identifier->declared_ref_kind ? identifier->declared_ref : nullptr, identifier->declared_ref_kind, identifier->name));
-                } else if (currentVal && currentVal->is_cpp_bound()) {
-                    // This is a C++ bound value - use assign_through
-                    currentVal->assign_through(value);
-                } else if (currentVal && currentVal->is_weak_ptr()) {
-                    // Special handling for weak_ptr assignment
-                    if (value.is_null()) {
-                        // Assign null - create empty weak_ptr
-                        auto type_info = currentVal->get_type_info();
-                        JAISCRIPT_TRY(store_back(script_value::make_empty_weak_ptr(type_info, engine_)));
-                    } else if (value.is_weak_ptr()) {
-                        // Assign another weak_ptr
-                        JAISCRIPT_TRY(store_back(std::move(value)));
-                    } else if (value.type() == script_value_type::jai_shared_ptr_type) {
-                        // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
-                        auto weak_type_info = currentVal->get_type_info();
-                        auto expected_type = weak_type_info ? weak_type_info->element_type() : nullptr;
-                        auto value_type_info = value.get_type_info();
-                        if (expected_type && value_type_info &&
-                            expected_type->base_type != script_value_type::jai_any_type) {
-                            const std::string& expected_class = expected_type->type_name;
-                            const std::string& actual_class = value_type_info->element_type()
-                                ? value_type_info->element_type()->type_name
-                                : value_type_info->type_name;
-
-                            if (expected_class != actual_class) {
-                                auto eng = engine_;
-                                if (eng) {
-                                    auto actual_def = eng->get_class_definition(actual_class);
-                                    if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-                                        return detail::typed_slot_rejection(value, *weak_type_info,
-                                            detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
-                                    }
-                                }
-                            }
-                        }
-
-                        // Convert shared_ptr to weak_ptr
-                        auto weak_result = script_value::make_weak_ptr(value, engine_);
-                        if (!weak_result) {
-                            return weak_result.error_value();
-                        }
-                        JAISCRIPT_TRY(store_back(std::move(weak_result.value())));
-                    } else {
-                        // A value-semantic object or a primitive: family D's assignment shape
-                        // (KEEP BYTE-PARALLEL with vm_backend::exec_store)
-                        const type_info* weak_tag = currentVal->get_type_info().get();
-                        if (!weak_tag) { weak_tag = engine_->get_type_info_weak_ptr(nullptr); }
-                        return detail::typed_slot_rejection(value, *weak_tag,
-                            detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
-                    }
-                } else if (currentVal && currentVal->get_type_info() &&
-                          currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-                    // Special handling for shared_ptr<T> assignment with auto-unwrap semantics
-                    auto ptr_type_info = currentVal->get_type_info();
-                    auto expected_type = ptr_type_info->element_type();
-
-                    if (value.is_null()) {
-                        // POINTER OP: Nullify pointer
-                        JAISCRIPT_TRY(store_back(std::move(value)));
-                    } else if (value.is_weak_ptr()) {
-                        return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                            "Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
-                    } else if (value.get_type_info() &&
-                              value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-                        // POINTER OP: shared_ptr<U> to shared_ptr<T> - polymorphic reassignment
-                        auto value_type_info = value.get_type_info();
-                        auto value_element = value_type_info->element_type();
-                        if (ptr_type_info->dynamic_pointee) {
-                            // var-declared holder: '=' with a handle rhs REBINDS unchecked
-                            // (enforcement guards copy-assign-to-
-                            // underlying, not re-pointing) - carry the rebindable marker
-                            if (engine_ && value_element && !value_type_info->dynamic_pointee) {
-                                value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
-                            }
-                            JAISCRIPT_TRY(store_back(std::move(value)));
-                        } else {
-                            // handle admission: a typed source by its static pointee, a var-held one by its object's class
-                            // (KEEP BYTE-PARALLEL with vm_backend::store_popped_value's environment row)
-                            if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
-                                uint64_t expected_id = expected_type ? expected_type->id : 0;
-                                return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-                                    "Cannot assign shared_ptr<{0}> to shared_ptr<{1}>",
-                                    string_symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)), expected_id);
-                            }
-
-                            // Compatible - reassign pointer (keep target's type info for polymorphism)
-                            value.set_type_info(ptr_type_info);
-                            JAISCRIPT_TRY(store_back(std::move(value)));
-                        }
-                    } else {
-                        // a value: the held object decides (a var rebinds to what its object does not take; KEEP BYTE-PARALLEL with
-                        // vm_backend::store_popped_value_full)
-                        auto stored = detail::slot_value_assign(*currentVal, value, engine_);
-                        if (!stored) {
-                            return detail::typed_slot_rejection(value, *ptr_type_info,
-                                detail::slot_site{detail::slot_kind::assignment, identifier->name, {}}, engine_);
-                        }
-                        if (!*stored) { return stored->error_value(); }
-                        if (stored->value() == detail::value_store::rebind) {
-                            script_value rebound = clone_for_assignment(value);
-                            detail::var_stamp(rebound, nullptr, engine_);
-                            JAISCRIPT_TRY(store_back(std::move(rebound)));
-                        }
-                    }
-                } else {
-                    // Regular variable assignment with STRONG TYPES enforcement
-                    type_info_ptr target_type = currentVal->get_type_info();
-
-                    if (detail::slot_value_assign_candidate(*currentVal) && (!target_type || target_type->base_type != script_value_type::jai_object_type)) {
-                        if (auto stored = detail::slot_value_assign(*currentVal, value, engine_)) {   // a var's object runs its operator=
-                            if (!*stored) { return stored->error_value(); }
-                            push_value(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));
-                            return {};
-                        }
-                    }
-
-                    // A user operator= writes the held instance (KEEP BYTE-PARALLEL with vm_backend::store_popped_value)
-                    if (target_type && target_type->base_type == script_value_type::jai_object_type) {
-                        if (auto assigned = detail::user_assign_operator(*currentVal, value, engine_, nullptr, nullptr, &value)) {
-                            if (!*assigned) { return assigned->error_value(); }
-                            push_value(expression_result_needed_ ? clone_for_assignment(*currentVal) : std::move(value));   // the expression's value is the destination's; a discarded one drops the source
-                            return {};
-                        }
-                    }
-
-                    auto enforced = enforce_type_compatibility(std::move(value), target_type, identifier->name);
-                    if (!enforced) {
-                        return enforced.error_value();
-                    }
-                    value = std::move(enforced.value());
-
-                    // Handle first assignment for uninitialized auto variables
-                    if (!target_type) {
-                        // Lock the variable's type to the assigned value's type
-                        // The value keeps its own type_info
-                    }
-                    // For any_type (var), keep the any_type on the variable. Exception
-                    // (mirrors the decl path): a shared_ptr-tagged
-                    // rhs keeps its marker - flattening to 'any' would silently detach
-                    // the handle at the copy below
-                    else if (detail::var_slot(target_type.get()) &&
-                             (!value.get_type_info() ||
-                              value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-                        detail::var_stamp(value, target_type, engine_);   // the var marker (a typed array keeps its element type)
-                    }
-                    else if (detail::var_slot(target_type.get()) &&
-                             engine_ && value.get_type_info()->element_type() &&
-                             !value.get_type_info()->dynamic_pointee) {
-                        // var target adopting a handle: mark it rebindable
-                        value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
-                            value.get_type_info()->element_type().get()));
-                    }
-                    // For locked types, the value already has correct type from enforce_type_compatibility
-
-                    // C++ style move/copy semantics:
-                    // - If RHS is a variable/field/index read (lvalue), clone for value semantics
-                    // - If RHS is a temporary (function result, constructor, literal, operator), move
-                    const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
-
-                    if (is_lvalue_read) {
-                        // Reading from a storage location - the kernel deep-copies
-                        // values and shares shared_ptr handles
-                        script_value assignValue = clone_for_assignment(value);
-                        JAISCRIPT_TRY(store_back(std::move(assignValue)));
-                        // value is still valid for push_value below
-                        push_value(std::move(value));
-                    } else if (boxed_cell) {
-                        JAISCRIPT_TRY(store_back(std::move(value)));
-                        push_value(*currentVal);   // the cell inner IS the stored value
-                    } else {
-                        // Temporary value - move directly (like C++ RVO/move semantics)
-                        // No clone needed - the temporary becomes the stored value
-                        JAISCRIPT_TRY(ident_env->assign(identifier->symbol_id, std::move(value)));
-                        // Get the stored value back for the expression result
-                        // Use shallow copy (shares object_holder) - like C++ returning lvalue reference
-                        script_value* stored = ident_env->get_value_ptr(identifier->symbol_id);
-                        push_value(stored ? *stored : make_value());  // Shallow copy, not clone
-                    }
-                }
-                if (handle_rows) {
-                    if (is_unwinding_) { push_value(make_value()); } else { push_stored(); }
-                }
-            } else {
-                // ::name targets never reach members - a global miss is an error
-                if (identifier->global_qualified) {
-                    return checked_result<void>(make_error_code(runtime_error_code::undefined_variable),
-                        environment_->undefined_text(identifier->symbol_id), identifier->symbol_id);
-                }
-                // Variable doesn't exist in environment
-                // Try static_method_environment's assign (which handles static fields)
-                // or instance method's 'this' field assignment
-                bool assigned_to_member = false;
-
-                // Determine if RHS is lvalue (needs clone) or temporary (can move)
-                const bool is_lvalue_read = is_lvalue_expression(expr->value.get());
-
-                script_value* this_ptr = environment_->get_value_ptr(string_symbolizer_->get_this_id());
-                if (this_ptr) {
-                    script_value& this_val = *this_ptr;
-                    if (this_val.is_object()) {
-                        auto obj_holder = this_val.get_object_holder();
-                        if (obj_holder->is_instance()) {
-                            auto instance = obj_holder->instance_handle();
-
-                            // First try instance fields
-                            if (instance->has_field(identifier->symbol_id)) {
-                                // A hybrid's C++ property stores through its setter, exactly like
-                                // this.name = v (a same-named script field shadows it)
-                                if (uint64_t setter_id = detail::cpp_property_setter_id(instance.get(), identifier->symbol_id)) {
-                                    JAISCRIPT_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), setter_id, value));
-                                    assigned_to_member = true;
-                                }
-                                // Not a C++ property or no setter - use regular field assignment
-                                // (typed fields enforce like locals)
-                                if (!assigned_to_member) {
-                                    // All-detach rule: the implicit-this
-                                    // MOVE path stores a detached snapshot like the
-                                    // explicit o.f = spelling (was the one live-member hole)
-                                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                                        value = value.detached_for_store();
-                                    }
-                                    if (is_lvalue_read) {
-                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
-                                        if (!enforced) {
-                                            return enforced.error_value();
-                                        }
-                                        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
-                                    } else {
-                                        auto enforced = instance->field_store(identifier->symbol_id, value, [&] { return std::move(value); }, &value);
-                                        if (!enforced) {
-                                            return enforced.error_value();
-                                        }
-                                        instance->set_field_unchecked(identifier->symbol_id, enforced.value());
-                                        value = instance->get_field(identifier->symbol_id);  // Shallow copy for return
-                                    }
-                                    assigned_to_member = true;
-                                }
-                            }
-                            // Then try static fields (typed statics enforce like fields)
-                            else {
-                                class_definition* class_def = detail::bare_static_owner(bare_declaring_class(), instance->get_class_definition(),
-                                                                                        identifier->symbol_id);
-                                if (class_def) {
-                                    // All-detach (#12): implicit static store snapshots too
-                                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                                        value = value.detached_for_store();
-                                    }
-                                    if (is_lvalue_read) {
-                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
-                                        if (!stored) {
-                                            return stored.error_value();
-                                        }
-                                        if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
-                                    } else {
-                                        auto stored = detail::store_static_member(*class_def, identifier->symbol_id, value, [&] { return std::move(value); });
-                                        if (!stored) {
-                                            return stored.error_value();
-                                        }
-                                        value = std::move(stored.value());
-                                    }
-                                    assigned_to_member = true;
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Static-method scope: no 'this' to route through, and a nested block's env
-                // assign would raw-write the static cell it finds through the scope env - land
-                // the store on the scope's class (KEEP BYTE-PARALLEL with vm_backend
-                // store_popped_value's statics tail)
-                class_definition* static_owner = !assigned_to_member && member_scope_.state == detail::member_scope_state::statics
-                    ? detail::bare_static_owner(member_scope_.statics, nullptr, identifier->symbol_id) : nullptr;
-                if (static_owner) {
-                    if (value.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-                        value = value.detached_for_store();
-                    }
-                    if (is_lvalue_read) {
-                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return clone_for_assignment(value); });
-                        if (!stored) {
-                            return stored.error_value();
-                        }
-                        if (expression_result_needed_) { value = clone_for_assignment(stored.value()); }   // the stored value is the expression's
-                    } else {
-                        auto stored = detail::store_static_member(*static_owner, identifier->symbol_id, value, [&] { return std::move(value); });
-                        if (!stored) {
-                            return stored.error_value();
-                        }
-                        value = std::move(stored.value());
-                    }
-                    assigned_to_member = true;
-                }
-
-                if (!assigned_to_member) {
-                    // Use environment->assign() which will:
-                    // - For static_method_environment: check static fields, then return error if not found
-                    // - For method_environment: check 'this' fields, then define locally if not found
-                    // - For regular environment: return error if variable doesn't exist
-                    if (is_lvalue_read) {
-                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, clone_for_assignment(value)));
-                    } else {
-                        JAISCRIPT_TRY(environment_->assign(identifier->symbol_id, std::move(value)));
-                        // Get back the stored value for the return (shallow copy)
-                        script_value* stored = environment_->get_value_ptr(identifier->symbol_id);
-                        value = stored ? *stored : make_value();  // Shallow copy, not clone
-                    }
-                }
-                push_value(std::move(value));
-            }
+            return assign_identifier(expr, std::move(value));
         }
-        // Check if target is a member expression (property assignment)
-        else if (expr->target->get_type() == node_type::member_expr) {
+        if (expr->target->get_type() == node_type::member_expr) {
             auto* memberExpr = static_cast<member_expr*>(expr->target.get());
             // Static member assignment: the shared kernel resolves the class and runs the
             // field-store table over the static's declared type (vm parity)
@@ -3117,7 +2700,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     if (!resuming) {
         // Create a new child scope for the block
         // With lazy caching, this is O(1) - no flat_lookup_ copy needed
-        environment_ = get_block_environment(environment_);
+        environment_ = block_environment(environment_);
     }
 
     try {
@@ -3140,7 +2723,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
                 kill_scope_slots(stmt->declarations);
                 // Restore scope before returning
                 if (!resuming || i > start_index) {
-                    release_environment(environment_);
+                    end_scope(environment_);
                 }
                 environment_ = previous;
                 return result;
@@ -3173,7 +2756,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
     } catch (...) {
         // Restore scope even if an error occurs
         if (!resuming) {
-            release_environment(environment_);
+            end_scope(environment_);
         }
         environment_ = previous;
         throw;
@@ -3187,7 +2770,7 @@ checked_result<void> interpreter::visit_block_stmt(block_stmt* stmt) {
 
     // Restore the previous scope - only release if we created it
     if (!resuming) {
-        release_environment(environment_);
+        end_scope(environment_);
     }
     environment_ = previous;
     return {};
@@ -3276,69 +2859,21 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
     }
     
     if (is_weak_ptr) {
-        // weak_ptr<T> variable - handle initialization
-        if (!decl->initializer) {
-            // No initializer - create empty weak_ptr
-            script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-            JAISCRIPT_TRY(define_variable(std::move(weak)));
-        } else {
-            // Evaluate initializer
+        script_value value = make_value();
+        if (decl->initializer) {
             JAISCRIPT_TRY_ROOT(decl, decl->initializer.get());
-            script_value value = pop_value();
-            if (is_unwinding_) { return {}; }   // a raising initializer (missing member) wins over the declared-type check; the vm's run loop sees the flag before exec_decl_var
-
-            // Element/subscript reads arrive as reference wrappers (rhs-lvalue read
-            // shape); declarations consume the VALUE - normalize like assignment does
-            // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            value = pop_value();
+            if (is_unwinding_) { return {}; }   // a raising initializer wins over the declared-type check
+            // an element read arrives as a reference wrapper: the declaration consumes the value (KEEP BYTE-PARALLEL with
+            // vm_backend::exec_decl_var)
             if (value.is_reference()) {
                 script_value derefed = value.deref();
                 value = std::move(derefed);
             }
-
-            // Handle different initialization cases
-            if (value.is_null()) {
-                // Initialize with null - create empty weak_ptr
-                script_value weak = script_value::make_empty_weak_ptr(decl->type, engine_);
-                JAISCRIPT_TRY(define_variable(std::move(weak)));
-            } else if (value.is_weak_ptr()) {
-                // Initialize with another weak_ptr - copy it
-                JAISCRIPT_TRY(define_variable(std::move(value)));
-            } else if (value.type() == script_value_type::jai_shared_ptr_type) {
-                // Validate type parameter - weak_ptr<T> should only accept shared_ptr<T> or subclass
-                auto expected_type = decl->type ? decl->type->element_type() : nullptr;
-                auto value_type_info = value.get_type_info();
-                if (expected_type && value_type_info &&
-                    expected_type->base_type != script_value_type::jai_any_type) {
-                    const std::string& expected_class = expected_type->type_name;
-                    const std::string& actual_class = value_type_info->element_type()
-                        ? value_type_info->element_type()->type_name
-                        : value_type_info->type_name;
-
-                    if (expected_class != actual_class) {
-                        auto eng = engine_;
-                        if (eng) {
-                            auto actual_def = eng->get_class_definition(actual_class);
-                            if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-                                return detail::typed_slot_rejection(value, *decl->type,
-                                    detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
-                            }
-                        }
-                    }
-                }
-
-                // Initialize with shared_ptr - create weak_ptr from it
-                auto weak_result = script_value::make_weak_ptr(value, engine_);
-                if (!weak_result) {
-                    return weak_result.error_value();
-                }
-                JAISCRIPT_TRY(define_variable(std::move(weak_result.value())));
-            } else {
-                // A value-semantic object or a primitive: family D's declaration shape
-                // (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
-                return detail::typed_slot_rejection(value, *decl->type,
-                    detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
-            }
         }
+        JAISCRIPT_TRY_ASSIGN(script_value weak, detail::weak_declaration_value(decl->type, std::move(value), engine_,
+            detail::slot_site{detail::slot_kind::declaration, decl->name, {}}));
+        JAISCRIPT_TRY(define_variable(std::move(weak)));
     } else if (is_shared_ptr) {
         // shared_ptr<T> variable - handle initialization.
         // shared_ptr<auto> (element_type null) INFERS the pointee from the initializer's
@@ -3415,7 +2950,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
                 // Mark the type as shared_ptr to ensure reference semantics
                 value.set_type_info(decl->type);
                 JAISCRIPT_TRY(define_variable(std::move(value)));
-            } else {   // a primitive or a container: family D's declaration shape (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
+            } else {   // a primitive or a container: the declaration's rejection (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
                 return detail::typed_slot_rejection(value, *decl->type,
                     detail::slot_site{detail::slot_kind::declaration, decl->name, {}}, engine_);
             }
@@ -3733,6 +3268,44 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
     return *storage;
 }
 
+// The value a store into a named variable writes, converted by the variable's declared type (the tag its value carries): a typed
+// handle keeps the declared tag through every store, a var takes its marker and a var-held handle stays rebindable (KEEP
+// BYTE-PARALLEL with vm_backend::store_popped_value)
+checked_result<script_value> interpreter::converted_for_variable(const type_info_ptr& tag, script_value value, std::string_view name) {
+    if (!tag) {
+        return value;
+    }
+    const bool handle_slot = tag->base_type == script_value_type::jai_shared_ptr_type || tag->base_type == script_value_type::jai_weak_ptr_type;
+    if (handle_slot && value.is_null()) {
+        if (tag->base_type == script_value_type::jai_weak_ptr_type) {
+            return script_value::make_empty_weak_ptr(tag, engine_);
+        }
+        value.set_type_info(tag);
+        return value;
+    }
+    if (tag->base_type == script_value_type::jai_shared_ptr_type && tag->dynamic_pointee && value.get_type_info() &&
+        value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+        if (value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
+            value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
+        }
+        return value;
+    }
+    if (!detail::var_slot(tag.get()) && !handle_slot && detail::same_type_payload(value, tag.get())) {
+        return value;
+    }
+    JAISCRIPT_TRY_ASSIGN(value, enforce_type_compatibility(std::move(value), tag, name));
+    detail::keep_handle_slot_type(value, tag);
+    if (detail::var_slot(tag.get())) {
+        // a var keeps a shared_ptr-tagged value's marker (flattening to 'any' would detach the handle at the copy), rebindable
+        if (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
+            detail::var_stamp(value, tag, engine_);
+        } else if (value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
+            value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
+        }
+    }
+    return value;
+}
+
 checked_result<script_value> interpreter::enforce_type_compatibility(
     script_value value,
     type_info_ptr target_type,
@@ -3895,6 +3468,7 @@ checked_result<script_value> interpreter::concat_with_methods(const script_value
     return make_value(std::move(joined));
 }
 
+
 namespace {
 
 // a bare identifier callee in an instance method's own frame that the member ladder may answer with a method of the receiver
@@ -3907,7 +3481,6 @@ identifier_expr* sibling_method_callee(expression* callee, const detail::member_
 
 }  // namespace
 
-// Placeholder implementations for remaining visitors
 template<bool Replaying>
 checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const replay_point* rs) {
     if (expr->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(expr, expr->const_check)); }
@@ -4485,7 +4058,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
             callOutcome.emplace(call_function(*callee_thunk->payload.fn, arguments));
         } else if (arguments.size() == 1 && engine_->sleep_callee(&func)) {
             callOutcome.emplace(engine_->sleep_builtin(arguments[0]));   // the builtin in place (vm op_sleep's twin)
-        } else if (!call_static_method(func, arguments, callOutcome)) {
+        } else {
             callOutcome.emplace(call_value(func, arguments));
         }
     } catch (const std::exception& e) {
@@ -5059,10 +4632,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         return {};
     }
 
-    // Worker direct-field read (parallel_for v1): probing getters/methods below
-    // COPIES shared method values out of class_definition state - a cross-worker
-    // count race on the non-atomic strong_ptr. Fields live on the (exclusively
-    // owned) instance; anything else needs method machinery - wall it.
+    // A worker reads a field directly: probing getters and methods copies shared method values out of the class (a cross-worker
+    // count race on the non-atomic strong_ptr); fields live on the worker's own instance
     if (parallel_worker_ && objectValue.parallel_object_borrow()) [[unlikely]] {
         // a shared object: a script field as the worker's own copy, a host member on its view (KEEP BYTE-PARALLEL with
         // vm_backend::member_access_value)
@@ -5580,18 +5151,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
     std::shared_ptr<environment> final_closure_env;
 
     if (needs_capture_env) {
-        // Create captured variables in the closure environment.
-        // Parent = global environment (NOT the local-function's pool-env).
-        //
-        // Using the local function's closure_env as parent causes a use-after-free
-        // / ownership cycle for ESCAPING closures: the outer function's pooled env
-        // gets released when it returns, then get_pooled_environment() re-allocates
-        // that same slot with itself (or a descendant) as parent → infinite loop.
-        //
-        // The capture env is self-contained: all needed outer variables are copied
-        // into it (env-variables above, and outer-slot locals below). The only thing
-        // a parent provides beyond that is global-scope fallback, so pointing at the
-        // global env gives correct semantics without the lifecycle hazard.
+        // the capture environment holds every captured name itself, so it parents on the program scope, never on the creating
+        // frame's scope (an escaping closure would otherwise keep that frame's whole chain)
         auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), string_symbolizer_);
         
         if (captures_this && has_default_capture) {
@@ -5763,10 +5324,8 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             }
             script_value this_obj = std::move(this_result.value());
 
-            // Create a method_environment with the captured 'this' object
-            // The parent is closure_env (the environment where the lambda was defined)
-            // Use pooled environment to avoid creating infinite parent chains
-            auto method_env = get_pooled_method_environment(closure_env, this_obj);
+            // the captured this scopes the body, parented on the environment the lambda was defined in
+            auto method_env = method_environment(closure_env, this_obj);
             method_env->define(this_id, this_obj);
 
             // The other captures sit in an environment in front of the instance scope - the capture env's OWN storage only,
@@ -5795,39 +5354,17 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         
     }
     
-    // Note: Parameter symbol IDs are pre-interned by the parser (parse_parameter_list())
-
-    // Create the script function. Capture-free lambdas mint ONCE per node (closure_env
-    // is nullptr, so every creation is identical - body wrap, parameter storage and the
-    // function object all reuse); capturing lambdas share the node's parameter storage
-    // but carry their per-creation capture environment.
-    const unit_stamp decl_unit = current_unit();
-    std::shared_ptr<script_defined_function> lambdaFunc = needs_capture_env || (expr->mint_cache && expr->mint_cache->unit.id != decl_unit.id) ? nullptr : expr->mint_cache;
-    if (!lambdaFunc) {
-        // Convert the lambda body to a block_stmt if it's not already
-        std::shared_ptr<block_stmt> lambdaBody;
-        if (auto blockStmt = std::dynamic_pointer_cast<block_stmt>(expr->body)) {
-            lambdaBody = blockStmt;
-        } else {
-            // Wrap single statement in a block
-            std::vector<declaration_ptr> stmts;
-            if (auto stmt = std::dynamic_pointer_cast<statement>(expr->body)) {
-                auto stmtDecl = std::make_shared<statement_decl>(expr->location, stmt);
-                stmts.push_back(stmtDecl);
-            }
-            lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
+    std::shared_ptr<block_stmt> lambdaBody = std::dynamic_pointer_cast<block_stmt>(expr->body);
+    if (!lambdaBody) {
+        std::vector<declaration_ptr> stmts;
+        if (auto stmt = std::dynamic_pointer_cast<statement>(expr->body)) {
+            stmts.push_back(std::make_shared<statement_decl>(expr->location, stmt));
         }
-        lambdaFunc = std::make_shared<script_defined_function>(
-            "<lambda>",  // Anonymous function name
-            shared_parameters_for(expr),
-            expr->return_type,
-            lambdaBody,
-            needs_capture_env ? final_closure_env : nullptr,  // Only use closure env if we have captures
-            expr->local_count   // the frame reserves every slot up front, as a named function's does
-        );
-        lambdaFunc->unit = decl_unit;
-        if (!needs_capture_env) { expr->mint_cache = lambdaFunc; }
+        lambdaBody = std::make_shared<block_stmt>(expr->location, std::move(stmts));
     }
+    auto lambdaFunc = std::make_shared<script_defined_function>("<lambda>", shared_parameters_for(expr), expr->return_type, lambdaBody,
+        needs_capture_env ? final_closure_env : nullptr, expr->local_count);
+    lambdaFunc->unit = current_unit();
 
     // Create a script_function wrapper resolving the live backend at call time.
     // Named thunk (not an anonymous lambda) so callers can recover the payload via
@@ -6123,9 +5660,7 @@ checked_result<void> interpreter::visit_ternary_expr_t(ternary_expr* expr, const
     }
     script_value conditionValue = parked<Replaying>(rs, 0) ? rs->partial[0] : pop_value();
 
-    // A script throw unwinding out of the condition leaves a null PLACEHOLDER, not a
-    // bool: the unchecked read below would deref get_if<BOOL>()'s nullptr (fuzz seed
-    // 285 AV), and neither branch may run. Placeholder result, unwind propagates.
+    // a throw unwinding out of the condition leaves a null placeholder, not a bool: neither branch runs, the unwind propagates
     if (is_unwinding_) {
         push_value(make_value());
         return {};
@@ -6555,9 +6090,7 @@ checked_result<void> interpreter::visit_if_stmt(if_stmt* stmt) {
         }
         script_value conditionValue = pop_value();
 
-        // Throw unwinding out of the condition: the popped value is a null
-        // placeholder (unchecked_as_bool would deref nullptr - fuzz seed 285 AV)
-        // and neither branch may run
+        // a throw unwinding out of the condition leaves a null placeholder: neither branch runs
         if (is_unwinding_) {
             return {};
         }
@@ -6614,8 +6147,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
                 return cond_result.error_value();
             }
 
-            // Throw unwinding out of the condition: placeholder on the stack, not a
-            // bool (fuzz seed 285 AV) - stop the loop, the unwind propagates
+            // a throw unwinding out of the condition leaves a null placeholder: the loop stops, the unwind propagates
             if (is_unwinding_) {
                 valueStack_.discard();
                 break;
@@ -6720,7 +6252,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
 
     if (!resuming_loop) {
         // Create new scope for the for loop (initialization variables should be scoped)
-        auto loop_env = get_block_environment(environment_);
+        auto loop_env = block_environment(environment_);
         environment_ = loop_env;
         owns_scope = true;
 
@@ -6729,7 +6261,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
             if (debug_hook_) [[unlikely]] { debug_quiet_node_ = stmt->initializer.get(); }
             auto result = dispatch_decl(stmt->initializer.get());
             if (!result) {
-                release_environment(loop_env);
+                end_scope(loop_env);
                 environment_ = previous;
                 return result;
             }
@@ -6765,7 +6297,6 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // OPTIMIZATION: Pre-check if condition is guaranteed to return bool
     // This allows us to skip is_truthy() type dispatch entirely
 
-    // Lambda helpers (ChaiScript-style) for cleaner, more optimizable code
     bool replay_condition = resume_phase == rp_cond;
     bool replay_update = resume_phase == rp_update;
     auto eval_condition = [&]() -> bool {
@@ -6787,8 +6318,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
             return false;
         }
 
-        // Throw unwinding out of the condition: placeholder on the stack, not a
-        // bool (fuzz seed 285 AV) - exit the loop, the unwind propagates
+        // a throw unwinding out of the condition leaves a null placeholder: the loop exits, the unwind propagates
         if (is_unwinding_) {
             valueStack_.discard();
             return false;
@@ -6846,7 +6376,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     while (true) {
         if (execution_limit_exhausted()) [[unlikely]] {
             if (owns_scope) {
-                release_environment(environment_);
+                end_scope(environment_);
             }
             environment_ = previous;
             return execution_limit_failure();
@@ -6864,7 +6394,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
         resume_body = false;
         if (!result) {
             if (owns_scope) {
-                release_environment(environment_);
+                end_scope(environment_);
             }
             environment_ = previous;
             return result;
@@ -6911,7 +6441,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     // Release the loop environment to destroy all loop variables (only if we created it).
     // A parked condition/update keeps it: the resume runs in that same scope.
     if (owns_scope && !park_loop_env) {
-        release_environment(environment_);
+        end_scope(environment_);
     }
 
     // Restore previous environment
@@ -7080,7 +6610,7 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
                 } else if (stmt->is_reference) {
                     // Reallocation-safe reference (container+index, not a raw element
                     // pointer): a push in the loop body can reallocate the vector, and a
-                    // raw pointer would dangle -> heap corruption on write-through (#41).
+                    // raw pointer would dangle on write-through.
                     // The ref carries the container's declared element
                     // type — for (auto& x : intArr) x = "s" errors like intArr[i] = "s";
                     // var (any-tagged) containers stay unconstrained.
@@ -7865,14 +7395,14 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 // re-enters the scope its suspension parked
                 auto previous = environment_;
                 auto case_env = (resuming_body && case_idx == resume_case && resumed_case_env)
-                    ? resumed_case_env : get_block_environment(environment_);
+                    ? resumed_case_env : block_environment(environment_);
                 environment_ = case_env;
 
                 try {
                     // Execute case body
                     auto case_result = dispatch_stmt(case_stmt.get());
                     if (!case_result) {
-                        release_environment(case_env);
+                        end_scope(case_env);
                         environment_ = previous;
                         in_switch_ = old_in_switch;
                         should_fallthrough_ = old_should_fallthrough;
@@ -7890,7 +7420,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                         should_fallthrough_ = old_should_fallthrough;
                         return {};
                     }
-                    release_environment(case_env);
+                    end_scope(case_env);
                     environment_ = previous;
 
                     // An explicit `break;` inside a case terminates the switch
@@ -7914,7 +7444,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     // If should_fallthrough_ is true, continue to next iteration
                 } catch (...) {
                     // Release and restore environment before re-throwing
-                    release_environment(case_env);
+                    end_scope(case_env);
                     environment_ = previous;
                     throw;
                 }
@@ -7926,13 +7456,13 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
             // Create a new scope for the default body
             auto previous = environment_;
             auto default_env = (resume_phase == rp_default_body && resumed_case_env)
-                ? resumed_case_env : get_block_environment(environment_);
+                ? resumed_case_env : block_environment(environment_);
             environment_ = default_env;
 
             try {
                 auto default_result = dispatch_stmt(stmt->default_case.get());
                 if (!default_result) {
-                    release_environment(default_env);
+                    end_scope(default_env);
                     environment_ = previous;
                     in_switch_ = old_in_switch;
                     should_fallthrough_ = old_should_fallthrough;
@@ -7950,7 +7480,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                     should_fallthrough_ = old_should_fallthrough;
                     return {};
                 }
-                release_environment(default_env);
+                end_scope(default_env);
                 environment_ = previous;
 
                 // Consume an explicit `break;` in default so it does not leak to
@@ -7960,7 +7490,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 }
             } catch (...) {
                 // Release and restore environment before re-throwing
-                release_environment(default_env);
+                end_scope(default_env);
                 environment_ = previous;
                 throw;
             }
@@ -8030,9 +7560,6 @@ checked_result<void> interpreter::visit_fallthrough_stmt(fallthrough_stmt* stmt)
 }
 
 checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
-    // Note: name_id and parameter symbol_ids are pre-interned by the parser
-    // (see parse_function_body() and parse_parameter_list())
-
     if (decl->is_coroutine) {
         // Coroutine function - calling it returns a coroutine_handle instead of executing.
         // The shared function_decl copy the handle pins is identical on every execution
@@ -8094,9 +7621,7 @@ checked_result<void> interpreter::visit_function_decl(function_decl* decl) {
                     if (slot < outer_slot_count) {
                         if (script_value* slot_val = call_stack_.back().get_local(slot)) {
                             if (!captureEnv) {
-                                // Parent = global, NOT the enclosing pooled env: an escaping
-                                // handle would otherwise recycle its own ancestor into an env
-                                // cycle (same lifecycle hazard visit_lambda_expr documents)
+                                // parented on the globals, as a lambda's capture environment is
                                 captureEnv = std::make_shared<environment>(get_global_environment(), string_symbolizer_);
                             }
                             captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
@@ -8485,10 +8010,9 @@ checked_result<script_value> interpreter::execute_method_ast(std::shared_ptr<fun
                                            std::shared_ptr<environment> method_env,
                                            const std::vector<script_value>& args) {
     // Coroutine methods mint a handle instead of executing (free-coroutine parity).
-    // The handle pins its OWN method env carrying 'this' — the caller recycles
-    // method_env back to the pool right after this returns — plus the receiver, so
-    // the instance stays alive while suspended and 'this' resolves identically
-    // across resumes. KEEP BYTE-PARALLEL with vm_backend::execute_method_ast.
+    // The handle pins its own method env carrying 'this' (the caller ends method_env when this returns) plus the receiver, so
+    // the instance stays alive while suspended and 'this' resolves identically across resumes (KEEP BYTE-PARALLEL with
+    // vm_backend::execute_method_ast)
     if (ast->is_coroutine) {
         const uint64_t this_id = string_symbolizer_->get_this_id();
         script_value this_obj(std::monostate{}, engine_);
@@ -8799,10 +8323,10 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             return member && member->fn ? call_function(*member->fn, args) : call_value(picked.value()->as_function(), args);
         }
         case script_callable::kind_type::method: {
-            auto method_env = get_pooled_method_environment(payload.definition_env(), *payload.this_obj(), payload.cls().get());
+            auto method_env = method_environment(payload.definition_env(), *payload.this_obj(), payload.cls().get());
             method_env->define("this", *payload.this_obj());
             auto result = execute_method_ast(payload.ast(), method_env, args);
-            release_environment(method_env, true);   // the receiver dies with the call, as the vm's method frame drops it
+            end_scope(method_env);   // the receiver dies with the call, as the vm's method frame drops it
             return result;
         }
         case script_callable::kind_type::static_method: {
@@ -8852,7 +8376,7 @@ scoped_method_environment::scoped_method_environment(
     const script_value& this_obj,
     class_definition* access_ctx)
     : interp_(interp)
-    , env_(interp->get_pooled_method_environment(parent, this_obj, access_ctx))
+    , env_(interp->method_environment(parent, this_obj, access_ctx))
 {
     // Define 'this' as a regular variable for compatibility
     // method_environment::get() also has special handling for 'this'
@@ -8861,7 +8385,7 @@ scoped_method_environment::scoped_method_environment(
 
 scoped_method_environment::~scoped_method_environment() {
     // Always clear immediately to release 'this' reference
-    interp_->release_environment(env_, true);
+    interp_->end_scope(env_);
 }
 
 // KEEP BYTE-PARALLEL with vm_backend::bind_bare_cpp_property_ref: the member scope's
@@ -9002,7 +8526,7 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
     }
 
     // Field/subscript/chain lvalue argument: resolve through the shared helper into
-    // an owner-pinned reference (Tier 1)
+    // an owner-pinned reference
     if (argExpr && detail::is_ref_bindable_lvalue(argExpr)) {
         auto resolved = detail::resolve_ref_lvalue(argExpr, detail::caller_frame_view{caller_locals},
                                                    caller_env.get(), engine_, string_symbolizer_);
@@ -9010,9 +8534,8 @@ checked_result<bool> interpreter::bind_site_reference(const expression* argExpr,
             out = std::move(resolved.value());
             return true;
         }
-        // The kernel's generic non-lvalue verdict falls through to Tier 2 (identifier-
-        // keyed map entries classify Tier 1 but only evaluation can resolve them);
-        // access enforcement and other specific errors propagate
+        // the kernel's generic non-lvalue verdict falls through to the evaluated argument below (identifier-keyed map entries
+        // classify as lvalues but only evaluation resolves them); access enforcement and other specific errors propagate
         if (resolved.error() != make_error_code(runtime_error_code::invalid_reference)) {
             return resolved.error_value();
         }
@@ -9108,7 +8631,7 @@ checked_result<void> interpreter::bind_reference_parameter(const parameter& para
         return {};
     }
 
-    // Tier 2 (general lvalues): the argument already evaluated
+    // General lvalues: the argument already evaluated
     // in normal left-to-right order, and subscript/map reads over lvalue bases mint
     // owner-pinned references with full index generality - computed indices
     // (grid[y+1][x]), member-expr indices (arr[o.idx]), map keys (m["k"]). A reference
@@ -9420,20 +8943,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         return detail::arity_error(function.name, function.parameters().size(), args.size(), arity_count_ids_, *string_symbolizer_);
     }
 
-    // ============================================================
-    // CALL FRAME OPTIMIZATION: Push a call frame for parameters
-    // ============================================================
-    // Parameters are stored in the call frame for O(n) lookup where n is small.
-    // This avoids hash map overhead for the most frequently accessed variables.
-    // The environment is still used for:
-    // - 'this' object in methods
-    // - Static class fields
-    // - Closure captures
-    // - Variables defined in the function body (int x = 0; etc.)
-
-    // Push call frame and remember its index (NOT a reference!)
-    // IMPORTANT: Using index instead of reference to avoid invalidation when
-    // parameter conversion calls constructors that push more frames onto call_stack_
+    // the frame is held by index: a parameter's conversion can run a constructor that pushes frames and moves call_stack_
     call_stack_.emplace_back();
     const size_t frame_index = call_stack_.size() - 1;
     call_stack_[frame_index].function_name = function.name;
@@ -9463,7 +8973,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // the carrier method env and its per-call define("this")
         call_stack_[frame_index].set_this(*method_ctx->this_obj);
         call_stack_[frame_index].closure_env = *method_ctx->definition_env;
-        environment_ = get_pooled_method_environment(*method_ctx->definition_env, *method_ctx->this_obj,
+        environment_ = method_environment(*method_ctx->definition_env, *method_ctx->this_obj,
                                                      method_ctx->access_ctx);
         member_scope_.state = detail::member_scope_state::instance;
         member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
@@ -9476,7 +8986,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
             call_stack_[frame_index].set_this(this_obj);  // Uses set_this which sets is_method = true
             call_stack_[frame_index].closure_env = function.closure_env->get_parent();
             // Set environment to a method environment for 'this' field lookups in body
-            environment_ = get_pooled_method_environment(function.closure_env->get_parent(), this_obj,
+            environment_ = method_environment(function.closure_env->get_parent(), this_obj,
                                                          function.closure_env->get_access_context());
             member_scope_.state = detail::member_scope_state::instance;
             member_scope_.this_storage = call_stack_[frame_index].this_object_ptr.get();
@@ -9499,7 +9009,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         } else {
             // Regular closure
             call_stack_[frame_index].closure_env = function.closure_env;
-            environment_ = get_pooled_environment(function.closure_env);
+            environment_ = std::make_shared<environment>(function.closure_env, env_symbolizer_);
             // A closure created inside a method sees that method's class scope
             // (lexically, through its captured chain) between its own scopes and
             // the globals - the boundary env's OWN storage (the enclosing call's
@@ -9525,7 +9035,7 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         // Regular function: the caller's chain past its block scopes (C++: a callee never sees a block's declarations)
         auto parent = environment::call_parent(previousEnv, function.block_defined);
         call_stack_[frame_index].closure_env = parent;
-        environment_ = get_pooled_environment(std::move(parent));
+        environment_ = std::make_shared<environment>(std::move(parent), env_symbolizer_);
     }
 
     // Mirror the member scope onto the frame: the shared ref-lvalue kernel
@@ -9561,25 +9071,18 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
 
         auto function_env = environment_;
         if (clear_this) {
-            // Only the CALLEE's own method scope env is cleared (pooled-env hygiene).
-            // A plain callee's env may be parented on the CALLER's method env - clearing
-            // through the parent poisoned the caller's this-binding (demoreel finding 1).
+            // only the callee's own method scope lets go of this: a plain callee's scope may be parented on the caller's
             if (function_env->is_method_env()) {
                 function_env->clear_this_reference();
             }
         }
         environment_ = previousEnv;
         member_scope_ = previousScope;
-        release_environment(function_env, false);
         hasReturnValue_ = previousHasReturn;
         returnValue_ = previousReturn;
     };
 
-    // ============================================================
-    // BIND PARAMETERS TO CALL FRAME
-    // ============================================================
-    // Parameters go into the call frame for fast lookup.
-    // Reference parameters still need special handling.
+    // parameters bind into the call frame; a reference parameter binds to its argument's storage
 
     std::vector<script_value> held_args;
     const std::vector<script_value>* argv = &args;
@@ -10348,122 +9851,23 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
     return handle.yield_value_;
 }
 
-// Function call optimization helpers
-std::shared_ptr<environment> interpreter::get_block_environment(std::shared_ptr<environment> parent) {
-    auto env = get_pooled_environment(std::move(parent));
+
+std::shared_ptr<environment> interpreter::block_environment(std::shared_ptr<environment> parent) {
+    auto env = std::make_shared<environment>(std::move(parent), env_symbolizer_);
     env->set_block_scope(true);
     return env;
 }
 
-std::shared_ptr<environment> interpreter::get_pooled_environment(std::shared_ptr<environment> parent) {
-    if (environment_pool_index_ < environment_pool_.size()) {
-        // Reuse existing environment from pool
-        auto env = environment_pool_[environment_pool_index_++];
-        env->reset(parent);
-        return env;
-    } else {
-        // Pool is exhausted, create new environment and add to pool. env_symbolizer_ is
-        // the epoch sink: == string_symbolizer_ normally; a parallel worker's private
-        // instance, so worker env churn never bumps the shared engine epoch.
-        auto newEnv = std::make_shared<environment>(parent, env_symbolizer_);
-        environment_pool_.emplace_back(newEnv);
-        ++environment_pool_index_;
-        return newEnv;
-    }
+std::shared_ptr<environment> interpreter::method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
+    auto env = std::make_shared<environment>(std::move(parent), env_symbolizer_, std::move(this_obj));
+    env->set_access_context(access_ctx);
+    return env;
 }
 
-// Release an environment back to the pool.
-// Lifetime rule: a freed pool slot holds NOTHING — a dead
-// frame's env must not keep its values or parent chain (a lambda's capture env!) alive
-// until slot reuse; weak_ptr expiry is script-observable. The epilogue flattens/derefs
-// return values BEFORE release, and references are owner-pinned (cells), so resetting
-// here is lawful — the old defer-to-reuse behavior was a pre-cells relic. Escaped envs
-// (still referenced beyond the pool + the caller's handle: an escaping closure_env, a
-// suspended coroutine chain) keep SOLE ownership and their slot is re-minted, so they
-// are never wiped by later reuse either — same escape rule reset_environment_pool
-// applies between executes (vm release_scope_env parity).
-// Parameter is const&: unshared == use_count() of exactly 2 (pool entry + the caller's
-// handle). Callers must pass a named handle, never a fresh temporary copy (a temp adds
-// a count and demotes the release to the escape path — safe, but re-mints needlessly).
-void interpreter::release_environment(const std::shared_ptr<environment>& env, bool clear_now) {
-    if (!env) return;
-
-    // Block scopes clear eagerly (pre-existing; script dtor ORDER is pinned on this
-    // happening before the slot frees, and dtor reentrancy sees the slot as in-use)
-    if (clear_now) {
-        env->reset(nullptr);
-    }
-
-    // Only the pool TOP may be released. Decrementing for anything else (a non-pooled
-    // make_shared env, or an out-of-order release) hands the caller's still-live scope
-    // to the next get_pooled_environment, which reset()s it into a self-parent cycle.
-    if (environment_pool_index_ > 0 && environment_pool_[environment_pool_index_ - 1] == env) {
-        if (env.use_count() <= 2) {
-            if (!clear_now) {
-                // Lifetime rule: a freed pool slot must not pin a PARENT
-                // CHAIN until slot reuse — that retention was exactly the dead-lambda
-                // capture leak (the freed frame env's parent was the capture env).
-                // ONLY the parent link (+ its stale pointer cache) drops here: the
-                // env's values/kind/this/bound-method interiors deliberately survive
-                // until reuse-time reset — the call machinery holds transient pointers
-                // into them for a few instructions after release, and clearing values
-                // here detonated as a use-after-reset AV (Debug 0xDD). clear_now
-                // block scopes were already fully reset above, pre-existing behavior
-                // (script dtor order is pinned on it).
-                env->set_parent(nullptr);
-                env->clear_parent_cache();
-            }
-            --environment_pool_index_;
-        } else {
-            // Escaped: the outside holder owns it from now on; re-mint the freed slot
-            --environment_pool_index_;
-            environment_pool_[environment_pool_index_] = std::make_shared<environment>(nullptr, env_symbolizer_);
-        }
-        return;
-    }
-
-    // Non-pooled env: clear when the caller vouches it is dead (block scopes); a live
-    // escapee just drops the caller's handle and its refcount governs.
-    if (clear_now && env.use_count() <= 1) {
-        env->reset(nullptr);
-    }
-}
-
-std::shared_ptr<environment> interpreter::get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
-    // Use unified pool - get an environment and reset it as a method environment
-    if (environment_pool_index_ < environment_pool_.size()) {
-        // Reuse existing environment from pool
-        auto env = environment_pool_[environment_pool_index_++];
-        // Reset as method environment with this object
-        env->reset_as_method(parent, std::move(this_obj));
-        env->set_access_context(access_ctx);
-        return env;
-    } else {
-        // Pool is exhausted, create new method environment and add to pool
-        auto newEnv = std::make_shared<environment>(parent, env_symbolizer_, std::move(this_obj));
-        newEnv->set_access_context(access_ctx);
-        environment_pool_.emplace_back(newEnv);
-        ++environment_pool_index_;
-        return newEnv;
-    }
-}
-
-bool interpreter::call_static_method(const script_function& callee, const std::vector<script_value>& arguments, std::optional<checked_result<script_value>>& out) {
-    if (parallel_worker_) return false;
-    const auto* dispatch = callee.target<script_static_method_dispatch>();
-    if (!dispatch || dispatch->eng != engine_ || !dispatch->cls || !dispatch->fallback) return false;
-    std::shared_ptr<function_decl> ast = dispatch->fallback;
-    const auto& table = dispatch->cls->script_static_method_overloads();
-    const auto it = table.find(dispatch->name_id);
-    if (it != table.end() && it->second.size() > 1) {
-        const auto verdict = score_declarations(it->second, arguments.data(), arguments.size(), engine_);
-        if (verdict.rival) return false;   // the dispatcher raises the tie
-        if (verdict.best) { ast = *verdict.best; }
-    }
-    if (!ast->body || ast->is_coroutine) return false;   // a coroutine mints a handle: the dispatcher's execute_callable
-    // the dispatcher's env exactly (its own, never pooled: what the body leaves in it dies with the call)
-    out.emplace(execute_method_ast(ast, std::make_shared<environment>(dispatch->definition_env, string_symbolizer_, dispatch->cls), arguments));
-    return true;
+// A scope that ends: its values die now, in the order a block's locals die (an escaped scope, a suspended coroutine's, is never
+// ended here)
+void interpreter::end_scope(const std::shared_ptr<environment>& env) {
+    if (env) { env->reset(nullptr); }
 }
 
 // A suspendable run's execution state (vm_backend::vm_run_state's twin): swapped whole with the live members at every switch,
@@ -10502,9 +9906,6 @@ struct interpreter::interpreter_run_state : backend_run_state {
     uint32_t budget_tick = 0;
     bool budget_active = false;
     std::vector<call_frame> call_stack;
-    std::vector<script_value> argument_pool;
-    std::vector<std::shared_ptr<environment>> environment_pool;
-    size_t environment_pool_index = 0;
     bool identifier_callee_lookup = false;
     bool member_callee_lookup = false;
     bool expression_result_needed = true;
@@ -10563,9 +9964,6 @@ void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
     swap(budget_tick_, s.budget_tick);
     swap(budget_active_, s.budget_active);
     swap(call_stack_, s.call_stack);
-    swap(argument_pool_, s.argument_pool);
-    swap(environment_pool_, s.environment_pool);
-    swap(environment_pool_index_, s.environment_pool_index);
     swap(identifier_callee_lookup_, s.identifier_callee_lookup);
     swap(member_callee_lookup_, s.member_callee_lookup);
     swap(expression_result_needed_, s.expression_result_needed);
@@ -10612,10 +10010,6 @@ void interpreter::reset_run_state(backend_run_state& a_state) {
     s.budget_tick = 0;
     s.budget_active = false;
     s.call_stack.clear();
-    s.argument_pool.clear();
-    for (auto& env : s.environment_pool) { if (env.use_count() == 1) { env->reset(nullptr); } }
-    std::erase_if(s.environment_pool, [](const std::shared_ptr<environment>& env) { return env.use_count() > 1; });
-    s.environment_pool_index = 0;
     s.identifier_callee_lookup = s.member_callee_lookup = false;
     s.expression_result_needed = true;
     s.unconsumed_root = nullptr;
@@ -10638,25 +10032,6 @@ void interpreter::adopt_run_trace(backend_run_state& a_state) {
     s.captured_trace.clear();
 }
 
-void interpreter::reset_environment_pool() {
-    environment_pool_index_ = 0;
-
-    // A suspended coroutine keeps its env chain alive across executes; resetting those
-    // would orphan its variables (undefined variable on resume). Any env still referenced
-    // outside the pool escapes it - the holder owns it from now on (vm parity).
-    std::erase_if(environment_pool_, [](const std::shared_ptr<environment>& env) {
-        return env.use_count() > 1;
-    });
-
-    // Clear all environments in the unified pool to release references
-    for (auto& env : environment_pool_) {
-        // Reset the environment by clearing its parent, values, and kind-specific fields
-        env->reset(nullptr);
-    }
-}
-
-// ============================================================
-// SWITCH-BASED DISPATCH (faster than virtual calls)
 checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
     auto enum_map = script_value::make_map(
         engine_->get_type_info_string(),
@@ -10708,10 +10083,6 @@ checked_result<void> interpreter::visit_destructuring_decl_t(destructuring_decl*
 
     return {};
 }
-
-// These functions use a switch on node_type enum instead of
-// virtual method dispatch, eliminating vtable lookup overhead.
-// ============================================================
 
 void interpreter::park_operands(ast_node* node, uint32_t phase, size_t index, std::vector<script_value> partial) {
     if (active_coroutine_) {

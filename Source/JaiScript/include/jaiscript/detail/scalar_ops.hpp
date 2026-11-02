@@ -81,12 +81,26 @@ namespace jai::detail {
 		}
 	}
 
-	// The error a binary operator's fault raises (one text per operator family)
+	// a compound assignment's overflow names the compound (index 0..3: += -= *= /=), ++ and -- name themselves
+	inline constexpr int k_compound_increment = 10;
+	inline constexpr int k_compound_decrement = 11;
+	inline const char* compound_overflow_text(int compound) noexcept {
+		switch (compound) {
+			case 1: return "Integer overflow in '-='";
+			case 2: return "Integer overflow in '*='";
+			case 3: return "Integer overflow in '/='";
+			case k_compound_increment: return "Integer overflow in '++'";
+			case k_compound_decrement: return "Integer overflow in '--'";
+			default: return "Integer overflow in '+='";
+		}
+	}
+
+	// The error a binary operator's fault raises (one text per operator family; a compound's overflow names the compound)
 	template <class Result>
-	Result scalar_fault_error(token_type op, scalar_fault fault) {
+	Result scalar_fault_error(token_type op, scalar_fault fault, int compound = -1) {
 		switch (fault) {
 			case scalar_fault::overflow:
-				return Result(make_error_code(runtime_error_code::invalid_numeric_operand), int_overflow_text(op));
+				return Result(make_error_code(runtime_error_code::invalid_numeric_operand), compound >= 0 ? compound_overflow_text(compound) : int_overflow_text(op));
 			case scalar_fault::division_by_zero:
 				return Result(make_error_code(runtime_error_code::division_by_zero),
 				              "Division by zero");

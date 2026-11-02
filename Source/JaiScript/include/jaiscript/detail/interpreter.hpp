@@ -517,29 +517,19 @@ namespace jai {
         // What the interpreter lends the construction kernel (detail/construction.hpp)
         struct construction_lender;
 
-        // Binary operator dispatch: flat array indexed by the shared op_slot enum
-        // (detail/operator_table.hpp) - direct index, no hashing on the generic path.
-        // Returns checked_result for zero-allocation error handling
-        using binary_op_handler = checked_result<script_value>(interpreter::*)(const script_value&, const script_value&);
-        std::array<binary_op_handler, static_cast<size_t>(detail::op_slot::count)> binary_handlers_{};
-
-        // Initialize dispatch table
-        void init_dispatch_table();
         void initialize();
-        checked_result<void> member_compound_result(token_type a_op, script_value& currentValue, script_value& rightValue, script_value& result);
+        checked_result<void> increment_variable(unary_expr* expr);
+        template<bool Replaying> checked_result<void> assign_compound_identifier(assignment_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> assign_compound_member(assignment_expr* expr, const replay_point* rs);
+        template<bool Replaying> checked_result<void> assign_compound_element(assignment_expr* expr, const replay_point* rs);
+        checked_result<void> assign_identifier(assignment_expr* expr, script_value value);
+        checked_result<script_value> compound_value(token_type a_op, const script_value& a_current, const script_value& a_right, bool a_incdec = false,
+                                                    bool a_text_slot = false);
 
         // Optimized binary operation handlers - return checked_result for error propagation
         struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
-        checked_result<script_value> handle_add(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_multiply(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_divide(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_modulo(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_less(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_less_equal(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_greater(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_greater_equal(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_equal(const script_value& left, const script_value& right);
+        // a op b on evaluated operands, by the shared kernels (detail/binary_handlers.hpp)
+        checked_result<script_value> binary_operator(token_type op, const script_value& left, const script_value& right);
         checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
         checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
         const expression* compound_map_target_ = nullptr;   // the subscript a general compound is reading as its target
@@ -555,13 +545,6 @@ namespace jai {
                 },
                 [](void* self) { return static_cast<interpreter*>(self)->is_unwinding_; }, this};
         }
-        checked_result<script_value> handle_not_equal(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_spaceship(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_bitwise_and(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_bitwise_or(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_bitwise_xor(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_left_shift(const script_value& left, const script_value& right);
-        checked_result<script_value> handle_right_shift(const script_value& left, const script_value& right);
         
         // Performance optimization: Skip custom operator checks for numeric types
         bool has_custom_numeric_ops_ = false;
@@ -800,9 +783,6 @@ namespace jai {
         std::vector<call_frame> call_stack_;
 
         // Function call optimization pools
-        mutable std::vector<script_value> argument_pool_;  // Reusable argument vector
-        std::vector<std::shared_ptr<environment>> environment_pool_;  // Pool of reusable environments (all kinds)
-        size_t environment_pool_index_ = 0;  // Current pool position
 
         // Class lookup callback for finding C++ classes
         class_lookup_callback class_lookup_callback_;
@@ -930,6 +910,17 @@ namespace jai {
             return environment_->get_value_ptr(symbol_id);
         }
 
+        // The cell a compound store or ++/-- on a name writes in place; null for a field of this, whose store converts through the
+        // field's declared type (the value it holds carries no var marker)
+        [[nodiscard]] script_value* variable_cell(const identifier_expr* identifier) noexcept {
+            script_value* cell = resolve_local_or_env(identifier->slot_index, identifier->symbol_id, identifier->global_qualified);
+            if (cell && !identifier->global_qualified && member_scope_.state == detail::member_scope_state::instance) {
+                auto hit = detail::probe_member_scope(member_scope_.state, member_scope_.this_storage, member_scope_.statics, identifier->symbol_id, false);
+                if (hit.what == detail::member_probe_hit::kind::field && hit.value_ptr == cell) { return nullptr; }
+            }
+            return cell;
+        }
+
         // A reference to a bare member out of reach names the access text, never the undefined one
         checked_result<void> bare_reference_access(uint64_t symbol_id) {
             if (!member_scope_.active()) { return {}; }
@@ -1032,6 +1023,7 @@ namespace jai {
         // - locked target = enforce compatibility or convert
         // ns::x = v / op= / ++ on a namespace variable's cell (detail/namespace_scope.hpp resolves the target)
         checked_result<script_value> store_namespace_cell(const detail::namespace_store_target& target, const member_expr* member, script_value incoming);
+        checked_result<script_value> converted_for_variable(const type_info_ptr& tag, script_value value, std::string_view name);
         checked_result<script_value> enforce_type_compatibility(
             script_value value,
             type_info_ptr target_type,
@@ -1207,9 +1199,6 @@ namespace jai {
             environment_ = std::move(root_env);
             env_symbolizer_ = env_epoch_sink;
             limits_ = worker_limits;
-            // Pool envs minted before this point carry the shared epoch sink - drop them
-            environment_pool_.clear();
-            environment_pool_index_ = 0;
             // Slot REUSE reset (worker contexts persist across regions): a prior call
             // may have ended mid-chunk on an error - clear every piece of residual
             // execution state so the slot starts this region pristine.
@@ -1269,14 +1258,9 @@ namespace jai {
         }
 
         // Environment pooling functions (public: scoped_method_environment uses them)
-        std::shared_ptr<environment> get_pooled_environment(std::shared_ptr<environment> parent);
-        std::shared_ptr<environment> get_block_environment(std::shared_ptr<environment> parent);   // a { } / loop / case scope
-        std::shared_ptr<environment> get_pooled_method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);
-        // a script class's static method called directly (the dispatcher's overload and static scope env, no callable hop): false when
-        // callee is not one this interpreter enters, else the call's result in out
-        bool call_static_method(const script_function& callee, const std::vector<script_value>& arguments, std::optional<checked_result<script_value>>& out);
-        void release_environment(const std::shared_ptr<environment>& env, bool clear_now = true);
-        void reset_environment_pool();
+        std::shared_ptr<environment> block_environment(std::shared_ptr<environment> parent);   // a { } / loop / case scope
+        std::shared_ptr<environment> method_environment(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx = nullptr);
+        void end_scope(const std::shared_ptr<environment>& env);
     };
     
 } // namespace jai

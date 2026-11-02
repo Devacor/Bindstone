@@ -14,6 +14,9 @@
 #include "runtime_errors.hpp"
 #include <functional>
 #include <optional>
+#include <set>
+#include <unordered_map>
+#include <unordered_set>
 #include <tuple>
 
 // Forward declarations to avoid circular dependencies
@@ -761,15 +764,74 @@ class engine;
         
     } // namespace detail
     
-    // Helper to detect if function has reference parameters
-    template<typename Tuple, size_t... Is>
-    constexpr bool tuple_has_references_impl(std::index_sequence<Is...>) {
-        return (std::is_reference_v<std::tuple_element_t<Is, Tuple>> || ...);
-    }
-    
-    template<typename Tuple>
-    constexpr bool tuple_has_references() {
-        return tuple_has_references_impl<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+    namespace detail {
+        // A bound object a parameter aliases: T&, const T&, T or shared_ptr<T> (by value or const&) of a class the boundary
+        // hands by identity
+        template<typename P>
+        consteval bool host_object_param() {
+            using D = std::remove_cvref_t<P>;
+            if constexpr (is_specialization_v<D, std::shared_ptr>) {
+                return std::is_class_v<typename D::element_type> && !(std::is_lvalue_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>);
+            } else if constexpr (std::is_class_v<D>) {
+                return !std::is_same_v<D, std::string> && !is_script_value_v<D> && !math_adapted<D> &&
+                       !is_specialization_v<D, std::vector> && !is_script_map_like_v<D> && !is_specialization_v<D, std::unordered_map> &&
+                       !is_specialization_v<D, std::set> &&
+                       !is_specialization_v<D, std::unordered_set> && !is_specialization_v<D, std::function> &&
+                       !is_specialization_v<D, std::weak_ptr> && !is_specialization_v<D, std::unique_ptr> &&
+                       !is_specialization_v<D, bound_array> && !is_specialization_v<D, bound_map> &&
+                       (std::is_reference_v<P> || std::is_copy_constructible_v<D>);
+            } else {
+                return false;
+            }
+        }
+
+        // The one rule the direct lanes share (a free or static function's by-value call, a bound method's native lane): every
+        // parameter but a non-const reference to anything other than a bound object, which the ordinary call writes back or views
+        template<typename P>
+        consteval bool host_lane_param() {
+            return !(std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) || host_object_param<P>();
+        }
+
+        template<typename Tuple, size_t... Is>
+        consteval bool host_lane_params(std::index_sequence<Is...>) {
+            return (host_lane_param<std::tuple_element_t<Is, Tuple>>() && ...);
+        }
+        template<typename Tuple>
+        consteval bool host_lane_params() {
+            return host_lane_params<Tuple>(std::make_index_sequence<std::tuple_size_v<Tuple>>{});
+        }
+
+        // A direct-lane argument behind a reference parameter takes the ordinary call's conversion: a bound object, a string, a
+        // script_value, a script array or a script map is the script's own, borrowed in place, a bound_array or bound_map views
+        // it; anything else is the converted value, a temporary the call's full expression keeps
+        template<typename P>
+        decltype(auto) lane_argument(const script_value& arg, engine* eng) {
+            using D = std::remove_cvref_t<P>;
+            if constexpr (!std::is_reference_v<P>) {
+                return value_converter<P>::from(arg, eng);
+            } else {
+                script_value& actual = const_cast<script_value&>(arg.deref());
+                if constexpr (is_specialization_v<D, std::shared_ptr> || is_specialization_v<D, std::weak_ptr> || math_adapted<D>) {
+                    return actual.as<D>();
+                } else if constexpr (is_specialization_v<D, std::function>) {
+                    return value_converter<D>::from(actual, eng);
+                } else if constexpr (host_object_param<P>()) {
+                    return static_cast<std::remove_reference_t<P>&>(actual.as<D&>());
+                } else if constexpr (std::is_same_v<D, script_value>) {
+                    return static_cast<const script_value&>(actual);
+                } else if constexpr (is_specialization_v<D, bound_array>) {
+                    if (!arg.is_array()) { throw runtime_error("Cannot convert non-array to bound_array<T>&"); }
+                    return D(const_cast<script_value&>(arg), eng);
+                } else if constexpr (is_specialization_v<D, bound_map>) {
+                    if (!arg.is_map()) { throw runtime_error("Cannot convert non-map to bound_map<K,V>&"); }
+                    return D(const_cast<script_value&>(arg).as_map(), eng);
+                } else if constexpr (std::is_same_v<D, std::string> || std::is_same_v<D, std::vector<script_value>> || std::is_same_v<D, script_map>) {
+                    return static_cast<const D&>(actual.as<const D&>());
+                } else {
+                    return D(actual.as<P>());
+                }
+            }
+        }
     }
 
     // Main function binder
@@ -785,8 +847,7 @@ class engine;
             // IMPORTANT: capture func_ by value and engine pointer, not this!
             // The FunctionBinder is temporary and will be destroyed after add_function returns
             
-            // Check if function has reference parameters
-            if constexpr (tuple_has_references<args_tuple>()) {
+            if constexpr (!detail::host_lane_params<args_tuple>()) {
                 // Use reference-aware calling for functions with reference parameters
                 return [func = func_, eng = engine_](const std::vector<script_value>& args) -> checked_result<script_value> {
                     using traits = detail::function_traits<Func>;
@@ -814,7 +875,7 @@ class engine;
             }
         }
 
-        // The binding of a function without reference parameters; invoke is the same call without the std::function
+        // The binding of a function every parameter of which takes the direct lane; invoke is the same call without the std::function
         struct by_value_call {
             Func func;
             engine* eng;
@@ -861,19 +922,16 @@ class engine;
             }
         }
 
-        // No parameter_storage scope_guard here: these are only reached from the
-        // no-reference-parameters branch of bind(), where every value_converter<T> is a
-        // by-value conversion that never consults the engine's parameter storage. Keeping
-        // the call path free of engine writes lets ref-free bindings (the whole math
-        // stdlib) run inside parallel regions without touching shared engine state.
+        // No parameter_storage scope_guard: a lane argument is a by-value conversion or a borrow, never the engine's parameter
+        // storage, so these bindings (the whole math stdlib) run inside parallel regions without touching shared engine state
         template<typename ArgsTuple, typename F, size_t... Is>
         static void call_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, [[maybe_unused]] engine* eng) {
-            func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
+            func(detail::lane_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
         }
 
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
         static R call_non_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, [[maybe_unused]] engine* eng) {
-            return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
+            return func(detail::lane_argument<std::tuple_element_t<Is, ArgsTuple>>(args[Is], eng)...);
         }
         
         // Reference-aware calling methods
@@ -1031,6 +1089,8 @@ class engine;
                 } else if constexpr (detail::is_script_value_v<base_type>) {
                     // For script_value references, return directly - no conversion needed
                     return actual_arg;
+                } else if constexpr (std::is_same_v<base_type, std::string>) {
+                    return std::cref(const_cast<script_value&>(actual_arg).as<const std::string&>());   // the script's own string
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

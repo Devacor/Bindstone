@@ -706,26 +706,11 @@ public:
     // for a floating parameter, a string, any value for a script_value parameter, and a bound object (T&, const T&, T, shared_ptr<T>)
     // the ordinary call's extraction takes; any other argument declines to the ordinary call. An overload set dispatches on exact
     // argument kinds (class_definition::native_exact). A pointer result, a reference-writing parameter or a guarded method has no lane.
-    // a bound object parameter: T&, const T&, T or shared_ptr<T> (by value or const&) of a class the boundary hands by identity
-    template<typename P>
-    static constexpr bool lane_object_param() {
-        using D = std::remove_cvref_t<P>;
-        if constexpr (is_specialization_v<D, std::shared_ptr>) {
-            return std::is_class_v<typename D::element_type> && !(std::is_lvalue_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>);
-        } else if constexpr (std::is_class_v<D>) {
-            return !std::is_same_v<D, std::string> && !detail::is_script_value_v<D> && !math_adapted<D> &&
-                   !dynamic_binder_validation::is_std_container<D>::value && !dynamic_binder_validation::is_std_function<D>::value &&
-                   !is_specialization_v<D, std::weak_ptr> && !is_specialization_v<D, std::unique_ptr> &&
-                   (std::is_reference_v<P> || std::is_copy_constructible_v<D>);
-        } else {
-            return false;
-        }
-    }
     template<typename P>
     static constexpr bool lane_param() {
         using D = std::remove_cvref_t<P>;
-        if constexpr (lane_object_param<P>()) { return true; }
-        else if constexpr (std::is_reference_v<P> && !std::is_const_v<std::remove_reference_t<P>>) { return false; }
+        if constexpr (detail::host_object_param<P>()) { return true; }
+        else if constexpr (!detail::host_lane_param<P>()) { return false; }
         else if constexpr (std::is_same_v<D, bool> || std::is_same_v<D, std::string> || detail::is_script_value_v<D> || std::is_floating_point_v<D>) { return true; }
         else if constexpr (std::is_integral_v<D>) {
             return !std::is_same_v<D, char> && !std::is_same_v<D, signed char> && !std::is_same_v<D, unsigned char> && !std::is_same_v<D, wchar_t> &&
@@ -741,7 +726,7 @@ public:
     static bool lane_arg(const script_value& a) {
         using D = std::remove_cvref_t<P>;
         const size_t k = a.raw_storage_index();
-        if constexpr (lane_object_param<P>()) {
+        if constexpr (detail::host_object_param<P>()) {
             if constexpr (is_specialization_v<D, std::shared_ptr>) {
                 if (k == script_value::TYPEID_NULL) { return true; }
             }
@@ -760,7 +745,7 @@ public:
     static bool lane_exact_arg(const script_value& a) {
         using D = std::remove_cvref_t<P>;
         const size_t k = a.raw_storage_index();
-        if constexpr (lane_object_param<P>() || detail::is_script_value_v<D>) { return false; }
+        if constexpr (detail::host_object_param<P>() || detail::is_script_value_v<D>) { return false; }
         else if constexpr (std::is_same_v<D, bool>) { return k == script_value::TYPEID_BOOL; }
         else if constexpr (std::is_integral_v<D>) { return k == script_value::TYPEID_INT && std::in_range<D>(a.unchecked_as_int()); }
         else if constexpr (std::is_floating_point_v<D>) { return k == script_value::TYPEID_FLOAT; }
@@ -811,7 +796,7 @@ public:
     };
     // a bound object argument: the ordinary call's own extraction (detail::checked_native_reference / checked_native_object),
     // made before the call; an argument it would refuse declines the lane, so the ordinary call reports it
-    template<typename P> requires (lane_object_param<P>() && !is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
+    template<typename P> requires (detail::host_object_param<P>() && !is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
     struct lane_held<P> {
         using D = std::remove_cvref_t<P>;
         script_value& slot;
@@ -820,7 +805,7 @@ public:
         bool prepare() { return (object = detail::lane_object_pointer(slot, typeid(D))) != nullptr; }
         D& get(engine*) const { return *static_cast<D*>(object); }
     };
-    template<typename P> requires (lane_object_param<P>() && is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
+    template<typename P> requires (detail::host_object_param<P>() && is_specialization_v<std::remove_cvref_t<P>, std::shared_ptr>)
     struct lane_held<P> {
         using E = typename std::remove_cvref_t<P>::element_type;
         script_value& slot;

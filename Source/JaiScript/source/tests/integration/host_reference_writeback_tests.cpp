@@ -150,11 +150,28 @@ public:
 			expect("int k = 1; string m = \"\"; try { [[warn_mode]] set_text(k); } catch (e) { m = \"raised\"; } m + to_string(k)", "raised1", "a store the variable's type rejects raises and leaves it");
 		});
 
-		test("non_lvalues_and_const_refs", [expect]() {
+		test("non_lvalues_and_const_refs", [this, expect]() {
 			expect("add_i64(5, 1); \"ok\"", "ok", "a literal passes as a temporary");
 			expect("int x = 1; add_i64(x + 1, 1); to_string(x)", "1", "a temporary writes nothing back");
 			expect("int x = 4; to_string(peek_i64(x)) + to_string(x)", "84", "const T& reads");
 			expect("string s = \"abc\"; to_string(peek_str(s)) + s", "3abc", "const std::string& reads");
+			// a const T& binding takes the direct lane (one rule with the bound methods' native lane), and a const std::string&
+			// parameter is the script's own string, never a copy
+			static_assert(detail::host_lane_params<std::tuple<const std::string&, const writeback_hosts::gate&, writeback_hosts::gate&, const int64_t&, int64_t>>());
+			static_assert(!detail::host_lane_params<std::tuple<int64_t&>>() && !detail::host_lane_params<std::tuple<std::string&>>());
+			for (bool use_vm : {false, true}) {
+				auto e = host(use_vm);
+				const std::string* seen = nullptr;
+				e->add_function("seen_alone", [&seen](const std::string& s) { seen = &s; });
+				e->add_function("seen_beside_a_write", [&seen](const std::string& s, int64_t& n) { seen = &s; n = 1; });
+				e->execute("string text = \"a string longer than any small-string buffer\"; int n = 0;");
+				const std::string* own = &e->get_variable("text").as<const std::string&>();
+				e->execute("seen_alone(text);");
+				check_true(seen == own, std::string("the direct lane borrows the string") + (use_vm ? " (vm)" : " (interpreter)"));
+				seen = nullptr;
+				e->execute("seen_beside_a_write(text, n);");
+				check_true(seen == own, std::string("the writeback call borrows it too") + (use_vm ? " (vm)" : " (interpreter)"));
+			}
 		});
 
 		test("methods_statics_and_constructors", [expect]() {

@@ -147,7 +147,7 @@ namespace jai::vm {
                                // post-pop tail (shared helper) with no push/pop round-trip
         op_binary_fused_temp,  // a=fused_binary_protos index, b=frame slot: BINARY_FUSED whose
                                // result lands RAW in a compiler temp slot (above local_count,
-                               // inside the window) - the register-file wave's producer form;
+                               // inside the window), a temp's producer form;
                                // consumers read it back through the ordinary fused slot operand
         op_unary_temp,         // a=fused_binary_protos index (left = the operand; k_invalid_u32 = the operand
                                // rides the stack), b=frame slot (a compiler temp), c=token_type: a unary
@@ -207,7 +207,7 @@ namespace jai::vm {
                                // resolved as operands; an array receiver appends through the builtin's
                                // exact kernel and pushes the call result (null), anything else replays
                                // the unfused LOAD, LOAD, CALL_METHOD sequence through its call site
-        // Typed scalar set (internal/typed_regions_design.md, stage 1): lowered from a fused
+        // Typed scalar set (internal/typed_regions_design.md): lowered from a fused
         // binary, compare-jump or scalar move whose operands the checker proved int/int or
         // float/float and the compiler addresses directly. Each op keeps ONE tag guard per
         // operand and lands the way the general op would; any miss (a boxed slot, an

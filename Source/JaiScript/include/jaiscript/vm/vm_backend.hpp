@@ -969,7 +969,7 @@ namespace jai::vm {
 
         // Return classification (detail/return_conv.hpp, shared with the interpreter),
         // cached per function (backend_return_conv) and stamped on the record at push.
-        // unclassified routes through the legacy decision (method frames); the prim_*
+        // unclassified routes through the full conversion (method frames); the prim_*
         // classes pass a storage-matching result through verbatim — exactly what the full
         // path's identity try_convert produces for primitives.
         using return_conv = detail::return_conv;
@@ -989,7 +989,7 @@ namespace jai::vm {
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
             strong_ptr<script_function_node> direct_pin;    // probe-called frames: pin without a callee value/slot
             type_info_ptr return_type;                 // pop drivers convert the result against this
-            uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = legacy decision)
+            uint8_t return_conv_class = 0;             // return_conv stamped at push (0 = the full conversion)
             // the caller's unit is the frame below's (vm_backend::caller_frame_unit); no stamp is saved per call
             std::shared_ptr<function_decl> ast_pin;    // a worker's method frame: its resolved overload outlives a mid-call hot reload
             const function_decl* ast = nullptr;        // the method frame's overload, kept alive by ast_pin or by the backend's retained declarations

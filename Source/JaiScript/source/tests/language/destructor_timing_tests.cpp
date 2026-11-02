@@ -1255,6 +1255,26 @@ public:
                 }
                 check_eq(std::string("cnewnew|k'copy|k"), got, variant == 0 ? "default engine" : "proofs and passes off");
             }
+            // a callee another unit redefines to return an instance: the compiled caller's condition temporary still dies before the body
+            for (int variant = 0; variant < 2; ++variant) {
+                auto eng = make_engine();
+                if (variant == 1) { eng->type_proofs(false); eng->ir_passes(false); }
+                std::string got;
+                try {
+                    eng->execute(R"(
+                        string LOG = "";
+                        class T { string n; T(string a) { n = a; } ~T() { LOG = LOG + "-" + n; } }
+                        int mk() { return 1; }
+                        void h() { if (mk()) { LOG = LOG + "in"; } LOG = LOG + "|"; }
+                        h();
+                    )");
+                    eng->execute(R"(T mk() { return T("x"); })");
+                    got = eng->execute("h(); LOG;").as_string();
+                } catch (const std::exception& e) {
+                    got = std::string("threw: ") + e.what();
+                }
+                check_eq(std::string("in|-xin|"), got, variant == 0 ? "a reloaded callee, default engine" : "a reloaded callee, proofs and passes off");
+            }
         });
 
         // C++ destroys a local inside the function that declares it, so the frames of an error its destructor raises run through it

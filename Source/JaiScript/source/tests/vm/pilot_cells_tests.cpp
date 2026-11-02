@@ -17,6 +17,8 @@
 #include <jaiscript/vm/disassembler.hpp>
 #include <jaiscript/vm/chunk_manifest.hpp>
 #include <jaiscript/vm/region_ir.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
+#include <chrono>
 #include <cstring>
 #include <cmath>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -1762,6 +1764,30 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				f([1, 2, 3]);
 			)");
 			check_true(listing.find("-- cell loop") != std::string::npos, "the size head closes");
+			// a global a reloaded module redeclares as an instance whose script size() runs in its own frame: the compiled size site calls it
+			const auto dir = jai::foundry::test_temp_directory();
+			int tick = 0;
+			for (const bool vm : {false, true}) {
+				const std::string module = vm ? "size_reload_vm.jai" : "size_reload_interp.jai";
+				auto write_module = [&](const std::string& body) {
+					{ std::ofstream(dir / module, std::ios::binary | std::ios::trunc) << body; }
+					std::error_code ec;
+					std::filesystem::last_write_time(dir / module, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+				};
+				auto e = engine::make();
+				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
+				stdlib::register_all(*e);
+				e->add_include_path(dir.string());
+				e->import_recheck_interval(0);
+				std::string got;
+				try {
+					write_module("array<int> G = [1, 2, 3];\n");
+					e->execute("import(\"" + module + "\"); int n() { int s = 0; for (int i = 0; i < 2; ++i) { s += G.size(); } return s + G.size(); } n();");
+					write_module("class S { int size() { return 42; } }\nS G;\n");
+					got = std::to_string(e->execute("import(\"" + module + "\"); n();").as_int());
+				} catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+				check_eq(std::string("126"), got, vm ? "a script size() behind a compiled size site, vm" : "a script size() behind a compiled size site, interpreter");
+			}
 		});
 
 		test("compound_element_operands_land_in_temps", [this]() {

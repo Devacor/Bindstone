@@ -15,7 +15,8 @@ the unproven price, consistently typed users pay once at parse.
 Soundness principle (the one sentence every consumer obeys): **a proof selects a lane; a total
 runtime guard makes the lane sound.** Guard failure = the general code runs, byte for byte. There
 is therefore no path where a proof produces an error the unproven path would not; stale proofs (hot
-reload, re-stamp races, frozen vm flags) can only cost the lane.
+reload, re-stamp races, frozen vm flags) can only cost the lane. A compile-time decision that has no
+guard reads only facts its own unit owns (section 6.1, "Unguarded facts").
 
 Byte-parallel contract: for every program, both backends with `type_proofs(true)` and
 `type_proofs(false)` produce identical results, identical printed output, identical error text,
@@ -202,11 +203,25 @@ proof the interpreter observes. It has no runtime guard: it relies on the proof 
 |---|---|---|
 | `static_store_proof` | `store_flag_same_type = 32` in `op_store.c` (and `op_concat_store`'s identifier mode, `op_t_store_mov`'s site), mirrored into `fused_binary_dst_proto.flags` at the peepholes | the typed store lowering: a fused binary landing in a frame slot (`op_binary_fused_store`, no result, no ref alias, not `::`) becomes a typed row with a `k_typed_dst_store` destination; `typed_land_int`/`typed_land_float` check the slot's tag and fall back to the general store on a miss |
 | `static_operand_class` | `fused_binary_proto::typed_class`, `compound_fused_proto::typed_class` | the typed arithmetic and compare rows, each guarding its operands' storage |
-| `static_arg_proofs`, `proof_globals`, `receiver_global`, `proven_callee_decl`, `proven_method_decl`, `static_return_proof` | the AST, read when the inliner grafts | the inliner's admission (a graft's parameters and result take the proven kinds); the grafted code keeps the general guards |
+| `static_arg_proofs`, `proof_globals`, `receiver_global`, `proven_callee_decl`, `proven_method_decl`, `static_return_proof` | the AST, read when the inliner grafts | the inliner's admission (a graft's parameters and result take the proven kinds); the grafted code keeps the general guards, and a parameter's declaration converts with the call's parameter text on a miss (`site_kind = site_parameter`) |
+| `static_return_proof` | the AST, read by `parallel_transform`'s body rewrite | the rewritten return skips its conversion (section 5; unguarded) |
+| `proven_callee_decl` (raw signature) | `cell_call::raw`, the frame program's raw sites | a raw call into the callee's frame program; the call site re-resolves the callee and checks its body at run time |
+| `proven_callee_decl` (return type) | `value_call_operand`, `deref_ahead_of` | whether a call's result may be a reference a later operand could change (see "Unguarded facts") |
+| `builtin_receiver` | `op_size_temp` | the proven kind's count; any other receiver makes the method call and the `op_call_temp` that follows lands its result |
 
 Freshness: instruction-borne flags (`store_flag_same_type`) never gain proofs after first compile —
 toggling `type_proofs(true)` later or a surface move that adds store proofs only benefits fresh
 chunks; correctness is unaffected (guards). No chunk invalidation happens on a re-stamp.
+
+Unguarded facts. A compiled chunk outlives a reload of another unit, so a decision with no runtime guard
+reads only what its own unit declares. `value_owns_nothing` (a temp holding the value needs no release)
+takes literals, this frame's declared and inferred scalar slots, a container slot's element or count, a
+math intrinsic over those, and the operators over those; a callee's return type, a class's field type and
+an alias's stdlib identity belong to other units, so a temp read through one keeps its release. The
+other readers of another unit's facts: `value_call_operand` and `deref_ahead_of` read a callee's declared
+by-value return, which a reload could make a reference (a reload of the callee to `int& f()` returning a
+global the next operand writes keeps both backends' values: probed for the binary, the declaration, the
+argument list and the cell block); `parallel_transform`'s return proof (section 5).
 
 ### 6.2 Identity lanes (no proof)
 

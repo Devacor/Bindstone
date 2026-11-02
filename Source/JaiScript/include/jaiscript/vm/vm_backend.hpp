@@ -1834,15 +1834,15 @@ namespace jai::vm {
         std::unordered_map<const class_definition*, field_init_plan> field_init_plans_;
         // A class level's field initializers as one method body over its initializer environment (an aggregate's, a reload's), keyed by
         // the class, rebuilt when its initializers or the unit change
-        struct level_initializers {
+        struct level_initializer_body {
             uint64_t unit = UINT64_MAX;
             std::vector<const expression*> asts;
             std::unique_ptr<script_defined_function> fn;
         };
         // The construction machinery's state, boxed: the backend's own layout stays as it was for code that never constructs
         struct construction_state {
-            std::unordered_map<const expression*, level_initializers> single_initializers;   // run_level_initializers' `only` bodies
-            std::unordered_map<const class_definition*, level_initializers> level_initializers;
+            std::unordered_map<const expression*, level_initializer_body> single_initializers;   // run_level_initializers' `only` bodies
+            std::unordered_map<const class_definition*, level_initializer_body> level_initializers;
             std::exception_ptr field_init_exception;   // what a field store in a level's initializer body threw, rethrown natively
         };
         std::unique_ptr<construction_state> construction_;

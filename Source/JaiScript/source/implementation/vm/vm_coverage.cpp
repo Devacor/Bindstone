@@ -68,7 +68,7 @@ namespace {
 			return fam::call;
 		case opcode::op_call_method: case opcode::op_probe_member: return fam::method;
 		case opcode::op_call_builtin: case opcode::op_size_temp: case opcode::op_push_fused: return fam::builtin;
-		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_convert: case opcode::op_implicit_return:
+		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_return_convert: case opcode::op_implicit_return:
 		case opcode::op_halt: case opcode::op_ref_return_bind: case opcode::op_ref_return_lvalue:
 			return fam::ret;
 		case opcode::op_get_member: case opcode::op_get_member_path: case opcode::op_get_member_this: case opcode::op_place_arg: case opcode::op_get_static: case opcode::op_set_member: case opcode::op_set_static: case opcode::op_member_compound:
@@ -138,7 +138,7 @@ namespace {
 		case opcode::op_unary_temp: case opcode::op_math_temp: case opcode::op_call_temp: case opcode::op_math_guard: case opcode::op_inline_guard:
 		case opcode::op_jump: case opcode::op_jump_if_true: case opcode::op_jump_if_false: case opcode::op_load: case opcode::op_const: case opcode::op_store:
 		case opcode::op_decl_var: case opcode::op_operand_temp: case opcode::op_compound_fused: case opcode::op_incdec: case opcode::op_pop:
-		case opcode::op_return: case opcode::op_return_ident: case opcode::op_null: case opcode::op_true: case opcode::op_false:
+		case opcode::op_return: case opcode::op_return_ident: case opcode::op_return_binary: case opcode::op_null: case opcode::op_true: case opcode::op_false:
 			return true;
 		default: return false;
 		}

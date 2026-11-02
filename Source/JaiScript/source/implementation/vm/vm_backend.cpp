@@ -20006,7 +20006,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 // takes the loop top and its statement hook; the plain one tests for a session armed mid-run only where control moves (a
 // jump, a back edge, a call or a return), so a straight-line op dispatches its successor with no hook test.
 #ifndef JAISCRIPT_VM_COVERAGE
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_AT(at) { if constexpr (Hooked) { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -20552,6 +20552,16 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 					return {};
 				}
 				VM_TRY_OP(exec_return_ident<false>(fp, ins));
+				if (is_unwinding_) [[unlikely]] { break; }
+				JAI_SWITCH_FRAME(fp);
+			}
+			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
+				if (call_records_top_ == records_base) {
+					VM_TRY_OP(exec_return_binary<true>(fp, ins));
+					if (is_unwinding_) [[unlikely]] { break; }
+					return {};
+				}
+				VM_TRY_OP(exec_return_binary<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				JAI_SWITCH_FRAME(fp);
 			}
@@ -21973,6 +21983,35 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	script_value value(*resolved);
 	materialize_return(f, value, detail::return_operand_ident, ins.a);
 	return finish(std::move(value));
+}
+
+// Fused `return <a op b>;`: computes exactly like exec_binary's general tail (custom operator dispatch
+// included), then returns without the push+pop round trip. A custom operator that THROWS leaves the result pushed and the
+// ip parked here so the dispatch loop's unwind handling sees the same state op_binary
+// would have produced one op earlier (same statement, same trace line).
+template <bool Entry>
+op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
+	script_value left_raw = std::move(stack_[stack_.size() - 2]);   // the operands die right then left, as exec_binary's
+	script_value right_raw = std::move(stack_.back());
+	stack_.pop_back();
+	stack_.pop_back();
+	const token_type op = static_cast<token_type>(ins.a);
+	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left_raw, right_raw, op)) {
+		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), 0); }
+		else { return return_with_result(fp, std::move(left_raw)); }
+	}
+	auto result = binary_general(op, left_raw.deref(), right_raw.deref());
+	if (!result) {
+		return raise_from(result);
+	}
+	if (is_unwinding_) [[unlikely]] {
+		// Custom-op script throw mid-compute: reproduce op_binary's post-op state
+		// (result pushed, frame NOT popped) and let the loop bottom unwind
+		stack_.push_back(std::move(result.value()));
+		return {};
+	}
+	if constexpr (Entry) { return entry_return_finish(*fp, std::move(result.value()), 0); }
+	else { return return_with_result(fp, std::move(result.value())); }
 }
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {

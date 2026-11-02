@@ -1281,6 +1281,7 @@ namespace jai::vm {
         // entry branch)
         template <bool Entry> op_status exec_return_ident(frame*& fp, const vm_instruction& ins);   // Entry: the entry frame's return door
         static fused_operand ident_operand_at(const frame& f, const vm_instruction& ins) noexcept;
+        template <bool Entry> op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
         op_status fall_off_script_frame(frame*& fp);
         // Return-site conversion (op_return_convert inside try regions) and the
         // native-entry / fiber completion door; both run convert_return_at_site

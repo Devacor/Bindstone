@@ -213,7 +213,7 @@ namespace jai::vm {
         bool lift_operand_shape(const expression* e);
         bool lift_temp_only(const expression* e);
         bool lift_partners_ok(const binary_expr* b);
-        int lift_fusible_nodes(const expression* e);
+        int lift_fusible_nodes(const expression* e, int budget = 16);
         bool binary_lands_fused(binary_expr* b);
         bool numeric_value_binary(expression* e);
         bool reference_slot_operand(const expression* e);
@@ -365,6 +365,8 @@ namespace jai::vm {
 
         void compile_identifier_load(const expression_ptr& expr);
         void compile_binary(const std::shared_ptr<binary_expr>& expr);
+        bool compile_binary_shaped(const std::shared_ptr<binary_expr>& expr);   // false: the stack form, nothing emitted
+        const binary_expr* not_append_chain_ = nullptr;   // compile_binary's spine: a `+` known to be no append chain
         void compile_unary(const std::shared_ptr<unary_expr>& expr);
         void compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement);
         void record_argument_source(call_site& site, const expression_ptr& arg, size_t argc);

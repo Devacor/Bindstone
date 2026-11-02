@@ -7550,19 +7550,20 @@ bool vm_compiler::lift_partners_ok(const binary_expr* b) {
 }
 
 // Whole-tree classification: operands and pure value-op binaries all the way down. Returns the binary-node
-// count (the conservative temp bound), -1 = not fusible. literal-op-literal nodes stay UNFUSED, mirroring
-// binary_shape's refusal: the interpreter's fast paths never fire for them (fuzz seed 115)
-int vm_compiler::lift_fusible_nodes(const expression* e) {
+// count (the conservative temp bound), -1 = not fusible or more than `budget` binaries (no lift takes over 16, so a long chain
+// stops the walk there). literal-op-literal nodes stay UNFUSED, mirroring binary_shape's refusal: the interpreter's fast paths
+// never fire for them (fuzz seed 115)
+int vm_compiler::lift_fusible_nodes(const expression* e, int budget) {
 	if (lift_operand_shape(e)) { return 0; }
 	if (e->get_type() != node_type::binary_expr) { return -1; }
 	const auto* b = static_cast<const binary_expr*>(e);
 	if (b->op.type == token_type::left_bracket) { return -1; }
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
 	if (b->left->get_type() == node_type::literal_expr && b->right->get_type() == node_type::literal_expr) { return -1; }
-	if (!lift_partners_ok(b)) { return -1; }
-	const int l = lift_fusible_nodes(b->left.get());
+	if (!lift_partners_ok(b) || budget <= 0) { return -1; }
+	const int l = lift_fusible_nodes(b->left.get(), budget - 1);
 	if (l < 0) { return -1; }
-	const int r = lift_fusible_nodes(b->right.get());
+	const int r = lift_fusible_nodes(b->right.get(), budget - 1 - l);
 	if (r < 0) { return -1; }
 	return l + r + 1;
 }
@@ -7692,7 +7693,33 @@ size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_
 	return ip;
 }
 
+// A binary: its shapes (compile_binary_shaped), else the stack form, its left operand first. A left operand that takes the stack form
+// too is walked here rather than recursed into, so a long left-leaning chain (y + y + ... + y) compiles at any length
 void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
+	std::vector<std::shared_ptr<binary_expr>> spine;
+	std::shared_ptr<binary_expr> at = expr;
+	while (!compile_binary_shaped(at)) {
+		spine.push_back(at);
+		const expression_ptr& left = at->left;
+		if (left->get_type() != node_type::binary_expr || (held_root_ && left.get() == held_root_)) {
+			compile_expression(left);
+			break;
+		}
+		emit_const_guard(left);   // what compile_expression does ahead of the dispatch
+		at = std::static_pointer_cast<binary_expr>(left);
+		// a `+` that is no append chain has a `+` left that is none either (the same head, one link fewer): the walk is not repeated
+		not_append_chain_ = spine.back()->op.type == token_type::plus && at->op.type == token_type::plus ? at.get() : nullptr;
+	}
+	not_append_chain_ = nullptr;
+	for (auto it = spine.rbegin(); it != spine.rend(); ++it) {
+		const binary_expr* b = it->get();
+		deref_ahead_of(b->left.get(), b->right.get());
+		compile_expression(b->right);
+		emit(opcode::op_binary, static_cast<uint32_t>(b->op.type), binary_shape_none);
+	}
+}
+
+bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::question_question) {
 		// the left value stays when it is not null; a null is replaced by the right operand, which runs only then
 		compile_expression(expr->left);
@@ -7702,7 +7729,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		emit(opcode::op_pop);
 		compile_expression(expr->right);
 		patch_jump(done_jump, chunk_->code.size());
-		return;
+		return true;
 	}
 	if (expr->op.type == token_type::ampersand_ampersand || expr->op.type == token_type::pipe_pipe) {
 		// the left side is jumping code (nested && / || and comparisons as compare-jumps, no bool materialized between them); the right side is
@@ -7722,10 +7749,10 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		emit(expr->op.type == token_type::ampersand_ampersand ? opcode::op_false : opcode::op_true);
 		patch_jump(jump_end, chunk_->code.size());
 		chunk_->logical_values.emplace_back(first_ip, static_cast<uint32_t>(chunk_->code.size()));   // a block holds the value in a cell (lower_typed_ops)
-		return;
+		return true;
 	}
 
-	if (!reference_ && string_append_chain(expr.get())) {
+	if (!reference_ && expr.get() != not_append_chain_ && string_append_chain(expr.get())) {
 		// the literal, then each operand and its append, the order the chain evaluates in
 		std::vector<const binary_expr*> chain;
 		for (const expression* e = expr.get(); e->get_type() == node_type::binary_expr; e = static_cast<const binary_expr*>(e)->left.get()) {
@@ -7776,7 +7803,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			first_hint = 0;
 		}
 		flush();
-		return;
+		return true;
 	}
 
 	if (expr->op.type == token_type::left_bracket) {
@@ -7784,12 +7811,12 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		if (expr->transient_element_read && !reference_) {
 			flags |= index_flag_transient_read;
 		}
-		if (try_emit_fused_index(expr.get(), flags)) return;
+		if (try_emit_fused_index(expr.get(), flags)) return true;
 		if (const auto held = take_subscript_guard(expr.get())) { compile_expression(held); }   // the container a graft statement's guard took
 		else { compile_expression(expr->left); }
 		compile_expression(expr->right);
 		emit(opcode::op_index, flags);
-		return;
+		return true;
 	}
 
 	// A subscript operand the fused index op can read lands in a temp first (left before right) when its
@@ -7839,7 +7866,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			chunk_->fused_binary_protos.push_back(proto);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
 			free_temps(temp_mark);   // the read temps die into the binary
-			return;
+			return true;
 		}
 	}
 
@@ -7857,7 +7884,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 		stamp_typed_class(proto, expr.get());
 		chunk_->fused_binary_protos.push_back(proto);
 		emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), shape);
-		return;
+		return true;
 	}
 
 	// Register-file lift: pure fusible sub-binaries on EITHER side compute
@@ -7958,14 +7985,11 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 			chunk_->fused_binary_protos.push_back(outer);
 			emit(opcode::op_binary_fused, static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1), binary_shape_ident_ident);
 			free_temps(temp_mark);   // LIFO release: temps die once the outer op consumed them
-			return;
+			return true;
 		}
 	}
 
-	compile_expression(expr->left);
-	deref_ahead_of(expr->left.get(), expr->right.get());
-	compile_expression(expr->right);
-	emit(opcode::op_binary, static_cast<uint32_t>(expr->op.type), binary_shape_none);
+	return false;
 }
 
 uint32_t vm_compiler::temp_symbol_index() {

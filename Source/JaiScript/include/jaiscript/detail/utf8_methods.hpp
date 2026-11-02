@@ -186,7 +186,7 @@ namespace jai::detail {
             };
         }
 
-        // the pads: widths in characters, the fill one character (a string's first character, which may be several bytes)
+        // the pads: widths in characters, the fill's characters tiled from its start on each side (the byte form's rule)
         struct pad_kind { const char* name; int side; };   // -1 left, 1 right, 0 center
         for (const pad_kind pk : {pad_kind{"pad_left", -1}, pad_kind{"pad_right", 1}, pad_kind{"pad_center", 0}}) {
             const builtin_method string_pad = get(pk.name);
@@ -195,7 +195,7 @@ namespace jai::detail {
                 std::string fill = " ";
                 if (args.size() == 2) {
                     if (args[1].is_char()) { fill = std::string(1, args[1].unchecked_as_char()); }
-                    else if (const std::string* f = args[1].text_bytes(); f && !f->empty()) { fill = f->substr(0, utf8::decode(*f, 0).length); }
+                    else if (const std::string* f = args[1].text_bytes(); f && !f->empty()) { fill = *f; }
                     else { return string_pad(ctx, self, args); }   // the byte form's texts for an empty or wrong fill
                 }
                 const bool cache = utf8::may_cache(ctx);
@@ -205,9 +205,17 @@ namespace jai::detail {
                 const size_t total = saturating_count(want) - len;
                 if (!builtin_memory_charge(ctx.get_engine(), total, fill.size())) [[unlikely]] { return builtin_memory_cap(ctx.get_engine()); }
                 const size_t left = pk.side < 0 ? total : pk.side > 0 ? 0 : total / 2;
-                std::string lhs, rhs;
-                for (size_t k = 0; k < left; ++k) lhs += fill;
-                for (size_t k = 0; k < total - left; ++k) rhs += fill;
+                auto tiled = [&](size_t characters) {
+                    std::string out;
+                    for (size_t at = 0; characters > 0; --characters) {
+                        if (at == fill.size()) { at = 0; }
+                        const size_t width = utf8::decode(fill, at).length;
+                        out.append(fill, at, width);
+                        at += width;
+                    }
+                    return out;
+                };
+                const std::string lhs = tiled(left), rhs = tiled(total - left);
                 std::string& bytes = self.unchecked_as_utf8_ref().bytes;
                 bytes = lhs + bytes + rhs;
                 return R(self);

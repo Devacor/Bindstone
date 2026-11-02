@@ -3,6 +3,8 @@
 #ifndef __JAISCRIPT_CORE_RUNTIME_ERRORS_HPP__
 #define __JAISCRIPT_CORE_RUNTIME_ERRORS_HPP__
 
+#include <new>
+#include <stdexcept>
 #include <system_error>
 #include <string>
 
@@ -121,6 +123,11 @@ namespace jai {
 
     namespace detail {
         inline constexpr const char* bare_throw_text = "Bare throw with no active exception thrown.";
+
+        // The text a native exception raises in script: an allocation the platform refuses reads alike everywhere
+        inline const char* native_exception_text(const std::exception& e) noexcept {
+            return dynamic_cast<const std::bad_alloc*>(&e) || dynamic_cast<const std::length_error*>(&e) ? "Out of memory" : e.what();
+        }
     }
 
 } // namespace jai

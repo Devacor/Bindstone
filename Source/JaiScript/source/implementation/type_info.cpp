@@ -172,62 +172,11 @@ type_info type_info::make_int8(string_symbolizer& symbolizer) {
     return info;
 }
 
-type_info type_info::make_int16(string_symbolizer& symbolizer) {
-    auto info = make_int(symbolizer);
-    info.type_name = "int16";
-    info.native_size = 2;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
-type_info type_info::make_int32(string_symbolizer& symbolizer) {
-    auto info = make_int(symbolizer);
-    info.type_name = "int32";
-    info.native_size = 4;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
 type_info type_info::make_uint8(string_symbolizer& symbolizer) {
     auto info = make_int(symbolizer);
     info.type_name = "uint8";
     info.native_size = 1;
     info.is_signed = false;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
-type_info type_info::make_uint16(string_symbolizer& symbolizer) {
-    auto info = make_int(symbolizer);
-    info.type_name = "uint16";
-    info.native_size = 2;
-    info.is_signed = false;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
-type_info type_info::make_uint32(string_symbolizer& symbolizer) {
-    auto info = make_int(symbolizer);
-    info.type_name = "uint32";
-    info.native_size = 4;
-    info.is_signed = false;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
-type_info type_info::make_uint64(string_symbolizer& symbolizer) {
-    auto info = make_int(symbolizer);
-    info.type_name = "uint64";
-    info.native_size = 8;
-    info.is_signed = false;
-    info.id = type_name_id(symbolizer, info.canonical_name());
-    return info;
-}
-
-type_info type_info::make_float32(string_symbolizer& symbolizer) {
-    auto info = make_float(symbolizer);
-    info.type_name = "float32";
-    info.native_size = 4;
     info.id = type_name_id(symbolizer, info.canonical_name());
     return info;
 }

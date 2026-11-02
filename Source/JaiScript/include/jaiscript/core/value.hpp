@@ -2051,9 +2051,6 @@ namespace detail {
         // C++20 spaceship operator for complete ordering
         std::strong_ordering operator<=>(const script_value& other) const;
         
-        // Custom conversion checker function type
-        using conversion_func = std::function<script_value(const script_value&, const std::type_info&)>;
-        
         // Get engine pointer for creating new script_values
         // the (declared type, engine) pair in one compare of the tag word: exactly this stamp (whose owner is eng), or no stamp and eng
         JAI_FORCEINLINE bool stamped_as(const type_info* stamp) const noexcept {

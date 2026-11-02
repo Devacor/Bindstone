@@ -663,8 +663,8 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
             is_unwinding_ = true;
         } catch (const std::exception& e) {
             // a native exception a statement raises (a host error, an allocation failure) is the run's script exception, as on the vm
-            active_exception_value_ = make_value(std::string(e.what()));
-            current_exception_ = script_exception(e.what());
+            active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
+            current_exception_ = script_exception(detail::native_exception_text(e));
             is_unwinding_ = true;
         }
 
@@ -7836,8 +7836,8 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         } catch (const std::exception& e) {
             while (valueStack_.size() > try_stack_mark) { (void)valueStack_.pop(); }
             if (auto* se = dynamic_cast<const script_exception*>(&e)) { current_exception_ = *se; }
-            else { current_exception_ = script_exception(e.what()); }
-            active_exception_value_ = make_value(std::string(e.what()));
+            else { current_exception_ = script_exception(detail::native_exception_text(e)); }
+            active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
             is_unwinding_ = true;
         }
     }
@@ -8570,11 +8570,11 @@ checked_result<void> interpreter::include_into_value_stack(expression* path_expr
 }
 
 checked_result<void> interpreter::raise_native_exception(const std::exception& e) {
-    active_exception_value_ = make_value(std::string(e.what()));
+    active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
     if (const auto* thrown = dynamic_cast<const script_exception*>(&e)) {
         current_exception_ = *thrown;
     } else {
-        current_exception_ = script_exception(e.what());
+        current_exception_ = script_exception(detail::native_exception_text(e));
     }
     is_unwinding_ = true;
     push_value(make_value());

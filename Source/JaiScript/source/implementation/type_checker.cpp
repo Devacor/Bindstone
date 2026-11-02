@@ -1470,8 +1470,8 @@ private:
     }
 
     static bool engine_instance_member(const class_definition& def, uint64_t id, uint64_t getter_id) {
-        return !def.get_method(id, false).is_invalid() || def.find_field_declaring_class(id) != nullptr ||
-               !def.get_method(getter_id, false).is_invalid() ||
+        return def.method_ptr(id) != nullptr || def.find_field_declaring_class(id) != nullptr ||
+               def.method_ptr(getter_id) != nullptr ||
                def.is_static_field(id) || def.has_static_field(id) || def.has_static_method(id);
     }
 

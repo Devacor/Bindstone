@@ -2362,7 +2362,7 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
     try {
         return ref_store_through(target, value, eng, eng->get_symbolizer());
     } catch (const std::exception& e) {
-        return host_exception_error(eng, e.what());
+        return host_exception_error(eng, detail::native_exception_text(e));
     }
 }
 
@@ -2882,19 +2882,6 @@ void engine::initialize_engine_reference() {
     binary::register_library(*this);
     // regex, regex::match and regex::escape (detail/regex_library.hpp): engine-core, so a constant pattern compiles once at load
     detail::regex_library::register_library(*this);
-
-    // Note: weak_ptr and shared_ptr are now handled as type constructors in the interpreter
-    // They are keywords and follow C++ semantics:
-    // - weak_ptr<T> var;           // Creates empty weak_ptr
-    // - weak_ptr<T> var = obj;     // Creates weak_ptr from object
-    // - weak_ptr<T>(obj)           // Constructor syntax
-    // - shared_ptr<T> var;         // Creates empty shared_ptr  
-    // - shared_ptr<T>(obj)         // Constructor syntax
-    
-    // weak_ptr methods are now registered as instance methods on weak_ptr objects
-    // See interpreter::weak_ptr_methods_ for lock() and expired() implementations
-
-    // expired() is now a method on weak_ptr objects - see interpreter::weak_ptr_methods_
 }
 
 
@@ -6481,8 +6468,6 @@ script_value engine::execute_import(const std::string& resolved_path) {
     }
 }
 
-
-// Note: get_engine_weak_ptr() function removed - no longer needed since script_value uses engine* directly
 
 void engine::note_script_layer(const void* cpp_object, const weaker_ptr<class_instance>& owner) {
     if (!cpp_object) { return; }

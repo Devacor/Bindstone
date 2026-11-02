@@ -4213,6 +4213,14 @@ private:
 				b.loose[1] + b.loose["k"] + "|" + type_of(from_json("{\"$char\": 300}")) + "|" + type_of(from_json("{\"$map\": [1]}")) + "|" +
 				type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"));
 			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", warn_region);
+			// a float no JSON number spells is {"$float": "inf" | "-inf" | "nan"}: a value, a map key and a vector component alike
+			expect("json float tags", R"(
+				map<float, int> m = {}; m[-math::INF] = 3; m[math::NAN_VALUE] = 4; m[1.0] = 1;
+				var back = from_json(to_json(m));
+				var v = from_json(to_json(math::vec2(math::INF, 1.0)));
+				to_json([math::INF, -math::INF, math::NAN_VALUE]) + "|" + to_json(m) + "|" + back.size() + " " + back[math::NAN_VALUE] + " " + back[-math::INF] +
+				"|" + type_of(v) + " " + v.x + "|" + type_of(from_json("{\"$float\": \"big\"}"));
+			)", "[{\"$float\":\"inf\"},{\"$float\":\"-inf\"},{\"$float\":\"nan\"}]|{\"$map\":[[{\"$float\":\"-inf\"},3],[1.0,1],[{\"$float\":\"nan\"},4]]}|3 4 3|math::vec2 inf|map", warn_region);
 		});
 	}
 

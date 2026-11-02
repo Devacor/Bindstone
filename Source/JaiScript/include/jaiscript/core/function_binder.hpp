@@ -802,7 +802,7 @@ class engine;
                     try {
                         return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
-                        return host_exception_error(eng, e.what());
+                        return host_exception_error(eng, detail::native_exception_text(e));
                     }
                 };
             } else {
@@ -831,7 +831,7 @@ class engine;
                 try {
                     return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                 } catch (const std::exception& e) {
-                    return host_exception_error(eng, e.what());
+                    return host_exception_error(eng, detail::native_exception_text(e));
                 }
             }
             static checked_result<script_value> invoke(const void* self, const script_value* args, size_t argc) {

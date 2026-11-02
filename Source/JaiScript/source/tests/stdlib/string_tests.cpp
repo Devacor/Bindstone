@@ -398,6 +398,10 @@ public:
             stdlib::register_all(*engine);
             auto result = engine->execute("var s = \"hi\"; s.pad_center(6, '.');");
             check_eq(result.as<std::string>(), "..hi..");
+            // a fill of several characters tiles from its start on each side (JavaScript's padStart / padEnd)
+            check_eq(std::string("xyzxyab|abxyzxy|xyzabxyz|\xC3\xA9\xE6\x97\xA5\xC3\xA9\xE6\x97\xA5" "b"),
+                     engine->execute("var l = \"ab\"; l.pad_left(7, \"xyz\"); var r = \"ab\"; r.pad_right(7, \"xyz\"); var c = \"ab\"; c.pad_center(8, \"xyz\");"
+                                     " utf8_string u = \"b\"; u.pad_left(5, \"\xC3\xA9\xE6\x97\xA5\"); l + \"|\" + r + \"|\" + c + \"|\" + u;").to_string());
         });
 
         test("replace_first", [this]() {

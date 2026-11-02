@@ -8,6 +8,7 @@
 #include <jaiscript/serialization/json_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
 #include <memory>
+#include <limits>
 #include <optional>
 #include <unordered_set>
 #include <sstream>
@@ -311,6 +312,14 @@ namespace stdlib {
 				if (tag.is_string() && tag.as_string() == "$char" && payload.is_int() && payload.as_int() >= 0 && payload.as_int() <= 255) {
 					out = script_value(static_cast<script_char>(payload.as_int()), eng_);
 					return true;
+				}
+				if (tag.is_string() && tag.as_string() == "$float" && payload.is_string()) {
+					const std::string& text = payload.as_string();
+					if (text == "inf" || text == "-inf" || text == "nan") {
+						out = script_value(text == "nan" ? std::numeric_limits<double>::quiet_NaN() : text == "inf" ? std::numeric_limits<double>::infinity()
+						                                                                                     : -std::numeric_limits<double>::infinity(), eng_);
+						return true;
+					}
 				}
 				if (tag.is_string() && tag.as_string() == "$map" && payload.is_array() && pairs_well_formed(payload)) {
 					frame f(shape::pairs, payload, script_value::make_map(nullptr, nullptr, eng_), eng_);

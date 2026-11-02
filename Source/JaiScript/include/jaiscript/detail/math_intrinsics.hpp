@@ -608,7 +608,7 @@ namespace jai::detail {
         if (argc > math::k_max_dims) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), math::ctor_arity_text(kind));
         }
-        // S8: a bound argument decodes once (a host variable reads its current value)
+        // a bound argument decodes once (a host variable reads its current value)
         script_value decoded[math::k_max_dims] = {script_value(std::monostate{}, eng), script_value(std::monostate{}, eng),
                                                  script_value(std::monostate{}, eng), script_value(std::monostate{}, eng)};
         const script_value* view[math::k_max_dims] = {nullptr, nullptr, nullptr, nullptr};
@@ -1078,7 +1078,7 @@ namespace jai::detail {
     // The ONE evaluation kernel, used verbatim by both backends. Args arrive as an
     // array of DEREF'D pointers (zero-copy from the caller's stack). Type discipline:
     // ONE variant read per arg, switch on it; cpp_bound decodes through
-    // the S8 prologue shape. Every case arity-checks BEFORE touching args.
+    // one up-front decode (a bound operand decodes once). Every case arity-checks BEFORE touching args.
     inline checked_result<script_value> eval_math_intrinsic(math_fn fn, const script_value* const* args, size_t argc,
                                                             engine* eng) {
         // Normalize each operand once: yields (is_number, as_double, is_int, as_int)
@@ -1095,7 +1095,7 @@ namespace jai::detail {
                 case script_value::TYPEID_INT: out.ok = true; out.is_int = true; out.i = v.unchecked_as_int(); break;
                 case script_value::TYPEID_FLOAT: out.ok = true; out.f = v.unchecked_as_float(); break;
                 case script_value::TYPEID_CPP_BOUND: {
-                    const script_value decoded = v.bound_decoded_temp();   // S8 prologue
+                    const script_value decoded = v.bound_decoded_temp();   // a bound operand decodes once
                     if (decoded.raw_storage_index() == script_value::TYPEID_INT) {
                         out.ok = true; out.is_int = true; out.i = decoded.unchecked_as_int();
                     } else if (decoded.raw_storage_index() == script_value::TYPEID_FLOAT) {
@@ -1236,19 +1236,19 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::itrunc>(argc)) return bad_arity(math_arity_of(math_fn::itrunc).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::itrunc expects a numeric argument");
-				if (a.is_int) { return script_value(a.i, eng); }
-				auto result = checked_float_to_integer(a.f);
-				if (!result) { return result.error_value(); }
-				return script_value(result.value(), eng);
+                if (a.is_int) { return script_value(a.i, eng); }
+                auto result = checked_float_to_integer(a.f);
+                if (!result) { return result.error_value(); }
+                return script_value(result.value(), eng);
             }
             case math_fn::ifloor: {
                 if (!math_arity_ok<math_fn::ifloor>(argc)) return bad_arity(math_arity_of(math_fn::ifloor).text);
                 const num a = read(*args[0]);
                 if (!a.ok) return bad_type("math::ifloor expects a numeric argument");
-				if (a.is_int) { return script_value(a.i, eng); }
-				auto result = checked_float_to_integer(std::floor(a.f));
-				if (!result) { return result.error_value(); }
-				return script_value(result.value(), eng);
+                if (a.is_int) { return script_value(a.i, eng); }
+                auto result = checked_float_to_integer(std::floor(a.f));
+                if (!result) { return result.error_value(); }
+                return script_value(result.value(), eng);
             }
             case math_fn::sqrt_: {
                 if (!math_arity_ok<math_fn::sqrt_>(argc)) return bad_arity(math_arity_of(math_fn::sqrt_).text);
@@ -1287,8 +1287,8 @@ namespace jai::detail {
                 if (!math_arity_ok<math_fn::clamp_>(argc)) return bad_arity(math_arity_of(math_fn::clamp_).text);
                 const num v = read(*args[0]), lo = read(*args[1]), hi = read(*args[2]);
                 if (!v.ok || !lo.ok || !hi.ok) return eval_vec_math(fn, args, argc, eng, "math::clamp expects numeric arguments");
-				const bool below = v.is_int && lo.is_int ? v.i < lo.i : v.d() < lo.d();
-				const num& p = below ? lo : ((v.is_int && hi.is_int ? v.i > hi.i : v.d() > hi.d()) ? hi : v);
+                const bool below = v.is_int && lo.is_int ? v.i < lo.i : v.d() < lo.d();
+                const num& p = below ? lo : ((v.is_int && hi.is_int ? v.i > hi.i : v.d() > hi.d()) ? hi : v);
                 if (p.is_int) return checked_result<script_value>(script_value(p.i, eng));
                 return checked_result<script_value>(script_value(p.f, eng));
             }

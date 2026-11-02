@@ -537,6 +537,14 @@ bool json_archive_writer::map_needs_tag(const script_value& value) {
            kt->base_type != script_value_type::jai_null_type;
 }
 
+namespace {
+    // a float JSON has no number for: {"$float": "inf"}, "-inf" or "nan", as $char tags a char
+    void append_json_script_float(std::string& out, double d) {
+        if (std::isfinite(d)) { append_json_float(out, d); return; }
+        out.append(d != d ? "{\"$float\":\"nan\"}" : d > 0 ? "{\"$float\":\"inf\"}" : "{\"$float\":\"-inf\"}");
+    }
+}
+
 void json_archive_writer::write_leaf(const script_value& val) {
     switch (val.type()) {
         case script_value_type::jai_null_type:
@@ -551,11 +559,9 @@ void json_archive_writer::write_leaf(const script_value& val) {
             append_json_integer(out_, val.as_int());
             break;
 
-        case script_value_type::jai_float_type: {
-            const double d = val.as_float();
-            if (std::isfinite(d)) { append_json_float(out_, d); } else { out_.append("null"); }
+        case script_value_type::jai_float_type:
+            append_json_script_float(out_, val.as_float());
             break;
-        }
 
         case script_value_type::jai_string_type: {
             const script_value& s = val.deref();
@@ -590,7 +596,7 @@ void json_archive_writer::write_leaf(const script_value& val) {
                     append_json_integer(out_, detail::math::i32_at(m, k));
                 } else {
                     const float c = detail::math::f32_at(m, k);
-                    if (std::isfinite(c)) { detail::math::append_f32(out_, c); } else { out_.append("null"); }
+                    if (std::isfinite(c)) { detail::math::append_f32(out_, c); } else { append_json_script_float(out_, c); }
                 }
             }
             out_.append("}}");
@@ -946,14 +952,32 @@ bool json_archive_reader::materialize_math(const JNode& node, engine* eng, scrip
     float f[4] = {0, 0, 0, 0};
     int32_t i[4] = {0, 0, 0, 0};
     bool seen[4] = {false, false, false, false};
+    auto text_of = [&](const JNode& n) { return std::string_view(chars_.data() + n.u.str.off, n.u.str.len); };
+    // a float component no JSON number spells: {"$float": "inf" | "-inf" | "nan"}
+    auto tagged_float = [&](const JNode& c, float& out) {
+        if (c.tag != JTag::Obj || c.u.agg.count != 1 || detail::math::integral(kind)) { return false; }
+        const JNode& tag = nodes_[c.u.agg.first];
+        const JNode& spelled = nodes_[c.u.agg.first + 1];
+        if (text_of(tag) != "$float" || spelled.tag != JTag::Str) { return false; }
+        const std::string_view text = text_of(spelled);
+        if (text != "inf" && text != "-inf" && text != "nan") { return false; }
+        out = text == "nan" ? std::numeric_limits<float>::quiet_NaN() : text == "inf" ? std::numeric_limits<float>::infinity() : -std::numeric_limits<float>::infinity();
+        return true;
+    };
     for (uint32_t m = 0; m < val.u.agg.count; ++m) {
         const JNode& k = nodes_[val.u.agg.first + 2 * m];
         const JNode& c = nodes_[val.u.agg.first + 2 * m + 1];
-        const int comp = detail::math::component_of(kind, std::string_view(chars_.data() + k.u.str.off, k.u.str.len));
-        if (comp < 0 || seen[comp] || (c.tag != JTag::Int && c.tag != JTag::Double)) {
+        const int comp = detail::math::component_of(kind, text_of(k));
+        float tagged = 0;
+        const bool is_tagged = comp >= 0 && tagged_float(c, tagged);
+        if (comp < 0 || seen[comp] || (c.tag != JTag::Int && c.tag != JTag::Double && !is_tagged)) {
             throw serialization_error(std::string("Malformed ") + math_type_name(kind) + " component in JSON");
         }
         seen[comp] = true;
+        if (is_tagged) {
+            f[comp] = tagged;
+            continue;
+        }
         if (detail::math::integral(kind)) {
             auto narrowed = c.tag == JTag::Int ? detail::math::to_i32(static_cast<script_int>(c.u.i)) : detail::math::to_i32(c.u.d);
             if (!narrowed) { throw serialization_error(std::string("Out-of-range ") + math_type_name(kind) + " component in JSON"); }

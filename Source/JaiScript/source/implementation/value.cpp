@@ -956,9 +956,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
     if (!eng) {
         throw runtime_error("Cannot create object with null engine pointer");
     }
-    // CRITICAL: Get persistent type_info from class registry (fast O(1) lookup by type_id)
-    // NEVER use type_info::make_object() - it creates a TEMPORARY that gets freed (0xDDDDDDDD)
-
+    // the registry's class names the object: a type_info::make_object() temporary would die before the value
     auto class_def = eng->get_class_definition(type_id);
     if (!class_def) {
         throw runtime_error("Cannot create object of unregistered class '" + std::string(type_name) +
@@ -2279,9 +2277,8 @@ void script_value::assign_through(const script_value& value) {
             case script_value_type::jai_char_type:
                 *static_cast<char*>(boundPtr) = value.as<script_char>();
                 break;
-            default:
-                // For complex types, we'll need to use the conversion registry
-                throw runtime_error("assign_through not yet implemented for this cpp_bound type");
+            default:   // an opaque host pointer: nothing script can store converts into it
+                throw runtime_error("Cannot assign through an opaque host pointer");
         }
     } else {
         *this = value;

@@ -142,7 +142,7 @@ out;
    2
   ]
  }
-}|{"$type":"Hold","$val":{"a":{"$id":1,"$type":"Pt","$val":{"x":1,"y":2.5,"name":"p\"q","tags":[1,2]}},"b":{"$id":1},"w":{"$ref":1}}}|{"$map":[]}[1.0,1e-06,123456789.0]|{"a":1,"b":[1,2,{"c":"d"}]}:map|{"k":"v<e9>\n","n":-1500.0,"t":true,"z":null}:map|{"$char":65}:char|{"$map":[[1,"x"]]}:map|{"$type":"math::vec2","$val":{"x":1.0,"y":2.0}}:math::vec2|[{"id":1,"tags":["a"]},{"id":2,"tags":[]}]:array|null:float|{"$id":1,"$type":"Pt","$val":{"x":7,"y":2.5,"name":"p\"q","tags":[1,2]}}:Pt|name=ax,v=1,extra=true,name=b,v=2,name=c,v=3,|Expected '"' in JSON|Expected ',' or ']' in JSON array at position 3, got '2', near: ...[1 2]...)OUT"), got);
+}|{"$type":"Hold","$val":{"a":{"$id":1,"$type":"Pt","$val":{"x":1,"y":2.5,"name":"p\"q","tags":[1,2]}},"b":{"$id":1},"w":{"$ref":1}}}|{"$map":[]}[1.0,1e-06,123456789.0]|{"a":1,"b":[1,2,{"c":"d"}]}:map|{"k":"v<e9>\n","n":-1500.0,"t":true,"z":null}:map|{"$char":65}:char|{"$map":[[1,"x"]]}:map|{"$type":"math::vec2","$val":{"x":1.0,"y":2.0}}:math::vec2|[{"id":1,"tags":["a"]},{"id":2,"tags":[]}]:array|{"$float":"inf"}:float|{"$id":1,"$type":"Pt","$val":{"x":7,"y":2.5,"name":"p\"q","tags":[1,2]}}:Pt|name=ax,v=1,extra=true,name=b,v=2,name=c,v=3,|Expected '"' in JSON|Expected ',' or ']' in JSON array at position 3, got '2', near: ...[1 2]...)OUT"), got);
 		});
 
 		// stable sorts across the block boundary (255..1500 elements): by-reference, by-value and int comparators make the same calls in the same number; a comparator that writes fields or reassigns its reference parameter

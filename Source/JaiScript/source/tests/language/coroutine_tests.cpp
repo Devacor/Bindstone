@@ -1475,10 +1475,9 @@ public:
         });
 
         test("handle_type_of_and_to_string_parity", [this, check_parity]() {
-            // parity pin: literal to be sharpened once the behavior is ruled
             std::string r = check_parity("coroutine int g() { yield 1; }\nauto h = g(); auto h2 = h;\ntype_of(h) + \"|\" + to_string(to_string(h) != \"\") + \"|\" + to_string(h == null) + \"|\" + to_string(h == h2)",
                 "type_of / to_string / equality of a coroutine handle");
-            check_true(r.find("ERROR") != 0, "handles print and compare without raising: " + r);
+            check_eq(std::string("coroutine_handle|true|false|true"), r, "a handle's type_of is the name its error texts use");
         });
 
         // A brace-less body that completes AT the yield leaves no inner frame: the enclosing

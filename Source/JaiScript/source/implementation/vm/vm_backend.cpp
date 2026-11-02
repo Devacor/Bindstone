@@ -20002,16 +20002,18 @@ checked_result<void> vm_backend::run(frame& entry) {
 
 // Replicated dispatch: a hot handler fetches and dispatches its successor itself, so each such tail is its own indirect
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
-// unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
+// unwinding check; diagnostic builds keep the one loop. A debugger session runs the hooked instantiation, where every op
+// takes the loop top and its statement hook; the plain one tests for a session armed mid-run only where control moves (a
+// jump, a back edge, a call or a return), so a straight-line op dispatches its successor with no hook test.
 #ifndef JAISCRIPT_VM_COVERAGE
 #define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
-#define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
-#define JAI_DISPATCH_HERE() JAI_DISPATCH_AT(f.ip)
+#define JAI_DISPATCH_AT(at) { if constexpr (Hooked) { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
+#define JAI_DISPATCH_HERE() { if (debug_hook_) [[unlikely]] { continue; } JAI_DISPATCH_AT(f.ip) }
 #define JAI_NEXT_OP() { if (is_unwinding_) [[unlikely]] { break; } const size_t next_ip_ = f.ip + 1; f.ip = next_ip_; JAI_DISPATCH_AT(next_ip_) }
 // a frame switch (a call that pushed its callee, a return that landed in its caller) dispatches the target's instruction itself
-#define JAI_SWITCH_FRAME(target) { fp = (target); fr = fp; code_owner = fr->code; code_base = code_owner->code.data(); JAI_DISPATCH_AT(fr->ip) }
+#define JAI_SWITCH_FRAME(target) { fp = (target); if (debug_hook_) [[unlikely]] { continue; } fr = fp; code_owner = fr->code; code_base = code_owner->code.data(); JAI_DISPATCH_AT(fr->ip) }
 #else
 #define JAI_OP_LABEL(o)
 #define JAI_DISPATCH_HERE() continue
@@ -20022,6 +20024,11 @@ checked_result<void> vm_backend::run(frame& entry) {
 #define ins (*cur)
 
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
+	return debug_hook_ ? run_dispatch_loop<true>(fp, records_base) : run_dispatch_loop<false>(fp, records_base);
+}
+
+template <bool Hooked>
+op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 	JAI_COVERAGE_TIMING_PAUSE();
 	const chunk* code_owner = nullptr;
 	const vm_instruction* code_base = nullptr;
@@ -20036,7 +20043,11 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		// Every chunk compiler ends its code with op_halt and no jump target passes it,
 		// so the halt case IS the end-of-chunk exit (Debug asserts the invariant)
 		assert(f.ip < f.code->code.size());
-		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
+		if constexpr (Hooked) {
+			if (debug_hook_) { debug_statement_boundary(f); }
+		} else if (debug_hook_) [[unlikely]] {
+			return run_dispatch_loop<true>(fp, records_base);   // a session armed mid-run: its statements from here on
+		}
 		cur = code_base + f.ip;
 		JAI_COVERAGE_GENERAL(f);
 	L_main_switch:

@@ -1172,6 +1172,7 @@ namespace jai::vm {
 
         checked_result<void> run(frame& entry);
         op_status run_dispatch(frame*& fp, const size_t records_base);
+        template <bool Hooked> op_status run_dispatch_loop(frame*& fp, const size_t records_base);   // Hooked: a debugger session's loop
         // In-loop call machinery: push/pop of call_records_ without native recursion.
         // ArgsT is value_stack (zero-copy slice [args_base, args_base+argc) with the
         // callee slot at args_base-1 — args IS stack_, which conversions can relocate

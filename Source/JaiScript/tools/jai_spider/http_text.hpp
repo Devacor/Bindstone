@@ -37,6 +37,14 @@ inline bool iequals(std::string_view a, std::string_view b) {
 	return true;
 }
 
+// the headers that describe one connection, never forwarded (RFC 9110 7.6.1); the server writes its own framing
+inline bool is_hop_header(std::string_view name) {
+	for (std::string_view hop : {"connection", "keep-alive", "proxy-connection", "te", "trailer", "transfer-encoding", "upgrade", "content-length"}) {
+		if (iequals(name, hop)) { return true; }
+	}
+	return false;
+}
+
 inline std::string_view trim_spaces(std::string_view text) {
 	while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) { text.remove_prefix(1); }
 	while (!text.empty() && (text.back() == ' ' || text.back() == '\t')) { text.remove_suffix(1); }

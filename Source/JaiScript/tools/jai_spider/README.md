@@ -56,7 +56,7 @@ request may run, over `--budget`) and `max_body` (bytes, over `--max-body`).
 
 ```
 jai_spider app.jai [--port N] [--host ADDR] [--root DIR] [--max-body N] [--timeout S] [--budget S]
-                   [--backend vm|interp] [--allow-shutdown] [--quiet]
+                   [--backend vm|interp] [--dev] [--allow-shutdown TOKEN] [--quiet]
 ```
 
 | option | meaning |
@@ -64,14 +64,19 @@ jai_spider app.jai [--port N] [--host ADDR] [--root DIR] [--max-body N] [--timeo
 | `--port N` | port to listen on (default 8080; 0 picks a free one, printed in the spinning line) |
 | `--host ADDR` | IPv4 address to listen on (default 127.0.0.1; 0.0.0.0 for every interface) |
 | `--root DIR` | serve the files under DIR for GET and HEAD before the app sees the request (default: the app's `public/` folder when it exists) |
-| `--max-body N` | largest request body, `K`/`M` suffixes allowed (default 2M); a larger one is answered 413 |
+| `--max-body N` | largest request body, `K`/`M`/`G` suffixes allowed (default 2M); a larger one is answered 413 |
 | `--timeout S` | seconds a request may take to arrive and a response to leave (default 30) |
 | `--budget S` | execution budget per request (default 30; 0 = unlimited); a runaway handler is a 500 |
 | `--backend` | the engine's backend (vm), as for `jaiscript` |
-| `--allow-shutdown` | `POST /__spider/shutdown` from this machine stops the server (for scripts and agents driving it headless) |
+| `--dev` | development: error pages show the error and its trace, and `lib/` is imported from the source checkout (an edit to `spider.jai` applies on the next request) |
+| `--allow-shutdown TOKEN` | `POST /__spider/shutdown` from this machine with the header `X-Spider-Shutdown: TOKEN` stops the server (for scripts and agents driving it headless); without the token it is 403 |
 | `--quiet` | no banner and no request log |
 
 Ctrl+C stops the server; open connections are closed and the app's databases are closed with the engine.
+
+A server listening on a loopback address answers 421 to a Host header that is not `localhost`, a `127.x` address or
+`[::1]`, so a page whose own name resolves to 127.0.0.1 (DNS rebinding) cannot reach it. One address holds at most 128
+of the 512 connections.
 
 ## The script surface (`lib/spider.jai`, all under `spider::`)
 
@@ -152,12 +157,12 @@ hands complete requests to the script one at a time, so a slow handler (or a slo
 requests behind it. Requests are HTTP/1.1 or 1.0 with keep-alive and pipelining, bodies by Content-Length or
 chunked, `Expect: 100-continue`. The request head is capped at 64 KiB (431), the body at `--max-body` (413), each
 connection at `--timeout`, and 512 connections are open at once (503 beyond). A script error is a 500 whose page
-shows the error and trace to a browser on the same machine and nothing to anyone else; the error is logged either
-way and the server goes on.
+shows the error and trace under `--dev` and nothing otherwise; the error is logged either way and the server goes on.
 
 Static files get their Content-Type from the extension, a weak ETag and Last-Modified, and `Cache-Control: no-cache`,
-so a browser revalidates and an edited file shows on reload (304 otherwise). Dot-files and paths that leave the root
-are never served.
+so a browser revalidates and an edited file shows on reload (304 otherwise). A file or folder whose real name starts
+with a dot (an 8.3 short name such as `ENV~1` included) and paths that leave the root are never served; a request path
+with a `.` or `..` segment, or one decoding to a `/`, `\` or NUL inside a segment, is 400.
 
 The server speaks no TLS: serve behind a reverse proxy (Caddy, nginx) for HTTPS.
 

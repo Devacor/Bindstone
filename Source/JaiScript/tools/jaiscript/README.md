@@ -206,7 +206,8 @@ d.success()  d.error()  d.cancel()
 ```
 
 The transport is the platform's own: WinHTTP on Windows, libcurl on Linux and macOS when
-the build found it, otherwise the `curl` executable at run time. A failed transfer leaves no
+the build found it, otherwise the `curl` executable at run time; redirects follow only to http
+and https. `start` needs the `filesystem` and `network` privileges. A failed transfer leaves no
 partial file. JaiDoom's first run uses this to fetch and verify its own game data.
 
 For hosting, `net_host_name()` returns this machine's name and `net_local_addresses()` its IPv4

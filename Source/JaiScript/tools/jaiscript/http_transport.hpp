@@ -167,6 +167,11 @@ private:
 			}
 			if (available == 0) { break; }
 			const size_t at = result.body.size();
+			if (at + available > jai::net::http_wire::reader::k_max_body) {   // the socket transport's cap
+				result = jai::http_reply{};
+				result.error = "the answer is over 512 MiB";
+				return result;
+			}
 			result.body.resize(at + available);
 			DWORD got = 0;
 			if (!WinHttpReadData(a_request, result.body.data() + at, available, &got)) {

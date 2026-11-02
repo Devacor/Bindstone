@@ -1189,6 +1189,26 @@ namespace jai::vm {
                                                const ArgsT& args,
                                                size_t args_base, size_t argc,
                                                const call_site* site);
+        // the frame-push kernels every push shares (vm_backend.cpp, beside push_plain_frame)
+        op_status pass_call_limits();
+        call_record& take_call_record();
+        void init_call_record(call_record& rec, frame& caller, const type_info_ptr& return_type, uint8_t return_conv, std::string_view name, const chunk& body);
+        void open_record_frame(call_record& rec, chunk* body, size_t window_base, size_t window_live, size_t stack_base, unit_stamp unit,
+                               const script_defined_function* function);
+        template <class ArgsT>
+        op_status bind_frame_parameters(call_record& rec, const std::vector<parameter>& parameters, const ArgsT& args, size_t args_base, size_t argc,
+                                        frame& caller, const call_site* site, const script_defined_function* function, const statement* body);
+        void finish_frame_window(call_record& rec, size_t local_count);
+        void abandon_call_record(call_record& rec);
+        template <class ArgsT>
+        op_status open_script_frame(frame& caller, const script_defined_function& function, const ArgsT& args, size_t args_base, size_t argc,
+                                    const call_site* site, script_value* callee, strong_ptr<script_function_node>* pin, size_t stack_base);
+        template <class DispatchT>
+        chunk* method_body_chunk(const DispatchT& dispatch, const function_decl& ast, const class_definition* member_class);
+        call_record& open_method_record(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast, const chunk& body,
+                                        bool anchor);
+        template <class TakeReceiver>
+        void enter_method_env(call_record& rec, const script_method_dispatch& dispatch, const chunk& body, TakeReceiver&& take_receiver);
         // Method-call flattening: a script-class instance method enters the dispatch loop
         // directly (no bound-method mint, no arg re-copies, no native run() recursion)
         op_status enter_script_method(frame& caller, script_value&& method_val,

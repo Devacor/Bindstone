@@ -12875,6 +12875,94 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 // The plain frame: a function without a frame environment (a closure's not a method's), a plain one called outside a block scope, whose
 // arguments are already its parameter slots (or its T& parameters name the caller's frame-slot locals), takes push_script_frame_pinned's
 // lazy lane (env-untouched, or the closure environment installed) with nothing that can throw; false = the general push
+// a push's limits: the depth gate and the budget tick (a blown depth or a spent budget raises)
+JAI_FORCEINLINE op_status vm_backend::pass_call_limits() {
+	if (current_call_depth_ >= limits_->vm_depth_gate) {
+		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
+	}
+	if (execution_limit_exhausted()) [[unlikely]] {
+		return raise_from(execution_limit_failure());
+	}
+	assert(!has_return_value_);   // in-loop calls hand results over on stack_, never through return_value_
+	return {};
+}
+
+// the next record off the pool, which grows on demand (records sit behind unique_ptr, so &rec.f stays put)
+JAI_FORCEINLINE vm_backend::call_record& vm_backend::take_call_record() {
+	if (call_records_top_ == call_records_.size()) { call_records_.push_back(std::make_unique<call_record>()); }
+	return *call_records_[call_records_top_++];
+}
+
+// the fields every push writes: the caller, the return conversion, the bases its pop truncates to, the name and the cells its body reads
+JAI_FORCEINLINE void vm_backend::init_call_record(call_record& rec, frame& caller, const type_info_ptr& return_type, uint8_t return_conv, std::string_view name, const chunk& body) {
+	rec.raw_prepared = nullptr;
+	rec.caller = &caller;
+	rec.return_type = return_type;
+	rec.return_conv_class = return_conv;
+	rec.try_base = try_records_.size();
+	rec.iter_base = iter_states_.size();
+	rec.cfor_base = cfor_states_.size();
+	rec.pending_base = pending_callees_.size();
+	rec.locals.function_name = name;
+	rec.locals.reset_member_scope();
+	if (!body.cell_loops.empty()) { rec.cells.reset_call(body.max_cells); }
+	rec.f.cells = &rec.cells;
+}
+
+// the record's frame over body: its window (window_base, the live slots, the stack territory from stack_base its pop truncates) joins frames_
+// before binding, so the ref-param frames_ scan sees it
+JAI_FORCEINLINE void vm_backend::open_record_frame(call_record& rec, chunk* body, size_t window_base, size_t window_live, size_t stack_base, unit_stamp unit,
+                                                   const script_defined_function* function) {
+	++current_call_depth_;
+	rec.f.code = body;
+	rec.f.ip = 0;
+	rec.f.locals = &rec.locals;
+	rec.f.window_backed = true;
+	rec.f.window_base = window_base;
+	rec.f.window_live = static_cast<uint32_t>(window_live);
+	rec.f.stack_base = stack_base;
+	rec.f.top_level = false;
+	rec.f.unit = unit;
+	enter_unit(unit);
+	enter_frame(rec.f, function);
+}
+
+// the arguments bound into the frame's window; a failure or a throw pops the frame again
+template <class ArgsT>
+JAI_FORCEINLINE op_status vm_backend::bind_frame_parameters(call_record& rec, const std::vector<parameter>& parameters, const ArgsT& args, size_t args_base, size_t argc,
+                                                            frame& caller, const call_site* site, const script_defined_function* function, const statement* body) {
+	op_status bound{};
+	try {
+		bound = bind_parameters(parameters, args, args_base, argc, rec.f, *rec.f.code, rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
+		                        function, caller_frame_unit(), 0, false, body);
+	} catch (...) {
+		pop_script_frame_core(rec);
+		throw;
+	}
+	if (bound == op_status::failed) { pop_script_frame_core(rec); }
+	return bound;
+}
+
+// the body's slots past the bound ones exist as nulls (operand temps start above the full window), and the dispatcher switches to the frame
+JAI_FORCEINLINE void vm_backend::finish_frame_window(call_record& rec, size_t local_count) {
+	stack_.fill_null_to(rec.f.window_base + std::max(local_count, static_cast<size_t>(rec.f.code->local_count)), engine_);
+	switch_to_ = &rec.f;
+}
+
+// a push whose environment setup threw: the record goes back to the pool and the caller's environment comes back
+void vm_backend::abandon_call_record(call_record& rec) {
+	rec.callee_pin = make_null();
+	rec.direct_pin = {};
+	rec.return_type = nullptr;
+	rec.ast_pin.reset();
+	rec.ast = nullptr;
+	rec.method_result_anchor = false;
+	rec.locals.this_object_ptr.reset();
+	rec.locals.is_method = false;
+	if (!rec.env_untouched && rec.prev_env) { environment_ = std::move(rec.prev_env); }
+	--call_records_top_;
+}
+
 bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function_node>& pin, size_t args_base, size_t argc) {
 	chunk* body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 	if (!body_chunk || current_call_depth_ >= limits_->vm_depth_gate || call_records_top_ == call_records_.size()) { return false; }
@@ -12892,24 +12980,9 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 	}
 	assert(!has_return_value_);
 	if (parallel_worker_) { worker_pin_env_cache(function.backend_body_cache, body_chunk); }
-	if (function.backend_return_conv == 0) {
-		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
-	}
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = function.return_type;
-	rec.return_conv_class = function.backend_return_conv;
+	call_record& rec = *call_records_[call_records_top_++];
+	init_call_record(rec, caller, function.return_type, static_cast<uint8_t>(detail::return_conv_of(function)), function.name, *body_chunk);
 	rec.direct_pin = std::move(pin);
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = function.name;
-	rec.locals.reset_member_scope();
-	if (!body_chunk->cell_loops.empty()) { rec.cells.reset_call(body_chunk->max_cells); }
-	rec.f.cells = &rec.cells;
 	rec.env_lazy = true;
 	if (function.closure_env) {
 		// a lambda or nested function: its closure environment is the callee's, the caller's comes back at the pop
@@ -12923,81 +12996,48 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 		rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);
 		if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
 	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
-	rec.f.window_backed = true;
-	rec.f.window_base = args_base;
-	rec.f.window_live = static_cast<uint32_t>(argc);
-	rec.f.stack_base = args_base;
-	rec.f.top_level = false;
-	rec.f.unit = function.unit;
-	enter_unit(function.unit);
-	enter_frame(rec.f, &function);
-	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	switch_to_ = &rec.f;
+	open_record_frame(rec, body_chunk, args_base, argc, args_base, function.unit, &function);
+	finish_frame_window(rec, function.local_count);
 	return true;
 }
 
 // Zero-copy frame push for probe-called frames: no callee value below the window,
 // the record's direct_pin holds the callable (hot reload cannot kill the executing
 // function; the pin releases at pop exactly where the callee slot died).
-op_status vm_backend::push_script_frame_pinned(frame& caller,
-                                                          const script_defined_function& function,
-                                                          strong_ptr<script_function_node> pin,
-                                                          size_t args_base, size_t argc,
-                                                          const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
-	}
-	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
-		--budget_tick_;   // the general check ticks it
-		if (execution_limit_exhausted()) { return raise_from(execution_limit_failure()); }
-	}
-	assert(!has_return_value_);
+op_status vm_backend::push_script_frame_pinned(frame& caller, const script_defined_function& function, strong_ptr<script_function_node> pin, size_t args_base, size_t argc,
+                                               const call_site* site) {
+	return open_script_frame(caller, function, stack_, args_base, argc, site, nullptr, &pin, args_base);
+}
 
-	chunk* body_chunk;
-	{
-		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
-		if (!body_chunk) {
-			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
-			function.backend_body_cache = compiled;
-			body_chunk = compiled.get();
-		}
-		if (parallel_worker_) {
-			// The owning handle is in hand exactly here: pin the chunk so this
-			// worker's private env-lookup rows stay identity-sound for its life
-			worker_pin_env_cache(function.backend_body_cache, body_chunk);
-		}
-		if (call_records_top_ == call_records_.size()) {
-			call_records_.push_back(std::make_unique<call_record>());
-		}
+// A script function's frame. The callee value: a stack callee stays in its slot below the window (stack_base, the slot IS the pin, so hot
+// reload cannot kill the executing function and the pop's truncation releases it); a callee riding with pooled-vector arguments moves
+// into the record (callee); a probe-called frame has no callee value, and the record's direct_pin holds the callable (pin)
+template <class ArgsT>
+op_status vm_backend::open_script_frame(frame& caller, const script_defined_function& function, const ArgsT& args, size_t args_base, size_t argc,
+                                        const call_site* site, script_value* callee, strong_ptr<script_function_node>* pin, size_t stack_base) {
+	VM_TRY(pass_call_limits());
+	// Raw chunk*: every body chunk is pinned for the backend's lifetime by chunk_cache_ (chunk_for_body inserts, nothing erases)
+	chunk* body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
+	if (!body_chunk) {
+		auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
+		function.backend_body_cache = compiled;
+		body_chunk = compiled.get();
 	}
-
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = function.return_type;
-	if (function.backend_return_conv == 0) {
-		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
+	if (parallel_worker_) {
+		// The owning handle is in hand exactly here: pin the chunk so this worker's private env-lookup rows stay identity-sound for its life
+		worker_pin_env_cache(function.backend_body_cache, body_chunk);
 	}
-	rec.return_conv_class = function.backend_return_conv;
-	rec.direct_pin = std::move(pin);
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = function.name;
-	rec.locals.reset_member_scope();
-	if (!body_chunk->cell_loops.empty()) { rec.cells.reset_call(body_chunk->max_cells); }
-	rec.f.cells = &rec.cells;
+	call_record& rec = take_call_record();
+	init_call_record(rec, caller, function.return_type, static_cast<uint8_t>(detail::return_conv_of(function)), function.name, *body_chunk);
+	if (callee) { rec.callee_pin = std::move(*callee); }
+	if (pin) { rec.direct_pin = std::move(*pin); }
+	// Compile-time lazy elision: plain callees whose bodies provably never touch the per-call scope env skip creating it (methods and
+	// statics never elide: env kind fallbacks gate field-vs-shadowing precedence)
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
 	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
+		// the callee runs in the caller's env, which does not move: nothing saved, nothing restored at the pop
 		rec.env_untouched = true;
 		rec.locals.scope_state = static_cast<uint8_t>(detail::member_scope_state::none);   // a plain function without a closure: no member scope (compute_member_scope's answer)
 	} else if (rec.env_lazy && !function.closure_env) {
@@ -13007,7 +13047,7 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 		environment_ = environment::call_parent(rec.prev_env, false);
 	} else {
 		rec.env_untouched = false;
-		rec.prev_env = std::move(environment_);
+		rec.prev_env = std::move(environment_);   // both branches overwrite environment_; the catch restores it
 		try {
 			if (rec.env_lazy) {
 				environment_ = function.closure_env;
@@ -13015,50 +13055,22 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 				setup_callee_env(function, rec.locals, rec.prev_env);
 			}
 		} catch (...) {
-			rec.direct_pin = {};
-			rec.return_type = nullptr;
-			environment_ = std::move(rec.prev_env);
-			--call_records_top_;
+			abandon_call_record(rec);
 			throw;
 		}
 	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
-	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
-	// frames (plain non-closure functions are lexically top-level - no class context,
-	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
+	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched frames (plain non-closure functions are lexically
+	// top-level: no class context, no closure chain); closure-lazy frames carry their closure env
 	rec.f.entry_env = rec.env_untouched || (rec.env_lazy && !function.closure_env) ? nullptr : environment_;
-	rec.f.window_backed = true;
-	rec.f.window_base = args_base;
-	rec.f.window_live = static_cast<uint32_t>(argc);
-	rec.f.stack_base = args_base;   // no callee slot below the window
-	rec.f.top_level = false;
-	rec.f.unit = function.unit;
-	enter_unit(function.unit);
-	enter_frame(rec.f, &function);
-
-	const bool bound_in_place = binds_slice_in_place(function, stack_.data() + args_base, argc);
-	if (!bound_in_place) {
-		op_status bound{};
-		try {
-			bound = bind_parameters(function.parameters(), stack_, args_base, argc, rec.f, *rec.f.code,
-			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-			                        &function, caller_frame_unit());
-		} catch (...) {
-			pop_script_frame_core(rec);
-			throw;
-		}
-		if (bound == op_status::failed) {
-			pop_script_frame_core(rec);
-			return bound;
-		}
+	// Frame window: stack arguments ARE slots 0..argc-1 in place; pooled-vector arguments build the window at the stack top during binding
+	const bool args_on_stack = args_are_stack(args);
+	open_record_frame(rec, body_chunk, args_on_stack ? args_base : stack_.size(), args_on_stack ? argc : 0, args_on_stack ? stack_base : stack_.size(),
+	                  function.unit, &function);
+	if (!pin || !binds_slice_in_place(function, stack_.data() + args_base, argc)) {
+		VM_TRY(bind_frame_parameters(rec, function.parameters(), args, args_base, argc, caller, site, &function, nullptr));
 	}
-	assert(stack_.size() == args_base + argc);
-	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	switch_to_ = &rec.f;
+	assert(!args_on_stack || stack_.size() == args_base + argc);   // conversions during binding push and pop above the arguments
+	finish_frame_window(rec, function.local_count);
 	return {};
 }
 
@@ -21143,138 +21155,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
                                                    const ArgsT& args,
                                                    size_t args_base, size_t argc,
                                                    const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
-	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		return raise_from(execution_limit_failure());
-	}
-	// In-loop dispatch invariant: results travel on stack_, never through return_value_
-	assert(!has_return_value_);
-
-	// Raw chunk*: every body chunk is pinned for the backend's lifetime by chunk_cache_
-	// (chunk_for_body inserts, nothing erases), so the per-call shared_ptr pin was
-	// two redundant atomic refcounts per call
-	chunk* body_chunk;
-	{
-		body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
-		if (!body_chunk) {
-			auto compiled = chunk_for_body(function.name, function.parameters(), function.body, function.local_count, function.unit);
-			function.backend_body_cache = compiled;
-			body_chunk = compiled.get();
-		}
-		if (parallel_worker_) {
-			// The owning handle is in hand exactly here: pin the chunk so this
-			// worker's private env-lookup rows stay identity-sound for its life
-			worker_pin_env_cache(function.backend_body_cache, body_chunk);
-		}
-		if (call_records_top_ == call_records_.size()) {
-			call_records_.push_back(std::make_unique<call_record>());
-		}
-	}
-
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = function.return_type;
-	if (function.backend_return_conv == 0) {
-		function.backend_return_conv = static_cast<uint8_t>(classify_return_conv(function.return_type));
-	}
-	rec.return_conv_class = function.backend_return_conv;
-	// Stack callees stay in their slot below the window — the slot IS the pin
-	// (hot reload can't kill the executing function; pop truncation releases it).
-	// Pooled-vector callees still pin through the record.
-	const bool args_on_stack = args_are_stack(args);
-	if (!args_on_stack) {
-		rec.callee_pin = std::move(callee);
-	}
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = function.name;
-	rec.locals.reset_member_scope();
-	rec.cells.reset_call(body_chunk->max_cells);
-	rec.f.cells = &rec.cells;
-	// Compile-time lazy elision: plain callees whose bodies provably never touch the
-	// per-call scope env skip creating it (methods/statics never elide — env kind
-	// fallbacks gate field-vs-shadowing precedence)
-	rec.env_lazy = !body_chunk->needs_frame_env &&
-	               (!function.closure_env ||
-	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
-	if (rec.env_lazy && !function.closure_env && (function.block_defined || !environment_ || !environment_->block_scope())) {
-		// The callee runs in the caller's env and the env stack does not move
-		// AT ALL — nothing saved (prev_env stays null), nothing restored at pop
-		rec.env_untouched = true;
-	} else if (rec.env_lazy && !function.closure_env) {
-		// the caller stands in a block scope: the callee reads past it (KEEP BYTE-PARALLEL with the interpreter's call_function)
-		rec.env_untouched = false;
-		rec.prev_env = std::move(environment_);
-		environment_ = environment::call_parent(rec.prev_env, false);
-	} else {
-		rec.env_untouched = false;
-		// Moved, not copied: both branches below overwrite environment_; the catch
-		// restores it on setup failure
-		rec.prev_env = std::move(environment_);
-		try {
-			if (rec.env_lazy) {
-				environment_ = function.closure_env;
-			} else {
-				setup_callee_env(function, rec.locals, rec.prev_env);
-			}
-		} catch (...) {
-			rec.callee_pin = make_null();
-			rec.return_type = nullptr;
-			environment_ = std::move(rec.prev_env);   // restore the caller env (moved at entry)
-			--call_records_top_;
-			throw;
-		}
-	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;   // frame-kind metadata (closure_env/this); slots live in the window
-	// entry_env doubles as the lexical-context marker: null ONLY for env-untouched
-	// frames (plain non-closure functions are lexically top-level - no class context,
-	// no closure chain); closure-lazy frames carry their closure env (chain is correct)
-	rec.f.entry_env = rec.env_untouched || (rec.env_lazy && !function.closure_env) ? nullptr : environment_;
-	// Frame window: zero-copy callers' args ARE slots 0..argc-1 in place;
-	// pooled-vector callers build the window at the stack top during binding. stack_base
-	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind
-	// truncation destroys the window (+pin) at the frame's end.
-	rec.f.window_backed = true;
-	rec.f.window_base = args_on_stack ? args_base : stack_.size();
-	rec.f.window_live = args_on_stack ? static_cast<uint32_t>(argc) : 0;
-	rec.f.stack_base = args_on_stack ? args_base - 1 : stack_.size();
-	rec.f.top_level = false;
-	rec.f.unit = function.unit;
-	enter_unit(function.unit);
-	enter_frame(rec.f, &function);   // before binding: the ref-param frames_ scan must see this frame
-
-	op_status bound{};
-	try {
-		bound = bind_parameters(function.parameters(), args, args_base, argc, rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        &function, caller_frame_unit());
-	} catch (...) {
-		pop_script_frame_core(rec);
-		throw;
-	}
-	if (bound == op_status::failed) {
-		pop_script_frame_core(rec);
-		return bound;
-	}
-	if (args_on_stack) {
-		// Conversions during binding push and pop above the args, so the slice is intact
-		assert(stack_.size() == args_base + argc);
-	}
-	// Body slots up to local_count exist behind window_live (null placeholders), so
-	// operand temps start above the full window
-	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
-	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	switch_to_ = &rec.f;
-	return {};
+	return open_script_frame(caller, function, args, args_base, argc, site, args_are_stack(args) ? nullptr : &callee, nullptr, args_base - 1);
 }
 
 op_status vm_backend::enter_script_method(frame& caller, script_value&& method_val,
@@ -21309,41 +21190,17 @@ JAI_FORCEINLINE vm_backend::frame* vm_backend::push_lean_method_frame(frame& cal
 	if (budget_tick_ >= 1023 || limits_->memory_tripped()) [[unlikely]] { return nullptr; }
 	++budget_tick_;
 	assert(!has_return_value_);
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = decl.return_type;
-	rec.return_conv_class = decl.backend_return_conv;
+	call_record& rec = *call_records_[call_records_top_++];
+	init_call_record(rec, caller, decl.return_type, decl.backend_return_conv, decl.name, *body_chunk);
 	pin_method_decl(rec, ast);
 	rec.method_result_anchor = true;
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = decl.name;
-	rec.locals.reset_member_scope();
 	rec.locals.scope_static = dispatch.cls.get();
-	rec.cells.reset_call(body_chunk->max_cells);
-	rec.f.cells = &rec.cells;
 	rec.env_lazy = true;
 	rec.env_untouched = true;
 	rec.lean = true;
-	if (rec.locals.this_object_ptr) { *rec.locals.this_object_ptr = std::move(receiver); } else { rec.locals.this_object_ptr = std::make_unique<script_value>(std::move(receiver)); }
-	rec.locals.is_method = true;
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
+	rec.locals.set_this(std::move(receiver));
 	if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
-	rec.f.window_backed = true;
-	rec.f.window_base = args_base;
-	rec.f.window_live = static_cast<uint32_t>(argc);
-	rec.f.stack_base = frame_base;
-	rec.f.top_level = false;
-	rec.f.unit = decl.unit;
-	enter_unit(decl.unit);
-	enter_frame(rec.f);
+	open_record_frame(rec, body_chunk, args_base, argc, frame_base, decl.unit, nullptr);
 	if (body_chunk->member_class) { bind_member_layout(rec.f, *body_chunk, inst); } else { rec.f.this_inst = nullptr; }
 	stack_.fill_null_to(args_base + std::max(decl.local_count, static_cast<size_t>(body_chunk->local_count)), engine_);
 	return &rec.f;
@@ -21521,63 +21378,14 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
                                                script_value* receiver_owned, size_t frame_base,
                                                size_t args_base, size_t argc,
                                                const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
-	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		return raise_from(execution_limit_failure());
-	}
-	assert(!has_return_value_);
-
-	chunk* body_chunk;
-	{
-		if (dispatch.body_cache_key == ast->body.get()) {
-			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
-		} else {
-			compiler_.member_class(dispatch.cls.get());
-			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
-			compiler_.member_class(nullptr);
-			dispatch.body_cache = compiled;
-			dispatch.body_cache_key = ast->body.get();
-			body_chunk = compiled.get();
-		}
-		if (call_records_top_ == call_records_.size()) {
-			call_records_.push_back(std::make_unique<call_record>());
-		}
-	}
-
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = ast->return_type;
-	if (ast->backend_return_conv == 0) {
-		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
-	}
-	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
-	pin_method_decl(rec, ast);
-	rec.method_result_anchor = true;
-	// no pin: the body chunk lives in chunk_cache_ for the engine's life, the class definition is engine-pinned, the overload is retained (pin_method_decl) and
-	// the lazy env environment_, so a reload that replaces the method mid-call frees only the old dispatcher
-	(void)method_val;
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = ast->name;
-	rec.locals.reset_member_scope();
-	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
-	rec.cells.reset_call(body_chunk->max_cells);
-	rec.f.cells = &rec.cells;
-	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env && dispatch.cls;
-	rec.env_untouched = false;
+	(void)method_val;   // no pin: the body chunk lives in chunk_cache_, the class definition is engine-pinned and the overload retained (pin_method_decl)
+	VM_TRY(pass_call_limits());
+	chunk* body_chunk = method_body_chunk(dispatch, *ast, dispatch.cls.get());
+	call_record& rec = open_method_record(caller, dispatch, ast, *body_chunk, true);
+	// Slot receivers stay put (the slot is the pin) and this/env bindings COPY the deref'd value; owned receivers (thunk payloads) move
+	// into the env
+	const script_value& receiver_v = receiver_owned ? receiver_owned->deref() : stack_[args_base - 1].deref();
 	try {
-		// Slot receivers stay put (the slot is the pin) and this/env bindings COPY the
-		// deref'd value — the vector path's caller made that same copy itself (objv =
-		// object.deref()), so net copies match. Owned receivers (thunk payloads) move
-		// into the env like the vector path moved.
-		const script_value& receiver_v = receiver_owned ? receiver_owned->deref()
-		                                                : stack_[args_base - 1].deref();
 		if (!receiver_owned && rec.env_lazy && stack_[args_base - 1].raw_storage_index() != script_value::TYPEID_REFERENCE) {
 			// a lazy frame's receiver slot moves into the frame's this (the slot is read by nothing until the pop truncates it, and the pop
 			// nulls this after that truncation): no handle copy, the slot's own destruction point
@@ -21587,94 +21395,89 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		} else {
 			rec.locals.set_this(receiver_v);
 		}
+	} catch (...) {
+		abandon_call_record(rec);
+		throw;
+	}
+	enter_method_env(rec, dispatch, *body_chunk, [&] { return receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v); });
+	// Slice window: the caller's arguments ARE slots 0..argc-1 in place; frame_base marks this frame's stack territory (the receiver or
+	// callee slot when one sits below), so the pop's truncation destroys window and pin together
+	open_record_frame(rec, body_chunk, args_base, argc, frame_base, ast->unit, nullptr);
+	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
+	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
+		VM_TRY(bind_frame_parameters(rec, rec.ast->parameters, stack_, args_base, argc, caller, site, nullptr, rec.ast->body.get()));
+	}
+	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
+	assert(stack_.size() == args_base + rec.f.window_live);
+	finish_frame_window(rec, rec.ast->local_count);
+	return {};
+}
+
+// a method's compiled body, cached on its dispatcher by the body it compiled (member_class: the class whose field layout the body reads)
+template <class DispatchT>
+JAI_FORCEINLINE chunk* vm_backend::method_body_chunk(const DispatchT& dispatch, const function_decl& ast, const class_definition* member_class) {
+	if (dispatch.body_cache_key == ast.body.get()) { return static_cast<chunk*>(dispatch.body_cache.get()); }
+	compiler_.member_class(member_class);
+	auto compiled = chunk_for_body(ast.name, ast.parameters, ast.body, ast.local_count, ast.unit);
+	compiler_.member_class(nullptr);
+	dispatch.body_cache = compiled;
+	dispatch.body_cache_key = ast.body.get();
+	return compiled.get();
+}
+
+// a method push's record: the overload retained, the declaring class for a lazy frame's bare statics, and the frame's laziness (a body
+// whose ops never park state in an env runs on the definition env with no method env: 'this', fields and the access context resolve
+// through the frame)
+JAI_FORCEINLINE vm_backend::call_record& vm_backend::open_method_record(frame& caller, const script_method_dispatch& dispatch, const std::shared_ptr<function_decl>& ast,
+                                                                       const chunk& body, bool anchor) {
+	call_record& rec = take_call_record();
+	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->name, body);
+	pin_method_decl(rec, ast);
+	rec.method_result_anchor = anchor;
+	rec.locals.scope_static = dispatch.cls.get();
+	rec.env_lazy = !body.needs_frame_env && dispatch.definition_env && dispatch.cls;
+	rec.env_untouched = false;
+	return rec;
+}
+
+// a method frame's environment, the receiver taken from take_receiver where an env binds it. A lazy frame whose caller already stands
+// in the definition env (recursion, sibling calls within one class) swaps nothing and restores nothing at the pop. A sticky method
+// scope: a body that provably never parks state in the env (chunk::method_env_reusable) runs in ONE persistent env per dispatcher,
+// re-bound to the receiver each call, its lookup caches warm across calls; gated to global-parented dispatchers (global redefinition
+// is in place, so cached pointers never go stale; workers null cached_global_env_ and never match) and an idle env (use_count > 1 is a
+// reentry within this dispatcher, which takes the pool). The pop needs no special case: clear_this_on_frame_exit still nulls the
+// receiver, and release_scope_env's use_count guard skips pooling.
+template <class TakeReceiver>
+JAI_FORCEINLINE void vm_backend::enter_method_env(call_record& rec, const script_method_dispatch& dispatch, const chunk& body, TakeReceiver&& take_receiver) {
+	try {
 		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
-			// Recursion/sibling calls within one class: the resolution env is already
-			// the definition env — skip the atomic swap pair entirely and leave nothing
-			// to restore at pop (env-untouched; entry_env stays null for lazy methods,
-			// 'this' rides rec.locals, public-only chains need no access context)
 			rec.env_untouched = true;
 		} else if (rec.env_lazy) {
 			rec.prev_env = std::move(environment_);
 			environment_ = dispatch.definition_env;
-		} else
-		if (body_chunk->method_env_reusable &&
-		    dispatch.definition_env.get() == cached_global_env_) {
+		} else if (body.method_env_reusable && dispatch.definition_env.get() == cached_global_env_) {
 			rec.prev_env = std::move(environment_);
 			auto& scope = dispatch.backend_scope_env;
 			if (scope && scope.use_count() == 1) {
-				scope->rebind_method_this(receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v));
+				scope->rebind_method_this(take_receiver());
 				environment_ = scope;
 			} else if (!scope) {
-				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_,
-					receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v));
+				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_, take_receiver());
 				scope->set_access_context(dispatch.cls.get());
 				scope->set_vm_pinned_scope(true);
 				environment_ = scope;
 			} else {
-				environment_ = acquire_method_scope_env(dispatch.definition_env,
-					receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
+				environment_ = acquire_method_scope_env(dispatch.definition_env, take_receiver(), dispatch.cls.get());
 			}
 		} else {
 			rec.prev_env = std::move(environment_);
-			environment_ = acquire_method_scope_env(dispatch.definition_env,
-				receiver_owned ? std::move(*receiver_owned) : script_value(receiver_v), dispatch.cls.get());
+			environment_ = acquire_method_scope_env(dispatch.definition_env, take_receiver(), dispatch.cls.get());
 		}
 	} catch (...) {
-		rec.callee_pin = make_null();
-		rec.return_type = nullptr;
-		rec.ast_pin.reset();
-		rec.ast = nullptr;
-		rec.method_result_anchor = false;
-		rec.locals.this_object_ptr.reset();
-		rec.locals.is_method = false;
-		if (!rec.env_untouched && rec.prev_env) {
-			environment_ = std::move(rec.prev_env);   // restore the caller env (moved above)
-		}
-		--call_records_top_;
+		abandon_call_record(rec);
 		throw;
 	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
-	if (!rec.env_lazy) { rec.f.entry_env = environment_; } else if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
-	// Slice window: the caller's args ARE slots 0..argc-1 in place; frame_base marks
-	// this frame's stack territory (receiver/callee slot when one sits below), so
-	// pop/unwind truncation destroys window + pin together
-	rec.f.window_backed = true;
-	rec.f.window_base = args_base;
-	rec.f.window_live = static_cast<uint32_t>(argc);
-	rec.f.stack_base = frame_base;
-	rec.f.top_level = false;
-	rec.f.unit = ast->unit;
-	enter_unit(ast->unit);
-	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
-	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
-
-	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
-		op_status bound{};
-		try {
-			bound = bind_parameters(rec.ast->parameters, stack_, args_base, argc, rec.f, *rec.f.code,
-			                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-			                        nullptr, caller_frame_unit(),
-			                        0, false, rec.ast->body.get());
-		} catch (...) {
-			pop_script_frame_core(rec);
-			throw;
-		}
-		if (bound == op_status::failed) {
-			pop_script_frame_core(rec);
-			return bound;
-		}
-	}
-	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
-	assert(stack_.size() == args_base + rec.f.window_live);
-	{
-		const size_t window_slots = std::max(rec.ast->local_count, static_cast<size_t>(body_chunk->local_count));
-		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	}
-	switch_to_ = &rec.f;
-	return {};
+	if (!rec.env_lazy) { rec.f.entry_env = environment_; } else if (rec.f.entry_env) { rec.f.entry_env = nullptr; }   // null entry_env: the lazy marker
 }
 
 op_status vm_backend::push_method_frame(frame& caller, const script_value& method_val,
@@ -21683,153 +21486,21 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
                                                    script_value&& receiver,
                                                    const std::vector<script_value>& arguments,
                                                    const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
-	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		return raise_from(execution_limit_failure());
-	}
-	assert(!has_return_value_);
-
-	// Raw chunk*: pinned for the backend's lifetime by chunk_cache_ (see push_script_frame)
-	chunk* body_chunk;
-	{
-		if (dispatch.body_cache_key == ast->body.get()) {
-			body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
-		} else {
-			compiler_.member_class(dispatch.cls.get());
-			auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
-			compiler_.member_class(nullptr);
-			dispatch.body_cache = compiled;
-			dispatch.body_cache_key = ast->body.get();
-			body_chunk = compiled.get();
-		}
-		if (call_records_top_ == call_records_.size()) {
-			call_records_.push_back(std::make_unique<call_record>());
-		}
-	}
-
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = ast->return_type;
-	if (ast->backend_return_conv == 0) {
-		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
-	}
-	rec.return_conv_class = ast->backend_return_conv;   // typed method returns take the same memoized epilogue as functions
-	pin_method_decl(rec, ast);
-	rec.method_result_anchor = true;
 	(void)method_val;   // no pin, as in push_method_frame_sliced
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = ast->name;
-	rec.locals.reset_member_scope();
-	rec.locals.scope_static = dispatch.cls.get();   // the declaring class: a lazy frame's bare statics resolve through it
-	rec.cells.reset_call(body_chunk->max_cells);
-	rec.f.cells = &rec.cells;
-	// Method-lazy (this-in-frame): a body whose ops never park
-	// state in an env runs with environment_ = the DEFINITION env (globals chain,
-	// lexically correct) and NO method env at all — 'this', fields, and the access
-	// context all resolve through the frame (current_this / frame_access_context, which answers the declaring class).
-	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env && dispatch.cls;
-	rec.env_untouched = false;
+	VM_TRY(pass_call_limits());
+	chunk* body_chunk = method_body_chunk(dispatch, *ast, dispatch.cls.get());
+	call_record& rec = open_method_record(caller, dispatch, ast, *body_chunk, true);
 	try {
-		// Net effect of the native wrapper-env round trip: a method scope parented on
-		// definition_env with the receiver bound; the wrapper env and its define(this)
-		// are bypassed dead weight
 		rec.locals.set_this(receiver);
-		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
-			// Resolution env already correct (recursion/sibling calls within one
-			// class): skip the atomic swap pair; nothing to restore at pop
-			// (KEEP BYTE-PARALLEL with push_method_frame_sliced)
-			rec.env_untouched = true;
-		} else if (rec.env_lazy) {
-			rec.prev_env = std::move(environment_);
-			environment_ = dispatch.definition_env;
-		} else
-		// Sticky method scope: bodies that provably never park state in the env
-		// (chunk::method_env_reusable) run in ONE persistent env per dispatcher, re-bound
-		// to the receiver each call - no pool round trip, no reset/epoch churn, and the
-		// env's lookup caches stay warm across calls. Gated to global-parented dispatchers
-		// (global redefinition is in-place into stable deque storage, so cached pointers
-		// never go stale; workers null cached_global_env_ and never match) and an idle env
-		// (use_count > 1 = recursion/reentry within this dispatcher - pooled fallback).
-		// The pop path needs no special case: clear_this_on_frame_exit still nulls the
-		// receiver, and release_scope_env's use_count guard skips pooling (the dispatcher
-		// still holds the env).
-		if (body_chunk->method_env_reusable &&
-		    dispatch.definition_env.get() == cached_global_env_) {
-			rec.prev_env = std::move(environment_);
-			auto& scope = dispatch.backend_scope_env;
-			if (scope && scope.use_count() == 1) {
-				scope->rebind_method_this(std::move(receiver));
-				environment_ = scope;
-			} else if (!scope) {
-				scope = std::make_shared<environment>(dispatch.definition_env, env_symbolizer_, std::move(receiver));
-				scope->set_access_context(dispatch.cls.get());
-				scope->set_vm_pinned_scope(true);
-				environment_ = scope;
-			} else {
-				environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
-			}
-		} else {
-			rec.prev_env = std::move(environment_);
-			environment_ = acquire_method_scope_env(dispatch.definition_env, std::move(receiver), dispatch.cls.get());
-		}
 	} catch (...) {
-		rec.callee_pin = make_null();
-		rec.return_type = nullptr;
-		rec.ast_pin.reset();
-		rec.ast = nullptr;
-		rec.method_result_anchor = false;
-		rec.locals.this_object_ptr.reset();
-		rec.locals.is_method = false;
-		if (!rec.env_untouched && rec.prev_env) {
-			environment_ = std::move(rec.prev_env);   // restore the caller env (moved above)
-		}
-		--call_records_top_;
+		abandon_call_record(rec);
 		throw;
 	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;   // frame-kind metadata (this/closure_env); slots live in the window
-	// null entry_env = lazy marker: this/fields/access-context resolve from the frame
-	if (!rec.env_lazy) { rec.f.entry_env = environment_; } else if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
-	// Frame window built at the stack top during binding (pooled-vector args)
-	rec.f.window_backed = true;
-	rec.f.window_base = stack_.size();
-	rec.f.window_live = 0;
-	rec.f.stack_base = stack_.size();
-	rec.f.top_level = false;
-	rec.f.unit = ast->unit;
-	enter_unit(ast->unit);
-	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
+	enter_method_env(rec, dispatch, *body_chunk, [&] { return std::move(receiver); });
+	open_record_frame(rec, body_chunk, stack_.size(), 0, stack_.size(), ast->unit, nullptr);   // the window builds at the stack top during binding
 	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
-
-	op_status bound{};
-	try {
-		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code,
-		                        rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
-		                        nullptr, caller_frame_unit(),
-		                        0, false, ast->body.get());
-	} catch (...) {
-		pop_script_frame_core(rec);
-		throw;
-	}
-	if (bound == op_status::failed) {
-		pop_script_frame_core(rec);
-		return bound;
-	}
-	// Body slots exist behind window_live so operand temps start above the full window
-	{
-		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
-		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	}
-	switch_to_ = &rec.f;
+	VM_TRY(bind_frame_parameters(rec, ast->parameters, arguments, 0, arguments.size(), caller, site, nullptr, ast->body.get()));
+	finish_frame_window(rec, ast->local_count);
 	return {};
 }
 
@@ -21859,91 +21530,27 @@ bool vm_backend::enter_static_method(frame& caller, script_value& callee, const 
 // (parented on the definition env, the class for bare statics and access), parameters in the window
 op_status vm_backend::push_static_method_frame(frame& caller, const script_value& method_val, const script_static_method_dispatch& dispatch,
                                                const std::shared_ptr<function_decl>& ast, const std::vector<script_value>& arguments, const call_site* site) {
-	if (current_call_depth_ >= limits_->vm_depth_gate) {
-		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
-	}
-	if (execution_limit_exhausted()) [[unlikely]] {
-		return raise_from(execution_limit_failure());
-	}
-	assert(!has_return_value_);
-	chunk* body_chunk;
-	if (dispatch.body_cache_key == ast->body.get()) {
-		body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
-	} else {
-		auto compiled = chunk_for_body(ast->name, ast->parameters, ast->body, ast->local_count, ast->unit);
-		dispatch.body_cache = compiled;
-		dispatch.body_cache_key = ast->body.get();
-		body_chunk = compiled.get();
-	}
-	if (call_records_top_ == call_records_.size()) {
-		call_records_.push_back(std::make_unique<call_record>());
-	}
-	call_record& rec = *call_records_[call_records_top_];
-	++call_records_top_;
-	rec.raw_prepared = nullptr;
-	rec.caller = &caller;
-	rec.return_type = ast->return_type;
-	if (ast->backend_return_conv == 0) {
-		ast->backend_return_conv = static_cast<uint8_t>(classify_return_conv(ast->return_type));
-	}
-	rec.return_conv_class = ast->backend_return_conv;
+	(void)method_val;
+	VM_TRY(pass_call_limits());
+	chunk* body_chunk = method_body_chunk(dispatch, *ast, nullptr);
+	call_record& rec = take_call_record();
+	init_call_record(rec, caller, ast->return_type, static_cast<uint8_t>(detail::return_conv_of(*ast)), ast->name, *body_chunk);
 	pin_method_decl(rec, ast);
 	rec.method_result_anchor = false;   // no receiver to anchor a result to
-	(void)method_val;
-	rec.try_base = try_records_.size();
-	rec.iter_base = iter_states_.size();
-	rec.cfor_base = cfor_states_.size();
-	rec.pending_base = pending_callees_.size();
-	rec.locals.function_name = ast->name;
-	rec.locals.reset_member_scope();
 	rec.locals.scope_static = dispatch.cls.get();
-	rec.cells.reset_call(body_chunk->max_cells);
-	rec.f.cells = &rec.cells;
 	rec.env_lazy = false;
 	rec.env_untouched = false;
 	try {
 		rec.prev_env = std::move(environment_);
 		environment_ = acquire_static_scope_env(dispatch.definition_env, dispatch.cls);
 	} catch (...) {
-		rec.callee_pin = make_null();
-		rec.return_type = nullptr;
-		rec.ast_pin.reset();
-		rec.ast = nullptr;
-		if (rec.prev_env) { environment_ = std::move(rec.prev_env); }
-		--call_records_top_;
+		abandon_call_record(rec);
 		throw;
 	}
-	++current_call_depth_;
-	rec.f.code = body_chunk;
-	rec.f.ip = 0;
-	rec.f.locals = &rec.locals;
 	rec.f.entry_env = environment_;
-	rec.f.window_backed = true;
-	rec.f.window_base = stack_.size();
-	rec.f.window_live = 0;
-	rec.f.stack_base = stack_.size();
-	rec.f.top_level = false;
-	rec.f.unit = ast->unit;
-	enter_unit(ast->unit);
-	enter_frame(rec.f);
-	op_status bound{};
-	try {
-		bound = bind_parameters(ast->parameters, arguments, 0, arguments.size(), rec.f, *rec.f.code, rec.prev_env, site, &caller, caller.code,
-		                        nullptr, caller_frame_unit(),
-		                        0, false, ast->body.get());
-	} catch (...) {
-		pop_script_frame_core(rec);
-		throw;
-	}
-	if (bound == op_status::failed) {
-		pop_script_frame_core(rec);
-		return bound;
-	}
-	{
-		const size_t window_slots = std::max(ast->local_count, static_cast<size_t>(body_chunk->local_count));
-		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
-	}
-	switch_to_ = &rec.f;
+	open_record_frame(rec, body_chunk, stack_.size(), 0, stack_.size(), ast->unit, nullptr);
+	VM_TRY(bind_frame_parameters(rec, ast->parameters, arguments, 0, arguments.size(), caller, site, nullptr, ast->body.get()));
+	finish_frame_window(rec, ast->local_count);
 	return {};
 }
 

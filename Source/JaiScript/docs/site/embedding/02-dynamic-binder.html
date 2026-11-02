@@ -339,29 +339,18 @@ the pointer you passed, with its <code>$id</code>; your object is the <code>$val
 auto json = jai::to_json(*eng, gate);
 std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
-  "value0":
-  {
+  "value0": {
     "$id": 1,
-    "$val":
-    {
+    "$val": {
       "id": "east-gate",
       "interval": 2.5,
       "level": 7,
-      "onWave":
-      {
-        "parameter_names":
-        [
-        ],
-        "observers":
-        [
-        ],
-        "owned_observers":
-        {
-          "logger":
-          {
-            "parameter_names":
-            [
-            ],
+      "onWave": {
+        "parameter_names": [],
+        "observers": [],
+        "owned_observers": {
+          "logger": {
+            "parameter_names": [],
             "script": "print(\"wave logged\");"
           }
         }
@@ -747,12 +736,10 @@ std::cout &lt;&lt; lootJson &lt;&lt; &quot;\n&quot;;
 auto back = jai::from_json&lt;std::shared_ptr&lt;Pickup&gt;&gt;(*eng, lootJson);
 auto* hp = dynamic_cast&lt;HealthPickup*&gt;(back.get());   // != nullptr, healing == 40</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
-  "value0":
-  {
+  "value0": {
     "$id": 1,
     "$type": "HealthPickup",
-    "$val":
-    {
+    "$val": {
       "name": "elixir",
       "healing": 40
     }

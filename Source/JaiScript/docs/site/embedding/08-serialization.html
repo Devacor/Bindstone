@@ -109,7 +109,7 @@ print(loaded.hero.name, " ", loaded.hero.gold, " ", loaded.hero.bag[0], " ", loa
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ada 120 lantern true</code></pre></div>
 <p>A field added to the class after a save loads with its initializer, because <code>from_json</code> builds the object first and then writes the fields the file has. A version field like the one above lets a loader convert older files explicitly.</p>
 <h2 id="c-side-the-convenience-api">C++ side: the convenience API<a class="hlink" href="#c-side-the-convenience-api" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+<div class="codeblock cb-cpp" data-sample="serialization-savegame"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
 
 struct SaveGame {
     int level = 0; double time_played = 0; std::string hero; std::vector&lt;int&gt; inventory;
@@ -123,17 +123,30 @@ struct SaveGame {
 };
 
 SaveGame save{7, 123.5, &quot;Alice&quot;, {1, 2, 3}};
-std::string json = jai::to_json(*eng, save);                  // human-readable
+std::string json = jai::to_json(*eng, save);                  // human-readable, indented 2 spaces
 SaveGame loaded  = jai::from_json&lt;SaveGame&gt;(*eng, json);
+std::cout &lt;&lt; json &lt;&lt; &quot;\n&quot;;
+std::cout &lt;&lt; jai::to_json(*eng, save, 0) &lt;&lt; &quot;\n&quot;;              // indent 0: one line
+std::cout &lt;&lt; &quot;loaded: level=&quot; &lt;&lt; loaded.level &lt;&lt; &quot; hero=&quot; &lt;&lt; loaded.hero &lt;&lt; &quot; items=&quot; &lt;&lt; loaded.inventory.size() &lt;&lt; &quot;\n&quot;;
 
 std::vector&lt;uint8_t&gt; blob = jai::to_binary(*eng, save);       // compact little-endian
-SaveGame fromBin = jai::from_binary&lt;SaveGame&gt;(*eng, blob);    // 114 bytes for this demo</code></pre></div>
-<p>Output, with the JSON written by <code>jai::to_json(*eng, save, 0)</code>: the third argument is the indent,
-2 by default, and 0 writes one line. A plain struct&#x27;s fields sit flat in the root record, which <code>to_json</code> opens with no type name, and a C++ record nested inside it carries no <code>$type</code>. (An owning pointer at the root sits under a <code>value0</code> slot in its pointer shape instead: <code>$id</code>/<code>$type</code>/<code>$val</code> for a <code>shared_ptr</code>, the shape the <a href="02-dynamic-binder.html#serialized">binder chapter</a> shows, and <code>$val</code> alone for a <code>unique_ptr</code>.)</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">{&quot;level&quot;: 7,&quot;time_played&quot;: 123.5,&quot;hero&quot;: &quot;Alice&quot;,&quot;inventory&quot;: [1,2,3]}
+SaveGame fromBin = jai::from_binary&lt;SaveGame&gt;(*eng, blob);
+std::cout &lt;&lt; &quot;binary: &quot; &lt;&lt; blob.size() &lt;&lt; &quot; bytes, hero=&quot; &lt;&lt; fromBin.hero &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
+  &quot;level&quot;: 7,
+  &quot;time_played&quot;: 123.5,
+  &quot;hero&quot;: &quot;Alice&quot;,
+  &quot;inventory&quot;: [
+    1,
+    2,
+    3
+  ]
+}
+{&quot;level&quot;: 7,&quot;time_played&quot;: 123.5,&quot;hero&quot;: &quot;Alice&quot;,&quot;inventory&quot;: [1,2,3]}
 loaded: level=7 hero=Alice items=3
 binary: 114 bytes, hero=Alice</code></pre></div>
-<p>Also available: <code>to_binary_string</code>/<code>from_binary_string</code>, <code>to_base64</code>/<code>from_base64</code>, and <code>Context&amp;</code> overloads (<code>jai::from_json&lt;T&gt;(*eng, json, ctx)</code>) that thread a user context pointer to nested <code>load</code> calls. The binary format is little-endian on every platform, so a blob written on one machine loads on another.</p>
+<p>The third argument of <code>to_json</code> is the indent, 2 by default; 0 writes one line. A plain struct&#x27;s fields sit flat in the root record, which <code>to_json</code> opens with no type name, and a C++ record nested inside it carries no <code>$type</code>. (An owning pointer at the root sits under a <code>value0</code> slot in its pointer shape instead: <code>$id</code>/<code>$type</code>/<code>$val</code> for a <code>shared_ptr</code>, the shape the <a href="02-dynamic-binder.html#serialized">binder chapter</a> shows, and <code>$val</code> alone for a <code>unique_ptr</code>.)</p>
+<p>Also available: <code>to_binary_string</code>/<code>from_binary_string</code>, <code>to_base64</code>/<code>from_base64</code>, and <code>Context&amp;</code> overloads of every one (<code>jai::from_json&lt;T&gt;(*eng, json, ctx)</code>, <code>jai::to_binary(*eng, value, ctx)</code>) that hand a user context pointer to nested <code>save</code> and <code>load</code> calls (<code>ar.get_user_context&lt;Context&gt;()</code>). The binary format is little-endian on every platform, so a blob written on one machine loads on another.</p>
 <p>The loads that return <code>T</code> by value (<code>from_json&lt;T&gt;</code>, <code>from_binary&lt;T&gt;</code>, <code>from_binary_string&lt;T&gt;</code>, <code>from_base64&lt;T&gt;</code>) build a local <code>T</code> and return it, so <code>T</code> must be movable. A <code>property_owner</code> deletes its move constructor (its property manager points at its members), so it loads as <code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;</code>, which also keeps a derived object&#x27;s <code>$type</code>.</p>
 <h3 id="dispatch-priority-cereal-style-provide-either-serialize-or-save-load">Dispatch priority (Cereal-style: provide either <code>serialize</code> OR <code>save</code>/<code>load</code>)<a class="hlink" href="#dispatch-priority-cereal-style-provide-either-serialize-or-save-load" aria-label="link">&#8203;</a></h3>
 <p>For a type <code>T</code> the archive takes the first of these that applies:</p>
@@ -243,7 +256,7 @@ link.w = link.a;
 print(to_json(link));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;$type&quot;:&quot;Link&quot;,&quot;$val&quot;:{&quot;a&quot;:{&quot;$id&quot;:1,&quot;$type&quot;:&quot;Node&quot;,&quot;$val&quot;:{&quot;v&quot;:1}},&quot;b&quot;:{&quot;$id&quot;:1},&quot;w&quot;:{&quot;$ref&quot;:1}}}</code></pre></div>
 <p>The C++ version of the same types:</p>
-<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Node {
+<div class="codeblock cb-cpp" data-sample="serialization-link"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Node {
     int64_t v = 1;
     template&lt;class Archive&gt; void serialize(Archive&amp; ar) { ar(&quot;v&quot;, v); }
 };
@@ -257,9 +270,8 @@ Link link;
 link.a = std::make_shared&lt;Node&gt;();
 link.b = link.a;
 link.w = link.a;
-std::string json = jai::to_json(*eng, link, 0);</code></pre></div>
-<p>writes this shape (whitespace aside):</p>
-<div class="codeblock cb-plain"><pre><code class="lang-plain">{&quot;a&quot;: {&quot;$id&quot;: 1, &quot;$val&quot;: {&quot;v&quot;: 1}}, &quot;b&quot;: {&quot;$id&quot;: 1}, &quot;w&quot;: {&quot;$ref&quot;: 1}}</code></pre></div>
+std::cout &lt;&lt; jai::to_json(*eng, link, 0) &lt;&lt; &quot;\n&quot;;</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{&quot;a&quot;: {&quot;$id&quot;: 1,&quot;$val&quot;: {&quot;v&quot;: 1}},&quot;b&quot;: {&quot;$id&quot;: 1},&quot;w&quot;: {&quot;$ref&quot;: 1}}</code></pre></div>
 <p>A script load has no static type to go by, so every object names its class, and a name the engine does not know leaves the data as a map. A C++ load knows the type it is reading, so a record names its class only when the dynamic type differs from the static one. A script class layered over a C++ object meets both: the C++ archives write it as <code>"$type"</code>, <code>"$script"</code> and <code>"$val"</code>, and <code>"$script"</code> holds the script fields as a string in the script archives&#x27; JSON (<a href="13-script-extensible.html#serialization">Script-Extensible Objects</a>).</p>
 <h3 id="migrating-from-cereal">Migrating from Cereal<a class="hlink" href="#migrating-from-cereal" aria-label="link">&#8203;</a></h3>
 <p>A Cereal-serialized type moves over with spelling changes: <code>CEREAL_NVP</code> becomes <code>JAI_NVP</code>, <code>friend class cereal::access</code> becomes <code>friend jai::access</code>, member and free <code>serialize</code> / <code>save</code> / <code>load</code> keep their shape, and <code>CEREAL_REGISTER_TYPE</code> becomes a <code>jai::registrar</code> or a <code>property_owner</code> base. The files do not move: these archives do not read Cereal&#x27;s format, so existing data is converted once, loaded with Cereal and saved with JaiScript. <a href="../bridges/04-from-cereal.html">From Cereal</a>, in the Code Migrations, maps every Cereal construct (and the Boost.Serialization spellings), converts a small save game, keeps both libraries in one function during the transition, and covers converting existing files.</p>
@@ -279,7 +291,7 @@ auto json = jai::to_json(*eng, boss);                 // &quot;$type&quot;: &quo
 auto back = jai::from_json&lt;std::shared_ptr&lt;Actor&gt;&gt;(*eng, json);   // a Monster again</code></pre></div>
 The chain&#x27;s <code>.version(n)</code>, <code>.post_load_hook(...)</code> and <code>.deserialization_factory(...)</code> serve bound objects inside script values: <code>.version(n)</code> and the factory serve <code>from_binary</code> / <code>from_base64</code>, and the hook runs after those and after <code>from_json</code> (<a href="#versions-and-missing-fields">Versions</a>). A C++ pointer load constructs through <code>load_and_construct</code> or the default constructor. The chain itself is documented in <a href="02-dynamic-binder.html">dynamic_binder</a>.</li><li><strong>A script class layered over a C++ object serializes as itself.</strong> An object a script has <code>extend</code>ed writes <code>$type</code> (the script class), <code>$script</code> (its script fields) and <code>$val</code> (the C++ payload) through every archive path, and a load rebuilds the hybrid. See <a href="13-script-extensible.html#serialization">Script-Extensible Objects</a>.</li><li><strong>Signal connections ride save files.</strong> Named <em>script-text</em> receivers on signal properties serialize with their object; pass the engine as the <strong>load context</strong> (<code>jai::from_json&lt;std::shared_ptr&lt;T&gt;&gt;(*eng, json, *eng)</code>) and they re-arm on load, firing on the next emit. Function-object receivers (script lambdas, C++ callbacks) are runtime-only and skipped, never errored on. The worked round-trip is in the <a href="02-dynamic-binder.html#serialized">binder chapter</a>.</li></ul>
 <h3 id="security-posture-untrusted-payloads">Security posture (untrusted payloads)<a class="hlink" href="#security-posture-untrusted-payloads" aria-label="link">&#8203;</a></h3>
-<p>A dedicated security suite pins that deserialization <strong>never executes</strong> payload-controlled names: hostile <code>$type</code>/property names in JSON, binary, and base64 are data, not code, and oversized array/map length prefixes in binary data are rejected instead of pre-allocated, so a 12-byte payload can&#x27;t request a 2 GB allocation. A payload does choose which of the engine&#x27;s classes a load builds: a type name it carries runs that class&#x27;s zero-argument constructor and its <code>post_load</code>, as any load of that class would.</p>
+<p>A dedicated security suite pins that deserialization <strong>never executes</strong> payload-controlled names: hostile <code>$type</code>/property names in JSON, binary, and base64 are data, not code, and oversized array/map length prefixes in binary data are rejected instead of pre-allocated, so a 12-byte payload can&#x27;t request a 2 GB allocation, and a count reserves at most 1 MiB ahead of the elements that actually load. Data of another kind where a record, an array, a map or an integer belongs fails the load with a <code>jai::serialization_error</code> (<code>Expected an object in the archive, found an integer</code>), and so does an integer its field cannot hold (<code>Archive value 300 does not fit int8</code>, and <code>1.5</code> into an integer field alike): nothing wraps or truncates (<a href="../reference/index.html#host-errors-archives">the texts</a>). A payload does choose which of the engine&#x27;s classes a load builds: a type name it carries runs that class&#x27;s zero-argument constructor and its <code>post_load</code>, as any load of that class would.</p>
 <p id="saved-receivers-are-script">The load itself runs no payload text, but two things in a payload reach code. A signal property (<code>JAI_SIGNAL_PROPERTY</code>) saves its script-text receivers as their source, and a load re-arms them, so each one runs as an <code>execute</code> of that text, in the engine&#x27;s global scope with every API the host registered, the next time its signal fires. A payload carrying signal properties therefore carries script: load such objects only from a trusted source, or into an engine that runs untrusted script under the <a href="05-safety-rails.html#putting-it-together-running-untrusted-script">safety rails</a>. And a payload chooses which classes the load constructs: a <code>$type</code> naming a class the engine defines runs that class&#x27;s own code (on <code>from_json</code>, a script class&#x27;s constructor and field initializers, the setters of the properties the payload writes, and its <code>post_load</code>; a hybrid&#x27;s field initializers and <code>post_load</code>; a C++ type&#x27;s <code>load_and_construct</code> or default constructor and its <code>load</code>), never code the payload supplies.</p>
 <h2 id="which-layer-to-use">Which layer to use<a class="hlink" href="#which-layer-to-use" aria-label="link">&#8203;</a></h2>
 <ul><li>Script gameplay state (the crawler&#x27;s save file is exactly this): script-side <code>to_json(G)</code> / <code>from_json(text)</code>. One line each way, typed fields re-enforced on load.</li><li>Host/engine objects, editor documents, network payloads: the C++ archives. JSON while debugging, <code>to_binary</code> when size/speed matter, same <code>serialize</code> method either way. A network payload that holds signal properties carries script (<a href="#saved-receivers-are-script">Security posture</a>).</li><li>Pre-parsed script code is its own format: <code>.jaibite</code> via <code>jaibite::save</code> (see <a href="04-jaibite.html">jaibite</a>). ASTs, not values.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/07-hot-reload.html"><span>&larr; previous</span>Hot Reload</a><a class="next" rel="next" href="../embedding/09-coroutine-hosting.html"><span>next &rarr;</span>Coroutine Hosting</a></nav></article>

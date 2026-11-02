@@ -123,6 +123,7 @@ private:
     void append_escaped(std::string_view str);
 
     // A scalar's separator before it and its container's first-member flag after it
+    void begin_element();
     void begin_scalar();
     void end_scalar();
 

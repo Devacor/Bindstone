@@ -5,8 +5,10 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
 #include <jaiscript/serialization/convenience.hpp>
+#include <jaiscript/detail/text_hash.hpp>
 
 #include <map>
+#include <set>
 #include <memory>
 #include <vector>
 
@@ -46,6 +48,26 @@ struct hostile_containers {
     std::map<std::string, int> table;
     template<typename Archive> void serialize(Archive& ar) { ar("list", list); ar("table", table); }
 };
+
+// Eight-byte keys an attacker would craft against an unseeded text_hash: each one's hash, had the seed been the fixed constant,
+// has its low 24 bits zero, so every key would share one bucket of any table up to 2^24 slots
+inline std::vector<std::string> keys_colliding_without_a_seed(size_t count) {
+    auto inverse = [](uint64_t a) { uint64_t x = a; for (int i = 0; i < 6; ++i) { x *= 2 - a * x; } return x; };
+    auto unxorshift = [](uint64_t y, int shift) { uint64_t x = y; for (int i = 0; i < 64 / shift + 1; ++i) { x = y ^ (x >> shift); } return x; };
+    std::vector<std::string> result;
+    for (uint64_t target = 1; result.size() < count; ++target) {
+        uint64_t h = target << 24;
+        h = unxorshift(h, 33); h *= inverse(0xc4ceb9fe1a85ec53ull);
+        h = unxorshift(h, 33); h *= inverse(0xff51afd7ed558ccdull);
+        h = unxorshift(h, 33);
+        h = unxorshift(h, 29); h *= inverse(0xbf58476d1ce4e5b9ull);
+        const uint64_t word = h ^ (0x9E3779B97F4A7C15ull ^ (uint64_t(8) * 0xff51afd7ed558ccdull));
+        std::string key(8, '\0');
+        for (int i = 0; i < 8; ++i) { key[i] = char((word >> (8 * i)) & 0xff); }
+        result.push_back(std::move(key));
+    }
+    return result;
+}
 
 template<typename Load>
 std::string archive_load_error(Load&& load) {
@@ -175,6 +197,13 @@ public:
             auto round = from_json<hostile_containers>(*eng, to_json(*eng, good));
             check_eq(size_t(2), round.list.size());
             check_eq(3, round.table["a"]);
+        });
+
+        // The text hash starts from a per-process seed, so keys inverted against the fixed constant spread over the table
+        test("text_hash_is_seeded_per_process", [&]() {
+            std::set<uint64_t> buckets;
+            for (const std::string& key : keys_colliding_without_a_seed(256)) { buckets.insert(jai::detail::text_hash(key) & 0xffff); }
+            check_true(buckets.size() > 200, "crafted keys spread over " + std::to_string(buckets.size()) + " buckets of 65536");
         });
 
         test("binary_oversized_map_length_rejected", [&]() {

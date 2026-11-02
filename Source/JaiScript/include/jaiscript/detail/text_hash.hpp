@@ -4,7 +4,8 @@
 #define __JAISCRIPT_DETAIL_TEXT_HASH_HPP__
 
 // The hash of a map's string keys: eight bytes a step, the last word overlapping the one before it, so a key of up to
-// sixteen bytes costs two loads and two multiplies. Computed within one process only (key order never depends on it).
+// sixteen bytes costs two loads and two multiplies. Computed within one process only (key order never depends on it), so it
+// starts from a seed each process draws once: a key set built to collide in one run spreads in the next.
 
 #include <bit>
 #include <cstdint>
@@ -13,6 +14,9 @@
 #include <jaiscript/jaiscript_fwd.hpp>
 
 namespace jai::detail {
+
+	// value.cpp: drawn once when the library initializes, never written after
+	extern const uint64_t k_process_hash_seed;
 
 	JAI_FORCEINLINE uint64_t text_load64(const char* p) noexcept { uint64_t w; std::memcpy(&w, p, 8); return w; }
 	JAI_FORCEINLINE uint64_t text_load32(const char* p) noexcept { uint32_t w; std::memcpy(&w, p, 4); return w; }
@@ -40,7 +44,7 @@ namespace jai::detail {
 	JAI_FORCEINLINE size_t text_hash(std::string_view text) noexcept {
 		const char* p = text.data();
 		const size_t n = text.size();
-		uint64_t h = 0x9E3779B97F4A7C15ull ^ (static_cast<uint64_t>(n) * 0xff51afd7ed558ccdull);
+		uint64_t h = k_process_hash_seed ^ (static_cast<uint64_t>(n) * 0xff51afd7ed558ccdull);
 		if (n <= 8) {
 			h = text_hash_step(h, text_pack_short(p, n));
 		} else if constexpr (std::endian::native == std::endian::little) {

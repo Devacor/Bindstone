@@ -16,6 +16,8 @@
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <random>
 #include <optional>
 #include <thread>
 #ifdef JAISCRIPT_VM_COVERAGE
@@ -41,6 +43,17 @@ namespace jai {
 }
 
 namespace detail {
+
+namespace {
+    uint64_t draw_process_hash_seed() {
+        std::random_device device;
+        uint64_t seed = (static_cast<uint64_t>(device()) << 32) ^ device();
+        seed ^= static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count()) * 0x9E3779B97F4A7C15ull;
+        return seed ^ reinterpret_cast<uintptr_t>(&seed);
+    }
+}
+
+extern const uint64_t k_process_hash_seed = draw_process_hash_seed();
 
 namespace {
     constexpr std::string_view k_conversion_targets[] = {

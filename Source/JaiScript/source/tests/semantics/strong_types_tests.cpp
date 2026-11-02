@@ -2660,7 +2660,7 @@ public:
             check_quad(q("string r = \"ok\"; try { C::i += L(\"x\"); } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Cannot apply '+=' to int and string 1", "+= string into an int static raises the compound text, static untouched");
             check_quad(q("string r = \"ok\"; try { C::i /= L(0); } catch (err) { r = err; } r").c_str(), "Division by zero", "/= 0");
             check_quad(q("string r = \"ok\"; try { C::i %= L(0); } catch (err) { r = err; } r").c_str(), "Modulo by zero", "%= 0");
-            check_quad(q("C::i = 9223372036854775807; string r = \"ok\"; try { C::i++; } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Integer overflow in '+=' 9223372036854775807", "++ overflow raises, static untouched");
+            check_quad(q("C::i = 9223372036854775807; string r = \"ok\"; try { C::i++; } catch (err) { r = err; } r + \" \" + to_string(C::i)").c_str(), "Integer overflow in '++' 9223372036854775807", "++ overflow raises, static untouched");
             check_quad_error(q("C::s++").c_str(), "++ on a string static");
             check_quad_error(q("C::nosuch = 1").c_str(), "store to a missing static");
             check_quad_error(q("C::nosuch += 1").c_str(), "compound to a missing static");
@@ -3836,9 +3836,15 @@ public:
                 var keep = shared_ptr<Foo>(); var sub = shared_ptr<Foo2>(); var nothing = null; var five = 5;
                 string r1 = "ok"; try { weak_ptr<Foo> w = keep; weak_ptr<Foo> w2 = sub; weak_ptr<Foo> w3 = nothing; w = sub; w2 = nothing; w3 = keep; } catch (e) { r1 = e; }
                 string r2 = "ok"; try { shared_ptr<Foo> p = keep; p = five; } catch (e) { r2 = e; }
-                r1 + "|" + r2 + "|" + to_string(keep.a)
-            )JAI", "ok|Cannot assign int to 'p' (declared shared_ptr<Foo>)|1",
-                "handles and subclass handles still bind; a rejected handle store leaves the pointee untouched");
+                weak_ptr<Foo> gw = sub; gw = keep; gw = sub; gw = keep;
+                string r3 = "ok"; try { gw = five; } catch (e) { r3 = e; }
+                string local() { weak_ptr<Foo> lw = sub; lw = keep; lw = sub; string r = "ok"; try { lw = keep; lw = five; } catch (e) { r = e; } return r; }
+                string r4 = ""; try { shared_ptr<Foo> gp = keep; var vgw = gw; gp = vgw; } catch (e) { r4 = e; }
+                r1 + "|" + r2 + "|" + to_string(keep.a) + "|" + r3 + "|" + local() + "|" + r4
+            )JAI", "ok|Cannot assign int to 'p' (declared shared_ptr<Foo>)|1|Cannot assign int to 'gw' (declared weak_ptr<Foo>)|"
+                   "Cannot assign int to 'lw' (declared weak_ptr<Foo>)|Cannot assign weak_ptr to 'gp' (declared shared_ptr<Foo>)",
+                "handles and subclass handles still bind; a rejected handle store leaves the pointee untouched; a handle variable keeps its "
+                "declared type through subclass stores, a global as a local");
         });
 
         test("auto_container_homogeneity_index", [check_both]() {

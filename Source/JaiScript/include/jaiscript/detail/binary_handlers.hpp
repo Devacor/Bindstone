@@ -833,7 +833,7 @@ namespace jai::detail {
 			if (!scalar_arith_op(op)) { return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator"); }
 			script_int out;
 			if (const auto fault = int_arith(op, left.unchecked_as_int(), right.unchecked_as_int(), out); fault != scalar_fault::none) {
-				return scalar_fault_error<checked_result<script_value>>(op, fault);
+				return scalar_fault_error<checked_result<script_value>>(op, fault, compound);
 			}
 			return h.make_int(out);
 		}
@@ -852,6 +852,23 @@ namespace jai::detail {
 			return scalar_fault_error<checked_result<script_value>>(op, fault);
 		}
 		return h.make_float(out);
+	}
+
+	// a op= b on a member, a field, a static or an element, whose store converts the result (`op` is the compound's binary operator):
+	// text += appends by the one '+=' table, ++ and -- step (incdec_step), every other pairing is evaluate_arithmetic under the
+	// compound's texts
+	template <class Host>
+	checked_result<script_value> compound_value(Host& h, token_type op, const script_value& current_in, const script_value& right_in, bool incdec = false,
+	                                            bool text_slot = false) {
+		if (incdec) { return incdec_step(current_in, op == token_type::plus, h.engine()); }
+		const script_value& current = current_in.deref();
+		const script_value& right = right_in.deref();
+		if (op == token_type::plus) {
+			const script_value c = current.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? current.bound_decoded_temp() : current;
+			const script_value r = right.raw_storage_index() == script_value::TYPEID_CPP_BOUND ? right.bound_decoded_temp() : right;
+			if (compound_plus_text(c, r, text_slot) == compound_text::mismatch) { return compound_mismatch(0, c, r, h.engine()); }
+		}
+		return evaluate_arithmetic(h, current, op, right, compound_index(op));
 	}
 
 }

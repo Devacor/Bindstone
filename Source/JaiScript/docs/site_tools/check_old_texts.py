@@ -38,6 +38,8 @@ OLD_TEXTS = [
     r"Type mismatch: expected",
     r"Type mismatch in assignment",
     r"Incompatible class types",
+    r"Cannot assign shared_ptr<[^>]*> to shared_ptr<",
+    r"Cannot assign weak_ptr to shared_ptr - use weak\.lock\(\)",
     r"Cannot store '[^']*' in '[^']*'",
     r"Cannot assign to static member: field",
     r"resume\(\) takes no arguments",

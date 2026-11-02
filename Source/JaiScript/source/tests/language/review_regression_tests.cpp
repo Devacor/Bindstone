@@ -4623,6 +4623,35 @@ public:
         test("compound_assign_through_promotion", [this]() {
             auto e = make_engine();
             check_eq((int64_t)102, e->execute("var x = 5; x += 'a'; x").as_int());
+            // a var holding a char takes the promoted int from -= and ++ on every storage: a local, a slot, a field of this, a
+            // member and an element; a char-declared one refuses it
+            jai::stdlib::register_all(e);
+            check_eq(std::string("97 99 97 99 97 99 97 99 97 99 98 a"), e->execute(R"(
+                class P { var c = 'b'; string m() { c -= 1; string s = "" + c; c = 'b'; c++; return s + " " + c; } }
+                function slot() -> string { var x = 'b'; x -= 1; var y = 'b'; y++; return "" + x + " " + y; }
+                var lx = 'b'; lx -= 1; var ly = 'b'; ly++;
+                P p; P q; q.c = 'b'; q.c -= 1; P r; r.c++;
+                var arr = ['b', 'b']; arr[0] -= 1; arr[1]++;
+                var w = 'a'; var old = w++;
+                "" + lx + " " + ly + " " + slot() + " " + p.m() + " " + q.c + " " + r.c + " " + arr[0] + " " + arr[1] + " " + w + " " + old
+            )").as_string());
+            check_eq(std::string("Cannot assign int to 'tc' (declared char)"),
+                e->execute("char tc = 'b'; string got = \"\"; try { tc++; } catch (err) { got = err.message; } got").as_string());
+            // an overflow names the compound or the step, whatever the storage
+            if (!e->throw_on_overflow()) { return; }
+            check_eq(std::string("Integer overflow in '+=';Integer overflow in '++';Integer overflow in '*=';Integer overflow in '--';"
+                                 "Integer overflow in '+=';Integer overflow in '++'"), e->execute(R"(
+                class H { int x = 9223372036854775807; int y = -9223372036854775807 - 1; }
+                H h; array<int> a = [9223372036854775807]; map<string, int> m; m["k"] = 9223372036854775807;
+                string out = "";
+                try { h.x += 1; } catch (err) { out += err.message + ";"; }
+                try { h.x++; } catch (err) { out += err.message + ";"; }
+                try { a[0] *= 2; } catch (err) { out += err.message + ";"; }
+                try { h.y--; } catch (err) { out += err.message + ";"; }
+                try { m["k"] += 1; } catch (err) { out += err.message + ";"; }
+                try { a[0]++; } catch (err) { out += err.message; }
+                out
+            )").as_string());
         });
         // The additive guarantees: everything that worked before promotion still means
         // the same thing.

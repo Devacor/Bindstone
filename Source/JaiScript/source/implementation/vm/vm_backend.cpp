@@ -2468,6 +2468,10 @@ checked_result<script_value> vm_backend::evaluate_arithmetic(const script_value&
 	binary_host h{*this};
 	return detail::evaluate_arithmetic(h, left, op, right, compound);
 }
+checked_result<script_value> vm_backend::compound_value(token_type op, const script_value& current, const script_value& right, bool incdec, bool text_slot) {
+	binary_host h{*this};
+	return detail::compound_value(h, op, current, right, incdec, text_slot);
+}
 
 // ============================================================
 // Type enforcement + parameter conversion (interpreter parity)
@@ -2553,6 +2557,48 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 		default:
 			return detail::typed_slot_rejection(value, *target_type, detail::slot_site{kind, name_of(), owner}, engine_);
 	}
+}
+
+// The value a store into a named variable writes, converted by the variable's declared type (the tag its value carries): a typed
+// handle keeps the declared tag through every store, a var takes its marker and a var-held handle stays rebindable (KEEP
+// BYTE-PARALLEL with interpreter::converted_for_variable)
+checked_result<script_value> vm_backend::converted_for_variable(const type_info_ptr& tag, script_value value, uint64_t name_sym) {
+	if (!tag) {
+		return value;
+	}
+	const bool handle_slot = tag->base_type == script_value_type::jai_shared_ptr_type || tag->base_type == script_value_type::jai_weak_ptr_type;
+	if (handle_slot && value.is_null()) {
+		if (tag->base_type == script_value_type::jai_weak_ptr_type) {
+			return script_value::make_empty_weak_ptr(tag, engine_);
+		}
+		value.set_type_info(tag);
+		return value;
+	}
+	if (tag->base_type == script_value_type::jai_shared_ptr_type && tag->dynamic_pointee && value.get_type_info() &&
+	    value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
+		if (value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
+			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
+		}
+		return value;
+	}
+	if (!detail::var_slot(tag.get()) && !handle_slot && detail::same_type_payload(value, tag.get())) {
+		return value;
+	}
+	auto enforced = enforce_type_compatibility(std::move(value), tag, name_sym);
+	if (!enforced) {
+		return enforced;
+	}
+	value = std::move(enforced.value());
+	detail::keep_handle_slot_type(value, tag);
+	if (detail::var_slot(tag.get())) {
+		// a var keeps a shared_ptr-tagged value's marker (flattening to 'any' would detach the handle at the copy), rebindable
+		if (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
+			detail::var_stamp(value, tag, engine_);
+		} else if (value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
+			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
+		}
+	}
+	return value;
 }
 
 // Compound store-back: locked targets convert the promoted result like '=' does; var
@@ -3206,93 +3252,12 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			stack_.push_back(std::move(value));
 			return {};
 		}
-		if (currentVal && currentVal->is_weak_ptr()) {
-			script_value result = value;
-			if (value.is_null()) {
-				auto type_info = currentVal->get_type_info();
-				VM_TRY(store_back(script_value::make_empty_weak_ptr(type_info, engine_)));
-			} else if (value.is_weak_ptr()) {
-				VM_TRY(store_back(std::move(value)));
-			} else if (value.type() == script_value_type::jai_shared_ptr_type) {
-				auto weak_type_info = currentVal->get_type_info();
-				auto expected_type = weak_type_info ? weak_type_info->element_type() : nullptr;
-				auto value_type_info = value.get_type_info();
-				if (expected_type && value_type_info &&
-				    expected_type->base_type != script_value_type::jai_any_type) {
-					const std::string& expected_class = expected_type->type_name;
-					const std::string& actual_class = value_type_info->element_type()
-						? value_type_info->element_type()->type_name
-						: value_type_info->type_name;
-					if (expected_class != actual_class && engine_) {
-						auto actual_def = engine_->get_class_definition(actual_class);
-						if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-							return raise_from(detail::typed_slot_rejection(value, *weak_type_info,
-								detail::slot_site{detail::slot_kind::assignment, symbolizer_->get_string(sym), {}}, engine_));
-						}
-					}
-				}
-				auto weak_result = script_value::make_weak_ptr(value, engine_);
-				if (!weak_result) {
-					return raise_from(weak_result);
-				}
-				VM_TRY(store_back(std::move(weak_result.value())));
-			} else {
-				// A value-semantic object or a primitive: family D's assignment shape
-				// (KEEP BYTE-PARALLEL with the interpreter's assignment twin)
-				const type_info* weak_tag = currentVal->get_type_info().get();
-				if (!weak_tag) { weak_tag = engine_->get_type_info_weak_ptr(nullptr); }
-				return raise_from(detail::typed_slot_rejection(value, *weak_tag,
-					detail::slot_site{detail::slot_kind::assignment, symbolizer_->get_string(sym), {}}, engine_));
-			}
-			stack_.push_back(std::move(result));
-			return {};
-		}
-		if (currentVal && currentVal->get_type_info() &&
-		    currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-			script_value result = value;
-			auto ptr_type_info = currentVal->get_type_info();
-			auto expected_type = ptr_type_info->element_type();
-
-			if (value.is_null()) {
-				VM_TRY(store_back(std::move(value)));
-			} else if (value.is_weak_ptr()) {
-				return raise_(make_error_code(runtime_error_code::type_mismatch),
-					"Cannot assign weak_ptr to shared_ptr - use weak.lock() instead");
-			} else if (value.get_type_info() &&
-			           value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
-				auto value_type_info = value.get_type_info();
-				auto value_element = value_type_info->element_type();
-				if (ptr_type_info->dynamic_pointee) {
-					// var-declared holder: '=' with a handle rhs REBINDS unchecked
-					// (enforcement guards copy-assign-to-underlying,
-					// not re-pointing) - carry the rebindable marker
-					if (engine_ && value_element && !value_type_info->dynamic_pointee) {
-						value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value_element.get()));
-					}
-					VM_TRY(store_back(std::move(value)));
-				} else {
-					// handle admission: a typed source by its static pointee, a var-held one by its object's class
-					// (KEEP BYTE-PARALLEL with the interpreter's environment row)
-					if (!detail::shared_handle_admits(value, ptr_type_info, engine_)) {
-						uint64_t expected_id = expected_type ? expected_type->id : 0;
-						return raise_(make_error_code(runtime_error_code::type_mismatch),
-							"Cannot assign shared_ptr<{0}> to shared_ptr<{1}>",
-							symbolizer_->intern(detail::shared_handle_judged_class(value, engine_)), expected_id);
-					}
-
-					value.set_type_info(ptr_type_info);
-					VM_TRY(store_back(std::move(value)));
-				}
-			} else {
-				// a value: the held object decides (a var rebinds to what its object does not take; KEEP BYTE-PARALLEL with the interpreter)
-				op_status held_status = op_status::ok;
-				if (held_object_store(*currentVal, value, result_used(), held_status)) { return held_status; }
-				return raise_from(detail::typed_slot_rejection(value, *ptr_type_info,
-					detail::slot_site{detail::slot_kind::assignment, symbolizer_->get_string(sym), {}}, engine_));
-			}
-			stack_.push_back(std::move(result));
-			return {};
-		}
+		// a store into a handle hands a discarded expression its right-hand side, a consumed one the stored handle (KEEP
+		// BYTE-PARALLEL with the interpreter's environment store)
+		const bool handle_store = currentVal && (currentVal->is_weak_ptr() ||
+			(currentVal->get_type_info() && currentVal->get_type_info()->base_type == script_value_type::jai_shared_ptr_type));
+		std::optional<script_value> host_rhs;
+		if (handle_store && !result_used()) { host_rhs = value; }
 
 		// Regular variable assignment with strong-types enforcement
 #ifdef JAISCRIPT_VM_PROFILE
@@ -3300,7 +3265,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 #endif
 		type_info_ptr target_type = currentVal ? currentVal->get_type_info() : nullptr;
 
-		if (currentVal && detail::slot_value_assign_candidate(*currentVal) && (!target_type || target_type->base_type != script_value_type::jai_object_type)) {
+		if (currentVal && !detail::handle_rebinds(*currentVal, value) && detail::slot_value_assign_candidate(*currentVal) &&
+		    (!target_type || target_type->base_type != script_value_type::jai_object_type)) {
 			op_status held_status = op_status::ok;
 			if (held_object_store(*currentVal, value, result_used(), held_status)) { return held_status; }
 		}
@@ -3314,29 +3280,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			}
 		}
 
-		// no type, a var, or a payload the type already names: the table is the identity
-		if (target_type && !detail::var_slot(target_type.get()) && !detail::same_type_payload(value, target_type.get())) {
-			auto enforced = enforce_type_compatibility(std::move(value), target_type, sym);
-			if (!enforced) {
-				return raise_from(enforced);
-			}
-			value = std::move(enforced.value());
-		}
-
-		// var targets keep a shared_ptr-tagged rhs's marker (decl parity;
-		// flattening to 'any' would silently detach the handle at the copy)
-		if (target_type && detail::var_slot(target_type.get()) &&
-		    (!value.get_type_info() ||
-		     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-			detail::var_stamp(value, target_type, engine_);   // the var marker (a typed array keeps its element type)
-		} else if (target_type && detail::var_slot(target_type.get()) &&
-		           engine_ && value.get_type_info()->element_type() &&
-		           !value.get_type_info()->dynamic_pointee) {
-			// var target adopting a handle: mark it rebindable
-			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
-				value.get_type_info()->element_type().get()));
-		}
-
+		VM_TRY_ASSIGN(value, converted_for_variable(target_type, std::move(value), sym));
 		if (rhs_lvalue) {
 			script_value assignValue = clone_for_assignment(value);
 			VM_TRY(store_back(std::move(assignValue)));
@@ -3344,6 +3288,9 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		} else {
 			VM_TRY(store_back(std::move(value)));
 			stack_.push_back(*currentVal);
+		}
+		if (handle_store) {
+			stack_.back() = host_rhs ? std::move(*host_rhs) : clone_for_assignment(currentVal->deref());
 		}
 		return {};
 	}
@@ -3501,105 +3448,6 @@ JAI_NOINLINE op_status vm_backend::compound_append_string(script_value& slot, co
 	return {};
 }
 
-// A member's or an implicit this field's compound arithmetic past the text-append lanes, over operands a bound alias has
-// already decoded (KEEP BYTE-PARALLEL with interpreter::member_compound_result)
-op_status vm_backend::member_compound_arith(uint32_t kind, bool text_append, const script_value& currentValue,
-                                            const script_value& rightValue, script_value& result) {
-	const size_t ci = currentValue.raw_storage_index();
-	const size_t ri = rightValue.raw_storage_index();
-	if (text_append) {   // one '+=' table for every destination (KEEP BYTE-PARALLEL with the interpreter)
-		VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-	} else if (detail::math::owns_arithmetic(ci, ri)) [[unlikely]] {   // a math field or component operand takes the math rows (KEEP BYTE-PARALLEL with the interpreter's member compound)
-		const detail::math::bop op = kind == compound_minus ? detail::math::bop::sub : kind == compound_star ? detail::math::bop::mul
-		                           : kind == compound_slash ? detail::math::bop::div : kind == compound_percent ? detail::math::bop::mod
-		                           : detail::math::bop::add;
-		auto math_result = detail::math::binary(op, currentValue, rightValue, engine_);
-		if (!math_result) {
-			return raise_from(math_result);
-		}
-		result = std::move(math_result.value());
-	} else
-	switch (kind) {
-		case compound_plus: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_add(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '+='"));
-				result = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				result = script_value(cf + rf, engine_);
-			} else if (ci == script_value::TYPEID_STRING && ri == script_value::TYPEID_STRING) {
-				// engine::memory_cap chokepoint: deny the concat result before it exists
-				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_as_string().size() + rightValue.unchecked_as_string().size())) [[unlikely]] {
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				result = script_value(currentValue.unchecked_as_string() + rightValue.unchecked_as_string(), engine_);
-			} else if (detail::utf8_operands(ci, ri) && currentValue.is_text() && rightValue.is_text()) {
-				if (!limits_->memory_charge(sizeof(script_value) + currentValue.unchecked_text().size() + rightValue.unchecked_text().size())) [[unlikely]] {
-					return raise_from(detail::raise_memory_cap(*limits_));
-				}
-				result = script_value::make_utf8(currentValue.unchecked_text() + rightValue.unchecked_text(), engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_minus: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_sub(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '-='"));
-				result = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				result = script_value(cf - rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(1, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_star: {
-			if (ci == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
-				script_int rr;
-				if (!ints::try_mul(currentValue.unchecked_as_int(), rightValue.unchecked_as_int(), rr)) return raise_from(vm_int_overflow_v("Integer overflow in '*='"));
-				result = script_value(rr, engine_);
-			} else if ((ci == script_value::TYPEID_INT || ci == script_value::TYPEID_FLOAT) &&
-			           (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT)) {
-				script_float cf = (ci == script_value::TYPEID_INT) ? script_float(currentValue.unchecked_as_int()) : currentValue.unchecked_as_float();
-				script_float rf = (ri == script_value::TYPEID_INT) ? script_float(rightValue.unchecked_as_int()) : rightValue.unchecked_as_float();
-				result = script_value(cf * rf, engine_);
-			} else {
-				return raise_from(detail::compound_mismatch(2, currentValue, rightValue, engine_));
-			}
-			break;
-		}
-		case compound_slash: {
-			// the local's semantics: int / int divides as integers (C++), a zero divisor and the operand text come from the kernel
-			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-			break;
-		}
-		case compound_percent: {
-			if (ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-				return raise_(make_error_code(runtime_error_code::modulo_by_zero),
-					"Modulo by zero");
-			}
-			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-			break;
-		}
-		default:
-			if (!compound_kind_bitwise(kind)) {
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"Unsupported compound assignment operator");
-			}
-			VM_TRY_ASSIGN(result, evaluate_arithmetic(currentValue, compound_kind_token(kind), rightValue, detail::compound_index(compound_kind_token(kind))));
-			break;
-	}
-	return {};
-}
-
 JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const uint32_t kind = ins.c & compound_kind_mask;
@@ -3610,7 +3458,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 
 	script_value* varPtr = (ins.c & compound_flag_global_only)
 		? engine_->get_global_environment()->get_value_ptr(sym)
-		: resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
+		: variable_cell(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
 		uint8_t declared_kind = 0;
 		// Constrained element/field ref (Tier 1 bind): route through the shared helper
@@ -4035,23 +3883,29 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			return {};
 		}
 	}
-	VM_TRY(member_compound_arith(kind, text_pair == detail::compound_text::append, currentValue, rightValue, resultValue));
+	VM_TRY_ASSIGN(resultValue, compound_value(compound_kind_token(kind), currentValue, rightValue));
 
-	// Store the enforced (declared-type converted) value; the expression result stays the
-	// promoted value, matching member/element compound semantics
+	// the field's declared type converts the stored value; a consumed expression's value is the stored one, read back through a
+	// property's getter (KEEP BYTE-PARALLEL with the interpreter's implicit-this compound)
 	if (prop_setter) {
 		VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, resultValue));
+		if (result_needed) {
+			VM_TRY_ASSIGN(resultValue, detail::read_bare_cpp_property(this_val, instance.get(), instance->get_method(prop_getter, false), prop_getter, sym));
+		}
 	} else {
 		auto enforced = instance->field_store(sym, resultValue, [&] { return clone_for_assignment(resultValue); });
 		if (!enforced) {
 			return raise_from(enforced);
 		}
+		if (result_needed) { resultValue = clone_for_assignment(enforced.value()); }
 		instance->set_field_unchecked(sym, enforced.value());
 	}
 	if (!no_result) { stack_.push_back(std::move(resultValue)); }
 	return {};
 }
 
+// ++x, x++, --x and x-- on a named variable: x += 1 on its storage (detail::incdec_step), the value stored back through the
+// variable's table; a field of this takes the field store (KEEP BYTE-PARALLEL with interpreter::increment_variable)
 op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
@@ -4059,16 +3913,14 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 
 	script_value* varPtr = (ins.c & incdec_flag_global_only)
 		? engine_->get_global_environment()->get_value_ptr(sym)
-		: resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
+		: variable_cell(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
-		// Scratch-backed ref (typed element, C++ property): deref hands back the holder
-		// scratch - the in-place mutation below must commit it (buffer store / setter)
-		// (KEEP BYTE-PARALLEL with the interpreter ++/-- twin)
+		// a scratch-backed reference (a typed element, a C++ property) commits what the step wrote into its scratch
 		auto* scratch_ref = varPtr->scratch_ref_holder();
 		script_value& target = varPtr->deref();
 		const bool slot_named = !(ins.c & incdec_flag_global_only) && varPtr->is_reference();
 		if (const uint8_t declared_kind = slot_named && slot_declared_kind(f, ins.b) ? slot_declared_kind(f, ins.b) : detail::ref_declared_kind(*varPtr);
-		    declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table (KEEP BYTE-PARALLEL with the interpreter ++/--)
+		    declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table
 			auto stepped = detail::ref_target_assign(*varPtr, script_value(static_cast<script_int>(1), engine_), isIncrement ? token_type::plus : token_type::minus,
 				true, postfix, true, operator_table_, engine_, symbolizer_,
 				[this](const script_value& l, token_type o, const script_value& r) { return evaluate_arithmetic(l, o, r, detail::compound_index(o)); },
@@ -4077,126 +3929,69 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 			stack_.push_back(std::move(stepped.value()));
 			return {};
 		}
-		// Write-through: ++/-- on a bound VARIABLE decodes the live value and stores
-		// back through assign_through (the type() switch below would mutate a dead shadow).
-		// KEEP BYTE-PARALLEL with the interpreter ++/-- bound branch.
+		VM_TRY_ASSIGN(script_value stepped, detail::incdec_step(target, isIncrement, engine_));
+		script_value old = postfix ? detail::incdec_old_value(target, engine_) : make_null();
 		if (target.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
-			if (target.is_int()) {
-				const script_int oldVal = target.unchecked_as_int();
-				script_int newVal;
-				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
-				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
-				}
-				target.assign_through(script_value(newVal, engine_));
-				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
-				return {};
-			}
-			if (target.is_float()) {
-				const script_float oldVal = target.unchecked_as_float();
-				const script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-				target.assign_through(script_value(newVal, engine_));
-				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
-				return {};
-			}
-			return raise_from(detail::incdec_mismatch(isIncrement, target, engine_));
+			target.assign_through(stepped);
+		} else if (target.raw_storage_index() == script_value::TYPEID_INT && stepped.raw_storage_index() == script_value::TYPEID_INT) {
+			target.unchecked_as_int_ref() = stepped.unchecked_as_int();
+		} else if (target.raw_storage_index() == script_value::TYPEID_FLOAT) {
+			target.unchecked_as_float_ref() = stepped.unchecked_as_float();
+		} else {
+			VM_TRY(compound_typed_store_back(target, stepped, sym));
 		}
-		switch (target.type()) {
-			case script_value_type::jai_int_type: {
-				// Overflow policy applies to plain ++/-- like every other int op
-				// (INCDEC-WRAPS-SILENTLY); wrap builds fold the check away.
-				script_int& tref = target.unchecked_as_int_ref();
-				const script_int oldVal = tref;
-				script_int newVal;
-				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
-				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
-				}
-				tref = newVal;
-				if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
-				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
-				return {};
-			}
-			case script_value_type::jai_float_type: {
-				if (postfix) {
-					stack_.push_back(script_value(target.unchecked_as_float(), engine_));
-					if (isIncrement) target.unchecked_as_float_ref() += 1.0;
-					else target.unchecked_as_float_ref() -= 1.0;
-				} else {
-					if (isIncrement) target.unchecked_as_float_ref() += 1.0;
-					else target.unchecked_as_float_ref() -= 1.0;
-					stack_.push_back(script_value(target.unchecked_as_float(), engine_));
-				}
-				if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
-				return {};
-			}
-			default:
-				return raise_from(detail::incdec_mismatch(isIncrement, target, engine_));
-		}
+		if (scratch_ref) [[unlikely]] { scratch_ref->commit_scratch(); }
+		stack_.push_back(postfix ? std::move(old) : std::move(stepped));
+		return {};
 	}
 
-	// ::name targets never reach the implicit this.member fallback
 	if (ins.c & incdec_flag_global_only) {
 		return raise_(make_error_code(runtime_error_code::undefined_variable),
 			environment_->undefined_text(sym), sym);
 	}
 	script_value* frame_this = current_this(f);
-	if (frame_this && frame_this->is_object()) {
-		script_value this_val = *frame_this;
-		strong_ptr<class_instance> instance = this_val.get_class_instance();
-		if (instance && instance->has_field(sym)) {
-			if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
-				VM_TRY(detail::enforce_member_access(field_class, sym, frame_access_context(f)));
-			}
-			// A hybrid's C++ property reads through its getter and stores through its setter
-			// (KEEP BYTE-PARALLEL with the interpreter ++/-- this-tail)
-			const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), sym);
-			const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), sym) : 0;
-			script_value currentVal = make_null();
-			if (prop_getter) {
-				VM_TRY_ASSIGN(currentVal, detail::read_bare_cpp_property(this_val, instance.get(),
-					instance->get_method(prop_getter, false), prop_getter, sym));
-			} else {
-				currentVal = instance->get_field(sym);
-			}
-			// S8: a bound-alias field decodes live; set_field stores the detached result
-			if (currentVal.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
-				currentVal = currentVal.bound_decoded_temp();
-			const size_t ti = currentVal.raw_storage_index();
-			if (ti == script_value::TYPEID_INT) {
-				script_int oldVal = currentVal.unchecked_as_int();
-				script_int newVal;
-				if (isIncrement) {
-					if (!ints::try_add(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '++'"));
-				} else {
-					if (!ints::try_sub(oldVal, 1, newVal)) return raise_from(vm_int_overflow_v("Integer overflow in '--'"));
-				}
-				if (prop_setter) {
-					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, script_value(newVal, engine_)));
-				} else {
-					instance->set_field(sym, script_value(newVal, engine_));
-				}
-				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
-				return {};
-			} else if (ti == script_value::TYPEID_FLOAT) {
-				script_float oldVal = currentVal.unchecked_as_float();
-				script_float newVal = isIncrement ? oldVal + 1.0 : oldVal - 1.0;
-				if (prop_setter) {
-					VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, script_value(newVal, engine_)));
-				} else {
-					instance->set_field(sym, script_value(newVal, engine_));
-				}
-				stack_.push_back(script_value(postfix ? oldVal : newVal, engine_));
-				return {};
-			} else {
-				return raise_from(detail::incdec_mismatch(isIncrement, currentVal, engine_));
-			}
-		}
+	strong_ptr<class_instance> instance = frame_this && frame_this->is_object() ? frame_this->get_class_instance() : strong_ptr<class_instance>{};
+	if (!instance || !instance->has_field(sym)) {
+		return raise_(make_error_code(runtime_error_code::undefined_variable),
+			environment_->undefined_text(sym), sym);
 	}
-	return raise_(make_error_code(runtime_error_code::undefined_variable),
-		environment_->undefined_text(sym), sym);
+	if (class_definition* field_class = instance->get_class_definition(); field_class && field_class->chain_has_nonpublic()) [[unlikely]] {
+		VM_TRY(detail::enforce_member_access(field_class, sym, frame_access_context(f)));
+	}
+	// a hybrid's C++ property reads through its getter and stores through its setter
+	script_value this_val = *frame_this;
+	const uint64_t prop_getter = detail::cpp_property_getter_id(instance.get(), sym);
+	const uint64_t prop_setter = prop_getter ? detail::cpp_property_setter_id(instance.get(), sym) : 0;
+	script_value current = make_null();
+	if (prop_getter) {
+		VM_TRY_ASSIGN(current, detail::read_bare_cpp_property(this_val, instance.get(), instance->get_method(prop_getter, false), prop_getter, sym));
+	} else {
+		current = instance->get_field(sym);
+	}
+	VM_TRY_ASSIGN(script_value stepped, detail::incdec_step(current, isIncrement, engine_));
+	script_value old = postfix ? detail::incdec_old_value(current, engine_) : make_null();
+	if (prop_setter) {
+		VM_TRY(detail::write_cpp_property(this_val, instance->get_class_definition(), prop_setter, stepped));
+	} else {
+		auto enforced = instance->field_store(sym, stepped, [&] { return clone_for_assignment(stepped); });
+		if (!enforced) {
+			return raise_from(enforced);
+		}
+		instance->set_field_unchecked(sym, enforced.value());
+	}
+	stack_.push_back(postfix ? std::move(old) : std::move(stepped));
+	return {};
+}
+
+// The cell a compound store or ++/-- on a name writes in place; null for a field of this, whose store converts through the field's
+// declared type (KEEP BYTE-PARALLEL with interpreter::variable_cell)
+script_value* vm_backend::variable_cell(frame& f, uint32_t slot, uint64_t symbol_id, size_t cache_slot) {
+	script_value* cell = resolve_local_or_env(f, slot, symbol_id, cache_slot);
+	if (cell && f.locals && !f.top_level && f.locals->scope_state == static_cast<uint8_t>(detail::member_scope_state::instance)) {
+		auto hit = detail::probe_member_scope(detail::member_scope_state::instance, f.locals->scope_this, f.locals->scope_static, symbol_id, false);
+		if (hit.what == detail::member_probe_hit::kind::field && hit.value_ptr == cell) { return nullptr; }
+	}
+	return cell;
 }
 
 op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
@@ -6170,71 +5965,34 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	stack_.pop_back();
 	const bool old_result = (compound & compound_flag_old_result) != 0;
 	script_value postfix_old = old_result ? script_value(currentValue.deref()) : make_null();
-	if (compound & compound_flag_incdec) {
-		// ++/-- gate: numeric targets only, the identifier path's exact error
-		const size_t ci = currentValue.deref().raw_storage_index();
-		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-			return raise_from(detail::incdec_mismatch((compound & compound_kind_mask) == compound_plus, currentValue.deref(), engine_));
-		}
-	}
-
+	const bool incdec = (compound & compound_flag_incdec) != 0;
 	const token_type op = compound_kind_token(compound);
 
 	script_value resultValue = make_null();
-	// Custom operator consult through the flat table (was a per-store string-keyed
-	// env-chain walk - the single hottest waste on the compound-store path)
-	const script_value* opFunc = operator_table_ ? operator_table_->entry(detail::binary_op_slot(op)) : nullptr;
+	// a global operator answers first (the flat table; KEEP BYTE-PARALLEL with the interpreter's element compound); ++ and --
+	// step numbers only
+	const script_value* opFunc = operator_table_ && !incdec ? operator_table_->entry(detail::binary_op_slot(op)) : nullptr;
 	if (opFunc) {
-		const script_function& func = opFunc->as_function();
-		std::vector<script_value> args = {currentValue, rightValue};
-		auto result = call_value(func, args);
+		auto result = call_value(opFunc->as_function(), {currentValue, rightValue});
 		if (!result) {
 			return raise_from(result);
 		}
 		resultValue = std::move(result.value());
 	} else {
-		// S8: a bound rhs decodes before the zero pre-checks so /= and %= keep
-		// today's error codes/texts (byte-parallel with the interpreter compound path)
-		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+		// a bound rhs decodes before the zero divisor's check, which comes ahead of the operands' kinds
+		if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			rightValue = rightValue.bound_decoded_temp();
-		switch (op) {
-			case token_type::plus: {
-				// one '+=' table for every destination: a text target appends text, a text operand never stringifies
-				const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
-				if (detail::compound_plus_text(currentValue.deref(), rightValue.deref(), text_slot) == detail::compound_text::mismatch) {
-					return raise_from(detail::compound_mismatch(0, currentValue.deref(), rightValue.deref(), engine_));
-				}
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::plus, rightValue, 0));
-				break;
-			}
-			case token_type::minus: {
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::minus, rightValue, 1));
-				break;
-			}
-			case token_type::star: {
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::star, rightValue, 2));
-				break;
-			}
-			case token_type::slash: {
-				const size_t ri = rightValue.raw_storage_index();
-				if ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
-				    (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0)) {
-					return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
-				}
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::slash, rightValue, 3));
-				break;
-			}
-			case token_type::percent: {
-				if (rightValue.raw_storage_index() == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
-					return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
-				}
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, token_type::percent, rightValue, 4));
-				break;
-			}
-			default:
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(currentValue, op, rightValue, detail::compound_index(op)));   // & | ^ << >>
-				break;
 		}
+		const size_t ri = rightValue.raw_storage_index();
+		if (op == token_type::slash && ((ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) ||
+		                                (ri == script_value::TYPEID_FLOAT && rightValue.unchecked_as_float() == 0.0))) {
+			return raise_(make_error_code(runtime_error_code::division_by_zero), "Division by zero");
+		}
+		if (op == token_type::percent && ri == script_value::TYPEID_INT && rightValue.unchecked_as_int() == 0) {
+			return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
+		}
+		const bool text_slot = currentValue.is_reference() && currentValue.get_reference_holder() && currentValue.get_reference_holder()->string_element();
+		VM_TRY_ASSIGN(resultValue, compound_value(op, currentValue, rightValue, incdec, text_slot));
 	}
 
 	if (!currentValue.is_reference()) {
@@ -11753,53 +11511,19 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 	const bool is_shared_ptr = decl->type && decl->type->base_type == script_value_type::jai_shared_ptr_type;
 
 	if (is_weak_ptr) {
-		if (!has_init) {
-			return define_decl_value(f, decl,
-				script_value::make_empty_weak_ptr(decl->type, engine_));
-		}
-		script_value value = std::move(stack_.back());
-		stack_.pop_back();
-		// Element/subscript reads arrive as reference wrappers (rhs-lvalue read
-		// shape); declarations consume the VALUE - normalize like assignment does
-		// (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
-		if (value.is_reference()) {
-			script_value derefed = value.deref();
-			value = std::move(derefed);
-		}
-		if (value.is_null()) {
-			return define_decl_value(f, decl,
-				script_value::make_empty_weak_ptr(decl->type, engine_));
-		}
-		if (value.is_weak_ptr()) {
-			return define_decl_value(f, decl, std::move(value), decl->ref_escaping);
-		}
-		if (value.type() == script_value_type::jai_shared_ptr_type) {
-			auto expected_type = decl->type ? decl->type->element_type() : nullptr;
-			auto value_type_info = value.get_type_info();
-			if (expected_type && value_type_info &&
-			    expected_type->base_type != script_value_type::jai_any_type) {
-				const std::string& expected_class = expected_type->type_name;
-				const std::string& actual_class = value_type_info->element_type()
-					? value_type_info->element_type()->type_name
-					: value_type_info->type_name;
-				if (expected_class != actual_class && engine_) {
-					auto actual_def = engine_->get_class_definition(actual_class);
-					if (!actual_def || !actual_def->is_subtype_of(expected_class)) {
-						return raise_from(detail::typed_slot_rejection(value, *decl->type,
-							decl_site(decl), engine_));
-					}
-				}
+		script_value value = make_null();
+		if (has_init) {
+			value = std::move(stack_.back());
+			stack_.pop_back();
+			// an element read arrives as a reference wrapper: the declaration consumes the value (KEEP BYTE-PARALLEL with the
+			// interpreter's visit_variable_decl)
+			if (value.is_reference()) {
+				script_value derefed = value.deref();
+				value = std::move(derefed);
 			}
-			auto weak_result = script_value::make_weak_ptr(value, engine_);
-			if (!weak_result) {
-				return raise_from(weak_result);
-			}
-			return define_decl_value(f, decl, std::move(weak_result.value()), decl->ref_escaping);
 		}
-		// A value-semantic object or a primitive: family D's declaration shape
-		// (KEEP BYTE-PARALLEL with the interpreter's visit_var_decl)
-		return raise_from(detail::typed_slot_rejection(value, *decl->type,
-			decl_site(decl), engine_));
+		VM_TRY_ASSIGN(script_value weak, detail::weak_declaration_value(decl->type, std::move(value), engine_, decl_site(decl)));
+		return define_decl_value(f, decl, std::move(weak), decl->ref_escaping);
 	}
 
 	if (is_shared_ptr) {
@@ -16884,14 +16608,9 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		rightValue = std::move(derefed);
 	}
 	script_value postfix_old = old_result ? currentValue : make_null();
-	if (ins.c & compound_flag_incdec) {
-		const size_t ci = currentValue.raw_storage_index();
-		if (ci != script_value::TYPEID_INT && ci != script_value::TYPEID_FLOAT && ci != script_value::TYPEID_CPP_BOUND) {
-			return raise_from(detail::incdec_mismatch(kind == compound_plus, currentValue, engine_));
-		}
-	}
+	const bool incdec = (ins.c & compound_flag_incdec) != 0;
 
-	if (currentValue.is_object()) {
+	if (!incdec && currentValue.is_object()) {
 		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
 			auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
@@ -16928,7 +16647,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		rightValue = rightValue.bound_decoded_temp();
 
 	script_value resultValue = make_null();
-	const detail::compound_text text_pair = kind == compound_plus ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
+	const detail::compound_text text_pair = kind == compound_plus && !incdec ? detail::compound_plus_text(currentValue, rightValue) : detail::compound_text::none;
 	if (text_pair == detail::compound_text::mismatch) { return raise_from(detail::compound_mismatch(0, currentValue, rightValue, engine_)); }
 	if (text_pair == detail::compound_text::append && member->is_static && !old_result) {
 		if (auto appended = static_text_append(f, member, currentValue, rightValue)) {
@@ -16945,7 +16664,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 			return {};
 		}
 	}
-	VM_TRY(member_compound_arith(kind, text_pair == detail::compound_text::append, currentValue, rightValue, resultValue));
+	VM_TRY_ASSIGN(resultValue, compound_value(compound_kind_token(kind), currentValue, rightValue, incdec));
 
 	if (member->is_static) {
 		script_value stored_static = make_null();

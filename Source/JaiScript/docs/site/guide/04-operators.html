@@ -171,6 +171,7 @@ s[0] == 97:  true
 s[0] + 0   = 97
 &#x27;a&#x27; &amp; 0x7F = 97
 == result: int</code></pre></div>
+<p>Compound assignment and <code>++</code>/<code>--</code> promote the same way, wherever the char is held: a <code>var</code> local, field or element holding <code>'b'</code> holds the int <code>97</code> after <code>-= 1</code> and <code>99</code> after <code>++</code>, while a variable declared <code>char</code> refuses the int (<code>Cannot assign int to 'c' (declared char)</code>, a load error when the checker sees it).</p>
 <p>Promotion never crosses into the string domain: <code>'a' == "a"</code> is false, and <code>char + string</code> concatenates as text. And there is no implicit int→char either: <code>type_of('a' + 1)</code> is <code>int</code>, and <code>char c = 65</code> is a type error. The char↔int door is <code>cast&lt;T&gt;</code> (<code>cast&lt;char&gt;(n)</code> for an int in 0..255, <code>cast&lt;int&gt;(c)</code> for the code point), with <code>to_char(n)</code> as the stdlib function form of the same range-checked rule, and <code>\xNN</code> literals for bytes you know at write time:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">char c = cast&lt;char&gt;(65);          // int -&gt; char, range-checked 0..255
 int  n = cast&lt;int&gt;('a');          // char -&gt; int: the code point

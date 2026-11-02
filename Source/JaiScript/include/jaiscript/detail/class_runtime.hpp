@@ -2207,6 +2207,8 @@ inline void keep_handle_slot_type(script_value& value, const type_info_ptr& slot
     if (slot_type && slot_type->base_type == script_value_type::jai_shared_ptr_type && !slot_type->dynamic_pointee &&
         value.get_type_info() && value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type) {
         value.set_type_info(slot_type);
+    } else if (slot_type && slot_type->base_type == script_value_type::jai_weak_ptr_type && slot_type->element_type() && value.is_weak_ptr()) {
+        value.set_type_info(slot_type);
     }
 }
 
@@ -2462,6 +2464,34 @@ inline error_propagator typed_slot_rejection(const script_value& source, const t
         return {ec, slot_rejection_message(site.kind), source_id, symbols->intern(slot_description(site, target))};
     }
     return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), source_id, target.id};
+}
+
+// A store into a handle variable that re-points it: a weak_ptr takes only handles, and a shared_ptr re-points for null, a weak_ptr
+// (refused) or another shared handle; any other value is the held object's to take
+inline bool handle_rebinds(const script_value& current, const script_value& value) {
+    if (current.is_weak_ptr()) { return true; }
+    const type_info* tag = current.type_info_raw();
+    if (!tag || tag->base_type != script_value_type::jai_shared_ptr_type) { return false; }
+    const type_info* incoming = value.type_info_raw();
+    return value.is_null() || value.is_weak_ptr() || (incoming && incoming->base_type == script_value_type::jai_shared_ptr_type);
+}
+
+// A weak_ptr<T> declaration's value: an empty handle for null, a shared_ptr<T> (or a subclass's) downgraded, another weak_ptr as
+// it is, each under the declared type, which every later store keeps; anything else is the declaration's error
+inline checked_result<script_value> weak_declaration_value(const type_info_ptr& declared, script_value value, engine* eng, const slot_site& site) {
+    if (value.is_null()) {
+        return script_value::make_empty_weak_ptr(declared, eng);
+    }
+    if (value.is_weak_ptr()) {
+        value.set_type_info(declared);
+        return value;
+    }
+    if (!weak_slot_takes_shared(value, declared, eng)) {
+        return typed_slot_rejection(value, *declared, site, eng);
+    }
+    auto weak = script_value::make_weak_ptr(value, eng);
+    if (weak) { weak.value().set_type_info(declared); }
+    return weak;
 }
 
 // A compound assignment whose operator does not take its operands (internal/diagnostics.md, compound assignment): op 0..4 is

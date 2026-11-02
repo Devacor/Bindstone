@@ -1680,6 +1680,7 @@ namespace jai::vm {
         void exec_map(frame& f, const vm_instruction& ins);
 
         script_value* resolve_local_or_env(frame& f, uint32_t slot, uint64_t symbol_id, size_t cache_slot = SIZE_MAX);
+        script_value* variable_cell(frame& f, uint32_t slot, uint64_t symbol_id, size_t cache_slot);
         // The cell an identifier RECEIVER of a string builtin mutates: exec_load's ladder as
         // a pointer (:: door, slot, member scope, env). KEEP BYTE-PARALLEL with
         // interpreter::string_receiver_cell.
@@ -1738,6 +1739,7 @@ namespace jai::vm {
         // interpreter::compound_typed_store_back
         op_status compound_typed_store_back(script_value& target, script_value promoted, std::string_view var_name = {});
         op_status compound_typed_store_back(script_value& target, script_value promoted, uint64_t name_sym);
+        checked_result<script_value> converted_for_variable(const type_info_ptr& tag, script_value value, uint64_t name_sym);
         template <class NameOf> op_status compound_typed_store_back_named(script_value& target, script_value promoted, NameOf&& name_of);
         checked_result<script_value> enforce_type_compatibility(script_value value, type_info_ptr target_type, uint64_t name_sym);
         template <class NameOf> checked_result<script_value> enforce_type_compatibility_named(script_value value, type_info_ptr target_type, NameOf&& name_of,
@@ -2352,8 +2354,8 @@ namespace jai::vm {
         op_status exec_incdec(frame& f, const vm_instruction& ins);
         op_status exec_decl_var(frame& f, const vm_instruction& ins);
         op_status exec_decl_var_full(frame& f, const vm_instruction& ins);
-        op_status member_compound_arith(uint32_t kind, bool text_append, const script_value& currentValue,
-                                        const script_value& rightValue, script_value& result);
+        [[nodiscard]] checked_result<script_value> compound_value(token_type op, const script_value& current, const script_value& right, bool incdec = false,
+                                                                  bool text_slot = false);
         op_status bind_graft_parameter(frame& f, const variable_decl* decl);   // a graft's by-value parameter: bind_parameters's by-value lane over the popped argument
         bool graft_parameter_alias(frame& f, const variable_decl* decl, const script_value& value);   // the read-only alias the call would take
         op_status exec_decl_ref_ident(frame& f, const vm_instruction& ins);

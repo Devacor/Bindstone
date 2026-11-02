@@ -1634,6 +1634,7 @@ namespace jai::vm {
         member_target resolve_member_target(const script_value& objectValue) const;
         const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const;
         bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const;
+        std::string_view worker_operator_refusal(const script_value& v, std::initializer_list<uint64_t> ids) const;
         script_value operator_value(const member_target& target, uint64_t id) const;
         checked_result<script_value> operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args);
     public:

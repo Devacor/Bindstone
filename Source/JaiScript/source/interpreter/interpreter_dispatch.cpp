@@ -41,6 +41,7 @@ struct interpreter::binary_host {
     script_value operator_value(const member_target& target, uint64_t id) const { return in.operator_value(target, id); }
     checked_result<script_value> operator_call(const script_value& self, const script_value& method, uint64_t id, std::vector<script_value> args) { return in.operator_call(self, method, id, std::move(args)); }
     bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const { return in.worker_operators_pinned(v, ids); }
+    std::string_view worker_operator_refusal(const script_value& v, std::initializer_list<uint64_t> ids) const { return in.worker_operator_refusal(v, ids); }
     const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const { return in.worker_operator_pin(v, id); }
     bool comparison_free(const script_value&) const noexcept { return false; }
     const detail::operator_ids& ids() const noexcept { return in.ops_; }

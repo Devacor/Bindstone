@@ -283,6 +283,12 @@ namespace jai::detail {
 	template <class Host>
 	checked_result<script_value> equal_operands(Host& h, const script_value& left, const script_value& right, equality_walk* walk);
 
+	// A worker's refusal of the operand's operator (the first of ids its class declares): its violation, else the verdict
+	template <class T, class Host>
+	inline checked_result<T> parallel_operator_refused(const Host& h, const script_value& operand, std::initializer_list<uint64_t> ids) {
+		return checked_result<T>(make_error_code(runtime_error_code::unsupported_operation), h.worker_operator_refusal(operand, ids));
+	}
+
 	// == with a parallel worker's borrow of a shared object: two handles are one object when they are one wrap, as on the serial
 	// path; a value compares as the worker's own copy of it, whose class's == runs through its pins
 	template <class Host>
@@ -293,7 +299,7 @@ namespace jai::detail {
 		const object_borrow_record* rb = r.parallel_object_borrow();
 		if (l.is_shared_ptr_type() || r.is_shared_ptr_type()) {
 			if (h.defines_custom_equality(l) || h.defines_custom_equality(r)) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), parallel_operator_verdict_text);
+				return parallel_operator_refused<script_value>(h, h.defines_custom_equality(l) ? l : r, { h.ids().equal_equal, h.ids().spaceship });
 			}
 			return h.make_bool(lb && rb && lb == rb);
 		}
@@ -364,8 +370,7 @@ namespace jai::detail {
 			// safe-mode workers: the operator wall would skip a custom operator== and the structural answer would diverge
 			// from the serial loop
 			if (h.worker_equality_refused(left) || h.worker_equality_refused(right)) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
-					"custom operator dispatch on class instances is not admitted in a parallel body");
+				return parallel_operator_refused<script_value>(h, h.worker_equality_refused(left) ? left : right, { h.ids().equal_equal, h.ids().spaceship });
 			}
 		}
 		if (auto custom = equality_candidates(h, left, right)) {
@@ -484,13 +489,9 @@ namespace jai::detail {
 	//   member_target resolve_member_target(v); script_value operator_value(target, id)   // a worker reads only its pins
 	//   checked_result<script_value> operator_call(self, method, id, std::vector<script_value> args)
 	//   bool worker_operators_pinned(v, {ids}); const parallel_method_pin* worker_operator_pin(v, id)
+	//   std::string_view worker_operator_refusal(v, {ids})   // what a worker raises for v's unpinned operator
 	//   bool comparison_free(v)   // v's class answers none of ==, != and <=> (a memo; false where the host keeps none)
 	//   const operator_ids& ids(); script_value make_null(); script_value bound_method(self, method); execution_backend& backend()
-
-	template <class T>
-	inline checked_result<T> parallel_operator_refused() {
-		return checked_result<T>(make_error_code(runtime_error_code::unsupported_operation), parallel_operator_verdict_text);
-	}
 
 	inline token_type comparison_token(const operator_ids& ids, uint64_t id) noexcept {
 		return id == ids.less ? token_type::less : id == ids.less_equal ? token_type::less_equal : id == ids.greater ? token_type::greater : token_type::greater_equal;
@@ -528,7 +529,7 @@ namespace jai::detail {
 	std::optional<checked_result<bool>> object_inequality_via_method(Host& h, const script_value& left, const script_value& right) {
 		const operator_ids& ids = h.ids();
 		if (h.parallel_worker() && !h.worker_operators_pinned(left, { ids.bang_equal })) [[unlikely]] {
-			if (!right.is_null()) { return parallel_operator_refused<bool>(); }
+			if (!right.is_null()) { return parallel_operator_refused<bool>(h, left, { ids.bang_equal }); }
 			return std::nullopt;
 		}
 		if (!left.is_object() || right.is_null() || h.comparison_free(left)) { return std::nullopt; }
@@ -559,7 +560,7 @@ namespace jai::detail {
 
 	template <class Host>
 	std::optional<checked_result<bool>> object_comparison_reversed_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
-		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<bool>(); }
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<bool>(h, right, { h.ids().spaceship }); }
 		auto result = reversed_spaceship_call(h, left, right);
 		if (!result) { return std::nullopt; }
 		if (!*result) {
@@ -572,7 +573,7 @@ namespace jai::detail {
 
 	template <class Host>
 	std::optional<checked_result<script_value>> object_spaceship_reversed_via_method(Host& h, const script_value& left, const script_value& right) {
-		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { h.ids().spaceship })) [[unlikely]] { return parallel_operator_refused<script_value>(h, right, { h.ids().spaceship }); }
 		auto result = reversed_spaceship_call(h, left, right);
 		if (!result) { return std::nullopt; }
 		if (!*result) {
@@ -608,7 +609,7 @@ namespace jai::detail {
 			if (!target) { return std::nullopt; }
 			if (h.parallel_worker() && !h.worker_operators_pinned(self, { ids.spaceship, ids.equal_equal })) [[unlikely]] {
 				if (!instance_declares_operator(self, ids.spaceship)) { return std::nullopt; }
-				return parallel_operator_refused<bool>();
+				return parallel_operator_refused<bool>(h, self, { ids.spaceship, ids.equal_equal });
 			}
 			script_value spaceship = h.operator_value(target, ids.spaceship);
 			if (!spaceship.is_function()) { return std::nullopt; }
@@ -628,7 +629,7 @@ namespace jai::detail {
 	std::optional<checked_result<bool>> object_comparison_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 		const operator_ids& ids = h.ids();
 		if (h.parallel_worker() && !h.worker_operators_pinned(left, { op_symbol_id, ids.spaceship })) [[unlikely]] {
-			if (instance_declares_operator(left, op_symbol_id)) { return parallel_operator_refused<bool>(); }
+			if (instance_declares_operator(left, op_symbol_id)) { return parallel_operator_refused<bool>(h, left, { op_symbol_id, ids.spaceship }); }
 			return std::nullopt;
 		}
 		auto target = h.resolve_member_target(left);
@@ -664,7 +665,7 @@ namespace jai::detail {
 	std::optional<checked_result<script_value>> object_arithmetic_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 		// a worker dispatches a class operator through its region pin; one the class declares that the region could not pin raises the
 		// verdict, never the builtin meaning
-		if (h.parallel_worker() && !h.worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		if (h.parallel_worker() && !h.worker_operators_pinned(left, { op_symbol_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, left, { op_symbol_id }); }
 		auto target = h.resolve_member_target(left);
 		if (!target) { return std::nullopt; }
 		script_value method_val = h.operator_value(target, op_symbol_id);
@@ -690,7 +691,7 @@ namespace jai::detail {
 		if (!right.deref().is_object()) { return std::nullopt; }
 		const uint64_t reflected_id = h.engine()->reflected_operator_id(op_symbol_id);
 		if (!reflected_id) { return std::nullopt; }
-		if (h.parallel_worker() && !h.worker_operators_pinned(right, { reflected_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+		if (h.parallel_worker() && !h.worker_operators_pinned(right, { reflected_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, right, { reflected_id }); }
 		auto target = h.resolve_member_target(right);
 		if (!target) { return std::nullopt; }
 		script_value method_val = h.operator_value(target, reflected_id);
@@ -708,7 +709,7 @@ namespace jai::detail {
 	template <class Host>
 	std::optional<checked_result<script_value>> object_compound_via_method(Host& h, const script_value& target, const script_value& right, uint64_t op_symbol_id) {
 		if (const uint64_t compound_id = h.engine()->compound_operator_id(op_symbol_id)) {
-			if (h.parallel_worker() && !h.worker_operators_pinned(target, { compound_id })) [[unlikely]] { return parallel_operator_refused<script_value>(); }
+			if (h.parallel_worker() && !h.worker_operators_pinned(target, { compound_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, target, { compound_id }); }
 			if (auto owner = h.resolve_member_target(target)) {
 				script_value method_val = h.operator_value(owner, compound_id);
 				if (method_val.is_function() && host_operator_accepts(method_val, right)) {
@@ -757,7 +758,7 @@ namespace jai::detail {
 		const operator_ids& ids = h.ids();
 		const uint64_t id = op == token_type::minus ? ids.minus : op == token_type::plus ? ids.plus : ids.tilde;
 		if (h.parallel_worker() && !h.worker_operators_pinned(operand, { id })) [[unlikely]] {
-			if (declares_unary_operator(operand_instance_class(operand), id)) { return parallel_operator_refused<script_value>(); }
+			if (declares_unary_operator(operand_instance_class(operand), id)) { return parallel_operator_refused<script_value>(h, operand, { id }); }
 			return std::nullopt;
 		}
 		auto target = h.resolve_member_target(operand);

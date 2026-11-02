@@ -1533,6 +1533,27 @@ public:
 				return "no-error";
 			)");
 			check_true(r.as<std::string>().find("body writes enclosing state 'seen'") != std::string::npos);
+			// a weight runs at every worker count, so what it raises never depends on the count, and its own throw arrives intact
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				auto got = e->execute(R"(
+					int inc(int v) { return v + 1; }
+					float neg(int v) { return -1.0; }
+					float boom(int v) { if (v == 3) { throw "weight boom"; } return 1.0; }
+					string named(int v) { return "x"; }
+					float by_ref(int& v) { return 1.0; }
+					var xs = [1, 2, 3, 4, 5];
+					string out = "";
+					try { parallel_transform(xs, inc, by_ref); } catch (e) { out += e + "|"; }
+					try { parallel_transform(xs, inc, neg); } catch (e) { out += e + "|"; }
+					try { parallel_transform(xs, inc, boom); } catch (e) { out += e + "|"; }
+					try { parallel_transform(xs, inc, named); } catch (e) { out += e; }
+					return out;
+				)").as<std::string>();
+				check_eq(std::string("parallel_transform: weight_fn must take exactly one parameter by value|"
+				                     "parallel_transform: weight_fn must return a finite non-negative number (element 0)|weight boom|"
+				                     "parallel_transform: weight_fn must return a number (element 0)"), got, std::to_string(workers) + " workers");
+			}
 		});
 
 		// === Errors inside the region ===
@@ -2122,6 +2143,8 @@ public:
 				{ "parallel_for (int i : idx) { out[i] = holder.inner.bump(); }", "parallel_for: method 'bump' of 'C' writes its object, and captured 'holder' is read-only" },
 				{ "parallel_for (int i : idx) { c.n = i; }", "parallel_for: member store reaches captured state 'c' (captured reads are read-only) at 9:" },
 				{ "parallel_for (int i : idx) { c.seen.push(i); }", "parallel_for: method 'push' may mutate captured state 'c' at 9:" },
+				{ "parallel_for (int i : idx) { for (auto& v : c.seen) { v += 1; } }", "parallel_for: cannot iterate captured state 'c' by reference in a parallel body (captured reads are read-only) at 9:" },
+				{ "parallel_for (int i : idx) { auto& r = c.n; out[i] = r; }", "parallel_for: reference declaration would alias enclosing state 'c' (captured reads are read-only) at 9:" },
 				{ "parallel_for (int i : idx) { out[i] = bad.link.n; }", "parallel_for: captured name 'bad' is not value-semantic (an object holding a handle, a function, a var field or a C++ object)" },
 				{ "parallel_for (int i : idx) { shared_ptr<C> mine = h; out[i] = mine.n; }", "parallel_for: captured handle 'h' is read through its members and methods only (a worker reads its own view of the object) at 9:" },
 				{ "parallel_for (auto& e : hs) { e.n = h.peek() + 1; }", "parallel_for: element 1 reaches the object captured as 'h' (a captured object is read-only, and an element's lane may write it)" },
@@ -2310,6 +2333,39 @@ public:
 			const auto& vals = r.as_array();
 			check_eq((int64_t)0, vals[0].as_int());
 			check_eq((int64_t)0, vals[1].as_int());
+		});
+
+		test("references_to_members_and_map_pairs_write_what_the_body_owns", [this]() {
+			// a reference bound to a member of the element or of a body local, a structured binding over the element's map and a
+			// map pair's .second write through as the serial loop's do
+			const std::string src = R"(
+				class P { float x = 0.0; }
+				class B { P pos; array<int> hist; map<string, int> m = {"a": 1, "b": 2}; }
+				array<B> par = []; array<B> ser = [];
+				for (int k = 0; k < 40; k++) { par.push(B()); ser.push(B()); }
+				parallel_for (auto& b : par) {
+					auto& p = b.pos; p.x += 1.5;
+					auto& h = b.hist; h.push(cast<int>(p.x));
+					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
+					for (auto& [k, v] : b.m) { v += 10; }
+					for (auto& pr : b.m) { pr.second += 1; }
+					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
+				}
+				for (auto& b : ser) {
+					auto& p = b.pos; p.x += 1.5;
+					auto& h = b.hist; h.push(cast<int>(p.x));
+					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
+					for (auto& [k, v] : b.m) { v += 10; }
+					for (auto& pr : b.m) { pr.second += 1; }
+					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
+				}
+				return [to_json(par), to_json(ser)];
+			)";
+			for (size_t workers : {size_t(1), size_t(4), size_t(16)}) {
+				auto e = make_engine();
+				jai::stdlib::register_all(*e);
+				check_matches_serial_at(e, src, {workers});
+			}
 		});
 
 		test("captured_scalar_and_borrow_reads", [this]() {
@@ -2594,9 +2650,9 @@ public:
 			check_true(msg.find("only single-overload methods of the element's class or its bases") != std::string::npos);
 		});
 
-		test("custom_operator_denied_with_verdict", [this]() {
+		test("custom_operator_refused_with_its_violation", [this]() {
 			// an operator whose body the region cannot admit (here it writes enclosing state) stays unpinned: dispatching it raises
-			// the verdict, and a custom op== never silently falls back to structural equality
+			// what its walk refused, and a custom op== never silently falls back to structural equality
 			auto e = make_engine();
 			auto r = e->execute(R"(
 				int calls = 0;
@@ -2608,7 +2664,7 @@ public:
 				return "no-error";
 			)");
 			auto msg = r.as<std::string>();
-			check_true(msg.find("custom operator dispatch on class instances is not admitted in a parallel body") != std::string::npos);
+			check_true(msg.rfind("body writes enclosing state 'calls' in operator '==' of 'Vec' at 3:", 0) == 0, msg);
 		});
 
 		test("custom_arithmetic_comparison_and_unary_operators_run_through_their_pins", [this]() {

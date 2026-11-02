@@ -6815,7 +6815,7 @@ checked_result<void> interpreter::visit_while_stmt(while_stmt* stmt) {
         if (skip_first_condition) {
             skip_first_condition = false;  // Only skip once
         } else {
-            // Evaluate the condition
+            note_running_statement(stmt);
             auto cond_result = replay_condition ? replay_expression(stmt->condition.get())
                                                 : dispatch_expr(stmt->condition.get());
             replay_condition = false;
@@ -6981,6 +6981,7 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     auto eval_condition = [&]() -> bool {
         if (!stmt->condition) return true;  // No condition = infinite loop
 
+        note_running_statement(stmt);
         auto result = replay_condition ? replay_expression(stmt->condition.get())
                                        : dispatch_expr(stmt->condition.get());
         replay_condition = false;
@@ -7011,6 +7012,11 @@ checked_result<void> interpreter::run_for_stmt(for_stmt* stmt) {
     auto eval_update = [&]() {
         if (!stmt->update) return;
 
+        struct updating_scope {
+            std::vector<std::pair<size_t, const for_stmt*>>& loops;
+            ~updating_scope() { loops.pop_back(); }
+        } updating{updating_loops_};
+        updating_loops_.emplace_back(call_stack_.size(), stmt);
         auto result = replay_update ? replay_expression(stmt->update.get())
                                     : dispatch_expr(stmt->update.get());
         replay_update = false;
@@ -9454,100 +9460,139 @@ checked_result<void> interpreter::host_slot_store(const host_slot& slot, script_
     return detail::variable_store(*storage, value, engine_);
 }
 
-// Function call implementation - returns checked_result for consistent error handling
-// Uses stack-based call frames for fast parameter access instead of hash map environments
-// Debugger: collect (slot, name) for every local a function body declares. Mirrors the shape
-// of collect_outer_slots_stmt; stops at nested function/lambda/class bodies (separate frames)
-// and expression statements (no locals). Runs only when a debugger asks for locals at a stop.
-static void collect_frame_slot_names(const statement* s,
-                                     std::vector<std::pair<size_t, std::string_view>>& out) {
-    if (!s) return;
-    switch (s->get_type()) {
-    case node_type::variable_decl: {
-        auto* vd = static_cast<const variable_decl*>(s);
-        if (vd->slot_index != SIZE_MAX) out.emplace_back(vd->slot_index, vd->name);
-        break;
+namespace {
+void note_scope_slot(size_t slot, std::string_view name, std::vector<std::pair<size_t, std::string_view>>& out) {
+    if (slot != SIZE_MAX && !name.empty() && name[0] != '\x01') out.emplace_back(slot, name);
+}
+
+void note_scope_decl(const statement* d, std::vector<std::pair<size_t, std::string_view>>& out) {
+    if (d->get_type() == node_type::variable_decl) {
+        const auto* v = static_cast<const variable_decl*>(d);
+        if (!v->is_static) note_scope_slot(v->slot_index, v->name, out);
+    } else if (d->get_type() == node_type::destructuring_decl) {
+        const auto* dd = static_cast<const destructuring_decl*>(d);
+        for (size_t i = 0; i < dd->names.size() && i < dd->slot_indices.size(); ++i) note_scope_slot(dd->slot_indices[i], dd->names[i].first, out);
     }
+}
+
+// Debugger: the frame-slot locals in scope at `at`, the statement the frame is running, outermost first: what each scope
+// enclosing it declared before it (the vm's chunk::debug_locals at the frame's ip). A for statement running mid-statement is
+// in its condition or update, past its initializer (which runs as a statement of its own). Nested function, lambda and
+// parallel bodies are frames of their own.
+bool scope_slots_at(const statement* s, const ast_node* at, bool mid_statement, std::vector<std::pair<size_t, std::string_view>>& out) {
+    if (!s) return false;
+    const size_t mark = out.size();
+    auto in_scope_list = [&](const auto& list) {
+        for (const auto& d : list) {
+            if (scope_slots_at(d.get(), at, mid_statement, out)) return true;
+            note_scope_decl(d.get(), out);
+        }
+        return false;
+    };
+    bool found = false;
+    switch (s->get_type()) {
     case node_type::statement_decl:
-        collect_frame_slot_names(static_cast<const statement_decl*>(s)->statement.get(), out);
+        found = s == at || scope_slots_at(static_cast<const statement_decl*>(s)->statement.get(), at, mid_statement, out);
         break;
     case node_type::block_stmt:
-        for (const auto& d : static_cast<const block_stmt*>(s)->declarations)
-            collect_frame_slot_names(d.get(), out);
+        found = s == at || in_scope_list(static_cast<const block_stmt*>(s)->declarations);
         break;
     case node_type::if_stmt: {
         auto* is = static_cast<const if_stmt*>(s);
-        collect_frame_slot_names(is->then_statement.get(), out);
-        if (is->else_statement) collect_frame_slot_names(is->else_statement.get(), out);
+        found = s == at || scope_slots_at(is->then_statement.get(), at, mid_statement, out) || scope_slots_at(is->else_statement.get(), at, mid_statement, out);
         break;
     }
     case node_type::while_stmt:
-        collect_frame_slot_names(static_cast<const while_stmt*>(s)->body.get(), out);
+        found = s == at || scope_slots_at(static_cast<const while_stmt*>(s)->body.get(), at, mid_statement, out);
         break;
     case node_type::for_stmt: {
         auto* fs = static_cast<const for_stmt*>(s);
-        if (fs->initializer) collect_frame_slot_names(fs->initializer.get(), out);
-        collect_frame_slot_names(fs->body.get(), out);
+        if (s == at) {
+            if (mid_statement && fs->initializer) note_scope_decl(fs->initializer.get(), out);
+            return true;
+        }
+        if (fs->initializer && fs->initializer.get() == at) return true;
+        if (fs->initializer) note_scope_decl(fs->initializer.get(), out);
+        found = scope_slots_at(fs->body.get(), at, mid_statement, out);
         break;
     }
     case node_type::range_for_stmt: {
         auto* rf = static_cast<const range_for_stmt*>(s);
-        if (rf->variable_slot_index != SIZE_MAX)
-            out.emplace_back(rf->variable_slot_index, rf->variable_name);
-        collect_frame_slot_names(rf->body.get(), out);
+        if (s == at) return true;
+        note_scope_slot(rf->variable_slot_index, rf->variable_name, out);
+        found = scope_slots_at(rf->body.get(), at, mid_statement, out);
         break;
     }
-    case node_type::parallel_for_stmt:
-        // Body slots belong to the WORKER frame's own numbering - naming them here
-        // would alias this frame's slots
-        break;
     case node_type::switch_stmt: {
         auto* sw = static_cast<const switch_stmt*>(s);
-        for (const auto& c : sw->cases)
-            for (const auto& st : c->body) collect_frame_slot_names(st.get(), out);
-        if (sw->default_case)
-            for (const auto& st : sw->default_case->body) collect_frame_slot_names(st.get(), out);
+        found = s == at;
+        for (size_t i = 0; !found && i < sw->cases.size(); ++i) {
+            found = sw->cases[i].get() == at || in_scope_list(sw->cases[i]->body);
+            if (!found) out.resize(mark);
+        }
+        if (!found && sw->default_case) found = sw->default_case.get() == at || in_scope_list(sw->default_case->body);
         break;
     }
     case node_type::try_stmt: {
         auto* tr = static_cast<const try_stmt*>(s);
-        if (tr->try_block) collect_frame_slot_names(tr->try_block.get(), out);
-        if (tr->catch_slot_index != SIZE_MAX) out.emplace_back(tr->catch_slot_index, tr->catch_var);
-        if (tr->catch_block) collect_frame_slot_names(tr->catch_block.get(), out);
+        found = s == at || scope_slots_at(tr->try_block.get(), at, mid_statement, out);
+        if (!found) {
+            note_scope_slot(tr->catch_slot_index, tr->catch_var, out);
+            found = scope_slots_at(tr->catch_block.get(), at, mid_statement, out);
+        }
         break;
     }
-    default: break;   // expressions, nested functions/lambdas/classes: not this frame's locals
+    default:
+        found = s == at;
+        break;
     }
+    if (!found) out.resize(mark);
+    return found;
+}
+}
+
+void interpreter::note_running_statement(statement* stmt) {
+    if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
+    else top_level_node_ = stmt;
+}
+
+std::vector<std::pair<size_t, std::string_view>> interpreter::frame_scope_slots(size_t frame_index) const {
+    std::vector<std::pair<size_t, std::string_view>> out;
+    const call_frame& frame = call_stack_[call_stack_.size() - 1 - frame_index];
+    const script_defined_function* fn = frame.function;
+    if (!fn) return out;
+    // a for statement's update runs past its body's statements, the last of which stays the frame's current node (the vm's line)
+    const size_t depth = call_stack_.size() - frame_index;
+    const auto updating = std::find_if(updating_loops_.rbegin(), updating_loops_.rend(), [&](const auto& u) { return u.first == depth; });
+    const ast_node* at = updating != updating_loops_.rend() ? updating->second : frame.current_node;
+    for (const auto& p : fn->parameters())
+        if (!p.binds_capture) note_scope_slot(p.slot_index, p.name, out);
+    scope_slots_at(fn->body.get(), at, frame_index > 0, out);
+    return out;
 }
 
 std::vector<std::pair<std::string, script_value>> interpreter::get_frame_locals(size_t frame_index) const {
     std::vector<std::pair<std::string, script_value>> out;
     if (frame_index >= call_stack_.size()) return out;   // the top level: the caller reads its environment
     const call_frame& frame = call_stack_[call_stack_.size() - 1 - frame_index];
-    const script_defined_function* fn = frame.function;
-    if (!fn) return out;
-
-    // slot -> name for this frame: parameters, then every declaration reachable in the body.
-    std::vector<std::pair<size_t, std::string_view>> slot_names;
-    for (const auto& p : fn->parameters())
-        if (p.slot_index != SIZE_MAX) slot_names.emplace_back(p.slot_index, p.name);
-    collect_frame_slot_names(fn->body.get(), slot_names);
-
-    // Emit in slot order; only slots that are live (assigned/reached) in this frame show up,
-    // so an unentered branch's not-yet-declared locals are naturally excluded.
-    std::sort(slot_names.begin(), slot_names.end(),
-              [](const auto& a, const auto& b) { return a.first < b.first; });
-    size_t last = SIZE_MAX;
-    for (const auto& [slot, name] : slot_names) {
-        if (slot == last) continue;                      // dedupe (slots are unique anyway)
-        last = slot;
-        const script_value* v = frame.get_local(slot);
-        if (!v) continue;                                // reserved capacity only: not live yet
-        out.emplace_back(std::string(name), *v);
+    for (const auto& [slot, name] : frame_scope_slots(frame_index)) {
+        if (const script_value* v = frame.get_local(slot)) out.emplace_back(std::string(name), *v);
     }
     detail::fold_lowered_locals(out, engine_);
     return out;
 }
+
+script_value* interpreter::debug_local_storage(const std::string& name) {
+    if (call_stack_.empty()) return nullptr;
+    const auto slots = frame_scope_slots(0);
+    for (auto it = slots.rbegin(); it != slots.rend(); ++it) {
+        if (it->second == name) return call_stack_.back().get_local(it->first);
+    }
+    return nullptr;
+}
+
+// Function call implementation - returns checked_result for consistent error handling
+// Uses stack-based call frames for fast parameter access instead of hash map environments
 
 checked_result<script_value> interpreter::call_function(const script_defined_function& function, const std::vector<script_value>& args,
                                                         const method_call_override* method_ctx) {

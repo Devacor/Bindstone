@@ -16,6 +16,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <unordered_map>
 #include <unordered_set>
@@ -24,6 +25,7 @@
 namespace jai {
     class engine;
     class ast_node;
+    class declaration;
 
 namespace debug {
 
@@ -40,18 +42,18 @@ struct stop_info {
 using breakpoint_table = std::unordered_map<std::string, std::vector<int>>;
 
 // One stack frame at a stop (parked-thread inspection result), named as an error trace names it: the function,
-// "<anonymous>" for a lambda, "<script>" for the top level.
+// "<lambda>" for a lambda, "<script>" for the top level.
 struct frame_info {
     std::string name;
     std::string file;
     int line = 0;
 };
 
-// One in-scope variable at a stop (name + rendered value + coarse type).
+// One in-scope variable at a stop: its name, its value as display text and its kind ("int", "string", "array", "object", ...)
 struct variable_info {
     std::string name;
     std::string value;
-    std::string type;   // "array" | "map" | "object" | "" (scalar)
+    std::string type;
 };
 
 // Optional transport an engine drives its controller through (a DAP socket server, a
@@ -86,9 +88,8 @@ public:
     // Arming also suspends the execution budget (a paused script must not trip the
     // wall-clock cap) and restores it on disable.
     void set_enabled(bool on);
-    // Native labels are exact. Source paths (DAP) normalize only on the script
-    // thread at sync, and only while the engine permits filesystem access.
-    // Serialize breakpoint writers, as with the original snapshot publication.
+    // Native labels are exact. Source paths (DAP) normalize only on the script thread at sync, and only while the engine
+    // permits filesystem access. A line that starts no statement binds to the next one that does (breakpoint_line).
     void set_breakpoints(const std::string& file, std::vector<int> lines);
     void set_source_breakpoints(const std::string& file, std::vector<int> lines);
     void clear_breakpoints();
@@ -101,19 +102,27 @@ public:
     // post_command only while the script thread is parked, decided under the park's lock: false (fn dropped) once it has left
     bool post_command_while_paused(std::function<void()> fn);
     void detach();                                     // force-resume + disarm (disconnect/shutdown)
-    void set_on_stopped(std::function<void(const stop_info&)> cb) { on_stopped_ = std::move(cb); }
+    void set_on_stopped(std::function<void(const stop_info&)> cb);
     // Whether a source-path breakpoint on `path` can bind: "<script>", or a unit the engine has
     // parsed under that path (spelled as given, or normalized like set_source_breakpoints does).
     bool source_known(const std::string& path) const;
+    // The line a breakpoint on `line` of `path` binds to: the first line at or after it where a statement starts, nullopt
+    // when none follows; `line` itself for a path whose statements are unknown ("<script>", a native label, a unit not loaded)
+    std::optional<int> breakpoint_line(const std::string& path, int line) const;
     // Fires on the script thread the first time the engine parses a unit under a new path.
     void set_on_source_loaded(std::function<void(const std::string&)> cb);
 
-    // ---- script thread: the engine reports each unit's path as it is parsed or reused ----
-    void note_source(const std::string& path);
+    // ---- script thread: the engine reports each unit's path (and its declarations, for the lines a stop can take) as it is
+    // parsed or reused ----
+    void note_source(const std::string& path, const std::vector<std::shared_ptr<declaration>>* declarations = nullptr);
 
     // ---- inspection: call ONLY on the parked script thread (via post_command) ----
-    script_value get_variable(const std::string& name) const;   // live scope at the stop
+    // A name as the stopped statement resolves it: the innermost frame's locals, then its environment chain (the top level's
+    // block scopes, a closure's captures, the program scope). Throws when nothing in scope has the name; a set never declares.
+    script_value get_variable(const std::string& name) const;
     void set_variable(const std::string& name, const script_value& value);
+    // A name, or a name followed by .field and [index] steps, read at the stop and rendered as a Variables row is
+    variable_info evaluate(const std::string& path) const;
     std::vector<frame_info> list_frames() const;   // the call stack at the stop, innermost first, the top level last
     // Frame `frame`'s locals, in list_frames order (callables hidden): a function's parameters and reached locals; the
     // top level's block-scoped names while it is the innermost frame
@@ -163,6 +172,7 @@ private:
     bool should_stop(const ast_node* node, int depth, std::string& reason_out) const;
     bool breakpoint_hit(const std::string& file, int line) const;
     void publish_breakpoints(const std::string& file, std::vector<int> lines, bool source_path);
+    script_value* variable_storage(const std::string& name) const;
 
     struct breakpoint_record {
         std::vector<int> lines;
@@ -205,6 +215,8 @@ private:
     const uint64_t* hot_line_bloom_ = nullptr;           // null = no breakpoints
     std::vector<uint64_t> hot_line_bloom_storage_;
     std::shared_ptr<const breakpoint_table> hot_bps_;    // installed table; retained across disable/rearm
+    breakpoint_table hot_bound_bps_;                     // the installed lines moved onto the lines statements start
+    uint64_t hot_stop_lines_version_ = 0;
     uint64_t applied_bp_sequence_ = 0;
     uint64_t hot_bp_version_ = 0;                        // ~0 forces a re-cache (session re-arm)
 
@@ -221,6 +233,8 @@ private:
     // Paths of the units the engine has attributed, for source_known (any thread, under sources_mtx_).
     mutable std::mutex sources_mtx_;
     std::unordered_set<std::string> sources_;
+    std::unordered_map<std::string, std::vector<int>> stop_lines_;   // file -> the lines a statement starts on (sorted)
+    std::atomic<uint64_t> stop_lines_version_{0};
     std::function<void(const std::string&)> on_source_loaded_;
     std::atomic<bool> normalize_sources_{true};   // the engine's filesystem grant as of the script thread's last note/sync
     stop_info current_stop_;   // last stop; read only on the parked script thread

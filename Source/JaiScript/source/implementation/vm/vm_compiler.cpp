@@ -880,6 +880,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 		}
 	}
 	emit(opcode::op_halt);
+	close_debug_locals(0);
 	if (slots > 0) {
 		if (temp_high_ > result->local_count) { result->local_count = temp_high_; }
 		lower_typed_ops(*result);
@@ -993,6 +994,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 #endif
 		if (p.is_reference && p.slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(p.slot_index)); }   // its load dereferences the caller's binding, possibly through a getter
 		if (const type_info* declared = p.slot_index != SIZE_MAX ? detail::parameter_declared_ref(p) : nullptr) { note_slot_declared_ref(p.slot_index, declared); }
+		if (!p.binds_capture) { note_debug_local(p.slot_index, p.name); }
 	}
 	{
 		body_walker walker;
@@ -1035,6 +1037,7 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 		compile_declaration(decl, false);
 	}
 	emit(opcode::op_halt);
+	close_debug_locals(0);
 	result->needs_frame_env = reference_ || body_needs_frame_env(*result);   // the reference mode keeps the eager per-call env
 	result->shares_cells = body->shares_cells;
 	if (result->shares_cells) { result->needs_frame_env = true; }
@@ -1323,6 +1326,7 @@ void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_leve
 	if (decl->get_type() != node_type::statement_decl) { release_temps(start, temps); }   // a statement releases its own
 	release_.stmt_ip = outer;
 	note_debug_span(decl.get(), start);
+	note_debug_locals(decl.get());
 }
 
 void vm_compiler::note_debug_span(const ast_node* node, size_t start) {
@@ -1334,6 +1338,28 @@ void vm_compiler::note_debug_span(const ast_node* node, size_t start) {
 
 void vm_compiler::drop_debug_span(const ast_node* node) {
 	if (!chunk_->debug_spans.empty() && chunk_->debug_spans.back().node == node) { chunk_->debug_spans.pop_back(); }
+}
+
+// a source name in one of the callable's own slots, live from here to its scope's close (a graft's locals are compiler temps)
+void vm_compiler::note_debug_local(size_t slot, std::string_view name) {
+	if (!callable_.active || slot == SIZE_MAX || slot >= chunk_->first_temp_slot || name.empty() || name[0] == '\x01') { return; }
+	chunk_->debug_locals.push_back({ static_cast<uint32_t>(slot), static_cast<uint32_t>(chunk_->code.size()), UINT32_MAX, symbolizer_->intern(name) });
+}
+
+void vm_compiler::note_debug_locals(const statement* decl) {
+	if (decl->get_type() == node_type::variable_decl) {
+		const auto* v = static_cast<const variable_decl*>(decl);
+		if (!v->is_static) { note_debug_local(v->slot_index, v->name); }
+	} else if (decl->get_type() == node_type::destructuring_decl) {
+		const auto* d = static_cast<const destructuring_decl*>(decl);
+		for (size_t i = 0; i < d->names.size() && i < d->slot_indices.size(); ++i) { note_debug_local(d->slot_indices[i], d->names[i].first); }
+	}
+}
+
+void vm_compiler::close_debug_locals(size_t mark) {
+	for (size_t i = mark; i < chunk_->debug_locals.size(); ++i) {
+		if (chunk_->debug_locals[i].end_ip == UINT32_MAX) { chunk_->debug_locals[i].end_ip = static_cast<uint32_t>(chunk_->code.size()); }
+	}
 }
 
 void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top_level) {
@@ -1598,11 +1624,13 @@ void vm_compiler::compile_block(block_stmt* block) {
 		}
 	}
 	kill_scopes_.emplace_back();
+	const size_t locals = chunk_->debug_locals.size();
 	if (!needs_scope) {
 		for (const auto& decl : block->declarations) {
 			compile_declaration(decl, false);
 			note_kill_decl(decl.get());
 		}
+		close_debug_locals(locals);
 		close_kill_scope();
 		return;
 	}
@@ -1612,6 +1640,7 @@ void vm_compiler::compile_block(block_stmt* block) {
 		compile_declaration(decl, false);
 		note_kill_decl(decl.get());
 	}
+	close_debug_locals(locals);
 	close_kill_scope();
 	--scope_depth_;
 	emit(opcode::op_scope_pop);
@@ -1823,6 +1852,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 	}
 
 	kill_scopes_.emplace_back();
+	const size_t locals = chunk_->debug_locals.size();
 	if (stmt->initializer) {
 		compile_declaration(stmt->initializer, false);
 		drop_debug_span(stmt->initializer.get());
@@ -1859,6 +1889,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 		patch_jump(at, end);
 	}
 	loops_.pop_back();
+	close_debug_locals(locals);
 	close_kill_scope();
 
 	if (loop_scope) {
@@ -1939,6 +1970,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 		++scope_depth_;
 	}
 
+	const size_t locals = chunk_->debug_locals.size();
 	compile_declaration(stmt->initializer, false);
 	drop_debug_span(stmt->initializer.get());
 
@@ -1986,6 +2018,7 @@ bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	}
 	emit(opcode::op_loop_back, static_cast<uint32_t>(generic_cond));
 
+	close_debug_locals(locals);
 	const size_t exit_pop = chunk_->code.size();
 	emit(opcode::op_cfor_pop);
 	const size_t end = chunk_->code.size();
@@ -2136,9 +2169,12 @@ void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	if (!stmt->is_reference && proto.slot != SIZE_MAX && slot_kill_wanted(stmt->element_type, proto.slot, proto.var_symbol)) {
 		note_kill_slot(static_cast<uint32_t>(proto.slot));
 	}
+	const size_t locals = chunk_->debug_locals.size();
+	note_debug_local(proto.slot, stmt->variable_name);
 	const uint32_t outer_entry_proto = std::exchange(entry_proto_, stmt->binds_map_entry ? proto_idx : k_invalid_u32);
 	compile_statement(stmt->body);
 	entry_proto_ = outer_entry_proto;
+	close_debug_locals(locals);
 	const std::vector<uint32_t> loop_variable = std::move(kill_scopes_.back());   // the next element's binding replaces it, the last dies at the exit
 	kill_scopes_.pop_back();
 	emit(opcode::op_jump, static_cast<uint32_t>(loop_top));
@@ -2192,7 +2228,10 @@ void vm_compiler::compile_try(try_stmt* stmt) {
 	push_region(region_kind::loop);
 	loops_.back().kind = region_kind::catch_block;
 	loops_.back().scope_depth = scope_depth_;
+	const size_t locals = chunk_->debug_locals.size();
+	if (catch_slot != k_invalid_u32) { note_debug_local(catch_slot, stmt->catch_var); }
 	compile_statement(stmt->catch_block);
+	close_debug_locals(locals);
 	loops_.pop_back();
 
 	emit(opcode::op_catch_end);
@@ -2400,6 +2439,7 @@ void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 		++scope_depth_;
 	}
 	kill_scopes_.emplace_back();
+	const size_t locals = chunk_->debug_locals.size();
 	for (size_t k = 0; k < body.size(); ++k) {
 		if (k + 1 == body.size() && body[k]->get_type() == node_type::fallthrough_stmt) {
 			// a jump onto the next instruction: the debugger's stop at the statement, nothing to run (a block elides it)
@@ -2412,6 +2452,7 @@ void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 		compile_statement(body[k]);
 		note_kill_decl(body[k].get());
 	}
+	close_debug_locals(locals);
 	close_kill_scope();
 	if (case_scope) {
 		--scope_depth_;
@@ -2471,10 +2512,12 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 			++scope_depth_;
 		}
 		kill_scopes_.emplace_back();
+		const size_t locals = chunk_->debug_locals.size();
 		for (const auto& body_stmt : case_node->body) {
 			compile_statement(body_stmt);
 			note_kill_decl(body_stmt.get());
 		}
+		close_debug_locals(locals);
 		close_kill_scope();
 		if (case_scope) {
 			--scope_depth_;
@@ -2502,10 +2545,12 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 			++scope_depth_;
 		}
 		kill_scopes_.emplace_back();
+		const size_t locals = chunk_->debug_locals.size();
 		for (const auto& body_stmt : stmt->default_case->body) {
 			compile_statement(body_stmt);
 			note_kill_decl(body_stmt.get());
 		}
+		close_debug_locals(locals);
 		close_kill_scope();
 		if (default_scope) {
 			--scope_depth_;

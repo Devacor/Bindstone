@@ -408,6 +408,8 @@ namespace jai {
         bool host_function_serial(const std::string& name) const;
         // A free function the host (or the library) registered by name, as opposed to a function value script made
         bool host_function_registered(const std::string& name) const;
+        // A global the host (or the library) registered with add_global, as opposed to a variable script declared
+        bool host_global_registered(const std::string& name) const;
         // The argument positions any registration of `name` writes back through (non-const T& parameters), a bit each
         uint64_t host_function_writeback(const std::string& name) const;
         // While one lives, what registers is the library's own: serial unless it is pure (detail::parallel_pure_function)

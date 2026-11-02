@@ -97,6 +97,11 @@ inline void object_block::release_pinned(control_block_base* cb) noexcept {
     static_cast<control_block<class_instance>*>(cb)->~control_block();
     ::operator delete(static_cast<void*>(memory));
 }
+
+inline std::shared_ptr<class_definition>* object_block::definition_pin(control_block_base* cb) noexcept {
+    return cb->dealloc_fn == &release_pinned
+        ? reinterpret_cast<std::shared_ptr<class_definition>*>(reinterpret_cast<std::byte*>(cb) - pin_bytes) : nullptr;
+}
 }
 
 inline strong_ptr<class_instance> class_instance::make(std::string_view class_name, engine* eng) {
@@ -225,6 +230,8 @@ inline auto class_instance::extras() -> instance_extras& {
     if (!extras_) { extras_ = std::make_unique<instance_extras>(); }
     return *extras_;
 }
+
+inline void class_instance::region_tag(uint32_t tag) { if (tag || extras_) { extras().region_tag = tag; } }
 
 inline bool class_instance::fields_cascade() const noexcept {
     for (size_t slot = 0; slot < flat_fields_.size(); ++slot) {

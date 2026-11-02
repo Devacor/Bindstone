@@ -10,6 +10,7 @@
 #include <jaiscript/detail/typed_slot.hpp>
 #include <jaiscript/core/overload_resolution.hpp>
 #include <algorithm>
+#include <cstdint>
 
 #if defined(_WIN32)
 #ifndef WIN32_LEAN_AND_MEAN
@@ -25,6 +26,13 @@
 #define _WIN32_WINNT 0x0602
 #endif
 #include <windows.h>
+#else
+#include <pthread.h>
+#include <sys/resource.h>
+#endif
+
+#if defined(__GLIBC__)
+extern "C" void* __libc_stack_end;   // glibc: the top of the initial thread's stack
 #endif
 
 namespace {
@@ -46,33 +54,90 @@ namespace jai {
 
 namespace detail {
 
-#if defined(_WIN32)
 namespace {
-// Per-thread OS query, no static state: the bytes of the calling thread's stack below this frame
-std::uintptr_t native_stack_left() noexcept {
-    ULONG_PTR low = 0, high = 0;
-    GetCurrentThreadStackLimits(&low, &high);
-    char probe;
-    return reinterpret_cast<std::uintptr_t>(&probe) - static_cast<std::uintptr_t>(low);
-}
+#if !defined(_WIN32)
+// A stack the OS calls unlimited (glibc's main thread under ulimit -s unlimited) counts this much below its top, the reservation an
+// engine::start fiber takes at most
+constexpr std::uintptr_t k_unbounded_stack = std::uintptr_t(1) << 30;
+
+std::uintptr_t lowest_of(std::uintptr_t high, std::uintptr_t size) noexcept {
+    if (size == 0 || size > k_unbounded_stack) { size = k_unbounded_stack; }
+    return high > size ? high - size : 0;
 }
 #endif
 
-// Recursive native call paths (constructor bodies stack 20-25 KB a level in Debug) raise the catchable recursion error here
-// instead of dying on 0xC00000FD
-bool native_stack_low() noexcept {
+// Per-thread OS query, no static state: the lowest usable address of the stack the caller runs on (0: unknown). An engine::start run
+// runs on its fiber's own stack; Windows keeps the thread's stack fields on it while it runs, elsewhere the fiber says.
+std::uintptr_t native_stack_floor() noexcept {
+    char probe;
+    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
 #if defined(_WIN32)
-    return native_stack_left() < 256 * 1024;
+    ULONG_PTR low = 0, high = 0;
+    GetCurrentThreadStackLimits(&low, &high);
+    (void)here;
+    return static_cast<std::uintptr_t>(low);
 #else
-    return false;
+    std::uintptr_t low = 0, high = 0;
+    if (running_fiber_stack(low, high) && here >= low && here < high) { return low; }
+#if defined(__GLIBC__)
+    // the initial thread: its top and RLIMIT_STACK, without pthread_getattr_np's walk of /proc/self/maps
+    const auto top = reinterpret_cast<std::uintptr_t>(__libc_stack_end);
+    rlimit limit{};
+    if (top > here && getrlimit(RLIMIT_STACK, &limit) == 0) {
+        const std::uintptr_t size = limit.rlim_cur == RLIM_INFINITY ? 0 : static_cast<std::uintptr_t>(limit.rlim_cur);
+        const std::uintptr_t floor = lowest_of(top, size);
+        if (here >= floor) { return floor; }
+    }
 #endif
+#if defined(__APPLE__)
+    const auto apple_top = reinterpret_cast<std::uintptr_t>(pthread_get_stackaddr_np(pthread_self()));
+    return lowest_of(apple_top, static_cast<std::uintptr_t>(pthread_get_stacksize_np(pthread_self())));
+#elif defined(__linux__)
+    pthread_attr_t attr;
+    if (pthread_getattr_np(pthread_self(), &attr) != 0) { return 0; }
+    void* address = nullptr;
+    size_t size = 0;
+    const bool known = pthread_attr_getstack(&attr, &address, &size) == 0 && address;
+    pthread_attr_destroy(&attr);
+    if (!known) { return 0; }
+    return lowest_of(reinterpret_cast<std::uintptr_t>(address) + size, size);
+#else
+    return 0;
+#endif
+#endif
+}
+
+// the bytes below this frame, SIZE_MAX where the stack cannot be asked
+std::uintptr_t native_stack_left() noexcept {
+    const std::uintptr_t floor = native_stack_floor();
+    char probe;
+    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
+    return floor == 0 ? SIZE_MAX : here > floor ? here - floor : 0;
+}
+}
+
+// Recursive native call paths (constructor bodies stack 20-25 KB a level in Debug) raise the catchable recursion error here
+// instead of dying on a stack overflow
+bool native_stack_low() noexcept {
+    return native_stack_left() < k_native_call_margin;
 }
 
 bool native_stack_nesting_low() noexcept {
+    return native_stack_left() < k_native_nesting_margin;
+}
+
+void native_stack_mark::arm() noexcept {
 #if defined(_WIN32)
-    return native_stack_left() < 192 * 1024;
+    limit_ = 0;   // low() asks the thread's bounds at each check, whatever thread runs the walk
 #else
-    return false;
+    const std::uintptr_t floor = native_stack_floor();
+    char probe;
+    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
+    if (floor != 0) {
+        limit_ = floor + k_native_nesting_margin;
+    } else {
+        limit_ = here > native_stack_mark::k_native_stack_budget ? here - native_stack_mark::k_native_stack_budget : 0;
+    }
 #endif
 }
 

@@ -5,6 +5,7 @@
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/run_record.hpp>
+#include <jaiscript/detail/native_stack.hpp>
 #include <algorithm>
 #include <cstdint>
 #include <cstdlib>
@@ -255,6 +256,14 @@ namespace {
     }
 
 } // namespace
+
+bool detail::running_fiber_stack(std::uintptr_t& a_low, std::uintptr_t& a_high) noexcept {
+    mco_coro* co = mco_running();
+    if (!co || !co->stack_base || co->stack_size == 0) { return false; }
+    a_low = reinterpret_cast<std::uintptr_t>(co->stack_base);
+    a_high = a_low + co->stack_size;
+    return true;
+}
 
 void detail::destroy_run_fiber(run_fiber* fiber) noexcept {
     if (!fiber) { return; }

@@ -222,6 +222,17 @@ public:
                 f3(4)
             )");
             check_eq((int64_t)4, bare.as_int());
+            auto bound = eng->execute(R"(
+                function f4(int a) -> int {
+                    array<int> arr = [5, 6];
+                    auto g = [=]() -> int { auto [x, y] = arr; return x + y; };
+                    auto h = [arr]() -> int { auto [x, y] = arr; return x - y; };
+                    auto k = [=]() -> int { auto inner = [z = a]() -> int { return z; }; return inner(); };
+                    return g() * 100 + h() * 10 + k();
+                }
+                f4(4)
+            )");
+            check_eq((int64_t)1094, bound.as_int());
         });
 
         test("by_reference_capture_chains_writes_to_the_declaring_local", [this]() {

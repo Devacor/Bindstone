@@ -635,6 +635,12 @@ public:
                 function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
                 f(); LOG;
             )", "|a|");
+            // suspended inside a handler: the handler's locals, then the thrown object it holds, then the body's locals
+            expect_log(R"(
+                coroutine gen() -> int { Token a = Token("a"); try { throw Token("t"); } catch (e) { Token h = Token("h"); yield 1; } yield 2; }
+                function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g = null; LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|hta|");
         });
 
         // C++ destroys the exception object as its handler exits; a rethrow carries it to the next handler

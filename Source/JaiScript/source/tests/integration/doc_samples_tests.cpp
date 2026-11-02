@@ -6,6 +6,9 @@
 // the page and run on the engine the test set up. The output block that follows the marked block on the page is what the run
 // must print: exactly for a C++ sample, and line by line in order for a script sample (the runner's "== result" lines aside).
 // With JAI_DOC_SAMPLES_DUMP naming a directory, each run's output is also written there as <id>.txt, for an author to paste.
+// A region marked "// [context id]" ... "// [/context]" is code a sample names but its page does not show; the page's text
+// never holds it. docs/site_tools/check_sample_includes.py compiles a whole-program page's samples with that context and
+// only the includes the page shows (tools/ci/gates.sh headers).
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -24,7 +27,10 @@
 
 // [sample quickstart-run]
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>   // section 3
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <filesystem>                          // section 5
+#include <fstream>
 #include <iostream>
 // [/sample]
 
@@ -67,6 +73,7 @@ struct Player {
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/signals/signal_property.hpp>
+#include <jaiscript/serialization/convenience.hpp>   // to_json / from_json / to_binary below
 // [/sample]
 // [sample signals-observable]
 #include <jaiscript/properties/property_manager.hpp>
@@ -205,11 +212,13 @@ struct Sprite {
 }
 
 namespace doc_binder_meter {
+// [context binder-meter-host]
 // what the page's Meter reaches beyond its own code: an audio manager, a log, the program's one Meter
 struct audio_manager { void play(const char*) const {} };
 inline const audio_manager& audio() { static const audio_manager manager; return manager; }
 struct log_sink { void write(const std::string&) {} };
 inline log_sink& logger() { static log_sink sink; return sink; }
+// [/context]
 // [sample binder-meter-host]
 struct Meter {
     double level = 0.0;
@@ -218,7 +227,9 @@ struct Meter {
     void publish() const { audio().play("tick"); }    // the audio manager: serial
 };
 // [/sample]
+// [context binder-meter-host]
 inline std::shared_ptr<Meter> master_meter = [] { auto meter = std::make_shared<Meter>(); meter->level = 100.0; return meter; }();
+// [/context]
 }
 
 namespace doc_binder_pickup {

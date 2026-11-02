@@ -73,7 +73,10 @@ vm_tier() {
 
 classify() {
 	local p="$1"
-	case "$p" in include/jaiscript/* | tools/ci/host_warnings.cpp) pick headers "the public headers compile alone and warning-free ($p)" ;; esac
+	case "$p" in
+		include/jaiscript/* | tools/ci/host_warnings.cpp | docs/site_tools/check_sample_includes.py | source/tests/integration/doc_samples_tests.cpp | docs/site/embedding/01-embedding-quickstart.html | docs/site/embedding/02-dynamic-binder.html)
+			pick headers "the public headers compile alone and warning-free, and the whole-program samples show their includes ($p)" ;;
+	esac
 	case "$p" in
 		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;
 		*.md | internal/* | docs/* | LICENSE* | .gitignore | .gitattributes) NOTES="$NOTES $p" ;;

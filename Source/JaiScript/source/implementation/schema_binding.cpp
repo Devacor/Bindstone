@@ -1,4 +1,5 @@
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/template_binder.hpp>
 #include <jaiscript/properties/property_manager.hpp>
 #include <jaiscript/core/engine_impl.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
@@ -67,7 +68,7 @@ template<typename ValueT>
 void ensure_observable_ref_type_registered(engine& a_engine) {
 	using RefType = jai::observable_property_ref<ValueT>;
 
-	std::string type_name = "observable_property_ref<" + std::string(typeid(ValueT).name()) + ">";
+	std::string type_name = "observable_property_ref<" + type_name_helper<ValueT>::name() + ">";
 	if (a_engine.is_type_registered(type_name)) {
 		return;
 	}

@@ -226,7 +226,8 @@ gate_android() {
 }
 
 # The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each
-# compile alone, and tools/ci/host_warnings.cpp, a host file over the headers the embedding pages name, builds under
+# compile alone, the pages whose samples build a whole program compile with the includes they show
+# (docs/site_tools/check_sample_includes.py), and tools/ci/host_warnings.cpp, a host file over the headers the embedding pages name, builds under
 # -Wall -Wextra -Werror: with HEADER_CXX, else with each of g++ and clang++ found (on Windows, Visual Studio's clang++ when
 # none is on PATH). JAI_BUILD_JOBS sets the parallel compiles (default 4).
 header_compilers() {
@@ -236,7 +237,7 @@ header_compilers() {
 	command -v clang++ > /dev/null 2>&1 && return
 	vswhere="$(printenv 'ProgramFiles(x86)' 2>/dev/null)/Microsoft Visual Studio/Installer/vswhere.exe"
 	[ -f "$vswhere" ] || return 0
-	install="$("$vswhere" -latest -products '*' -property installationPath 2>/dev/null | tr -d '' | head -n 1)"
+	install="$("$vswhere" -latest -products '*' -property installationPath 2>/dev/null | tr -d '\r' | head -n 1)"
 	[ -n "$install" ] && [ -f "$install/VC/Tools/Llvm/x64/bin/clang++.exe" ] && echo "$install/VC/Tools/Llvm/x64/bin/clang++.exe"
 	return 0
 }
@@ -245,19 +246,26 @@ gate_headers() {
 	local work compilers=() headers=() cxx failed=0 bad
 	mapfile -t compilers < <(header_compilers)
 	[ "${#compilers[@]}" -gt 0 ] || { echo "::error::headers: no g++ or clang++ found (set HEADER_CXX)"; exit 1; }
-	mapfile -t headers < <(cd "$ROOT/include" && find jaiscript -name '*.hpp' ! -path 'jaiscript/detail/*' ! -path 'jaiscript/vm/*' 		! -path 'jaiscript/testing/*' ! -name openssl_tls.hpp | sort)
+	mapfile -t headers < <(cd "$ROOT/include" && find jaiscript -name '*.hpp' ! -path 'jaiscript/detail/*' ! -path 'jaiscript/vm/*' \
+		! -path 'jaiscript/testing/*' ! -name openssl_tls.hpp | sort)
 	work="$(mktemp -d)"
 	for cxx in "${compilers[@]}"; do
 		echo "headers: $cxx, ${#headers[@]} headers alone"
-		bad="$(printf '%s
-' "${headers[@]}" | xargs -P "${JAI_BUILD_JOBS:-4}" -I{} "$BASH" -c 			'printf "#include <%s>
-" "$2" | "$1" -std=c++20 -I"$3" -fsyntax-only -x c++ - > "$4/$(printf %s "$2" | tr / _).log" 2>&1 || echo "$2"' 			_ "$cxx" {} "$ROOT/include" "$work")"
+		bad="$(printf '%s\n' "${headers[@]}" | xargs -P "${JAI_BUILD_JOBS:-4}" -I{} "$BASH" -c \
+			'printf "#include <%s>\n" "$2" | "$1" -std=c++20 -I"$3" -fsyntax-only -x c++ - > "$4/$(printf %s "$2" | tr / _).log" 2>&1 || echo "$2"' \
+			_ "$cxx" {} "$ROOT/include" "$work")"
 		if [ -n "$bad" ]; then
 			failed=1
 			for h in $bad; do
 				echo "::error::$h does not compile alone with $cxx"
 				grep -m 3 -E "error" "$work/$(printf %s "$h" | tr / _).log" | cut -c1-240
 			done
+		fi
+		echo "headers: $cxx, the complete pages' C++ samples with the includes they show"
+		if ! "$(jai_python)" "$ROOT/docs/site_tools/check_sample_includes.py" --cxx "$cxx" > "$work/samples.log" 2>&1; then
+			failed=1
+			echo "::error::a page's C++ samples need an include the page does not show ($cxx)"
+			grep -A 6 "^FAIL" "$work/samples.log" | head -14 | cut -c1-240
 		fi
 		echo "headers: $cxx, the host file under -Wall -Wextra -Werror"
 		if ! "$cxx" -std=c++20 -I"$ROOT/include" -Wall -Wextra -Werror -O2 -c "$ROOT/tools/ci/host_warnings.cpp" -o "$work/host_warnings.o" > "$work/host.log" 2>&1; then
@@ -268,7 +276,7 @@ gate_headers() {
 	done
 	rm -rf "$work"
 	[ "$failed" = 0 ] || exit 1
-	echo "headers: every public header compiles alone, and the host file builds warning-free"
+	echo "headers: every public header compiles alone, the samples need no include their page hides, and the host file builds warning-free"
 }
 
 gate_embed_quickstart() {

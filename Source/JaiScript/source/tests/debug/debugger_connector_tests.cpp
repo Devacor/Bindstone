@@ -10,6 +10,7 @@
 
 #include <jaiscript/debug/connector.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
 
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
@@ -30,6 +31,7 @@
 #include <cerrno>
 #include <chrono>
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <thread>
 
@@ -405,6 +407,15 @@ public:
             check_true(vars_buf.find("\"value\":\"1\"") != std::string::npos);
             check_true(vars_buf.find("\"name\":\"y\"") == std::string::npos);
 
+            std::string eval_buf;
+            send_dap(cli, R"({"seq":20,"type":"request","command":"evaluate","arguments":{"expression":" x ","context":"hover"}})");
+            check_true(wait_for(cli, eval_buf, "\"command\":\"evaluate\""));
+            check_true(eval_buf.find("\"result\":\"1\",\"type\":\"int\"") != std::string::npos, eval_buf);
+            eval_buf.clear();
+            send_dap(cli, R"({"seq":21,"type":"request","command":"evaluate","arguments":{"expression":"x + 1"}})");
+            check_true(wait_for(cli, eval_buf, "\"command\":\"evaluate\""));
+            check_true(eval_buf.find("\"success\":false") != std::string::npos, eval_buf);
+
             // --- next (step over) advances to line 3 ---
             std::string next_buf;
             send_dap(cli, R"({"seq":10,"type":"request","command":"next","arguments":{"threadId":1}})");
@@ -422,7 +433,7 @@ public:
             check_eq(static_cast<int64_t>(3), eng->get_variable("z").as_int());
 
             send_dap(cli, R"({"seq":13,"type":"request","command":"disconnect"})");
-            wait_for(cli, cont_buf, "\"command\":\"disconnect\"", 1000);
+            check_true(wait_for(cli, cont_buf, "\"command\":\"disconnect\"", 1000), "the disconnect is answered before the close");
             close_client(cli);
             // eng's destructor stops the connector (joins its thread, detaches the controller).
         });
@@ -594,6 +605,102 @@ public:
             eng->debugger().set_enabled(false);
         });
 
+        // A web page can reach a loopback port, but only with HTTP: its request line and headers drop it. A client that has
+        // not attached may configure, not drive or read the script, and a pause asked for before the session never stops it.
+        test("dap_a_web_request_is_dropped_and_a_client_before_attach_only_configures", [this]() {
+            wsa_up();
+            auto eng = make_engine();
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t web = connect_client(conn->port());
+            check_true(web != kBad);
+            if (web == kBad) return;
+            const std::string body = R"({"seq":1,"type":"request","command":"attach"})";
+            send_raw(web, "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body);
+            check_true(closed_by_peer(web, 3000), "an HTTP request is no DAP client");
+            close_client(web);
+
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            struct client_guard { sock_t socket; ~client_guard() { close_client(socket); } } close{cli};
+            std::string buf;
+            send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+            send_dap(cli, R"({"seq":2,"type":"request","command":"pause","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, buf, "\"request_seq\":2"));
+            check_true(buf.find("not attached") != std::string::npos, buf);
+            send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":"<script>"},"breakpoints":[{"line":9}]}})");
+            check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
+            eng->debugger().request_pause();
+            send_dap(cli, R"({"seq":4,"type":"request","command":"attach"})");
+            check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+            eng->execute("var a = 1;\nvar b = 2;\n");
+            check_false(buf.find("\"event\":\"stopped\"") != std::string::npos || wait_for(cli, buf, "\"event\":\"stopped\"", 300),
+                        "the pause from before the session is gone");
+            eng->debugger().set_enabled(false);
+        });
+
+        // A breakpoint binds to the first line at or after it that starts a statement, as the editor is told; one past the last
+        // statement stays unverified
+        test("dap_a_breakpoint_off_any_statement_moves_to_the_next_one", [this]() {
+            wsa_up();
+            const auto dir = jai::foundry::test_temp_directory() / "dap_breakpoint_lines";
+            std::filesystem::create_directories(dir);
+            { std::ofstream(dir / "lines.jai") << "var a = 1;\n\n// a note\nvar b = 2;\n// the end\n"; }
+            const std::string path = std::filesystem::canonical(dir / "lines.jai").string();
+            auto eng = make_engine();
+            eng->jaibite_cache(false);
+            auto conn = std::make_shared<jai::debug::debug_connector>(0);
+            eng->set_debug_connector(conn);
+            sock_t cli = connect_client(conn->port());
+            check_true(cli != kBad);
+            if (cli == kBad) return;
+            struct client_guard { sock_t socket; ~client_guard() { close_client(socket); } } close{cli};
+            std::string buf;
+            send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
+            check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
+            send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
+            check_true(wait_for(cli, buf, "\"command\":\"attach\""));
+            std::string escaped;
+            for (char c : path) { if (c == '\\') escaped += '\\'; escaped += c; }
+            send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":")" + escaped + R"("},"breakpoints":[{"line":2},{"line":5}]}})");
+            check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
+            std::thread script([&] { eng->execute_file(path); });
+            std::string stop_buf;
+            check_true(wait_for(cli, stop_buf, "\"event\":\"stopped\""));
+            check_true(stop_buf.find("\"verified\":true,\"line\":4") != std::string::npos, "the blank line's breakpoint binds to line 4: " + stop_buf);
+            check_true(stop_buf.find("\"verified\":false,\"line\":5") != std::string::npos, "nothing starts after the last statement: " + stop_buf);
+            send_dap(cli, R"({"seq":4,"type":"request","command":"stackTrace","arguments":{"threadId":1}})");
+            check_true(wait_for(cli, stop_buf, "\"stackFrames\""));
+            check_true(wait_for(cli, stop_buf, "\"line\":4,"), stop_buf);
+            send_dap(cli, R"({"seq":5,"type":"request","command":"continue","arguments":{"threadId":1}})");
+            script.join();
+            eng->debugger().set_enabled(false);
+        });
+
+        // Another process's wildcard listener holds the port: a loopback bind beside it would take its local connections
+        test("listen_beside_another_wildcard_listener_on_the_port_fails", [this]() {
+            wsa_up();
+            sock_t game = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            check_true(game != kBad);
+            if (game == kBad) return;
+            sockaddr_in addr{};
+            addr.sin_family = AF_INET;
+            addr.sin_addr.s_addr = htonl(INADDR_ANY);
+            addr.sin_port = 0;
+            check_eq(0, ::bind(game, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)));
+            check_eq(0, ::listen(game, 1));
+            socklen_t len = sizeof(addr);
+            ::getsockname(game, reinterpret_cast<sockaddr*>(&addr), &len);
+            const int port = ntohs(addr.sin_port);
+            auto eng = make_engine();
+            auto conn = jai::debug::listen(*eng, port);
+            check_false(conn->listening(), "the debugger does not listen beside another listener on port " + std::to_string(port));
+            check_eq(0, conn->port());
+            close_client(game);
+        });
+
         test("listen_on_a_busy_port_reports_why", [this]() {
             auto first_engine = jai::foundry::make_engine();
             auto first = jai::debug::listen(*first_engine, 0);
@@ -608,6 +715,18 @@ public:
             check_eq(0, second->port());
             check_true(second->error().find("127.0.0.1:" + std::to_string(port)) != std::string::npos,
                 "the failure names the address: " + second->error());
+
+            // the failed connector left no callback behind: a stop after it is gone reaches nothing of it
+            second_engine->set_debug_connector(nullptr);
+            second.reset();
+            auto& dbg = second_engine->debugger();
+            dbg.set_breakpoints("<script>", {1});
+            dbg.set_enabled(true);
+            std::thread script([&] { second_engine->execute("var q = 1;\n"); });
+            for (int i = 0; i < 500 && !dbg.is_paused(); ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+            check_true(dbg.is_paused());
+            dbg.set_enabled(false);
+            script.join();
         });
 
         test("park_only_request_while_running_errors", [this]() {

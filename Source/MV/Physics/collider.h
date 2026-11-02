@@ -38,7 +38,7 @@ namespace MV {
 		}
 
 		template <typename T>
-		std::function<void(jai::property<T>&, jai::property<T>&)> propertyNoClone() {
+		typename jai::property<T>::clone_function propertyNoClone() {
 			return [](jai::property<T>&, jai::property<T>&) {};
 		}
 

@@ -109,6 +109,7 @@ namespace jai::vm {
 
         op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
                             // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)
+        op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
         op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (internal/typed_regions_design.md, Inlined leaves)
@@ -589,6 +590,7 @@ namespace jai::vm {
             case opcode::op_ref_return_bind: return "REF_RETURN_BIND";
             case opcode::op_ref_return_lvalue: return "REF_RETURN_LVALUE";
             case opcode::op_return_ident: return "RETURN_IDENT";
+            case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_return_convert: return "RETURN_CONVERT";
             case opcode::op_inline_guard: return "INLINE_GUARD";
             case opcode::op_probe_callee: return "PROBE_CALLEE";

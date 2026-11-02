@@ -1,6 +1,7 @@
-#pragma once
-
-#ifndef __JAISCRIPT_CORE_VALUE_HPP__
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_VALUE_HPP__)
 #define __JAISCRIPT_CORE_VALUE_HPP__
 
 #include "types.hpp"
@@ -2413,7 +2414,7 @@ namespace detail {
             JAI_FORCEINLINE const strong_ptr<script_vec_node>& vec_node() const noexcept { return p_.vn; }
 
             JAI_FORCEINLINE storage(const storage& o) noexcept : hdr_(o.hdr_) {
-                if ((k_trivial_mask >> idx_()) & 1u) { std::memcpy(&p_, &o.p_, sizeof(p_)); }   // scalars: one test, no call
+                if ((k_trivial_mask >> idx_()) & 1u) { std::memcpy(static_cast<void*>(&p_), &o.p_, sizeof(p_)); }   // scalars: one test, no call
                 else { copy_handle(o); }
             }
             JAI_NOINLINE void copy_handle(const storage& o) noexcept {
@@ -2428,7 +2429,7 @@ namespace detail {
                     case TYPEID_CPP_BOUND: new (&p_.cb) strong_ptr<cpp_bound_holder>(o.p_.cb); break;
                     case TYPEID_UTF8_STRING: new (&p_.u) strong_ptr<script_utf8>(o.p_.u); break;
                     case TYPEID_VEC2: case TYPEID_IVEC2: case TYPEID_VEC3: case TYPEID_IVEC3: case TYPEID_VEC4: case TYPEID_COLOR: new (&p_.vn) strong_ptr<script_vec_node>(o.p_.vn); break;
-                    default: std::memcpy(&p_, &o.p_, sizeof(p_)); break;   // trivial payloads
+                    default: std::memcpy(static_cast<void*>(&p_), &o.p_, sizeof(p_)); break;   // trivial payloads
                 }
             }
             // Relocating move: every alternative is a trivial scalar or a steal-and-null
@@ -2437,7 +2438,7 @@ namespace detail {
             // handle before, one after). Source lands at TYPEID_NULL (script_value's
             // move contract nulls the source anyway).
             storage(storage&& o) noexcept : hdr_(o.hdr_) {
-                std::memcpy(&p_, &o.p_, sizeof(p_));
+                std::memcpy(static_cast<void*>(&p_), &o.p_, sizeof(p_));
                 o.set_idx_(TYPEID_NULL);
             }
             // Both assignments pin/steal o first (o may live inside our own payload: x = x.deref() through a map-entry
@@ -2449,7 +2450,7 @@ namespace detail {
                     storage pinned(o);
                     storage doomed(std::move(*this));
                     set_idx_(pinned.idx_());
-                    std::memcpy(&p_, &pinned.p_, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&p_), &pinned.p_, sizeof(p_));
                     pinned.set_idx_(TYPEID_NULL);
                 }
                 return *this;
@@ -2458,38 +2459,45 @@ namespace detail {
                 if (this != &o) {
                     const auto stolen_index = o.idx_();
                     payload stolen;
-                    std::memcpy(&stolen, &o.p_, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&stolen), &o.p_, sizeof(p_));
                     o.set_idx_(TYPEID_NULL);
                     storage doomed(std::move(*this));
                     set_idx_(stolen_index);
-                    std::memcpy(&p_, &stolen, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&p_), &stolen, sizeof(p_));
                 }
                 return *this;
             }
             // The value's own move and assignments: the whole word (index and tag) travels with the payload, the source
             // lands at a zero word, and the old payload still dies last
             struct whole_word {};
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"   // a scalar's unused payload bytes travel with it
+#endif
             storage(storage&& o, whole_word) noexcept : hdr_(o.hdr_) {
-                std::memcpy(&p_, &o.p_, sizeof(p_));
+                std::memcpy(static_cast<void*>(&p_), &o.p_, sizeof(p_));
                 o.hdr_ = 0;
             }
             void assign_whole(storage&& o) noexcept {
                 if (this != &o) {
                     const uint64_t word = o.hdr_;
                     payload stolen;
-                    std::memcpy(&stolen, &o.p_, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&stolen), &o.p_, sizeof(p_));
                     o.hdr_ = 0;
                     storage doomed(std::move(*this));
                     hdr_ = word;
-                    std::memcpy(&p_, &stolen, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&p_), &stolen, sizeof(p_));
                 }
             }
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
             void assign_whole(const storage& o) noexcept {
                 if (this != &o) {
                     storage pinned(o);
                     storage doomed(std::move(*this));
                     hdr_ = pinned.hdr_;
-                    std::memcpy(&p_, &pinned.p_, sizeof(p_));
+                    std::memcpy(static_cast<void*>(&p_), &pinned.p_, sizeof(p_));
                     pinned.hdr_ = 0;
                 }
             }
@@ -2540,7 +2548,7 @@ namespace detail {
             template <typename T> JAI_FORCEINLINE const T& get() const noexcept { assert(idx_() == index_of<T>()); return alt<index_of<T>()>(); }
             // the payload word as raw bits (an int, a float's bits, a handle's pointer), whatever the index
             JAI_FORCEINLINE int64_t payload_bits() const noexcept { int64_t b; std::memcpy(&b, &p_, sizeof b); return b; }
-            JAI_FORCEINLINE void set_payload_bits(int64_t b) noexcept { std::memcpy(&p_, &b, sizeof b); }
+            JAI_FORCEINLINE void set_payload_bits(int64_t b) noexcept { std::memcpy(static_cast<void*>(&p_), &b, sizeof b); }
 
         private:
             union alignas(8) payload {   // 8-aligned on 32-bit hosts too, where int64_t may align to 4

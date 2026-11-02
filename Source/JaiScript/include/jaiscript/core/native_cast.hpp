@@ -1,4 +1,8 @@
-#pragma once
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_NATIVE_CAST_HPP__)
+#define __JAISCRIPT_CORE_NATIVE_CAST_HPP__
 
 #include "value.hpp"
 
@@ -25,3 +29,5 @@ T native_cast_or_throw(checked_result<T> result, engine* eng) {
 }
 
 }
+
+#endif // __JAISCRIPT_CORE_NATIVE_CAST_HPP__

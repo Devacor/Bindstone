@@ -1,4 +1,8 @@
-#pragma once
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_SCRIPT_EXTENSIBLE_HPP__)
+#define __JAISCRIPT_CORE_SCRIPT_EXTENSIBLE_HPP__
 
 #include <memory>
 #include <string>
@@ -77,3 +81,5 @@ namespace detail {
 }
 
 }
+
+#endif // __JAISCRIPT_CORE_SCRIPT_EXTENSIBLE_HPP__

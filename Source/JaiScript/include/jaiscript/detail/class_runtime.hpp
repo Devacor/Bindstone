@@ -1,4 +1,5 @@
 #pragma once
+#define __JAISCRIPT_DETAIL_CLASS_RUNTIME_HPP__
 
 // The class runtime: the member bodies, slot stores, assignments and copies the library's own translation units (the
 // interpreter, the VM, the engine) compile and inline. Hosts include core/class_definition.hpp, which declares them.

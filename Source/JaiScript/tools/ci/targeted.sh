@@ -73,6 +73,7 @@ vm_tier() {
 
 classify() {
 	local p="$1"
+	case "$p" in include/jaiscript/* | tools/ci/host_warnings.cpp) pick headers "the public headers compile alone and warning-free ($p)" ;; esac
 	case "$p" in
 		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;
 		*.md | internal/* | docs/* | LICENSE* | .gitignore | .gitattributes) NOTES="$NOTES $p" ;;

@@ -1,6 +1,7 @@
-#pragma once
-
-#ifndef __JAISCRIPT_CORE_OVERLOAD_RESOLUTION_HPP__
+// Part of the class runtime's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_DETAIL_CLASS_RUNTIME_HPP__)
+#include <jaiscript/detail/class_runtime.hpp>
+#elif !defined(__JAISCRIPT_CORE_OVERLOAD_RESOLUTION_HPP__)
 #define __JAISCRIPT_CORE_OVERLOAD_RESOLUTION_HPP__
 
 #include <jaiscript/detail/class_runtime.hpp>

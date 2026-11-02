@@ -2,7 +2,6 @@
 
 #ifndef JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
 #define JAISCRIPT_SERIALIZATION_ARCHIVE_HPP
-#define JAISCRIPT_ARCHIVE_HPP_INCLUDED
 
 #include <concepts>
 #include <type_traits>

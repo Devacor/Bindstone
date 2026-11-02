@@ -152,54 +152,54 @@ namespace jai {
 		// Constructor 1: No default value, no clone function
 		inline property(property_manager& reg, std::string name)
 			: property_base(reg, std::move(name))
-			, m_custom_clone()
-			, m_value{} {
+			, m_value{}
+			, m_custom_clone() {
 		}
 
 		// Constructor 2: With value (but NOT a function type)
 		template<typename U, std::enable_if_t<!is_clone_function_v<U>, int> = 0>
 		inline property(property_manager& reg, std::string name, U&& def)
 			: property_base(reg, std::move(name))
-			, m_custom_clone()
-			, m_value(std::forward<U>(def)) {
+			, m_value(std::forward<U>(def))
+			, m_custom_clone() {
 		}
 
 		// Constructor 3: With clone function only
 		template<typename Fn, std::enable_if_t<is_clone_function_v<Fn>, int> = 0>
 		inline property(property_manager& reg, std::string name, Fn&& cl)
 			: property_base(reg, std::move(name))
-			, m_custom_clone(std::forward<Fn>(cl))
-			, m_value{} {
+			, m_value{}
+			, m_custom_clone(std::forward<Fn>(cl)) {
 		}
 
 		// Constructor 4: With T constructed from initializer list
 		inline property(property_manager& reg, std::string name, T def)
 			: property_base(reg, std::move(name))
-			, m_custom_clone()
-			, m_value(std::move(def)) {
+			, m_value(std::move(def))
+			, m_custom_clone() {
 		}
 
 		// Constructor 5: With value and clone function
 		template<typename U, typename Fn>
 		inline property(property_manager& reg, std::string name, U&& def, Fn&& cl)
 			: property_base(reg, std::move(name))
-			, m_custom_clone(std::forward<Fn>(cl))
-			, m_value(std::forward<U>(def)) {
+			, m_value(std::forward<U>(def))
+			, m_custom_clone(std::forward<Fn>(cl)) {
 		}
 
 		// Constructor 6: With T constructed from initializer list and clone function
 		inline property(property_manager& reg, std::string name, T def,
 			std::function<void(property<T>&, property<T>&)> cl)
 			: property_base(reg, std::move(name))
-			, m_custom_clone(std::move(cl))
-			, m_value(std::move(def)) {
+			, m_value(std::move(def))
+			, m_custom_clone(std::move(cl)) {
 		}
 
 		// Constructor 7: With serialize_mode
 		inline property(property_manager& reg, std::string name, serialize_mode mode)
 			: property_base(reg, std::move(name))
-			, m_custom_clone()
-			, m_value{} {
+			, m_value{}
+			, m_custom_clone() {
 			m_serialize_mode = mode;
 		}
 
@@ -207,8 +207,8 @@ namespace jai {
 		template<typename U, std::enable_if_t<!is_clone_function_v<U> && !std::is_same_v<std::decay_t<U>, serialize_mode>, int> = 0>
 		inline property(property_manager& reg, std::string name, U&& def, serialize_mode mode)
 			: property_base(reg, std::move(name))
-			, m_custom_clone()
-			, m_value(std::forward<U>(def)) {
+			, m_value(std::forward<U>(def))
+			, m_custom_clone() {
 			m_serialize_mode = mode;
 		}
 

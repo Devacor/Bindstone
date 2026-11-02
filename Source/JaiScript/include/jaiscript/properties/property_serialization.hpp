@@ -261,7 +261,7 @@ namespace jai {
 	}
 
 	template<typename T>
-	inline void deleted_property<T>::serialize(serialization::any_archive_writer& ar) const {
+	inline void deleted_property<T>::serialize(serialization::any_archive_writer&) const {
 	}
 
 	template<typename T>

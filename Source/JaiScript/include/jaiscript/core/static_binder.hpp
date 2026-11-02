@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_CORE_STATIC_BINDER_HPP__
 #define __JAISCRIPT_CORE_STATIC_BINDER_HPP__
 
+#include <cstddef>
 #include <tuple>
 #include <type_traits>
 

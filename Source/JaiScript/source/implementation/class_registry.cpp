@@ -8,6 +8,7 @@
 #include "jaiscript/detail/parallel_transform.hpp"
 #include <stdexcept>
 #include <thread>
+#include <tuple>
 #include <set>
 #include <algorithm>
 
@@ -998,6 +999,8 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         if (!parent_defs.empty() && !class_def->set_parents(parent_defs)) {
             return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
         }
+    } else if (is_redefinition && !class_def->get_parent_classes().empty()) {
+        (void)class_def->set_parents({});
     }
 
     class_def->declare_implicit_default_constructor();
@@ -1238,9 +1241,21 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         }
 
         auto reloaded_fields = live_fields_before_reload(*eng, *class_def, per_instance_fields);
-        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical);
+        // a changed base list: each ancestor's fields a live object never held start as construction makes them
+        std::vector<std::tuple<script_class_definition*, std::vector<uint64_t>, std::vector<reloaded_object>>> inherited;
+        if (class_def->parents_changed()) {
+            for (const class_definition* level : class_def->construction_order()) {
+                if (level == class_def.get() || !level->is_script_class()) { continue; }
+                std::vector<uint64_t> fields;
+                level->for_each_own_field_id([&](uint64_t id) { fields.push_back(id); });
+                auto objects = live_fields_before_reload(*eng, *class_def, fields);
+                inherited.emplace_back(const_cast<script_class_definition*>(static_cast<const script_class_definition*>(level)), std::move(fields), std::move(objects));
+            }
+        }
+        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical, host.discard_unwinding);
         class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
         initialize_reloaded_fields(host, *class_def, per_instance_fields, reloaded_fields);
+        for (auto& [level, fields, objects] : inherited) { initialize_reloaded_fields(host, *level, fields, objects); }
 
         if (structural_key.empty()) {
             try {

@@ -1167,12 +1167,6 @@ namespace jai {
         // clone, observationally identical - the differential gates flip it
         void parameter_alias(bool on);
         bool parameter_alias() const;
-        // Read-only by-value local declarations (`T x = lvalue;`) that bound the source's object instead of cloning it
-        // (main thread; the local elision's test observable) and that elision's kill switch (default on)
-        // Set when the first instance armed with a script destructor is minted: until then no destructor can run, so
-        // destruction-order work (a frame's reverse release) costs nothing in programs without one
-        bool destructors_armed() const noexcept { return destructors_armed_; }
-        void note_destructors_armed() noexcept { destructors_armed_ = true; }
         // The release stack (detail/release_machine.hpp); _here is null while a parallel region runs (workers release natively)
         detail::release_machine& release_machine();
         detail::release_machine* release_machine_here();
@@ -1505,7 +1499,6 @@ namespace jai {
 
         size_t hot_reload_field_migrations_ = 0;
         bool hot_reload_reporting_ = false;
-        bool destructors_armed_ = false;
         bool parallel_region_active_ = false;
         bool construction_access_waived_ = false;
         int* active_run_pins_ = nullptr;

@@ -227,6 +227,8 @@ public:
     inline void migrate_fields(const std::set<uint64_t>& old_field_ids,
                        const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                        bool preseeded = false);
+    // The second half of a migration: fields the new definition no longer declares go (after the class's migrate hook read them)
+    inline void drop_fields_absent_from(const std::unordered_map<uint64_t, script_value>& new_field_defaults);
 
     inline script_value get_method(uint64_t id, bool throw_if_missing = true) const;
 
@@ -241,6 +243,8 @@ public:
     inline void reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared = false);
     // Armed when the instance was minted (the allocation's deleter runs the chain of its class at death)
     void note_destructor_armed() noexcept { destructor_armed_ = true; }
+    // A chain that came to declare a destructor after the mint (a re-class, a reload adding one or a base with one) runs it at death
+    inline void arm_late_destructor(const class_definition& cls);
 
     // Field iteration, slot order (first build ≈ declaration order, base-first) then
     // runtime-overflow entries; replaces get_fields()/get_fields_mutable() — flat
@@ -915,6 +919,8 @@ public:
     [[nodiscard]] bool add_parent(std::shared_ptr<class_definition> parent);
 
     [[nodiscard]] inline bool set_parents(const std::vector<std::shared_ptr<class_definition>>& parents);
+    // the last set_parents changed the chain: the next redefinition migrates the inherited fields too
+    bool parents_changed() const { return reparented_from_fields_.has_value(); }
 
     const std::vector<std::shared_ptr<class_definition>>& get_parent_classes() const {
         return parent_classes_;
@@ -1269,9 +1275,12 @@ public:
                         const std::unordered_map<uint64_t, script_value>& new_methods,
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
                         engine* engine_ref,
-                        bool structurally_identical = false);
+                        bool structurally_identical = false,
+                        const std::function<void()>& discard_unwinding = {});
 
     inline void update_instances_from_base();
+    // one instance's hot_reload_migrate: a failure goes to the engine's script-error handler and the reload goes on
+    void run_migrate_hook(script_value instance_value, const script_value& hook, engine* engine_ref, const std::function<void()>& discard_unwinding);
 
     // Parallel workers construct and copy instances: registry mutations serialize on the
     // engine's region lock while a region runs (a never-taken branch otherwise).
@@ -1342,6 +1351,7 @@ private:
     mutable std::vector<type_info_ptr> slot_declared_types_;   // per field slot, the chain walk's answer under slot_declared_epoch_
     mutable uint64_t slot_declared_epoch_ = UINT64_MAX;
     bool declared_types_dirty_ = false;
+    std::optional<std::set<uint64_t>> reparented_from_fields_;   // the whole chain's field ids before the last chain change
     std::unordered_map<uint64_t, script_value> static_field_values_;
     std::unordered_set<uint64_t> static_fields_;
     std::unordered_map<uint64_t, type_info_ptr> static_declared_types_;

@@ -9,6 +9,13 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+struct teardown_mark {
+    std::string* log;
+    std::string name;
+    teardown_mark(std::string* a_log, std::string a_name) : log(a_log), name(std::move(a_name)) {}
+    ~teardown_mark() { *log += name; }
+};
+
 // C++ object lifetimes (the contract): a block's locals die at its closing brace in reverse declaration order, a loop
 // body's at the end of each iteration, parameters at the end of the callee after its locals, a prvalue argument is the
 // parameter itself, a member dies after its own class's destructor body and before its base's, and program-scope
@@ -551,6 +558,20 @@ public:
                 }
                 check_eq(std::string("ac2sn1"), log, "the last constructed dies first: namespace members, statics and captures alike");
             }
+            // host objects alone, in a program no script destructor names: their C++ destructors keep the order
+            std::string log;
+            {
+                auto eng = make_engine();
+                dynamic_binder<teardown_mark>(*eng, "Mark").build();
+                eng->add_function("mark", [&log](std::string s) { return std::make_shared<teardown_mark>(&log, std::move(s)); });
+                eng->execute(R"(
+                    var G1 = mark("1");
+                    namespace ns { var inner = mark("n"); }
+                    class S { static var s = mark("s"); }
+                    var G2 = mark("2");
+                )");
+            }
+            check_eq(std::string("2sn1"), log, "a host object's C++ destructor runs in reverse construction order without any script destructor");
         });
 
         test("a_destructor_error_at_teardown_is_reported", [this]() {

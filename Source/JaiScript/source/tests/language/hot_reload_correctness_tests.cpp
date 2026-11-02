@@ -194,6 +194,9 @@ public:
             eng->execute("class D { int d = 0; D(int v) { d = v; } }");
             check_eq(std::string("D has no member 'y' 4"), eng->execute("var r = \"\"; try { var gone = c.y; } catch (e) { r = e; } r + \" \" + c.d;").to_string(),
                      "a base the reload removes takes its fields along");
+            eng->execute("class B3 { int x = 1; } class D3 : B3 { int d = 0; } var k = D3(); k.x = 5;");
+            eng->execute("class D3 : B3 { int d = 0; int e = 1; }");
+            check_eq(std::string("5 1"), eng->execute("\"\" + k.x + \" \" + k.e").to_string(), "a derived class's own field change keeps its inherited values");
         });
 
         // A hot_reload_migrate hook that constructs a new same-class instance must not hang

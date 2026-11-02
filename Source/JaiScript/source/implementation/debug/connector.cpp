@@ -40,6 +40,7 @@
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -140,7 +141,25 @@ void skip_ws(const std::string& s, size_t& i) {
 void append_utf8(std::string& out, unsigned cp) {
     if (cp < 0x80) out += static_cast<char>(cp);
     else if (cp < 0x800) { out += static_cast<char>(0xC0 | (cp >> 6)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
-    else { out += static_cast<char>(0xE0 | (cp >> 12)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+    else if (cp < 0x10000) { out += static_cast<char>(0xE0 | (cp >> 12)); out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F)); }
+    else {
+        out += static_cast<char>(0xF0 | (cp >> 18)); out += static_cast<char>(0x80 | ((cp >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((cp >> 6) & 0x3F)); out += static_cast<char>(0x80 | (cp & 0x3F));
+    }
+}
+
+bool parse_hex4(const std::string& s, size_t& i, unsigned& cp) {
+    if (i + 4 > s.size()) return false;
+    cp = 0;
+    for (int k = 0; k < 4; ++k) {
+        const char h = s[i++];
+        cp <<= 4;
+        if (h >= '0' && h <= '9') cp |= static_cast<unsigned>(h - '0');
+        else if (h >= 'a' && h <= 'f') cp |= static_cast<unsigned>(h - 'a' + 10);
+        else if (h >= 'A' && h <= 'F') cp |= static_cast<unsigned>(h - 'A' + 10);
+        else return false;
+    }
+    return true;
 }
 
 bool parse_string(const std::string& s, size_t& i, std::string& out) {
@@ -162,16 +181,17 @@ bool parse_string(const std::string& s, size_t& i, std::string& out) {
                 case 'b': out += '\b'; break;
                 case 'f': out += '\f'; break;
                 case 'u': {
-                    if (i + 4 > s.size()) return false;
                     unsigned cp = 0;
-                    for (int k = 0; k < 4; ++k) {
-                        char h = s[i++]; cp <<= 4;
-                        if (h >= '0' && h <= '9') cp |= (h - '0');
-                        else if (h >= 'a' && h <= 'f') cp |= (h - 'a' + 10);
-                        else if (h >= 'A' && h <= 'F') cp |= (h - 'A' + 10);
-                        else return false;
+                    if (!parse_hex4(s, i, cp)) return false;
+                    if (cp >= 0xD800 && cp < 0xDC00 && s.compare(i, 2, "\\u") == 0) {   // a high surrogate and its low half: one code point
+                        size_t at = i + 2;
+                        unsigned low = 0;
+                        if (parse_hex4(s, at, low) && low >= 0xDC00 && low < 0xE000) {
+                            cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
+                            i = at;
+                        }
                     }
-                    append_utf8(out, cp);   // BMP only; surrogate pairs are rare in DAP text
+                    append_utf8(out, cp);
                     break;
                 }
                 default: out += e; break;
@@ -274,19 +294,20 @@ constexpr size_t kMaxHeaderBytes = 64 * 1024;
 constexpr size_t kMaxMessageBytes = 64 * 1024 * 1024;
 constexpr size_t kMaxPendingOutput = 4 * 1024 * 1024;
 
-// SIZE_MAX for a value past size_t, so the limit check rejects it instead of reading a wrapped length
-size_t parse_content_length(std::string_view headers) {
-    // Case-sensitive "Content-Length:" per DAP.
-    size_t p = headers.find("Content-Length:");
-    if (p == std::string_view::npos) return 0;
-    p += 15;
+// A DAP header block is exactly one "Content-Length: N" line: anything else (an HTTP request line a web page's fetch sends,
+// any other header) is no debugger, and nullopt drops it. SIZE_MAX for a value past size_t, so the limit check rejects it.
+std::optional<size_t> parse_content_length(std::string_view headers) {
+    constexpr std::string_view key = "Content-Length:";
+    if (headers.substr(0, key.size()) != key) return std::nullopt;
+    size_t p = key.size();
     while (p < headers.size() && (headers[p] == ' ' || headers[p] == '\t')) ++p;
+    if (p == headers.size()) return std::nullopt;
     size_t v = 0;
-    while (p < headers.size() && std::isdigit(static_cast<unsigned char>(headers[p]))) {
+    for (; p < headers.size(); ++p) {
+        if (!std::isdigit(static_cast<unsigned char>(headers[p]))) return std::nullopt;
         const size_t digit = static_cast<size_t>(headers[p] - '0');
         if (v > (SIZE_MAX - digit) / 10) return SIZE_MAX;
         v = v * 10 + digit;
-        ++p;
     }
     return v;
 }
@@ -323,7 +344,7 @@ struct debug_connector::impl {
 
     // Breakpoints answered unverified because no loaded unit carries their path yet; a
     // `breakpoint` event verifies them when the engine parses that path (script thread).
-    struct pending_breakpoint { int id; int line; };
+    struct pending_breakpoint { int id; int line; std::string path; };
     std::mutex pending_mtx_;
     std::unordered_map<std::string, std::vector<pending_breakpoint>> pending_bps_;
     int next_bp_id_ = 1;   // connector thread only
@@ -410,23 +431,36 @@ struct debug_connector::impl {
         return false;
     }
 
-    bool open_listener() {
-        listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-        if (listener_ == kInvalid) return fail_listener("socket");
+    // Windows' SO_EXCLUSIVEADDRUSE refuses a bind onto a taken port; elsewhere SO_REUSEADDR only lets a TIME_WAIT go
+    static void claim_port_options(sock_t s) {
         int yes = 1;
 #ifdef _WIN32
-        // SO_REUSEADDR on Windows lets this bind land on top of another process's wildcard
-        // listener on the same port (an OS-assigned game port, say) and then steal its loopback
-        // connections; exclusive use makes that bind fail so the port ladder moves on
-        ::setsockopt(listener_, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        ::setsockopt(s, SOL_SOCKET, SO_EXCLUSIVEADDRUSE, reinterpret_cast<const char*>(&yes), sizeof(yes));
 #else
-        ::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
+        ::setsockopt(s, SOL_SOCKET, SO_REUSEADDR, reinterpret_cast<const char*>(&yes), sizeof(yes));
 #endif
+    }
+
+    bool open_listener() {
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(static_cast<uint16_t>(requested_port));
         if (::inet_pton(AF_INET, host.c_str(), &addr.sin_addr) != 1)
             addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+        if (requested_port != 0 && addr.sin_addr.s_addr != htonl(INADDR_ANY)) {
+            // A specific address binds beside another process's wildcard listener on the port (Windows, BSD) and then takes
+            // its loopback connections: a wildcard bind of our own first, which fails exactly when the port is taken
+            listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+            if (listener_ == kInvalid) return fail_listener("socket");
+            claim_port_options(listener_);
+            sockaddr_in any = addr;
+            any.sin_addr.s_addr = htonl(INADDR_ANY);
+            if (::bind(listener_, reinterpret_cast<sockaddr*>(&any), sizeof(any)) != 0) return fail_listener("bind");
+            close_sock(listener_);
+        }
+        listener_ = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+        if (listener_ == kInvalid) return fail_listener("socket");
+        claim_port_options(listener_);
         if (::bind(listener_, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) != 0) return fail_listener("bind");
         if (::listen(listener_, 1) != 0) return fail_listener("listen");
         socklen_t len = sizeof(addr);
@@ -439,10 +473,10 @@ struct debug_connector::impl {
     void begin(engine* eng) {
         engine_ = eng;
         ctrl_ = &eng->debugger();
-        ctrl_->set_on_stopped([this](const stop_info& si) { on_stop(si); });
-        ctrl_->set_on_source_loaded([this](const std::string&) { verify_pending(); });
         if (!open_listener()) return;
         if (!make_wake_pair(wake_r_, wake_w_)) { fail_listener("wake pair"); bound_port_ = 0; return; }
+        ctrl_->set_on_stopped([this](const stop_info& si) { on_stop(si); });
+        ctrl_->set_on_source_loaded([this](const std::string&) { verify_pending(); });
         running_.store(true, std::memory_order_release);
         started_ = true;
         thread_ = std::thread([this] { run(); });
@@ -455,7 +489,10 @@ struct debug_connector::impl {
         // Disarmed once the connector thread is gone (it owns session_active_ and could re-arm a session it was still dispatching);
         // the disarm wakes a parked script thread, so nothing stays blocked in the hook once the engine starts to die
         if (ctrl_ && session_active_) { ctrl_->set_enabled(false); session_active_ = false; }
-        if (ctrl_) ctrl_->set_on_source_loaded(nullptr);
+        if (ctrl_) {
+            ctrl_->set_on_stopped(nullptr);
+            ctrl_->set_on_source_loaded(nullptr);
+        }
         started_ = false;
     }
 
@@ -474,9 +511,19 @@ struct debug_connector::impl {
             }
         }
         for (const auto& bp : ready) {
-            enqueue(make_event("breakpoint", "{\"reason\":\"changed\",\"breakpoint\":{\"id\":" + std::to_string(bp.id)
-                + ",\"verified\":true,\"line\":" + std::to_string(bp.line) + "}}"));
+            enqueue(make_event("breakpoint", "{\"reason\":\"changed\",\"breakpoint\":" + breakpoint_json(bp.id, bp.path, bp.line, true) + "}"));
         }
+    }
+
+    // A breakpoint as the editor shows it: on the line a statement starts at or after the one asked for, unverified when
+    // none does or no loaded unit has the path yet
+    std::string breakpoint_json(int id, const std::string& path, int line, bool known) const {
+        const std::optional<int> bound = known ? ctrl_->breakpoint_line(path, line) : std::optional<int>(line);
+        std::string out = "{\"id\":" + std::to_string(id) + ",\"verified\":" + (known && bound ? "true" : "false")
+            + ",\"line\":" + std::to_string(bound.value_or(line));
+        if (!known) out += ",\"message\":\"" + json_escape("no loaded script has this path yet: " + path) + "\"";
+        else if (!bound) out += ",\"message\":\"" + json_escape("no statement starts on or after line " + std::to_string(line)) + "\"";
+        return out + "}";
     }
 
     void end_session() {
@@ -521,7 +568,12 @@ struct debug_connector::impl {
                 if (client_ != kInvalid && (re & POLLOUT)) try_send();
                 if (client_ != kInvalid && (re & (POLLERR | POLLHUP | POLLNVAL))) drop_client(true);
             }
-            if (want_close_client_) { drop_client(true); want_close_client_ = false; }
+            if (want_close_client_) {
+                drain_out_into_send_buf();
+                if (client_ != kInvalid) try_send();   // the disconnect reply goes out before the close
+                drop_client(true);
+                want_close_client_ = false;
+            }
 
             drain_out_into_send_buf();
             if (client_ != kInvalid) try_send();
@@ -608,8 +660,9 @@ struct debug_connector::impl {
             const size_t hdr_end = in_buf_.find("\r\n\r\n", at);
             if ((hdr_end == std::string::npos ? in_buf_.size() : hdr_end) - at > kMaxHeaderBytes) { drop_client(true); return; }
             if (hdr_end == std::string::npos) break;
-            const size_t cl = parse_content_length(std::string_view(in_buf_).substr(at, hdr_end - at));
-            if (cl > kMaxMessageBytes) { drop_client(true); return; }
+            const auto length = parse_content_length(std::string_view(in_buf_).substr(at, hdr_end - at));
+            if (!length || *length > kMaxMessageBytes) { drop_client(true); return; }
+            const size_t cl = *length;
             const size_t body_start = hdr_end + 4;
             if (in_buf_.size() - body_start < cl) break;   // wait for the rest of the body
             jval msg;
@@ -628,8 +681,16 @@ struct debug_connector::impl {
         int req_seq = seqv ? seqv->as_int() : 0;
         const jval* args = msg.find("arguments");
 
+        // before attach a client configures; it neither drives nor reads the script
+        static constexpr std::string_view k_session_free[] = {"initialize", "attach", "launch", "disconnect", "setBreakpoints",
+                                                              "setExceptionBreakpoints", "configurationDone", "threads"};
+        if (!session_active_ && std::find(std::begin(k_session_free), std::end(k_session_free), cmd) == std::end(k_session_free)) {
+            enqueue(make_response(req_seq, cmd, false, "", "not attached: send attach first"));
+            return;
+        }
+
         if (cmd == "initialize") {
-            enqueue(make_response(req_seq, cmd, true, "{\"supportsConfigurationDoneRequest\":true}"));
+            enqueue(make_response(req_seq, cmd, true, "{\"supportsConfigurationDoneRequest\":true,\"supportsEvaluateForHovers\":true}"));
             enqueue(make_event("initialized", ""));   // tell VS Code to send breakpoints + configurationDone
         } else if (cmd == "attach" || cmd == "launch") {
             ctrl_->set_enabled(true);   // arm breakpoints; suspends the wall-clock budget
@@ -673,8 +734,11 @@ struct debug_connector::impl {
             ctrl_->request_pause();
             enqueue(make_response(req_seq, cmd, true, ""));
         } else if (cmd == "evaluate") {
-            // No expression evaluation: answer benignly so watch/hover don't error-spam.
-            enqueue(make_response(req_seq, cmd, true, "{\"result\":\"\",\"variablesReference\":0}"));
+            const jval* expression = args ? args->find("expression") : nullptr;
+            std::string text = expression ? expression->as_str() : std::string();
+            while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back()))) text.pop_back();
+            while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front()))) text.erase(0, 1);
+            post_park_only(req_seq, cmd, [this, req_seq, text] { reply_evaluate(req_seq, text); });
         } else if (cmd == "disconnect") {
             enqueue(make_response(req_seq, cmd, true, ""));
             want_close_client_ = true;   // detach + drop after this reply flushes; listener re-accepts
@@ -727,12 +791,9 @@ struct debug_connector::impl {
         std::string arr = "[";
         for (size_t i = 0; i < lines.size(); ++i) {
             const int id = next_bp_id_++;
-            answered.push_back({id, lines[i]});
+            answered.push_back({id, lines[i], path});
             if (i) arr += ",";
-            arr += "{\"id\":" + std::to_string(id) + ",\"verified\":" + (known ? "true" : "false")
-                + ",\"line\":" + std::to_string(lines[i]);
-            if (!known) arr += ",\"message\":\"" + json_escape("no loaded script has this path yet: " + path) + "\"";
-            arr += "}";
+            arr += breakpoint_json(id, path, lines[i], known);
         }
         arr += "]";
         {
@@ -774,6 +835,18 @@ struct debug_connector::impl {
             + std::to_string(handle(kGlobalsPayload + 1 + frame)) + ",\"expensive\":false},"
             + "{\"name\":\"Globals\",\"variablesReference\":" + std::to_string(handle(kGlobalsPayload)) + ",\"expensive\":false}]}";
         enqueue(make_response(req_seq, "scopes", true, body));
+    }
+
+    // A name and its .field / [index] steps read at the stop; anything else answers unsuccessfully with why
+    void reply_evaluate(int req_seq, const std::string& expression) {
+        try {
+            const variable_info v = ctrl_->evaluate(expression);
+            std::string body = "{\"result\":\"" + json_escape(v.value) + "\"";
+            if (!v.type.empty()) body += ",\"type\":\"" + json_escape(v.type) + "\"";
+            enqueue(make_response(req_seq, "evaluate", true, body + ",\"variablesReference\":0}"));
+        } catch (const std::exception& e) {
+            enqueue(make_response(req_seq, "evaluate", false, "", e.what()));
+        }
     }
 
     void reply_variables(int req_seq, int reference) {

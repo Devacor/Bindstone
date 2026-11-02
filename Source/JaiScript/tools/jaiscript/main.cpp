@@ -227,7 +227,9 @@ void print_usage() {
 		"  --warnings            list the static checker's warnings on stderr before a script runs (errors\n"
 		"                        always fail the load and print)\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
-		"  --no-debug            do not stand up the DAP debug listener\n"
+		"  --no-debug            do not stand up the DAP debug listener (it listens on 127.0.0.1 with no\n"
+		"                        password: any local process can attach, pause the script and read its\n"
+		"                        variables)\n"
 		"  --debug               name the DAP listener's port on stderr (a file run is otherwise silent about it)\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
@@ -1140,38 +1142,11 @@ std::shared_ptr<jai::engine> make_runner_engine(const options& opt, std::ostream
 // --------------------------------------------------------------- debugger ---
 
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
-// Exclusive-bind probe: the connector's listener sets SO_REUSEADDR, which on Windows lets a
-// second bind on a taken port "succeed" — probe without it (the pattern embedding hosts use).
-bool debug_port_free(int port) {
-#ifdef _WIN32
-	static const bool wsa_ready = [] { WSADATA wsa; return ::WSAStartup(MAKEWORD(2, 2), &wsa) == 0; }();
-	if (!wsa_ready) { return false; }
-#endif
-	auto probe = ::socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-#ifdef _WIN32
-	if (probe == INVALID_SOCKET) { return false; }
-#else
-	if (probe < 0) { return false; }
-#endif
-	sockaddr_in address{};
-	address.sin_family = AF_INET;
-	address.sin_port = htons(static_cast<unsigned short>(port));
-	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-	bool available = ::bind(probe, reinterpret_cast<sockaddr*>(&address), sizeof(address)) == 0;
-#ifdef _WIN32
-	::closesocket(probe);
-#else
-	::close(probe);
-#endif
-	return available;
-}
-
 // Base 52477 keeps clear of 52472-52474, which embedding hosts commonly take;
 // +10 steps like they do. Returns the bound port, 0 if nothing bound.
 int attach_debugger(jai::engine& eng, int requested_port) {
 	int base = requested_port > 0 ? requested_port : jai::debug::default_port + 5;
 	for (int candidate = base; candidate < base + 80; candidate += 10) {
-		if (!debug_port_free(candidate)) { continue; }
 		auto connector = jai::debug::listen(eng, candidate);
 		if (connector->port() == candidate) { return candidate; }
 		eng.set_debug_connector(nullptr);

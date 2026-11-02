@@ -192,6 +192,7 @@ struct TplRange { T lo{}; T hi{}; };
 template<typename A, typename B>
 struct TplTagged { A tag{}; B value{}; };
 struct TplCell { int64_t col = 0; int64_t row = 0; };
+struct TplSegment { TplCell from; TplCell to; int32_t weight = 0; };
 namespace jai::foundry::tests {
 template<typename T>
 struct TplSpan { T first{}; T count{}; T stride{}; };
@@ -219,6 +220,11 @@ JAI_BIND_TEMPLATE_VARIANTS_NAMED_3(TplSpan, jai::foundry::tests::TplSpan, int64_
 JAI_STATIC_BINDER_AUTO(TplCell,
     .property("col", &TplCell::col)
     .property("row", &TplCell::row)
+);
+JAI_STATIC_BINDER_AUTO(TplSegment,
+    .property("from", &TplSegment::from)
+    .property("to", &TplSegment::to)
+    .property("weight", &TplSegment::weight)
 );
 
 namespace jai::foundry::tests {
@@ -613,6 +619,56 @@ public:
 
             check_eq(v2.x, int{10}, "x serialized correctly");
             check_eq(v2.y, int{20}, "y serialized correctly");
+        });
+
+        // A static binder's load finds each property by its name, so JSON reads back whatever order its keys come in; a missing key
+        // keeps the member's value, and a nested static type is a record of its own
+        test("static_binder_json_round_trip", [this]() {
+            auto eng = make_engine();
+            auto save = [&](const ::TplSegment& segment) {
+                serialization::json_archive_writer ar(0, eng.get());
+                ar.begin_object("TplSegment", 1);
+                jai_static_type<::TplSegment>::save(ar, segment);
+                ar.end_object();
+                return ar.str();
+            };
+            auto load = [&](const std::string& text) {
+                ::TplSegment segment;
+                segment.weight = -1;
+                serialization::json_archive_reader ar(text, eng.get());
+                ar.begin_object();
+                jai_static_type<::TplSegment>::load(ar, segment);
+                ar.end_object();
+                return segment;
+            };
+            ::TplSegment original{ { 1, 2 }, { 3, 4 }, 9 };
+            const std::string text = save(original);
+            check_eq(std::string(R"({"$type": "TplSegment","from": {"col": 1,"row": 2},"to": {"col": 3,"row": 4},"weight": 9})"), text);
+            auto back = load(text);
+            check_eq((int64_t)1, back.from.col);
+            check_eq((int64_t)4, back.to.row);
+            check_eq(9, back.weight);
+            auto swapped = load(R"({"weight": 5,"to": {"row": 8,"col": 7},"from": {"row": 6,"col": 5}})");
+            check_eq((int64_t)5, swapped.from.col);
+            check_eq((int64_t)6, swapped.from.row);
+            check_eq((int64_t)7, swapped.to.col);
+            check_eq(5, swapped.weight);
+            check_eq(-1, load(R"({"from": {"col": 1}})").weight, "a missing key keeps the member's value");
+
+            std::vector<uint8_t> buffer;
+            {
+                serialization::binary_archive_writer ar(buffer);
+                ar.begin_object("TplSegment", 1);
+                jai_static_type<::TplSegment>::save(ar, original);
+                ar.end_object();
+            }
+            ::TplSegment from_binary;
+            serialization::binary_archive_reader ar(buffer, eng.get());
+            ar.begin_object();
+            jai_static_type<::TplSegment>::load(ar, from_binary);
+            ar.end_object();
+            check_eq((int64_t)3, from_binary.to.col);
+            check_eq(9, from_binary.weight);
         });
 
         test("template_binder_property_counts", [this]() {

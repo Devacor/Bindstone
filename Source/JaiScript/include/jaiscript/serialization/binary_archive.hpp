@@ -145,7 +145,6 @@ private:
         size_t end_object_pos = 0;
     };
     std::vector<object_state> object_stack_;
-    const script_value* current_property_value_ = nullptr;  // For pre-read script_values (jai_object_type)
     uint32_t seek_size_ = 0;    // Size of value to read (for validation)
 
 public:
@@ -184,9 +183,9 @@ public:
     std::vector<uint8_t> read_binary(size_t /*expected_size*/);
 
     // Wire format must agree with the writer's end_object: count, names[], sizes[], values[]
-    bool begin_object();
+    void begin_object();
 
-    bool begin_object(std::string& type_name, uint32_t& version);
+    void begin_object(std::string& type_name, uint32_t& version);
 
     void end_object();
 
@@ -244,6 +243,7 @@ private:
 
     // Raw read methods that always read from stream (for pre-reading phase)
     uint8_t read_uint8_raw();
+    void expect_marker(uint8_t marker, const char* expected);
 
     size_t remaining_bytes() const;
 

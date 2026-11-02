@@ -228,7 +228,7 @@ public:
             catalog_like_root_obj loaded;
             std::string rootType;
             uint32_t rootVersion = 0;
-            check(ar.begin_object(rootType, rootVersion), "fresh reader enters document root");
+            ar.begin_object(rootType, rootVersion);
             loaded.serialize(ar);
             ar.end_object();
             check_eq(size_t(3), loaded.data.size(), "root object member serialize element count");

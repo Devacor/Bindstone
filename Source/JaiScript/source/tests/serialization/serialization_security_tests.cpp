@@ -4,11 +4,60 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/convenience.hpp>
+
+#include <map>
+#include <memory>
+#include <vector>
 
 using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+struct hostile_unique_node {
+    int v = 0;
+    std::unique_ptr<hostile_unique_node> child;
+    template<typename Archive> void serialize(Archive& ar) { ar("v", v); ar("child", child); }
+};
+
+struct hostile_weak_node {
+    int v = 0;
+    std::weak_ptr<hostile_weak_node> w;
+    template<typename Archive> void serialize(Archive& ar) { ar("v", v); ar("w", w); }
+};
+
+struct hostile_vector_node {
+    int v = 0;
+    std::vector<hostile_vector_node> kids;
+    template<typename Archive> void serialize(Archive& ar) { ar("v", v); ar("kids", kids); }
+};
+
+struct hostile_inner { int secret = 0; template<typename Archive> void serialize(Archive& ar) { ar("secret", secret); } };
+struct hostile_outer {
+    int secret = 0;
+    std::vector<hostile_inner> items;
+    int after = 0;
+    template<typename Archive> void serialize(Archive& ar) { ar("secret", secret); ar("items", items); ar("after", after); }
+};
+
+struct hostile_containers {
+    std::vector<int> list;
+    std::map<std::string, int> table;
+    template<typename Archive> void serialize(Archive& ar) { ar("list", list); ar("table", table); }
+};
+
+template<typename Load>
+std::string archive_load_error(Load&& load) {
+    try {
+        load();
+        return "loaded";
+    } catch (const serialization_error& e) {
+        return e.what();
+    } catch (const std::exception& e) {
+        return std::string("not a serialization_error: ") + e.what();
+    }
+}
 
 class serialization_security_tests : public suite {
 public:
@@ -86,6 +135,46 @@ public:
             std::vector<uint8_t> blob = { 0x03, 0xFF, 0xFF, 0xFF, 0xFF }; // array marker + 4B count
             jai::serialization::binary_archive_reader r(blob.data(), blob.size(), eng.get());
             check_throws([&]() { (void)r.begin_array(); }, "oversized array length must be rejected");
+        });
+
+        // A scalar where a record, an array or a map belongs is refused: the readers used to report "no object" and go on
+        // reading the enclosing record's keys, so the same path ran again until the stack overflowed (a 26-byte payload),
+        // or an element read the outer record's fields
+        test("wrong_kind_where_a_record_belongs_is_refused", [&]() {
+            auto eng = make_engine();
+            check_eq(std::string("Expected an object in the archive, found an integer"),
+                archive_load_error([&]() { (void)from_json<hostile_unique_node>(*eng, R"({"v":1,"child":1,"$val":1})"); }));
+            check_eq(std::string("Expected an object in the archive, found an integer"),
+                archive_load_error([&]() { (void)from_json<hostile_weak_node>(*eng, R"({"v":1,"w":1,"$ref":1})"); }));
+            check_eq(std::string("Expected an object in the archive, found an integer"),
+                archive_load_error([&]() { (void)from_json<hostile_vector_node>(*eng, R"({"v":1,"kids":[1]})"); }));
+            check_eq(std::string("Expected an object in the archive, found an integer"),
+                archive_load_error([&]() { (void)from_json<hostile_outer>(*eng, R"({"secret":42,"items":[7],"after":9})"); }));
+            check_eq(std::string("Expected an array in the archive, found an object"),
+                archive_load_error([&]() { (void)from_json<hostile_containers>(*eng, R"({"list":{},"table":{}})"); }));
+            check_eq(std::string("Expected a map in the archive, found an array"),
+                archive_load_error([&]() { (void)from_json<hostile_containers>(*eng, R"({"list":[],"table":[1]})"); }));
+            check_eq(std::string("Expected an object in the archive, found a string"),
+                archive_load_error([&]() { (void)from_json<hostile_vector_node>(*eng, R"("v")"); }));
+
+            auto put32 = [](std::vector<uint8_t>& b, uint32_t v) { for (int i = 0; i < 4; ++i) { b.push_back(uint8_t(v >> (8 * i))); } };
+            auto putstr = [&](std::vector<uint8_t>& b, const std::string& t) { put32(b, uint32_t(t.size())); b.insert(b.end(), t.begin(), t.end()); };
+            std::vector<uint8_t> blob;   // a root record whose "child" and "$val" sit at the end of the data
+            blob.push_back(0x01); putstr(blob, ""); put32(blob, 1); put32(blob, 3);
+            putstr(blob, "v"); putstr(blob, "child"); putstr(blob, "$val");
+            put32(blob, 4); put32(blob, 0); put32(blob, 0);
+            put32(blob, 1);
+            check_eq(std::string("Expected an object in the archive, found the end of the data"),
+                archive_load_error([&]() { (void)from_binary<hostile_unique_node>(*eng, blob); }));
+            std::vector<uint8_t> wrong_marker = { 0x03, 0, 0, 0, 0, 0x04 };
+            check_eq(std::string("Expected an object in the archive, found marker 3"),
+                archive_load_error([&]() { (void)from_binary<hostile_unique_node>(*eng, wrong_marker); }));
+            hostile_containers good;
+            good.list = { 1, 2 };
+            good.table["a"] = 3;
+            auto round = from_json<hostile_containers>(*eng, to_json(*eng, good));
+            check_eq(size_t(2), round.list.size());
+            check_eq(3, round.table["a"]);
         });
 
         test("binary_oversized_map_length_rejected", [&]() {

@@ -691,21 +691,34 @@ const script_value& json_archive_reader::key_value(const JNode& k, engine* eng) 
     return made;
 }
 
-int8_t json_archive_reader::read_int8() { return static_cast<int8_t>(read_value().as<script_int>()); }
+template<typename T>
+T json_archive_reader::read_integer() {
+    uint32_t n;
+    if (!next_node(n)) n = root_;
+    const JNode& node = nodes_[n];
+    switch (node.tag) {
+        case JTag::Int: return archive_integer<T>(node.u.i);
+        case JTag::UInt: return archive_integer<T>(node.u.u);
+        case JTag::Double: return archive_integer<T>(node.u.d);
+        default: throw_archive_expected("an integer", found_kind(true, n));
+    }
+}
 
-int16_t json_archive_reader::read_int16() { return static_cast<int16_t>(read_value().as<script_int>()); }
+int8_t json_archive_reader::read_int8() { return read_integer<int8_t>(); }
 
-int32_t json_archive_reader::read_int32() { return static_cast<int32_t>(read_value().as<script_int>()); }
+int16_t json_archive_reader::read_int16() { return read_integer<int16_t>(); }
 
-int64_t json_archive_reader::read_int64() { return read_value().as<script_int>(); }
+int32_t json_archive_reader::read_int32() { return read_integer<int32_t>(); }
 
-uint8_t json_archive_reader::read_uint8() { return static_cast<uint8_t>(read_value().as<script_int>()); }
+int64_t json_archive_reader::read_int64() { return read_integer<int64_t>(); }
 
-uint16_t json_archive_reader::read_uint16() { return static_cast<uint16_t>(read_value().as<script_int>()); }
+uint8_t json_archive_reader::read_uint8() { return read_integer<uint8_t>(); }
 
-uint32_t json_archive_reader::read_uint32() { return static_cast<uint32_t>(read_value().as<script_int>()); }
+uint16_t json_archive_reader::read_uint16() { return read_integer<uint16_t>(); }
 
-uint64_t json_archive_reader::read_uint64() { return static_cast<uint64_t>(read_value().as<script_int>()); }
+uint32_t json_archive_reader::read_uint32() { return read_integer<uint32_t>(); }
+
+uint64_t json_archive_reader::read_uint64() { return read_integer<uint64_t>(); }
 
 float json_archive_reader::read_float32() { return static_cast<float>(read_value().as<script_float>()); }
 
@@ -750,16 +763,32 @@ std::vector<uint8_t> json_archive_reader::read_binary(size_t /*size*/) {
     return result;
 }
 
-bool json_archive_reader::begin_object() {
+void json_archive_reader::begin_object() {
     std::string type_name;
     uint32_t version = 0;
-    return begin_object(type_name, version);
+    begin_object(type_name, version);
 }
 
-bool json_archive_reader::begin_object(std::string& type_name, uint32_t& version) {
-    uint32_t n;
-    if (!next_node(n) || nodes_[n].tag != JTag::Obj) {
-        return false;
+const char* json_archive_reader::found_kind(bool present, uint32_t n) const {
+    if (!present) { return "nothing"; }
+    switch (nodes_[n].tag) {
+        case JTag::Null: return "null";
+        case JTag::Bool: return "a bool";
+        case JTag::Int:
+        case JTag::UInt: return "an integer";
+        case JTag::Double: return "a float";
+        case JTag::Str: return "a string";
+        case JTag::Arr: return "an array";
+        default: return "an object";
+    }
+}
+
+void json_archive_reader::begin_object(std::string& type_name, uint32_t& version) {
+    enter_host_record(object_stack_.size());
+    uint32_t n = 0;
+    const bool present = next_node(n);
+    if (!present || nodes_[n].tag != JTag::Obj) {
+        throw_archive_expected("an object", found_kind(present, n));
     }
     const JNode& obj = nodes_[n];
     const uint32_t first = obj.u.agg.first;
@@ -773,13 +802,11 @@ bool json_archive_reader::begin_object(std::string& type_name, uint32_t& version
         if (kv == "$type" && v.tag == JTag::Str) {
             type_name.assign(chars_.data() + v.u.str.off, v.u.str.len);
         } else if (kv == "$version" && v.tag == JTag::Int) {
-            version = static_cast<uint32_t>(v.u.i);
+            version = archive_integer<uint32_t>(v.u.i);
         }
     }
     version_ = version;
-    enter_host_record(object_stack_.size());
     object_stack_.push(ObjState{ first, count, 0, nullptr });
-    return true;
 }
 
 void json_archive_reader::end_object() {
@@ -789,9 +816,10 @@ void json_archive_reader::end_object() {
 }
 
 size_t json_archive_reader::begin_array() {
-    uint32_t n;
-    if (!next_node(n) || nodes_[n].tag != JTag::Arr) {
-        return 0;
+    uint32_t n = 0;
+    const bool present = next_node(n);
+    if (!present || nodes_[n].tag != JTag::Arr) {
+        throw_archive_expected("an array", found_kind(present, n));
     }
     const JNode& a = nodes_[n];
     array_stack_.push(ArrState{ a.u.agg.first, a.u.agg.count, 0 });
@@ -827,9 +855,11 @@ bool json_archive_reader::read_property_name(std::string& name) {
 }
 
 size_t json_archive_reader::begin_map() {
-    uint32_t n;
-    if (!next_node(n) || nodes_[n].tag != JTag::Obj) {
-        return 0;
+    enter_host_record(object_stack_.size());
+    uint32_t n = 0;
+    const bool present = next_node(n);
+    if (!present || nodes_[n].tag != JTag::Obj) {
+        throw_archive_expected("a map", found_kind(present, n));
     }
     const JNode& o = nodes_[n];
     object_stack_.push(ObjState{ o.u.agg.first, o.u.agg.count, 0, nullptr });
@@ -924,6 +954,7 @@ script_value json_archive_reader::materialize_primitive(const JNode& node, engin
         case JTag::Null:   return script_value(std::monostate{}, eng);
         case JTag::Bool:   return script_value(static_cast<script_bool>(node.u.i != 0), eng);
         case JTag::Int:    return script_value(static_cast<script_int>(node.u.i), eng);
+        case JTag::UInt:   return script_value(static_cast<script_float>(node.u.u), eng);
         case JTag::Double: return script_value(node.u.d, eng);
         case JTag::Str:    return script_value(std::string(chars_.data() + node.u.str.off, node.u.str.len), eng);
         default:           return script_value(std::monostate{}, eng);
@@ -970,7 +1001,7 @@ bool json_archive_reader::materialize_math(const JNode& node, engine* eng, scrip
         const int comp = detail::math::component_of(kind, text_of(k));
         float tagged = 0;
         const bool is_tagged = comp >= 0 && tagged_float(c, tagged);
-        if (comp < 0 || seen[comp] || (c.tag != JTag::Int && c.tag != JTag::Double && !is_tagged)) {
+        if (comp < 0 || seen[comp] || (c.tag != JTag::Int && c.tag != JTag::UInt && c.tag != JTag::Double && !is_tagged)) {
             throw serialization_error(std::string("Malformed ") + math_type_name(kind) + " component in JSON");
         }
         seen[comp] = true;
@@ -979,11 +1010,13 @@ bool json_archive_reader::materialize_math(const JNode& node, engine* eng, scrip
             continue;
         }
         if (detail::math::integral(kind)) {
-            auto narrowed = c.tag == JTag::Int ? detail::math::to_i32(static_cast<script_int>(c.u.i)) : detail::math::to_i32(c.u.d);
+            auto narrowed = c.tag == JTag::Int ? detail::math::to_i32(static_cast<script_int>(c.u.i))
+                : detail::math::to_i32(c.tag == JTag::UInt ? static_cast<script_float>(c.u.u) : c.u.d);
             if (!narrowed) { throw serialization_error(std::string("Out-of-range ") + math_type_name(kind) + " component in JSON"); }
             i[comp] = narrowed.value();
         } else {
-            f[comp] = c.tag == JTag::Int ? detail::math::to_f32(static_cast<script_int>(c.u.i)) : detail::math::to_f32(c.u.d);
+            f[comp] = c.tag == JTag::Int ? detail::math::to_f32(static_cast<script_int>(c.u.i))
+                : detail::math::to_f32(c.tag == JTag::UInt ? static_cast<script_float>(c.u.u) : c.u.d);
         }
     }
     out = detail::math::make(kind, f, i, eng);
@@ -1356,8 +1389,11 @@ void json_archive_reader::parse_number_flat() {
     } else {
         script_int iv = 0;
         auto r = std::from_chars(first, last, iv);
+        uint64_t uv = 0;
         if (r.ptr == last && r.ec == std::errc()) {
             v.tag = JTag::Int; v.u.i = iv;
+        } else if (r.ec == std::errc::result_out_of_range && *first != '-' && std::from_chars(first, last, uv).ec == std::errc()) {
+            v.tag = JTag::UInt; v.u.u = uv;
         } else {
             double d = 0.0;
             auto r2 = from_chars_double(first, last, d);

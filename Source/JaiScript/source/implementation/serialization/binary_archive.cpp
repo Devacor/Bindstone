@@ -418,87 +418,42 @@ binary_archive_reader::binary_archive_reader(const void* data, size_t size, engi
 }
 
 int8_t binary_archive_reader::read_int8() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<int8_t>(val.as<script_int>());
-    }
     int8_t value;
     read_raw(&value, sizeof(value));
     return value;
 }
 
 int16_t binary_archive_reader::read_int16() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<int16_t>(val.as<script_int>());
-    }
     return read_little_endian<int16_t>();
 }
 
 int32_t binary_archive_reader::read_int32() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<int32_t>(val.as<script_int>());
-    }
     return read_little_endian<int32_t>();
 }
 
 int64_t binary_archive_reader::read_int64() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val.is_float() ? static_cast<int64_t>(val.as<script_float>()) : val.as<script_int>();
-    }
     return read_little_endian<int64_t>();
 }
 
 uint8_t binary_archive_reader::read_uint8() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<uint8_t>(val.as<script_int>());
-    }
     uint8_t value;
     read_raw(&value, sizeof(value));
     return value;
 }
 
 uint16_t binary_archive_reader::read_uint16() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<uint16_t>(val.as<script_int>());
-    }
     return read_little_endian<uint16_t>();
 }
 
 uint32_t binary_archive_reader::read_uint32() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<uint32_t>(val.as<script_int>());
-    }
     return read_little_endian<uint32_t>();
 }
 
 uint64_t binary_archive_reader::read_uint64() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return static_cast<uint64_t>(val.as<script_int>());
-    }
     return read_little_endian<uint64_t>();
 }
 
 float binary_archive_reader::read_float32() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val.is_int() ? static_cast<float>(val.as<script_int>()) : static_cast<float>(val.as<script_float>());
-    }
     uint32_t bits = read_little_endian<uint32_t>();
     float value;
     std::memcpy(&value, &bits, sizeof(value));
@@ -506,11 +461,6 @@ float binary_archive_reader::read_float32() {
 }
 
 double binary_archive_reader::read_float64() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val.is_int() ? static_cast<double>(val.as<script_int>()) : val.as<script_float>();
-    }
     uint64_t bits = read_little_endian<uint64_t>();
     double value;
     std::memcpy(&value, &bits, sizeof(value));
@@ -518,20 +468,10 @@ double binary_archive_reader::read_float64() {
 }
 
 bool binary_archive_reader::read_bool() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val.as<script_bool>();
-    }
     return read_uint8_raw() != 0;
 }
 
 std::string binary_archive_reader::read_string() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val.as<script_string>();
-    }
     return read_string_raw();
 }
 
@@ -561,19 +501,22 @@ std::vector<uint8_t> binary_archive_reader::read_binary(size_t /*expected_size*/
     return result;
 }
 
-bool binary_archive_reader::begin_object() {
+void binary_archive_reader::begin_object() {
     std::string type_name;
     uint32_t version = 0;
-    return begin_object(type_name, version);
+    begin_object(type_name, version);
 }
 
-bool binary_archive_reader::begin_object(std::string& type_name, uint32_t& version) {
-    if (pos_ >= data_.size()) return false;
+void binary_archive_reader::expect_marker(uint8_t marker, const char* expected) {
+    if (pos_ >= data_.size()) { throw_archive_expected(expected, "the end of the data"); }
+    const uint8_t found = data_[pos_];
+    if (found != marker) { throw_archive_expected(expected, "marker " + std::to_string(found)); }
+    ++pos_;
+}
 
-    uint8_t marker = read_uint8_raw();
-    if (marker != 0x01) {
-        throw runtime_error("Expected object marker, got " + std::to_string(marker));
-    }
+void binary_archive_reader::begin_object(std::string& type_name, uint32_t& version) {
+    enter_host_record(object_stack_.size());
+    expect_marker(0x01, "an object");
 
     type_name = read_string_raw();
     version = read_little_endian<uint32_t>();
@@ -587,7 +530,6 @@ bool binary_archive_reader::begin_object(std::string& type_name, uint32_t& versi
         throw serialization_error("Binary archive object property count exceeds remaining data");
     }
 
-    enter_host_record(object_stack_.size());
     // Pre-read all properties for out-of-order access
     object_stack_.emplace_back();
     auto& state = object_stack_.back();
@@ -613,7 +555,6 @@ bool binary_archive_reader::begin_object(std::string& type_name, uint32_t& versi
     }
 
     state.end_object_pos = values_base + offset;
-    return true;
 }
 
 void binary_archive_reader::end_object() {
@@ -625,14 +566,10 @@ void binary_archive_reader::end_object() {
     if (marker != 0x02) {
         throw runtime_error("Expected end object marker, got " + std::to_string(marker));
     }
-    current_property_value_ = nullptr;
 }
 
 size_t binary_archive_reader::begin_array() {
-    uint8_t marker = read_uint8_raw();
-    if (marker != 0x03) {
-        throw runtime_error("Expected array marker, got " + std::to_string(marker));
-    }
+    expect_marker(0x03, "an array");
     uint32_t size = read_little_endian<uint32_t>();
     // A length prefix can't exceed the bytes left (each element costs >=1 byte); reject an
     // oversized count instead of reserving/looping into a multi-GB allocation from a tiny
@@ -657,12 +594,7 @@ bool binary_archive_reader::read_property_name(std::string& name) {
 }
 
 size_t binary_archive_reader::begin_map() {
-    if (pos_ >= data_.size()) return 0;
-
-    uint8_t marker = read_uint8_raw();
-    if (marker != 0x05) {
-        throw serialization_error("Expected map marker (0x05)");
-    }
+    expect_marker(0x05, "a map");
 
     uint32_t size = read_little_endian<uint32_t>();
     // See begin_array: a map of `size` entries needs at least `size` more bytes.
@@ -701,7 +633,6 @@ const std::vector<std::string>& binary_archive_reader::get_object_property_names
 }
 
 bool binary_archive_reader::seek_property_by_index(size_t index) {
-    current_property_value_ = nullptr;
     seek_size_ = 0;
 
     if (object_stack_.empty()) return false;
@@ -717,7 +648,6 @@ bool binary_archive_reader::seek_property_by_index(size_t index) {
 }
 
 bool binary_archive_reader::seek_property_by_index(size_t index, const std::string& expected_name) {
-    current_property_value_ = nullptr;
     seek_size_ = 0;
 
     if (object_stack_.empty()) return false;
@@ -735,7 +665,6 @@ bool binary_archive_reader::seek_property_by_index(size_t index, const std::stri
 }
 
 bool binary_archive_reader::seek_property(const std::string& name) {
-    current_property_value_ = nullptr;
     seek_size_ = 0;
 
     if (object_stack_.empty()) {
@@ -768,12 +697,6 @@ bool binary_archive_reader::seek_property(const std::string& name) {
 }
 
 script_value binary_archive_reader::read_value() {
-    if (current_property_value_) {
-        auto val = *current_property_value_;
-        current_property_value_ = nullptr;
-        return val;
-    }
-
     return read_value_internal();
 }
 

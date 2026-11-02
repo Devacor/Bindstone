@@ -36,10 +36,14 @@ void static_property<T, P>::save(Archive& ar, const T& obj) const {
         ar.end_map();
     }
     else if constexpr (has_static_type_v<P>) {
+        ar.begin_object();
         jai_static_type<P>::save(ar, value);
+        ar.end_object();
     }
     else if constexpr (has_any_template_binder_v<P>) {
+        ar.begin_object();
         template_binder_accessor<P>::save(ar, value);
+        ar.end_object();
     }
     else {
         ar(value);
@@ -49,8 +53,10 @@ void static_property<T, P>::save(Archive& ar, const T& obj) const {
 template<typename T, typename P>
 template<typename Archive>
 void static_property<T, P>::load(Archive& ar, T& obj) const {
-    // Note: property name already consumed by caller or we read it here
-    // For now, assume we're reading values in order
+    // a missing key keeps the member's value, as a property_owner's load does
+    if (!ar.seek_property(name)) {
+        return;
+    }
 
     P& value = obj.*member;
 
@@ -61,7 +67,7 @@ void static_property<T, P>::load(Archive& ar, T& obj) const {
         using elem_t = typename P::value_type;
         size_t count = ar.begin_array();
         value.clear();
-        value.reserve(count);
+        serialization::reserve_for_load(value, count);
         for (size_t i = 0; i < count; ++i) {
             elem_t elem{};
             ar(elem);
@@ -70,30 +76,27 @@ void static_property<T, P>::load(Archive& ar, T& obj) const {
         ar.end_array();
     }
     else if constexpr (property_serialization::is_std_map_v<P>) {
-        using key_t = typename P::key_type;
-        using val_t = typename P::mapped_type;
+        static_assert(std::is_same_v<typename P::key_type, std::string>, "a JAI_STATIC_BINDER map property needs string keys");
         size_t count = ar.begin_map();
         value.clear();
         for (size_t i = 0; i < count; ++i) {
-            std::string key_str;
-            if (!ar.read_map_key(key_str)) break;
-            key_t key{};
-            if constexpr (std::is_same_v<key_t, std::string>) {
-                key = key_str;
-            } else if constexpr (std::is_integral_v<key_t>) {
-                key = static_cast<key_t>(std::stoll(key_str));
-            }
-            val_t val{};
+            std::string key;
+            if (!ar.read_map_key(key)) break;
+            typename P::mapped_type val{};
             ar(val);
-            value[key] = std::move(val);
+            value[std::move(key)] = std::move(val);
         }
         ar.end_map();
     }
     else if constexpr (has_static_type_v<P>) {
+        ar.begin_object();
         jai_static_type<P>::load(ar, value);
+        ar.end_object();
     }
     else if constexpr (has_any_template_binder_v<P>) {
+        ar.begin_object();
         template_binder_accessor<P>::load(ar, value);
+        ar.end_object();
     }
     else {
         ar(value);

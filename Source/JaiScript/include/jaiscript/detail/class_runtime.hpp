@@ -1366,11 +1366,11 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
         declared_types_dirty_ = false;
     }
 
-    std::set<uint64_t> old_fields;
+    std::set<uint64_t> old_fields;   // the whole chain's: an instance holds its inherited fields beside the class's own
     if (reparented) {
         old_fields = *reparented;
     } else if (fields_changed) {
-        for (const auto& [id, _] : field_defaults_) {
+        for (const auto& [id, _] : get_all_field_defaults()) {
             old_fields.insert(id);
         }
     }
@@ -1390,7 +1390,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     recompute_property_getters(new_methods, engine_ref);
 
     store_field_defaults(new_field_defaults, engine_ref);
-    const std::unordered_map<uint64_t, script_value>& migrated_fields = reparented ? get_all_field_defaults() : new_field_defaults;
+    const std::unordered_map<uint64_t, script_value> migrated_fields = get_all_field_defaults();
 
     // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
     // construct new same-class instances, which register mid-migration;

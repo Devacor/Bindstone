@@ -16,7 +16,6 @@ namespace jai {
 
         // Variable errors (1-10)
         undefined_variable = 1,
-        uninitialized_reference = 2,
         invalid_reference = 3,
         max_recursion_depth = 4,
 

@@ -10,8 +10,6 @@ std::string runtime_error_category_impl::message(int ev) const {
         // Variable errors
         case runtime_error_code::undefined_variable:
             return "Undefined variable";
-        case runtime_error_code::uninitialized_reference:
-            return "Reference variable must be initialized";
         case runtime_error_code::invalid_reference:
             return "Invalid reference";
         case runtime_error_code::max_recursion_depth:

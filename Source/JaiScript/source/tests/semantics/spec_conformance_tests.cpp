@@ -1762,6 +1762,13 @@ private:
 				const var& v = fv();
 				r + "|" + c.size() + v[0];
 			)", "raised|11", warn_region);
+			// a reference names a variable from its declaration on (C++): one without an initializer never loads, warn region or not
+			for (const char* src : {"void f() { int& r; print(\"x\"); } f();", "[[warn_mode]]; const var& r;", "namespace ns { int& r; }"}) {
+				auto e = make_engine();
+				std::string err;
+				try { e->execute(src); } catch (const std::exception& ex) { err = ex.what(); }
+				check_true(err.find("reference variable 'r' must be initialized") != std::string::npos, std::string(src) + ": " + err);
+			}
 		});
 	}
 
@@ -2017,7 +2024,6 @@ private:
 				{"iterate int", "", "for (auto x : 5) { }", "Cannot iterate int: not an array, map, string or coroutine", warn_region},
 				{"iterate null", "var n = null;", "for (auto x : n) { }", "Cannot iterate null: not an array, map, string or coroutine", warn_region},
 				{"auto array homogeneity", "var s = \"x\";", "auto a = [1, 2, 3, s];", "Array 'auto' requires homogeneous elements - type mismatch at index 3", warn_region},
-				{"reference uninitialized", "", "int& r;", "Reference variable must be initialized", warn_region},
 				{"this at top level", "", "var z = this;", "'this' can only be used inside methods", warn_region},
 			});
 		});

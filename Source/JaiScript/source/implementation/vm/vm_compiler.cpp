@@ -9123,11 +9123,6 @@ void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_dec
 	// slot decision below mirrors identifier loads (declared symbols keep parser slots).
 	if (is_reference) {
 		if (decl->slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(decl->slot_index)); }   // its load dereferences, possibly through a getter (a plain alias is taken back out below)
-		if (!decl->initializer) {
-			emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::uninitialized_reference),
-			     add_message("Reference variable must be initialized"), add_symbol(decl->name_id));
-			return;
-		}
 		if (decl->initializer->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(decl->initializer.get());
 			// bound to a value the unit declares (a value slot, an alias already plain, a program-level value

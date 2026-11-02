@@ -136,6 +136,16 @@ public:
 			)");
 			check_eq(std::string("boom"), e->execute("caught").as<std::string>());
 			check_eq((int64_t)1, e->execute("m.size()").as_int());
+			// a store runs the comparisons of its one search, as std::map does: a largest key is never a comparison's receiver
+			e->execute(R"(
+				class O { int a = 0; O(int x) { a = x; } bool operator<(O o) { if (a == 99) { throw "receiver"; } return a < o.a; } }
+				var n = {};
+				n[O(2)] = 2; n[O(1)] = 1;
+				string late = "none";
+				try { n[O(99)] = 9; } catch (err) { late = err; }
+			)");
+			check_eq(std::string("none"), e->execute("late").as<std::string>());
+			check_eq((int64_t)3, e->execute("n.size()").as_int());
 		});
 
 		// a key operator that throws once propagates its first throw: the subscript never retries into a copy that loses the write

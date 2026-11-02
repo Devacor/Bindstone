@@ -881,6 +881,12 @@ script_value script_value::make_map_entry_reference(const strong_ptr<script_map>
     ref->has_map_key = true;
     ref->container_map = map_storage;
     ref->container_element_type = value_type;
+    if (entry) {
+        // the entry the caller just found or inserted: its first touch does not run the key's operators again
+        const script_map::entry_memo memo = map_storage->memo_at(*ref->cell(), entry);
+        ref->map_memo_gen = memo.gen;
+        ref->map_memo_entry = memo.e;
+    }
     v.storage_ = ref;
     return v;
 }
@@ -2701,6 +2707,32 @@ void script_map::build_order_with_class_keys() const {
 		return script_value_map_less{}(a->first, b->first);
 	});
 	order_gen_ = gen_;
+}
+
+// build_order's order from what the map holds (a class key by its run, any other key by operator<=>, which is what the
+// key order gives every key outside a run), so a dying map orders its entries without its keys' operators or engine
+void script_map::order_by_key(std::vector<entry*>& entries) const noexcept {
+	std::unordered_map<const entry*, std::pair<size_t, size_t>> rank;
+	if (class_keys_) {
+		std::vector<const class_key_index::run*> runs;
+		for (const auto& run : class_keys_->runs) { runs.push_back(&run); }
+		std::sort(runs.begin(), runs.end(), [](const auto* a, const auto* b) { return class_run_before(a->cls, b->cls); });
+		for (size_t r = 0; r < runs.size(); ++r) {
+			for (size_t i = 0; i < runs[r]->keys.size(); ++i) { rank.emplace(runs[r]->keys[i], std::pair<size_t, size_t>{r, i}); }
+		}
+	}
+	std::sort(entries.begin(), entries.end(), [&rank](const entry* a, const entry* b) {
+		const auto ra = rank.find(a);
+		const auto rb = rank.find(b);
+		const bool ca = ra != rank.end(), cb = rb != rank.end();
+		if (ca && cb) { return ra->second < rb->second; }
+		if (ca || cb) {
+			const script_value_type ta = a->kv.first.type(), tb = b->kv.first.type();
+			if (ta != tb) { return ta < tb; }
+			return ca;
+		}
+		return (a->kv.first <=> b->kv.first) < 0;
+	});
 }
 
 // The kinds ranked below objects come first in the order, then the class runs by class_run_before, then the other objects:

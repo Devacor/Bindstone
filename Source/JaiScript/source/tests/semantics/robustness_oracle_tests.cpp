@@ -265,8 +265,11 @@ private:
 				lam(); log += "|";
 				{ Holder hh; } log += "|";
 				{ Token a = Token("a"); Token b = Token("b"); { Token i = Token("i"); Token j = Token("j"); } log += "."; }
+				class Key { int v; Key(int a) { v = a; } ~Key() { log += "k" + v; } int operator<=>(const Key& o) { return v - o.v; } }
+				function keyed() { map<Key, int> m; m[Key(5)] = 1; m[Key(3)] = 2; m[Key(9)] = 3; log += ":"; map<int, Token> t; t[2] = Token("q"); t[1] = Token("p"); log += ":"; }
+				log += "|"; keyed();
 				log;
-			)", "cxyba|ba!|ba,ca|ba|ba|H21|ji.ba");
+			)", "cxyba|ba!|ba,ca|ba|ba|H21|ji.ba|::pqk3k5k9");
 		});
 	}
 

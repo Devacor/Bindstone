@@ -783,7 +783,6 @@ inline void class_definition::prime_region_memos() {
         dtor_memo_epoch_ = method_epoch_;
     }
     if (auto eng = engine_) {
-        if (has_script_dtor_ && !eng->destructors_armed()) { eng->note_destructors_armed(); }
         (void)destructor_id(*eng);
         (void)destructor_body(*eng);
     }
@@ -808,7 +807,6 @@ inline strong_ptr<class_instance> class_definition::allocate_instance() {
         }
         dtor_memo_epoch_ = method_epoch_;
     }
-    if (has_script_dtor_ && engine_ && !engine_->destructors_armed()) { engine_->note_destructors_armed(); }
     return class_instance::make(interned_name_id(), engine_, field_slot_count(), has_script_dtor_ ? this : nullptr);
 }
 
@@ -929,6 +927,12 @@ inline void class_definition::set_parent(std::shared_ptr<class_definition> paren
 
 [[nodiscard]] inline bool class_definition::set_parents(const std::vector<std::shared_ptr<class_definition>>& parents) {
     const bool chain_changed = parent_classes_ != parents;   // every (re)definition rewires; identical reloads must not move the shape epoch
+    reparented_from_fields_.reset();
+    if (chain_changed) {
+        std::set<uint64_t> before;
+        for (const auto& [id, _] : get_all_field_defaults()) { before.insert(id); }
+        reparented_from_fields_ = std::move(before);
+    }
     parent_classes_ = parents;
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
@@ -1313,14 +1317,16 @@ inline bool class_definition::structural_key_shape_matches(size_t member_count, 
     return !structural_key_.empty() && key_member_count_ == member_count && key_base_count_ == base_count;
 }
 
-inline void class_definition::redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults, const std::unordered_map<uint64_t, script_value>& new_methods, const std::unordered_map<uint64_t, script_value>& new_static_methods, engine* engine_ref, bool structurally_identical) {
+inline void class_definition::redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults, const std::unordered_map<uint64_t, script_value>& new_methods, const std::unordered_map<uint64_t, script_value>& new_static_methods, engine* engine_ref, bool structurally_identical, const std::function<void()>& discard_unwinding) {
     if (engine_ref) { engine_ref->recover_parallel_registrations(); }
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
     ++reflection_generation_;
     if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
+    // a changed base list migrates the whole chain: inherited fields come and go as the class's own do
+    const std::optional<std::set<uint64_t>> reparented = std::exchange(reparented_from_fields_, std::nullopt);
 
-    if (structurally_identical) {
+    if (structurally_identical && !reparented) {
         // Identical reload (structural AST equality, established by the caller):
         // ADOPT the new ASTs — methods were re-minted from the fresh parse, so
         // debugger/error positions track cosmetic shifts — and skip all
@@ -1335,11 +1341,8 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
         ++identical_redefinitions_;
         return;
     }
-    bool fields_changed = false;
-
-    if (field_defaults_.size() != new_field_defaults.size()) {
-        fields_changed = true;
-    } else {
+    bool fields_changed = reparented.has_value() || field_defaults_.size() != new_field_defaults.size();
+    if (!fields_changed) {
         for (const auto& [id, _] : field_defaults_) {
             if (new_field_defaults.find(id) == new_field_defaults.end()) {
                 fields_changed = true;
@@ -1385,7 +1388,9 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     }
 
     std::set<uint64_t> old_fields;
-    if (fields_changed) {
+    if (reparented) {
+        old_fields = *reparented;
+    } else if (fields_changed) {
         for (const auto& [id, _] : field_defaults_) {
             old_fields.insert(id);
         }
@@ -1406,6 +1411,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     recompute_property_getters(new_methods, engine_ref);
 
     store_field_defaults(new_field_defaults, engine_ref);
+    const std::unordered_map<uint64_t, script_value>& migrated_fields = reparented ? get_all_field_defaults() : new_field_defaults;
 
     // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
     // construct new same-class instances, which register mid-migration;
@@ -1419,37 +1425,21 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
             continue;
         }
         if (fields_changed) {
-            for (const auto& [name, default_value] : new_field_defaults) {
+            for (const auto& [name, default_value] : migrated_fields) {
                 if (!instance->has_field(name)) {
                     instance->set_field(name, default_value.clone());
                 }
             }
-
+            // retyped fields convert before the hook (it is checked against the new types); removed ones go after it reads them
+            instance->migrate_fields(old_fields, migrated_fields, true);
             if (migrate_method_it != new_methods.end() && !migrate_method_it->second.is_null()) {
-                // Per-instance isolation: one instance's migrate hook erroring (throwing,
-                // or returning an error) must not abort the reload for the others.
-                try {
-                    auto instance_value = script_value::make_object(name_, instance, engine_ref);
-                    const script_function& migrate_func = migrate_method_it->second.as_function();
-                    std::vector<script_value> args = {instance_value};
-                    auto result = migrate_func(args);
-                    (void)result;
-                } catch (...) {
-                    // A migrate hook that throws (script throw, runtime error, anything)
-                    // must not abort the reload for the other instances. Catch-all because
-                    // a script throw is not necessarily a std::exception.
-                }
+                run_migrate_hook(script_value::make_object(name_, instance, engine_ref), migrate_method_it->second, engine_ref, discard_unwinding);
             }
-
-            instance->migrate_fields(old_fields, new_field_defaults, true);
+            instance->drop_fields_absent_from(migrated_fields);
             if (engine_) { engine_->count_hot_reload_field_migration(); }
         }
-
-        try {
-            instance->set_class_definition(shared_from_this());
-        } catch (const std::exception& e) {
-            (void)e;
-        }
+        instance->set_class_definition(shared_from_this());
+        instance->arm_late_destructor(*this);
     }
     method_metadata_.clear();
 
@@ -1480,6 +1470,8 @@ inline void class_definition::update_instances_from_base() {
     for (const auto& weak : registered_instances()) {
         if (auto instance = weak.lock()) {
             instance->migrate_fields(dummy_old_fields, all_fields);
+            instance->drop_fields_absent_from(all_fields);
+            instance->arm_late_destructor(*this);
             if (engine_) { engine_->count_hot_reload_field_migration(); }
         }
     }
@@ -1728,12 +1720,15 @@ inline void class_instance::set_class_definition(class_definition* class_def) {
     rehome_overflow_fields();
 }
 
+inline void class_instance::arm_late_destructor(const class_definition& cls) {
+    if (!destructor_armed_ && owner_ && cls.is_script_class() && cls.chain_declares_destructor(*owner_)) {
+        destructor_armed_ = late_destructor_ = true;
+    }
+}
+
 inline void class_instance::reclass(const std::shared_ptr<class_definition>& class_def, bool drop_undeclared) {
     if (!class_def || class_def.get() == class_def_) { return; }
-    if (!destructor_armed_ && owner_ && class_def->is_script_class() && class_def->chain_declares_destructor(*owner_)) {
-        destructor_armed_ = late_destructor_ = true;
-        if (!owner_->destructors_armed()) { owner_->note_destructors_armed(); }
-    }
+    arm_late_destructor(*class_def);
     std::vector<std::pair<uint64_t, field_cell>> cells;
     if (class_def_) {
         cells.reserve(flat_fields_.size());
@@ -3203,9 +3198,16 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
         }
     }
 
-    // Drop fields absent from the new definition (the C++ object is no field and stays).
+}
+
+inline void class_instance::drop_fields_absent_from(const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
+    const bool reporting = owner_ && owner_->hot_reload_reporting();
+    auto record = [&](uint64_t field_id, const script_value* before) {
+        if (reporting) { owner_->record_field_migration(type_name(), field_id, field_migration_outcome::removed, before, nullptr); }
+    };
     // Slots drop IN PLACE (value overwritten with the invalid absent marker: the cell
     // address survives, the dropped value's resources free NOW like the old map erase).
+    // The C++ object is no field and stays.
     if (class_def_) {
         const size_t n = flat_fields_.size();
         for (size_t slot = 0; slot < n; ++slot) {
@@ -3215,7 +3217,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             }
             const uint64_t id = class_def_->slot_field(static_cast<uint32_t>(slot));
             if (new_field_defaults.find(id) == new_field_defaults.end()) {
-                record(id, field_migration_outcome::removed, v, nullptr);
+                record(id, v);
                 *v = script_value::make_invalid(owner_);
             }
         }
@@ -3223,7 +3225,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
     if (overflow_fields()) {
         for (auto it = overflow_fields()->begin(); it != overflow_fields()->end();) {
             if (new_field_defaults.find(it->first) == new_field_defaults.end()) {
-                record(it->first, field_migration_outcome::removed, &it->second, nullptr);
+                record(it->first, &it->second);
                 it = overflow_fields()->erase(it);
             } else {
                 ++it;

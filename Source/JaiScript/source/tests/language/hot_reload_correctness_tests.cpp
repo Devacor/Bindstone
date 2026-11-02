@@ -143,9 +143,11 @@ public:
         });
 
         // An error in one instance's hot_reload_migrate hook must not abort the reload for
-        // the others.
+        // the others, and reaches the script-error handler with the class's name.
         test("migrate_hook_error_is_isolated", [&]() {
             auto eng = make_engine();
+            std::string reported;
+            eng->set_script_error_handler([&](const std::string& message) { reported += message; });
             eng->execute(R"(
                 class Item {
                     int v = 0;
@@ -154,9 +156,44 @@ public:
                 auto a = Item(); a.v = 1;
                 auto b = Item(); b.v = 2;
             )");
-            eng->execute("class Item { int v = 0; int w = 5; void hot_reload_migrate() { if (v == 1) { throw \"boom\"; } } }");
-            check_eq(eng->execute("b.w").as<int>(), 5); // b migrated despite a's hook throwing
+            eng->execute("class Item { int v = 0; int w = 5; void hot_reload_migrate() { if (v == 1) { throw \"boom\"; } w = v * 10; } }");
+            check_eq(eng->execute("b.w").as<int>(), 20); // b migrated despite a's hook throwing
             check_eq(eng->execute("b.v").as<int>(), 2);
+            check_true(reported.find("Item::hot_reload_migrate failed: boom") != std::string::npos, reported);
+        });
+
+        // The hook runs against the new declaration: a retyped field already holds its converted value, and a field the
+        // reload removes is still readable (the drop comes after the hook)
+        test("migrate_hook_sees_retyped_fields_converted", [&]() {
+            auto eng = make_engine();
+            eng->execute("class Player { int hp = 100; } var p = Player(); p.hp = 62;");
+            eng->execute("class Player { string hp = \"0\"; int n = 0; void hot_reload_migrate() { n = hp.size(); hp = hp + \"!\"; } }");
+            check_eq(std::string("62! 2"), eng->execute("p.hp + \" \" + p.n").to_string());
+        });
+
+        // A changed base list migrates the inherited fields: the new base's fields start from their initializers, the old
+        // base's leave, and the new chain's destructor runs at the object's death
+        test("a_changed_base_migrates_inherited_fields", [&]() {
+            auto eng = make_engine();
+            std::string log;
+            eng->add_function("note", [&log](std::string s) { log += s; });
+            eng->execute(R"(
+                class B1 { int x = 1; int who() { return 1; } }
+                class B2 { int y = 2; int who() { return 2; } ~B2() { note("~" + y); } }
+                class D : B1 { int d = 0; D(int v) { d = v; } }
+                var a = D(1);
+                class E : D { int e = 5; E() : D(3) {} }
+                var b = E();
+            )");
+            eng->execute("class D : B2 { int d = 0; D(int v) { d = v; } }");
+            check_eq(std::string("2 2 1 2 3 5"), eng->execute("\"\" + a.who() + \" \" + a.y + \" \" + a.d + \" \" + b.y + \" \" + b.d + \" \" + b.e").to_string());
+            check_eq(std::string("D has no member 'x'"), eng->execute("var r = \"\"; try { var gone = a.x; } catch (e) { r = e; } r;").to_string());
+            eng->execute("a = null; b = null;");
+            check_eq(std::string("~2~2"), log);
+            eng->execute("var c = D(4);");
+            eng->execute("class D { int d = 0; D(int v) { d = v; } }");
+            check_eq(std::string("D has no member 'y' 4"), eng->execute("var r = \"\"; try { var gone = c.y; } catch (e) { r = e; } r + \" \" + c.d;").to_string(),
+                     "a base the reload removes takes its fields along");
         });
 
         // A hot_reload_migrate hook that constructs a new same-class instance must not hang

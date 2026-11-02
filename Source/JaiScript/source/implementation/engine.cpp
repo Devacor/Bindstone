@@ -2497,14 +2497,11 @@ engine::~engine() {
         impl->runs.sleep_identity = nullptr;
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
-        if (impl->backend && destructors_armed_ && impl->global_environment_) {
+        if (impl->backend && impl->global_environment_) {
             release_program_scope_in_reverse();
         }
         impl->tearing_down = true;
         impl->backend.reset();
-        // Without a destructor nothing a value releases runs script: program-scope values die while their classes still
-        // reach the engine, so a long chain releases on the release stack
-        if (!destructors_armed_ && impl->global_environment_) { impl->global_environment_->clear_values(); }
         // Definitions a host or a captured environment keeps alive past this point must not
         // consult the engine from an instance destructor (registry_lock reads it)
         for (auto& [name, def] : impl->classes) { if (def) { def->detach_for_teardown(); } }
@@ -5570,6 +5567,31 @@ void engine::report_script_error(const std::string& a_message, std::error_code a
     } else {
         std::cerr << "[jaiscript] " << message << std::endl;
     }
+}
+
+void class_definition::run_migrate_hook(script_value instance_value, const script_value& hook, engine* engine_ref,
+                                         const std::function<void()>& discard_unwinding) {
+    std::string failure;
+    std::error_code code;
+    try {
+        std::vector<script_value> args{std::move(instance_value)};
+        auto ran = hook.as_function()(args);
+        execution_backend* backend = engine_ref ? engine_ref->get_execution_backend() : nullptr;
+        if (backend && backend->is_unwinding()) {   // a script throw latches on the running backend: it belongs to this hook alone
+            failure = backend->get_current_exception().what();
+            if (discard_unwinding) { discard_unwinding(); }
+        } else if (ran) {
+            return;
+        } else {
+            code = ran.error();
+            if (engine_ref) { failure = format_error(ran, *engine_ref->get_symbolizer()); }
+        }
+    } catch (const std::exception& e) {
+        failure = e.what();
+    } catch (...) {
+        failure = "unknown error";
+    }
+    if (engine_ref) { engine_ref->report_script_error(name_ + "::hot_reload_migrate failed: " + failure, code); }
 }
 
 std::type_index engine_context_type_index() noexcept {

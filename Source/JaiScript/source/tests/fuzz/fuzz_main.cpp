@@ -6,65 +6,7 @@
 // results / printed output / error text / engine liveness.
 // Fully deterministic from the seed.
 //
-// Usage:
-//   jaiscript_fuzz                          run seeds 0..999 (default --iterations 1000)
-//   jaiscript_fuzz --iterations 10000       run seeds 0..9999
-//   jaiscript_fuzz --seed 1234              run exactly one seed (verbose)
-//   jaiscript_fuzz --seed-start 5000        first seed of the run's range
-//   jaiscript_fuzz --minimize               auto-minimize each divergence
-//   jaiscript_fuzz --corpus DIR             write failing programs + minimized forms + repro skeletons
-//   jaiscript_fuzz --timeout-ms 250         per-execute engine budget (default 250)
-//   jaiscript_fuzz --max-depth 4            expression depth cap
-//   jaiscript_fuzz --dump N                 print the generated program for seed N and exit
-//   jaiscript_fuzz --child --seed N         one seed, machine-readable verdict via exit code
-//                                           (0 agree, 20 diverge, 21 budget-skip)
-//   jaiscript_fuzz --isolate                spawn a --child process per seed (crash isolation:
-//                                           a VM crash doesn't kill the run)
-//   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too
-//   jaiscript_fuzz --vm-reference           the pair is the optimized vm against the vm in engine::vm_reference_mode (every
-//                                           optimization off): a divergence is a bug of an optimized lane (the everyday pair;
-//                                           every other flag composes with it, the switches applying to the optimized side)
-//   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)
-//   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false) and engine::local_alias(false)
-//   jaiscript_fuzz --local-alias-band       append the read-only local band (by-value locals beside writes of their sources) to
-//                                           every program (default: its own roll, ~35%); --no-local-alias-band never appends it
-//   jaiscript_fuzz --regex-band             append the regex band (generated patterns through every regex call on strings and
-//                                           utf8_strings, literal and built at run time) to every program (default: its own roll,
-//                                           ~25%); --no-regex-band never appends it
-//   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)
-//   jaiscript_fuzz --no-lowering            run both backends with engine::aggregate_lowering(false) (by default the interpreter
-//                                           runs boxed and the vm lowered, so every run is the lowering's differential)
-//   jaiscript_fuzz --lowered-interp         run both backends lowered (the interpreter's lowered tree against the vm's)
-//   jaiscript_fuzz --element-band           prepend the element-argument band to every program (default: its own roll, ~30%)
-//   jaiscript_fuzz --no-element-band        never prepend it (the programs of the generator before the band)
-//   jaiscript_fuzz --math-band              prepend the math band (math::vec2/vec3/ivec2/ivec3 through every lvalue kind) to every
-//                                           program (default: its own roll, ~25%); --no-math-band never prepends it
-//   jaiscript_fuzz --call-args-band         prepend the call-argument band (typed arrays read by index as the arguments of one kept call
-//                                           in a counted loop, two to four from different arrays, mixed with locals) to every program
-//                                           (default: its own roll, ~25%); --no-call-args-band never prepends it
-//   jaiscript_fuzz --block-shapes           block shapes in every program (default: their own roll, ~50%): the main program's
-//                                           statements run inside a function among closable counted loops (typed locals, typed local
-//                                           and program-scope arrays at plain [i], branches, math intrinsics, nested loops, grafted and
-//                                           kept helper calls), and the math band gains a lowered-math loop; --no-block-shapes never
-//   jaiscript_fuzz --order-band             ordering programs (writing calls beside reads of what they write), three oracles: the
-//                                           backends agree, the program agrees with its metamorphic variant (operands evaluated into
-//                                           locals left to right), and every run prints what the generator's spec model computes
-//   jaiscript_fuzz --order-args             with --order-band: call arguments read what a sibling argument's call writes too (the
-//                                           model captures each by-value argument where it is evaluated)
-//   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with
-//                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)
-//   jaiscript_fuzz --rename                 the metamorphic renaming oracle too: every generated name gains a suffix, and each
-//                                           backend's outcome (names restored) must equal its run of the original
-//   jaiscript_fuzz --census                the block census instead of the differential: per segment label (each band, the main
-//                                           program, the reload; --order-band / --order-args for the ordering programs) the share of
-//                                           programs that compiled a closed loop, entered a block and entered a closed block, the refused
-//                                           loops by class and instruction, and in a JAISCRIPT_VM_COVERAGE build the executed operations
-//                                           in cells and the general form's reasons (vm side only; the band flags pick the segments)
-//   jaiscript_fuzz --jaibite-mutate --iterations 10000
-//                                         isolated loader-only byte mutants, BOTH backends
-//                                         (0 accepted, 24 clean rejection, 20 finding, 23 hang)
-//
-// Exit code: 0 = no new divergences, 1 = new divergences found, 20/21 = child verdicts.
+// jaiscript_fuzz --help prints every flag.
 
 #include "fuzz_census.hpp"
 #include "fuzz_generator.hpp"
@@ -127,6 +69,69 @@ namespace {
 		std::string exe_path;
 	};
 
+	void print_usage() {
+		std::cout <<
+		"usage:\n"
+		"   jaiscript_fuzz                          run seeds 0..999 (default --iterations 1000)\n"
+		"   jaiscript_fuzz --iterations 10000       run seeds 0..9999\n"
+		"   jaiscript_fuzz --seed 1234              run exactly one seed (verbose)\n"
+		"   jaiscript_fuzz --seed-start 5000        first seed of the run's range\n"
+		"   jaiscript_fuzz --minimize               auto-minimize each divergence\n"
+		"   jaiscript_fuzz --corpus DIR             write failing programs + minimized forms + repro skeletons\n"
+		"   jaiscript_fuzz --timeout-ms 250         per-execute engine budget (default 250)\n"
+		"   jaiscript_fuzz --max-depth 4            expression depth cap\n"
+		"   jaiscript_fuzz --dump N                 print the generated program for seed N and exit\n"
+		"   jaiscript_fuzz --child --seed N         one seed, machine-readable verdict via exit code\n"
+		"                                           (0 agree, 20 diverge, 21 budget-skip)\n"
+		"   jaiscript_fuzz --isolate                spawn a --child process per seed (crash isolation:\n"
+		"                                           a VM crash doesn't kill the run)\n"
+		"   jaiscript_fuzz --no-suppressions        report known (suppressed) divergences too\n"
+		"   jaiscript_fuzz --vm-reference           the pair is the optimized vm against the vm in engine::vm_reference_mode (every\n"
+		"                                           optimization off): a divergence is a bug of an optimized lane (the everyday pair;\n"
+		"                                           every other flag composes with it, the switches applying to the optimized side)\n"
+		"   jaiscript_fuzz --no-proofs              run both backends with engine::type_proofs(false)\n"
+		"   jaiscript_fuzz --no-param-alias         run both backends with engine::parameter_alias(false) and engine::local_alias(false)\n"
+		"   jaiscript_fuzz --local-alias-band       append the read-only local band (by-value locals beside writes of their sources) to\n"
+		"                                           every program (default: its own roll, ~35%); --no-local-alias-band never appends it\n"
+		"   jaiscript_fuzz --regex-band             append the regex band (generated patterns through every regex call on strings and\n"
+		"                                           utf8_strings, literal and built at run time) to every program (default: its own roll,\n"
+		"                                           ~25%); --no-regex-band never appends it\n"
+		"   jaiscript_fuzz --no-passes              run both backends with engine::ir_passes(false)\n"
+		"   jaiscript_fuzz --no-lowering            run both backends with engine::aggregate_lowering(false) (by default the interpreter\n"
+		"                                           runs boxed and the vm lowered, so every run is the lowering's differential)\n"
+		"   jaiscript_fuzz --lowered-interp         run both backends lowered (the interpreter's lowered tree against the vm's)\n"
+		"   jaiscript_fuzz --element-band           prepend the element-argument band to every program (default: its own roll, ~30%)\n"
+		"   jaiscript_fuzz --no-element-band        never prepend it (the programs of the generator before the band)\n"
+		"   jaiscript_fuzz --math-band              prepend the math band (math::vec2/vec3/ivec2/ivec3 through every lvalue kind) to every\n"
+		"                                           program (default: its own roll, ~25%); --no-math-band never prepends it\n"
+		"   jaiscript_fuzz --call-args-band         prepend the call-argument band (typed arrays read by index as the arguments of one kept call\n"
+		"                                           in a counted loop, two to four from different arrays, mixed with locals) to every program\n"
+		"                                           (default: its own roll, ~25%); --no-call-args-band never prepends it\n"
+		"   jaiscript_fuzz --block-shapes           block shapes in every program (default: their own roll, ~50%): the main program's\n"
+		"                                           statements run inside a function among closable counted loops (typed locals, typed local\n"
+		"                                           and program-scope arrays at plain [i], branches, math intrinsics, nested loops, grafted and\n"
+		"                                           kept helper calls), and the math band gains a lowered-math loop; --no-block-shapes never\n"
+		"   jaiscript_fuzz --order-band             ordering programs (writing calls beside reads of what they write), three oracles: the\n"
+		"                                           backends agree, the program agrees with its metamorphic variant (operands evaluated into\n"
+		"                                           locals left to right), and every run prints what the generator's spec model computes\n"
+		"   jaiscript_fuzz --order-args             with --order-band: call arguments read what a sibling argument's call writes too (the\n"
+		"                                           model captures each by-value argument where it is evaluated)\n"
+		"   jaiscript_fuzz --miss-every N           the vm side misses at every Nth plain cell instruction (a build with\n"
+		"                                           JAISCRIPT_MISS_INJECTION defined: the flush and the continuation contract at every position)\n"
+		"   jaiscript_fuzz --rename                 the metamorphic renaming oracle too: every generated name gains a suffix, and each\n"
+		"                                           backend's outcome (names restored) must equal its run of the original\n"
+		"   jaiscript_fuzz --census                the block census instead of the differential: per segment label (each band, the main\n"
+		"                                           program, the reload; --order-band / --order-args for the ordering programs) the share of\n"
+		"                                           programs that compiled a closed loop, entered a block and entered a closed block, the refused\n"
+		"                                           loops by class and instruction, and in a JAISCRIPT_VM_COVERAGE build the executed operations\n"
+		"                                           in cells and the general form's reasons (vm side only; the band flags pick the segments)\n"
+		"   jaiscript_fuzz --jaibite-mutate --iterations 10000\n"
+		"                                         isolated loader-only byte mutants, BOTH backends\n"
+		"                                         (0 accepted, 24 clean rejection, 20 finding, 23 hang)\n"
+		"\n"
+		"Exit code: 0 = no new divergences, 1 = new divergences found, 20/21 = child verdicts.\n";
+	}
+
 	bool parse_args(int argc, char** argv, options& opt) {
 		opt.exe_path = argv[0];
 		for (int i = 1; i < argc; ++i) {
@@ -171,6 +176,7 @@ namespace {
 			else if (a == "--order-args") { opt.order = true; opt.order_args = true; }
 			else if (a == "--miss-every") { const char* v = next("--miss-every"); if (!v) return false; opt.miss_every = static_cast<uint32_t>(std::stoul(v)); }
 			else if (a == "--run") { const char* v = next("--run"); if (!v) return false; opt.run_file = v; }
+			else if (a == "--help" || a == "-h") { print_usage(); std::exit(0); }
 			else { std::cerr << "unknown argument: " << a << "\n"; return false; }
 		}
 		if (opt.jaibite_mutate && (opt.dump || !opt.run_file.empty() || opt.minimize_flag)) {
@@ -693,7 +699,9 @@ int main(int argc, char** argv) {
 		for (auto s : suppressed_seeds) std::cout << " " << s;
 	}
 	std::cout << "\nbudget-skips:   " << budget << "\n";
-	std::cout << "lowered locals: " << opt.lowered_locals << " in " << opt.lowered_programs << " programs (optimized vm side)\n";
+	if (!opt.isolate) {   // the children lower; their counts do not come back
+		std::cout << "lowered locals: " << opt.lowered_locals << " in " << opt.lowered_programs << " programs (optimized vm side)\n";
+	}
 	std::cout << "crashes:        " << crashes;
 	if (!crash_seeds.empty()) {
 		std::cout << "  seeds:";

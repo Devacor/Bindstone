@@ -1,7 +1,6 @@
 // Seeded differential-fuzz smoke suite: every CI run fuzzes a little.
 // Runs a fixed range of generator seeds through the same harness as
-// jaiscript_fuzz and asserts zero UNSUPPRESSED divergences (known in-flight
-// parity gaps are matched by the suppressions in fuzz_harness.hpp).
+// jaiscript_fuzz and asserts zero divergences outside the suppressions of fuzz_harness.hpp.
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
@@ -32,7 +31,7 @@ public:
 				fuzz::program p = fuzz::generate_program(seed, 3, band, math, call_args, blocks);
 				fuzz::compare_result cr = fuzz::compare_program(p, k_budget_seconds, proofs, true, true, 0, lowering);
 				if (cr.kind != fuzz::compare_result::diverge) continue;
-				if (!fuzz::match_suppression(p, cr.diff).empty()) continue; // known, in-flight fix
+				if (!fuzz::match_suppression(p, cr.diff).empty()) continue;
 				// Rare path: some known shapes are only recognizable minimized
 				// (e.g. eval-order divergences buried in printed-output noise).
 				{

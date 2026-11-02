@@ -16,7 +16,10 @@ jaiscript file.jai [options] [-- args...]
 
 Runs the script and exits. The exit code is the script's result if it is an int
 (a trailing expression works: end your script with `some_int_expr`), otherwise 0;
-script errors print message + stack trace to stderr and exit 1; usage errors exit 2.
+script errors print message + stack trace to stderr and exit 1; usage errors (an unknown
+flag, a missing or malformed value) exit 2. Only 0 to 255 survive as an exit code on every
+platform: an int outside that range exits with its low byte (`300` exits 44, `-1` exits 255),
+on Windows as on POSIX, so keep a result meant as an exit code in that range.
 
 - `include`/`import` resolve relative to the script's own directory.
 - Everything after `--` is the global `ARGS` (array of strings).
@@ -76,6 +79,7 @@ jai> add(4, 5)
   file runs that file into the session — this is exactly what dropping a file onto an
   open console window produces.
 - **Piping works**: `echo 1+1 | jaiscript` (prompts and banner only print on a real console).
+  A piped session exits 1 when any input failed (an error, a missing file), else 0.
 
 Meta-commands (`:help` inside):
 
@@ -83,7 +87,7 @@ Meta-commands (`:help` inside):
 |---|---|
 | `:load <path>` | run a `.jai` file into this session |
 | `:reset` | fresh engine (keeps backend, budget, debugger) |
-| `:backend vm\|interp` | switch backend — resets the engine (backends can't swap mid-engine) |
+| `:backend vm\|interp\|vm-reference` | switch backend — resets the engine (backends can't swap mid-engine) |
 | `:time on\|off` | print wall time per execute |
 | `:quit` / `:exit` | leave (Ctrl+Z+Enter or Ctrl+C also work) |
 
@@ -107,11 +111,15 @@ a catchable error at the import, and the program keeps its old code
 
 ```
 -e <source>           run the source text instead of a file (repeatable; see Mode 1)
---backend=vm|interp   execution backend (default vm)
+--backend=vm|interp|vm-reference
+                      execution backend (default vm; vm-reference is the VM with every
+                      optimization off)
 --budget=N            execution budget in seconds per execute (default 0 = unlimited;
                       the embedded-engine default of 5.0s is deliberately lifted —
                       long loops are the user's business in a runner)
 --time                print wall time for each run
+--warnings            list the static checker's warnings on stderr before a script runs
+                      (errors always fail the load and print)
 --benchmark-main=N    execute the file as a warm-up, then call its repeatable main() N times
 --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>
 --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits)
@@ -125,13 +133,19 @@ a catchable error at the import, and the program keeps its old code
                       (default: the engine's own)
 --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)
 --no-local-alias      copy every by-value local declaration (the read-only local elision off)
---no-proofs           run without type proofs, typed ops or cell blocks (the general form)
+--no-proofs           run without type proofs and the typed instructions they enable (the
+                      general form)
 --no-debug            don't stand up the DAP debug listener
 --debug-port=N        first port the listener tries (default 52477, probing +10)
 --pause / --no-pause  force / suppress the exit hold after a file run
 --selftest            built-in smoke tests (balancer, file mode, scripted REPL session)
 --version / --help
 ```
+
+A value flag takes its value after `=` or as the next argument (`--workers=4`, `--workers 4`);
+any other spelling is an unknown flag. Numbers are checked: `--workers` 0 to 4096, `--debug-port`
+1 to 65535, `--budget` a finite number of seconds from 0, `--benchmark-main` and `--miss-every`
+counts from 0.
 
 ## Environment the runner provides
 

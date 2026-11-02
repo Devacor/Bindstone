@@ -29,13 +29,7 @@ JAI_RELEASE_DIR="$(jai_abs "${JAI_RELEASE_DIR:-build}")"
 JAI_CI_LOG_DIR="${JAI_CI_LOG_DIR:-$(lockq_temp_dir)/jaiscript-ci-$(printf '%s' "$JAI_ROOT" | cksum | cut -d' ' -f1)}"
 mkdir -p "$JAI_CI_LOG_DIR"
 
-jai_python() {
-	local candidate
-	for candidate in python3 python; do
-		"$candidate" -c "import sys; sys.exit(sys.version_info < (3, 8))" >/dev/null 2>&1 && { echo "$candidate"; return; }
-	done
-	echo python
-}
+. "$JAI_ROOT/tools/ci/python.sh"
 
 jai_dir_of() { [ "$1" = debug ] && echo "$JAI_DEBUG_DIR" || echo "$JAI_RELEASE_DIR"; }
 

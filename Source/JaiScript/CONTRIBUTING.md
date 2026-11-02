@@ -229,6 +229,9 @@ Ubuntu 24.04 — and each of the six builds runs:
 - the embedding quickstart's host (`embed_quickstart`), whose checks must all hold
 - the language server's protocol tests (`tools/lsp/tests/lsp_test.py`: golden fixtures and the
   Gator Quest checks, plus its edit-latency budget in Release)
+- the web host against the runner's HTTP client (`tools/jai_spider/tests/spider_test.py`)
+- the runner's own smoke tests (`jaiscript --selftest`) and, in Release, the documentation site
+  (`docs/site_tools/verify_site.py`: every sample on both backends)
 
 A separate job runs a cheap `-fsyntax-only` sweep of every implementation file, which catches
 MSVC-isms and missing standard includes without waiting for the matrix. The gates live in

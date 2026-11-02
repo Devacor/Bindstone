@@ -11,7 +11,7 @@ Language support for [JaiScript](../../), an embedded scripting language for C++
   inferred types, signatures, class fields), completion (scope, members after `.`, namespaces and
   enums after `::`, builtin container and string methods, host functions), signature help, rename
   (refused with the reason when it cannot be proven complete), document and workspace symbols.
-- **Syntax highlighting** - TextMate grammar for `.script`, `.jai`, and `.jaibite` files.
+- **Syntax highlighting** - TextMate grammar for `.jai` files.
 - **Attach debugging** - breakpoints, stepping, call stack and variables over the Debug Adapter
   Protocol. The DAP server lives inside the C++ host (`jai::debug::debug_connector`, a raw TCP port); this
   extension points VS Code's DAP client straight at that socket, with nothing to spawn.
@@ -31,7 +31,7 @@ code tools/vscode-jaiscript        # F5 opens an Extension Development Host
 or link it into your extensions folder
 (`mklink /J "%USERPROFILE%\.vscode\extensions\snapjaw.jaiscript" tools\vscode-jaiscript` on
 Windows), or package it: `npm install`, `npx @vscode/vsce package`, then
-`code --install-extension jaiscript-0.2.0.vsix`.
+`code --install-extension jaiscript-0.5.0.vsix`.
 
 Build the server like any other target, `cmake --build build --target jaiscript_lsp`; the binary
 lands in `build/bin/` (see `docs/BUILD.md`). The extension looks for it in this order: the
@@ -53,20 +53,21 @@ checkout's `build/bin/` and `build-debug/bin/` (the CMake presets), the Visual S
 
 ## Attach debugging
 
-In the host, inject a connector on the engine:
+The standalone runner listens by default: `jaiscript game.jai` logs
+`debugger: DAP listening on 127.0.0.1:52477`. A host of your own listens with
 
 ```cpp
-engine->set_debug_connector(std::make_shared<jai::debug::debug_connector>(1234));
+auto conn = jai::debug::listen(*eng);   // port jai::debug::default_port, 52472
 ```
 
-then add a `.vscode/launch.json` attach configuration with the same port and start it while the
-host runs:
+Add a `.vscode/launch.json` attach configuration with the port the process logged (the
+extension's default is the runner's, 52477) and start it while the script runs:
 
 ```json
 {
   "version": "0.2.0",
   "configurations": [
-    { "type": "jaiscript", "request": "attach", "name": "Attach to JaiScript", "host": "127.0.0.1", "port": 1234 }
+    { "type": "jaiscript", "request": "attach", "name": "Attach to JaiScript", "host": "127.0.0.1", "port": 52477 }
   ]
 }
 ```

@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -45,6 +45,8 @@ TIMEDEMO_STATE=1746772898
 # Deep-recursion tests outgrow Linux's 8 MB main-thread stack in Debug builds; the
 # Windows binaries link a 128 MB stack, so match it where the shell allows.
 ulimit -s 131072 2>/dev/null || true
+
+. "$ROOT/tools/ci/python.sh"
 
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT
@@ -115,7 +117,7 @@ gate_timedemo() {
 # source/jaiscript.cpp (the one-file build) includes every implementation file the library's CMake list names
 gate_amalgamation() {
 	local py
-	py="$(python_cmd)"
+	py="$(jai_python)"
 	run "$py" - "$ROOT" <<'PYEOF'
 import re, sys, pathlib
 root = pathlib.Path(sys.argv[1])
@@ -141,22 +143,10 @@ gate_crawler() {
 	want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
 }
 
-python_cmd() {
-	local candidate
-	for candidate in python3 python; do
-		if "$candidate" -c "import sys; sys.exit(sys.version_info < (3, 8))" >/dev/null 2>&1; then
-			echo "$candidate"
-			return
-		fi
-	done
-	echo "::error::the lsp gate needs Python 3.8 or later" >&2
-	return 1
-}
-
 lsp_test() {
 	local exe="$BIN/jaiscript_lsp" py
 	[ -f "$exe.exe" ] && exe="$exe.exe"
-	py="$(python_cmd)"
+	py="$(jai_python)"
 	run "$py" "$ROOT/tools/lsp/tests/lsp_test.py" --exe "$exe" "$@"
 }
 
@@ -233,12 +223,25 @@ gate_spider() {
 	local exe="$BIN/jai_spider" runner="$BIN/jaiscript" py
 	[ -f "$exe.exe" ] && exe="$exe.exe"
 	[ -f "$runner.exe" ] && runner="$runner.exe"
-	py="$(python_cmd)"
+	py="$(jai_python)"
 	run_logged "$py" "$ROOT/tools/jai_spider/tests/spider_test.py" --exe "$exe" --runner "$runner"
 	want "spider: expected every check to hold" "^jai_spider: every check holds\$"
 }
 
-ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider)
+# The runner's built-in smoke tests (flags, file and -e modes, a scripted REPL session, the host file API)
+gate_selftest() {
+	cd "$ROOT"
+	run "$BIN/jaiscript" --selftest
+}
+
+# The documentation site: links, structure, leakage and every sample on both backends (docs/site_tools/verify_site.py; it
+# runs the host samples through jaiscript_tests beside the runner)
+gate_site() {
+	cd "$ROOT"
+	run "$(jai_python)" docs/site_tools/verify_site.py --runner "$BIN/jaiscript"
+}
+
+ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android)
 
@@ -247,7 +250,7 @@ CROSS=(android)
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider) ;;
+		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
 		gloom-workers | gloom-long | timedemo | amalgamation | android) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2 ;;
 	esac

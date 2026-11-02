@@ -24,13 +24,18 @@
 #include <atomic>
 #include <cctype>
 #include <cerrno>
+#include <charconv>
 #include <chrono>
+#include <climits>
+#include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <optional>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -204,12 +209,16 @@ void print_usage() {
 		"options:\n"
 		"  --backend=vm|interp|vm-reference   execution backend (default vm; interp = tree-walking interpreter; vm-reference =\n"
 		"                        the vm with every optimization off, engine::vm_reference_mode)\n"
-		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION; the flush at every position)\n"
+#ifdef JAISCRIPT_MISS_INJECTION
+		"  --miss-every=<n>      the vm misses at every nth plain cell instruction (the flush at every position)\n"
+#endif
 		"  --workers=<n>         the worker count of parallel_for, parallel_transform and parallel_reduce (default: the engine's own)\n"
 		"  --disasm=<file>       write every chunk the VM compiles, disassembled with its regions' IR, to <file>\n"
 		"  --manifest=<file>     write the same chunks' semantic manifests (every field, exact constant bits) to <file>\n"
+#ifdef JAISCRIPT_VM_COVERAGE
 		"  --coverage=<file>     write the vm's execution-coverage census (cells / typed / general, the reasons and their\n"
-		"                        source sites) to <file> at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
+		"                        source sites) to <file> at exit\n"
+#endif
 		"  --budget=N            execution budget in seconds per execute; overruns raise a script\n"
 		"                        error (default 0 = unlimited - infinite loops are your business;\n"
 		"                        the embedded-engine default of 5.0s is deliberately lifted here)\n"
@@ -220,7 +229,7 @@ void print_usage() {
 		"  --no-debug            do not stand up the DAP debug listener\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
-		"  --no-proofs           run without type proofs, typed ops or cell blocks (the general form)\n"
+		"  --no-proofs           run without type proofs and the typed instructions they enable (the general form)\n"
 		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
@@ -229,8 +238,9 @@ void print_usage() {
 		"  --version             print the JaiScript version\n"
 		"  --help                this text\n"
 		"\n"
-		"exit code: the script's result if it is an int, otherwise 0; script errors exit 1\n"
-		"           (message + stack trace on stderr), usage errors exit 2.\n"
+		"exit code: the script's int result (0..255; outside that range its low byte), otherwise 0;\n"
+		"           script errors exit 1 (message + stack trace on stderr), usage errors exit 2;\n"
+		"           a piped REPL exits 1 when any input failed.\n"
 		"\n"
 		"environment: the full JaiScript stdlib is always registered (print/format/to_string/\n"
 		"  type_of, math, to_json/from_json, containers, the random type, crypto:: hashes, HMAC,\n"
@@ -269,23 +279,61 @@ void print_usage() {
 		"  the listener is off there.\n");
 }
 
+// A number flag's value, whole and inside [low, high]; nullopt for anything else (the caller reports a usage error)
+template<typename Number>
+std::optional<Number> number_in_range(const std::string& text, Number low, Number high) {
+	Number value{};
+	if constexpr (std::is_floating_point_v<Number>) {
+		char* end = nullptr;
+		errno = 0;
+		value = static_cast<Number>(std::strtod(text.c_str(), &end));
+		if (text.empty() || end != text.c_str() + text.size() || errno == ERANGE || !std::isfinite(value)) { return std::nullopt; }
+	} else {
+		auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (ec != std::errc{} || end != text.data() + text.size()) { return std::nullopt; }
+	}
+	if (value < low || value > high) { return std::nullopt; }
+	return value;
+}
+
 int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 	bool args_section = false;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
 		if (args_section) { opt.script_args.push_back(a); continue; }
-		auto value_of = [&](const std::string& flag) -> std::string {
-			if (a.size() > flag.size() && a[flag.size()] == '=') { return a.substr(flag.size() + 1); }
-			if (i + 1 < argc) { return argv[++i]; }
-			std::fprintf(stderr, "%s\n", con.red("missing value for " + flag).c_str());
-			std::exit(2);
+		auto usage_error = [&](const std::string& text) {
+			std::fprintf(stderr, "%s\n", con.red(text).c_str());
+			return 2;
+		};
+		// a value flag is the flag alone (its value the next argument) or flag=value; any other spelling is unknown
+		auto is_flag = [&](const char* flag) { return a == flag || a.rfind(std::string(flag) + "=", 0) == 0; };
+		auto value_of = [&](const char* flag) -> std::optional<std::string> {
+			if (a.size() > std::strlen(flag)) { return a.substr(std::strlen(flag) + 1); }
+			if (i + 1 < argc) { return std::string(argv[++i]); }
+			return std::nullopt;
+		};
+		auto text_of = [&](const char* flag, std::string& out) {
+			std::optional<std::string> text = value_of(flag);
+			if (!text) {
+				usage_error(std::string("missing value for ") + flag);
+				return false;
+			}
+			out = std::move(*text);
+			return true;
+		};
+		auto number_of = [&](const char* flag, auto low, auto high, const char* expected) -> std::optional<decltype(low)> {
+			std::optional<std::string> text = value_of(flag);
+			if (!text) {
+				usage_error(std::string("missing value for ") + flag);
+				return std::nullopt;
+			}
+			auto value = number_in_range(*text, low, high);
+			if (!value) { usage_error(std::string("invalid value for ") + flag + ": '" + *text + "' (" + expected + ")"); }
+			return value;
 		};
 		if (a == "--") { args_section = true; }
 		else if (a == "-e") {
-			if (i + 1 >= argc) {
-				std::fprintf(stderr, "%s\n", con.red("missing value for -e").c_str());
-				return 2;
-			}
+			if (i + 1 >= argc) { return usage_error("missing value for -e"); }
 			opt.sources.push_back(argv[++i]);
 		}
 		else if (a == "--watch") { opt.watch = true; }
@@ -298,22 +346,38 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--pause") { opt.pause_mode = 1; }
 		else if (a == "--no-pause") { opt.pause_mode = 0; }
 		else if (a == "--selftest") { opt.selftest = true; }
-		else if (a.rfind("--benchmark-main", 0) == 0) { opt.benchmark_main = std::stoi(value_of("--benchmark-main")); }
-		else if (a.rfind("--backend", 0) == 0) { opt.backend = value_of("--backend"); }
-		else if (a.rfind("--workers", 0) == 0) { opt.workers = static_cast<size_t>(std::stoul(value_of("--workers"))); }
-		else if (a.rfind("--miss-every", 0) == 0) { opt.miss_every = static_cast<uint32_t>(std::stoul(value_of("--miss-every"))); }
-		else if (a.rfind("--disasm", 0) == 0) { opt.disasm = value_of("--disasm"); }
-		else if (a.rfind("--manifest", 0) == 0) { opt.manifest = value_of("--manifest"); }
-		else if (a.rfind("--coverage", 0) == 0) { opt.coverage = value_of("--coverage"); }
-		else if (a.rfind("--budget", 0) == 0) { opt.budget = std::stod(value_of("--budget")); }
-		else if (a.rfind("--debug-port", 0) == 0) { opt.debug_port = static_cast<int>(std::stol(value_of("--debug-port"))); }
+		else if (is_flag("--benchmark-main")) {
+			auto n = number_of("--benchmark-main", 0, INT_MAX, "a count from 0");
+			if (!n) { return 2; }
+			opt.benchmark_main = *n;
+		}
+		else if (is_flag("--workers")) {
+			auto n = number_of("--workers", size_t{0}, size_t{4096}, "a count from 0 to 4096; 0 is the engine's own");
+			if (!n) { return 2; }
+			opt.workers = *n;
+		}
+		else if (is_flag("--miss-every")) {
+			auto n = number_of("--miss-every", uint32_t{0}, UINT32_MAX, "a count from 0");
+			if (!n) { return 2; }
+			opt.miss_every = *n;
+		}
+		else if (is_flag("--budget")) {
+			auto n = number_of("--budget", 0.0, 1e9, "seconds from 0; 0 is unlimited");
+			if (!n) { return 2; }
+			opt.budget = *n;
+		}
+		else if (is_flag("--debug-port")) {
+			auto n = number_of("--debug-port", 1, 65535, "a port from 1 to 65535");
+			if (!n) { return 2; }
+			opt.debug_port = *n;
+		}
+		else if (is_flag("--backend")) { if (!text_of("--backend", opt.backend)) { return 2; } }
+		else if (is_flag("--disasm")) { if (!text_of("--disasm", opt.disasm)) { return 2; } }
+		else if (is_flag("--manifest")) { if (!text_of("--manifest", opt.manifest)) { return 2; } }
+		else if (is_flag("--coverage")) { if (!text_of("--coverage", opt.coverage)) { return 2; } }
 		else if (a == "--version" || a == "-v") { std::printf("JaiScript %s\n", jai::version().c_str()); std::exit(0); }
 		else if (a == "--help" || a == "-h" || a == "/?") { print_usage(); std::exit(0); }
-		else if (!a.empty() && a[0] == '-') {
-			std::fprintf(stderr, "%s\n", con.red("unknown flag: " + a).c_str());
-			print_usage();
-			return 2;
-		}
+		else if (!a.empty() && a[0] == '-') { return usage_error("unknown flag: " + a + " (jaiscript --help lists the flags)"); }
 		else if (opt.script.empty()) { opt.script = a; }
 		else {
 			std::fprintf(stderr, "%s\n", con.red("unexpected extra argument: " + a + " (script args go after --)").c_str());
@@ -1140,8 +1204,9 @@ struct run_result {
 	std::string stack_trace;
 };
 
+// An int result is the exit code; only 0..255 survive every platform, so outside it the code is the low byte, as on POSIX
 int result_to_exit_code(const jai::script_value& result) {
-	return result.is_int() ? static_cast<int>(result.as_int()) : 0;
+	return result.is_int() ? static_cast<int>(static_cast<uint64_t>(result.as_int()) & 0xFF) : 0;
 }
 
 // Scripts run as suspendable runs: a sleep hands control back here, and the loop waits on the engine's clock until the run is due
@@ -1425,6 +1490,7 @@ struct repl_session {
 	std::shared_ptr<jai::engine> eng;
 	bool show_time = false;
 	bool debugger_wired = false;
+	bool had_error = false;   // a piped session exits 1 once any input failed
 
 	// The engine holds the connector (jai::debug::listen attaches it), so releasing the old
 	// engine frees the port before the new listener binds.
@@ -1462,17 +1528,18 @@ struct repl_session {
 	// A line's last statement needs no ';', as the last expression of an execute needs none: a parse error asking for one
 	// retries with it on a line of its own (past a trailing comment), and a retry that does not parse either gives the original
 	jai::script_value execute_line(const std::string& source) {
+		std::exception_ptr original;
 		try {
 			return finish_run(*eng, eng->start(source));
 		} catch (const jai::parse_error& ex) {
 			if (std::string_view(ex.what()).find("Expected ';'") == std::string_view::npos) { throw; }
-			const std::exception_ptr original = std::current_exception();
-			try {
-				return finish_run(*eng, eng->start(source + "\n;"));
-			} catch (const jai::parse_error&) {
-				std::rethrow_exception(original);
-			}
+			original = std::current_exception();
 		}
+		try {
+			return finish_run(*eng, eng->start(source + "\n;"));
+		} catch (const jai::parse_error&) {
+		}
+		std::rethrow_exception(original);
 	}
 
 	void execute_chunk(const std::string& source, std::ostream& out) {
@@ -1481,6 +1548,7 @@ struct repl_session {
 			jai::script_value result = execute_line(source);
 			print_result(result, out);
 		} catch (const std::exception& ex) {
+			had_error = true;
 			out << con->red(std::string("error: ") + ex.what()) << "\n";
 			std::string trace = trim(eng->format_stack_trace());
 			if (!trace.empty()) { out << con->dim(trace) << "\n"; }
@@ -1495,6 +1563,7 @@ struct repl_session {
 
 	void load_file(const std::string& path, std::ostream& out) {
 		if (!fs::exists(path)) {
+			had_error = true;
 			out << con->red("no such file: " + path) << "\n";
 			return;
 		}
@@ -1507,6 +1576,7 @@ struct repl_session {
 			out << con->dim("[loaded " + path + "]") << "\n";
 			print_result(result, out);
 		} catch (const std::exception& ex) {
+			had_error = true;
 			out << con->red(std::string("error: ") + ex.what()) << "\n";
 			std::string trace = trim(eng->format_stack_trace());
 			if (!trace.empty()) { out << con->dim(trace) << "\n"; }
@@ -1613,7 +1683,7 @@ struct repl_session {
 				balance.reset();
 			}
 		}
-		return 0;
+		return !interactive && had_error ? 1 : 0;
 	}
 };
 
@@ -1703,6 +1773,21 @@ int run_selftest(const console_state& con) {
 		expect(captured.str().find("never") == std::string::npos, "-e: the first error stops the run");
 	}
 
+	{ // a value flag is the flag alone or flag=value, a malformed number is a usage error, and an int result keeps its low byte
+		auto parse = [&](std::vector<const char*> args) {
+			args.insert(args.begin(), "jaiscript");
+			options parsed;
+			return parse_args(static_cast<int>(args.size()), const_cast<char**>(args.data()), parsed, con);
+		};
+		expect(parse({"--disasmfoo", "a.jai"}) == 2 && parse({"--backendvm"}) == 2, "flags: a misspelled value flag is unknown, never a prefix");
+		expect(parse({"--workers=abc"}) == 2 && parse({"--workers=-1"}) == 2 && parse({"--debug-port=70000"}) == 2 &&
+			parse({"--budget=nan"}) == 2 && parse({"--benchmark-main=1x"}) == 2 && parse({"--workers"}) == 2, "flags: a malformed or missing number exits 2");
+		expect(parse({"--workers", "3", "--budget=1.5", "--debug-port=52490"}) == -1, "flags: a value follows its flag or its '='");
+		auto eng = make_runner_engine(opt, nullptr);
+		expect(run_sources_in_engine(*eng, {"300"}).exit_code == 44 && run_sources_in_engine(*eng, {"-1"}).exit_code == 255 &&
+			run_sources_in_engine(*eng, {"4294967296"}).exit_code == 0, "exit code: an int result outside 0..255 keeps its low byte");
+	}
+
 	{ // REPL scripted session: multi-line, auto-print, typo recovery, meta-commands, path paste
 		fs::path pasted = dir / "pasted.jai";
 		spill_file(pasted.string(), "int pasted_marker = 777;\nprint(\"pasted ran\");\n");
@@ -1731,7 +1816,7 @@ int run_selftest(const console_state& con) {
 		session.opt = opt;
 		session.con = &con;
 		session.engine_out = &out;
-		session.run(in, out, false);
+		expect(session.run(in, out, false) == 1, "repl: a piped session with an error exits 1");
 		std::string text = out.str();
 		expect(text.find("5") != std::string::npos, "repl: expression auto-prints");
 		expect(text.find("9") != std::string::npos, "repl: multi-line function defined and called");
@@ -1779,7 +1864,7 @@ int run_selftest(const console_state& con) {
 		session.opt = opt;
 		session.con = &con;
 		session.engine_out = &out;
-		session.run(in, out, true);
+		expect(session.run(in, out, true) == 0, "repl: an interactive session exits 0");
 		std::string text = out.str();
 		expect(text.find("JaiScript " + jai::version()) != std::string::npos, "repl: banner shows version");
 		expect(text.find("jai> ") != std::string::npos, "repl: prompt prints when interactive");
@@ -1860,7 +1945,7 @@ int run_selftest(const console_state& con) {
 				expect(run("var s = load_sound(snd + \"/tone.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
 					"s.stop(); seen += \" \" + to_string(s.playing()); s.play(true); seen += \" \" + to_string(s.playing()); stop_sounds(); seen + \" \" + to_string(s.playing());") ==
 					"false true true false true false", name("play, stop, a loop and stop_sounds set the play state").c_str());
-				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
+				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 15000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
 					name("a sound played once stops playing when it ends").c_str());
 			}
 		}

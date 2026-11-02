@@ -101,6 +101,14 @@ jobs:
       - name: Web host and HTTP client
         run: bash tools/ci/gates.sh spider
 
+      - name: Runner selftest
+        run: bash tools/ci/gates.sh selftest
+
+      # Release only: every sample on the site runs on both backends.
+      - name: Documentation site
+        if: matrix.config == 'Release'
+        run: bash tools/ci/gates.sh site
+
       # Release only: in a Debug build these two runs take tens of minutes.
       - name: demoreel hash gate
         if: matrix.config == 'Release'
@@ -124,7 +132,7 @@ jobs:
       - name: g++ -fsyntax-only sweep
         run: |
           fails=0
-          for f in source/implementation/*.cpp; do
-            g++-14 -std=c++20 -fsyntax-only -Iinclude "$f" || fails=$((fails+1))
+          for f in $(find source/implementation -name '*.cpp' | sort); do
+            g++-14 -std=c++20 -fsyntax-only -Iinclude -Isource "$f" || fails=$((fails+1))
           done
           exit $fails

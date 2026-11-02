@@ -5,6 +5,7 @@
 
 #include "ast.hpp"
 #include "string_symbolizer.hpp"
+#include "native_stack.hpp"
 #include <functional>
 
 namespace jai::detail {
@@ -16,9 +17,11 @@ namespace jai::detail {
 		std::function<void(uint64_t)> on_declared;
 		string_symbolizer* symbolizer;
 		std::function<void()> on_instance;
+		native_stack_mark stack;
 
 		void expr(const expression_ptr& e) const {
 			if (!e) return;
+			stack.guard(e->location);
 			switch (e->get_type()) {
 			case node_type::this_expr:
 			case node_type::super_expr:
@@ -96,6 +99,7 @@ namespace jai::detail {
 
 		void stmt(const statement_ptr& s) const {
 			if (!s) return;
+			stack.guard(s->location);
 			switch (s->get_type()) {
 			case node_type::function_decl: {
 				auto* value = static_cast<function_decl*>(s.get());

@@ -3,6 +3,7 @@
 #include "lexer.hpp"
 #include "ast.hpp"
 #include "foreign_keyword.hpp"
+#include "native_stack.hpp"
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/parse_errors.hpp>
@@ -14,21 +15,21 @@
 
 namespace jai {
 
-    // Forward declaration
     class string_symbolizer;
     class engine;
 
     class parser {
     public:
-        // One true constructor with dependency injection
         parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename = "<script>");
 
         // Parse the entire program
         checked_result<std::vector<declaration_ptr>> parse();
         
-        // Check if parsing had errors
         bool has_errors() const { return !errors_.empty(); }
-        const std::vector<std::string>& get_errors() const { return errors_; }
+        // each error as "file:line:col: message"
+        std::vector<std::string> get_errors() const;
+        // the source text the tokens came from: a failed parse's listing shows each error's line with a caret under it
+        void source_text(std::string_view source) { source_ = source; }
         // the files spliced into function bodies by this parse (resolved paths), for the parse cache's stamps
         const std::vector<std::string>& spliced_files() const { return spliced_files_; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
@@ -50,7 +51,13 @@ namespace jai {
         void check_reload_hook(const jai::declaration& d, bool& seen);
         std::string filename_;
         size_t current_ = 0;
-        std::vector<std::string> errors_;
+        struct parse_diagnostic {
+            source_location at;
+            std::string message;
+        };
+        std::vector<parse_diagnostic> errors_;
+        std::string_view source_;
+        checked_result<std::vector<declaration_ptr>> failed_parse();
         std::unordered_set<std::string> registered_template_types_;
         string_symbolizer* symbolizer_ = nullptr;  // Optional: for interning identifiers at parse time
         engine* engine_ = nullptr;  // Engine for interning type_info objects
@@ -76,7 +83,8 @@ namespace jai {
         std::vector<std::string> current_namespace_path_;
         
         // Error handling
-        void report_error(const std::string& message, const token& token);  // Logs error to errors_ vector
+        void report_error(const std::string& message, const token& token);
+        void report_error_at(const std::string& message, const source_location& at);
         void synchronize();  // Error recovery
         void synchronize_class_member(size_t class_open_index);  // Brace-aware recovery for the class-member loop
         // Name-position diagnostics: when the offending token is a type keyword
@@ -175,13 +183,13 @@ namespace jai {
         checked_result<expression_ptr> finish_call(expression_ptr callee);
         checked_result<expression_ptr> finish_member_access(expression_ptr object, bool is_arrow);
         bool looks_like_map_literal();  // Lookahead to distinguish map literals from blocks
+        bool json_map_ahead(size_t offset = 1) const;
         checked_result<expression_ptr> parse_map_literal();
         checked_result<type_info_ptr> parse_type();
 
         // Constant folding optimization: evaluates literal operations at parse time
         expression_ptr try_constant_fold(expression_ptr left, const token& op, expression_ptr right);
 
-        // Helper to create and store a type_info object, returning a pointer to it
         type_info_ptr store_type_info(type_info&& info);
 
         checked_result<std::vector<parameter>> parse_parameter_list();
@@ -210,29 +218,20 @@ namespace jai {
         // Helper for parsing > in generic contexts (handles >> token splitting)
         void consume_greater_in_generic(const std::string& message);
         
-        // Recursion depth tracking to prevent stack overflow on deeply nested input.
-        // NOTE: this must be low enough that REACHING the limit does not itself
-        // overflow the native stack (each recursive-descent level consumes a real
-        // C++ frame). 1024 was too high: on a 1 MB stack (Windows default) with
-        // Debug-sized frames, ~1024-deep unary/expression recursion overflowed the
-        // stack BEFORE the guard could fire. 250 leaves comfortable headroom while
-        // still allowing any realistic expression nesting depth.
-        int parse_depth_ = 0;
-        static constexpr int MAX_PARSE_DEPTH = 250;
+        // every recursive production asks it first: nesting past the host thread's stack is one parse error, never 0xC00000FD
+        detail::native_stack_mark stack_;
 
-        // weight: how many depth units this level costs. Constructs whose single
-        // recursion level burns many native frames (parenthesised grouping re-enters
-        // the whole precedence chain, ~18 frames/level) use a higher weight so the
-        // guard fires well before the native stack runs out.
-        struct depth_guard {
-            int& depth_;
-            int weight_;
-            bool overflow_ = false;
-            depth_guard(int& d, int max, int weight = 1) : depth_(d), weight_(weight) {
-                depth_ += weight_;
-                overflow_ = (depth_ > max);
-            }
-            ~depth_guard() { depth_ -= weight_; }
+        // what a break or continue in the statement being parsed would leave, within its function body: a parallel_for body is a
+        // loop for continue alone (its iterations are independent)
+        struct jump_targets { int breakable = 0; int continuable = 0; bool parallel_body = false; };
+        jump_targets jumps_;
+        struct jump_scope {
+            jump_targets& held;
+            jump_targets saved;
+            jump_scope(jump_targets& targets, jump_targets inner) : held(targets), saved(targets) { held = inner; }
+            ~jump_scope() { held = saved; }
+            jump_scope(const jump_scope&) = delete;
+            jump_scope& operator=(const jump_scope&) = delete;
         };
 
         // Context tracking for context-sensitive parsing
@@ -244,15 +243,11 @@ namespace jai {
         // body, so nested functions and lambdas never inherit yield permission
         bool coroutine_body_pending_ = false;
 
-        // Helper to check if a type name is registered for template parsing
         bool is_registered_template_type(const std::string& type_name) const;
 
-        // Helper to get symbol ID from token - uses pre-interned if available
         uint64_t get_symbol_id(const token& tok) const;
 
-        // ============ Slot-based local variable tracking ============
-        // Tracks local variable slots for the current function being parsed.
-        // Used for O(1) local variable access at runtime.
+        // Slot-based local variable tracking: the local slots of the function being parsed, read by index at run time
         struct function_scope {
             size_t next_slot = 0;  // Next available slot index
             std::unordered_map<uint64_t, size_t> symbol_to_slot;  // symbol_id -> slot
@@ -357,7 +352,7 @@ namespace jai {
                 const lambda_expr* owner = function_scope_stack_[i].owner;
                 if (!owner || owner->default_capture != lambda_expr::capture_default::none) { continue; }
                 if (std::none_of(owner->captures.begin(), owner->captures.end(), [](const auto& c) { return c.name == "this"; })) {
-                    report_error("Lambda capture list does not capture 'this'; use [this], [=] or [&]", at);
+                    report_error("lambda capture list does not capture 'this'; use [this], [=] or [&]", at);
                     return;
                 }
             }
@@ -368,7 +363,7 @@ namespace jai {
                 if (found == function_scope_stack_[i].symbol_to_slot.end()) continue;
                 for (size_t j = i + 1; j < function_scope_stack_.size() && j < use_scope_count; ++j) {
                     if (const uint64_t nested = function_scope_stack_[j].nested_function) {
-                        report_error("Nested function '" + std::string(symbolizer_->get_string(nested)) + "' cannot use enclosing local '" +
+                        report_error("nested function '" + std::string(symbolizer_->get_string(nested)) + "' cannot use enclosing local '" +
                                      std::string(symbolizer_->get_string(symbol_id)) + "': a named function captures nothing; use a lambda with a capture ([&], [=] or [" +
                                      std::string(symbolizer_->get_string(symbol_id)) + "]) or function(...) / =>", previous());
                         return SIZE_MAX;
@@ -376,7 +371,7 @@ namespace jai {
                     auto* owner = function_scope_stack_[j].owner;
                     if (!owner || owner->default_capture != lambda_expr::capture_default::none) { continue; }
                     if (std::none_of(owner->captures.begin(), owner->captures.end(), [symbol_id](const auto& c) { return c.symbol_id == symbol_id; })) {
-                        report_error("Lambda capture list does not capture enclosing local '" + std::string(symbolizer_->get_string(symbol_id)) +
+                        report_error("lambda capture list does not capture enclosing local '" + std::string(symbolizer_->get_string(symbol_id)) +
                                      "'; name it or use [=] or [&]", previous());
                         return SIZE_MAX;
                     }

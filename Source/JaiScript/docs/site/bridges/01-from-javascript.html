@@ -309,7 +309,10 @@ print(next());</code></pre></div>
     int count = 0;
     return []() { return count; };
 }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:3:26: Lambda capture list does not capture enclosing local 'count'; name it or use [=] or [&amp;]</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:3:26: error: lambda capture list does not capture enclosing local 'count'; name it or use [=] or [&amp;]
+        return []() { return count; };
+                             ^</code></pre></div>
 <p>A copy is taken when the lambda is made, so a loop that collects callbacks sees each iteration's value, as <code>let</code> does in JavaScript:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var callbacks = [];
 for (int i = 0; i &lt; 3; i++) { callbacks.push([i]() { return i; }); }

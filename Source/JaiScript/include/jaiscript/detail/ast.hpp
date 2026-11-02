@@ -8,6 +8,7 @@
 #include <jaiscript/core/value.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include "lexer.hpp"
+#include <initializer_list>
 #include <memory>
 #include <vector>
 #include <string>
@@ -146,6 +147,12 @@ namespace jai {
         [[nodiscard]] node_type get_type() const noexcept { return type_; }
     };
     
+    namespace detail {
+        // A chain the parser builds without recursing (a + b + c, a.b.c, f()(), a[0][0], a = b = c) is released without recursing:
+        // a dying operator node hands its operands to one work list (parser.cpp)
+        void release_operands(std::initializer_list<expression_ptr*> operands, std::vector<expression_ptr>* more = nullptr) noexcept;
+    }
+
     // Base expression node
     class expression : public ast_node {
     public:
@@ -228,6 +235,7 @@ namespace jai {
 
         binary_expr(const source_location& loc, expression_ptr l, const token& o, expression_ptr r)
             : expression(loc, node_type::binary_expr), left(l), op(o), right(r) {}
+        ~binary_expr() override { detail::release_operands({&left, &right}); }
         // Returns true if this binary expression ALWAYS produces a boolean result
         // (comparison or logical operators)
         [[nodiscard]] inline bool returns_bool() const noexcept {
@@ -259,6 +267,7 @@ namespace jai {
 
         unary_expr(const source_location& loc, const token& o, expression_ptr expr, bool postfix = false)
             : expression(loc, node_type::unary_expr), op(o), operand(expr), is_postfix(postfix) {}
+        ~unary_expr() override { detail::release_operands({&operand}); }
         // Returns true if this unary expression ALWAYS produces a boolean result
         [[nodiscard]] inline bool returns_bool() const noexcept {
             return op.type == token_type::bang;  // Logical NOT always returns bool
@@ -288,7 +297,8 @@ namespace jai {
         mutable const_site const_check;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)
-            : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}    };
+            : expression(loc, node_type::assignment_expr), target(t), op(o), value(v) {}
+        ~assignment_expr() override { detail::release_operands({&target, &value}); }    };
 
     // a program-scope name an argument proof read and what the proof took of it (call_expr::proof_globals): a graft re-checks it once a run
     // moved the definition epoch (the declaring unit may have run again with another type). kind: a scalar's base type, an array of scalars
@@ -329,7 +339,8 @@ namespace jai {
         mutable std::shared_ptr<const detail::regex::compiled> regex_constant;
 
         call_expr(const source_location& loc, expression_ptr c, std::vector<expression_ptr> args)
-            : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}    };
+            : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}
+        ~call_expr() override { detail::release_operands({&callee}, &arguments); }    };
 
     // member access expression
     class member_expr : public expression {
@@ -369,6 +380,7 @@ namespace jai {
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
+        ~member_expr() override { detail::release_operands({&object}); }
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, uint64_t mem_id, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), member_id(mem_id), is_arrow(arrow), is_static(static_access) {}    };

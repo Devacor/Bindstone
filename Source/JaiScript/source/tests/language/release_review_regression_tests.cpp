@@ -197,9 +197,11 @@ public:
 		test("deep_if_nesting_no_crash", [this]() {
 			auto e = make_engine();
 			std::string src;
-			for (int i = 0; i < 5000; ++i) { src += "if (true) "; }
+			for (int i = 0; i < 200000; ++i) { src += "if (true) "; }
 			src += "1;";
-			check_throws([&]() { e->execute(src); });
+			std::string failure;
+			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+			check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("deep_block_nesting_no_crash", [this]() {
@@ -210,10 +212,12 @@ public:
 		});
 		test("deep_paren_nesting_no_crash", [this]() {
 			auto e = make_engine();
-			std::string src(200, '(');
+			std::string src(200000, '(');
 			src += "1";
-			src += std::string(200, ')');
-			check_throws([&]() { e->execute(src); });
+			src += std::string(200000, ')');
+			std::string failure;
+			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+			check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("modest_paren_nesting_still_works", [this]() {

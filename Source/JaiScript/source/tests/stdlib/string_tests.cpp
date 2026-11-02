@@ -865,12 +865,12 @@ public:
                           "error for '" + source + "' should mention \"" + fragment + "\", got: " + e.what());
                 }
             };
-            expect_lex_error(R"(var x = 1; `${x:q}`;)", "Unsupported format spec ':q' in template string");
-            expect_lex_error(R"(var x = 1; `${x:}`;)", "Unsupported format spec ':' in template string");
-            expect_lex_error(R"(var x = 1; `${x:#x}`;)", "Unsupported format spec ':#x' in template string");  // no alternate form
-            expect_lex_error(R"(var x = 1; `${x:.f}`;)", "Unsupported format spec ':.f' in template string");
-            expect_lex_error(R"(var x = 1; `${x:5.}`;)", "Unsupported format spec ':5.' in template string");
-            expect_lex_error(R"(var x = 1; `${x:-5}`;)", "Unsupported format spec ':-5' in template string");  // '+' and ' ' are the signs
+            expect_lex_error(R"(var x = 1; `${x:q}`;)", "unsupported format spec ':q' in template string");
+            expect_lex_error(R"(var x = 1; `${x:}`;)", "unsupported format spec ':' in template string");
+            expect_lex_error(R"(var x = 1; `${x:#x}`;)", "unsupported format spec ':#x' in template string");  // no alternate form
+            expect_lex_error(R"(var x = 1; `${x:.f}`;)", "unsupported format spec ':.f' in template string");
+            expect_lex_error(R"(var x = 1; `${x:5.}`;)", "unsupported format spec ':5.' in template string");
+            expect_lex_error(R"(var x = 1; `${x:-5}`;)", "unsupported format spec ':-5' in template string");  // '+' and ' ' are the signs
         });
 
         test("template_spec_type_mismatch_is_runtime_error", [this]() {
@@ -1105,11 +1105,11 @@ public:
             };
             auto check_contains = [this](const std::string& text, const std::string& part) { check_true(text.find(part) != std::string::npos, text); };
             check_contains(parse_text("string s = R\"(a\nb\nc)\";\nint x = \"no\";"), ":4:");   // the lines inside count
-            check_contains(parse_text("R\"(abc"), "Unterminated raw string literal: no )\" closes it");
-            check_contains(parse_text("R\"ab(abc)a\""), "Unterminated raw string literal: no )ab\" closes it");
-            check_contains(parse_text("R\"a b(x)a b\""), "Invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
-            check_contains(parse_text("R\"12345678901234567(x)12345678901234567\""), "Invalid raw string delimiter");
-            check_contains(parse_text("R\"abc"), "Unterminated raw string literal");
+            check_contains(parse_text("R\"(abc"), "unterminated raw string literal: no )\" closes it");
+            check_contains(parse_text("R\"ab(abc)a\""), "unterminated raw string literal: no )ab\" closes it");
+            check_contains(parse_text("R\"a b(x)a b\""), "invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
+            check_contains(parse_text("R\"12345678901234567(x)12345678901234567\""), "invalid raw string delimiter");
+            check_contains(parse_text("R\"abc"), "unterminated raw string literal");
         });
     }
 };

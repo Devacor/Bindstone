@@ -111,6 +111,11 @@ namespace jai::detail {
 			"Native stack exhausted before the call-depth cap: the host thread's stack bounds this recursion" };
 	}
 
+	// Evaluation nested past the host thread's stack within one call (the source's own nesting, never a recursion of calls)
+	inline error_propagator raise_nesting_depth() noexcept {
+		return error_propagator{ make_error_code(runtime_error_code::max_recursion_depth), "Nesting too deep for the host thread's stack" };
+	}
+
 	// A started coroutine keeps its state (frames, environment, stack) while it is suspended: each start counts this much
 	// against the memory cap on both backends (the vm's fiber stack growth past its first block counts as well)
 	inline constexpr size_t k_coroutine_state_charge = 2048;

@@ -36,6 +36,12 @@ public:
 		}
 	}
 
+	// a parse listing's first entry, without its source line and caret
+	static std::string first_diagnostic(const std::string& a_text) {
+		const size_t header = a_text.find('\n');
+		return header == std::string::npos ? a_text : a_text.substr(0, a_text.find('\n', header + 1));
+	}
+
 	static std::shared_ptr<engine> fresh() {
 		auto result = make_engine();
 		stdlib::register_all(result);
@@ -177,24 +183,24 @@ public:
 
 		test("bare_keywords_stay_reserved", [this]() {
 			auto eng = fresh();
-			check_eq(std::string("ERROR: Parse error: <script>:1:1: Expected expression"), run(eng, "catch(5);"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:6: Expected variable name"), run(eng, "void catch() {}"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:5: Expected variable name"), run(eng, "int default = 0;"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:43: Expected expression"),
-			         run(eng, "class C { void catch(int x) {} void g() { catch(1); } }"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:39: Expected expression"),
-			         run(eng, "class C { int x = 0; int f() { return default; } }"));
-			const std::string parameter = run(eng, "int f(int default) { return 1; }");
-			check_true(parameter.rfind("ERROR: Parse error: <script>:1:11: Expected parameter name", 0) == 0, parameter);
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:1: error: expected expression"), first_diagnostic(run(eng, "catch(5);")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:6: error: expected variable name"), first_diagnostic(run(eng, "void catch() {}")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:5: error: expected variable name"), first_diagnostic(run(eng, "int default = 0;")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:43: error: expected expression"),
+			         first_diagnostic(run(eng, "class C { void catch(int x) {} void g() { catch(1); } }")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:39: error: expected expression"),
+			         first_diagnostic(run(eng, "class C { int x = 0; int f() { return default; } }")));
+			const std::string parameter = first_diagnostic(run(eng, "int f(int default) { return 1; }"));
+			check_true(parameter.rfind("ERROR: parse failed:\n<script>:1:11: error: expected parameter name", 0) == 0, parameter);
 		});
 
 		test("this_and_super_name_no_member", [this]() {
 			auto eng = fresh();
-			check_eq(std::string("ERROR: Parse error: <script>:1:15: 'this' is the receiver and cannot be used as a member name"), run(eng, "class C { int this = 0; }"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:16: 'super' is the base class and cannot be used as a member name"), run(eng, "class C { void super() {} }"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:19: 'this' is the receiver and cannot be used as a member name"), run(eng, "namespace n { int this = 1; }"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:10: Expected enum value name"), run(eng, "enum E { this }"));
-			check_eq(std::string("ERROR: Parse error: <script>:1:22: Expected member name"), run(eng, "class C { const int = 1; }"));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:15: error: 'this' is the receiver and cannot be used as a member name"), first_diagnostic(run(eng, "class C { int this = 0; }")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:16: error: 'super' is the base class and cannot be used as a member name"), first_diagnostic(run(eng, "class C { void super() {} }")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:19: error: 'this' is the receiver and cannot be used as a member name"), first_diagnostic(run(eng, "namespace n { int this = 1; }")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:10: error: expected enum value name"), first_diagnostic(run(eng, "enum E { this }")));
+			check_eq(std::string("ERROR: parse failed:\n<script>:1:21: error: expected member name"), first_diagnostic(run(eng, "class C { const int = 1; }")));
 		});
 	}
 };

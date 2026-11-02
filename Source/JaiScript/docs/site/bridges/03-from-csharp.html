@@ -162,9 +162,9 @@ print(loose, " ", locked);</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto locked = 5;
 locked = "text";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:9: error: cannot assign 'string' to 'locked' declared 'int' (declared at 1:6)
+&lt;script&gt;:2:8: error: cannot assign 'string' to 'locked' declared 'int' (declared at 1:6)
     locked = "text";
-            ^</code></pre></div>
+           ^</code></pre></div>
 <h3 id="properties">Properties are accessor methods<a class="hlink" href="#properties" aria-label="link">&#8203;</a></h3>
 <p>A plain field already reads and writes as <code>obj.x</code>. A computed property is a pair of methods, <code>_get_x()</code> and <code>_set_x(v)</code>, and <code>obj.x</code> goes through them; inside the class a bare <code>x</code> is the backing field, if there is one:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Thermostat {
@@ -194,7 +194,10 @@ try { print(b.secret); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7
 caught: Cannot access private member 'secret' of class 'Base'</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { private int secret = 7; }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:22: Expected ':' after 'private'</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:1:22: error: expected ':' after 'private'
+    class Base { private int secret = 7; }
+                         ^</code></pre></div>
 <h3 id="no-linq">LINQ is array methods<a class="hlink" href="#no-linq" aria-label="link">&#8203;</a></h3>
 <p><code>filter</code>, <code>map</code>, <code>reduce</code>, <code>find</code>, <code>some</code>, <code>every</code>, <code>sort</code> and <code>slice</code> cover a LINQ chain. There is no deferred query: each step runs when it is called. The <code>array::</code> forms (<code>array::filter(xs, f)</code>, <code>array::map</code>, <code>array::slice</code>, <code>array::sort</code>) return a new array and leave <code>xs</code> alone, like LINQ; the dot forms (<code>xs.filter(f)</code>, <code>map</code>, <code>slice</code>, <code>sort</code>, <code>remove_if</code>) change <code>xs</code> itself, like <code>List&lt;T&gt;.Sort</code> and <code>RemoveAll</code>. A map pairs the same way: <code>map::filter(m, f)</code> returns a new map, <code>m.filter(f)</code> keeps the entries in <code>m</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; scores = [72, 95, 40, 88, 61];

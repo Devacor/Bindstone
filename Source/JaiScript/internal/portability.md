@@ -40,7 +40,7 @@ path-separator assumptions). Every site is guarded and carries a portable branch
 - **Compiler attributes**: `__declspec(noinline)` vs `__attribute__((noinline))` in
   `vm/vm_backend.hpp` and the cold-path macros (`JAI_MATH_COLD`, `JAI_VM_COLD_PATH`);
   `vm_coverage.cpp` (a diagnostic build) uses `dbghelp` on MSVC.
-- **`native_stack_low()`** (`source/implementation/environment.cpp`): the `windows.h`
+- **`native_stack_low()`** and **`native_stack_mark`** (`source/implementation/environment.cpp`): the `windows.h`
   dependency stays `.cpp`-local, `WIN32_LEAN_AND_MEAN`+`NOMINMAX` guarded. The Windows
   implementation queries the current thread's stack bounds and checks a 256 KiB headroom
   margin. Guarded recursive execution paths raise the catchable `max_recursion_depth`
@@ -65,10 +65,13 @@ and parallel workers snapshot both settings at region entry. Raising either cap 
 not disable Windows headroom checks. VM self tail calls that reuse a frame run in
 constant space without increasing call depth; the execution budget still applies.
 
-The parser's `MAX_PARSE_DEPTH = 250` is a weighted recursion counter, not an AST-depth
-bound or a complete native-stack guarantee. Parentheses consume extra weight but
-disappear from the AST, left-associative expressions grow AST depth iteratively,
-and recursive assignment and type parsing are not covered by that counter.
+Source nesting has no count of levels. Each recursive walk over source (the parser, the
+marking and slot passes, the checker, the VM compiler, the interpreter's evaluation) holds a
+`detail::native_stack_mark` (`detail/native_stack.hpp`) and asks it at every level: on Windows
+it asks the thread's bounds for 192 KiB of headroom (the call guard's 256 KiB fires first in a
+recursion of calls); elsewhere a walk may take 1 MiB below the frame that armed the mark, so a
+host that parses or runs scripts on a thread with less stack than that plus its own use gives
+the thread more. The walk unwinds to its phase's entry, which reports the one nesting error.
 
 ## 2. Layout / representation assumptions
 

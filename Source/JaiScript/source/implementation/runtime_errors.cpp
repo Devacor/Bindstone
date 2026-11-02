@@ -108,10 +108,6 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Insufficient privilege";
 
         // Control flow errors
-        case runtime_error_code::continue_outside_loop:
-            return "'continue' statement not in loop";
-        case runtime_error_code::break_outside_loop:
-            return "'break' statement not in loop";
 
         // Operator errors
         case runtime_error_code::unknown_operator:

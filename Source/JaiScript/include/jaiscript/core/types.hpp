@@ -366,17 +366,6 @@ namespace jai {
     // runtime_error(a + b + c)
     [[noreturn]] JAI_NOINLINE void throw_concat(std::string_view a, std::string_view b, std::string_view c = {});
 
-    // Control flow exceptions for break/continue statements
-    class break_exception : public exception {
-    public:
-        break_exception() : exception("break statement") {}
-    };
-
-    class continue_exception : public exception {
-    public:
-        continue_exception() : exception("continue statement") {}
-    };
-
     // Script exception for try/catch/throw
     class script_exception : public runtime_error {
         using runtime_error::runtime_error;

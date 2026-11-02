@@ -374,15 +374,15 @@ private:
 				return std::string("no error");
 			};
 			const std::string en = parse_text("enum F { a, b = 5 }");
-			check_true(en.find("Enum values take no initializer: 'b' is 1, its position in the enum") != std::string::npos, en);
+			check_true(en.find("enum values take no initializer: 'b' is 1, its position in the enum") != std::string::npos, en);
 			const std::string sp = parse_text("array<int> a = [1, 2]; auto b = [...a, 3];");
 			check_true(sp.find("JaiScript has no spread '...': join arrays with array::concat(a, b)") != std::string::npos, sp);
 			// a lambda body that fails to parse leaves no scope behind: the enclosing function's own local reads as its own
 			// (ASAN: the stale scope pointed at the freed lambda, a heap use after free in resolve_outer_use)
 			const std::string lam = parse_text("function f() {\n\tint a = 1;\n\tauto l = []() { int b = ; };\n\treturn a;\n}\n");
-			check_true(lam.find("Expected expression") != std::string::npos && lam.find("does not capture enclosing local 'a'") == std::string::npos, lam);
+			check_true(lam.find("expected expression") != std::string::npos && lam.find("does not capture enclosing local 'a'") == std::string::npos, lam);
 			const std::string fn = parse_text("function g() {\n\tint a = 1;\n\tfunction h() { int b = ; }\n\treturn a;\n}\n");
-			check_true(fn.find("Expected expression") != std::string::npos && fn.find("cannot use enclosing local 'a'") == std::string::npos, fn);
+			check_true(fn.find("expected expression") != std::string::npos && fn.find("cannot use enclosing local 'a'") == std::string::npos, fn);
 			const std::string sc = parse_text("int f(int x, int y) { return x + y; } array<int> a = [1, 2]; f(...a);");
 			check_true(sc.find("JaiScript has no spread '...'") != std::string::npos, sc);
 		});

@@ -186,6 +186,26 @@ public:
             check_eq(token_type::error, tokens[1].type);   // the mid-file 0xEF is unexpected
         });
 
+        test("lexer_errors_name_the_token_and_point_at_its_start", [this]() {
+            string_symbolizer symbolizer;
+            auto first_error = [&](const std::string& source) {
+                lexer lex(source, &symbolizer, "test.jai");
+                for (const auto& t : lex.tokenize()) {
+                    if (t.type == token_type::error) { return t; }
+                }
+                return token(token_type::eof, "", source_location{});
+            };
+            const token comment = first_error("int a = 1;\n  /* never closed\nint b = 2;");
+            check_eq(std::string("unterminated block comment: no */ closes it"), std::string(comment.lexeme));
+            check_eq(std::size_t(2), comment.location.line);
+            check_eq(std::size_t(3), comment.location.column);
+            const token number = first_error("var x = 99999999999999999999;");
+            check_eq(std::string("number literal out of range: '99999999999999999999'"), std::string(number.lexeme));
+            check_eq(std::size_t(9), number.location.column);
+            check_eq(std::string("a character literal holds one character: write text in double quotes"), std::string(first_error("var c = 'ab';").lexeme));
+            check_eq(std::string("unterminated character literal"), std::string(first_error("var c = 'a").lexeme));
+        });
+
         test("utf16_le_bom_is_a_clear_encoding_error", [this]() {
             string_symbolizer symbolizer;
             lexer lex("\xFF\xFE" "foo", &symbolizer, "test.jai");

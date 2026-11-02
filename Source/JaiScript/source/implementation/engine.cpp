@@ -1199,6 +1199,7 @@ struct engine::implementation {
             lexer lex(content, &string_symbolizer_, sourcePath);
             auto tokens = lex.tokenize();
             parser prs(tokens, &string_symbolizer_, &self, registeredTemplateTypes);
+            prs.source_text(content);
             auto parse_result = prs.parse();
             if (!parse_result) {
                 for (const auto& f : prs.spliced_files()) { uint64_t mtime = 0, size = 0; const bool ok = stat_mtime_size(f, mtime, size); note_closure_file(f, ok, mtime, size); }
@@ -1240,7 +1241,10 @@ struct engine::implementation {
                 bool cacheFresh = false;
                 unit.entry = acquire_entry(self, unit.source, unit.path, cacheFile, cacheFresh);
             } catch (const parse_error& e) {
-                parse_failures += e.what();
+                std::string_view listing = e.what();
+                constexpr std::string_view k_header = "parse failed:\n";
+                if (listing.substr(0, k_header.size()) == k_header) { listing.remove_prefix(k_header.size()); }   // the program's own header leads them all
+                parse_failures += listing;
                 if (parse_failures.empty() || parse_failures.back() != '\n') { parse_failures += '\n'; }
                 continue;
             } catch (...) {
@@ -1381,7 +1385,11 @@ struct engine::implementation {
                 while (start < failures.size()) {
                     size_t end = failures.find('\n', start);
                     if (end == std::string::npos) { end = failures.size(); }
-                    if (end > start) { entry.closure_diags.push_back({check_diagnostic::level::error, 0, 0, failures.substr(start, end - start)}); }
+                    std::string line = failures.substr(start, end - start);
+                    if (!line.empty() && line.rfind("    ", 0) != 0) {   // a listing entry, not its source line or caret
+                        if (const size_t marker = line.find(": error: "); marker != std::string::npos) { line.erase(marker + 1, 7); }
+                        entry.closure_diags.push_back({check_diagnostic::level::error, 0, 0, std::move(line)});
+                    }
                     start = end + 1;
                 }
             } else {
@@ -1421,7 +1429,7 @@ struct engine::implementation {
     void gate_checked(const check_report& root, std::string_view source, std::string_view name = "<script>") {
         last_check_ = program_report(root);
         if (!program_parse_failures_.empty()) {
-            throw parse_error(program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
+            throw parse_error("parse failed:\n" + program_parse_failures_.substr(0, program_parse_failures_.size() - 1));
         }
         if (last_check_.has_errors()) {
             throw static_check_error("static check failed:\n" + root.format(source, name) + program_check_listing_);
@@ -3273,6 +3281,7 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     lexer lexer(scriptContent, &impl->string_symbolizer_);
     auto tokens = lexer.tokenize();
     parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+    parser.source_text(scriptContent);
     auto parse_result = parser.parse();
     if (!parse_result) {
         throw parse_error(format_error(parse_result));
@@ -3585,6 +3594,7 @@ check_report engine::check(const std::string& scriptContent) {
         lexer lexer(scriptContent, &impl->string_symbolizer_);
         auto tokens = lexer.tokenize();
         parser parser(tokens, &impl->string_symbolizer_, this, impl->registeredTemplateTypes);
+        parser.source_text(scriptContent);
         auto parse_result = parser.parse();
         if (!parse_result) {
             throw parse_error(format_error(parse_result));

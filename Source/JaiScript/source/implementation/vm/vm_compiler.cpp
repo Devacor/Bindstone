@@ -711,6 +711,44 @@ uint32_t vm_compiler::add_node(std::shared_ptr<ast_node> node) {
 	return static_cast<uint32_t>(chunk_->nodes.size() - 1);
 }
 
+// Source nested past the host thread's stack compiles to one raise of the nesting text where the body runs; the compiler
+// starts over from its settings, since the walk left it mid-body
+template<class Compile>
+std::shared_ptr<chunk> vm_compiler::within_native_stack(std::string_view name, size_t local_count, bool function_body, Compile&& compile) {
+	if (compile_entries_++ == 0) { stack_.arm(); }
+	try {
+		auto result = compile();
+		--compile_entries_;
+		return result;
+	} catch (const detail::nesting_exhausted& e) {
+		if (--compile_entries_ > 0) { throw; }
+		vm_compiler fresh(symbolizer_, builtins_);
+		fresh.engine_ = engine_;
+		fresh.member_class_ = member_class_;
+		fresh.prologue_ = prologue_;
+		fresh.typed_lowering_ = typed_lowering_;
+		fresh.ir_listing_ = ir_listing_;
+		fresh.ir_passes_ = ir_passes_;
+		fresh.reference_ = reference_;
+		fresh.inlining_off_ = inlining_off_;
+		*this = std::move(fresh);
+		auto result = std::make_shared<chunk>();
+		result->function_name = std::string(name);
+		result->local_count = local_count;
+		result->first_temp_slot = function_body ? local_count : SIZE_MAX;
+		result->is_function_body = function_body;
+		auto at = std::make_shared<block_stmt>(e.location(), std::vector<declaration_ptr>{});
+		chunk_ = result.get();
+		current_stmt_ = at.get();
+		chunk_->nodes.push_back(std::move(at));
+		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::max_recursion_depth), add_message(std::string(detail::k_nesting_too_deep)), k_invalid_u32);
+		emit(opcode::op_halt);
+		chunk_ = nullptr;
+		current_stmt_ = nullptr;
+		return result;
+	}
+}
+
 // a construct the parser, the jaibite reader or the compiler's own admission rules out
 void vm_compiler::unreachable_construct(const char* construct) {
 	assert(false && "vm_compiler: an unreachable construct");
@@ -815,6 +853,10 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 static bool loop_free_body(const ast_node* n);
 
 std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame) {
+	return within_native_stack({}, 0, false, [&] { return compile_program_code(declarations, program_frame); });
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_program_code(const std::vector<declaration_ptr>& declarations, bool program_frame) {
 	JAI_CENSUS_F(compile_chunk, 1);
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
@@ -884,6 +926,13 @@ std::shared_ptr<chunk> vm_compiler::compile_callable(std::string_view name,
                                                      const std::vector<parameter>& parameters,
                                                      const std::shared_ptr<block_stmt>& body,
                                                      size_t local_count) {
+	return within_native_stack(name, local_count, true, [&] { return compile_callable_code(name, parameters, body, local_count); });
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_callable_code(std::string_view name,
+                                                          const std::vector<parameter>& parameters,
+                                                          const std::shared_ptr<block_stmt>& body,
+                                                          size_t local_count) {
 	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
@@ -1130,6 +1179,10 @@ bool vm_compiler::raw_signature(const function_decl* fn) {
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expression_ptr& expr) {
+	return within_native_stack({}, 0, false, [&] { return compile_standalone_expression_code(expr); });
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_standalone_expression_code(const expression_ptr& expr) {
 	JAI_CENSUS_F(compile_chunk, 3);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
@@ -1164,6 +1217,10 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_level_initializers(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
+	return within_native_stack(name, 0, true, [&] { return compile_level_initializers_code(name, initializers); });
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_level_initializers_code(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
 	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
@@ -1265,6 +1322,10 @@ void vm_compiler::compile_constructor_prologue(const constructor_prologue& prolo
 }
 
 std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declaration_ptr& decl) {
+	return within_native_stack({}, 0, false, [&] { return compile_standalone_declaration_code(decl); });
+}
+
+std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration_code(const declaration_ptr& decl) {
 	JAI_CENSUS_F(compile_chunk, 4);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
@@ -1299,6 +1360,7 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 }
 
 void vm_compiler::compile_declaration(const declaration_ptr& decl, bool top_level) {
+	stack_.guard(decl->location);
 	flush_kills();
 	const size_t start = chunk_->code.size();
 	const size_t temps = temp_next_;
@@ -1425,6 +1487,7 @@ void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top
 
 void vm_compiler::compile_statement(const statement_ptr& stmt) {
 	if (!stmt) return;
+	stack_.guard(stmt->location);
 	flush_kills();
 	const size_t start = chunk_->code.size();
 	const size_t temps = temp_next_;
@@ -2067,8 +2130,8 @@ void vm_compiler::compile_break() {
 			break;
 		}
 	}
-	if (target == SIZE_MAX) {
-		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::break_outside_loop), k_invalid_u32, k_invalid_u32);
+	if (target == SIZE_MAX) {   // the parser and the jaibite reader refuse one: never reached
+		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation), add_message("'break' outside a loop or switch"), k_invalid_u32);
 		return;
 	}
 	const size_t depth = emit_region_exits(target, loops_[target].kill_depth);
@@ -2092,8 +2155,8 @@ void vm_compiler::compile_continue() {
 			break;
 		}
 	}
-	if (target == SIZE_MAX) {
-		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::continue_outside_loop), k_invalid_u32, k_invalid_u32);
+	if (target == SIZE_MAX) {   // a parallel_for body compiled as its own function ahead of the rewrite of its top-level continue: never reached
+		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::unsupported_operation), add_message("'continue' outside a loop"), k_invalid_u32);
 		return;
 	}
 	const size_t depth = emit_region_exits(target, loops_[target].kill_depth);
@@ -2986,6 +3049,7 @@ void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
 }
 
 void vm_compiler::compile_expression(const expression_ptr& expr, bool as_statement) {
+	stack_.guard(expr->location);
 	if (held_root_ && expr.get() == held_root_) [[unlikely]] {
 		// a read chain's temporary: a copy stays under the chain until its outer read completes (compile_member)
 		held_root_ = nullptr;
@@ -6446,6 +6510,7 @@ bool vm_compiler::value_temp_operand(const expression* e) {
 }
 
 bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
+	stack_.guard(e->location);
 	if (member_temp_operand(e.get())) { compile_member_into_temp(e, out); return true; }
 	if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, out); return true; }
 	if (unary_temp_operand(e.get())) { compile_unary_into_temp(e, out); return true; }

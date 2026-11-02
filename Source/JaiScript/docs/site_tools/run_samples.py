@@ -178,7 +178,7 @@ def run(runner, backend, main_path, budget, timeout, warnings=False):
 
 
 def looks_like_load_failure(stderr):
-    return ("static check failed" in stderr) or ("parse error" in stderr.lower())
+    return ("static check failed" in stderr) or ("parse failed" in stderr)
 
 
 def expected_shows_error(expected):

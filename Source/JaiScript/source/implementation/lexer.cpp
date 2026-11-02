@@ -8,7 +8,7 @@
 namespace jai {
 
 // Initialize keyword map
-const std::unordered_map<std::string, token_type> lexer::keywords_ = {
+const std::unordered_map<std::string, token_type, lexer::keyword_hash, std::equal_to<>> lexer::keywords_ = {
     {"bool", token_type::bool_keyword},
     {"break", token_type::break_keyword},
     {"char", token_type::char_keyword},
@@ -114,6 +114,8 @@ token lexer::next_token() {
     }
 
     skip_whitespace();
+    token_line_ = line_;
+    token_column_ = column_;
 
     if (is_at_end()) {
         return make_token(token_type::eof);
@@ -209,18 +211,15 @@ token lexer::next_token() {
                 return next_token();
             }
             if (match('*')) {
-                // Multi-line comment
-                while (!is_at_end()) {
-                    if (peek() == '*' && peek_next() == '/') {
-                        advance(); // *
-                        advance(); // /
-                        break;
-                    }
+                while (!(peek() == '*' && peek_next() == '/')) {
+                    if (is_at_end()) { return error_token("unterminated block comment: no */ closes it"); }
                     if (advance() == '\n') {
                         line_++;
                         column_ = 1;
                     }
                 }
+                advance();
+                advance();
                 return next_token();
             }
             if (match('=')) return make_token(token_type::slash_equal);
@@ -276,7 +275,7 @@ token lexer::next_token() {
             return make_token(token_type::colon);
     }
     
-    return error_token("Unexpected character");
+    return error_token("unexpected character");
 }
 
 char lexer::advance() {
@@ -398,17 +397,23 @@ token lexer::make_token(token_type type) {
             break;
     }
 
-    return token(type, lexeme, current_location());
+    return token(type, lexeme, token_start());
 }
 
 token lexer::make_token(token_type type, std::string_view lexeme) {
-    return token(type, lexeme, current_location());
+    return token(type, lexeme, token_start());
+}
+
+source_location lexer::token_start() const {
+    source_location result = current_location();
+    result.line = token_line_;
+    result.column = token_column_;
+    return result;
 }
 
 token lexer::error_token(const std::string& message) {
     auto [id, view] = symbolizer_->intern_with_view(message);
-    token token(token_type::error, view, current_location());
-    return token;
+    return token(token_type::error, view, token_start());
 }
 
 token lexer::scan_number() {
@@ -462,7 +467,7 @@ token lexer::scan_number() {
             }
             if (!is_digit(peek())) {
                 std::string_view lexeme_view(source_.data() + start, current_ - start);
-                return error_token("Invalid number literal: exponent has no digits in '" + std::string(lexeme_view) + "'");
+                return error_token("invalid number literal: exponent has no digits in '" + std::string(lexeme_view) + "'");
             }
             while (is_digit(peek())) {
                 advance();
@@ -484,7 +489,7 @@ token lexer::scan_number() {
         if (is_float) {
             const auto parsed = detail::parse_float_text(lexeme_str.c_str());
             if (parsed.out_of_range) {
-                return error_token("Number literal out of range: '" + lexeme_str + "'");
+                return error_token("number literal out of range: '" + lexeme_str + "'");
             }
             tok.float_value = parsed.value;
         } else if (is_hex) {
@@ -498,15 +503,15 @@ token lexer::scan_number() {
             size_t consumed = 0;
             tok.int_value = std::stoll(lexeme_str, &consumed, 8);
             if (consumed != lexeme_str.size()) {
-                return error_token("Invalid octal literal (digits 8/9 not allowed): '" + lexeme_str + "'");
+                return error_token("invalid octal literal (digits 8/9 not allowed): '" + lexeme_str + "'");
             }
         } else {
             tok.int_value = std::stoll(lexeme_str);
         }
     } catch (const std::out_of_range&) {
-        return error_token("Number literal out of range: '" + lexeme_str + "'");
+        return error_token("number literal out of range: '" + lexeme_str + "'");
     } catch (const std::invalid_argument&) {
-        return error_token("Invalid number literal: '" + lexeme_str + "'");
+        return error_token("invalid number literal: '" + lexeme_str + "'");
     }
 
     return tok;
@@ -613,7 +618,7 @@ void lexer::scan_template_string() {
                             advance();
                         }
                         if (is_at_end() || peek() != '}') {
-                            result.push_back(error_token("Unterminated format spec in template string"));
+                            result.push_back(error_token("unterminated format spec in template string"));
                             splice_failed = true;
                         } else {
                             spec_text = source_.substr(spec_start, current_ - spec_start);
@@ -621,7 +626,7 @@ void lexer::scan_template_string() {
                             brace_depth = 0;
                             detail::format_spec parsed;
                             if (!detail::parse_format_spec(spec_text, parsed)) {
-                                result.push_back(error_token("Unsupported format spec ':" + spec_text + "' in template string"));
+                                result.push_back(error_token("unsupported format spec ':" + spec_text + "' in template string"));
                                 splice_failed = true;
                             } else {
                                 has_spec = true;
@@ -712,13 +717,13 @@ token lexer::scan_string() {
 
     while (!is_at_end() && peek() != '"') {
         if (peek() == '\n') {
-            return error_token("Unterminated string literal");
+            return error_token("unterminated string literal");
         }
 
         if (peek() == '\\') {
             advance();
             if (is_at_end()) {
-                return error_token("Unterminated string literal");
+                return error_token("unterminated string literal");
             }
 
             char escaped = advance();
@@ -730,16 +735,16 @@ token lexer::scan_string() {
                 case '"': value += '"'; break;
                 case '\'': value += '\''; break;
                 case 'x': {
-                    if (is_at_end()) { return error_token("Unterminated string literal"); }
+                    if (is_at_end()) { return error_token("unterminated string literal"); }
                     int hi = hex_digit_value(advance());
-                    if (hi < 0 || is_at_end()) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                    if (hi < 0 || is_at_end()) { return error_token("invalid \\x escape: expected two hex digits"); }
                     int lo = hex_digit_value(advance());
-                    if (lo < 0) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                    if (lo < 0) { return error_token("invalid \\x escape: expected two hex digits"); }
                     value += static_cast<char>(static_cast<unsigned char>(hi * 16 + lo));
                     break;
                 }
                 default:
-                    return error_token("Invalid escape sequence");
+                    return error_token("invalid escape sequence");
             }
         } else {
             value += advance();
@@ -747,7 +752,7 @@ token lexer::scan_string() {
     }
 
     if (is_at_end()) {
-        return error_token("Unterminated string literal");
+        return error_token("unterminated string literal");
     }
 
     advance(); // Consume closing quote
@@ -774,11 +779,11 @@ token lexer::scan_raw_string() {
     while (!is_at_end() && peek() != '(') {
         const char d = peek();
         if (d == ' ' || d == ')' || d == '\\' || d == '"' || d == '\t' || d == '\v' || d == '\f' || d == '\n' || d == '\r' || delimiter.size() == 16) {
-            return error_token("Invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
+            return error_token("invalid raw string delimiter: up to 16 characters before '(', none a space, parenthesis, backslash or quote");
         }
         delimiter += advance();
     }
-    if (is_at_end()) { return error_token("Unterminated raw string literal"); }
+    if (is_at_end()) { return error_token("unterminated raw string literal"); }
     advance();   // '('
     const std::string close = ")" + delimiter + "\"";
     const size_t end = source_.find(close, current_);
@@ -786,7 +791,7 @@ token lexer::scan_raw_string() {
         while (!is_at_end()) {
             if (advance() == '\n') { line_++; column_ = 1; }
         }
-        return error_token("Unterminated raw string literal: no )" + delimiter + "\" closes it");
+        return error_token("unterminated raw string literal: no )" + delimiter + "\" closes it");
     }
     std::string value;
     value.reserve(end - current_);
@@ -815,14 +820,14 @@ token lexer::scan_char() {
     size_t startColumn = column_ - 1;
 
     if (is_at_end()) {
-        return error_token("Unterminated character literal");
+        return error_token("unterminated character literal");
     }
 
     char value;
     if (peek() == '\\') {
         advance();
         if (is_at_end()) {
-            return error_token("Unterminated character literal");
+            return error_token("unterminated character literal");
         }
 
         char escaped = advance();
@@ -834,23 +839,26 @@ token lexer::scan_char() {
             case '"': value = '"'; break;
             case '\'': value = '\''; break;
             case 'x': {
-                if (is_at_end()) { return error_token("Unterminated character literal"); }
+                if (is_at_end()) { return error_token("unterminated character literal"); }
                 int hi = hex_digit_value(advance());
-                if (hi < 0 || is_at_end()) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                if (hi < 0 || is_at_end()) { return error_token("invalid \\x escape: expected two hex digits"); }
                 int lo = hex_digit_value(advance());
-                if (lo < 0) { return error_token("Invalid \\x escape: expected two hex digits"); }
+                if (lo < 0) { return error_token("invalid \\x escape: expected two hex digits"); }
                 value = static_cast<char>(static_cast<unsigned char>(hi * 16 + lo));
                 break;
             }
             default:
-                return error_token("Invalid escape sequence in character literal");
+                return error_token("invalid escape sequence in character literal");
         }
     } else {
         value = advance();
     }
 
     if (is_at_end() || peek() != '\'') {
-        return error_token("Unterminated character literal");
+        if (!is_at_end() && peek() != '\n' && source_.find('\'', current_) < source_.find('\n', current_)) {
+            return error_token("a character literal holds one character: write text in double quotes");
+        }
+        return error_token("unterminated character literal");
     }
 
     advance(); // Consume closing quote
@@ -904,10 +912,8 @@ token lexer::scan_identifier() {
         }
     }
 
-    // Check if it's a keyword (keywords use static string storage)
-    // Need temporary std::string for map lookup (keyword map uses std::string keys)
-    std::string lexeme_str(lexeme_view);
-    auto it = keywords_.find(lexeme_str);
+    // a keyword's lexeme views the map's own key
+    auto it = keywords_.find(lexeme_view);
     if (it != keywords_.end()) {
         // For keywords, use string_view to the keyword string in the map (permanent storage)
         token tok(it->second, it->first, loc);
@@ -952,7 +958,7 @@ source_location lexer::current_location() const {
 }
 
 bool lexer::is_reserved_word(std::string_view word) {
-    return keywords_.count(std::string(word)) != 0;
+    return keywords_.find(word) != keywords_.end();
 }
 
 // token method implementations

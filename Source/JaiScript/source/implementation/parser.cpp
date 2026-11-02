@@ -17,8 +17,7 @@ namespace jai {
 
 namespace {
 
-    // ---- Escape-mark pass (cell reference model) ----------------------------------
-    // A variable "ref-escapes" when it may be bound by reference at runtime: it appears
+    // Escape-mark pass (cell reference model). A variable "ref-escapes" when it may be bound by reference at runtime: it appears
     // as a bare-identifier call argument (callee ref-ness is unknowable statically), as
     // the identifier source of a reference declaration (auto& x = y), or as an explicit
     // by-reference lambda capture. Marked declarations box their storage into a cell
@@ -37,6 +36,7 @@ namespace {
             block_stmt* body = nullptr;   // the function body this scope's frame runs
         };
         std::vector<scope> scopes;
+        detail::native_stack_mark stack;
         // class bodies being walked: inside one, an unqualified name resolves to a member (a script field or a
         // native property) before a same-named program global, and fields are never registered here
         size_t class_depth = 0;
@@ -71,12 +71,8 @@ namespace {
             }
         }
 
-        // Ref-return producers only (walk_args deliberately does NOT call this for call
-        // arguments: both backends' ref-param binds box the caller's storage IN PLACE on
-        // demand via share_env_ref / share_boxed_env_storage, so a by-ref callee never
-        // needs the variable pre-boxed — the old conservative mark cell-boxed every
-        // variable whose name ever appeared as a call argument and knocked those decls
-        // off every escape-gated fast path).
+        // Ref-return producers only: walk_args never calls this for call arguments, since both backends' ref-param binds
+        // box the caller's storage in place on demand (share_env_ref / share_boxed_env_storage).
         void escape_arg(const expression* arg) {
             if (arg && arg->get_type() == node_type::identifier_expr) {
                 escape(static_cast<const identifier_expr*>(arg)->symbol_id);
@@ -328,6 +324,7 @@ namespace {
             if (!e) {
                 return;
             }
+            stack.guard(e->location);
             switch (e->get_type()) {
                 case node_type::identifier_expr: {
                     auto* id = static_cast<identifier_expr*>(e);
@@ -446,6 +443,7 @@ namespace {
             if (!s) {
                 return;
             }
+            stack.guard(s->location);
             switch (s->get_type()) {
                 case node_type::expression_stmt:
                     walk_expr(static_cast<expression_stmt*>(s)->expression.get());
@@ -633,6 +631,41 @@ namespace {
 
 } // namespace
 
+void detail::release_operands(std::initializer_list<expression_ptr*> operands, std::vector<expression_ptr>* more) noexcept {
+    std::vector<expression_ptr> pending;
+    auto take = [&pending](expression_ptr& e) {
+        if (!e || e.use_count() != 1) { return; }
+        switch (e->get_type()) {
+            case node_type::binary_expr: case node_type::unary_expr: case node_type::assignment_expr: case node_type::call_expr: case node_type::member_expr:
+                pending.push_back(std::move(e));
+                return;
+            default:
+                return;
+        }
+    };
+    try {
+        for (expression_ptr* operand : operands) { take(*operand); }
+        if (more) { for (expression_ptr& argument : *more) { take(argument); } }
+        while (!pending.empty()) {
+            expression_ptr node = std::move(pending.back());
+            pending.pop_back();
+            switch (node->get_type()) {
+                case node_type::binary_expr: { auto* b = static_cast<binary_expr*>(node.get()); take(b->left); take(b->right); break; }
+                case node_type::unary_expr: take(static_cast<unary_expr*>(node.get())->operand); break;
+                case node_type::assignment_expr: { auto* a = static_cast<assignment_expr*>(node.get()); take(a->target); take(a->value); break; }
+                case node_type::call_expr: {
+                    auto* c = static_cast<call_expr*>(node.get());
+                    take(c->callee);
+                    for (expression_ptr& argument : c->arguments) { take(argument); }
+                    break;
+                }
+                case node_type::member_expr: take(static_cast<member_expr*>(node.get())->object); break;
+                default: break;
+            }
+        }
+    } catch (...) {}   // out of memory: what is left dies recursively
+}
+
 bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarations,
                                     string_symbolizer* symbolizer) {
 	bool names_execute_elapsed = false;
@@ -647,7 +680,6 @@ bool detail::run_ast_marking_passes(const std::vector<declaration_ptr>& declarat
 	return names_execute_elapsed;
 }
 
-// One true constructor with dependency injection
 parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, engine* eng, const std::unordered_set<std::string>& registeredTemplateTypes, const std::string& filename)
     : stream_(&tokens), filename_(filename), current_(0), registered_template_types_(registeredTemplateTypes), symbolizer_(symbolizer), engine_(eng) {
     if (!symbolizer_) {
@@ -683,7 +715,7 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
             size_t j = i + 1;
             bool ok = true;
             while (true) {
-                if (j >= n || in[j].type != token_type::identifier) { report_error("Expected a qualified name after 'using' (using ns::name;)", j < n ? in[j] : t); ok = false; break; }
+                if (j >= n || in[j].type != token_type::identifier) { report_error("expected a qualified name after 'using' (using ns::name;)", j < n ? in[j] : t); ok = false; break; }
                 const size_t start = j++;
                 while (j + 1 < n && in[j].type == token_type::colon_colon && in[j + 1].type == token_type::identifier) { j += 2; }
                 std::vector<token> target(in.begin() + static_cast<std::ptrdiff_t>(start), in.begin() + static_cast<std::ptrdiff_t>(j));
@@ -698,7 +730,7 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
                 if (j < n && in[j].type == token_type::comma) { ++j; continue; }
                 break;
             }
-            if (ok && (j >= n || in[j].type != token_type::semicolon)) { report_error("Expected ';' after the using declaration", j < n ? in[j] : t); ok = false; }
+            if (ok && (j >= n || in[j].type != token_type::semicolon)) { report_error("expected ';' after the using declaration", j < n ? in[j] : t); ok = false; }
             if (ok) {
                 for (auto& a : items) {
                     const bool taken = std::any_of(aliases.begin(), aliases.end(), [&](const alias& x) { return x.name == a.name; });
@@ -897,62 +929,59 @@ void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
                             !f.parameters[0].is_reference && !f.parameters[0].default_value &&
                             (!f.return_type || f.return_type->id == engine_->get_type_info_void()->id);
         if (!shaped) {
-            errors_.push_back(f.location.to_string() + ": hot_reload_migrate at a unit's top level is its reload hook, declared " + k_signature);
+            report_error_at(std::string("hot_reload_migrate at a unit's top level is its reload hook, declared ") + k_signature, f.location);
         } else if (seen) {
-            errors_.push_back(f.location.to_string() + ": a unit declares its reload hook hot_reload_migrate once");
+            report_error_at("a unit declares its reload hook hot_reload_migrate once", f.location);
         }
         seen = true;
     } else if (d.get_type() == node_type::variable_decl && static_cast<const variable_decl&>(d).name == "hot_reload_migrate") {
-        errors_.push_back(d.location.to_string() + ": 'hot_reload_migrate' at a unit's top level names its reload hook, declared " + k_signature);
+        report_error_at(std::string("'hot_reload_migrate' at a unit's top level names its reload hook, declared ") + k_signature, d.location);
     }
 }
 
 checked_result<std::vector<declaration_ptr>> parser::parse() {
+    stack_.arm();
     std::vector<declaration_ptr> declarations;
     bool reload_hook_seen = false;
     if (qualify_namespace_classes(*stream_, namespace_stream_)) { stream_ = &namespace_stream_; }
     if (apply_using_declarations(*stream_, using_stream_)) { stream_ = &using_stream_; }
 
-    while (!is_at_end()) {
-        const size_t errors_before = errors_.size();
-        auto decl_result = declaration();
+    try {
+        while (!is_at_end()) {
+            const size_t errors_before = errors_.size();
+            auto decl_result = declaration();
 
-        if (!decl_result) {
-            // Surface errors that bypass report_error (e.g. depth-guard failures) —
-            // otherwise execute() would return null with no diagnostic at all.
-            if (errors_.size() == errors_before && decl_result.error() != std::error_code()) {
-                report_error(format_error(decl_result, *symbolizer_), peek());
-            }
-            synchronize();
-        } else {
-            auto decl = std::move(decl_result.value());
-            if (decl) {
-                check_reload_hook(*decl, reload_hook_seen);
-                declarations.push_back(std::move(decl));
+            if (!decl_result) {
+                // an error that bypassed report_error still gets its diagnostic
+                if (errors_.size() == errors_before && decl_result.error() != std::error_code()) {
+                    report_error(format_error(decl_result, *symbolizer_), peek());
+                }
+                synchronize();
+            } else {
+                auto decl = std::move(decl_result.value());
+                if (decl) {
+                    check_reload_hook(*decl, reload_hook_seen);
+                    declarations.push_back(std::move(decl));
+                }
             }
         }
+    } catch (const detail::nesting_exhausted& e) {
+        report_error_at(std::string(detail::k_nesting_too_deep_listing), e.location());
     }
 
-    // If there were parse errors, return error carrying the FULL diagnostic list
-    // (interned; the engine boundary resolves it via format_error).
     if (!errors_.empty()) {
-        std::string all_errors = errors_[0];
-        for (size_t i = 1; i < errors_.size(); ++i) {
-            all_errors += '\n';
-            all_errors += errors_[i];
-        }
-        uint64_t error_id = symbolizer_->intern(all_errors);
         recovered_ = std::move(declarations);
-        return checked_result<std::vector<declaration_ptr>>(
-            make_error_code(parse_error_code::invalid_expression),
-            "Parse error: {0}",
-            error_id
-        );
+        return failed_parse();
     }
 
     // Escape-mark + transient-read passes (shared with jaibite loads, which must
     // re-derive the parser-pass flags the serializer does not carry)
-    if (detail::run_ast_marking_passes(declarations, symbolizer_)) { engine_->note_execute_elapsed_use(); }
+    try {
+        if (detail::run_ast_marking_passes(declarations, symbolizer_)) { engine_->note_execute_elapsed_use(); }
+    } catch (const detail::nesting_exhausted& e) {
+        report_error_at(std::string(detail::k_nesting_too_deep_listing), e.location());
+        return failed_parse();
+    }
 
     // Mark the last expression declaration as an implicit return
     if (!declarations.empty()) {
@@ -993,9 +1022,33 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
 
 // Error handling - logs error to errors_ vector for later reporting
 void parser::report_error(const std::string& message, const token& token) {
-    std::stringstream ss;
-    ss << token.location.to_string() << ": " << message;
-    errors_.push_back(ss.str());
+    report_error_at(message, token.location);
+}
+
+void parser::report_error_at(const std::string& message, const source_location& at) {
+    errors_.push_back({at, message});
+}
+
+std::vector<std::string> parser::get_errors() const {
+    std::vector<std::string> result;
+    result.reserve(errors_.size());
+    for (const auto& e : errors_) { result.push_back(e.at.to_string() + ": " + e.message); }
+    return result;
+}
+
+// The static listing's shape (check_report::format): each error at its file, line and column, then, for the parsed text's own
+// file, the line with a caret under the column
+checked_result<std::vector<declaration_ptr>> parser::failed_parse() {
+    const std::string& own_file = stream_->empty() ? filename_ : stream_->front().location.filename;
+    std::string listing = "parse failed:";
+    for (const auto& e : errors_) {
+        check_report one;
+        one.diagnostics.push_back({check_diagnostic::level::error, e.at.line, e.at.column, e.message});
+        listing += '\n';
+        listing += one.format(e.at.filename == own_file ? source_ : std::string_view{}, e.at.filename);
+        if (listing.back() == '\n') { listing.pop_back(); }
+    }
+    return checked_result<std::vector<declaration_ptr>>(make_error_code(parse_error_code::syntax_error), "{0}", symbolizer_->intern(listing));
 }
 
 void parser::synchronize() {
@@ -1108,7 +1161,7 @@ void parser::report_expected_name(const std::string& expected_message, const cha
 
 checked_result<token> parser::consume_name(const std::string& expected_message, const char* what) {
     if (check(token_type::identifier) && reject_using_name(peek(), what)) {
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (!check(token_type::identifier) && is_type_keyword_token(peek().type)) {
         return consume(token_type::identifier, type_keyword_name_message(peek().lexeme, what));
@@ -1145,7 +1198,7 @@ void parser::synchronize_class_member(size_t class_open_index) {
     }
 }
 
-// token management (return by reference to avoid copying strings - major perf win)
+// token access returns references: a token copy copies its strings
 const token& parser::peek() const {
     if (pushed_back_token_.has_value()) {
         return pushed_back_token_.value();
@@ -1198,17 +1251,14 @@ bool parser::match(std::initializer_list<token_type> types) {
 checked_result<token> parser::consume(token_type type, const std::string& message) {
     if (check(type)) return advance();
 
-    // Report error (adds to errors_ vector)
-    std::stringstream ss;
-    ss << peek().location.to_string() << ": " << message;
-    errors_.push_back(ss.str());
+    report_error(message, peek());
 
     // Return error as checked_result<token>
     // Intern the message so we can pass it as a symbol ID
     uint64_t msg_id = symbolizer_->intern(message);
     return checked_result<token>(
-        make_error_code(parse_error_code::expected_token),
-        "Expected token: {0}",
+        make_error_code(parse_error_code::syntax_error),
+        "expected token: {0}",
         msg_id
     );
 }
@@ -1217,18 +1267,23 @@ checked_result<token> parser::consume(token_type type, const std::string& messag
 checked_result<expression_ptr> parser::primary() {
     // Lexer errors travel as error tokens carrying the message in the lexeme
     // (e.g. template-string format specs rejected at lex time). Surface that
-    // message instead of a generic "Expected expression".
+    // message instead of a generic "expected expression".
     if (check(token_type::error)) {
         report_error(std::string(peek().lexeme), peek());
         advance();
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
 
-    // Map literals parse as a PRIMARY so postfix applies ({"k":1}["k"], {..}.size());
-    // they used to short-circuit at assignment level, which silently rejected any
-    // postfix on a literal (internal/grammar.md's own splice example was unparseable)
+    // Map literals parse as a primary so postfix applies ({"k":1}["k"], {..}.size())
     if (check(token_type::left_brace) && looks_like_map_literal()) {
         return parse_map_literal();
+    }
+    if (check(token_type::left_brace) && current_ + 2 < stream_->size() && (*stream_)[current_ + 1].type == token_type::string_literal) {
+        const token& after_key = (*stream_)[current_ + 2];
+        if (after_key.type != token_type::comma && after_key.type != token_type::right_brace) {
+            report_error("expected ':' after the map key", after_key);
+            return make_error_code(parse_error_code::syntax_error);
+        }
     }
 
     if (arrow_function_ahead()) {
@@ -1236,15 +1291,15 @@ checked_result<expression_ptr> parser::primary() {
     }
     if (check(token_type::identifier) && peek().lexeme == "const_cast" && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less) {
         report_foreign(detail::foreign_word::const_cast_call, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (check(token_type::const_keyword)) {
         report_foreign(detail::foreign_word::const_misplaced, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (check(token_type::function_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::star) {
         report_foreign(detail::foreign_word::generator_function, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
 
     // Anonymous function expression: `function (params) {...}` (a [&] lambda, the JavaScript closure).
@@ -1308,11 +1363,11 @@ checked_result<expression_ptr> parser::primary() {
         if (superToken.lexeme != "super::") {
             report_error(check(token_type::left_paren)
                 ? "super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)"
-                : "A base class method is called with super::name(args), not super.name", superToken);
-            return make_error_code(parse_error_code::unexpected_token);
+                : "a base class method is called with super::name(args), not super.name", superToken);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(token methodName, is_keyword_word(peek().type) ? checked_result<token>(advance())
-                                                                            : consume(token_type::identifier, "Expected method name after 'super::'"));
+                                                                            : consume(token_type::identifier, "expected method name after 'super::'"));
 
         // Create a member access on super
         auto superExpr = std::make_shared<super_expr>(superToken.location);
@@ -1328,7 +1383,7 @@ checked_result<expression_ptr> parser::primary() {
         token includeToken = previous();
         if (match(token_type::left_paren)) {
             JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
-            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after include expression"));
+            JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after include expression"));
             return std::make_shared<include_expr>(includeToken.location, path_expr);
         }
         JAISCRIPT_TRY_ASSIGN(std::string path, include_literal_path());
@@ -1354,10 +1409,10 @@ checked_result<expression_ptr> parser::primary() {
         if (make_shared_spelling) { advance(); }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
         if (make_shared_spelling) {
-            consume_greater_in_generic("Expected '>' after make_shared type");
+            consume_greater_in_generic("expected '>' after make_shared type");
             if (!check(token_type::left_paren)) {
-                report_error("Expected '(' after make_shared<T>", peek());
-                return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected '(' after make_shared<T>", peek());
+                return make_error_code(parse_error_code::syntax_error);
             }
         }
 
@@ -1376,7 +1431,7 @@ checked_result<expression_ptr> parser::primary() {
 
         if (!check(token_type::left_paren) && !check(token_type::left_brace)) {
             report_foreign(check(token_type::left_bracket) ? detail::foreign_word::new_array : detail::foreign_word::new_without_arguments, newToken);
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         const bool is_brace = check(token_type::left_brace);
         advance(); // consume '(' or '{'
@@ -1388,23 +1443,23 @@ checked_result<expression_ptr> parser::primary() {
     // spelling (detail/cast_kernel.hpp); the type is anything a declaration accepts
     if (match(token_type::cast_keyword)) {
         token castToken = previous();
-        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'cast'"));
+        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'cast'"));
         if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
             check(token_type::void_keyword) || check(token_type::function_keyword)) {
             report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
         if (!target || target->base_type == script_value_type::jai_any_type ||
             (target->base_type == script_value_type::jai_shared_ptr_type && !target->element_type())) {
             report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", castToken);
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         const bool by_reference = match(token_type::ampersand);
-        consume_greater_in_generic("Expected '>' after cast type");
-        JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after cast type"));
+        consume_greater_in_generic("expected '>' after cast type");
+        JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after cast type"));
         JAISCRIPT_TRY_ASSIGN(auto operand, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after cast operand"));
+        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after cast operand"));
         if (by_reference) { operand = bound_conditional(std::move(operand)); }
         return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
     }
@@ -1483,18 +1538,9 @@ checked_result<expression_ptr> parser::primary() {
         return id_expr;
     }
 
-    // Grouped expression. Weighted: one paren level re-enters the entire precedence
-    // chain (~18 native frames) but only ticks the shared counter twice, so unweighted
-    // nesting overflowed the native stack BELOW the cap (~40 levels on a 1 MB Debug stack).
     if (match(token_type::left_paren)) {
-        depth_guard guard(parse_depth_, MAX_PARSE_DEPTH, 6);
-        if (guard.overflow_) {
-            return checked_result<expression_ptr>(
-                make_error_code(parse_error_code::unexpected_token),
-                "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-        }
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after expression"));
+        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after expression"));
         return expr;
     }
 
@@ -1525,7 +1571,7 @@ checked_result<expression_ptr> parser::primary() {
 
         // Check for empty array OR empty capture list for lambda
         if (check(token_type::right_bracket)) {
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']'"));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']'"));
 
             // Check if this is followed by '(' which would make it a lambda
             if (check(token_type::left_paren)) {
@@ -1583,7 +1629,7 @@ checked_result<expression_ptr> parser::primary() {
                 elements.push_back(std::move(elem));
             } while (match(token_type::comma));
 
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after array elements"));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after array elements"));
             // Check if this is followed by '(' which would make it a lambda
             if (check(token_type::left_paren)) {
                 // Restore position and parse as lambda
@@ -1665,15 +1711,16 @@ checked_result<expression_ptr> parser::primary() {
         return id_expr;
     }
 
-    report_error("Expected expression", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+    report_error("expected expression", peek());
+    return make_error_code(parse_error_code::syntax_error);
 }
 
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
+    stack_.guard(peek().location);
     if (check(token_type::const_keyword)) {   // array<const int>, cast<const T&>: const qualifies a declaration (internal/const.md)
         report_foreign(detail::foreign_word::const_type_argument, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     // Handle auto - type inference (nullptr = infer from initializer, or uninitialized)
     if (match(token_type::auto_keyword)) {
@@ -1713,7 +1760,7 @@ checked_result<type_info_ptr> parser::parse_type() {
     // Generic types
     if (match(token_type::array_keyword)) {
         JAISCRIPT_TRY(consume(token_type::less,
-            "Expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
+            "expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
             "if this was meant as a variable, rename it"));
         type_info_ptr element_type;
         if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
@@ -1721,46 +1768,46 @@ checked_result<type_info_ptr> parser::parse_type() {
         } else {
             JAISCRIPT_TRY_ASSIGN(element_type, parse_type());
         }
-        consume_greater_in_generic("Expected '>' after array element type");
+        consume_greater_in_generic("expected '>' after array element type");
         return store_type_info(type_info::make_array(*symbolizer_, element_type));
     }
 
     if (match(token_type::map_keyword)) {
         JAISCRIPT_TRY(consume(token_type::less,
-            "Expected '<' after 'map' - 'map' is the built-in map type keyword (map<K, V>); "
+            "expected '<' after 'map' - 'map' is the built-in map type keyword (map<K, V>); "
             "if this was meant as a variable, rename it"));
         JAISCRIPT_TRY_ASSIGN(type_info_ptr keyType, parse_type());
-        JAISCRIPT_TRY(consume(token_type::comma, "Expected ',' after map key type"));
+        JAISCRIPT_TRY(consume(token_type::comma, "expected ',' after map key type"));
         JAISCRIPT_TRY_ASSIGN(type_info_ptr valueType, parse_type());
-        consume_greater_in_generic("Expected '>' after map value type");
+        consume_greater_in_generic("expected '>' after map value type");
         return store_type_info(type_info::make_map(*symbolizer_, keyType, valueType));
     }
 
     if (match(token_type::weak_ptr_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'weak_ptr'"));
+        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'weak_ptr'"));
         if (check(token_type::const_keyword)) {
             report_foreign(detail::foreign_word::pointer_to_const, peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
-        consume_greater_in_generic("Expected '>' after weak_ptr type");
+        consume_greater_in_generic("expected '>' after weak_ptr type");
         return store_type_info(type_info::make_weak_ptr(*symbolizer_, pointee_type));
     }
 
     if (match(token_type::shared_ptr_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "Expected '<' after 'shared_ptr'"));
+        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'shared_ptr'"));
         if (check(token_type::const_keyword)) {
             report_foreign(detail::foreign_word::pointer_to_const, peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         // A dynamic pointee adds nothing over plain var (which
         // already holds and rebinds any shared_ptr) - reject with the teaching pair
         if (check(token_type::var_keyword)) {
             report_error("shared_ptr<var> is not supported: use var (holds and rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
-        consume_greater_in_generic("Expected '>' after shared_ptr type");
+        consume_greater_in_generic("expected '>' after shared_ptr type");
         // Create a shared_ptr type that wraps the pointee type
         // This ensures reference semantics (no clone on assign)
         type_info info(script_value_type::jai_shared_ptr_type);
@@ -1783,7 +1830,7 @@ checked_result<type_info_ptr> parser::parse_type() {
     if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
         report_error(std::string("'") + std::string(peek().lexeme) + "' is an array element type only (array<" + std::string(peek().lexeme) +
                      ">, one byte per element); a single byte is an int", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (check(token_type::identifier)) {
         const script_value_type math_kind = math_type_from_name(peek().lexeme);
@@ -1823,14 +1870,14 @@ checked_result<type_info_ptr> parser::parse_type() {
                     JAISCRIPT_TRY_ASSIGN(param, parse_type());
                 }
                 if (!param) {
-                    report_error("A template argument needs a concrete type", previous());
-                    return make_error_code(parse_error_code::unexpected_token);
+                    report_error("a template argument needs a concrete type", previous());
+                    return make_error_code(parse_error_code::syntax_error);
                 }
                 spellings.push_back(param->canonical_name());
                 templateParams.push_back(param);
             } while (match(token_type::comma));
 
-            consume_greater_in_generic("Expected '>' after template parameters");
+            consume_greater_in_generic("expected '>' after template parameters");
 
             type_info info = type_info::make_object(*symbolizer_, template_instance_name(type_name, spellings));
             info.type_params = std::move(templateParams);
@@ -1840,18 +1887,12 @@ checked_result<type_info_ptr> parser::parse_type() {
         return store_type_info(type_info::make_object(*symbolizer_, type_name));
     }
 
-    report_error("Expected type", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+    report_error("expected type", peek());
+    return make_error_code(parse_error_code::syntax_error);
 }
 
-// Simple expression for now
 checked_result<expression_ptr> parser::expression() {
-    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
-    if (guard.overflow_) {
-        return checked_result<expression_ptr>(
-            make_error_code(parse_error_code::unexpected_token),
-            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-    }
+    stack_.guard(peek().location);
     return assignment();
 }
 
@@ -1890,6 +1931,7 @@ namespace {
 }
 
 checked_result<expression_ptr> parser::assignment() {
+    stack_.guard(peek().location);   // a = b = c recurses here
     const size_t target_start = current_;
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, ternary());
 
@@ -1901,7 +1943,7 @@ checked_result<expression_ptr> parser::assignment() {
                              (shape == node_type::binary_expr && static_cast<const binary_expr*>(expr.get())->op.type == token_type::left_bracket);
         if (!storage || !coalesce_target_pure(expr.get())) {
             report_error("'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first", op);
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         const size_t resume = current_;
         const std::optional<token> pushed = pushed_back_token_;
@@ -1928,6 +1970,12 @@ checked_result<expression_ptr> parser::assignment() {
     }
 
     return expr;
+}
+
+// `{ key:` from the token `offset` past the current one: a map literal's head, which no block begins with
+bool parser::json_map_ahead(size_t offset) const {
+    const size_t at = current_ + offset;
+    return at + 1 < stream_->size() && is_json_map_key_token((*stream_)[at].type) && (*stream_)[at + 1].type == token_type::colon;
 }
 
 // Helper function to check if { starts a map literal (as opposed to a block statement)
@@ -1986,21 +2034,13 @@ bool parser::looks_like_map_literal() {
 }
 
 checked_result<expression_ptr> parser::parse_map_literal() {
-    // Nested C++-style map literals ({{...}}) recurse here without passing through
-    // expression(); unguarded brace runs overflow the native stack.
-    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
-    if (guard.overflow_) {
-        return checked_result<expression_ptr>(
-            make_error_code(parse_error_code::unexpected_token),
-            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-    }
-
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{'"));
+    stack_.guard(peek().location);   // {{...}} recurses here without passing through expression()
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{'"));
     auto startLoc = previous().location;
 
     // Empty map
     if (check(token_type::right_brace)) {
-        JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}'"));
+        JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}'"));
         return std::make_shared<map_literal_expr>(startLoc, std::vector<std::pair<expression_ptr, expression_ptr>>());
     }
 
@@ -2042,34 +2082,35 @@ checked_result<expression_ptr> parser::parse_map_literal() {
                 JAISCRIPT_TRY_ASSIGN(key, expression());
             }
 
-            JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after key in JSON-style map"));
+            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after key in JSON-style map"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr value, expression());
             entries.emplace_back(std::move(key), std::move(value));
         } while (match(token_type::comma));
     } else {
         // Parse C++ style: {{"key", value}, {"key2", value2}}
         do {
-            JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' for map entry"));
+            JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' for map entry"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr key, expression());
-            JAISCRIPT_TRY(consume(token_type::comma, "Expected ',' between key and value in map entry"));
+            JAISCRIPT_TRY(consume(token_type::comma, "expected ',' between key and value in map entry"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr value, expression());
-            JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after map entry"));
+            JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after map entry"));
 
             entries.emplace_back(std::move(key), std::move(value));
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after map entries"));
+    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after map entries"));
     return std::make_shared<map_literal_expr>(startLoc, std::move(entries));
 }
 
 checked_result<expression_ptr> parser::ternary() {
+    stack_.guard(peek().location);
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, coalesce());
 
     if (match(token_type::question)) {
         token questionLoc = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr then_expression, expression());
-        JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after then expression in ternary"));
+        JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after then expression in ternary"));
         JAISCRIPT_TRY_ASSIGN(expression_ptr else_expression, ternary());
         return std::make_shared<ternary_expr>(questionLoc.location, expr, then_expression, else_expression);
     }
@@ -2079,6 +2120,7 @@ checked_result<expression_ptr> parser::ternary() {
 
 // a ?? b: a when it is not null, else b (b runs only then); right-associative, below || and above the conditional, as C#'s
 checked_result<expression_ptr> parser::coalesce() {
+    stack_.guard(peek().location);
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, logical_or());
     if (match(token_type::question_question)) {
         token op = previous();
@@ -2156,7 +2198,7 @@ checked_result<expression_ptr> parser::equality() {
         token op = previous();
         if (check(token_type::equal)) {
             report_foreign(op.type == token_type::equal_equal ? detail::foreign_word::strict_equal : detail::foreign_word::strict_not_equal, op);
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, relational());
         expr = std::make_shared<binary_expr>(op.location, expr, op, right);
@@ -2204,11 +2246,8 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
     const script_value& leftVal = leftLit->value;
     const script_value& rightVal = rightLit->value;
 
-    // Fold integer arithmetic (most common case) through the overflow policy: raw
-    // + - * here was signed-overflow UB in the compiler AND a silent wrap that
-    // bypassed the checked policy (PARSER-FOLD-WRAPS). On overflow DO NOT fold -
-    // the runtime's checked path raises with the correct operator name. Wrap builds
-    // still fold (jai::ints wraps UB-free there).
+    // Integer folds go through the overflow policy: on overflow nothing folds, so the run raises with the operator's name
+    // (a wrapping build folds, jai::ints wrapping without UB)
     if (leftVal.is_int() && rightVal.is_int()) {
         script_int leftInt = leftVal.as_int();
         script_int rightInt = rightVal.as_int();
@@ -2326,25 +2365,16 @@ checked_result<expression_ptr> parser::multiplicative() {
 }
 
 checked_result<expression_ptr> parser::unary() {
-    // unary() recurses into itself for chained prefix operators (e.g. !!!x,
-    // - - -x) WITHOUT re-entering expression(), so the depth guard in
-    // expression() does not cover it. Guard here too, or adversarial input
-    // like a long run of '!' overflows the native stack.
-    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
-    if (guard.overflow_) {
-        return checked_result<expression_ptr>(
-            make_error_code(parse_error_code::unexpected_token),
-            "Maximum expression nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-    }
+    stack_.guard(peek().location);   // !!!x recurses here without passing through expression()
 
     if (check(token_type::ampersand)) {
         report_foreign(detail::foreign_word::address_of, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (check(token_type::dot) && current_ + 2 < stream_->size() && (*stream_)[current_ + 1].type == token_type::dot &&
         (*stream_)[current_ + 2].type == token_type::dot) {
         report_foreign(detail::foreign_word::spread, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     if (match({token_type::bang, token_type::minus, token_type::plus, token_type::plus_plus,
                token_type::minus_minus, token_type::tilde})) {
@@ -2392,7 +2422,7 @@ checked_result<expression_ptr> parser::unary() {
         if (!in_coroutine_) {
             report_error("yield can only be used inside a coroutine function", yield_token);
             return checked_result<expression_ptr>(
-                make_error_code(parse_error_code::unexpected_token),
+                make_error_code(parse_error_code::syntax_error),
                 "yield can only be used inside a coroutine function");
         }
         expression_ptr value = nullptr;
@@ -2428,8 +2458,8 @@ checked_result<expression_ptr> parser::postfix() {
                 auto type_info = store_type_info(type_info::make_object(*symbolizer_, identExpr->name));
                 expr = std::make_shared<new_expr>(identExpr->location, type_info, std::move(arguments));
             } else {
-                report_error("Brace initialization can only be used with type names", previous());
-    return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected ';' after expression", previous());   // `i++ {`: only a type name takes a brace initializer
+    return make_error_code(parse_error_code::syntax_error);
             }
         } else if (match(token_type::dot) || match(token_type::question_dot)) {
             bool is_null_safe = (previous().type == token_type::question_dot);
@@ -2451,13 +2481,13 @@ checked_result<expression_ptr> parser::postfix() {
                 uint64_t member_id = get_symbol_id(name);
                 expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
             } else {
-                report_error("Expected member name after '::'", name);
-    return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected member name after '::'", name);
+    return make_error_code(parse_error_code::syntax_error);
             }
         } else if (match(token_type::left_bracket)) {
             // Array subscript
             JAISCRIPT_TRY_ASSIGN(expression_ptr index, expression());
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after array index"));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after array index"));
             token op(token_type::left_bracket, "[", previous().location);
             expr = std::make_shared<binary_expr>(op.location, expr, op, index);
         } else if (match({token_type::plus_plus, token_type::minus_minus})) {
@@ -2567,8 +2597,8 @@ checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const
     pushed_back_token_.reset();
     if (!parsed) { return parsed.error_value(); }
     if (!whole) {
-        report_error("Unexpected tokens in an optional chain", tokens[link]);
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("unexpected tokens in an optional chain", tokens[link]);
+        return make_error_code(parse_error_code::syntax_error);
     }
     return parsed.value();
 }
@@ -2664,7 +2694,6 @@ expression_ptr parser::bound_conditional(expression_ptr value) {
     return value;
 }
 
-// Stub for declaration
 checked_result<declaration_ptr> parser::declaration() {
     JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
     if (mode == check_mode_attr_none) { return declaration_body(); }
@@ -2681,25 +2710,18 @@ checked_result<declaration_ptr> parser::declaration() {
 }
 
 checked_result<declaration_ptr> parser::declaration_body() {
-    // Statement-level recursion (blocks, if-chains) needs the same protection as
-    // expressions: declaration->statement->block->declaration is unbounded.
-    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
-    if (guard.overflow_) {
-        return checked_result<declaration_ptr>(
-            make_error_code(parse_error_code::unexpected_token),
-            "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-    }
+    stack_.guard(peek().location);
 
     if (do_while_ahead()) {
         JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
         return std::make_shared<statement_decl>(stmt->location, stmt);
     }
-    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
+    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::syntax_error); }
     if (check(token_type::const_keyword)) { return const_declaration(); }
 
     if (match(token_type::nocopy_keyword)) {
         const token at = previous();
-        JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'"));
+        JAISCRIPT_TRY(consume(token_type::class_keyword, "expected 'class' after 'nocopy'"));
         reject_class_in_function_body(at);
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration(true));
         match(token_type::semicolon);
@@ -2736,10 +2758,10 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     // Check for enum keyword
     if (match(token_type::enum_keyword)) {
-        if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::unexpected_token); }
-        JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected enum name"));
+        if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::syntax_error); }
+        JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "expected enum name"));
         auto [name_id, name_view] = symbolizer_->intern_with_view(name_tok.lexeme);
-        JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after enum name"));
+        JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after enum name"));
 
         auto decl = std::make_shared<enum_decl>(name_tok.location, name_view, name_id);
 
@@ -2748,18 +2770,18 @@ checked_result<declaration_ptr> parser::declaration_body() {
                 const bool keyword_value = is_declarable_keyword_name(peek().type) && current_ + 1 < stream_->size() &&
                                            ((*stream_)[current_ + 1].type == token_type::comma || (*stream_)[current_ + 1].type == token_type::right_brace ||
                                             (*stream_)[current_ + 1].type == token_type::equal);
-                JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "Expected enum value name"));
+                JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "expected enum value name"));
                 auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
                 decl->values.push_back({val_view, val_id});
                 if (check(token_type::equal)) {
-                    report_error("Enum values take no initializer: '" + std::string(val_tok.lexeme) + "' is " +
+                    report_error("enum values take no initializer: '" + std::string(val_tok.lexeme) + "' is " +
                                  std::to_string(decl->values.size() - 1) + ", its position in the enum", peek());
-                    return make_error_code(parse_error_code::unexpected_token);
+                    return make_error_code(parse_error_code::syntax_error);
                 }
             } while (match(token_type::comma));
         }
 
-        JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after enum values"));
+        JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after enum values"));
         return decl;
     }
 
@@ -2776,8 +2798,8 @@ checked_result<declaration_ptr> parser::declaration_body() {
         // A suspended fiber's return channel is a value channel: ref returns are
         // function-only (the epilogue would flatten anyway - make it explicit)
         if (func->return_type && func->return_type->base_type == script_value_type::jai_reference_type) {
-            report_error("Coroutines cannot return references", previous());
-            return make_error_code(parse_error_code::unexpected_token);
+            report_error("coroutines cannot return references", previous());
+            return make_error_code(parse_error_code::syntax_error);
         }
         match(token_type::semicolon);
         return result;
@@ -2785,7 +2807,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     if (check(token_type::function_keyword) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::star) {
         report_foreign(detail::foreign_word::generator_function, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
 
     // Check specifically for function keyword to handle function declarations
@@ -2820,7 +2842,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
             auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
 
             do {
-                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected variable name in destructuring", "variable"));
+                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected variable name in destructuring", "variable"));
                 auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
                 decl->names.push_back({sym_view, sym_id});
 
@@ -2831,11 +2853,11 @@ checked_result<declaration_ptr> parser::declaration_body() {
                 }
             } while (match(token_type::comma));
 
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after destructuring names"));
-            JAISCRIPT_TRY(consume(token_type::equal, "Expected '=' after destructuring pattern"));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after destructuring names"));
+            JAISCRIPT_TRY(consume(token_type::equal, "expected '=' after destructuring pattern"));
 
             JAISCRIPT_TRY_ASSIGN(decl->initializer, expression());
-            JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after destructuring declaration"));
+            JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after destructuring declaration"));
 
             return decl;
         }
@@ -2971,27 +2993,18 @@ checked_result<declaration_ptr> parser::declaration_body() {
         }
     }
 
-    // Try parsing as expression first (includes map literals, array literals, etc.)
-    // If it fails, we'll try parsing as statement
+    // a '{' that starts a statement opens a block, as in C++, except a map literal spelled with keys at a unit's top level: the
+    // unit's value (a data file include reads as its value, execute's result)
     if (check(token_type::left_brace)) {
-        // Use lookahead to determine if this is a map literal or block statement
-        // This avoids exception-based control flow
-        if (looks_like_map_literal()) {
-            // Looks like a map literal - parse as expression
+        if (nesting_depth_ == 0 && json_map_ahead()) {
             JAISCRIPT_TRY_ASSIGN(auto expr, expression());
-
-            // Allow semicolon to be optional at end of file for single expressions
             if (!is_at_end()) {
-                JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after expression"));
+                JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
             }
-
-            // Create an expression_decl for top-level expressions
             return std::make_shared<expression_decl>(expr->location, expr);
-        } else {
-            // Looks like a block statement - parse as statement
-            JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
-            return std::make_shared<statement_decl>(stmt->location, stmt);
         }
+        JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
+        return std::make_shared<statement_decl>(stmt->location, stmt);
     }
 
     // Check for other statements that can appear at top level
@@ -3010,7 +3023,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     // Allow semicolon to be optional at end of file for single expressions
     if (!is_at_end()) {
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after expression"));
+        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
     }
 
     // Create an expression_decl for top-level expressions
@@ -3030,7 +3043,7 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY_ASSIGN(token paren, consume(token_type::right_paren, "Expected ')' after arguments"));
+    JAISCRIPT_TRY_ASSIGN(token paren, consume(token_type::right_paren, "expected ')' after arguments"));
 
     return std::make_shared<call_expr>(paren.location, callee, std::move(arguments));
 }
@@ -3040,7 +3053,7 @@ checked_result<expression_ptr> parser::finish_member_access(expression_ptr objec
         token name = advance();
         return std::make_shared<member_expr>(name.location, object, name.lexeme, get_symbol_id(name), is_arrow);
     }
-    JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected member name", "member"));
+    JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected member name", "member"));
     uint64_t member_id = get_symbol_id(name);
     return std::make_shared<member_expr>(name.location, object, name.lexeme, member_id, is_arrow);
 }
@@ -3053,7 +3066,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
             const bool is_const = match(token_type::const_keyword);
             if (is_const && check(token_type::const_keyword)) {
                 report_error("'const' appears once in a declaration", peek());
-                return make_error_code(parse_error_code::unexpected_token);
+                return make_error_code(parse_error_code::syntax_error);
             }
 
             type_info_ptr type = nullptr;
@@ -3064,7 +3077,7 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
             if (match(token_type::colon)) {
                 // :name means auto type
                 type = nullptr; // nullptr means auto
-                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name after ':'", "parameter"));
+                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected parameter name after ':'", "parameter"));
                 name = name_tok.lexeme;
             }
             // Check for type: name syntax
@@ -3078,13 +3091,13 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 
                 if (match(token_type::colon)) {
                     // type: name syntax
-                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name after ':'", "parameter"));
+                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected parameter name after ':'", "parameter"));
                     name = name_tok.lexeme;
                 } else if (check(token_type::ampersand) || check(token_type::identifier)) {
                     // Traditional type name syntax
                     // Check for reference
                     is_reference = match(token_type::ampersand);
-                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("Expected parameter name", "parameter"));
+                    JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected parameter name", "parameter"));
                     name = name_tok.lexeme;
                 } else if (check(token_type::comma) || check(token_type::right_paren) || check(token_type::equal)) {
                     // No identifier after type - treat the type as the parameter name with auto type
@@ -3096,18 +3109,18 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                         name = type->type_name;
                         type = nullptr; // Auto type
                     } else {
-                        report_expected_name("Expected parameter name", "parameter");
-    return make_error_code(parse_error_code::unexpected_token);
+                        report_expected_name("expected parameter name", "parameter");
+    return make_error_code(parse_error_code::syntax_error);
                     }
                 } else {
-                    report_expected_name("Expected parameter name", "parameter");
-    return make_error_code(parse_error_code::unexpected_token);
+                    report_expected_name("expected parameter name", "parameter");
+    return make_error_code(parse_error_code::syntax_error);
                 }
             }
             // No type specified, error
             else {
-                report_error("Expected parameter type or ':' for auto parameter", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected parameter type or ':' for auto parameter", peek());
+    return make_error_code(parse_error_code::syntax_error);
             }
 
             parameter param(type, name, is_reference, is_const);
@@ -3127,8 +3140,8 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
         if (p.default_value) {
             seen_default = true;
         } else if (seen_default) {
-            report_error("Parameter without default value cannot follow parameter with default value", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            report_error("parameter without default value cannot follow parameter with default value", peek());
+            return make_error_code(parse_error_code::syntax_error);
         }
     }
 
@@ -3140,7 +3153,7 @@ checked_result<expression_ptr> parser::lambda_expression() {
     auto lambda = std::make_shared<lambda_expr>(peek().location);
 
     // Parse capture list
-    JAISCRIPT_TRY(consume(token_type::left_bracket, "Expected '[' for lambda"));
+    JAISCRIPT_TRY(consume(token_type::left_bracket, "expected '[' for lambda"));
     JAISCRIPT_TRY_ASSIGN(auto capture_result, parse_capture_list());
     lambda->captures = std::move(capture_result.first);
     lambda->default_capture = capture_result.second;
@@ -3148,7 +3161,7 @@ checked_result<expression_ptr> parser::lambda_expression() {
         if (cap.symbol_id == UINT64_MAX && symbolizer_) cap.symbol_id = symbolizer_->intern(cap.name);
         if (cap.symbol_id != UINT64_MAX && !cap.initializer) cap.outer_slot = lookup_capture_slot(cap.symbol_id);   // an init-capture names no outer variable
     }
-    JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after capture list"));
+    JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after capture list"));
 
     return finish_lambda_after_captures(std::move(lambda));
 }
@@ -3165,10 +3178,10 @@ checked_result<expression_ptr> parser::anonymous_function_expression() {
 // optional trailing return, scope/slot bookkeeping, body
 checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda) {
     // Parse parameters
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' for lambda parameters"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' for lambda parameters"));
     JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parameters"));
-    if (const_method_suffix()) { return make_error_code(parse_error_code::unexpected_token); }
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parameters"));
+    if (const_method_suffix()) { return make_error_code(parse_error_code::syntax_error); }
 
     // Parse return type if specified
     if (match(token_type::arrow)) {
@@ -3216,15 +3229,16 @@ checked_result<expression_ptr> parser::arrow_function_expression() {
         param.symbol_id = get_symbol_id(name);
         lambda->parameters.push_back(std::move(param));
     } else {
-        JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' for arrow function parameters"));
+        JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' for arrow function parameters"));
         JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after arrow function parameters"));
+        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after arrow function parameters"));
     }
-    JAISCRIPT_TRY(consume(token_type::fat_arrow, "Expected '=>' after arrow function parameters"));
+    JAISCRIPT_TRY(consume(token_type::fat_arrow, "expected '=>' after arrow function parameters"));
     return finish_lambda_body(std::move(lambda), true);
 }
 
 checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda_expr> lambda, bool expression_body) {
+    jump_scope jumps_of_body(jumps_, {});
     // Enter function scope for slot-based local variable tracking
     enter_function_scope(lambda.get());
 
@@ -3270,8 +3284,8 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
     }
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error
-        report_error("Expected '{' for lambda body", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected '{' for lambda body", peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
     auto body_stmt = block_statement();
     if (!body_stmt) {
@@ -3299,7 +3313,7 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
             // "this" is pre-interned in symbolizer
             return symbolizer_->get_string(symbolizer_->get_this_id());
         } else {
-            JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "Expected capture variable name or 'this'"));
+            JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "expected capture variable name or 'this'"));
             // Token lexeme already points to symbolizer storage for identifiers
             return name_tok.lexeme;
         }
@@ -3311,8 +3325,8 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
         lambda_expr::capture cap(name, byRef);
         if (check(token_type::equal)) {
             if (byRef || name == symbolizer_->get_string(symbolizer_->get_this_id())) {
-                report_error(byRef ? "A reference capture takes no initializer" : "'this' takes no initializer", peek());
-                return make_error_code(parse_error_code::unexpected_token);
+                report_error(byRef ? "a reference capture takes no initializer" : "'this' takes no initializer", peek());
+                return make_error_code(parse_error_code::syntax_error);
             }
             advance();   // consume '='
             JAISCRIPT_TRY_ASSIGN(cap.initializer, expression());
@@ -3395,21 +3409,20 @@ checked_result<statement_ptr> parser::statement() {
 }
 
 checked_result<statement_ptr> parser::statement_body() {
-    // statement->if_statement->statement (and friends) recurse without passing
-    // through declaration(); guard here too.
-    depth_guard guard(parse_depth_, MAX_PARSE_DEPTH);
-    if (guard.overflow_) {
-        return checked_result<statement_ptr>(
-            make_error_code(parse_error_code::unexpected_token),
-            "Maximum statement nesting depth exceeded ({})", MAX_PARSE_DEPTH);
-    }
+    stack_.guard(peek().location);   // if (...) if (...) recurses here without passing through declaration()
 
-    if (match(token_type::left_brace)) return block_statement();
+    if (match(token_type::left_brace)) {
+        if (json_map_ahead(0)) {
+            report_error("a statement that starts with '{' is a block: write a map literal there in parentheses, ({...})", previous());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+        return block_statement();
+    }
     if (do_while_ahead()) {
         advance();
         return do_while_statement();
     }
-    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::unexpected_token); }
+    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::syntax_error); }
     if (match(token_type::if_keyword)) return if_statement();
     if (match(token_type::while_keyword)) return while_statement();
     if (match(token_type::for_keyword)) return for_statement();
@@ -3430,10 +3443,10 @@ checked_result<statement_ptr> parser::statement_body() {
     if (match(token_type::fallthrough_keyword)) {
         if (!in_switch_case_) {
             report_error("'fallthrough' can only be used inside a switch case", previous());
-    return make_error_code(parse_error_code::unexpected_token);
+    return make_error_code(parse_error_code::syntax_error);
         }
         auto fallthrough = std::make_shared<fallthrough_stmt>(previous().location);
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after 'fallthrough'"));
+        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'fallthrough'"));
         return fallthrough;
     }
 
@@ -3441,6 +3454,7 @@ checked_result<statement_ptr> parser::statement_body() {
 }
 
 checked_result<statement_ptr> parser::block_statement() {
+    stack_.guard(peek().location);
     token leftBrace = previous();
     std::vector<declaration_ptr> declarations;
 
@@ -3453,7 +3467,7 @@ checked_result<statement_ptr> parser::block_statement() {
         if (!splice_include(decl, declarations)) { declarations.push_back(std::move(decl)); }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after block"));
+    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after block"));
 
     return std::make_shared<block_stmt>(leftBrace.location, std::move(declarations));
 }
@@ -3524,16 +3538,16 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
 
 checked_result<statement_ptr> parser::expression_statement() {
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after expression"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
     return std::make_shared<expression_stmt>(expr->location, expr);
 }
 
 checked_result<statement_ptr> parser::if_statement() {
     token ifToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'if'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'if'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after if condition"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after if condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr then_statement, statement());
     statement_ptr else_statement = nullptr;
@@ -3547,10 +3561,11 @@ checked_result<statement_ptr> parser::if_statement() {
 
 checked_result<statement_ptr> parser::while_statement() {
     token whileToken = previous();
+    jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'while'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'while'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after while condition"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after while condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
@@ -3565,16 +3580,17 @@ checked_result<statement_ptr> parser::while_statement() {
 // barrier provisions captured reads there, globals from the environment chain and the
 // enclosing frame's locals from the slots recorded in frame_captures.
 checked_result<statement_ptr> parser::parallel_for_statement() {
+    jump_scope loop(jumps_, {0, 1, true});
     token forToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'parallel_for'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'parallel_for'"));
 
     bool is_const = match(token_type::const_keyword);
     JAISCRIPT_TRY_ASSIGN(type_info_ptr element_type, parse_type());
     const bool is_reference = match(token_type::ampersand);
     if (!check(token_type::identifier)) {
-        report_error("Expected loop variable name in parallel_for", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected loop variable name in parallel_for", peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
     token varName = advance();
     // auto& mutates the owned element in place (the loop's output channel);
@@ -3591,15 +3607,15 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
             JAISCRIPT_TRY_ASSIGN(type_info_ptr extra_type, parse_type());
             const bool extra_ref = match(token_type::ampersand);
             if (!check(token_type::identifier)) {
-                report_error("Expected loop variable name in parallel_for", peek());
-                return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected loop variable name in parallel_for", peek());
+                return make_error_code(parse_error_code::syntax_error);
             }
             token extraName = advance();
             parameter extra(extra_type, std::string(extraName.lexeme), extra_ref, extra_const);
             extra.symbol_id = get_symbol_id(extraName);
             extra_params.push_back(std::move(extra));
         }
-        JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after parallel_for loop variable"));
+        JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after parallel_for loop variable"));
 
         // The containers evaluate in the ENCLOSING scope on the calling thread
         JAISCRIPT_TRY_ASSIGN(container, expression());
@@ -3610,10 +3626,10 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
         if (extra_containers.size() != extra_params.size()) {
             report_error("parallel_for zip: one array per loop variable (" + std::to_string(1 + extra_params.size()) +
                          " variables, " + std::to_string(1 + extra_containers.size()) + " arrays)", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parallel_for range"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parallel_for range"));
 
     parameter loop_param(element_type, std::string(varName.lexeme), is_reference, is_const);
     loop_param.symbol_id = get_symbol_id(varName);
@@ -3637,8 +3653,8 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     };
     if (!match(token_type::left_brace)) {
         restore_scope();
-        report_error("Expected '{' for parallel_for body", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected '{' for parallel_for body", peek());
+        return make_error_code(parse_error_code::syntax_error);
     }
     auto body_result = block_statement();
     if (!body_result) {
@@ -3680,7 +3696,7 @@ static bool loop_invariant_step(const jai::expression* e) {
 checked_result<expression_ptr> parser::counted_parallel_range(const type_info_ptr& element_type, bool is_reference, bool is_const, const token& variable) {
     auto refuse = [&](const char* text) -> checked_result<expression_ptr> {
         report_error(text, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     };
     const bool int_variable = !is_reference && !is_const &&   // a null type is auto
                               (!element_type || (element_type->base_type == script_value_type::jai_int_type && !element_type->is_byte_element()));
@@ -3759,9 +3775,10 @@ checked_result<expression_ptr> parser::counted_parallel_range(const type_info_pt
 }
 
 checked_result<statement_ptr> parser::for_statement() {
+    jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
     token forToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'for'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'for'"));
 
     // Save position for potential backtracking
     size_t savedPosition = current_;
@@ -3799,17 +3816,17 @@ checked_result<statement_ptr> parser::for_statement() {
             const bool auto_spelled = !element_type;
             std::vector<token> names;
             do {
-                JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected a name in the structured binding", "variable"));
+                JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected a name in the structured binding", "variable"));
                 names.push_back(name);
             } while (match(token_type::comma));
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "Expected ']' after the structured binding's names"));
+            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after the structured binding's names"));
             if (names.size() != 2) {
-                report_error("A map entry binds two names, the key and the value: for (auto [k, v] : m)", bracket);
-                return make_error_code(parse_error_code::unexpected_token);
+                report_error("a map entry binds two names, the key and the value: for (auto [k, v] : m)", bracket);
+                return make_error_code(parse_error_code::syntax_error);
             }
-            JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after the structured binding"));
+            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after the structured binding"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
-            JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after range expression"));
+            JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after range expression"));
 
             block_scope_guard loop_var_scope(*this);
             const auto [pair_id, pair_name] = hidden_name("entry");
@@ -3853,7 +3870,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 // Parse the container in the OUTER scope (it must not see the
                 // loop variable's slot).
                 JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
-                JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after range expression"));
+                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after range expression"));
 
                 // Allocate the loop variable's slot BEFORE parsing the body so
                 // that references to it inside the body resolve to this slot.
@@ -3923,7 +3940,7 @@ traditional_for:
             type = store_type_info(std::move(refType));
         }
 
-        JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected variable name", "variable"));
+        JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected variable name", "variable"));
 
         expression_ptr initializer = nullptr;
         const bool spelled_initializer = match(token_type::equal);
@@ -3938,13 +3955,13 @@ traditional_for:
         if (in_function_scope() && var_init->name_id != UINT64_MAX) {
             var_init->slot_index = allocate_slot(var_init->name_id);
         }
-        if (init_const && !finish_const(var_init, init_const_at, false)) { return make_error_code(parse_error_code::unexpected_token); }
+        if (init_const && !finish_const(var_init, init_const_at, false)) { return make_error_code(parse_error_code::syntax_error); }
         init = var_init;
         // Note: NOT consuming semicolon here - the for loop will handle it
     } else {
         if (init_const) {
             report_foreign(detail::foreign_word::const_misplaced, init_const_at);
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
         init = std::make_shared<expression_decl>(expr->location, std::move(expr));
@@ -3952,7 +3969,7 @@ traditional_for:
 
     // Consume semicolon after init
     if (init) {
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after for loop initializer"));
+        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after for loop initializer"));
     }
 
     // Condition
@@ -3960,14 +3977,14 @@ traditional_for:
     if (!check(token_type::semicolon)) {
         JAISCRIPT_TRY_ASSIGN(condition, expression());
     }
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after for loop condition"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after for loop condition"));
 
     // Update
     expression_ptr update = nullptr;
     if (!check(token_type::right_paren)) {
         JAISCRIPT_TRY_ASSIGN(update, expression());
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after for loop clauses"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after for loop clauses"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
@@ -3980,27 +3997,34 @@ checked_result<statement_ptr> parser::return_statement() {
     expression_ptr value = nullptr;
     if (!check(token_type::semicolon)) {
         if (in_constructor_) {
-            report_error("A constructor cannot return a value (a bare 'return;' ends it early and the call yields the instance)", returnToken);
-            return make_error_code(parse_error_code::unexpected_token);
+            report_error("a constructor cannot return a value (a bare 'return;' ends it early and the call yields the instance)", returnToken);
+            return make_error_code(parse_error_code::syntax_error);
         }
         JAISCRIPT_TRY_ASSIGN(value, expression());
         if (returns_reference_ && !in_coroutine_) { value = bound_conditional(std::move(value)); }
     }
 
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after return value"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after return value"));
 
     return std::make_shared<return_stmt>(returnToken.location, value);
 }
 
 checked_result<statement_ptr> parser::break_statement() {
     token breakToken = previous();
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after 'break'"));
+    if (jumps_.breakable == 0) {
+        report_error(jumps_.parallel_body ? "'break' is not allowed in a parallel_for body: iterations are independent; use 'continue' for the next element"
+                                          : "'break' outside a loop or switch", breakToken);
+    }
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'break'"));
     return std::make_shared<break_stmt>(breakToken.location);
 }
 
 checked_result<statement_ptr> parser::continue_statement() {
     token continueToken = previous();
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after 'continue'"));
+    if (jumps_.continuable == 0) {
+        report_error("'continue' outside a loop", continueToken);
+    }
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'continue'"));
     return std::make_shared<continue_stmt>(continueToken.location);
 }
 
@@ -4008,11 +4032,11 @@ checked_result<statement_ptr> parser::try_statement() {
     token tryToken = previous();
 
     // Parse try block
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after 'try'"));
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after 'try'"));
     JAISCRIPT_TRY_ASSIGN(statement_ptr try_block, block_statement());
 
     // Must have catch block
-    JAISCRIPT_TRY(consume(token_type::catch_keyword, "Expected 'catch' after try block"));
+    JAISCRIPT_TRY(consume(token_type::catch_keyword, "expected 'catch' after try block"));
 
     // Optional catch variable: a block-scoped local of the catch body (slot in a
     // function frame, scope env at top level), exactly the range-for variable's shape
@@ -4027,11 +4051,11 @@ checked_result<statement_ptr> parser::try_statement() {
                              (*stream_)[current_ + 1].type == token_type::colon_colon));
         if (typed) {
             report_foreign(detail::foreign_word::typed_catch, peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
-        JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "Expected variable name in catch"));
+        JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
         catch_var = var_name.lexeme;
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after catch variable"));
+        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after catch variable"));
         catch_var_id = get_symbol_id(var_name);
         if (in_function_scope() && catch_var_id != UINT64_MAX) {
             catch_slot = allocate_slot(catch_var_id);
@@ -4039,7 +4063,7 @@ checked_result<statement_ptr> parser::try_statement() {
     }
 
     // Parse catch block
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after 'catch'"));
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after 'catch'"));
     JAISCRIPT_TRY_ASSIGN(statement_ptr catch_block, block_statement());
 
     auto result = std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
@@ -4050,17 +4074,18 @@ checked_result<statement_ptr> parser::try_statement() {
 
 // declaration parsing implementations
 checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::string_view space) {
-    if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::unexpected_token); }
-    JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "Expected class name"));
+    stack_.guard(peek().location);
+    if (check(token_type::identifier) && reject_using_name(peek(), "class")) { return make_error_code(parse_error_code::syntax_error); }
+    JAISCRIPT_TRY_ASSIGN(token className, consume(token_type::identifier, "expected class name"));
     if (check(token_type::identifier) && peek().lexeme == "extends") {
         report_foreign(detail::foreign_word::extends_base, peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
 
     std::vector<std::string_view> base_classes;
     if (match(token_type::colon)) {
         do {
-            JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "Expected base class name"));
+            JAISCRIPT_TRY_ASSIGN(token base_class_tok, consume(token_type::identifier, "expected base class name"));
             if (!check(token_type::colon_colon)) {
                 // Token lexeme already points to symbolizer storage (identifiers are interned during lexing)
                 base_classes.emplace_back(base_class_tok.lexeme);
@@ -4076,7 +4101,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before class body"));
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' before class body"));
     const size_t class_open_index = current_ - 1;
 
     // a class a namespace declares is named ns::Name (C++); its constructors and destructor carry that name
@@ -4096,7 +4121,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     while (!check(token_type::right_brace) && !is_at_end()) {
         if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         // Error-recovery `continue`s below can leave in_coroutine_ armed; every member
         // starts from the class-entry state
@@ -4105,7 +4130,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
 
         // Check for visibility specifiers
         if (match(token_type::public_keyword)) {
-            auto colon_result = consume(token_type::colon, "Expected ':' after 'public'");
+            auto colon_result = consume(token_type::colon, "expected ':' after 'public'");
             if (!colon_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4114,7 +4139,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             continue;
         }
         if (match(token_type::private_keyword)) {
-            auto colon_result = consume(token_type::colon, "Expected ':' after 'private'");
+            auto colon_result = consume(token_type::colon, "expected ':' after 'private'");
             if (!colon_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4123,7 +4148,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             continue;
         }
         if (match(token_type::protected_keyword)) {
-            auto colon_result = consume(token_type::colon, "Expected ':' after 'protected'");
+            auto colon_result = consume(token_type::colon, "expected ':' after 'protected'");
             if (!colon_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4159,7 +4184,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     }
                     init = std::move(init_result.value());
                 }
-                if (!consume(token_type::semicolon, "Expected ';' after field declaration")) {
+                if (!consume(token_type::semicolon, "expected ';' after field declaration")) {
                     synchronize_class_member(class_open_index);
                     continue;
                 }
@@ -4210,7 +4235,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             }
             member = std::move(body_result.value());
         } else if (match(token_type::tilde)) {
-            auto destructor_name_result = consume(token_type::identifier, "Expected class name after '~'");
+            auto destructor_name_result = consume(token_type::identifier, "expected class name after '~'");
             if (!destructor_name_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4223,8 +4248,6 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 continue;
             }
             member = std::move(body_result.value());
-            // TODO: Mark destructor as virtual if class has any virtual methods
-            // Currently no virtual destructor support
         } else if (check(token_type::function_keyword) &&
                    current_ + 2 < stream_->size() &&
                    ((*stream_)[current_ + 1].type == token_type::identifier || is_declarable_keyword_name((*stream_)[current_ + 1].type)) &&
@@ -4244,7 +4267,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 }
                 init = std::move(init_result.value());
             }
-            auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
+            auto semicolon_result = consume(token_type::semicolon, "expected ';' after field declaration");
             if (!semicolon_result) {
                 synchronize_class_member(class_open_index);
                 continue;
@@ -4281,7 +4304,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 token name_tok = advance();
                 method_name = std::string(name_tok.lexeme);
             } else {
-                report_error("Expected method name or 'operator' after 'function'", peek());
+                report_error("expected method name or 'operator' after 'function'", peek());
                 synchronize_class_member(class_open_index);
                 continue;
             }
@@ -4346,7 +4369,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     func->is_override = is_override; // Set from earlier check
 
                     // Parse parameters
-                    auto open_paren_result = consume(token_type::left_paren, "Expected '(' after function name");
+                    auto open_paren_result = consume(token_type::left_paren, "expected '(' after function name");
                     if (!open_paren_result) {
                         synchronize_class_member(class_open_index);
                         continue;
@@ -4359,7 +4382,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     }
                     func->parameters = std::move(params_result.value());
 
-                    auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
+                    auto close_paren_result = consume(token_type::right_paren, "expected ')' after parameters");
                     if (!close_paren_result) {
                         synchronize_class_member(class_open_index);
                         continue;
@@ -4382,7 +4405,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                             }
                             func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                             if (method_return_type && func->return_type && func->return_type->id != method_return_type->id) {
-                                report_error("Conflicting return types '" + method_return_type->type_name + "' and '" +
+                                report_error("conflicting return types '" + method_return_type->type_name + "' and '" +
                                              func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
                                 synchronize_class_member(class_open_index);
                                 continue;
@@ -4399,7 +4422,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
 
                     // Validate: static methods cannot use override keyword
                     if (func->is_static && func->is_override) {
-                        report_error("Static methods cannot use 'override' keyword - they are not virtual", name);
+                        report_error("static methods cannot use 'override' keyword - they are not virtual", name);
                         synchronize_class_member(class_open_index);
                         continue;
                     }
@@ -4408,14 +4431,14 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     if (check(token_type::colon)) {
                         // Initializer lists are constructor-only; on methods
                         // silently parsing and ignoring them would be a trap
-                        report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
+                        report_error("constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
                         synchronize_class_member(class_open_index);
                         continue;
                     }
 
                     // Now parse the body
                     if (!match(token_type::left_brace)) {
-                        report_error("Expected '{' before function body", peek());
+                        report_error("expected '{' before function body", peek());
                         synchronize_class_member(class_open_index);
                         continue;
                     }
@@ -4453,7 +4476,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                         init = std::move(init_result.value());
                     }
 
-                    auto semicolon_result = consume(token_type::semicolon, "Expected ';' after field declaration");
+                    auto semicolon_result = consume(token_type::semicolon, "expected ';' after field declaration");
                     if (!semicolon_result) {
                         synchronize_class_member(class_open_index);
                         continue;
@@ -4475,7 +4498,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                     member = var_decl;
                 }
             } else {
-                report_expected_name("Expected member name", "member");
+                report_expected_name("expected member name", "member");
                 synchronize_class_member(class_open_index);
                 continue;
             }
@@ -4497,7 +4520,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 continue;
             }
             if (func_member->return_type && func_member->return_type->base_type == script_value_type::jai_reference_type) {
-                report_error("Coroutines cannot return references", peek());
+                report_error("coroutines cannot return references", peek());
                 synchronize_class_member(class_open_index);
                 continue;
             }
@@ -4514,12 +4537,13 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     }
 
     in_coroutine_ = class_entry_in_coroutine;
-    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after class body"));
+    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after class body"));
 
     return classDecl;
 }
 
 checked_result<declaration_ptr> parser::namespace_declaration() {
+    stack_.guard(peek().location);
     // Accept identifier or any keyword as namespace name
     // Supports: namespace string {}, namespace mylib {}, namespace my::nested::nspace {}
     std::vector<std::string> namespace_path;
@@ -4534,8 +4558,8 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         first_name.type == token_type::right_paren ||
         first_name.type == token_type::semicolon ||
         first_name.type == token_type::colon_colon) {
-        report_error("Expected namespace name", first_name);
-    return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected namespace name", first_name);
+    return make_error_code(parse_error_code::syntax_error);
     }
     namespace_path.emplace_back(first_name.lexeme);
 
@@ -4549,13 +4573,13 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             next_name.type == token_type::right_paren ||
             next_name.type == token_type::semicolon ||
             next_name.type == token_type::colon_colon) {
-            report_error("Expected namespace name after '::'", next_name);
-    return make_error_code(parse_error_code::unexpected_token);
+            report_error("expected namespace name after '::'", next_name);
+    return make_error_code(parse_error_code::syntax_error);
         }
         namespace_path.emplace_back(next_name.lexeme);
     }
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' before namespace body"));
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' before namespace body"));
 
     // Build the full namespace name by prepending the current namespace context
     // For nested namespaces: namespace outer { namespace inner {} }
@@ -4591,7 +4615,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
     while (!check(token_type::right_brace) && !is_at_end()) {
         if (check(token_type::import_keyword)) {   // an import is a statement that takes no scope: never a member
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
-            return make_error_code(parse_error_code::unexpected_token);
+            return make_error_code(parse_error_code::syntax_error);
         }
         // Parse any declaration (class, function, variable)
         declaration_ptr member_decl = nullptr;
@@ -4601,7 +4625,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         const bool const_member = match(token_type::const_keyword);
         bool nested_nocopy = !const_member && match(token_type::nocopy_keyword);
         if (nested_nocopy || match(token_type::class_keyword)) {
-            if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "Expected 'class' after 'nocopy'")); }
+            if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "expected 'class' after 'nocopy'")); }
             auto class_result = class_declaration(nested_nocopy, full_namespace_name);
             if (!class_result) {
                 synchronize();
@@ -4624,7 +4648,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             auto* func = static_cast<function_decl*>(parsed.value().get());
             func->is_coroutine = true;
             if (func->return_type && func->return_type->base_type == script_value_type::jai_reference_type) {
-                report_error("Coroutines cannot return references", previous());
+                report_error("coroutines cannot return references", previous());
                 continue;
             }
             member_decl = std::move(parsed.value());
@@ -4654,9 +4678,9 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
 
             if (!check(token_type::identifier) && !keyword_member_name_at(*stream_, current_)) {
                 if (check(token_type::this_keyword) || check(token_type::super_keyword)) {
-                    report_expected_name("Expected member name in namespace", "member");
+                    report_expected_name("expected member name in namespace", "member");
                 } else {
-                    report_error("Expected member name in namespace", peek());
+                    report_error("expected member name in namespace", peek());
                 }
                 synchronize();
                 continue;
@@ -4678,7 +4702,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 }
                 func->parameters = std::move(params_result.value());
 
-                auto close_paren_result = consume(token_type::right_paren, "Expected ')' after parameters");
+                auto close_paren_result = consume(token_type::right_paren, "expected ')' after parameters");
                 if (!close_paren_result) {
                     synchronize();
                     continue;
@@ -4702,7 +4726,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                         }
                         func->return_type = wrap_reference_return_type(std::move(return_type_result.value()));
                         if (!function_spelling && type && func->return_type && func->return_type->id != type->id) {
-                            report_error("Conflicting return types '" + type->type_name + "' and '" +
+                            report_error("conflicting return types '" + type->type_name + "' and '" +
                                          func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
                             synchronize();
                             continue;
@@ -4711,7 +4735,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 }
 
                 // Parse function body
-                auto open_brace_result = consume(token_type::left_brace, "Expected '{' before function body");
+                auto open_brace_result = consume(token_type::left_brace, "expected '{' before function body");
                 if (!open_brace_result) {
                     synchronize();
                     continue;
@@ -4750,7 +4774,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                     init = std::move(init_result.value());
                 }
 
-                auto semicolon_result = consume(token_type::semicolon, "Expected ';' after variable declaration");
+                auto semicolon_result = consume(token_type::semicolon, "expected ';' after variable declaration");
                 if (!semicolon_result) {
                     synchronize();
                     continue;
@@ -4769,7 +4793,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         if (inline_member && member_decl) {
             auto* var_decl = member_decl->get_type() == node_type::variable_decl ? static_cast<variable_decl*>(member_decl.get()) : nullptr;
             if (!var_decl || (var_decl->type && var_decl->type->base_type == script_value_type::jai_reference_type)) {
-                report_error(var_decl ? "An inline variable cannot be a reference" : "'inline' declares a variable", member_start);
+                report_error(var_decl ? "an inline variable cannot be a reference" : "'inline' declares a variable", member_start);
                 continue;
             }
             var_decl->is_inline = true;
@@ -4783,7 +4807,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after namespace body"));
+    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after namespace body"));
 
     // Pop the namespace context (restore to parent namespace or global scope)
     for (size_t i = 0; i < namespace_path.size(); ++i) {
@@ -4805,7 +4829,7 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
     if (check(token_type::left_bracket)) {
         advance();
         if (!match(token_type::right_bracket)) {
-            report_error("Expected ']' after '[' in operator[]", peek());
+            report_error("expected ']' after '[' in operator[]", peek());
             return std::nullopt;
         }
         return std::string("[]");
@@ -4834,7 +4858,7 @@ std::optional<std::string> parser::parse_operator_method_symbol() {
         advance(); advance();
         return std::string("()");
     }
-    report_error("Expected operator symbol after 'operator' keyword", peek());
+    report_error("expected operator symbol after 'operator' keyword", peek());
     return std::nullopt;
 }
 
@@ -4845,7 +4869,7 @@ checked_result<declaration_ptr> parser::include_declaration() {
     if (match(token_type::left_paren)) {
         // Parse the expression inside parentheses
         JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after include expression"));
+        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after include expression"));
         return std::make_shared<include_decl>(previous().location, path_expr);
     }
 
@@ -4864,11 +4888,11 @@ checked_result<std::string> parser::include_literal_path() {
             result += peek().lexeme;
             advance();
         }
-        JAISCRIPT_TRY(consume(token_type::greater, "Expected '>' after include path"));
+        JAISCRIPT_TRY(consume(token_type::greater, "expected '>' after include path"));
         return result;
     }
-    report_error("Expected string literal, '<', or '(' after include", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+    report_error("expected string literal, '<', or '(' after include", peek());
+    return make_error_code(parse_error_code::syntax_error);
 }
 
 // A construction's arguments after its '(' or '{', through the closer
@@ -4882,7 +4906,7 @@ checked_result<std::vector<expression_ptr>> parser::construction_arguments(bool 
             result.push_back(bound_conditional(std::move(arg)));
         } while (match(token_type::comma));
     }
-    JAISCRIPT_TRY(consume(close, a_closeError ? a_closeError : a_brace ? "Expected '}' after constructor arguments" : "Expected ')' after constructor arguments"));
+    JAISCRIPT_TRY(consume(close, a_closeError ? a_closeError : a_brace ? "expected '}' after constructor arguments" : "expected ')' after constructor arguments"));
     return result;
 }
 
@@ -4899,8 +4923,8 @@ checked_result<expression_ptr> parser::import_call(const source_location& at) {
                 const token first = peek();
                 const std::string directive = "jai::" + std::string((*stream_)[current_ + 2].lexeme);
                 if (directive != "jai::force") {
-                    report_error("Unknown import directive '" + directive + "' (the directive is jai::force)", first);
-                    return make_error_code(parse_error_code::unexpected_token);
+                    report_error("unknown import directive '" + directive + "' (the directive is jai::force)", first);
+                    return make_error_code(parse_error_code::syntax_error);
                 }
                 advance();
                 advance();
@@ -4912,10 +4936,10 @@ checked_result<expression_ptr> parser::import_call(const source_location& at) {
             args.push_back(std::move(arg));
         } while (match(token_type::comma));
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after import paths"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after import paths"));
     if (args.empty()) {
         report_error("import(...) needs at least one path", previous());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     bool literal = true;
     for (const auto& a : args) {
@@ -4954,11 +4978,11 @@ checked_result<declaration_ptr> parser::import_declaration() {
             path_buffer += peek().lexeme;
             advance();
         }
-        JAISCRIPT_TRY(consume(token_type::greater, "Expected '>' after import path"));
+        JAISCRIPT_TRY(consume(token_type::greater, "expected '>' after import path"));
         path = path_buffer;
     } else {
-        report_error("Expected string literal, '<', or '(' after import", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected string literal, '<', or '(' after import", peek());
+    return make_error_code(parse_error_code::syntax_error);
     }
 
     return std::make_shared<import_decl>(previous().location, path);
@@ -4976,8 +5000,8 @@ checked_result<declaration_ptr> parser::extern_declaration() {
                  (*stream_)[current_ + 1].type == token_type::semicolon)) {
         JAISCRIPT_TRY_ASSIGN(type, parse_type());
     }
-    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected name after 'extern'"));
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after extern declaration"));
+    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "expected name after 'extern'"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after extern declaration"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
     auto decl = std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
     decl->is_const = is_const;
@@ -5000,8 +5024,8 @@ bool parser::untyped_member_declaration_ahead() const {
 checked_result<declaration_ptr> parser::inline_variable_declaration() {
     const token at = previous();
     if (nesting_depth_ != 0) {
-        report_error("An inline variable is declared at program scope or in a namespace", at);
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("an inline variable is declared at program scope or in a namespace", at);
+        return make_error_code(parse_error_code::syntax_error);
     }
     std::shared_ptr<variable_decl> decl;
     const bool is_const = match(token_type::const_keyword);
@@ -5009,7 +5033,7 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
         token name = advance();
         expression_ptr init;
         if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
+        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
         decl = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
         decl->default_initialized = !init;
     } else {
@@ -5017,11 +5041,11 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
         decl = std::static_pointer_cast<variable_decl>(parsed);
     }
     if (decl->type && decl->type->base_type == script_value_type::jai_reference_type) {
-        report_error("An inline variable cannot be a reference", at);
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("an inline variable cannot be a reference", at);
+        return make_error_code(parse_error_code::syntax_error);
     }
     decl->is_inline = true;
-    if (is_const && !finish_const(decl, at, false)) { return make_error_code(parse_error_code::unexpected_token); }
+    if (is_const && !finish_const(decl, at, false)) { return make_error_code(parse_error_code::syntax_error); }
     return declaration_ptr(decl);
 }
 
@@ -5029,7 +5053,7 @@ checked_result<declaration_ptr> parser::const_declaration() {
     const token at = advance();
     if (check(token_type::const_keyword)) {
         report_error("'const' appears once in a declaration", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     declaration_ptr decl;
     if (untyped_declaration_ahead()) {
@@ -5037,18 +5061,18 @@ checked_result<declaration_ptr> parser::const_declaration() {
         token name = advance();
         expression_ptr init;
         if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
-        JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
+        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
         auto var = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
         var->default_initialized = !init;
         if (in_function_scope() && var->name_id != UINT64_MAX) { var->slot_index = allocate_slot(var->name_id); }
         decl = var;
     } else if (check(token_type::inline_keyword) || check(token_type::extern_keyword) || check(token_type::static_keyword)) {
         report_error("write '" + std::string(peek().lexeme) + " const', not 'const " + std::string(peek().lexeme) + "'", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     } else {
         JAISCRIPT_TRY_ASSIGN(decl, declaration_body());
     }
-    if (!finish_const(decl, at, false)) { return make_error_code(parse_error_code::unexpected_token); }
+    if (!finish_const(decl, at, false)) { return make_error_code(parse_error_code::syntax_error); }
     return decl;
 }
 
@@ -5101,7 +5125,7 @@ checked_result<uint8_t> parser::check_mode_attribute() {
                        : name.lexeme == "strict_mode" ? check_mode_attr_strict : check_mode_attr_none;
     if (mode == check_mode_attr_none) {
         report_error("unknown attribute '" + std::string(name.lexeme) + "'", name);
-        return make_error_code(parse_error_code::unexpected_token);
+        return make_error_code(parse_error_code::syntax_error);
     }
     current_ += 5;
     match(token_type::semicolon);
@@ -5155,13 +5179,14 @@ checked_result<declaration_ptr> parser::function_declaration() {
     if (!match(token_type::function_keyword)) { JAISCRIPT_TRY_ASSIGN(return_type, parse_type()); }   // `function f(...)` declares no return type
     return_type = wrap_reference_return_type(return_type);
 
-    if (check(token_type::identifier) && reject_using_name(peek(), "function")) { return make_error_code(parse_error_code::unexpected_token); }
-    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "Expected function name"));
+    if (check(token_type::identifier) && reject_using_name(peek(), "function")) { return make_error_code(parse_error_code::syntax_error); }
+    JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "expected function name"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
     return parse_function_body(name_view, name_id, return_type);
 }
 
 checked_result<declaration_ptr> parser::parse_function_body(std::string_view name, uint64_t name_id, type_info_ptr return_type, bool allow_ctor_initializers) {
+    jump_scope jumps_of_body(jumps_, {});
     auto func = std::make_shared<function_decl>(previous().location, name, name_id);
     // Only the body a coroutine head armed may yield: a nested function inherits nothing
     struct coroutine_scope { bool& flag; bool saved; ~coroutine_scope() { flag = saved; } } body_scope{in_coroutine_, in_coroutine_};
@@ -5170,10 +5195,10 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     coroutine_scope ctor_scope{in_constructor_, in_constructor_};
     in_constructor_ = allow_ctor_initializers;
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after function name"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after parameters"));
-    if (const_method_suffix()) { return make_error_code(parse_error_code::unexpected_token); }
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parameters"));
+    if (const_method_suffix()) { return make_error_code(parse_error_code::syntax_error); }
 
     // Handle trailing return type
     if (match(token_type::arrow)) {
@@ -5187,9 +5212,8 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
             // A leading return type and a contradictory trailing one is an error;
             // a matching pair is redundant-legal.
             if (return_type && func->return_type && func->return_type->id != return_type->id) {
-                report_error("Conflicting return types '" + return_type->type_name + "' and '" +
-                             func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());
-                return make_error_code(parse_error_code::unexpected_token);
+                report_error("conflicting return types '" + return_type->type_name + "' and '" +
+                             func->return_type->type_name + "' (leading and trailing '->' types must match)", previous());   // the body still parses
             }
         }
     } else {
@@ -5202,15 +5226,14 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     if (check(token_type::colon) && !allow_ctor_initializers) {
         // Initializer lists are constructor-only; on free functions, destructors, and
         // function-keyword methods silently ignoring them would be a trap
-        report_error("Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors", peek());   // the list and the body still parse
     }
     if (match(token_type::colon)) {
         do {
             // Parse initializer target (super or this)
             if (match(token_type::super_keyword)) {
                 // Parse super(args)
-                JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'super'"));
+                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'super'"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5218,11 +5241,11 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after super arguments"));
+                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after super arguments"));
                 func->initializers.emplace_back("super", std::move(args));
             } else if (match(token_type::this_keyword)) {
                 // Parse this(args)
-                JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'this'"));
+                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'this'"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5230,12 +5253,12 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after this arguments"));
+                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after this arguments"));
                 func->initializers.emplace_back("this", std::move(args));
             } else if (check(token_type::identifier)) {
                 // Parse Base(args): the base it names constructs with them (C++ [class.base.init])
                 std::string base_name(advance().lexeme);
-                JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after base class name"));
+                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after base class name"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5243,11 +5266,11 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after base constructor arguments"));
+                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after base constructor arguments"));
                 func->initializers.emplace_back(std::move(base_name), std::move(args));
             } else {
-                report_error("Expected 'super', 'this' or a base class name in constructor initializer list", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+                report_error("expected 'super', 'this' or a base class name in constructor initializer list", peek());
+    return make_error_code(parse_error_code::syntax_error);
             }
         } while (match(token_type::comma));
     }
@@ -5269,8 +5292,8 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
 
     if (!match(token_type::left_brace)) {
         exit_function_scope();  // Clean up on error
-        report_error("Expected '{' before function body", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+        report_error("expected '{' before function body", peek());
+    return make_error_code(parse_error_code::syntax_error);
     }
     auto body = block_statement();
     if (!body) {
@@ -5326,8 +5349,8 @@ checked_result<expression_ptr> parser::initializer_from_arguments(const type_inf
         // a primitive: () and {} are its zero, one argument is its value
         if (arguments.empty()) return default_initializer(type, loc);
         if (arguments.size() == 1) return std::move(arguments[0]);
-        report_error("A '" + type->canonical_name() + "' is initialized by one value, not " + std::to_string(arguments.size()), previous());
-        return make_error_code(parse_error_code::unexpected_token);
+        report_error("a '" + type->canonical_name() + "' is initialized by one value, not " + std::to_string(arguments.size()), previous());
+        return make_error_code(parse_error_code::syntax_error);
     default:
         return expression_ptr(std::make_shared<new_expr>(loc, type, std::move(arguments)));
     }
@@ -5362,7 +5385,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         type = store_type_info(std::move(refType));
     }
 
-    JAISCRIPT_TRY_ASSIGN(token name, consume_name("Expected variable name", "variable"));
+    JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected variable name", "variable"));
 
     expression_ptr initializer = nullptr;
     if (match(token_type::equal)) {
@@ -5372,7 +5395,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         // Type name{args...} / Type name(args...): construction with the declared type (a primitive takes its one value)
         const bool brace = check(token_type::left_brace);
         advance();
-        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(brace, "Expected closing bracket after constructor arguments"));
+        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(brace, "expected closing bracket after constructor arguments"));
         JAISCRIPT_TRY_ASSIGN(initializer, initializer_from_arguments(type, std::move(arguments), name.location));
     } else if (check(token_type::left_brace)) {
         // Auto type with brace initializer - parse as expression
@@ -5386,7 +5409,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         initializer = default_initializer(type, name.location);   // T x;: the type's default (a class default-constructs)
     }
 
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after variable declaration"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
 
     auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
     decl->function_spelling = function_spelling;
@@ -5424,13 +5447,14 @@ bool parser::is_registered_template_type(const std::string& type_name) const {
 }
 
 checked_result<statement_ptr> parser::switch_statement() {
+    jump_scope cases(jumps_, {jumps_.breakable + 1, jumps_.continuable, jumps_.parallel_body});
     token switchToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'switch'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'switch'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after switch condition"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after switch condition"));
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "Expected '{' after switch condition"));
+    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after switch condition"));
 
     auto switchStmt = std::make_shared<switch_stmt>(switchToken.location, condition);
 
@@ -5439,7 +5463,7 @@ checked_result<statement_ptr> parser::switch_statement() {
         if (match(token_type::case_keyword)) {
             // Parse case
             JAISCRIPT_TRY_ASSIGN(expression_ptr caseValue, expression());
-            JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after case value"));
+            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after case value"));
 
             auto caseStmt = std::make_shared<case_stmt>(previous().location, caseValue);
 
@@ -5455,7 +5479,7 @@ checked_result<statement_ptr> parser::switch_statement() {
                 if (check(token_type::fallthrough_keyword)) {
                     auto fallthroughStmt = std::make_shared<fallthrough_stmt>(peek().location);
                     advance(); // consume 'fallthrough'
-                    auto consume_result = consume(token_type::semicolon, "Expected ';' after 'fallthrough'");
+                    auto consume_result = consume(token_type::semicolon, "expected ';' after 'fallthrough'");
                     if (!consume_result) {
                         in_switch_case_ = oldInSwitchCase;
                         return consume_result.error();
@@ -5468,7 +5492,7 @@ checked_result<statement_ptr> parser::switch_statement() {
                 // Check for break statement (it's allowed but redundant)
                 if (check(token_type::break_keyword)) {
                     advance(); // consume 'break'
-                    auto consume_result = consume(token_type::semicolon, "Expected ';' after 'break'");
+                    auto consume_result = consume(token_type::semicolon, "expected ';' after 'break'");
                     if (!consume_result) {
                         in_switch_case_ = oldInSwitchCase;
                         return consume_result.error();
@@ -5494,11 +5518,11 @@ checked_result<statement_ptr> parser::switch_statement() {
         } else if (match(token_type::default_keyword)) {
             // Parse default
             if (switchStmt->default_case) {
-                report_error("Multiple default labels in switch statement", previous());
-    return make_error_code(parse_error_code::unexpected_token);
+                report_error("multiple default labels in switch statement", previous());
+    return make_error_code(parse_error_code::syntax_error);
             }
 
-            JAISCRIPT_TRY(consume(token_type::colon, "Expected ':' after 'default'"));
+            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after 'default'"));
 
             auto defaultStmt = std::make_shared<default_stmt>(previous().location);
 
@@ -5513,7 +5537,7 @@ checked_result<statement_ptr> parser::switch_statement() {
                 // Check for break statement (allowed but redundant)
                 if (check(token_type::break_keyword)) {
                     advance(); // consume 'break'
-                    auto consume_result = consume(token_type::semicolon, "Expected ';' after 'break'");
+                    auto consume_result = consume(token_type::semicolon, "expected ';' after 'break'");
                     if (!consume_result) {
                         in_switch_case_ = oldInSwitchCase;
                         return consume_result.error();
@@ -5535,17 +5559,16 @@ checked_result<statement_ptr> parser::switch_statement() {
             switchStmt->default_case = defaultStmt;
 
         } else {
-            report_error("Expected 'case' or 'default' in switch statement", peek());
-    return make_error_code(parse_error_code::unexpected_token);
+            report_error("expected 'case' or 'default' in switch statement", peek());
+    return make_error_code(parse_error_code::syntax_error);
         }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "Expected '}' after switch body"));
+    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after switch body"));
 
     return switchStmt;
 }
 
-// Helper to get symbol ID from token - uses pre-interned symbol_id if available
 std::pair<uint64_t, std::string_view> parser::hidden_name(std::string_view stem) {
     std::string name(stem);
     name += '#';
@@ -5572,12 +5595,13 @@ checked_result<statement_ptr> parser::do_while_statement() {
                                                 std::make_shared<literal_expr>(do_token.location, first_pass));
     if (in_function_scope()) { flag->slot_index = allocate_slot(flag_id); }
 
+    jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
-    JAISCRIPT_TRY_ASSIGN(token while_token, consume(token_type::while_keyword, "Expected 'while' after the body of 'do'"));
-    JAISCRIPT_TRY(consume(token_type::left_paren, "Expected '(' after 'while'"));
+    JAISCRIPT_TRY_ASSIGN(token while_token, consume(token_type::while_keyword, "expected 'while' after the body of 'do'"));
+    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'while'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "Expected ')' after while condition"));
-    JAISCRIPT_TRY(consume(token_type::semicolon, "Expected ';' after do-while condition"));
+    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after while condition"));
+    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after do-while condition"));
 
     token or_op(token_type::pipe_pipe, "||", while_token.location);
     auto test = std::make_shared<binary_expr>(while_token.location, hidden_identifier(flag_id, flag_name, while_token.location), or_op, condition);

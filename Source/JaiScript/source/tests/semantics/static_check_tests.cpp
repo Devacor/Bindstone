@@ -904,6 +904,31 @@ public:
         // ------------------------------------------------------------ shadowing warnings
         // Always WARNING severity (shadowing is legal; strict must not throw on it).
 
+        test("a_scope_declares_a_name_once", [this]() {
+            auto e = make_engine();
+            for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
+                {"int f(int a, int a) { return a; }", "redeclaration of 'a' in the same scope"},
+                {"auto g = [](int a, string a) { return a; };", "redeclaration of 'a' in the same scope"},
+                {"void f() { int y = 1; string y = \"s\"; }", "redeclaration of 'y' in the same scope"},
+                {"{ int y = 1; int y = 2; }", "redeclaration of 'y' in the same scope"},
+                {"void f() { auto [a, b] = [1, 2]; int a = 3; }", "redeclaration of 'a' in the same scope"},
+                {"class C { int x; string x; }", "redeclaration of member 'x' in class 'C'"},
+                {"class C { int x; void x() {} }", "redeclaration of member 'x' in class 'C'"}
+            }) {
+                auto report = e->check(source);
+                check_true(has_diag(report, dlevel::error, text), source + "\n" + report.format(source));
+            }
+            for (const char* source : {
+                "void f() { int y = 1; { string y = \"s\"; } }",       // a nested block's own name shadows (a warning)
+                "int y = 1; string y = \"s\";",                          // a program's top level declares again, as a re-run does
+                "class C { void f() {} void f(int a) {} }",              // overloads
+                "void f(int a) { for (int i = 0; i < 1; i++) {} for (int i = 0; i < 1; i++) {} }"
+            }) {
+                auto report = e->check(source);
+                check_eq(std::size_t(0), report.error_count(), std::string(source) + "\n" + report.format(source));
+            }
+        });
+
 		test("lambda_capture_lists_are_exhaustive", [this]() {
 			for (auto backend : {backend_type::interpreter, backend_type::vm}) {
 				{
@@ -2144,7 +2169,7 @@ public:
             catch (const parse_error& ex) { what = ex.what(); as_parse_error = true; }
             catch (const std::exception& ex) { what = ex.what(); }
             check_true(as_parse_error, "the unit's parse failure fails the root as a parse error");
-            check_true(what.find("pe_b.jai:1:12: 'var' is a type keyword") != std::string::npos, what);
+            check_true(what.find("pe_b.jai:1:12: error: 'var' is a type keyword") != std::string::npos, what);
             check_true(what.find("undeclared identifier") == std::string::npos, "no cascade from the unit's missing names");
             check_false(e->has_function("g"), "nothing ran");
             auto r = e->check(root);

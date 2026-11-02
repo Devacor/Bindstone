@@ -515,7 +515,7 @@ public:
 
         test("structured_binding_takes_two_names", [this]() {
             const std::string err = error_text("var m = {\"a\": 1}; for (auto [a, b, c] : m) { }");
-            check_true(contains(err, "A map entry binds two names, the key and the value"), err);
+            check_true(contains(err, "a map entry binds two names, the key and the value"), err);
         });
 
         // ------------------------------------------------------------------ foreign keywords

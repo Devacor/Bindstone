@@ -4,6 +4,7 @@
 #define __JAISCRIPT_DETAIL_TRANSIENT_READ_HPP__
 
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/lvalue_shape.hpp>
 
@@ -56,6 +57,7 @@ namespace jai::detail {
     // (a subscript operand errors on both backends), and marking would make that shape's
     // behavior depend on the runtime gate.
     struct transient_read_marker {
+        native_stack_mark stack;
 
         static bool is_value_binary_op(token_type t) noexcept {
             switch (t) {
@@ -224,6 +226,7 @@ namespace jai::detail {
             if (!e) {
                 return;
             }
+            stack.guard(e->location);
             switch (e->get_type()) {
                 case node_type::binary_expr: {
                     auto* b = static_cast<binary_expr*>(e);
@@ -338,6 +341,7 @@ namespace jai::detail {
             if (!s) {
                 return;
             }
+            stack.guard(s->location);
             switch (s->get_type()) {
                 case node_type::expression_stmt:
                     walk_expr(static_cast<expression_stmt*>(s)->expression.get(), false);

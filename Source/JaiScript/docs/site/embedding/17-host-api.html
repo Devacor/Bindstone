@@ -208,7 +208,7 @@ instead, catchable and raised only if control flow actually reaches the name:</p
 <p>The other two surfaces are unchanged by checking, and the engine survives all of them:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;execute(&quot;throw \&quot;from script\&quot;;&quot;); // uncaught script throw -&gt; jai::script_exception: &quot;from script&quot;
 eng-&gt;execute(&quot;var x = ;&quot;);              // throws jai::parse_error:
-                                        //   &quot;Parse error: &lt;script&gt;:1:10: Expected expression&quot;
+                                        //   &quot;parse failed:\n&lt;script&gt;:1:9: error: expected expression\n...&quot;
 eng-&gt;execute(&quot;40 + 2&quot;).as_int();        // 42</code></pre></div>
 <p>Every one of them derives from <code>std::exception</code>, so one <code>catch (const std::exception&amp;)</code>
 is a valid backstop (put one around the host&#x27;s own script calls: an exception that leaves <code>main</code> ends the process with its buffered output unflushed): <code>jai::static_check_error</code> for load-time type and name errors,

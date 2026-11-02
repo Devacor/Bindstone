@@ -409,7 +409,7 @@ public:
                 auto eng = jai::foundry::make_engine();
                 std::string message;
                 try { eng->execute(source); } catch (const std::exception& e) { message = e.what(); }
-                check_true(message.find("Nested function 'gen' cannot use enclosing local 'base'") != std::string::npos, message);
+                check_true(message.find("nested function 'gen' cannot use enclosing local 'base'") != std::string::npos, message);
             }
         });
 
@@ -822,7 +822,7 @@ public:
             };
             for (const char* src : srcs) {
                 auto [i_out, v_out] = both_backends(src);
-                check_true(i_out.find("Coroutines cannot return references") != std::string::npos, std::string("interp: ") + src + " -> " + i_out);
+                check_true(i_out.find("coroutines cannot return references") != std::string::npos, std::string("interp: ") + src + " -> " + i_out);
                 check_eq(i_out, v_out, std::string("parity: ") + src);
             }
             auto e = jai::foundry::make_engine();
@@ -1788,7 +1788,7 @@ public:
                 check_true(i_out.find(text) != std::string::npos, std::string("interp: ") + what + " (got: " + i_out + ")");
                 check_true(v_out.find(text) != std::string::npos, std::string("vm: ") + what + " (got: " + v_out + ")");
             };
-            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance();", "2:26: error: advance() takes 1 argument (the variable that receives the yielded value)", "the checker knows the arity");
+            load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance();", "2:25: error: advance() takes 1 argument (the variable that receives the yielded value)", "the checker knows the arity");
             load_error("coroutine int g() { yield 1; }\nauto h = g(); h.advance(5);", "2:25: error: advance() writes the yielded value through its argument; pass a variable", "a literal fails the load");
             load_error("coroutine string g() { yield \"a\"; }\nauto h = g(); int v = 0; h.advance(v);", "advance() cannot store the yielded 'string' into 'int'", "the yielded type against v's");
             load_error("coroutine int g() { yield 1; }\nconst int c = 0; auto h = g(); h.advance(c);", "cannot pass const 'c' to parameter 'v' of 'advance': 'advance' writes through it", "a const fails the load");

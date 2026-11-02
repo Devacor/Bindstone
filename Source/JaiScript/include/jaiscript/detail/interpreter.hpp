@@ -1008,9 +1008,7 @@ namespace jai {
             if (limits_->memory_tripped()) {
                 return detail::raise_memory_cap(*limits_);
             }
-            return error_propagator{
-                make_error_code(runtime_error_code::execution_budget_exceeded),
-                "Script execution budget exceeded - raise engine::execution_budget or break up the work"};
+            return detail::raise_execution_budget(*limits_);
         }
 
         // Binary operation helpers

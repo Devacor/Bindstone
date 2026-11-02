@@ -33,6 +33,7 @@
 #include <sys/sysctl.h>
 #elif defined(__linux__)
 #include <fstream>
+#include <set>
 #endif
 
 // Standard C++ (std::thread/mutex/condition_variable) apart from performance_core_count's platform queries and the
@@ -91,9 +92,16 @@ namespace jai {
             size_t size = sizeof(value);
             return sysctlbyname("hw.perflevel0.physicalcpu", &value, &size, nullptr, 0) == 0 && value > 0 ? static_cast<size_t>(value) : 0;
 #elif defined(__linux__)
-            // Intel hybrid chips list their performance cores' logical CPUs here, as ranges ("0-11" or "0-7,16-19")
+            // Intel hybrid chips list their performance cores' logical CPUs here, every other machine all of its CPUs there, as
+            // ranges ("0-11" or "0-7,16-19"); SMT siblings share a core, so the count is the distinct (package, core) pairs
             std::ifstream file("/sys/devices/cpu_core/cpus");
-            size_t result = 0;
+            if (!file) { file.open("/sys/devices/system/cpu/online"); }
+            auto topology = [](long cpu, const char* field) {
+                std::ifstream in("/sys/devices/system/cpu/cpu" + std::to_string(cpu) + "/topology/" + field);
+                long value = -1;
+                return in >> value ? value : -1;
+            };
+            std::set<std::pair<long, long>> cores;
             long first = 0;
             while (file >> first) {
                 long last = first;
@@ -102,11 +110,14 @@ namespace jai {
                     if (!(file >> last)) { return 0; }
                 }
                 if (first < 0 || last < first) { return 0; }
-                result += static_cast<size_t>(last - first + 1);
+                for (long cpu = first; cpu <= last; ++cpu) {
+                    const long core = topology(cpu, "core_id");
+                    cores.emplace(core < 0 ? -1 : topology(cpu, "physical_package_id"), core < 0 ? cpu : core);   // no topology: each CPU its own
+                }
                 if (file.peek() != ',') { break; }
                 file.get();
             }
-            return result;
+            return cores.size();
 #else
             return 0;
 #endif

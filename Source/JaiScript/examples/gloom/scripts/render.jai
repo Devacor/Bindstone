@@ -418,7 +418,6 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	// --- 4. particles: pixel confetti with z-buffer clipping ---
 	var& pcols = PART_COLS;
 	int half2 = vh / 2;
-	int pxw = PIXW;
 	int pxh = PIXH;
 	for (auto& prt : G.fx.pool) {
 		int pk = prt.kind;

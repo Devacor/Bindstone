@@ -504,10 +504,10 @@ public:
                 auto w = s->check("[[warn_mode]];\nGate::twice();");
                 check_eq((size_t)0, error_count(w));
                 check_true(has_diag(w, dlevel::warning, "'Gate::twice' expects 1 argument(s), got 0"), w.format());
-                check_eq(std::string("Static method expects 1 argument, got 0"),
+                check_eq(std::string("'Gate::twice' expects 1 argument, got 0"),
                          s->execute("[[warn_mode]]; var m = \"\"; try { Gate::twice(); } catch (err) { m = err; } m;").to_string());
                 check_eq((int64_t)5, s->execute("Gate::pick(5)").as_int(), "the run time calls the later binding");
-                check_eq(std::string("Static method expects 1 argument, got 2"),
+                check_eq(std::string("'Gate::pick' expects 1 argument, got 2"),
                          s->execute("[[warn_mode]]; var m = \"\"; try { Gate::pick(1, 2); } catch (err) { m = err; } m;").to_string());
             }
         });

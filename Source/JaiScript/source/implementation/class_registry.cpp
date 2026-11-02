@@ -1355,12 +1355,18 @@ void class_definition::add_static_method(const std::string& name, script_functio
     add_static_method(name_id, std::move(func), arity);
 }
 
+[[noreturn]] JAI_NOINLINE static void throw_static_method_arity(const std::string& qualified, size_t expected, size_t got) {
+    throw runtime_error("'" + qualified + "' expects " + detail::arity_detail(expected, got));
+}
+
 void class_definition::add_static_method(uint64_t name_id, script_function func, size_t arity) {
     const auto* writeback = func.target<host_writeback_function>();
     const uint64_t writeback_mask = writeback ? writeback->mask : 0;
-    script_function call = [func, eng = engine_](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
+    std::string qualified = arity == SIZE_MAX ? std::string() : name_ + "::" + std::string(engine_->get_symbolizer()->get_string(name_id));
+    script_function call = [func, eng = engine_, arity, qualified = std::move(qualified)](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
         std::vector<script_value> scratch;
         try {
+            if (arity != SIZE_MAX && raw_args.size() != arity) [[unlikely]] { throw_static_method_arity(qualified, arity, raw_args.size()); }
             return func(detail::deref_builtin_args(raw_args, scratch));
         } catch (const std::exception& e) {
             return host_exception_result(eng, e);

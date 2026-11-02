@@ -612,12 +612,10 @@ namespace {
 		int fn_depth = 0;
 		uint64_t source_root = UINT64_MAX;   // the initializer's root local (UINT64_MAX: a global)
 
-		// A program with a script destructor (both proofs): an instance dying while the root lives runs code the walk
-		// cannot see, so every place a value of a type whose tree can hold such an instance dies escapes the root (a
-		// by-value local or parameter, a replaced slot, a container's mutation, a by-value call result or cast)
-		bool dtor_check = false;
+		// Both proofs: an instance dying while the root lives runs code the walk cannot see, so every place a value of a type
+		// whose tree can hold an instance with a script destructor or a copy constructor dies escapes the root (a by-value local or parameter, a
+		// replaced slot, a container's mutation, a by-value call result or cast); an untyped value may hold one
 		bool type_runs_destructor(const type_info_ptr& t) {
-			if (!dtor_check) { return false; }
 			if (!t) { return true; }
 			switch (t->base_type) {
 			case script_value_type::jai_null_type:
@@ -641,7 +639,7 @@ namespace {
 		void note_death(const type_info_ptr& t) { if (proof_mode && type_runs_destructor(t)) { root_escaped = true; } }
 		// A store replaces the target's value: the old one dies
 		void note_replaced(const expression* target) {
-			if (!proof_mode || !dtor_check || !target) { return; }
+			if (!proof_mode || !target) { return; }
 			if (target->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(target);
 				if (is_element_symbol(n->symbol_id)) { note_death(root_type); return; }
@@ -2283,7 +2281,7 @@ namespace {
 				return true;
 			}
 			case node_type::throw_expr:
-				if (proof_mode && dtor_check && maybe_object(static_cast<throw_expr*>(e.get())->value)) { root_escaped = true; }   // the thrown copy dies where it is caught
+				if (proof_mode && maybe_object(static_cast<throw_expr*>(e.get())->value)) { root_escaped = true; }   // the thrown copy dies where it is caught
 				return walk_expr(static_cast<throw_expr*>(e.get())->value);
 			case node_type::cast_expr: {
 				auto* n = static_cast<cast_expr*>(e.get());
@@ -2620,7 +2618,7 @@ namespace {
 		}
 	};
 
-	bool prove_readonly_parameter(engine& eng, const std::shared_ptr<script_defined_function>& fn, size_t index, bool dtor_check) {
+	bool prove_readonly_parameter(engine& eng, const std::shared_ptr<script_defined_function>& fn, size_t index) {
 		const parameter& p = fn->parameters()[index];
 		if (p.is_reference || p.ref_escaping) { return false; }
 		admission_builder builder(eng);
@@ -2630,21 +2628,9 @@ namespace {
 		builder.element_symbol = p.symbol_id;
 		builder.root_type = p.type;
 		builder.param_ref_aliases = fn->has_reference_parameters;
-		builder.dtor_check = dtor_check;
 		if (builder.type_runs_destructor(p.type)) { return false; }   // the elided copy's destructor would never run
 		const bool walked = builder.admit_function(fn, UINT64_MAX, admission_builder::root_param::none, nullptr);
 		return walked && !builder.failed && !builder.adm.element_mutated && !builder.root_escaped;
-	}
-
-	// A program whose classes declare a script destructor or a user copy constructor: a copy runs it, and an instance dying
-	// anywhere in a live range runs user code the walk cannot see
-	bool any_script_destructor(engine& eng) {
-		for (const auto& entry : eng.get_class_registry().script_classes_) {
-			const class_definition* cls = entry.second.get();
-			if (!cls) { continue; }
-			if (cls->has_method(cls->destructor_id(eng)) || cls->copy_constructor_level() == cls) { return true; }
-		}
-		return false;
 	}
 
 	bool local_alias_candidate(const variable_decl& d) {
@@ -2666,9 +2652,7 @@ namespace {
 		using local_info = admission_builder::local_info;
 		std::vector<std::unordered_map<uint64_t, local_info>> scopes;
 
-		bool dtor_check = false;
-
-		local_alias_prover(engine& e, const local_alias_home& h) : eng(e), home(h), sym(*e.get_symbolizer()), dtor_check(any_script_destructor(e)) {}
+		local_alias_prover(engine& e, const local_alias_home& h) : eng(e), home(h), sym(*e.get_symbolizer()) {}
 
 		void declare(uint64_t id, local_info info) { scopes.back()[id] = std::move(info); }
 		void declare_decl(variable_decl& d) {
@@ -2742,7 +2726,6 @@ namespace {
 			b.root_type = d.type;
 			b.return_type = home.return_type;
 			b.scopes = scopes;
-			b.dtor_check = dtor_check;
 			if (b.type_runs_destructor(d.type)) { return false; }   // the elided copy's destructor would never run
 			const expression* init = d.initializer.get();
 			const identifier_expr* root = admission_builder::chain_root_identifier(init);
@@ -6762,14 +6745,13 @@ bool parameter_alias_allows(const script_value& derefed) {
 
 uint32_t prove_readonly_parameters(engine& eng, const script_defined_function& fn) {
 	if (!fn.body) { return 0; }
-	const bool dtor_check = any_script_destructor(eng);
 	// Non-owning view: the builder pins call targets for its own lifetime only
 	std::shared_ptr<script_defined_function> view(std::shared_ptr<void>{}, const_cast<script_defined_function*>(&fn));
 	uint32_t mask = 0;
 	const size_t n = std::min<size_t>(fn.parameters().size(), 32);
 	for (size_t i = 0; i < n; ++i) {
 		try {
-			if (prove_readonly_parameter(eng, view, i, dtor_check)) { mask |= (1u << i); }
+			if (prove_readonly_parameter(eng, view, i)) { mask |= (1u << i); }
 		} catch (...) {
 			// an unresolvable callee or a frozen symbolizer means no proof, never an error
 		}

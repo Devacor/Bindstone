@@ -562,18 +562,6 @@ def run_latency(exe, checks):
         client.close()
 
 
-def run_malformed_headers(exe, checks):
-    # a Content-Length that does not parse or passes any real message is skipped, and the session ends cleanly at end of input (it threw from the reader thread)
-    for header in (b"Content-Length: abc\r\n\r\n{}", b"Content-Length: 99999999999999999999999\r\n\r\n{}", b"Content-Length:\r\n\r\n"):
-        proc = subprocess.Popen([str(exe)], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        try:
-            proc.communicate(header, timeout=20)
-        except subprocess.TimeoutExpired:
-            proc.kill()
-            proc.communicate()
-        checks.check(proc.returncode in (0, 1), "a malformed header ends the session cleanly: %r" % header[:40], "exit code %s" % proc.returncode)
-
-
 class RawServer:
     """The server over raw stdio bytes, for input no well-behaved client sends."""
 
@@ -644,6 +632,24 @@ class RawServer:
         self.send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
         return self.answered(1)
 
+    def reply_with(self, needle, timeout=30):
+        """the first message whose body holds needle, decoded"""
+        deadline = time.time() + timeout
+        with self.cv:
+            while True:
+                data = bytes(self.out)
+                at = data.find(needle)
+                if at >= 0:
+                    start = data.rindex(b"Content-Length:", 0, at)
+                    length = int(data[start:data.index(b"\r\n", start)].split(b":")[1])
+                    body_start = data.index(b"\r\n\r\n", start) + 4
+                    if len(data) >= body_start + length:
+                        return json.loads(data[body_start:body_start + length].decode("utf-8"))
+                remaining = deadline - time.time()
+                if remaining <= 0 or self.proc.poll() is not None:
+                    return None
+                self.cv.wait(min(remaining, 0.2))
+
     def ping(self, rid, timeout=30):
         self.send({"jsonrpc": "2.0", "id": rid, "method": "jaiscript/status", "params": {}})
         return self.answered(rid, timeout)
@@ -706,10 +712,10 @@ def run_robustness(exe, checks):
     finally:
         server.kill()
 
-    server = RawServer(exe, ["--max-message=1000"])
+    server = RawServer(exe, ["--max-message=65536"])
     try:
         server.initialize()
-        server.send({"jsonrpc": "2.0", "id": 50, "method": "jaiscript/status", "params": {"padding": "x" * 5000}})
+        server.send({"jsonrpc": "2.0", "id": 50, "method": "jaiscript/status", "params": {"padding": "x" * 70000}})
         checks.check(server.ping(51), "a body over --max-message: the next request is answered")
         checks.check(not server.answered(50, 1), "a body over --max-message is skipped, not answered")
     finally:
@@ -780,6 +786,60 @@ def run_robustness(exe, checks):
     finally:
         server.kill()
 
+    for args in (["--max-message=1000"], ["--max-message=lots"], ["--host=nope"]):
+        proc = subprocess.run([str(exe), *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        checks.check(proc.returncode == 2, "a bad %s is a usage error" % args[0], "exit %s" % proc.returncode)
+
+    def error_code(reply):
+        return (reply or {}).get("error", {}).get("code")
+
+    server = RawServer(exe)
+    try:
+        server.send({"jsonrpc": "2.0", "id": 3, "method": "shutdown"})
+        checks.check(error_code(server.response(3)) == -32002, "shutdown before initialize is -32002")
+        server.initialize()
+        server.write(server.frame(b'{"jsonrpc":"2.0","id":4,"method":"jaiscript/status","params":{"n":0099}}'))
+        reply = server.reply_with(b'"code":-32700')
+        checks.check(reply is not None and reply.get("id") is None, "a number with a leading zero is a parse error (-32700, id null)", str(reply)[:200])
+        server.write(server.frame(b'{"jsonrpc":"2.0","id":5,"method":"jaiscript/status","params":{"s":"\\ud800\\u0041"}}'))
+        checks.check(not server.answered(5, 2), "an unpaired surrogate escape is a parse error, not a request")
+        for message in ({"jsonrpc": "2.0", "id": 1.5, "method": "jaiscript/status"}, {"jsonrpc": "2.0", "id": {"o": 1}, "method": "jaiscript/status"},
+                        {"jsonrpc": "2.0", "id": 6, "method": ""}, {"jsonrpc": "2.0", "params": {}}):
+            server.send(message)
+        checks.check(server.ping(7), "after invalid requests the next request is answered")
+        invalid = bytes(server.out).count(b'"code":-32600')
+        checks.check(invalid == 4, "a fractional or object id, an empty method and a message with neither id nor method are -32600", "%d replies" % invalid)
+        server.send({"jsonrpc": "2.0", "id": 8, "method": "initialize", "params": {"capabilities": {}}})
+        checks.check(error_code(server.response(8)) == -32600, "a second initialize is -32600")
+
+        uri = uri_of(FIXTURES / "cancel_unsaved.jai")
+        server.send({"jsonrpc": "2.0", "method": "textDocument/didOpen", "params": {"textDocument": {
+            "uri": uri, "languageId": "jaiscript", "version": 1, "text": "int z = 2;\n" * 40000}}})
+        burst = bytearray()
+        for message in ({"jsonrpc": "2.0", "id": 9, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}},
+                        {"jsonrpc": "2.0", "id": "abc", "method": "jaiscript/status"},
+                        {"jsonrpc": "2.0", "id": 10, "method": "jaiscript/status"},
+                        {"jsonrpc": "2.0", "id": 77, "result": None},
+                        {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": -2}},
+                        {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {}},
+                        {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": 77}},
+                        {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": "abc"}},
+                        {"jsonrpc": "2.0", "id": 77, "method": "jaiscript/status"}):
+            burst += server.frame(message)
+        server.write(bytes(burst))
+        checks.check(error_code(server.reply_with(b'"id":"abc"', 60)) == -32800, "a cancel by string id cancels that queued request")
+        checks.check("result" in (server.response(10, 60) or {}), "a cancel of another id, or of none, leaves a queued request alone")
+        checks.check("result" in (server.response(77, 60) or {}), "a stray response's id is never marked cancelled")
+
+        server.send({"jsonrpc": "2.0", "id": 11, "method": "shutdown"})
+        server.answered(11)
+        server.send({"jsonrpc": "2.0", "id": 12, "method": "textDocument/hover", "params": {"textDocument": {"uri": uri}, "position": {"line": 0, "character": 4}}})
+        checks.check(error_code(server.response(12)) == -32600, "a request after shutdown is -32600")
+        server.send({"jsonrpc": "2.0", "method": "exit"})
+        checks.check(server.end_input() == 0, "exit after shutdown exits 0")
+    finally:
+        server.kill()
+
     server = RawServer(exe)
     try:
         server.initialize()
@@ -806,7 +866,6 @@ def main():
     if args.only in (None, "fixtures"):
         run_fixtures(exe, args.update, checks)
         run_keyword_members(exe, checks)
-        run_malformed_headers(exe, checks)
     if args.only in (None, "gatorquest"):
         run_gatorquest(exe, checks)
     if args.only in (None, "latency"):

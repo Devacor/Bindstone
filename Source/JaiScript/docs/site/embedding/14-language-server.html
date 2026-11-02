@@ -72,7 +72,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
 jaiscript_lsp --host=runner|stdlib|bare   # the host profile (default runner)
               --include=&lt;dir&gt;             # an include path (repeatable)
-              --max-message=&lt;bytes&gt;       # the largest message body read (default 64 MiB; a larger one is skipped)
+              --max-message=&lt;bytes&gt;       # the largest message body read (default 64 MiB, at least 65536; a larger one is skipped)
               --log                       # each request and its time, on stderr</code></pre></div>
 <h2 id="vs-code">Installing the VS&nbsp;Code extension<a class="hlink" href="#vs-code" aria-label="link">&#8203;</a></h2>
 <p>The extension folder is ready to run as it is in the repository: <code>out/extension.js</code> is a single bundled file, the language client included. Install it in one of three ways:</p>
@@ -86,8 +86,8 @@ code tools/vscode-jaiscript          # then press F5 and open a .jai file there
 # 3. package it
 cd tools/vscode-jaiscript
 npm install
-npx @vscode/vsce package             # jaiscript-0.2.0.vsix
-code --install-extension jaiscript-0.2.0.vsix</code></pre></div>
+npx @vscode/vsce package             # jaiscript-0.5.0.vsix
+code --install-extension jaiscript-0.5.0.vsix</code></pre></div>
 <p>The extension finds the server in this order: <code>jaiscript.languageServer.path</code> when it is set; <code>server/jaiscript_lsp</code> (<code>.exe</code> on Windows) inside the extension folder, where a packaged build carries it; the JaiScript folder&#x27;s build trees, two levels above the extension folder (so found when the extension runs from <code>tools/vscode-jaiscript</code>): <code>build/bin</code>, then <code>build-debug/bin</code>, then the trees Visual Studio&#x27;s CMake presets create there (Release before Debug); then <code>PATH</code>. Rebuilding the extension itself is <code>npm install</code> and <code>npm run compile</code> (a type check, then the bundle).</p>
 <div class="tablewrap"><table>
 <thead><tr><th>setting</th><th>default</th><th>meaning</th></tr></thead>

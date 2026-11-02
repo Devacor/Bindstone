@@ -34,26 +34,24 @@ public:
 	static json array() { json j; j.kind_ = kind::array; return j; }
 	static json object() { json j; j.kind_ = kind::object; return j; }
 
-	kind type() const { return kind_; }
 	bool is_null() const { return kind_ == kind::null; }
 	bool is_string() const { return kind_ == kind::string; }
-	bool is_number() const { return kind_ == kind::number; }
-	bool is_bool() const { return kind_ == kind::boolean; }
+	bool is_integer() const { return kind_ == kind::number && is_int_; }
 	bool is_array() const { return kind_ == kind::array; }
 	bool is_object() const { return kind_ == kind::object; }
 
 	const std::string& str() const { static const std::string empty; return kind_ == kind::string ? string_ : empty; }
+	// a fraction truncates; a number past int64 (or not a number) is the fallback
 	int64_t integer(int64_t fallback = 0) const {
 		if (kind_ != kind::number) { return fallback; }
-		return is_int_ ? int_ : static_cast<int64_t>(double_);
+		if (is_int_) { return int_; }
+		return double_ >= -9223372036854775808.0 && double_ < 9223372036854775808.0 ? static_cast<int64_t>(double_) : fallback;
 	}
-	double number() const { return kind_ != kind::number ? 0.0 : is_int_ ? static_cast<double>(int_) : double_; }
 	bool boolean(bool fallback = false) const { return kind_ == kind::boolean ? bool_ : fallback; }
 
 	size_t size() const { return kind_ == kind::array ? items_.size() : kind_ == kind::object ? members_.size() : 0; }
 	const json& operator[](size_t i) const { return i < items_.size() ? items_[i] : null_value(); }
 	const std::vector<json>& items() const { return items_; }
-	const std::vector<member>& members() const { return members_; }
 
 	const json& operator[](std::string_view key) const {
 		if (kind_ == kind::object) {
@@ -261,6 +259,7 @@ private:
 			while (pos < text.size()) {
 				char c = text[pos++];
 				if (c == '"') { return out; }
+				if (static_cast<unsigned char>(c) < 0x20) { fail("control character in a string"); }
 				if (c != '\\') { out += c; continue; }
 				if (pos >= text.size()) { break; }
 				char e = text[pos++];
@@ -275,9 +274,12 @@ private:
 					case 't': out += '\t'; break;
 					case 'u': {
 						uint32_t cp = hex4();
-						if (cp >= 0xD800 && cp < 0xDC00 && pos + 6 <= text.size() && text[pos] == '\\' && text[pos + 1] == 'u') {
+						if (cp >= 0xDC00 && cp < 0xE000) { fail("unpaired surrogate"); }
+						if (cp >= 0xD800 && cp < 0xDC00) {
+							if (pos + 2 > text.size() || text[pos] != '\\' || text[pos + 1] != 'u') { fail("unpaired surrogate"); }
 							pos += 2;
-							uint32_t low = hex4();
+							const uint32_t low = hex4();
+							if (low < 0xDC00 || low >= 0xE000) { fail("unpaired surrogate"); }
 							cp = 0x10000 + ((cp - 0xD800) << 10) + (low - 0xDC00);
 						}
 						append_utf8(out, cp);
@@ -288,22 +290,36 @@ private:
 			}
 			fail("unterminated string");
 		}
+		// RFC 8259: -?(0|[1-9][0-9]*)(.[0-9]+)?([eE][+-]?[0-9]+)?
 		json number_value() {
-			size_t start = pos;
-			bool integral = true;
+			const size_t start = pos;
+			auto digits = [&] {
+				const size_t from = pos;
+				while (pos < text.size() && text[pos] >= '0' && text[pos] <= '9') { ++pos; }
+				return pos - from;
+			};
 			if (pos < text.size() && text[pos] == '-') { ++pos; }
-			while (pos < text.size()) {
-				char c = text[pos];
-				if (c >= '0' && c <= '9') { ++pos; continue; }
-				if (c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') { integral = false; ++pos; continue; }
-				break;
+			const size_t whole_start = pos;
+			const size_t whole = digits();
+			if (whole == 0) { fail(pos == start ? "unexpected character" : "bad number"); }
+			if (whole > 1 && text[whole_start] == '0') { fail("bad number"); }
+			bool integral = true;
+			if (pos < text.size() && text[pos] == '.') {
+				++pos;
+				if (digits() == 0) { fail("bad number"); }
+				integral = false;
 			}
-			if (pos == start) { fail("unexpected character"); }
-			std::string digits(text.substr(start, pos - start));
+			if (pos < text.size() && (text[pos] == 'e' || text[pos] == 'E')) {
+				++pos;
+				if (pos < text.size() && (text[pos] == '+' || text[pos] == '-')) { ++pos; }
+				if (digits() == 0) { fail("bad number"); }
+				integral = false;
+			}
+			std::string spelled(text.substr(start, pos - start));
 			if (integral) {
-				try { return json(static_cast<int64_t>(std::stoll(digits))); } catch (...) {}
+				try { return json(static_cast<int64_t>(std::stoll(spelled))); } catch (...) {}
 			}
-			try { return json(std::stod(digits)); } catch (...) { fail("bad number"); }
+			try { return json(std::stod(spelled)); } catch (...) { fail("bad number"); }
 		}
 	};
 };

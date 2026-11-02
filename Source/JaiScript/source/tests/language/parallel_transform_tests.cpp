@@ -2043,6 +2043,24 @@ public:
 				return [to_json(out), to_json(serial)];
 			)";
 			check_matches_serial_at(e, src, {1, 4, 8});
+			// the range is the sequence itself, never an index array: a loop the memory cap could never hold the indices of runs, and
+			// a store past the written array raises the serial loop's first out-of-bounds text whichever end the sequence leaves by
+			e->memory_cap(64 * 1024);
+			const std::string bounds = R"(
+				array<int> small = [0, 0, 0, 0];
+				int ran = 0;
+				parallel_for (int i = 0; i < 20000; i++) { int j = i; }
+				string texts = "";
+				try { parallel_for (int i = -2; i < 9; i++) { small[i] = i; } } catch (e) { texts += e + "|"; }
+				try { parallel_for (int i = 0; i < 900; i += 3) { small[i] = i; } } catch (e) { texts += e + "|"; }
+				try { parallel_for (int i = 6; i >= -30; i -= 3) { small[i] = i; } } catch (e) { texts += e; }
+				texts;
+			)";
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				check_eq(std::string("Array index -2 out of bounds for array of size 4|Array index 6 out of bounds for array of size 4|"
+				                     "Array index 6 out of bounds for array of size 4"), e->execute(bounds).as<std::string>(), std::to_string(workers) + " workers");
+			}
 		});
 
 		test("counted_parallel_for_refuses_what_it_cannot_prove", [this]() {

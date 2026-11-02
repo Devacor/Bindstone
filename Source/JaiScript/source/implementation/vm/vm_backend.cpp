@@ -21621,6 +21621,15 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 						std::string_view("__jai_parallel_element is only valid inside a parallel_for chunk")));
 					break;
 				}
+				if (ins.b) {   // the counted form's variable: the sequence's value at the cursor's element
+					if (!parallel_counted_) {
+						VM_TRY_OP(checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+							std::string_view("__jai_parallel_counted is only valid inside a counted parallel_for chunk")));
+						break;
+					}
+					stack_.push_back(script_value(static_cast<script_int>(parallel_counted_->at((*parallel_cursors_)[0].element_cursor_index())), engine_));
+					break;
+				}
 				stack_.push_back((*parallel_cursors_)[ins.a]);
 				break;
 

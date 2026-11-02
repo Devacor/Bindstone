@@ -201,7 +201,8 @@ namespace jai::vm {
                             // reads copy), c=the identifier's own-frame slot (k_invalid_u32 = none)
         op_parallel_advance,   // parallel_for chunk loop: pops the counter, advances the worker's
                                // element cursor to the next slot, pushes counter + 1
-        op_parallel_element,   // pushes the worker's element cursor (a by-value body copies through it)
+        op_parallel_element,   // pushes the worker's element cursor (a by-value body copies through it); b=1: the counted
+                               // form's value at the cursor's element instead
         op_push_fused,         // a=push_protos index: `recv.push(v);` as a statement, receiver and value
                                // resolved as operands; an array receiver appends through the builtin's
                                // exact kernel and pushes the call result (null), anything else replays

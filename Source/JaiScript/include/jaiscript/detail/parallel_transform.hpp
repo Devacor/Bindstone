@@ -546,8 +546,9 @@ namespace jai::detail {
     const script_string* parallel_borrow_string_source(const script_value& borrow, const script_value& index) noexcept;
 
     // The counted parallel_for's range (parallel_for_stmt::k_counted_range): __jai_parallel_range(a, b, k, comparison, step)
-    // with comparison 0 <, 1 <=, 2 >, 3 >= and step 1 ++, -1 --, 2 +=, -2 -= gives the values the serial loop gives its
-    // variable, as array<int>; the serial loop that never ends or overflows its last step is refused with its text
+    // with comparison 0 <, 1 <=, 2 >, 3 >= and step 1 ++, -1 --, 2 +=, -2 -= describes the values the serial loop gives its
+    // variable (parallel_counted_sequence: [start, up, size, n] as array<int>, read by run_parallel_for); the serial loop that
+    // never ends or overflows its last step is refused with its text
     checked_result<script_value> parallel_counted_range(engine& eng, const std::vector<script_value>& args);
 
     // size(), length() and empty() with no arguments: the builtins a borrowed container answers in place (the count is frozen

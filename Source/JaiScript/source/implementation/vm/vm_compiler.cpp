@@ -7318,7 +7318,8 @@ bool vm_compiler::call_temp_operand(const expression* e) const {
 	}
 	if (!call->callee || call->callee->get_type() != node_type::identifier_expr) return false;
 	const auto* ident = static_cast<const identifier_expr*>(call->callee.get());
-	if (ident->name == "weak_from_this" || ident->name == "shared_from_this" || ident->name == "__jai_parallel_advance" || ident->name == "__jai_parallel_element") return false;
+	if (ident->name == "weak_from_this" || ident->name == "shared_from_this" || ident->name == "__jai_parallel_advance" || ident->name == "__jai_parallel_element" ||
+	    ident->name == "__jai_parallel_counted") return false;
 	return call->arguments.size() <= 8;
 }
 // a hoistable call the checker resolved to a by-value return: its temp holds a value no later operand can change
@@ -8620,6 +8621,10 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 				if (lit.is_int()) { which = static_cast<uint32_t>(lit.unchecked_as_int()); }
 			}
 			emit(opcode::op_parallel_element, which);
+			return;
+		}
+		if (ident->name == "__jai_parallel_counted" && expr->arguments.empty()) {
+			emit(opcode::op_parallel_element, 0, 1);
 			return;
 		}
 	}

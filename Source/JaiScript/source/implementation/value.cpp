@@ -27,6 +27,9 @@
 #endif
 #endif
 
+// The library's configuration (strong_ptr.hpp): a host compiled with another one names a symbol this does not define
+const int jai::detail::JAI_BUILD_CONFIG = 1;
+
 namespace jai {
 
 [[noreturn]] JAI_NOINLINE void throw_runtime_error(std::string_view message) {

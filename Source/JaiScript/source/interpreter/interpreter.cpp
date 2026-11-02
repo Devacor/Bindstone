@@ -5485,51 +5485,18 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             "Lambda capture list does not capture 'this'; use [this], [=] or [&]");
     }
 
-    // ----------------------------------------------------------------
-    // OUTER-LOCAL SLOT CAPTURE
-    //
-    // When the parser assigned slot indices, it walked the outer function
-    // scope stack — so identifier_expr nodes in this lambda body that
-    // refer to OUTER locals have their slot_index set to the outer
-    // function's slot (e.g. slot 0 of the enclosing `auto f()`) rather
-    // than SIZE_MAX. At runtime the lambda runs in its OWN call frame
-    // (slot 0 = its first param/local), so a baked-in outer slot resolves
-    // to completely wrong data or "Undefined variable".
-    //
-    // Fix: scan the lambda body for identifier nodes whose slot_index falls
-    // within the outer call frame's live slot range. For each, read the
-    // value from the outer frame (which IS alive at lambda creation time),
-    // materialise it into the capture environment, then zero the baked
-    // slot_index to SIZE_MAX so the runtime lookup falls through to the env
-    // path on every subsequent call.
-    //
-    // Outer-ness is decided by SYMBOL identity, not slot ranges: outer-function
-    // slots and the lambda's own slots are independent numbering spaces that both
-    // start at 0, so an outer local can collide with the lambda's own params/locals
-    // (e.g. the enclosing function's first param captured by a one-param lambda).
-    // Any body identifier whose symbol the lambda does not itself declare is outer.
-    //
-    // This is purely a runtime operation — zero parser changes; re-parsing
-    // (hot reload) regenerates the lambda AST fresh.
-    //
-    // Performance: one AST walk at closure-creation time, O(1) env lookup
-    // per captured local on every call — identical cost to the existing
-    // [=] path. No overhead for lambdas that don't reference outer locals.
-    // ----------------------------------------------------------------
+    // Outer locals carry the enclosing frame's slot numbering, so each one copies into the capture environment and its node
+    // falls back to the env lookup; outer-ness is by symbol, since both frames number their slots from 0
     struct outer_slot_ref {
-        identifier_expr* node;       // the AST node (we'll zero its slot_index)
+        identifier_expr* node;
         uint64_t symbol_id;
-        size_t outer_slot;           // the outer frame's slot index
+        size_t outer_slot;
     };
     std::vector<outer_slot_ref> outer_slot_refs;
-
-    // Build the set of outer-slot-index identifiers we've already handled
-    // (avoid duplicates for the same symbol used multiple times in the body)
     std::unordered_set<uint64_t> outer_slots_captured;
 
     if (!call_stack_.empty() && expr->outer_slot_plan_built) {
-        // Later creations from this AST: the first creation already patched the body
-        // identifiers (a re-scan would find nothing), so replay its capture plan.
+        // Later creations from this AST replay the first creation's plan: its body identifiers are already patched
         const size_t outer_slot_count = call_stack_.back().local_count();
         for (const auto& [sym, slot] : expr->outer_slot_plan) {
             if (slot < outer_slot_count && outer_slots_captured.insert(sym).second) {
@@ -5538,10 +5505,6 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
         }
     } else if (!call_stack_.empty()) {
         const size_t outer_slot_count = call_stack_.back().local_count();
-
-        // Symbols the lambda itself declares (params + body locals + loop variables).
-        // Slot ranges cannot distinguish own locals from outer ones — both scopes
-        // number from 0 — so classification below is by symbol identity.
         std::unordered_set<uint64_t> lambda_declared;
         for (const auto& p : expr->parameters) {
             if (p.symbol_id == UINT64_MAX) {
@@ -5550,188 +5513,15 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             lambda_declared.insert(p.symbol_id);
         }
         std::vector<identifier_expr*> outer_slot_candidates;
-
-        // Reuse the existing AST-walk infrastructure but collect identifier_expr*
-        // nodes whose slot_index is in [0, outer_slot_count) — those came from the
-        // outer function scope.  We walk even for no-capture lambdas ([]) because the
-        // parser still bakes outer slot indices whenever the body references them.
-        std::function<void(expression*)> collect_outer_slots_expr;
-        std::function<void(statement*)>  collect_outer_slots_stmt;
-
-        collect_outer_slots_expr = [&](expression* e) {
-            if (!e) return;
-            if (e->get_type() == node_type::identifier_expr) {
-                auto* ident = static_cast<identifier_expr*>(e);
-                if (ident->slot_index != SIZE_MAX && ident->slot_index < outer_slot_count) {
-                    // Candidate only — whether it is outer is decided after the walk,
-                    // once every symbol the lambda declares has been collected.
-                    outer_slot_candidates.push_back(ident);
-                }
-                return;
-            }
-            // Recurse into sub-expressions (mirrors find_identifiers above)
-            switch (e->get_type()) {
-            case node_type::binary_expr: {
-                auto* b = static_cast<binary_expr*>(e);
-                collect_outer_slots_expr(b->left.get());
-                collect_outer_slots_expr(b->right.get());
-                break;
-            }
-            case node_type::unary_expr:
-                collect_outer_slots_expr(static_cast<unary_expr*>(e)->operand.get()); break;
-            case node_type::call_expr: {
-                auto* c = static_cast<call_expr*>(e);
-                collect_outer_slots_expr(c->callee.get());
-                for (const auto& a : c->arguments) collect_outer_slots_expr(a.get());
-                break;
-            }
-            case node_type::member_expr:
-                collect_outer_slots_expr(static_cast<member_expr*>(e)->object.get()); break;
-            case node_type::assignment_expr: {
-                auto* a = static_cast<assignment_expr*>(e);
-                collect_outer_slots_expr(a->target.get());
-                collect_outer_slots_expr(a->value.get());
-                break;
-            }
-            case node_type::ternary_expr: {
-                auto* t = static_cast<ternary_expr*>(e);
-                collect_outer_slots_expr(t->condition.get());
-                collect_outer_slots_expr(t->then_expression.get());
-                collect_outer_slots_expr(t->else_expression.get());
-                break;
-            }
-            case node_type::array_literal_expr:
-                for (const auto& el : static_cast<array_literal_expr*>(e)->elements)
-                    collect_outer_slots_expr(el.get());
-                break;
-            case node_type::map_literal_expr:
-                for (const auto& kv : static_cast<map_literal_expr*>(e)->entries) {
-                    collect_outer_slots_expr(kv.first.get());
-                    collect_outer_slots_expr(kv.second.get());
-                }
-                break;
-            case node_type::new_expr:
-                for (const auto& a : static_cast<new_expr*>(e)->arguments)
-                    collect_outer_slots_expr(a.get());
-                break;
-            case node_type::throw_expr:
-                if (static_cast<throw_expr*>(e)->value)
-                    collect_outer_slots_expr(static_cast<throw_expr*>(e)->value.get());
-                break;
-            case node_type::yield_expr:
-                if (static_cast<yield_expr*>(e)->value)
-                    collect_outer_slots_expr(static_cast<yield_expr*>(e)->value.get());
-                break;
-            case node_type::include_expr:
-                if (static_cast<include_expr*>(e)->path_expr)
-                    collect_outer_slots_expr(static_cast<include_expr*>(e)->path_expr.get());
-                break;
-            case node_type::import_expr:
-                for (const auto& a : static_cast<import_expr*>(e)->path_exprs) collect_outer_slots_expr(a.get());
-                break;
-            case node_type::cast_expr:
-                collect_outer_slots_expr(static_cast<cast_expr*>(e)->operand.get());
-                break;
-            default: break;
+        detail::body_walker walker;
+        walker.symbolizer = string_symbolizer_;
+        walker.on_declared = [&lambda_declared](uint64_t id) { lambda_declared.insert(id); };
+        walker.on_identifier = [&](identifier_expr* ident) {
+            if (ident->slot_index != SIZE_MAX && ident->slot_index < outer_slot_count) {
+                outer_slot_candidates.push_back(ident);
             }
         };
-
-        collect_outer_slots_stmt = [&](statement* s) {
-            if (!s) return;
-            switch (s->get_type()) {
-            case node_type::expression_stmt:
-                collect_outer_slots_expr(static_cast<expression_stmt*>(s)->expression.get()); break;
-            case node_type::expression_decl:
-                collect_outer_slots_expr(static_cast<expression_decl*>(s)->expression.get()); break;
-            case node_type::statement_decl:
-                collect_outer_slots_stmt(static_cast<statement_decl*>(s)->statement.get()); break;
-            case node_type::block_stmt:
-                for (const auto& d : static_cast<block_stmt*>(s)->declarations)
-                    collect_outer_slots_stmt(d.get());
-                break;
-            case node_type::if_stmt: {
-                auto* is = static_cast<if_stmt*>(s);
-                collect_outer_slots_expr(is->condition.get());
-                collect_outer_slots_stmt(is->then_statement.get());
-                if (is->else_statement) collect_outer_slots_stmt(is->else_statement.get());
-                break;
-            }
-            case node_type::while_stmt: {
-                auto* ws = static_cast<while_stmt*>(s);
-                collect_outer_slots_expr(ws->condition.get());
-                collect_outer_slots_stmt(ws->body.get());
-                break;
-            }
-            case node_type::for_stmt: {
-                auto* fs = static_cast<for_stmt*>(s);
-                if (fs->initializer) collect_outer_slots_stmt(fs->initializer.get());
-                if (fs->condition)   collect_outer_slots_expr(fs->condition.get());
-                if (fs->update)      collect_outer_slots_expr(fs->update.get());
-                collect_outer_slots_stmt(fs->body.get());
-                break;
-            }
-            case node_type::range_for_stmt: {
-                auto* rf = static_cast<range_for_stmt*>(s);
-                if (rf->variable_name_id != UINT64_MAX) {
-                    lambda_declared.insert(rf->variable_name_id);
-                }
-                if (rf->container) collect_outer_slots_expr(rf->container.get());
-                collect_outer_slots_stmt(rf->body.get());
-                break;
-            }
-            case node_type::parallel_for_stmt: {
-                // Body identifiers carry the WORKER function's slot numbering (the
-                // parser's boundary keeps outer slots off them), so only the container
-                // can reference outer slots; the loop variable is body-declared.
-                auto* pf = static_cast<parallel_for_stmt*>(s);
-                if (pf->loop_param.symbol_id != UINT64_MAX) {
-                    lambda_declared.insert(pf->loop_param.symbol_id);
-                }
-                for (const auto& extra : pf->extra_params) {
-                    if (extra.symbol_id != UINT64_MAX) { lambda_declared.insert(extra.symbol_id); }
-                }
-                if (pf->container) collect_outer_slots_expr(pf->container.get());
-                break;
-            }
-            case node_type::return_stmt:
-                if (static_cast<return_stmt*>(s)->value)
-                    collect_outer_slots_expr(static_cast<return_stmt*>(s)->value.get());
-                break;
-            case node_type::switch_stmt: {
-                auto* sw = static_cast<switch_stmt*>(s);
-                if (sw->condition) collect_outer_slots_expr(sw->condition.get());
-                for (const auto& c : sw->cases) {
-                    if (c->value) collect_outer_slots_expr(c->value.get());
-                    for (const auto& st : c->body) collect_outer_slots_stmt(st.get());
-                }
-                if (sw->default_case)
-                    for (const auto& st : sw->default_case->body) collect_outer_slots_stmt(st.get());
-                break;
-            }
-            case node_type::try_stmt: {
-                auto* tr = static_cast<try_stmt*>(s);
-                if (tr->try_block) collect_outer_slots_stmt(tr->try_block.get());
-                if (tr->catch_var_id != UINT64_MAX) {
-                    lambda_declared.insert(tr->catch_var_id);
-                }
-                if (tr->catch_block) collect_outer_slots_stmt(tr->catch_block.get());
-                break;
-            }
-            case node_type::variable_decl: {
-                auto* vd = static_cast<variable_decl*>(s);
-                if (vd->name_id == UINT64_MAX) {
-                    vd->name_id = string_symbolizer_->intern(std::string(vd->name));
-                }
-                lambda_declared.insert(vd->name_id);
-                if (vd->initializer)
-                    collect_outer_slots_expr(vd->initializer.get());
-                break;
-            }
-            default: break;
-            }
-        };
-
-        collect_outer_slots_stmt(expr->body.get());
+        walker.stmt(expr->body);
 
         // Classify: anything the lambda itself declares resolves in its own frame;
         // every other slot-carrying identifier references the outer frame.

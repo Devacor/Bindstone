@@ -556,7 +556,7 @@ private:
     std::string_view class_ctx_name_{};
     enum class cdtor_ctx : uint8_t { none, construction, destruction };
     cdtor_ctx cdtor_ctx_ = cdtor_ctx::none;   // code the class's constructor, field initializers or destructor run (not a lambda they create)
-    int parallel_body_depth_ = 0;   // a parallel_for body, or a lambda written as a parallel_transform/parallel_reduce argument
+    int parallel_body_depth_ = 0;   // a parallel_for body, or a lambda written as a parallel_transform/parallel_reduce argument (not combine)
 
     bool core_sleep_bound() const {
         const script_value bound = eng_.get_variable("sleep");
@@ -4116,11 +4116,13 @@ private:
     ctype infer_call(call_expr* c) {
         std::vector<ctype> args;
         args.reserve(c->arguments.size());
-        const bool parallel_callee = c->callee && c->callee->get_type() == node_type::identifier_expr &&
-            (static_cast<const identifier_expr*>(c->callee.get())->name == "parallel_transform" ||
-             static_cast<const identifier_expr*>(c->callee.get())->name == "parallel_reduce");
-        for (auto& a : c->arguments) {
-            const bool body = parallel_callee && a->get_type() == node_type::lambda_expr;
+        const std::string_view callee_name = c->callee && c->callee->get_type() == node_type::identifier_expr
+            ? std::string_view(static_cast<const identifier_expr*>(c->callee.get())->name) : std::string_view{};
+        const bool parallel_callee = callee_name == "parallel_transform" || callee_name == "parallel_reduce";
+        for (size_t k = 0; k < c->arguments.size(); ++k) {
+            auto& a = c->arguments[k];
+            const bool combine = callee_name == "parallel_reduce" && k == 3;   // runs serially after the join
+            const bool body = parallel_callee && !combine && a->get_type() == node_type::lambda_expr;
             parallel_body_depth_ += body;
             args.push_back(infer(a.get()));
             parallel_body_depth_ -= body;

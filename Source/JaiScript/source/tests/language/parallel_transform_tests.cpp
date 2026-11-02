@@ -1032,6 +1032,9 @@ public:
 				void fold_in(Stats& s, float x) { s.count += 1; s.sum += x; if (x > s.hi) { s.hi = x; } }
 				Stats& grow(Stats& s, float x) { s.count += 1; s.sum += x; return s; }
 				float scaled() { float k = 2.0; return parallel_reduce(xs, 0.0, [k](float a, float x) { return a + x * k; }, add); }
+				int combines = 0;
+				float counting_add(float a, float b) { combines++; return a + b; }
+				int combine_calls() { array<float> few = []; for (int i = 0; i < 200; i++) { few.push(1.0); } parallel_reduce(few, 0.0, add, counting_add); return combines; }
 			)";
 			const std::string body = R"(
 				Stats s = parallel_reduce(xs, Stats(), fold, merge);
@@ -1040,7 +1043,8 @@ public:
 				float lam = parallel_reduce(xs, 0.0, [](float a, float x) { return a + x; }, [](float a, float b) { return a + b; });
 				return format("{:.17f}", parallel_reduce(xs, 0.0, add, add)) + " " + s.count + " " + format("{:.17f}", s.sum) + " " +
 				       to_json(parallel_reduce(xs, [0, 0], tally, both)) + " " + parallel_reduce([], 7, add, add) + " " +
-				       format("{:.17f}", t.sum) + " " + format("{:.17f}", u.sum) + " " + format("{:.17f}", lam) + " " + format("{:.17f}", scaled());
+				       format("{:.17f}", t.sum) + " " + format("{:.17f}", u.sum) + " " + format("{:.17f}", lam) + " " + format("{:.17f}", scaled()) +
+				       " combines " + combine_calls();
 			)";
 			std::string first;
 			for (bool vm : {false, true}) {
@@ -1055,6 +1059,7 @@ public:
 				}
 			}
 			check_true(first.find(" 10000 ") != std::string::npos && first.find("[9903,97] 7") != std::string::npos, first);
+			check_true(first.find(" combines 12") != std::string::npos, first);   // combine is serial code after the join: it counts its calls
 
 			const std::vector<std::pair<std::string, std::string>> errors {
 				{"float total = 0.0; float bad(float a, float x) { total += x; return a; } try { parallel_reduce(xs, 0.0, bad, add); } catch (err) { return err; } return \"ran\";",

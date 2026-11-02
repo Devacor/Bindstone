@@ -1,7 +1,7 @@
-# GLOOM — port-target reference
+# GLOOM — reference spec
 
-GLOOM is becoming a cross-language comparison piece: this document is the
-**single source of truth** for ports (ChaiScript / Squirrel / sol2-Lua / …).
+This document is the **single source of truth** for GLOOM's behavior, and for
+any port of it to another language.
 The JaiScript implementation in `scripts/` is the reference; where prose and
 script disagree, the script wins. Conformance is defined operationally:
 **same seed, same tick count ⇒ same `STATE_HASH`** (§3).
@@ -265,10 +265,9 @@ where consumption differs.
 
 ## 2. Host API contract (`gloom_host.hpp/.cpp` — the shared host)
 
-The host is shared across all language ports; each language supplies a thin
-adapter (`gloom_adapter_<lang>.cpp`) implementing the interface in
-`gloom_host.hpp` — the ports keep the adapter contract, CMake options,
-measurement protocol, and feedback rubric.
+The host is shared by every language: each supplies a thin adapter
+(`gloom_adapter_<lang>.cpp`; JaiScript's is `gloom_adapter_jai.cpp`) implementing
+the interface in `gloom_host.hpp`.
 
 The host owns: console, input, timing, rng, flags. Script owns everything else.
 Entry points the host calls (script must export):

@@ -1,4 +1,5 @@
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
@@ -45,20 +46,38 @@ namespace jai {
 
 namespace detail {
 
-// True when the current thread's remaining native stack is below the safety margin.
-// Guards the recursive native call paths (constructor bodies in particular stack
-// 20-25KB per level in Debug), converting an imminent 0xC00000FD process kill into
-// the catchable max_recursion_depth error. Per-thread OS query - no static state.
-bool native_stack_low() noexcept {
 #if defined(_WIN32)
-    static constexpr uintptr_t k_stack_margin = 256 * 1024;
+namespace {
+// Per-thread OS query, no static state: the bytes of the calling thread's stack below this frame
+std::uintptr_t native_stack_left() noexcept {
     ULONG_PTR low = 0, high = 0;
     GetCurrentThreadStackLimits(&low, &high);
     char probe;
-    return reinterpret_cast<uintptr_t>(&probe) - static_cast<uintptr_t>(low) < k_stack_margin;
+    return reinterpret_cast<std::uintptr_t>(&probe) - static_cast<std::uintptr_t>(low);
+}
+}
+#endif
+
+// Recursive native call paths (constructor bodies stack 20-25 KB a level in Debug) raise the catchable recursion error here
+// instead of dying on 0xC00000FD
+bool native_stack_low() noexcept {
+#if defined(_WIN32)
+    return native_stack_left() < 256 * 1024;
 #else
     return false;
 #endif
+}
+
+bool native_stack_nesting_low() noexcept {
+#if defined(_WIN32)
+    return native_stack_left() < 192 * 1024;
+#else
+    return false;
+#endif
+}
+
+void throw_nesting_exhausted(const source_location& at) {
+    throw nesting_exhausted(at);
 }
 
 // Out-of-line door for class_definition.hpp's field kernel (typed_slot.hpp holds the body)

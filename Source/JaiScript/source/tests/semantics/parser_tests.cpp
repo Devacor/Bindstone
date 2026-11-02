@@ -164,8 +164,17 @@ public:
 
         test("map_literals", [this]() {
             check_parse_succeeds("{\"key\": value};");
-            check_parse_succeeds("{};");
             check_parse_succeeds("{\"a\": 1, \"b\": 2};");
+            check_parse_succeeds("var m = {};");
+            // a '{' that starts a statement opens a block, as in C++: nested, empty, and inside a body
+            check_parse_succeeds("{}");
+            check_parse_succeeds("{ {} }");
+            check_parse_succeeds("{ { int a = 1; } }");
+            check_parse_succeeds("void f() { { { int a = 1; } {} } }");
+            check_parse_succeeds("void f() { ({\"k\": 1}); }");
+            const auto errors = collect_parse_errors("void f() { {\"k\": 1}; }");
+            check_true(!errors.empty() && errors[0].find("a statement that starts with '{' is a block") != std::string::npos,
+                       errors.empty() ? std::string("no error") : errors[0]);
         });
 
         test("variable_declarations", [this]() {
@@ -190,6 +199,16 @@ public:
         test("break_continue_statements", [this]() {
             check_parse_succeeds("while (true) { if (done) break; }");
             check_parse_succeeds("for (var i = 0; i < 10; ++i) { if (skip) continue; work(); }");
+            check_parse_succeeds("switch (1) { case 1: break; }");
+            check_parse_succeeds("while (true) { switch (1) { case 1: continue; } }");
+            check_parse_succeeds("do { break; } while (true);");
+            check_parse_succeeds("for (auto x : [1]) { [](){ while (true) { break; } }; continue; }");
+            // C++: a jump with nothing to leave is ill-formed, a function or lambda body leaving nothing it sits in
+            for (const char* source : {"break;", "continue;", "if (true) { break; }", "switch (1) { case 1: continue; }",
+                                       "while (true) { auto f = []() { break; }; }", "for (;;) { void g() { continue; } }"}) {
+                const auto errors = collect_parse_errors(source);
+                check_true(!errors.empty() && errors[0].find("outside a loop") != std::string::npos, std::string(source) + ": " + (errors.empty() ? std::string("no error") : errors[0]));
+            }
         });
 
         test("return_statements", [this]() {

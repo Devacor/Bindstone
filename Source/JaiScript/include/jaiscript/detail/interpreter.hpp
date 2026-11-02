@@ -18,6 +18,7 @@
 #include "member_scope.hpp"
 #include "builtin_methods.hpp"
 #include "execution_limits.hpp"
+#include "native_stack.hpp"
 #include "operator_table.hpp"
 #include "value_text.hpp"
 #include "truthiness.hpp"
@@ -680,6 +681,9 @@ namespace jai {
         // execute (host callback mid-script, e.g. hot reload) isolates itself at
         // top level and must not reset the environment pool the outer run still uses
         int execute_depth_ = 0;
+        // evaluation's own recursion (nesting within one call) stops here; a recursion of calls meets native_stack_low first
+        detail::native_stack_mark stack_mark_;
+        void arm_native_stack() noexcept { if (!is_executing()) { stack_mark_.arm(); } }
 
         // Coroutine support
         coroutine_handle* active_coroutine_ = nullptr;

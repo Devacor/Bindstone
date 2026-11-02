@@ -74,7 +74,7 @@ public:
 			check_eq(outcome("auto a = new Vec(1, 2, 3); 1"), outcome("auto a = make_shared<Vec>(1, 2, 3); 1"));
 		});
 		test("missing_arguments_is_a_parse_error", [this]() {
-			check_eq(std::string("error: Parse error: <script>:1:27: Expected '(' after make_shared<T>"), outcome("auto a = make_shared<Vec>; 1"));
+			check_true(outcome("auto a = make_shared<Vec>; 1").rfind("error: parse failed:\n<script>:1:26: error: expected '(' after make_shared<T>", 0) == 0);
 		});
 		test("user_function_named_make_shared_stays_callable", [this]() {
 			check_eq(std::string("6"), outcome("int make_shared(int v) { return v * 2; } make_shared(3)"));

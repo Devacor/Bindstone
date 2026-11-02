@@ -25,7 +25,7 @@ public:
                 auto engine = make_engine();
                 std::string message;
                 try { engine->execute(source); } catch (const std::exception& e) { message = e.what(); }
-                check_true(message.find("Nested function 'helper' cannot use enclosing local 'y'") != std::string::npos, message);
+                check_true(message.find("nested function 'helper' cannot use enclosing local 'y'") != std::string::npos, message);
             }
             auto engine = make_engine();
             check_eq(script_int(101), engine->execute("var y = 100; int g() { int helper(int x) { return x + y; } return helper(1); } g();").as_int());

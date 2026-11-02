@@ -338,9 +338,9 @@ public:
 				const std::string lambda = parse_error_of("int n = 1; auto f = [n]() mutable { return n; };");
 				const std::string dot = parse_error_of("class B { void m() {} }\nclass D : B { void m() override { super.m(); } }");
 				const std::string call = parse_error_of("class B { void m() {} }\nclass D : B { void m() override { super(1); } }");
-				return std::to_string(lambda.find("A lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls") != std::string::npos &&
-				                      lambda.find("Expected expression") == std::string::npos) + "|" +
-					std::to_string(dot.find("A base class method is called with super::name(args), not super.name") != std::string::npos) + "|" +
+				return std::to_string(lambda.find("a lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls") != std::string::npos &&
+				                      lambda.find("expected expression") == std::string::npos) + "|" +
+					std::to_string(dot.find("a base class method is called with super::name(args), not super.name") != std::string::npos) + "|" +
 					std::to_string(call.find("super(...) constructs the base only in a constructor's initializer list (: super(args)); call a base method with super::name(args)") != std::string::npos);
 			});
 		});
@@ -2883,7 +2883,7 @@ private:
 				try { e.execute("int x = 1; auto l = [&r = x]() { return r; };"); return std::string("accepted"); }
 				catch (const std::exception& ex) {
 					const std::string w = ex.what();
-					return std::string(w.find("A reference capture takes no initializer") != std::string::npos ? "parse error" : w);
+					return std::string(w.find("a reference capture takes no initializer") != std::string::npos ? "parse error" : w);
 				}
 			});
 		});

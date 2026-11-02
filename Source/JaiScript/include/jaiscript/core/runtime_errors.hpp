@@ -69,10 +69,6 @@ namespace jai {
         include_path_invalid = 82,
         insufficient_privilege = 83,
 
-        // Control flow errors (91-100)
-        continue_outside_loop = 91,
-        break_outside_loop = 92,
-
         // Operator errors (101-110)
         unknown_operator = 101,
         unsupported_operation = 102,

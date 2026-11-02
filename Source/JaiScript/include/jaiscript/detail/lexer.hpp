@@ -1,6 +1,7 @@
 #pragma once
 
 #include <jaiscript/core/types.hpp>
+#include <functional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -105,7 +106,11 @@ namespace jai {
         size_t column_ = 1;
 
 
-        static const std::unordered_map<std::string, token_type> keywords_;
+        struct keyword_hash {
+            using is_transparent = void;
+            size_t operator()(std::string_view text) const noexcept { return std::hash<std::string_view>{}(text); }
+        };
+        static const std::unordered_map<std::string, token_type, keyword_hash, std::equal_to<>> keywords_;   // looked up by view
 
         char advance();
         char peek() const;
@@ -117,6 +122,9 @@ namespace jai {
         token make_token(token_type type);
         token make_token(token_type type, std::string_view lexeme);
         token error_token(const std::string& message);
+        size_t token_line_ = 1;     // where the token being scanned starts: its location, an error's too
+        size_t token_column_ = 1;
+        source_location token_start() const;
 
         token scan_number();
         token scan_string();

@@ -324,7 +324,6 @@ void workspace::parse(unit& u, bool publish) {
 		if (t.type == jai::token_type::eof) { continue; }
 		lex_token lt{t.type, {static_cast<uint32_t>(t.location.line ? t.location.line - 1 : 0), static_cast<uint32_t>(t.location.column ? t.location.column - 1 : 0)}, {}, static_cast<uint32_t>(t.lexeme.size())};
 		if (t.type == jai::token_type::identifier || t.is_keyword() || punctuation(t.type)) { lt.lexeme = t.lexeme; }
-		if (punctuation(t.type)) { lt.pos.col = lt.pos.col >= t.lexeme.size() ? lt.pos.col - static_cast<uint32_t>(t.lexeme.size()) : 0; }
 		u.tokens.push_back(lt);
 	}
 	std::stable_sort(u.tokens.begin(), u.tokens.end(), [](const lex_token& a, const lex_token& b) { return a.pos < b.pos; });

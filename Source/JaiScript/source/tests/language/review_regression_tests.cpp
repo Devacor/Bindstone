@@ -221,12 +221,12 @@ public:
         });
         test("deep_unary_chain_guard_no_crash", [this]() {
             auto e = make_engine();
-            std::string src(400, '!');  // > MAX_PARSE_DEPTH
+            std::string src(200000, '!');
             src += "true";
-            // The depth guard makes the parser fail gracefully (no stack overflow):
-            // guard failures surface as a thrown
-            // parse_error with a diagnostic instead of a silent null. Engine stays usable.
-            check_throws([&]() { e->execute(src); });
+            // past the host thread's stack: one parse error, and the engine stays usable
+            std::string failure;
+            try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+            check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
             check_eq((int64_t)3, e->execute("1 + 2").as_int());
         });
 
@@ -4824,7 +4824,7 @@ public:
             jai::stdlib::register_all(e);
             std::string err;
             try { e->execute("class B { int x = 2; B() { x = 7; return 99; } }"); } catch (const std::exception& ex) { err = ex.what(); }
-            check_true(err.find("A constructor cannot return a value") != std::string::npos, err);
+            check_true(err.find("a constructor cannot return a value") != std::string::npos, err);
             check_eq((int64_t)12, e->execute(
                 "class C { int x = 0; C() { var f = [](int a) { return a * 2; }; function g(int b) -> int { return b + 1; } x = f(5) + g(1); } } C().x").as_int());
         });

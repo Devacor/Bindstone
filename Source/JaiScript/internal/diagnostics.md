@@ -345,10 +345,9 @@ and text. The following checks do not change the encoded format:
 
 Inferred/null type arguments remain permitted. Saved capture plans and the
 `SIZE_MAX` environment-lookup sentinel are not rewritten by validation.
-The nesting diagnostics also apply while saving. They are independent of the
-parser's weighted recursion limit of 250, which is not an AST-depth limit or a
-complete native-stack guarantee; recursive assignment and type parsing are not
-covered by that parser counter.
+The nesting diagnostics also apply while saving. Source nested past the host
+thread's stack is the parser's, the checker's or a backend's own error
+(`detail/native_stack.hpp`), whichever walk reaches the margin first.
 
 ## Binary data
 

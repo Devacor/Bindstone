@@ -4,6 +4,7 @@
 #define __JAISCRIPT_VM_VM_COMPILER_HPP__
 
 #include "chunk.hpp"
+#include <jaiscript/detail/native_stack.hpp>
 #include <functional>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <memory>
@@ -284,6 +285,15 @@ namespace jai::vm {
         void mark_loop(const ast_node* stmt) { loops_.back().stmt = stmt; loop_marks_.emplace_back(stmt, static_cast<uint32_t>(chunk_->code.size())); }
         bool in_closable_loop() const;
         std::shared_ptr<chunk> compile_callable_once(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
+        std::shared_ptr<chunk> compile_program_code(const std::vector<declaration_ptr>& declarations, bool program_frame);
+        std::shared_ptr<chunk> compile_callable_code(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
+        std::shared_ptr<chunk> compile_standalone_expression_code(const expression_ptr& expr);
+        std::shared_ptr<chunk> compile_standalone_declaration_code(const declaration_ptr& decl);
+        std::shared_ptr<chunk> compile_level_initializers_code(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers);
+        template<class Compile>
+        std::shared_ptr<chunk> within_native_stack(std::string_view name, size_t local_count, bool function_body, Compile&& compile);
+        detail::native_stack_mark stack_;
+        int compile_entries_ = 0;   // compile entries open: the outermost arms the mark and answers a nesting failure
         std::unordered_map<std::string, bool> nested_land_memo_;   // a call a graft's body makes, by what decides it (the callee, the grafts around it, its arguments' shapes and kinds): whether it grafts as the body's block instructions
         uint64_t inline_symbol_ = 0;
         std::unordered_map<const call_expr*, std::pair<uint32_t, uint32_t>> alias_pins_;   // a stdlib alias whose callee a guard resolved at its place (call site, mark temp): compile_math_into_temp takes them

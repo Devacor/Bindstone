@@ -1877,7 +1877,7 @@ public:
                 check_true(bad.find("import(...) takes paths: strings or arrays of strings") != std::string::npos, bad);
                 std::string unknown;
                 try { eng->execute("import(\"ir_a.jai\", jai::forse);"); } catch (const std::exception& ex) { unknown = ex.what(); }
-                check_true(unknown.find("Unknown import directive 'jai::forse' (the directive is jai::force)") != std::string::npos, unknown);
+                check_true(unknown.find("unknown import directive 'jai::forse' (the directive is jai::force)") != std::string::npos, unknown);
             }
             for (const char* f : {"ir_a.jai", "ir_b.jai"}) { cleanup_temp_file((dir / f).string()); }
         });
@@ -2515,7 +2515,7 @@ public:
                 check_true(checked.find("inc_err.jai:1:5: error: cannot initialize 'x' declared 'int' with 'string'\n    int x = \"s\";\n        ^\n") != std::string::npos, checked);
                 check_true(checked.find("<script>:1:5") == std::string::npos, checked);
                 const std::string parsed = run(*eng, "void f(int var) {}\n").to_string();
-                check_true(parsed.rfind("Parse error: ", 0) == 0 && parsed.find("inc_err.jai:1:12:") != std::string::npos, parsed);
+                check_true(parsed.rfind("parse failed:", 0) == 0 && parsed.find("inc_err.jai:1:12: error:") != std::string::npos, parsed);
                 // from a function body, a computed path; the program goes on after every catch
                 create_temp_file("inc_err.jai", "throw \"deep\";\n");
                 check_eq(std::string("deep after"), eng->execute("string go(string p) { try { include(p); } catch (e) { return e + \" after\"; } return \"none\"; }\ngo(\"inc_err.jai\");").to_string());

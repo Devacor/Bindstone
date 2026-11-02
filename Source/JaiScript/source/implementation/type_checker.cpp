@@ -12,6 +12,7 @@
 #include <jaiscript/detail/type_checker.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/method_value.hpp>
 #include <jaiscript/detail/construction.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
@@ -289,16 +290,20 @@ public:
     }
 
     check_report run() {
-        collect_top_level();
-        scopes_.emplace_back();
-        {
+        stack_.arm();
+        try {
+            collect_top_level();
+            scopes_.emplace_back();
             mode_guard unit(mode_stack_, leading_mode(decls_), /*scoped=*/true);
             warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
             for (const auto& d : decls_) {
                 walk_decl(d.get());
             }
+            scopes_.pop_back();
+        } catch (const nesting_exhausted& e) {
+            // an error under [[warn_mode]] and with diagnostics off as well: the walk stopped, so nothing past it was checked
+            diags_.push_back({diag_level::error, e.location().line, e.location().column, std::string(k_nesting_too_deep_listing)});
         }
-        scopes_.pop_back();
 
         if (stats_out_) { counts_.deferred = deferred_ ? 1 : 0; *stats_out_ = counts_; }
         check_report report;
@@ -392,6 +397,7 @@ private:
     std::unordered_set<std::string_view> all_names_;
     std::unordered_set<std::string_view> namespace_names_;   // what namespace bodies declare: bare only inside a namespace
     int collect_depth_ = 0;   // collect_names: 0 at program scope
+    native_stack_mark stack_;
     bool collecting_namespace_names_ = false;
     void collect_program_name(std::string_view name) {
         if (collect_depth_ == 0) { (collecting_namespace_names_ ? namespace_names_ : all_names_).insert(name); }
@@ -663,6 +669,42 @@ private:
         diags_.push_back({severity, loc.line, loc.column, std::move(message), related_line, related_column});
     }
 
+    // C++ [basic.scope]: a block or a parameter list declares a name once; a program's top level may declare one again, the later
+    // declaration standing for the earlier as a re-run's does
+    void declare_local(std::string_view name, var_entry entry, const source_location& at) {
+        auto [held, fresh] = scopes_.back().emplace(name, std::move(entry));
+        if (!fresh && scopes_.size() > 1) {
+            diag(diag_level::error, at, "redeclaration of '" + std::string(name) + "' in the same scope", held->second.line, held->second.column);
+        }
+    }
+
+    // C++ [class.mem]: a class declares a member name once (methods overload with one another, never with a field)
+    void check_member_names(const class_decl* cd) {
+        std::unordered_map<std::string_view, const declaration*> fields;
+        std::unordered_map<std::string_view, const declaration*> methods;
+        for (const auto& m : cd->members) {
+            if (!m.declaration) { continue; }
+            const declaration* d = m.declaration.get();
+            if (d->get_type() == node_type::variable_decl) {
+                const std::string_view name = static_cast<const variable_decl*>(d)->name;
+                const declaration* earlier = fields.count(name) ? fields[name] : methods.count(name) ? methods[name] : nullptr;
+                if (earlier) {
+                    diag(diag_level::error, d->location, "redeclaration of member '" + std::string(name) + "' in class '" + std::string(cd->name) + "'",
+                         earlier->location.line, earlier->location.column);
+                } else {
+                    fields.emplace(name, d);
+                }
+            } else if (d->get_type() == node_type::function_decl) {
+                const std::string_view name = static_cast<const function_decl*>(d)->name;
+                if (auto field = fields.find(name); field != fields.end()) {
+                    diag(diag_level::error, d->location, "redeclaration of member '" + std::string(name) + "' in class '" + std::string(cd->name) + "'",
+                         field->second->location.line, field->second->location.column);
+                }
+                methods.emplace(name, d);
+            }
+        }
+    }
+
     void undeclared(const source_location& loc, std::string_view name) {
         // Literal imports are covered by the program closure's names; a dynamic path can
         // define anything - keep the signal, drop the teeth.
@@ -841,6 +883,7 @@ private:
     }
 
     void collect_namespace_vars(const namespace_decl* n, const std::string& prefix) {
+        stack_.guard(n->location);
         const std::string path = prefix.empty() ? std::string(n->name) : prefix + "::" + std::string(n->name);
         for (const auto& d : n->declarations) {
             if (!d) { continue; }
@@ -972,6 +1015,7 @@ private:
     // Every block of one namespace in the unit is one scope: a reopening's function collides like one in the first block
     void collect_namespace_functions(const namespace_decl* n, const std::string& prefix,
                                      std::map<std::string, std::vector<const function_decl*>>& by_namespace) {
+        stack_.guard(n->location);
         const std::string path = prefix.empty() ? std::string(n->name) : prefix + "::" + std::string(n->name);
         auto& fns = by_namespace[path];
         for (const auto& d : n->declarations) {
@@ -3633,6 +3677,7 @@ private:
     // -------------------------------------------------------------- expressions
 
     ctype infer(expression* e) {
+        if (e) { stack_.guard(e->location); }
         ctype result = infer_impl(e);
         result.origin = e;
         if (observer_ && e) { observe(e, result); }
@@ -5004,6 +5049,7 @@ private:
 
     void walk_stmt(statement* s) {
         if (!s) { return; }
+        stack_.guard(s->location);
         mode_guard region(mode_stack_, s->check_mode_attr, /*scoped=*/false);
         switch (s->get_type()) {
             case node_type::expression_stmt:
@@ -5270,6 +5316,7 @@ private:
 
     void walk_decl(declaration* d) {
         if (!d) { return; }
+        stack_.guard(d->location);
         mode_guard region(mode_stack_, d->check_mode_attr, /*scoped=*/false);
         switch (d->get_type()) {
             case node_type::variable_decl:
@@ -5318,7 +5365,7 @@ private:
                     entry.is_const = dd->is_const;
                     entry.line = dd->location.line; entry.column = dd->location.column;
                     warn_shadow("local", name, dd->location);
-                    scopes_.back().emplace(name, std::move(entry));
+                    declare_local(name, std::move(entry), dd->location);
                 }
                 break;
             }
@@ -5463,7 +5510,7 @@ private:
             }
             check_const_bind(decl, entry);
             warn_shadow("local", decl->name, decl->location);
-            scopes_.back().emplace(decl->name, std::move(entry));
+            declare_local(decl->name, std::move(entry), decl->location);
             return;
         }
         if (decl->function_spelling) {
@@ -5541,7 +5588,7 @@ private:
         }
         check_const_bind(decl, entry);
         warn_shadow("local", decl->name, decl->location);
-        scopes_.back().emplace(decl->name, std::move(entry));
+        declare_local(decl->name, std::move(entry), decl->location);
     }
 
     void walk_function(const function_decl* fn) {
@@ -5631,7 +5678,7 @@ private:
             entry.line = fn_loc.line;
             entry.column = fn_loc.column;
             entry.is_const = p.is_const;
-            scopes_.back().emplace(std::string_view(p.name), std::move(entry));
+            declare_local(p.name, std::move(entry), fn_loc);
         }
     }
 
@@ -5697,6 +5744,7 @@ private:
 
     void walk_class(const class_decl* cd) {
         check_class_bases(cd);
+        check_member_names(cd);
         auto it = classes_.find(cd->name);
         if (it == classes_.end()) { return; }
         sclass* prev_class = class_ctx_;
@@ -5839,6 +5887,7 @@ private:
 // Safety-net sweep: the program scope's names (see all_names_), and what the walk reads by name at any depth.
 void static_checker::collect_names(const statement* node) {
     if (!node) { return; }
+    stack_.guard(node->location);
     struct nested_scope {
         int& depth;
         explicit nested_scope(int& a_depth) : depth(a_depth) { ++depth; }
@@ -5984,6 +6033,7 @@ void static_checker::collect_names(const statement* node) {
 
 void static_checker::collect_names_expr(const expression* e) {
     if (!e) { return; }
+    stack_.guard(e->location);
     switch (e->get_type()) {
         case node_type::lambda_expr: {
             auto* l = static_cast<const lambda_expr*>(e);

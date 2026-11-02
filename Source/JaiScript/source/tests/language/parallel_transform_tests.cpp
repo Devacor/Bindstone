@@ -3758,10 +3758,9 @@ public:
 		});
 
 		test("body_control_flow_continue_return_break", [this]() {
-			// A body runs once per element: a top-level continue means the next element on BOTH
-			// backends (the vm used to raise 'continue' statement not in loop, the interpreter fell
-			// through), return does the same, a loop-level break is rejected at admission; nested
-			// loops and switches keep their own break/continue
+			// A body runs once per element: a top-level continue means the next element on both
+			// backends, return does the same, a loop-level break is a parse error; nested loops and
+			// switches keep their own break/continue
 			auto e = make_engine();
 			auto r = e->execute(R"(
 				class C { int n = 0; }
@@ -3774,10 +3773,7 @@ public:
 				array<C> a5 = mk(100); parallel_for (auto& c : a5) { switch (c.n) { case 0: c.n = 1; continue; default: c.n = 9; } c.n = 5; }
 				array<C> a6 = mk(100); parallel_for (auto& c : a6) { switch (c.n) { case 0: c.n = 1; break; default: c.n = 9; } c.n = c.n + 10; }
 				array<C> a7 = mk(100); parallel_for (auto& c : a7) { if (c.n == 0) { continue; } c.n = 5; }
-				string broke = "";
-				array<C> a8 = mk(100);
-				try { parallel_for (auto& c : a8) { c.n = 1; break; } } catch (err) { broke = err; }
-				return [sum(a1), sum(a2), sum(a3), sum(a4), sum(a5), sum(a6), sum(a7), broke, sum(a8)];
+				return [sum(a1), sum(a2), sum(a3), sum(a4), sum(a5), sum(a6), sum(a7)];
 			)");
 			const auto& v = r.as_array();
 			check_eq((int64_t)100, v[0].as_int());
@@ -3787,8 +3783,9 @@ public:
 			check_eq((int64_t)100, v[4].as_int());
 			check_eq((int64_t)1100, v[5].as_int());
 			check_eq((int64_t)0, v[6].as_int());
-			check_eq(std::string("parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element) at 14:50"), v[7].as<std::string>());
-			check_eq((int64_t)0, v[8].as_int());
+			std::string broke;
+			try { e->execute("array<int> a8 = [1, 2];\nparallel_for (auto& c : a8) { c = 1; break; }"); } catch (const std::exception& err) { broke = err.what(); }
+			check_true(broke.find("2:38: error: 'break' is not allowed in a parallel_for body: iterations are independent; use 'continue' for the next element") != std::string::npos, broke);
 		});
 
 		test("chunk_loop_modes_nested_return_and_typed_by_value", [this]() {

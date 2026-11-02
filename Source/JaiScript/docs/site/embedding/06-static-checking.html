@@ -249,9 +249,9 @@ bump(speed);                      // an int&amp; never binds a float
 array&lt;int&gt; ids = [1, 2];
 for (float&amp; v : ids) { v = 0; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">static check failed:
-&lt;script&gt;:3:12: error: argument 1 of &#x27;bump&#x27;: cannot bind &#x27;float&#x27; to &#x27;r&#x27; declared &#x27;int&amp;&#x27; (declared at 1:6)
+&lt;script&gt;:3:11: error: argument 1 of &#x27;bump&#x27;: cannot bind &#x27;float&#x27; to &#x27;r&#x27; declared &#x27;int&amp;&#x27; (declared at 1:6)
     bump(speed);                      // an int&amp; never binds a float
-               ^
+              ^
 &lt;script&gt;:5:1: error: cannot bind &#x27;int&#x27; to &#x27;v&#x27; declared &#x27;float&amp;&#x27;
     for (float&amp; v : ids) { v = 0; }
     ^</code></pre></div>

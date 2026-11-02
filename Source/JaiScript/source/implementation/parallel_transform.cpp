@@ -264,50 +264,46 @@ namespace {
 	// (any value) becomes `continue` - both mean the next element; a `return` inside a NESTED
 	// loop cannot mean that in a grafted body, so such a body takes call mode instead (one
 	// call per element, where a top-level `continue` becomes a bare `return`). A loop-level
-	// `break` has no deterministic meaning (iterations are independent) and is rejected in
-	// both modes; inside a nested loop or switch break/continue keep their C++ meaning.
+	// `break` is a parse error (iterations are independent); inside a nested loop or switch
+	// break/continue keep their C++ meaning.
 	struct body_control_scan {
-		const statement* bad_break = nullptr;
 		bool nested_return = false;
 	};
-	void scan_parallel_body_control(const statement_ptr& slot, size_t loop_depth, size_t switch_depth, body_control_scan& out) {
-		if (!slot || out.bad_break) { return; }
+	void scan_parallel_body_control(const statement_ptr& slot, size_t loop_depth, body_control_scan& out) {
+		if (!slot) { return; }
 		switch (slot->get_type()) {
 		case node_type::return_stmt:
 			if (loop_depth > 0) { out.nested_return = true; }
 			return;
-		case node_type::break_stmt:
-			if (loop_depth == 0 && switch_depth == 0) { out.bad_break = slot.get(); }
-			return;
 		case node_type::block_stmt:
 			for (auto& d : static_cast<block_stmt*>(slot.get())->declarations) {
 				if (d && d->get_type() == node_type::statement_decl) {
-					scan_parallel_body_control(static_cast<statement_decl*>(d.get())->statement, loop_depth, switch_depth, out);
+					scan_parallel_body_control(static_cast<statement_decl*>(d.get())->statement, loop_depth, out);
 				}
 			}
 			return;
 		case node_type::if_stmt: {
 			auto* n = static_cast<if_stmt*>(slot.get());
-			scan_parallel_body_control(n->then_statement, loop_depth, switch_depth, out);
-			scan_parallel_body_control(n->else_statement, loop_depth, switch_depth, out);
+			scan_parallel_body_control(n->then_statement, loop_depth, out);
+			scan_parallel_body_control(n->else_statement, loop_depth, out);
 			return;
 		}
 		case node_type::while_stmt:
-			scan_parallel_body_control(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
+			scan_parallel_body_control(static_cast<while_stmt*>(slot.get())->body, loop_depth + 1, out); return;
 		case node_type::for_stmt:
-			scan_parallel_body_control(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
+			scan_parallel_body_control(static_cast<for_stmt*>(slot.get())->body, loop_depth + 1, out); return;
 		case node_type::range_for_stmt:
-			scan_parallel_body_control(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, switch_depth, out); return;
+			scan_parallel_body_control(static_cast<range_for_stmt*>(slot.get())->body, loop_depth + 1, out); return;
 		case node_type::try_stmt: {
 			auto* n = static_cast<try_stmt*>(slot.get());
-			scan_parallel_body_control(n->try_block, loop_depth, switch_depth, out);
-			scan_parallel_body_control(n->catch_block, loop_depth, switch_depth, out);
+			scan_parallel_body_control(n->try_block, loop_depth, out);
+			scan_parallel_body_control(n->catch_block, loop_depth, out);
 			return;
 		}
 		case node_type::switch_stmt: {
 			auto* n = static_cast<switch_stmt*>(slot.get());
-			for (auto& c : n->cases) { for (auto& st : c->body) { scan_parallel_body_control(st, loop_depth, switch_depth + 1, out); } }
-			if (n->default_case) { for (auto& st : n->default_case->body) { scan_parallel_body_control(st, loop_depth, switch_depth + 1, out); } }
+			for (auto& c : n->cases) { for (auto& st : c->body) { scan_parallel_body_control(st, loop_depth, out); } }
+			if (n->default_case) { for (auto& st : n->default_case->body) { scan_parallel_body_control(st, loop_depth, out); } }
 			return;
 		}
 		default:
@@ -3201,9 +3197,9 @@ namespace {
 		if (found != state.transform_inline_wrappers.end()) { return found->second; }
 		body_control_scan scan;
 		statement_ptr body_view = fn->body;
-		scan_parallel_body_control(body_view, 0, 0, scan);
+		scan_parallel_body_control(body_view, 0, scan);
 		const bool reads_only = !adm.element_reach_all && !adm.element_mutated;
-		const bool inline_ok = reads_only && !scan.nested_return && !scan.bad_break && fn->parameters().size() == 1;
+		const bool inline_ok = reads_only && !scan.nested_return && fn->parameters().size() == 1;
 		if (!inline_ok) {
 			if (!state.transform_chunk_wrapper) { state.transform_chunk_wrapper = parse_chunk_skeleton(eng, k_parallel_chunk_transform); }
 			return state.transform_inline_wrappers.emplace(static_cast<const void*>(fn->body.get()), state.transform_chunk_wrapper).first->second;
@@ -6359,8 +6355,8 @@ namespace {
 		const bool in_place = params[0].is_reference;
 		body_control_scan scan;
 		statement_ptr body_view = step->body;
-		scan_parallel_body_control(body_view, 0, 0, scan);
-		const bool graft = !scan.nested_return && !scan.bad_break;
+		scan_parallel_body_control(body_view, 0, scan);
+		const bool graft = !scan.nested_return;
 		std::string source = k_reduce_chunk_head;
 		if (!graft) {
 			source += in_place ? "__jai_parallel_body(__c0, __jai_reduce_xs[__i]);" : "__c0 = __jai_parallel_body(__c0, __jai_reduce_xs[__i]);";
@@ -6574,11 +6570,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 	// per statement together with the body's control-flow mode.
 	if (!stmt->body_fn_cache) {
 		body_control_scan scan;
-		scan_parallel_body_control(stmt->body, 0, 0, scan);
-		if (scan.bad_break) {
-			return usage("parallel_for: 'break' is not allowed in a parallel body (iterations are independent; use 'continue' for the next element) at " +
-			             std::to_string(scan.bad_break->location.line) + ":" + std::to_string(scan.bad_break->location.column));
-		}
+		scan_parallel_body_control(stmt->body, 0, scan);
 		stmt->chunk_mode = scan.nested_return ? 2 : 1;
 		rewrite_parallel_body_control(stmt->body, 0, stmt->chunk_mode == 1);
 		auto body_block = std::dynamic_pointer_cast<block_stmt>(stmt->body);

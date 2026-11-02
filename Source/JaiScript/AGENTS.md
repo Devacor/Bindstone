@@ -107,7 +107,8 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   backends need lives once, in a shared kernel under `include/jaiscript/detail/`; writing the same rule twice is the
   signal to add a kernel.
 - Comments state a non-obvious *why* in one line: no narration, no history.
-- Match the file: tabs in `interpreter.cpp` and `parser.cpp`, otherwise follow the surrounding code.
+- Match the file: `interpreter.cpp`, `parser.cpp`, `lexer.cpp` and `engine.cpp` indent with spaces, the VM's files with tabs;
+  otherwise follow the surrounding code.
 
 ### Header hygiene (consumers pay for every include)
 
@@ -145,8 +146,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   memberwise `==` and `<=>`) run on explicit work stacks, so data nests as deep as memory allows; no depth cap stops a
   legitimate payload, and a deep copy's steps run in the order the native walk takes them. A walk that recurses through host
   code (a host type's `serialize`/`save`/`load`) keeps a guard on save and on load: `detail::native_stack_low()` plus the
-  `JAI_MAX_HOST_RECORD_DEPTH` backstop (1024). Parse recursion (`MAX_PARSE_DEPTH`) stays low enough to throw before the
-  native stack overflows in a Debug build.
+  `JAI_MAX_HOST_RECORD_DEPTH` backstop (1024). Every recursive walk over source (the parser, the checker, the slot and
+  marking passes, the VM compiler, the interpreter's evaluation) asks its `detail::native_stack_mark` at each level and stops
+  with the one nesting error before the native stack overflows, in a Debug build too; no count of levels stands in for it.
 
 ## Design principles
 

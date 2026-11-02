@@ -220,12 +220,13 @@ public:
         });
 
         test("a_using_name_redeclared_spells_its_qualified_name", [this]() {
-            expect("namespace g { int a = 1; } using g::a; int a = 2;",
-                   "ERROR: Parse error: <script>:1:44: 'a' names g::a by a using declaration; a variable cannot be declared with that name",
-                   "a variable", load::strict);
-            expect("namespace g { namespace h { int b = 1; } } using g::h::b; int b = 2;",
-                   "ERROR: Parse error: <script>:1:63: 'b' names g::h::b by a using declaration; a variable cannot be declared with that name",
-                   "a nested namespace", load::strict);
+            for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
+                {"namespace g { int a = 1; } using g::a; int a = 2;", "<script>:1:44: error: 'a' names g::a by a using declaration; a variable cannot be declared with that name"},
+                {"namespace g { namespace h { int b = 1; } } using g::h::b; int b = 2;", "<script>:1:63: error: 'b' names g::h::b by a using declaration; a variable cannot be declared with that name"}}) {
+                std::string failure;
+                try { make_engine()->execute(source); } catch (const std::exception& e) { failure = e.what(); }
+                check_true(failure.rfind("parse failed:\n" + text, 0) == 0, failure);
+            }
         });
 
         test("checker_and_reference_texts", [this]() {

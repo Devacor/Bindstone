@@ -44,9 +44,9 @@ print("before");
 x = "oops";
 print("after");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:3:4: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
+&lt;script&gt;:3:3: error: cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27; (declared at 1:5)
     x = &quot;oops&quot;;
-       ^</code></pre></div>
+      ^</code></pre></div>
 <p>Nothing ran. <code>before</code> never printed. The checker saw a string literal flowing into a slot declared <code>int</code>, and under strict that is a <strong>load error</strong>: the load fails, the whole listing is the error text, and the engine is untouched. On the C++ side <code>execute()</code> throws <code>jai::static_check_error</code>; the standalone runner prints the listing and exits 1.</p>
 <p>Now the same mistake, hidden behind <code>var</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
@@ -77,9 +77,9 @@ c.hp = "full";                              // a type error: this one gates the 
 &lt;script&gt;:3:22: warning: local &#x27;hp&#x27; shadows field &#x27;hp&#x27; of class &#x27;Creature&#x27; (field declared at 2:9)
         int poke() { int hp = 1; return hp; }   // shadows the field: a warning
                          ^
-&lt;script&gt;:6:7: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)
+&lt;script&gt;:6:6: error: cannot assign &#x27;string&#x27; to field &#x27;hp&#x27; declared &#x27;int&#x27; (declared at 2:9)
     c.hp = &quot;full&quot;;                              // a type error: this one gates the load
-          ^</code></pre></div>
+         ^</code></pre></div>
 <p>The shadowing warning would not have stopped the load on its own; the field store did. (Shadowing warnings are covered in <a href="07-classes.html">Classes</a>; the runner prints warnings when a load fails or when you pass <code>--warnings</code>, and a host reads them from <code>engine-&gt;last_check_diagnostics()</code>.)</p>
 <h2 id="what-the-checker-sees">What the checker sees<a class="hlink" href="#what-the-checker-sees" aria-label="link">&#8203;</a></h2>
 <p>The rules, in the order you are likely to trip over them. Each is a load error under strict.</p>
@@ -88,9 +88,9 @@ c.hp = "full";                              // a type error: this one gates the 
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 print("{}", fib(10, 2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:23: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
+&lt;script&gt;:2:22: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
     print(&quot;{}&quot;, fib(10, 2));
-                          ^</code></pre></div>
+                         ^</code></pre></div>
 <p>The checker knows <code>fib</code>&#x27;s signature because <code>fib</code> is defined in the same program. Put the function in a variable and the knowledge is gone. A callable held in a variable is unchecked, and the same two mistakes become run-time errors:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 var f = fib;                                   // a callable in a variable: unchecked
@@ -129,12 +129,12 @@ void service(Wheel&amp; w) {
 array&lt;Wheel&gt; rack = [Wheel()];
 for (auto&amp; w : rack) { w.spoke = 36; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:3:15: error: cannot assign &#x27;string&#x27; to field &#x27;spokes&#x27; declared &#x27;int&#x27; (declared at 1:19)
+&lt;script&gt;:3:14: error: cannot assign &#x27;string&#x27; to field &#x27;spokes&#x27; declared &#x27;int&#x27; (declared at 1:19)
         w.spokes = &quot;many&quot;;
-                  ^
-&lt;script&gt;:4:16: error: &#x27;true_up&#x27; expects 1 argument(s), got 0 (declared at 1:37)
+                 ^
+&lt;script&gt;:4:15: error: &#x27;true_up&#x27; expects 1 argument(s), got 0 (declared at 1:37)
         w.true_up();
-                   ^
+                  ^
 &lt;script&gt;:7:26: error: no member &#x27;spoke&#x27; in class &#x27;Wheel&#x27; (declared at 1:7)
     for (auto&amp; w : rack) { w.spoke = 36; }
                              ^</code></pre></div>
@@ -146,9 +146,9 @@ string typed = "3";
 if (lives == typed) { print("match"); }        // always false
 if (lives == typed.to_int()) { print("match"); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:3:13: error: cannot compare &#x27;int&#x27; with &#x27;string&#x27; using &#x27;==&#x27;: the types have no comparison (it is always false); convert one operand
+&lt;script&gt;:3:11: error: cannot compare &#x27;int&#x27; with &#x27;string&#x27; using &#x27;==&#x27;: the types have no comparison (it is always false); convert one operand
     if (lives == typed) { print(&quot;match&quot;); }        // always false
-                ^</code></pre></div>
+              ^</code></pre></div>
 <h3 id="every-path-returns">Every path returns<a class="hlink" href="#every-path-returns" aria-label="link">&#8203;</a></h3>
 <p>A function, method or lambda declared to return a primitive (<code>int</code>, <code>float</code>, <code>bool</code>, <code>char</code>), a <code>string</code> or a reference must return a value on every path, as a C++ compiler warns and this checker requires. A path ends when it returns, throws, or never ends (<code>while (true)</code> with no <code>break</code>); an <code>if</code> needs its <code>else</code>, and a <code>switch</code> needs its <code>default</code>. A loop body that returns does not count, since the loop may run zero times. <code>void</code>, <code>var</code> and untyped functions are exempt, and a class, handle or container return that can fall off the end draws a warning instead (<code>'pick' declared to return 'array&lt;int&gt;' may reach the end of its body without returning (returns null)</code>). The check is a load verdict only: in a <code>[[warn_mode]]</code> region a call that falls off the end yields <code>null</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int sign(int n) {
@@ -173,12 +173,12 @@ cast&lt;float&gt;(x) = 3.0;         // a value cast is a temporary
 x++ = 4;                      // postfix yields the old value
 (c ? x : 5) = 6;              // one arm names no storage</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:4:6: error: cannot assign to a call result: &#x27;f&#x27; returns by value
+&lt;script&gt;:4:5: error: cannot assign to a call result: &#x27;f&#x27; returns by value
     f() = 3;                      // a call that returns by value
-         ^
-&lt;script&gt;:5:17: error: cannot assign to the result of cast&lt;float&gt;(x): it is a temporary value (cast&lt;float&amp;&gt;(x) names the variable)
+        ^
+&lt;script&gt;:5:16: error: cannot assign to the result of cast&lt;float&gt;(x): it is a temporary value (cast&lt;float&amp;&gt;(x) names the variable)
     cast&lt;float&gt;(x) = 3.0;         // a value cast is a temporary
-                    ^
+                   ^
 &lt;script&gt;:6:6: error: cannot assign to x++: it yields the old value
     x++ = 4;                      // postfix yields the old value
          ^
@@ -274,9 +274,9 @@ print("loaded; on_packet waits for the host to register net_relay");</code></pre
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern int tick_rate;
 tick_rate = "fast";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:12: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
+&lt;script&gt;:2:11: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
     tick_rate = &quot;fast&quot;;
-               ^</code></pre></div>
+              ^</code></pre></div>
 <p>At run time an <code>extern</code> declares nothing. The name resolves when it is used, so the extern may run before the file or the host that defines it; a declaration in any file, a host <code>add_global</code> or a host function is the definition. A use while nothing defines the name raises <code>'tick_rate' is declared extern but never defined (an 'inline' declaration creates it)</code> (for <code>extern function</code>: <code>'net_relay' is declared extern but never defined</code>), a catchable error. If the same program does define the name, the definition wins, which makes <code>extern</code> the right spelling for a shared file that calls into a module only some programs import (<a href="10-modules.html#three-escape-valves">Modules</a> has that shape).</p>
 <h3 id="inline"><code>inline</code>: one variable every file shares<a class="hlink" href="#inline" aria-label="link">&#8203;</a></h3>
 <p><code>inline</code> on a variable means what it means in C++17: one variable shared by every file that declares it. The first declaration to run creates it, from its initializer or its type&#x27;s default (<code>int</code> 0, <code>string</code> &quot;&quot;, a class default-constructed, <code>var</code> null); every later one, in any file or a re-run of the same file, adopts the existing variable and runs no initializer. It is allowed at program scope and in a namespace, and the checker sees an ordinary declaration of that type:</p>
@@ -315,9 +315,9 @@ function on_debug_key() { return debug_overlay(1); }
 &lt;script&gt;:2:34: warning: use of undeclared identifier &#x27;debug_overlay&#x27;
     function on_debug_key() { return debug_overlay(1); }
                                      ^
-&lt;script&gt;:3:33: error: cannot assign &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 3:23)
+&lt;script&gt;:3:32: error: cannot assign &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 3:23)
     [[strict_mode]] { int n = 1; n = &quot;one&quot;; }   // re-armed strict inside a warn unit: gates the load
-                                    ^</code></pre></div>
+                                   ^</code></pre></div>
 <p>The runtime never changes. Both backends treat an attribute as nothing, and a warn region&#x27;s type mistakes raise at run time exactly as they would with no checker at all (the <code>debug_overlay</code> call above would raise <code>Undefined variable</code> if it ran before the host registered it). A file&#x27;s mode says nothing about the files it imports, and a <code>[[warn_mode]]</code> leaf never fails its program. <code>warn_mode</code> and <code>strict_mode</code> are the only attribute names; anything else in <code>[[ ]]</code> is a parse error.</p>
 <p>Prefer <code>extern</code> when you know the name; it is precise and it keeps the rest of the file checked. Reach for <code>[[warn_mode]]</code> when a region is deliberately dynamic.</p>
 <h2 id="across-files">Across files<a class="hlink" href="#across-files" aria-label="link">&#8203;</a></h2>

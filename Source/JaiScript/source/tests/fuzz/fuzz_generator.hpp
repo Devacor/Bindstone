@@ -1637,9 +1637,11 @@ namespace jai::fuzz {
 			++loop_depth_;
 			int n = static_cast<int>(rng_.range(1, 3));
 			for (int i = 0; i < n; ++i) emit_stmt(nesting + 1);
-			// spice: redeclare an outer variable inside the loop body
+			// spice: redeclare an outer variable inside the loop body (one the body itself declared would be a redeclaration error)
 			if (rng_.chance(18)) {
-				if (const var_info* outer = random_var(vt::i))
+				const var_info* outer = random_var(vt::i);
+				const auto& body = scopes_.back();
+				if (outer && std::none_of(body.begin(), body.end(), [&](const var_info& own) { return own.name == outer->name; }))
 					lines_.push_back("var " + outer->name + " = " + int_expr(1) + ";");
 			}
 			// spice: capture the loop var in a lambda, call it in-body

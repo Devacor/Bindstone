@@ -5,6 +5,7 @@
 
 #include "ast.hpp"
 #include "body_walker.hpp"
+#include "native_stack.hpp"
 #include <algorithm>
 #include <unordered_map>
 #include <unordered_set>
@@ -57,6 +58,7 @@ namespace jai::detail {
 		std::vector<size_t*> decl_slots_;
 		std::unordered_set<const identifier_expr*> resolved_;
 		std::unordered_set<uint64_t> declared_;
+		native_stack_mark stack_;
 
 		size_t slot_statement(statement* s) {
 			scopes_.clear();
@@ -109,6 +111,7 @@ namespace jai::detail {
 
 		void stmt(statement* s) {
 			if (!s || !ok_) return;
+			if (stack_.low()) { ok_ = false; return; }   // unslotted is always correct
 			switch (s->get_type()) {
 			case node_type::expression_stmt: expr(static_cast<expression_stmt*>(s)->expression.get()); return;
 			case node_type::expression_decl: expr(static_cast<expression_decl*>(s)->expression.get()); return;
@@ -182,6 +185,7 @@ namespace jai::detail {
 
 		void expr(expression* e) {
 			if (!e || !ok_) return;
+			if (stack_.low()) { ok_ = false; return; }
 			switch (e->get_type()) {
 			case node_type::literal_expr: return;
 			case node_type::identifier_expr: read(static_cast<identifier_expr*>(e)); return;

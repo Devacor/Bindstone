@@ -48,7 +48,7 @@ inline constexpr std::string_view foreign_word_text(foreign_word w) noexcept {
 		case foreign_word::mutable_field:
 			return "JaiScript has no 'mutable' fields: every field of a const object is read-only; keep state that must change behind a shared_ptr field";
 		case foreign_word::mutable_lambda:
-			return "A lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls";
+			return "a lambda takes no 'mutable': its copied captures are already its own, writable and kept between calls";
 		case foreign_word::const_misplaced:
 			return "'const' starts a declaration: const int x = 5;";
 		case foreign_word::virtual_method:

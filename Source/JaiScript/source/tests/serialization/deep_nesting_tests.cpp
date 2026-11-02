@@ -367,6 +367,49 @@ public:
 				host_chain_length(std::move(deep));
 			}
 		});
+
+		// Source nests as deep as the walks over it (the parser, the checker, the compiler, the evaluation) can go on the host
+		// thread's stack: each shape loads and runs, or fails with the one nesting error, at every depth, never 0xC00000FD
+		test("source_nesting_meets_the_nesting_error_on_a_host_stack", [this]() {
+			using shape = std::string (*)(int);
+			static const std::pair<const char*, shape> k_shapes[] = {
+				{"arrays", [](int n) { return "var x = " + std::string(n, '[') + std::string(n, ']') + "; 1;"; }},
+				{"maps", [](int n) { std::string r = "var x = "; for (int i = 0; i < n; ++i) { r += "{\"a\":"; } return r + "1" + std::string(n, '}') + "; 1;"; }},
+				{"lambdas", [](int n) { std::string r = "var f = "; for (int i = 0; i < n; ++i) { r += "[]() { return "; } r += "1"; for (int i = 0; i < n; ++i) { r += "; }"; } return r + "; 1;"; }},
+				{"casts", [](int n) { std::string r = "var a = "; for (int i = 0; i < n; ++i) { r += "cast<int>("; } return r + "1" + std::string(n, ')') + "; 1;"; }},
+				{"calls", [](int n) { std::string r = "int f(int a) { return a; } "; for (int i = 0; i < n; ++i) { r += "f("; } return r + "1" + std::string(n, ')') + "; 1;"; }},
+				{"subscripts", [](int n) { std::string r = "var a = [0]; a["; for (int i = 0; i < n; ++i) { r += "a["; } return r + "0" + std::string(n, ']') + "]; 1;"; }},
+				{"types", [](int n) { std::string r; for (int i = 0; i < n; ++i) { r += "array<"; } return r + "int" + std::string(n, '>') + " x; 1;"; }},
+				{"parens", [](int n) { return "var x = " + std::string(n, '(') + "1" + std::string(n, ')') + "; 1;"; }},
+				{"assignments", [](int n) { std::string r = "var a = 0; "; for (int i = 0; i < n; ++i) { r += "a = "; } return r + "1; 1;"; }},
+				{"ternaries", [](int n) { std::string r = "var x = "; for (int i = 0; i < n; ++i) { r += "true ? 1 : "; } return r + "0; 1;"; }},
+				{"and_chain", [](int n) { std::string r = "bool t = true; var x = t"; for (int i = 0; i < n; ++i) { r += " && t"; } return r + "; 1;"; }},
+				{"plus_chain", [](int n) { std::string r = "int g(int y) { return y"; for (int i = 0; i < n; ++i) { r += " + y"; } return r + "; } g(1); 1;"; }},
+				{"ifs", [](int n) { std::string r; for (int i = 0; i < n; ++i) { r += "if (true) "; } return r + "{} 1;"; }},
+				{"else_ifs", [](int n) { std::string r = "int x = 5; if (x == -1) {}"; for (int i = 0; i < n; ++i) { r += " else if (x == " + std::to_string(i) + ") {}"; } return r + " 1;"; }},
+				{"blocks", [](int n) { return "void g() " + std::string(n, '{') + std::string(n, '}') + " g(); 1;"; }},
+				{"namespaces", [](int n) { std::string r; for (int i = 0; i < n; ++i) { r += "namespace a { "; } return r + "int x = 1;" + std::string(n, '}') + " 1;"; }},
+			};
+			for (const auto& [name, make] : k_shapes) {
+				for (int depth : {8, 30, 60, 100, 250, 1000, 20000}) {
+					const std::string source = make(depth);
+					std::string outcome;
+					on_small_stack([&]() {
+						auto eng = make_engine();
+						try {
+							outcome = std::to_string(eng->execute(source).as_int());
+						} catch (const std::exception& e) {
+							outcome = e.what();
+						}
+					});
+					const std::string at = std::string(name) + " at " + std::to_string(depth) + ": " + outcome.substr(0, 300);
+					const bool nesting = outcome.find("esting too deep for the host thread's stack") != std::string::npos;
+					check_true(outcome == "1" || nesting, at);
+					if (depth == 8) { check_eq(std::string("1"), outcome, at); }
+					if (depth == 20000) { check_true(nesting, at); }
+				}
+			}
+		});
 	}
 };
 

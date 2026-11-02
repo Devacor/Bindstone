@@ -118,7 +118,10 @@ hi!
 <h2 id="return-type-rules">Return-type rules<a class="hlink" href="#return-type-rules" aria-label="link">&#8203;</a></h2>
 <p>A leading return type and a trailing <code>-&gt; type</code> may both be written only when they <strong>match</strong> (redundant but legal: <code>int f() -&gt; int</code>). A contradictory pair is a parse error. An arrow with no type before the <code>{</code> adds no information. It keeps the leading type if one was given, otherwise means auto:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() -&gt; string { return "s"; }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:12: Conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:1:12: error: conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)
+    int f() -&gt; string { return "s"; }
+               ^</code></pre></div>
 <p>A declared return type is a typed slot like any other, and it runs the <a href="../guide/02-type-ladder.html#conversion-table-typed-locked-auto-targets">one conversion table</a>: <code>int f()</code> returning <code>2.9</code> yields <code>2</code>. Return a string literal from it and the checker stops the load before anything runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function f() -&gt; int { return "s"; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
@@ -181,12 +184,12 @@ passthrough
 print(fib(10, 2));
 print(fib("ten"));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:17: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:5)
+&lt;script&gt;:2:16: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:5)
     print(fib(10, 2));
-                    ^
-&lt;script&gt;:3:17: error: argument 1 of &#x27;fib&#x27;: cannot pass &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 1:5)
+                   ^
+&lt;script&gt;:3:16: error: argument 1 of &#x27;fib&#x27;: cannot pass &#x27;string&#x27; to &#x27;n&#x27; declared &#x27;int&#x27; (declared at 1:5)
     print(fib(&quot;ten&quot;));
-                    ^</code></pre></div>
+                   ^</code></pre></div>
 <p>A callable held in a variable is opaque to the checker (it could be anything by the time the call runs), so the same mistakes through a variable are run-time errors, and catchable:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 var f = fib;                       // a callable in a variable: the checker cannot see through it
@@ -224,7 +227,10 @@ print(h.next());</code></pre></div>
 <h2 id="initializer-lists-are-constructor-only">Initializer lists are constructor-only<a class="hlink" href="#initializer-lists-are-constructor-only" aria-label="link">&#8203;</a></h2>
 <p><code>: super(…)</code> / <code>: this(…)</code> delegation belongs to constructors (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:1:19: Constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:1:18: error: constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors
+    function setup() : super(1) { return 3; }
+                     ^</code></pre></div>
 <h2 id="function-typed-variables">Function-typed variables and fields<a class="hlink" href="#function-typed-variables" aria-label="link">&#8203;</a></h2>
 <p><code>function name = expr;</code> declares a variable that holds a callable or null (the checker rejects any other value at load: <code>cannot assign 'int' to 'cb' declared 'function'</code>, and a value it cannot see raises at the store: <code>Cannot assign int to 'cb' (declared function)</code>); <code>function name;</code> starts null for later assignment. Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
@@ -293,7 +299,10 @@ function-local m is snapshot: g() = 5</code></pre></div>
     bump();
     return n;
 }</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Parse error: &lt;script&gt;:3:24: Lambda capture list does not capture enclosing local &#x27;n&#x27;; name it or use [=] or [&amp;]</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:3:24: error: lambda capture list does not capture enclosing local 'n'; name it or use [=] or [&amp;]
+        auto bump = []() { n += 1; };
+                           ^</code></pre></div>
 <p>Use <code>[=]</code> or <code>[name]</code> for a snapshot of an enclosing local, <code>[&amp;]</code> or <code>[&amp;name]</code> to share its storage, and <code>[x = expression]</code> for an init-capture: the lambda&#x27;s own <code>x</code>, initialized when the lambda is made, as <code>auto x = expression;</code> would be (a temporary is the member itself, a variable is copied). A copied capture belongs to the lambda: its body may write it, and the value it leaves is the one the next call sees, as in a C++ <code>mutable</code> lambda, so there is no <code>mutable</code> to write (<code>A lambda takes no &#x27;mutable&#x27;: its copied captures are already its own, writable and kept between calls</code>). Shared cells outlive the creating frame. A global or namespace variable is a live program binding, read when the lambda runs, unless the list copies it: <code>[g]</code> takes the global&#x27;s value at creation.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int level = 1;
 auto live = []() { return level; };          // a global: read when the lambda runs

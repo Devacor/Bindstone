@@ -534,6 +534,7 @@ void interpreter::pop_instance_scope() {
 }
 
 script_value interpreter::execute(const std::vector<declaration_ptr>& declarations, bool textual) {
+    arm_native_stack();
     std::optional<detail::call_depth_guard> reentry_depth;
     checked_result<void> entry_result;
     if (is_executing()) {
@@ -3422,6 +3423,7 @@ std::optional<checked_result<script_value>> interpreter::parallel_operator_call(
 
 // self's method name_id called with no arguments; a parallel worker dispatches it only through its pin. KEEP BYTE-PARALLEL with the other backend
 checked_result<script_value> interpreter::invoke_method(const script_value& self, uint64_t name_id) {
+    arm_native_stack();
     if (parallel_worker_ && !worker_operator_pin(self, name_id)) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { name_id })); }
     auto target = resolve_member_target(self);
     script_value method_val = target ? operator_value(target, name_id) : script_value(std::monostate{}, engine_);
@@ -7346,7 +7348,7 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
     in_switch_ = true;
     should_fallthrough_ = false;
 
-    try {
+    {
         bool matched = false;
         bool executed_case = false;
 
@@ -7498,8 +7500,6 @@ checked_result<void> interpreter::visit_switch_stmt(switch_stmt* stmt) {
                 throw;
             }
         }
-    } catch (const break_exception&) {
-        // Break out of switch - this is expected behavior
     }
 
     // Restore switch state
@@ -8271,6 +8271,7 @@ struct interpreter::construction_lender final : detail::construction_host {
 };
 
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
+    arm_native_stack();
     detail::release_sync release_first(engine_);
     // A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
     // destructors run during unwinding); what the destructor raised goes to the script error handler, where C++ would terminate
@@ -9581,6 +9582,7 @@ script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, s
 }
 
 checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& handle) {
+    arm_native_stack();
     // Host-level resume is its own budgeted entry; a resume nested inside an
     // executing script keeps the outer deadline (and the outer limit state).
     // Depth alone is not enough: a TOP-LEVEL script statement calling next() also
@@ -10221,6 +10223,7 @@ checked_result<void> interpreter::visit_destructuring_decl(destructuring_decl* d
 checked_result<void> interpreter::visit_expression_decl(expression_decl* decl) { return visit_expression_decl_t<false>(decl); }
 
 checked_result<void> interpreter::dispatch_expr(expression* expr) {
+    if (stack_mark_.low()) [[unlikely]] { return detail::raise_nesting_depth(); }
     switch (expr->get_type()) {
         case node_type::literal_expr:
             return visit_literal_expr(static_cast<literal_expr*>(expr));
@@ -10344,6 +10347,7 @@ std::string interpreter::format_stack_trace() const {
 }
 
 checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
+    if (stack_mark_.low()) [[unlikely]] { return detail::raise_nesting_depth(); }
     if (!call_stack_.empty()) call_stack_.back().current_node = stmt;
     else top_level_node_ = stmt;
     if (debug_hook_) [[unlikely]] {
@@ -10389,6 +10393,7 @@ checked_result<void> interpreter::dispatch_stmt(statement* stmt) {
 }
 
 checked_result<void> interpreter::dispatch_decl(declaration* decl) {
+    if (stack_mark_.low()) [[unlikely]] { return detail::raise_nesting_depth(); }
     if (!call_stack_.empty()) call_stack_.back().current_node = decl;
     else top_level_node_ = decl;
     if (debug_hook_) [[unlikely]] {

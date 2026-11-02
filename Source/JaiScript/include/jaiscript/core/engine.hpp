@@ -838,7 +838,7 @@ namespace jai {
             auto binder = make_functionBinder(std::forward<Func>(func), this);
             script_function boundFunc = binder.bind();
             stage_host_result(host_result_kind<return_type>());
-            if constexpr (!tuple_has_references<typename traits::argument_types>() && std::is_same_v<Requirements, privilege>) {
+            if constexpr (detail::host_lane_params<typename traits::argument_types>() && std::is_same_v<Requirements, privilege>) {
                 if (required == privilege::none) {
                     using call_t = typename decltype(binder)::by_value_call;
                     stage_host_direct({&call_t::invoke, &call_t::locate});

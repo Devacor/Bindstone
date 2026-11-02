@@ -1413,6 +1413,11 @@ public:
 			                           " try { r = r + \",\" + s2(C, 6); } catch (err) { r = r + \",throw:\" + err; } r;";
 			both(script, "", "values per definition");
 			both(script, "", "values per definition, proofs off", false);
+			// a graft's converting declaration (a load and a declaration, not one row) on a temp slot an earlier graft defined with
+			// another kind writes its own definition's cell
+			const std::string converting = "float g = 1.0; float half() { return 0.5; } int three() { int t = 3.0; return t; }"
+				" int run() { int s = 0; for (int i = 0; i < 3; ++i) { bool b = (g + half()) != g; s = s + three(); } return s; } to_string(run());";
+			both(converting, "9", "a converting declaration on a reused temp slot");
 			const std::string vm = run_on(true, script);
 			check_true(vm.find(",throw:") != std::string::npos && vm.find("overflow") != std::string::npos, "the overflow after a float definition of the same temp: " + vm);
 			const std::string listing = listing_of(defs);

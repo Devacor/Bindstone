@@ -10,7 +10,8 @@
 #
 # Two tiers. The VM tier runs for every change to code a program runs (the library, the VM, the interpreter, a kernel, the
 # build): the Debug suites on the VM and on the VM reference (--backend=vm, --backend=vm-reference), the VM against
-# VM-reference fuzz (gates.sh fuzz-vm-reference) and the example hashes on the VM. The interpreter tier adds the
+# VM-reference fuzz (gates.sh fuzz-vm-reference) and the example hashes on the VM; a change to the VM or its compiler adds the
+# ordering fuzz (gates.sh fuzz-order). The interpreter tier adds the
 # interpreter's Debug suites, the interpreter against VM fuzz (gates.sh fuzz) and the example hashes on the interpreter, and
 # is picked only when a path touches
 #   - the interpreter: source/interpreter/*, include/jaiscript/detail/interpreter.hpp
@@ -92,9 +93,9 @@ classify() {
 		source/tests/*) pick debug-suites "a test ($p)" ;;
 		source/implementation/vm/vm_backend.cpp | source/implementation/vm/vm_compiler.cpp | \
 		include/jaiscript/vm/vm_backend.hpp | include/jaiscript/vm/vm_compiler.hpp | include/jaiscript/vm/chunk.hpp | include/jaiscript/vm/opcode.hpp)
-			vm_tier "the VM or its compiler ($p)"; pick android "libc++ and 32-bit compile the library ($p)"
+			vm_tier "the VM or its compiler ($p)"; pick fuzz-order "the VM or its compiler ($p)"; pick android "libc++ and 32-bit compile the library ($p)"
 			[ "$LANES" = 1 ] || interp_tier "the VM's general path or its compiler's front end ($p)" ;;
-		include/jaiscript/vm/* | source/implementation/vm/*) vm_tier "the VM's optimized lanes or its tools ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
+		include/jaiscript/vm/* | source/implementation/vm/*) vm_tier "the VM's optimized lanes or its tools ($p)"; pick fuzz-order "the VM's optimized lanes ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		source/interpreter/* | include/jaiscript/detail/interpreter.hpp)
 			vm_tier "the interpreter ($p)"; interp_tier "the interpreter ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp | \
@@ -154,7 +155,7 @@ if [ "$BUILD" = 1 ]; then
 	for check in $CHECKS; do
 		case "$check" in
 			debug-suites) debug_targets="$debug_targets jaiscript_tests" ;;
-			fuzz | fuzz-vm-reference) release_targets="$release_targets jaiscript_fuzz" ;;
+			fuzz | fuzz-vm-reference | fuzz-order) release_targets="$release_targets jaiscript_fuzz" ;;
 			gloom) release_targets="$release_targets jai_gloom" ;;
 			demoreel) release_targets="$release_targets jai_demoreel" ;;
 			crawler) release_targets="$release_targets jai_crawler" ;;

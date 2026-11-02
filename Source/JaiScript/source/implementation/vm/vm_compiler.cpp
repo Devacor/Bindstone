@@ -5009,7 +5009,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					type_info* stamp = decl->type.get();
 					if ((decl->decl_fast_flags & variable_decl::decl_fast_slot_store) != variable_decl::decl_fast_slot_store || decl->ref_escaping || decl->slot_index == SIZE_MAX || decl->slot_index >= k_typed_slot_mask) { refuse(chunk::cell_refusal_representation, ip + 1); break; }
 					if (stamp && stamp_kind(stamp) == 0 && stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip + 1); break; }   // a string or class local
-					{ const uint8_t ld = decl_landing(static_cast<uint32_t>(decl->slot_index)); use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, ip + 1); }
+					{ const uint8_t ld = decl_landing(static_cast<uint32_t>(decl->slot_index)); use_slot(static_cast<uint32_t>(decl->slot_index), stamp_kind(stamp), true, ld, ld == k_typed_dst_temp ? nullptr : stamp, ip); }
 					op.a = static_cast<uint32_t>(decl->slot_index); op.writes = op.a;
 					if (!stamp && st.op == opcode::op_load) { op.tok = 1; }   // an auto declaration from a name takes its declared type
 				} else if (sn.b == k_invalid_u32) { op.a = k_ir_env_bit | env_written(sn.a, k_typed_dst_store, ip + 1); }

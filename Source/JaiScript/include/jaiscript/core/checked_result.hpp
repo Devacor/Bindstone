@@ -20,6 +20,18 @@ concept IsStdString = std::same_as<std::decay_t<T>, std::string>;
 // Forward declaration
 template<typename T> class checked_result;
 
+namespace detail {
+// The error a checked_result's union holds, as two whole words: GCC 14's SRA copies the union through std::error_code's
+// 4-byte int field and drops bytes 4-7 of the value sharing it
+struct checked_error_words {
+    int64_t value;
+    const std::error_category* category;
+
+    checked_error_words(std::error_code ec) noexcept : value(ec.value()), category(&ec.category()) {}
+    std::error_code code() const noexcept { return {static_cast<int>(value), *category}; }
+};
+}
+
 /**
  * error_propagator - Helper type for clean error propagation across checked_result types
  *
@@ -58,7 +70,7 @@ class [[nodiscard]] checked_result {
 private:
     union {
         T value_;
-        std::error_code error_;
+        detail::checked_error_words error_;
     };
     bool has_value_;
     std::string_view static_msg_;  // Static error message (no allocation)
@@ -94,7 +106,7 @@ public:
         if (has_value_) {
             new (&value_) T(other.value_);
         } else {
-            new (&error_) std::error_code(other.error_);
+            new (&error_) detail::checked_error_words(other.error_);
         }
     }
 
@@ -104,7 +116,7 @@ public:
         if (has_value_) {
             new (&value_) T(std::move(other.value_));
         } else {
-            new (&error_) std::error_code(other.error_);
+            new (&error_) detail::checked_error_words(other.error_);
         }
     }
 
@@ -112,8 +124,6 @@ public:
     ~checked_result() {
         if (has_value_) {
             value_.~T();
-        } else {
-            error_.~error_code();
         }
     }
 
@@ -145,7 +155,7 @@ public:
 
     // Get error
     [[nodiscard]] std::error_code error() const noexcept {
-        return error_;
+        return error_.code();
     }
 
     // Get symbol ID for additional context (e.g., variable name)
@@ -166,7 +176,7 @@ public:
     // Get error as propagator for clean cross-type error propagation
     // Usage: if (!result) return result.error_value();
     [[nodiscard]] error_propagator error_value() const noexcept {
-        return error_propagator{error_, static_msg_, symbol_id_, symbol_id2_};
+        return error_propagator{error_.code(), static_msg_, symbol_id_, symbol_id2_};
     }
 };
 
@@ -179,7 +189,7 @@ class [[nodiscard]] checked_result<T&> {
 private:
     union {
         std::reference_wrapper<T> value_;
-        std::error_code error_;
+        detail::checked_error_words error_;
     };
     bool has_value_;
     std::string_view static_msg_;
@@ -211,7 +221,7 @@ public:
         if (has_value_) {
             new (&value_) std::reference_wrapper<T>(other.value_);
         } else {
-            new (&error_) std::error_code(other.error_);
+            new (&error_) detail::checked_error_words(other.error_);
         }
     }
 
@@ -221,7 +231,7 @@ public:
         if (has_value_) {
             new (&value_) std::reference_wrapper<T>(other.value_);
         } else {
-            new (&error_) std::error_code(other.error_);
+            new (&error_) detail::checked_error_words(other.error_);
         }
     }
 
@@ -229,8 +239,6 @@ public:
     ~checked_result() {
         if (has_value_) {
             value_.~reference_wrapper<T>();
-        } else {
-            error_.~error_code();
         }
     }
 
@@ -254,7 +262,7 @@ public:
 
     // Get error
     [[nodiscard]] std::error_code error() const noexcept {
-        return error_;
+        return error_.code();
     }
 
     // Get symbol ID for additional context
@@ -274,7 +282,7 @@ public:
 
     // Get error as propagator for clean cross-type error propagation
     [[nodiscard]] error_propagator error_value() const noexcept {
-        return error_propagator{error_, static_msg_, symbol_id_, symbol_id2_};
+        return error_propagator{error_.code(), static_msg_, symbol_id_, symbol_id2_};
     }
 };
 

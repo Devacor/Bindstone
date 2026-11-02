@@ -76,10 +76,13 @@ namespace stdlib {
 	}
 
 	double random::next_float(double a_lo, double a_hi) {
-		if (!std::isfinite(a_lo) || !std::isfinite(a_hi) || !std::isfinite(a_hi - a_lo)) { throw runtime_error("random::next_float bounds must be finite"); }
+		if (!std::isfinite(a_lo) || !std::isfinite(a_hi)) { throw runtime_error("random::next_float bounds must be finite"); }
 		if (a_hi < a_lo) { throw runtime_error("random::next_float range is inverted (max < min)"); }
 		follow_region();
-		const double result = std::fma(core_.unit(), a_hi - a_lo, a_lo);   // one rounding on every platform, never a contraction choice
+		// one rounding on every platform, never a contraction choice; a span past the float range runs halved (exactly)
+		const double span = a_hi - a_lo;
+		const double result = std::isfinite(span) ? std::fma(core_.unit(), span, a_lo)
+		                                          : 2.0 * std::fma(core_.unit(), a_hi * 0.5 - a_lo * 0.5, a_lo * 0.5);
 		return result < a_hi || a_lo == a_hi ? result : std::nextafter(a_hi, a_lo);
 	}
 

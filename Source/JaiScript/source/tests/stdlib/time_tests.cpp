@@ -335,6 +335,7 @@ public:
             expect(R"(time::utc_date(2024, 2, 28, 23, 30).add_hours(25).to_string() + " " + time::utc_date(2024, 1, 1, 0, 30).add_minutes(-90).to_string() + " " + time::utc_date(2024, 1, 1).add_seconds(1.5).to_string() + " " + time::utc_date(2024, 1, 1).add_seconds(-0.001).to_string() + " " + time::utc_date(2024, 1, 1).add_hours(0.5).to_string();)",
                    "2024-03-01T00:30:00.000Z 2023-12-31T23:00:00.000Z 2024-01-01T00:00:01.500Z 2023-12-31T23:59:59.999Z 2024-01-01T00:30:00.000Z", "hours, minutes and seconds");
             expect_error(R"(try { time::utc_date(2024, 1, 1).add_days(1.5); } catch (e) { return e; } return "no-error";)", "time::date::add_days expects a whole number", "whole days");
+            expect_error(R"(try { time::utc_date(2024, 1, 1).add_days(9223372036854775807); } catch (e) { return e; } return "no-error";)", "time::date::add_days is out of range", "a whole number past the step range");
             expect_error(R"(try { time::utc_date(9999, 12, 31).add_days(1); } catch (e) { return e; } return "no-error";)", "time::date: the result is outside the supported range (years 1 to 9999)", "range");
             expect_error(R"(try { time::utc_date(1, 1, 1).add_seconds(-1); } catch (e) { return e; } return "no-error";)", "time::date: the result is outside the supported range (years 1 to 9999)", "range below");
         });

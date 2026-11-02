@@ -54,12 +54,10 @@ public:
         declare_implicit_default_constructor();
     }
 
-    // Helper to add a script method from AST
     void add_method_from_ast(std::string_view name,
                             std::shared_ptr<function_decl> ast,
                             std::shared_ptr<environment> definition_env,
                             bool is_hot_reload = false) {
-        // Intern the name for fast lookups
         auto eng = get_engine();
         if (!eng) return;
         uint64_t name_id = eng->symbolize(name);
@@ -105,13 +103,8 @@ public:
             }
         }
         
-        // Store AST for potential VM compilation later (keyed by ID)
         method_asts_[name_id] = ast;
-
-        // Use inherited add_script_method with the caller-supplied definition environment
         add_script_method(name, ast, definition_env);
-        
-        // Set metadata for this method
         method_metadata metadata;
         metadata.is_virtual = ast->is_override || is_destructor;  // Override methods and destructors are virtual
         
@@ -210,12 +203,7 @@ public:
         implicit_default_ctor_ = std::move(ctor);
     }
     
-    // Add field initializer AST (will be evaluated at instance construction time).
-    // Stored in SOURCE DECLARATION ORDER (append), not interned-id order — a field
-    // initializer may read a sibling field (this.other), so order must match the
-    // source. (Previously a std::map keyed by name_id ran initializers in interning
-    // order, which only coincides with declaration order if each name is first seen
-    // at its declaration; a name interned earlier elsewhere broke it.)
+    // A field initializer, run at construction in source declaration order: an initializer may read a sibling field
     void add_field_initializer_ast(uint64_t field_id, expression_ptr initializer) {
         for (auto& [id, ast] : field_initializer_asts_) {
             if (id == field_id) { ast = initializer; return; }

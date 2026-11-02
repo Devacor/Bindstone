@@ -109,6 +109,11 @@ public:
 			check_eq(std::string("random::next_int range is inverted (max < min)"), caught("random r(1); r.next_int(5, 1);"));
 			check_eq(std::string("random::next_float range is inverted (max < min)"), caught("random r(1); r.next_float(2.0, 1.0);"));
 			check_eq(std::string("random::next_float bounds must be finite"), caught("random r(1); r.next_float(0.0, math::INF);"));
+			check_eq(std::string("true"), caught("random r(1); float x = r.next_float(-1.7e308, 1.7e308); throw to_string(x >= -1.7e308 && x < 1.7e308);"),
+			         "finite bounds a float cannot span draw from the whole range");
+			check_eq(std::string("Out of memory"), caught("random r(1); r.next_bytes(9223372036854775807);"));
+			check_eq(std::string("Out of memory"), caught("crypto::random_bytes(9223372036854775807);"));
+			check_eq(std::string("Out of memory"), caught("var s = \"ab\"; s.pad_left(9223372036854775807);"));
 			check_eq(std::string("random::pick expects a non-empty array"), caught("random r(1); r.pick([]);"));
 			check_eq(std::string("random::next_bytes count cannot be negative"), caught("random r(1); r.next_bytes(-1);"));
 			check_eq(std::string("random::shuffle expects an array"), caught("random r(1); var s = \"text\"; r.shuffle(s);"));

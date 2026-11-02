@@ -241,19 +241,7 @@ namespace jai {
         // Factory methods for specific native types
         static type_info make_int8(string_symbolizer& symbolizer);
 
-        static type_info make_int16(string_symbolizer& symbolizer);
-
-        static type_info make_int32(string_symbolizer& symbolizer);
-
         static type_info make_uint8(string_symbolizer& symbolizer);
-
-        static type_info make_uint16(string_symbolizer& symbolizer);
-
-        static type_info make_uint32(string_symbolizer& symbolizer);
-
-        static type_info make_uint64(string_symbolizer& symbolizer);
-
-        static type_info make_float32(string_symbolizer& symbolizer);
 
         // Array<T>
         static type_info make_array(string_symbolizer& symbolizer, type_info_ptr element_type);

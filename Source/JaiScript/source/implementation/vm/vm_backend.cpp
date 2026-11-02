@@ -1853,7 +1853,7 @@ JAI_NOINLINE bool vm_backend::member_layout_verdict(const chunk& body, const cla
 	bool same = cd->is_script_class() && !cd->chain_has_nonpublic() && (cd == body.member_class || cd->derives_from(body.member_class));
 	for (size_t i = 0; same && i < body.this_field_uses.size(); ++i) {
 		const auto [id, slot] = body.this_field_uses[i];
-		same = cd->field_slot(id) == slot && !cd->slot_is_cpp_property(slot) && cd->get_method(id, false).is_invalid() &&
+		same = cd->field_slot(id) == slot && !cd->slot_is_cpp_property(slot) && cd->method_ptr(id) == nullptr &&
 		       cd->find_field_declaring_class(id) == body.member_class->find_field_declaring_class(id) &&
 		       !cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) && !cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first) &&
 		       !const_cast<class_definition*>(cd)->find_static_field_in_chain(id) && !const_cast<class_definition*>(cd)->find_static_method_in_chain(id) &&
@@ -1861,7 +1861,7 @@ JAI_NOINLINE bool vm_backend::member_layout_verdict(const chunk& body, const cla
 	}
 	for (size_t i = 0; same && i < body.this_global_uses.size(); ++i) {   // a bare name past the members: the receiver's class takes none of them
 		const uint64_t id = body.this_global_uses[i];
-		same = cd->field_slot(id) == class_definition::k_no_field_slot && !cd->chain_declares_field(id) && cd->get_method(id, false).is_invalid() &&
+		same = cd->field_slot(id) == class_definition::k_no_field_slot && !cd->chain_declares_field(id) && cd->method_ptr(id) == nullptr &&
 		       !const_cast<class_definition*>(cd)->find_static_field_in_chain(id) && !const_cast<class_definition*>(cd)->find_static_method_in_chain(id);
 	}
 	chunk::member_layout_row& row = body.member_layout_rows[body.member_layout_next];
@@ -12512,7 +12512,7 @@ bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const cla
 		if (dispatch->definition_env.get() != cached_global_env_) return false;
 		class_definition* receiver_class = const_cast<class_definition*>(cd);
 		for (const uint64_t id : site.global_ids) {
-			if (cd->field_slot(id) != class_definition::k_no_field_slot || cd->chain_declares_field(id) || !cd->get_method(id, false).is_invalid()) return false;
+			if (cd->field_slot(id) != class_definition::k_no_field_slot || cd->chain_declares_field(id) || cd->method_ptr(id) != nullptr) return false;
 			detail::member_probe_hit statics;
 			detail::probe_scope_statics(statics, dispatch->cls.get(), receiver_class, id, true);
 			if (statics) return false;
@@ -13223,8 +13223,8 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 		return {};
 	} catch (const std::exception& e) {
 		if (truncate_to != SIZE_MAX) { stack_.truncate(truncate_to); }
-		active_exception_value_ = script_value(std::string(e.what()), engine_);
-		current_exception_ = script_exception(e.what());
+		active_exception_value_ = script_value(std::string(detail::native_exception_text(e)), engine_);
+		current_exception_ = script_exception(detail::native_exception_text(e));
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
@@ -20866,7 +20866,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (const std::exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
-			convert_cpp_exception_in_frame(script_exception(e.what()));
+			convert_cpp_exception_in_frame(script_exception(detail::native_exception_text(e)));
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (...) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }

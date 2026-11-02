@@ -1163,7 +1163,7 @@ namespace jai::detail {
 		// or not the bound container was typed
 		script_value currentValue = refLocal.deref();
 		const script_value& rightDeref = rightArg.deref();
-		// S8: a bound rhs decodes up front so the /= and %= zero pre-checks below keep
+		// a bound rhs decodes up front so the /= and %= zero pre-checks below keep
 		// today's error codes/texts (shared by both backends; `arith` normalizes bound lhs)
 		const bool rightBound = rightDeref.raw_storage_index() == script_value::TYPEID_CPP_BOUND;
 		const script_value rightNorm = rightBound ? rightDeref.bound_decoded_temp() : script_value(std::monostate{}, eng);

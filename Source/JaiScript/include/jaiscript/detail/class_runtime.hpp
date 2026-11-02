@@ -343,7 +343,7 @@ inline bool class_definition::owns_auto_accessor(uint64_t id) const { return aut
 inline void class_definition::set_auto_accessor_ids(std::unordered_set<uint64_t> ids) { auto_accessor_ids_ = std::move(ids); }
 
 inline checked_result<script_value> class_definition::host_exception_result(engine* eng, const std::exception& e) {
-    return host_exception_error(eng, e.what());
+    return host_exception_error(eng, detail::native_exception_text(e));
 }
 
 inline function_decl* class_definition::single_method_overload(uint64_t name_id) const {
@@ -526,31 +526,10 @@ inline bool class_definition::has_static_field(uint64_t id) const {
 
 inline script_value class_definition::get_method(uint64_t id, bool throw_if_missing) const {
     JAI_CENSUS(get_method);
-    auto it = methods_.find(id);
-    if (it != methods_.end()) {
-        return it->second;
-    }
-
-    for (const auto& parent : parent_classes_) {
-        if (parent) {
-            auto result = parent->get_method(id, false);
-            if (!result.is_invalid()) {
-                return result;
-            }
-        }
-    }
-
-    if (cpp_base_class_) {
-        auto result = cpp_base_class_->get_method(id, false);
-        if (!result.is_invalid()) {
-            return result;
-        }
-    }
-
+    if (const script_value* found = method_ptr(id)) { return *found; }
     if (throw_if_missing) {
         throw_method_missing("Method '", id);
     }
-
     return script_value::make_invalid(engine_);
 }
 

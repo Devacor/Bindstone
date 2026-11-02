@@ -89,9 +89,10 @@ namespace stdlib {
             .build();
 
         auto whole = [](script_float v, const char* what) -> int64_t {
-            if (!std::isfinite(v) || std::floor(v) != v || std::fabs(v) > 1e15) {
+            if (!std::isfinite(v) || std::floor(v) != v) {
                 throw runtime_error(std::string("time::date::") + what + " expects a whole number");
             }
+            if (std::fabs(v) > 1e15) { throw runtime_error(std::string("time::date::") + what + " is out of range"); }
             return static_cast<int64_t>(v);
         };
         auto to_ms = [](script_float v, double scale, const char* what) -> int64_t {

@@ -27,6 +27,46 @@
 namespace jai {
 
 namespace {
+    struct pad_texts { const char* arity; const char* width; const char* empty; const char* fill; };
+
+    // pad_left (side -1), pad_right (1) and pad_center (0, the odd byte on the right): the fill tiles from its start on each
+    // side, as JavaScript's padStart and padEnd do ("ab".pad_left(7, "xyz") is "xyzxyab")
+    checked_result<script_value> pad_text(const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args, int side,
+                                          const pad_texts& texts) {
+        if (args.size() < 1 || args.size() > 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), texts.arity);
+        }
+        if (!args[0].is_int()) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), texts.width);
+        }
+        const script_int target_len = args[0].unchecked_as_int();
+        std::string fill = " ";
+        if (args.size() > 1) {
+            if (args[1].is_char()) {
+                fill = std::string(1, args[1].unchecked_as_char());
+            } else if (args[1].is_text()) {
+                if (args[1].unchecked_text().empty()) {
+                    return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), texts.empty);
+                }
+                fill = args[1].unchecked_text();
+            } else {
+                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), texts.fill);
+            }
+        }
+        auto& str = self.unchecked_text_ref(ctx.get_engine());
+        if (target_len <= static_cast<script_int>(str.size())) { return self; }
+        const size_t total = detail::saturating_count(target_len) - str.size();
+        if (!detail::builtin_memory_charge(ctx.get_engine(), total)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
+        const size_t left = side < 0 ? total : side > 0 ? 0 : total / 2;
+        auto tiled = [&](size_t n) {
+            std::string out;
+            out.reserve(n);
+            while (out.size() < n) { out.append(fill, 0, std::min(fill.size(), n - out.size())); }
+            return out;
+        };
+        str = tiled(left) + str + tiled(total - left);
+        return self;
+    }
     // The argument positions a builtin's callback binds by reference (a script T& parameter, a host T& that writes back):
     // those take the builtin's elements as lvalues, as std::sort hands its comparator the elements it sorts
     uint32_t callback_lvalue_positions(const script_value& callback, size_t argc) {
@@ -1678,103 +1718,21 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }},
 
         {symbolizer->intern("pad_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            if (args.size() < 1 || args.size() > 2) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_left() takes 1 or 2 arguments (target_len, [char])");
-            }
-            if (!args[0].is_int()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_left() first argument must be an integer");
-            }
-            script_int target_len = args[0].unchecked_as_int();
-
-            char pad_char = ' ';
-            if (args.size() > 1) {
-                if (args[1].is_char()) {
-                    pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_text()) {
-                    const auto& pad_str = args[1].unchecked_text();
-                    if (pad_str.empty()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_left() padding character cannot be empty");
-                    }
-                    pad_char = pad_str[0];
-                } else {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_left() second argument must be a char or string");
-                }
-            }
-
-            auto& str = self.unchecked_text_ref(ctx.get_engine());
-            if (target_len > static_cast<script_int>(str.size())) {
-                if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
-                str.insert(0, detail::saturating_count(target_len) - str.size(), pad_char);
-            }
-            return self;
+            static constexpr pad_texts texts{"pad_left() takes 1 or 2 arguments (target_len, [char])", "pad_left() first argument must be an integer",
+                                            "pad_left() padding character cannot be empty", "pad_left() second argument must be a char or string"};
+            return pad_text(ctx, self, args, -1, texts);
         }},
 
         {symbolizer->intern("pad_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            if (args.size() < 1 || args.size() > 2) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_right() takes 1 or 2 arguments (target_len, [char])");
-            }
-            if (!args[0].is_int()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_right() first argument must be an integer");
-            }
-            script_int target_len = args[0].unchecked_as_int();
-
-            char pad_char = ' ';
-            if (args.size() > 1) {
-                if (args[1].is_char()) {
-                    pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_text()) {
-                    const auto& pad_str = args[1].unchecked_text();
-                    if (pad_str.empty()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_right() padding character cannot be empty");
-                    }
-                    pad_char = pad_str[0];
-                } else {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_right() second argument must be a char or string");
-                }
-            }
-
-            auto& str = self.unchecked_text_ref(ctx.get_engine());
-            if (target_len > static_cast<script_int>(str.size())) {
-                if (!detail::builtin_memory_charge(ctx.get_engine(), detail::saturating_count(target_len) - str.size())) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
-                str.append(detail::saturating_count(target_len) - str.size(), pad_char);
-            }
-            return self;
+            static constexpr pad_texts texts{"pad_right() takes 1 or 2 arguments (target_len, [char])", "pad_right() first argument must be an integer",
+                                            "pad_right() padding character cannot be empty", "pad_right() second argument must be a char or string"};
+            return pad_text(ctx, self, args, 1, texts);
         }},
 
         {symbolizer->intern("pad_center"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-            if (args.size() < 1 || args.size() > 2) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "pad_center() takes 1 or 2 arguments (target_len, [char])");
-            }
-            if (!args[0].is_int()) {
-                return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_center() first argument must be an integer");
-            }
-            script_int target_len = args[0].unchecked_as_int();
-
-            char pad_char = ' ';
-            if (args.size() > 1) {
-                if (args[1].is_char()) {
-                    pad_char = args[1].unchecked_as_char();
-                } else if (args[1].is_text()) {
-                    const auto& pad_str = args[1].unchecked_text();
-                    if (pad_str.empty()) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::invalid_operation), "pad_center() padding character cannot be empty");
-                    }
-                    pad_char = pad_str[0];
-                } else {
-                    return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "pad_center() second argument must be a char or string");
-                }
-            }
-
-            auto& str = self.unchecked_text_ref(ctx.get_engine());
-            if (target_len > static_cast<script_int>(str.size())) {
-                size_t total_pad = static_cast<size_t>(target_len) - str.size();
-                if (!detail::builtin_memory_charge(ctx.get_engine(), total_pad)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
-                size_t left_pad = total_pad / 2;
-                size_t right_pad = total_pad - left_pad;
-                str.insert(0, left_pad, pad_char);
-                str.append(right_pad, pad_char);
-            }
-            return self;
+            static constexpr pad_texts texts{"pad_center() takes 1 or 2 arguments (target_len, [char])", "pad_center() first argument must be an integer",
+                                            "pad_center() padding character cannot be empty", "pad_center() second argument must be a char or string"};
+            return pad_text(ctx, self, args, 0, texts);
         }},
 
         {symbolizer->intern("replace_first"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {

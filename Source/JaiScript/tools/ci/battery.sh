@@ -31,7 +31,7 @@ else
 	{ jai_debug_suites interp vm vm-reference || echo "DEBUG-SUITES-RED"; } > "$JAI_CI_LOG_DIR/battery_debug.out" 2>&1 &
 	debug_pid=$!
 fi
-jai_gates_side_by_side release tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp amalgamation selftest site
+jai_gates_side_by_side release tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp amalgamation selftest site
 FAILED="$FAILED$JAI_RED"
 if [ -n "${debug_pid:-}" ]; then
 	wait "$debug_pid" || true

@@ -2,7 +2,7 @@
 # The CI gates, one per argument, so the workflow can give each its own step and a
 # local run can reproduce any of them:
 #
-#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site
+#   BIN=build/bin tools/ci/gates.sh tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site
 #   tools/ci/gates.sh all
 #
 # BIN is the directory holding the built executables (default: build/bin under the
@@ -18,7 +18,8 @@
 #
 # The two differentials: `fuzz` runs each program on the interpreter and the optimized VM, `fuzz-vm-reference` on the
 # optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
-# bug of an optimized lane. tests-vm-reference runs the suite with --backend=vm-reference.
+# bug of an optimized lane. `fuzz-order` runs the ordering band with call arguments. tests-vm-reference runs the suite with
+# --backend=vm-reference.
 #
 # The asan gate builds its own Debug tree under AddressSanitizer (with UndefinedBehaviorSanitizer on GCC and Clang, at -O1;
 # MSVC has no UBSan) and runs the suites on the interpreter and the VM, then a short differential fuzz run that must also
@@ -89,6 +90,18 @@ fuzz_run() {
 
 gate_fuzz() { fuzz_run; }
 gate_fuzz_vm_reference() { fuzz_run --vm-reference; }
+
+# The ordering band with call arguments (writing calls beside reads of what they write, three oracles: the backends, the
+# metamorphic variant and the spec model), then the seeds past the band that once diverged
+ORDER_SEEDS=(710115 710329 710548 710591 710665 710791 710960 760275 760410 760428 760626)
+gate_fuzz_order() {
+	fuzz_run --order-args
+	local seed
+	for seed in "${ORDER_SEEDS[@]}"; do
+		run_logged "$BIN/jaiscript_fuzz" --seed "$seed" --order-args --max-depth 3 --timeout-ms 250 --isolate
+		want "fuzz-order: expected no divergence at seed $seed" "new divergences: ?0\\b"
+	done
+}
 
 vm_only() { hash_on vm || { echo "$1: its one backend is the VM, which HASH_BACKENDS leaves out; skipped"; return 1; }; }
 
@@ -282,7 +295,7 @@ gate_asan() {
 	want "asan fuzz: expected no crash" "^crashes: +0\b"
 }
 
-ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
+ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android)
 SANITIZER=(asan)
@@ -292,7 +305,7 @@ SANITIZER=(asan)
 
 for gate in "$@"; do
 	case "$gate" in
-		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
+		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | fuzz-order | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
 		gloom-workers | gloom-long | timedemo | amalgamation | android | asan) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2 ;;
 	esac

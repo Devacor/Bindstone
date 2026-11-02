@@ -84,6 +84,9 @@ jobs:
       - name: VM reference fuzz smoke
         run: bash tools/ci/gates.sh fuzz-vm-reference
 
+      - name: Ordering fuzz
+        run: bash tools/ci/gates.sh fuzz-order
+
       - name: GLOOM hash gate
         run: bash tools/ci/gates.sh gloom
 

@@ -78,7 +78,6 @@
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_impl.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\conversion_registry_templates.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine.hpp" />
-    <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_bindable.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\engine_impl.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\execution_backend.hpp" />
     <ClInclude Include="$(MSBuildThisFileDirectory)..\..\Source\JaiScript\include\jaiscript\core\function_binder.hpp" />

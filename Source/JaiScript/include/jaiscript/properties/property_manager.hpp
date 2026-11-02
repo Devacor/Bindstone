@@ -7,7 +7,6 @@
 #include <memory>
 #include <jaiscript/properties/property.hpp>
 #include <jaiscript/properties/property_schema.hpp>
-#include <jaiscript/core/engine_bindable.hpp>
 #include <jaiscript/core/script_extensible.hpp>
 #include <jaiscript/signals/receiver_owner.hpp>
 #include <jaiscript/detail/first_type.hpp>
@@ -47,19 +46,6 @@ namespace jai {
 
 		receiver_owner& script_receivers() { return script_receivers_; }
 
-		// Engine binding support
-		void bind_to_engine(std::weak_ptr<engine> eng) {
-			engine_ref_ = eng;
-		}
-
-		std::weak_ptr<engine> get_engine() const {
-			return engine_ref_;
-		}
-
-		bool has_engine() const {
-			return !engine_ref_.expired();
-		}
-
 		template<typename Fn>
 		void visit(Fn&& func) const {
 			for (const auto& [key, prop] : m_properties) {
@@ -86,7 +72,6 @@ namespace jai {
 
 	private:
 		std::map<std::string, property_base*> m_properties;
-		std::weak_ptr<engine> engine_ref_;
 		receiver_owner script_receivers_;  // Holds receivers created by script callbacks
 	};
 
@@ -246,13 +231,6 @@ namespace jai {
 
 		virtual ~property_owner() = default;
 
-		void bind_to_engine(std::weak_ptr<engine> eng) {
-			if constexpr (sizeof...(Bases) > 0) {
-				(try_bind_base<Bases>(eng), ...);
-			}
-			property_mgr.bind_to_engine(eng);
-		}
-
 		// Post-deserialization hook (called after all objects are deserialized)
 		// Override in derived classes to resolve cross-references, update caches, etc.
 		// Uses type-erased archive for polymorphic dispatch
@@ -272,7 +250,7 @@ namespace jai {
 		// --- Inheritance-aware property serialization -----------------------------------------
 		// property_owner<Derived, Bases...> holds ONE property_mgr per inheritance level, and the
 		// derived level name-hides the bases'. These walk the whole chain (each base is itself a
-		// property_owner, so it recurses — mirrors bind_to_engine/post_load) so a derived object's
+		// property_owner, so it recurses, as post_load does) so a derived object's
 		// INHERITED properties are serialized too; without them only the most-derived level survives.
 
 		// Visit every level's properties (bases first, then own) — the single save walk.
@@ -417,14 +395,6 @@ namespace jai {
 		}
 
 	private:
-		template<typename Base>
-		auto try_bind_base(std::weak_ptr<engine> eng)
-			-> decltype(static_cast<Base*>(this)->bind_to_engine(eng), void()) {
-			static_cast<Base*>(this)->bind_to_engine(eng);
-		}
-		template<typename Base>
-		void try_bind_base(...) {}
-
 		template<typename Base>
 		auto try_post_load_base(serialization::any_archive_reader& ar)
 			-> decltype(static_cast<Base*>(this)->post_load(ar), void()) {

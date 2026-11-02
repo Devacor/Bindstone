@@ -374,6 +374,14 @@ public:
             check_eq((size_t)2, trace[1].line);
             check_eq((size_t)3, trace[2].line);
             check_eq((size_t)4, trace[3].line);
+            // calls the vm grafts into the top level keep their frames
+            auto looped = make_engine();
+            failure_text(*looped,
+                "int half(int n) { return 10 / n; }\n"                       // line 1
+                "int outer(int k) { return half(k) + 1; }\n"                 // line 2
+                "int s = 0;\n"                                               // line 3
+                "for (int i = 3; i >= 0; i--) { s = s + outer(i); }\n");     // line 4
+            check_eq(std::string("half:1|outer:2|<script>:4"), trace_shape(*looped));
         });
 
         test("a_throw_in_construction_code_traces_the_level_running_it", [this]() {

@@ -1338,13 +1338,17 @@ void vm_backend::capture_stack_trace() {
 		frame* fr = *it;
 		const ast_node* node = frame_statement(*fr);
 		if (fr->top_level) {
+			graft_frames_at(*fr->code, fr->ip, &node, captured_trace_);
 			top_node = node;
 			break;
 		}
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
 			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
 			size_t grafted = 0;   // a frame stopped at a call a graft makes counts the grafts around it, as their frames would
-			for (auto rest = it; rest != frames_.rend() && !(*rest)->top_level; ++rest) { if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr, captured_trace_); } }
+			for (auto rest = it; rest != frames_.rend(); ++rest) {
+				if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr, captured_trace_); }
+				if ((*rest)->top_level) { break; }
+			}
 			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + grafted);
 			trace_captured_ = true;
 			return;
@@ -1364,13 +1368,13 @@ std::vector<stack_frame> vm_backend::debug_frame_walk(std::vector<const frame*>*
 	for (auto it = frames_.rbegin(); it != frames_.rend(); ++it) {
 		const frame* fr = *it;
 		const ast_node* node = frame_statement(*fr);
+		const size_t grafts = graft_frames_at(*fr->code, fr->ip, &node, out);
+		if (slot_frames) { slot_frames->insert(slot_frames->end(), grafts, nullptr); }
 		if (fr->top_level) {
 			out.push_back(trace_frame_at("<script>", location_of(node)));
 			if (slot_frames) { slot_frames->push_back(has_slots(*fr) ? fr : nullptr); }
 			break;
 		}
-		const size_t grafts = graft_frames_at(*fr->code, fr->ip, &node, out);
-		if (slot_frames) { slot_frames->insert(slot_frames->end(), grafts, nullptr); }
 		out.push_back(trace_frame_at(frame_function_name(*fr), location_of(node)));
 		if (slot_frames) { slot_frames->push_back(fr); }
 	}

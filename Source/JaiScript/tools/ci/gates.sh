@@ -20,6 +20,12 @@
 # optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
 # bug of an optimized lane. tests-vm-reference runs the suite with --backend=vm-reference.
 #
+# The asan gate builds its own Debug tree under AddressSanitizer (with UndefinedBehaviorSanitizer on GCC and Clang, at -O1;
+# MSVC has no UBSan) and runs the suites on the interpreter and the VM, then a short differential fuzz run that must also
+# report no crash. ASAN_BUILD_DIR names the tree (default build-asan, relative to the repository root) and FUZZ_ITERATIONS
+# the fuzz count (default 100). With cl on PATH and no CXX set it builds with MSVC and copies the ASan runtime DLL beside the
+# binaries. The interpreter's Debug suite runs for hours under it, so neither `all` nor the battery includes it.
+#
 # HASH_BACKENDS names the backends the runner's hash gates (gatorquest, timedemo) run (default "vm interp"; the per-change
 # tier passes "vm" unless its interpreter tier is picked, tools/ci/targeted.sh). GLOOM, the demoreel, the crawler and the
 # quickstart link the library without the interpreter: their gates run the VM, and skip when HASH_BACKENDS leaves it out.
@@ -241,18 +247,54 @@ gate_site() {
 	run "$(jai_python)" docs/site_tools/verify_site.py --runner "$BIN/jaiscript"
 }
 
+gate_asan() {
+	local build msvc=0 dll
+	build="${ASAN_BUILD_DIR:-build-asan}"
+	case "$build" in /* | [A-Za-z]:*) ;; *) build="$ROOT/$build" ;; esac
+	if [ -z "${CXX:-}" ] && command -v cl > /dev/null 2>&1; then
+		msvc=1
+		# CMake's MSVC Debug flags carry /RTC1, which /fsanitize=address refuses
+		run cmake -S "$ROOT" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl -DCMAKE_C_COMPILER=cl \
+			"-DCMAKE_CXX_FLAGS=/DWIN32 /D_WINDOWS /EHsc /fsanitize=address" "-DCMAKE_C_FLAGS=/DWIN32 /D_WINDOWS /fsanitize=address" \
+			"-DCMAKE_CXX_FLAGS_DEBUG=/Zi /Ob0 /Od" "-DCMAKE_C_FLAGS_DEBUG=/Zi /Ob0 /Od" \
+			-DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_LSP=OFF -DJAISCRIPT_BUILD_SPIDER=OFF -DJAISCRIPT_INSTALL=OFF
+	else
+		run cmake -S "$ROOT" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Debug \
+			"-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer" \
+			"-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer" \
+			"-DCMAKE_CXX_FLAGS_DEBUG=-g -O1" "-DCMAKE_C_FLAGS_DEBUG=-g -O1" "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined" \
+			-DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_LSP=OFF -DJAISCRIPT_BUILD_SPIDER=OFF -DJAISCRIPT_INSTALL=OFF
+		# scripts can build strong cycles on purpose (a coroutine handle in its own receiver's field), so leaks are not errors here
+		export ASAN_OPTIONS="${ASAN_OPTIONS:-detect_leaks=0}"
+		export UBSAN_OPTIONS="${UBSAN_OPTIONS:-print_stacktrace=1:halt_on_error=1}"
+	fi
+	run cmake --build "$build" --target jaiscript_tests jaiscript_fuzz
+	if [ "$msvc" = 1 ]; then
+		dll="$(dirname "$(command -v cl)")/clang_rt.asan_dynamic-x86_64.dll"
+		[ -f "$dll" ] || { echo "::error::asan: no $dll beside cl"; exit 1; }
+		run cp -f "$dll" "$build/bin/"
+	fi
+	BIN="$build/bin"
+	run "$BIN/jaiscript_tests" --backend=interpreter
+	run "$BIN/jaiscript_tests" --backend=vm
+	FUZZ_ITERATIONS="${FUZZ_ITERATIONS:-100}"
+	fuzz_run --timeout-ms 2000
+	want "asan fuzz: expected no crash" "^crashes: +0\b"
+}
+
 ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
 CROSS=(android)
+SANITIZER=(asan)
 
-[ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2; }
+[ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2; }
 [ "$1" = all ] && set -- "${ALL[@]}"
 
 for gate in "$@"; do
 	case "$gate" in
 		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
-		gloom-workers | gloom-long | timedemo | amalgamation | android) ;;
-		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]})" >&2; exit 2 ;;
+		gloom-workers | gloom-long | timedemo | amalgamation | android | asan) ;;
+		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"
 	( "gate_${gate//-/_}" )

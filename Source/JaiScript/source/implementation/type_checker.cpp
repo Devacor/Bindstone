@@ -1940,7 +1940,7 @@ private:
     }
 
     // -------------------------------------------------------------- type proofs
-    // internal/type_proofs_design.md. Every rule writes its node field on EVERY visit (a stamp
+    // Every rule writes its node field on EVERY visit (a stamp
     // or the no-proof default), so a re-check can add or drop proofs but never leaves a
     // stale one the pass no longer derives.
 

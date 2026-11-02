@@ -23,6 +23,8 @@ constexpr int k_method_not_found = -32601;
 constexpr int k_request_failed = -32803;
 constexpr int k_request_cancelled = -32800;
 constexpr int k_server_not_initialized = -32002;
+constexpr int k_parse_error = -32700;
+constexpr int k_invalid_request = -32600;
 
 constexpr size_t k_max_header_line = 64 * 1024;
 
@@ -142,15 +144,23 @@ void server::read_loop() {
 			log(std::string("cannot read a message: ") + ex.what());
 		}
 		if (!more) { break; }
+		json message;
 		try {
-			json message = json::parse(body);
-			const json& view = message;
+			message = json::parse(body);
+		} catch (const std::exception& ex) {
+			log(std::string("bad message: ") + ex.what());
+			reply_error(json(), k_parse_error, ex.what());
+			continue;
+		}
+		{
 			std::lock_guard<std::mutex> lock(mutex_);
+			const json& view = message;
 			if (view["method"].str() == "$/cancelRequest") {
 				// only a request still queued can be cancelled: ids of answered requests are not kept
-				const int64_t id = view["params"]["id"].integer(-1);
+				const json& params = view["params"];
+				const std::string id = params.contains("id") ? params["id"].dump() : std::string();
 				for (const auto& queued : queue_) {
-					if (queued.contains("id") && queued["id"].integer(-2) == id) {
+					if (!id.empty() && queued.contains("id") && !queued["method"].str().empty() && queued["id"].dump() == id) {
 						cancelled_.insert(id);
 						break;
 					}
@@ -158,8 +168,6 @@ void server::read_loop() {
 			} else {
 				queue_.push_back(std::move(message));
 			}
-		} catch (const std::exception& ex) {
-			log(std::string("bad message: ") + ex.what());
 		}
 		wake_.notify_one();
 	}
@@ -244,21 +252,43 @@ void server::flush_deferred_change() {
 	dirty_.insert(change.path);
 }
 
+// A request's id is a string or an integer; a message with no method is a response (the server sends no requests, so
+// nothing waits on one) unless it has no id either
+static bool well_formed(const json& message) {
+	if (!message.is_object()) { return false; }
+	if (!message.contains("method")) { return message.contains("id"); }
+	const json& method = message["method"];
+	const json& id = message["id"];
+	return method.is_string() && !method.str().empty() && (!message.contains("id") || id.is_string() || id.is_integer());
+}
+
 void server::handle(const json& message) {
+	if (!well_formed(message)) {
+		reply_error(json(), k_invalid_request, "not a JSON-RPC request, notification or response");
+		return;
+	}
 	const std::string& method = message["method"].str();
+	if (method.empty()) { return; }
 	if (method != "textDocument/didChange") { flush_deferred_change(); }
-	const bool is_request = message.contains("id") && !method.empty();
-	if (method.empty()) { return; }   // a response to a server request: nothing is waiting on it
+	const bool is_request = message.contains("id");
 	const json& id = message["id"];
 	if (is_request) {
 		std::lock_guard<std::mutex> lock(mutex_);
-		if (cancelled_.erase(id.integer(-2))) {
+		if (cancelled_.erase(id.dump())) {
 			reply_error(id, k_request_cancelled, "cancelled");
 			return;
 		}
 	}
-	if (!ws_ && method != "initialize" && method != "exit" && method != "shutdown") {
+	if (shutdown_ && method != "exit") {
+		if (is_request) { reply_error(id, k_invalid_request, "the server is shutting down: only exit is served"); }
+		return;
+	}
+	if (!ws_ && method != "initialize" && method != "exit") {
 		if (is_request) { reply_error(id, k_server_not_initialized, "server not initialized"); }
+		return;
+	}
+	if (ws_ && method == "initialize") {
+		if (is_request) { reply_error(id, k_invalid_request, "the server is already initialized"); }
 		return;
 	}
 	bool handled = true;
@@ -310,7 +340,7 @@ json server::dispatch(const std::string& method, const json& params, bool& handl
 		if (!u) { return nullptr; }
 		std::string text = continues ? std::move(deferred_change_->text) : u->text;
 		deferred_change_.reset();
-		for (const auto& change : params["contentChanges"].items()) { apply_change(*u, change, text); }
+		for (const auto& change : params["contentChanges"].items()) { apply_change(change, text); }
 		const int version = static_cast<int>(params["textDocument"]["version"].integer());
 		if (next_is_change_of(uri)) {
 			deferred_change_ = deferred_change{path, std::move(text), version};
@@ -526,7 +556,7 @@ json server::location_json(const location& loc) {
 	return j;
 }
 
-void server::apply_change(unit& u, const json& change, std::string& text) {
+void server::apply_change(const json& change, std::string& text) {
 	if (!change.contains("range")) {
 		text = change["text"].str();
 		return;
@@ -546,7 +576,6 @@ void server::apply_change(unit& u, const json& change, std::string& text) {
 	a = std::min(a, text.size());
 	b = std::min(b, text.size());
 	text.replace(a, b - a, change["text"].str());
-	(void)u;
 }
 
 json server::on_initialize(const json& params) {

@@ -45,7 +45,7 @@ private:
 	std::set<std::string> stale_;
 	std::unordered_map<std::string, uint64_t> surface_seen_;
 	std::map<std::string, std::string> published_;
-	std::set<int64_t> cancelled_;
+	std::set<std::string> cancelled_;   // the ids of queued requests a $/cancelRequest named, as JSON text
 	struct deferred_change { std::string path; std::string text; int version = 0; };
 	std::optional<deferred_change> deferred_change_;
 
@@ -73,7 +73,7 @@ private:
 	json to_lsp(unit& u, text_pos p);
 	json range_json(const std::string& path, text_span span);
 	json location_json(const location& loc);
-	void apply_change(unit& u, const json& change, std::string& text);
+	void apply_change(const json& change, std::string& text);
 
 	json on_initialize(const json& params);
 	json on_hover(const json& params);

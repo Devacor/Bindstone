@@ -4,6 +4,7 @@
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 
 namespace jai_lsp {
@@ -628,7 +629,7 @@ uint32_t semantic_walker::resolve_name(std::string_view name, bool global_only) 
 }
 
 nav_type semantic_walker::type_of(const jai::expression* e) {
-	if (!e) { return {}; }
+	if (!e || jai::detail::native_stack_low()) { return {}; }
 	if (auto it = nav_memo_.find(e); it != nav_memo_.end()) { return it->second; }
 	nav_type t;
 	if (auto it = m_.types.find(e); it != m_.types.end()) { t = nav_from_check(it->second); }
@@ -907,8 +908,9 @@ void semantic_walker::walk_class(const jai::class_decl* cd) {
 	class_stack_.pop_back();
 }
 
+// The walks recurse with the tree; past the native stack's margin they leave the rest of a subtree unindexed
 void semantic_walker::walk_stmt(const jai::statement* s) {
-	if (!s) { return; }
+	if (!s || jai::detail::native_stack_low()) { return; }
 	switch (s->get_type()) {
 		case jai::node_type::expression_stmt: walk_expr(static_cast<const jai::expression_stmt*>(s)->expression.get()); break;
 		case jai::node_type::block_stmt: {
@@ -1026,7 +1028,7 @@ void semantic_walker::walk_stmt(const jai::statement* s) {
 }
 
 void semantic_walker::walk_expr(const jai::expression* e) {
-	if (!e) { return; }
+	if (!e || jai::detail::native_stack_low()) { return; }
 	switch (e->get_type()) {
 		case jai::node_type::identifier_expr: {
 			auto* id = static_cast<const jai::identifier_expr*>(e);

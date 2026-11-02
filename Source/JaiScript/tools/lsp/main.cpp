@@ -12,6 +12,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <charconv>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
@@ -40,7 +41,7 @@ void usage() {
 	std::cout << "jaiscript_lsp - the JaiScript language server (LSP over stdio)\n"
 	             "  --host=runner|stdlib|bare   registration surface to check against (default runner)\n"
 	             "  --include=<dir>             extra include path for import/include resolution (repeatable)\n"
-	             "  --max-message=<bytes>       largest message body read (default 64 MiB; a larger one is skipped)\n"
+	             "  --max-message=<bytes>       largest message body read (default 64 MiB, at least 65536; a larger one is skipped)\n"
 	             "  --log                       log requests and timings to stderr\n";
 }
 
@@ -54,13 +55,27 @@ int main(int argc, char** argv) {
 	size_t max_message = jai_lsp::server::default_max_message;
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
-		if (a.rfind("--host=", 0) == 0) { host = a.substr(7); }
+		if (a.rfind("--host=", 0) == 0) {
+			host = a.substr(7);
+			if (host != "runner" && host != "stdlib" && host != "bare") {
+				std::cerr << "jaiscript_lsp: --host takes runner, stdlib or bare\n";
+				return 2;
+			}
+		}
 		else if (a.rfind("--include=", 0) == 0) { includes.push_back(a.substr(10)); }
-		else if (a.rfind("--max-message=", 0) == 0) { max_message = static_cast<size_t>(std::strtoull(a.c_str() + 14, nullptr, 10)); }
+		else if (a.rfind("--max-message=", 0) == 0) {
+			const std::string text = a.substr(14);
+			auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), max_message);
+			if (ec != std::errc{} || end != text.data() + text.size() || max_message < 65536) {
+				std::cerr << "jaiscript_lsp: --max-message takes a byte count of at least 65536\n";
+				return 2;
+			}
+		}
 		else if (a == "--log") { log = true; }
-		else if (a == "--stdio") {}
+		else if (a == "--stdio" || a.rfind("--clientProcessId", 0) == 0) {}
 		else if (a == "--help" || a == "-h") { usage(); return 0; }
 		else if (a == "--version") { std::cout << "jaiscript_lsp 0.5.0-beta\n"; return 0; }
+		else { std::cerr << "jaiscript_lsp: ignoring unknown argument " << a << " (--help lists the flags)\n"; }
 	}
 	jai_lsp::server s(make_engine, host, includes, log, max_message);
 	int code = s.run();

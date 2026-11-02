@@ -57,6 +57,7 @@ namespace jai {
         inline_keyword,
         question_question, question_question_equal, fat_arrow
     };
+    inline constexpr token_type k_last_token_type = token_type::fat_arrow;   // the bound a .jaibite's token numbers are read against: move it with a new last member
     
     class string_symbolizer;
 

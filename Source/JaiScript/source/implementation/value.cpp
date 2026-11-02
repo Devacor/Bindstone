@@ -2331,7 +2331,7 @@ bool script_value::operator==(const script_value& other) const {
             return lhs.raw_storage_index() == rhs.raw_storage_index() && detail::math::is_kind(lhs.raw_storage_index()) &&
                    detail::math::same_kind_equal(lhs, rhs);
         default:
-            return false;
+            return (lhs <=> rhs) == 0;
     }
 }
 
@@ -2357,14 +2357,8 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
         case script_value_type::jai_int_type:
             return unchecked_as_int() <=> other.unchecked_as_int();
         case script_value_type::jai_float_type:
-            // Use a TOTAL order over doubles (IEEE-754 totalOrder). The previous
-            // code mapped every NaN comparison to `less`, which made NaN < NaN
-            // true — an irreflexivity violation that is undefined behavior when a
-            // float (or NaN) is used as a std::map key. std::strong_order makes
-            // all NaNs compare equal to each other and orders them deterministically. 0.0 and -0.0 are one key (they are ==,
-            // and map_key_hash hashes them alike)
-            return std::strong_order(unchecked_as_float() == 0.0 ? 0.0 : unchecked_as_float(),
-                                     other.unchecked_as_float() == 0.0 ? 0.0 : other.unchecked_as_float());
+            // a total order (IEEE totalOrder over the canonical key): every NaN one key after +inf, 0.0 and -0.0 one key
+            return std::strong_order(detail::canonical_key_float(unchecked_as_float()), detail::canonical_key_float(other.unchecked_as_float()));
         case script_value_type::jai_string_type:
             return unchecked_as_string() <=> other.unchecked_as_string();
         case script_value_type::jai_utf8_string_type:
@@ -2386,14 +2380,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
             }
             return raw_storage_index() <=> other.raw_storage_index();
         default: {
-            // Complex types (array/map/object/function/shared_ptr/reference): order
-            // by the address of the HELD object, which is a STABLE identity for a
-            // given value. The previous code compared &storage_ — the address of the
-            // operand's own member — which is a transient property of the comparison,
-            // not of the value, so the ordering of a logical key changed between
-            // operations and violated std::map's strict-weak-ordering invariant
-            // (corrupting maps with complex-typed keys). Use std::less for a
-            // guaranteed total order over pointers.
+            // Heavy kinds order by the held object's address, the value's stable identity (std::less: a total order over pointers)
             auto identity = [](const script_value& v) -> const void* {
                 switch (v.raw_storage_index()) {
                     case TYPEID_ARRAY:      return v.storage_.get_if<TYPEID_ARRAY>()->get();
@@ -2418,8 +2405,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
 
 
 // The map-key hash (core/script_map.hpp): keys operator<=> calls equivalent hash alike. The type rank seeds it, then the payload
-// operator<=> compares: ints and chars by value, floats by value with every NaN and both zeros hashing alike (equality stays
-// operator<=>'s), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
+// operator<=> compares: ints and chars by value, floats by their canonical key (every NaN one, both zeros one), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
 uint64_t script_value::map_key_hash() const noexcept {
     const script_value_type t = type();
     const uint64_t seed = static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
@@ -2428,9 +2414,7 @@ uint64_t script_value::map_key_hash() const noexcept {
         case script_value_type::jai_null_type: return mix(0);
         case script_value_type::jai_int_type: return mix(static_cast<uint64_t>(unchecked_as_int()));
         case script_value_type::jai_float_type: {
-            double d = unchecked_as_float();
-            if (d != d) { return mix(0x7ff8000000000000ull); }
-            if (d == 0.0) { return mix(0); }
+            const double d = detail::canonical_key_float(unchecked_as_float());
             uint64_t bits; std::memcpy(&bits, &d, sizeof(bits));
             return mix(bits);
         }
@@ -2552,6 +2536,7 @@ const class_definition* map_class_key_class(const script_value& key) {
 struct script_map::class_key_index {
 	struct run {
 		const class_definition* cls = nullptr;
+		uint64_t epoch = 0;              // the class's method epoch the run was ordered under
 		bool hashed = false;
 		std::vector<entry*> keys;        // by the class's order, or by hash() value
 		std::vector<script_int> hashes;  // a hashed run's hash() values, beside its keys
@@ -2561,7 +2546,65 @@ struct script_map::class_key_index {
 
 void script_map::class_key_index_deleter::operator()(class_key_index* index) const noexcept { delete index; }
 
+// A class whose operators changed since its run was ordered (a reload) re-derives the run under its current policy: re-sorted
+// or re-hashed, or dropped when the class keys by identity now (its keys sit in the index under their identity already). Keys
+// the new order calls one key become the first of them in that order, as an insert finds it; the others leave the map.
+void script_map::refresh_class_runs() const {
+	if (!class_keys_) { return; }
+	auto& runs = class_keys_->runs;
+	for (size_t r = 0; r < runs.size();) {
+		class_key_index::run& run = runs[r];
+		if (run.epoch == run.cls->method_epoch()) { ++r; continue; }
+		const engine::map_key_ids& ids = key_ids(run.keys.front()->kv.first);
+		const key_policy policy = policy_of(run.cls, ids);
+		if (policy == key_policy::identity) {
+			runs.erase(runs.begin() + static_cast<ptrdiff_t>(r));
+			const_cast<script_map&>(*this).changed();
+			continue;
+		}
+		const bool hashed = policy == key_policy::hashed;
+		std::vector<entry*> keys = run.keys;
+		std::vector<script_int> hashes;
+		if (hashed) {
+			std::vector<std::pair<script_int, entry*>> by_hash;
+			by_hash.reserve(keys.size());
+			for (entry* e : keys) { by_hash.emplace_back(key_hash_value(e->kv.first, ids), e); }
+			std::stable_sort(by_hash.begin(), by_hash.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+			for (size_t i = 0; i < by_hash.size(); ++i) { hashes.push_back(by_hash[i].first); keys[i] = by_hash[i].second; }
+		} else {
+			std::stable_sort(keys.begin(), keys.end(), [](const entry* a, const entry* b) { return key_less(a->kv.first, b->kv.first); });
+		}
+		std::vector<entry*> kept;
+		std::vector<script_int> kept_hashes;
+		std::vector<entry*> merged;
+		for (size_t i = 0; i < keys.size(); ++i) {
+			bool same = false;
+			if (!hashed) {
+				same = !kept.empty() && !key_less(kept.back()->kv.first, keys[i]->kv.first);
+			} else {
+				for (size_t k = kept.size(); k-- > 0 && kept_hashes[k] == hashes[i];) {
+					if (key_equal(kept[k]->kv.first, keys[i]->kv.first, run.cls, ids)) { same = true; break; }
+				}
+			}
+			if (same) { merged.push_back(keys[i]); continue; }
+			kept.push_back(keys[i]);
+			if (hashed) { kept_hashes.push_back(hashes[i]); }
+		}
+		run.hashed = hashed;
+		run.keys = std::move(kept);
+		run.hashes = std::move(kept_hashes);
+		run.epoch = run.cls->method_epoch();
+		auto& self = const_cast<script_map&>(*this);
+		for (entry* e : merged) { self.unlink_entry(e); }
+		self.changed();
+		for (entry* e : merged) { self.pool_.destroy(e); }
+		++r;
+	}
+	if (runs.empty()) { const_cast<script_map&>(*this).class_keys_.reset(); }
+}
+
 script_map::class_probe script_map::probe_class(const script_value& key, const class_definition* cls) const {
+	refresh_class_runs();
 	class_probe at;
 	at.hash = script_value_hash{}(key);
 	const engine::map_key_ids& ids = key_ids(key);
@@ -2586,7 +2629,7 @@ script_map::class_probe script_map::probe_class(const script_value& key, const c
 	const auto first = std::lower_bound(run.hashes.begin(), run.hashes.end(), at.key_hash);
 	size_t i = static_cast<size_t>(first - run.hashes.begin());
 	for (; i < run.hashes.size() && run.hashes[i] == at.key_hash; ++i) {
-		if (key_equal(run.keys[i]->kv.first, key, cls, ids)) { at.found = run.keys[i]; return at; }
+		if (key_equal(run.keys[i]->kv.first, key, cls, ids)) { at.found = run.keys[i]; at.at = i; return at; }
 	}
 	at.at = i;
 	return at;
@@ -2598,6 +2641,7 @@ void script_map::insert_class_entry(const class_definition* cls, const class_pro
 	if (at.run == runs.size()) {
 		class_key_index::run fresh;
 		fresh.cls = cls;
+		fresh.epoch = cls->method_epoch();
 		fresh.hashed = policy_of(cls, key_ids(e->kv.first)) == key_policy::hashed;
 		runs.push_back(std::move(fresh));
 	}
@@ -2606,20 +2650,14 @@ void script_map::insert_class_entry(const class_definition* cls, const class_pro
 	if (run.hashed) { run.hashes.insert(run.hashes.begin() + static_cast<ptrdiff_t>(at.at), at.key_hash); }
 }
 
-void script_map::erase_class_entry(entry* e) noexcept {
-	if (!class_keys_) { return; }
+// at: the probe that found the entry, its run and its place in the run
+void script_map::erase_class_entry(const class_probe& at) noexcept {
 	auto& runs = class_keys_->runs;
-	for (size_t r = 0; r < runs.size(); ++r) {
-		auto& keys = runs[r].keys;
-		const auto it = std::find(keys.begin(), keys.end(), e);
-		if (it == keys.end()) { continue; }
-		const ptrdiff_t at = it - keys.begin();
-		keys.erase(it);
-		if (runs[r].hashed) { runs[r].hashes.erase(runs[r].hashes.begin() + at); }
-		if (keys.empty()) { runs.erase(runs.begin() + static_cast<ptrdiff_t>(r)); }
-		if (runs.empty()) { class_keys_.reset(); }
-		return;
-	}
+	auto& run = runs[at.run];
+	run.keys.erase(run.keys.begin() + static_cast<ptrdiff_t>(at.at));
+	if (run.hashed) { run.hashes.erase(run.hashes.begin() + static_cast<ptrdiff_t>(at.at)); }
+	if (run.keys.empty()) { runs.erase(runs.begin() + static_cast<ptrdiff_t>(at.run)); }
+	if (runs.empty()) { class_keys_.reset(); }
 }
 
 void script_map::copy_class_keys(const script_map& o, const std::vector<std::pair<const entry*, entry*>>& copies) {
@@ -2640,6 +2678,9 @@ namespace {
 }
 
 void script_map::build_order_with_class_keys() const {
+	refresh_class_runs();
+	if (!class_keys_) { build_order(); return; }
+	if (order_gen_ == gen_) { return; }
 	order_.clear();
 	order_.reserve(size_);
 	for (const slot& s : slots_) { if (s.e) order_.push_back(&s.e->kv); }
@@ -2665,27 +2706,24 @@ void script_map::build_order_with_class_keys() const {
 	order_gen_ = gen_;
 }
 
+// The kinds ranked below objects come first in the order, then the class runs by class_run_before, then the other objects:
+// the position after key is the runs ahead of its class's plus its place in its own run
 size_t script_map::index_after_class_key(const script_value& key, const class_definition* cls) const {
 	const engine::map_key_ids& ids = key_ids(key);
 	const bool hashed = policy_of(cls, ids) == key_policy::hashed;
 	const script_int key_hash = hashed ? key_hash_value(key, ids) : 0;
-	std::unordered_map<const value_type*, std::pair<const class_definition*, script_int>> class_of;
+	const auto objects = std::partition_point(order_.begin(), order_.end(),
+		[](const value_type* e) { return e->first.type() < script_value_type::jai_object_type; });
+	size_t result = static_cast<size_t>(objects - order_.begin());
+	if (!class_keys_) { return result; }
+	const class_key_index::run* own = nullptr;
 	for (const auto& run : class_keys_->runs) {
-		for (size_t i = 0; i < run.keys.size(); ++i) { class_of.emplace(&run.keys[i]->kv, std::pair{run.cls, run.hashed ? run.hashes[i] : 0}); }
+		if (run.cls == cls) { own = &run; } else if (class_run_before(run.cls, cls)) { result += run.keys.size(); }
 	}
-	// key < e in the order build_order_with_class_keys sorts by
-	const auto before = [&](const value_type* e) {
-		const auto found = class_of.find(e);
-		if (found == class_of.end()) {
-			const script_value_type te = e->first.type();
-			return te != script_value_type::jai_object_type ? script_value_type::jai_object_type < te : true;
-		}
-		const class_definition* ec = found->second.first;
-		if (ec != cls) { return class_run_before(cls, ec); }
-		return hashed ? key_hash < found->second.second : key_less(key, e->first);
-	};
-	const auto it = std::partition_point(order_.begin(), order_.end(), [&](const value_type* e) { return !before(e); });
-	return static_cast<size_t>(it - order_.begin());
+	if (!own) { return result; }
+	if (hashed) { return result + static_cast<size_t>(std::upper_bound(own->hashes.begin(), own->hashes.end(), key_hash) - own->hashes.begin()); }
+	return result + static_cast<size_t>(std::partition_point(own->keys.begin(), own->keys.end(),
+		[&](const entry* e) { return !key_less(key, e->kv.first); }) - own->keys.begin());
 }
 
 int map_class_key_order(const script_value& a, const script_value& b) {

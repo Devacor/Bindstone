@@ -52,6 +52,28 @@ public:
 			check_eq(true, e->execute("var c = m; c[P(9)] = \"z\"; c.size() == 3 && m.size() == 2 && c[P(1)] == \"A\"").as_bool());
 		});
 
+		test("a_reload_that_changes_a_key_class_operators_rekeys_live_maps", [this]() {
+			// a reload re-derives each map's run of the class's keys: re-sorted, re-hashed or back to identity; keys the new order
+			// calls one key become the first of them in that order, as an insert finds it
+			auto e = make_engine();
+			stdlib::register_all(e);
+			e->execute("class K { int v = 0; K(int a) { v = a; } bool operator<(K o) { return v < o.v; } }\n"
+			           "var m = {}; for (int i = 0; i < 6; ++i) { m[K(i)] = i; }\n"
+			           "string walk() { string s = \"\"; for (auto& [k, v] : m) { s += to_string(k.v) + \":\" + to_string(v) + \" \"; } return s; }");
+			e->execute("class K { int v = 0; K(int a) { v = a; } bool operator<(K o) { return v > o.v; } }");
+			check_eq(std::string("true true 6"), e->execute("to_string(m.has(K(3))) + \" \" + to_string(m.has(K(0))) + \" \" + to_string(m.size())").to_string());
+			e->execute("m[K(1)] = 100;");
+			check_eq(std::string("5:5 4:4 3:3 2:2 1:100 0:0 "), e->execute("walk()").to_string(), "the reversed order, one key per value");
+			e->execute("class K { int v = 0; K(int a) { v = a; } bool operator<(K o) { return v / 2 < o.v / 2; } }");
+			check_eq(std::string("1:100 3:3 5:5 "), e->execute("walk()").to_string(), "keys the new order merges keep the first of them");
+			check_eq(true, e->execute("m.has(K(0)) && m[K(2)] == 3 && m.size() == 3").as_bool());
+			e->execute("class K { int v = 0; K(int a) { v = a; } int hash() { return v % 2; } bool operator==(K o) { return v % 4 == o.v % 4; } }");
+			check_eq(std::string("1:100 3:3 "), e->execute("walk()").to_string(), "a class that hashes now: 5 and 1 are one key");
+			check_eq(true, e->execute("m.has(K(7)) && !m.has(K(2)) && m.remove(K(3)) && m.size() == 1").as_bool());
+			e->execute("class K { int v = 0; K(int a) { v = a; } }");
+			check_eq(true, e->execute("!m.has(K(1)) && m.size() == 1").as_bool(), "a class without key operators keys by identity again");
+		});
+
 		test("a_hashed_class_keys_by_hash_and_equality", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(e);

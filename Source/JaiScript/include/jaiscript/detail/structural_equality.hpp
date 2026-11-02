@@ -349,42 +349,50 @@ namespace jai::detail {
         return run_equality_walk(h, own);
     }
 
-    // same_object(x, y): identity. References resolve to their referents and shared_ptr
-    // handles to the object they share; arrays, maps, class instances, host objects and
-    // functions are the same object when they are one allocation. Primitives and strings
-    // carry no identity in the language (strings share buffers copy-on-write), so two of
-    // them are "the same" when they are equal values. A typed null is the same as null.
-    // The object a value names: holders are boxes, and several (a handle, an extend result, a re-boxed slot) can hold one object
-    inline const void* object_identity(const script_value& v) {
-        const auto holder = v.get_object_holder();
-        if (!holder) { return nullptr; }
+    // The object a holder names: holders are boxes, and several (a handle, an extend result, a re-boxed slot, two wraps of
+    // one C++ object) can hold one object
+    inline const void* holder_identity(const script_value::object_holder* holder) {
         if (holder->holds_object()) { return holder->object(); }
         if (holder->bound_object()) { return holder->bound_object(); }
-        return holder.get();
+        return holder;
+    }
+    // A weak handle names its owner's object while it lives, and its owner after (an expired handle is no other object's)
+    inline const void* object_identity(const script_value& v) {
+        if (v.raw_storage_index() == script_value::TYPEID_WEAK_PTR) {
+            const auto weak = v.get_weak_ptr();
+            if (const auto held = weak.lock()) { return holder_identity(held.get()); }
+            return weak.owner_identity();
+        }
+        const auto holder = v.get_object_holder();
+        return holder ? holder_identity(holder.get()) : nullptr;
     }
 
+    // same_object(x, y), and every same_as: identity. References resolve to their referents and handles (shared or weak) to
+    // the object they name; arrays, maps, class instances, host objects and functions are the same object when they are one
+    // allocation. Values without identity (numbers, chars, bools, strings, which share buffers copy-on-write, math values)
+    // are "the same" when they are equal values of one kind. A typed null is the same as null.
     inline bool same_object(const script_value& lv, const script_value& rv) {
-        const script_value l = lv.deref().try_unwrap_transparent_wrapper().value_or(lv.deref());
-        const script_value r = rv.deref().try_unwrap_transparent_wrapper().value_or(rv.deref());
+        script_value l = lv.deref().try_unwrap_transparent_wrapper().value_or(lv.deref());
+        script_value r = rv.deref().try_unwrap_transparent_wrapper().value_or(rv.deref());
+        if (l.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { l = l.bound_decoded_temp(); }
+        if (r.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { r = r.bound_decoded_temp(); }
+        if (l.is_null() || r.is_null()) { return l.is_null() && r.is_null(); }
         const size_t li = l.raw_storage_index();
         const size_t ri = r.raw_storage_index();
-        if (l.is_null() || r.is_null()) { return l.is_null() && r.is_null(); }
+        const bool l_handle = li == script_value::TYPEID_OBJECT || li == script_value::TYPEID_WEAK_PTR;
+        const bool r_handle = ri == script_value::TYPEID_OBJECT || ri == script_value::TYPEID_WEAK_PTR;
+        if (l_handle || r_handle) { return l_handle && r_handle && object_identity(l) == object_identity(r); }
+        if (li != ri || li == script_value::TYPEID_INVALID) { return false; }
         switch (li) {
         case script_value::TYPEID_ARRAY:
-            return ri == script_value::TYPEID_ARRAY && l.unchecked_array_node() == r.unchecked_array_node();
+            return l.unchecked_array_node() == r.unchecked_array_node();
         case script_value::TYPEID_MAP:
-            return ri == script_value::TYPEID_MAP && &l.unchecked_as_map() == &r.unchecked_as_map();
-        case script_value::TYPEID_OBJECT:
-            return ri == script_value::TYPEID_OBJECT && object_identity(l) == object_identity(r);
-        case script_value::TYPEID_STRING:
-            return ri == script_value::TYPEID_STRING && l.unchecked_as_string() == r.unchecked_as_string();
-        case script_value::TYPEID_INT:
-        case script_value::TYPEID_FLOAT:
-        case script_value::TYPEID_BOOL:
-        case script_value::TYPEID_CHAR:
-            return l == r;
+            return &l.unchecked_as_map() == &r.unchecked_as_map();
+        case script_value::TYPEID_FUNCTION:
+        case script_value::TYPEID_PARALLEL_BORROW:
+            return (l <=> r) == 0;
         default:
-            return li == ri && l.get_object_holder() != nullptr && object_identity(l) == object_identity(r);
+            return l == r;
         }
     }
 

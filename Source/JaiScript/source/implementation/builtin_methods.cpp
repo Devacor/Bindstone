@@ -2153,54 +2153,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }},
 
         {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        // Pointer identity comparison for weak_ptr: do they reference the same object?
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
         }
-
-        const script_value& other = args[0];
-
-        // Both expired -> same (both point to nothing)
-        auto self_weak = self.get_weak_ptr();
-        bool self_expired = self_weak.expired();
-
-        // Handle other being weak_ptr
-        if (other.is_weak_ptr()) {
-            auto other_weak = other.get_weak_ptr();
-            bool other_expired = other_weak.expired();
-
-            // Both expired -> same
-            if (self_expired && other_expired) {
-                return ctx.make_value(true);
-            }
-            // One expired, one not -> not same
-            if (self_expired || other_expired) {
-                return ctx.make_value(false);
-            }
-
-            // Both valid - compare locked pointers
-            auto self_locked = self_weak.lock();
-            auto other_locked = other_weak.lock();
-            return ctx.make_value(self_locked.get() == other_locked.get());
-        }
-
-        // Handle other being shared_ptr or null
-        if (other.is_null()) {
-            return ctx.make_value(self_expired);
-        }
-
-        if (!other.is_object()) {
-            return ctx.make_value(false);
-        }
-
-        // Compare weak_ptr with shared_ptr/object
-        if (self_expired) {
-            return ctx.make_value(false);
-        }
-
-        auto self_locked = self_weak.lock();
-        auto other_holder = const_cast<script_value&>(other).get_object_holder();
-        return ctx.make_value(self_locked.get() == other_holder.get());
+        return ctx.make_value(detail::same_object(self, args[0]));
     }}
     };
 
@@ -2291,34 +2247,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
     }},
 
         {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
-        // Pointer identity comparison: are these the same underlying object?
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
         }
-
-        const script_value& other = args[0];
-
-        // Both null -> same
-        if (self.is_null() && other.is_null()) {
-            return ctx.make_value(true);
-        }
-
-        // One null, one not -> not same
-        if (self.is_null() || other.is_null()) {
-            return ctx.make_value(false);
-        }
-
-        // Both must be objects
-        if (!self.is_object() || !other.is_object()) {
-            return ctx.make_value(false);
-        }
-
-        auto self_holder = self.get_object_holder();
-        auto other_holder = const_cast<script_value&>(other).get_object_holder();
-
-        // Compare the underlying object_holder pointers (pointer identity)
-        bool same = (self_holder.get() == other_holder.get());
-        return ctx.make_value(same);
+        return ctx.make_value(detail::same_object(self, args[0]));
     }}
     };
 
@@ -2391,22 +2323,7 @@ script_value same_as_method(const script_value& self, engine* eng) {
         if (args.size() != 1) {
             return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "same_as() takes exactly 1 argument");
         }
-        script_value self_val = captured.deref();
-        script_value other_val = args[0].deref();
-        // two aliases of one bound C++ value are the same
-        if (self_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { self_val = self_val.bound_decoded_temp(); }
-        if (other_val.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] { other_val = other_val.bound_decoded_temp(); }
-        if (self_val.is_null() || other_val.is_null()) { return script_value(self_val.is_null() && other_val.is_null(), eng); }
-        const size_t index = self_val.raw_storage_index();
-        if (index != other_val.raw_storage_index()) { return script_value(false, eng); }
-        switch (index) {
-            case script_value::TYPEID_INT: return script_value(self_val.unchecked_as_int() == other_val.unchecked_as_int(), eng);
-            case script_value::TYPEID_FLOAT: return script_value(self_val.unchecked_as_float() == other_val.unchecked_as_float(), eng);
-            case script_value::TYPEID_BOOL: return script_value(self_val.unchecked_as_bool() == other_val.unchecked_as_bool(), eng);
-            case script_value::TYPEID_STRING: return script_value(self_val.unchecked_as_string() == other_val.unchecked_as_string(), eng);
-            case script_value::TYPEID_OBJECT: return script_value(self_val.get_object_holder().get() == other_val.get_object_holder().get(), eng);
-            default: return script_value(false, eng);
-        }
+        return script_value(same_object(captured, args[0]), eng);
     };
     return script_value::make_function(std::move(same_as), eng);
 }

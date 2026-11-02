@@ -30,6 +30,13 @@
 #define JAI_MATH_COLD __attribute__((noinline, cold))
 #endif
 
+namespace jai::detail {
+	// A float as a map key: every NaN is one +qNaN (the last group of the total order) and -0 is +0. The key order and the
+	// key hash of floats and of float vector components both read it
+	inline double canonical_key_float(double x) noexcept { return x != x ? std::numeric_limits<double>::quiet_NaN() : x == 0.0 ? 0.0 : x; }
+	inline float canonical_key_float(float x) noexcept { return x != x ? std::numeric_limits<float>::quiet_NaN() : x == 0.0f ? 0.0f : x; }
+}
+
 namespace jai::detail::math {
 
 	// The build's integer-overflow policy (integer_ops.hpp's kCheckedOverflow, restated so this header stays off
@@ -529,8 +536,7 @@ namespace jai::detail::math {
 
 	// ---- the C++-level identity rows (map keys) -------------------------------------------------------------------
 	// operator==: the same kind, componentwise with the component's == (float's, like jai_float_type's row);
-	// operator<=>: by kind, then lexicographic, float components by std::strong_order (total, as the float row);
-	// map_key_hash: the kind and the components with every NaN and both zeros hashing alike, as the float row does
+	// operator<=> and map_key_hash: by kind, then the components, a float one as canonical_key_float (as the float row)
 	JAI_MATH_COLD inline bool same_kind_equal(const script_value& l, const script_value& r) noexcept {
 		const vk k = l.unchecked_vec_kind();
 		if (r.unchecked_vec_kind() != k) { return false; }
@@ -543,7 +549,8 @@ namespace jai::detail::math {
 		const vk k = l.unchecked_vec_kind(), rk = r.unchecked_vec_kind();
 		if (k != rk) { return static_cast<int>(k) <=> static_cast<int>(rk); }
 		for (size_t c = 0; c < dims(k); ++c) {
-			const std::strong_ordering o = integral(k) ? i32_at(l, c) <=> i32_at(r, c) : std::strong_order(f32_at(l, c), f32_at(r, c));
+			const std::strong_ordering o = integral(k) ? i32_at(l, c) <=> i32_at(r, c)
+			                                           : std::strong_order(canonical_key_float(f32_at(l, c)), canonical_key_float(f32_at(r, c)));
 			if (o != 0) { return o; }
 		}
 		return std::strong_ordering::equal;
@@ -556,8 +563,8 @@ namespace jai::detail::math {
 			if (integral(k)) {
 				bits = static_cast<uint32_t>(i32_at(v, c));
 			} else {
-				float x = f32_at(v, c);
-				if (x != x) { bits = 0x7fc00000u; } else if (x == 0.0f) { bits = 0; } else { std::memcpy(&bits, &x, 4); }
+				const float x = canonical_key_float(f32_at(v, c));
+				std::memcpy(&bits, &x, 4);
 			}
 			h = (h ^ bits) * 0x100000001b3ull;
 		}

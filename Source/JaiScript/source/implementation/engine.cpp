@@ -864,6 +864,17 @@ struct engine::implementation {
 
     // Include/Import support
     std::vector<std::string> include_paths;
+    std::vector<std::filesystem::path> confined_roots_;   // engine::confine_paths, canonical
+    bool outside_confined_roots(const std::filesystem::path& path) const {
+        if (confined_roots_.empty()) { return false; }
+        for (const auto& root : confined_roots_) {
+            auto p = path.begin();
+            bool within = true;
+            for (auto r = root.begin(); within && r != root.end(); ++r, ++p) { within = p != path.end() && *p == *r; }
+            if (within) { return false; }
+        }
+        return true;
+    }
     engine::import_behavior import_behavior = engine::import_behavior::file_timestamp; // Default
     
     struct closure_stamp {
@@ -1929,7 +1940,8 @@ struct engine::implementation {
     std::filesystem::path jaibite_cache_file(const std::string& sourcePath) const {
         const std::filesystem::path source(sourcePath);
         if (source.extension() == k_jaibite_extension) { return {}; }
-        return jaibite_cache_directory_.empty() ? jaibite_beside_file(source) : jaibite_mirrored_file(source);
+        if (jaibite_cache_directory_.empty()) { return outside_confined_roots(source) ? std::filesystem::path() : jaibite_beside_file(source); }
+        return jaibite_mirrored_file(source);
     }
 
     static bool stat_cache_file(const std::filesystem::path& cacheFile, uint64_t& mtime, uint64_t& size) {
@@ -6269,8 +6281,13 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
         if (const std::string* remembered = engine_ptr->remembered_resolution(key)) { return *remembered; }
     }
     std::vector<std::string> misses;
+    bool confined_out = false;   // a rung found the file outside confine_paths: skipped, and the error if no rung finds one inside
     auto rung = [&](const fs::path& candidate) {
         if (found(candidate, out)) {
+            if (engine_ptr && engine_ptr->outside_confined_paths(out)) {
+                confined_out = true;
+                return false;
+            }
             if (engine_ptr) { engine_ptr->remember_resolution(key, std::move(misses), candidate.string(), out); }
             return true;
         }
@@ -6287,6 +6304,10 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
             }
         }
         if (rung(p)) return out;
+    }
+    if (confined_out) {
+        return checked_result<std::string>(make_error_code(runtime_error_code::insufficient_privilege), "Path outside the confined roots: {0}",
+            engine_ptr->symbolize(path));
     }
     return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found),
         for_import ? "Failed to open import file: {0}" : "Failed to open include file: {0}",
@@ -6340,6 +6361,31 @@ void engine::remember_resolution(const std::string& key, std::vector<std::string
 
 std::vector<std::string> engine::get_include_paths() const {
     return impl->include_paths;
+}
+
+void engine::confine_paths(const std::vector<std::string>& roots) {
+    namespace fs = std::filesystem;
+    std::vector<fs::path> settled;
+    for (const auto& root : roots) {
+        std::error_code ec;
+        fs::path canonical = fs::weakly_canonical(root, ec);
+        if (ec) { canonical = fs::absolute(root, ec).lexically_normal(); }
+        if (!canonical.has_filename() && canonical.has_relative_path()) { canonical = canonical.parent_path(); }
+        settled.push_back(std::move(canonical));
+    }
+    impl->confined_roots_ = std::move(settled);
+    impl->resolution_memo_.clear();
+    ++impl->import_generation_;
+}
+
+std::vector<std::string> engine::confine_paths() const {
+    std::vector<std::string> result;
+    for (const auto& root : impl->confined_roots_) { result.push_back(root.string()); }
+    return result;
+}
+
+bool engine::outside_confined_paths(const std::string& canonicalPath) const {
+    return impl->outside_confined_roots(canonicalPath);
 }
 
 // Import behavior configuration

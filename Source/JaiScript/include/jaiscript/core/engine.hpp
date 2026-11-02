@@ -223,7 +223,8 @@ namespace jai {
         // restores the folder beside each source.
         void jaibite_cache_directory(const std::string& directory, const std::string& source_root = {});
         std::string jaibite_cache_directory() const;
-        // The cache file the engine writes for source_path (empty for a .jaibite source, which keeps none)
+        // The cache file the engine writes for source_path (empty for a .jaibite source, which keeps none, and for a source
+        // outside confine_paths when no cache directory is set)
         std::string jaibite_cache_path(const std::string& source_path) const;
 
         // Execute already-read script file contents with jaibite disk-cache maintenance
@@ -1345,6 +1346,13 @@ namespace jai {
         void add_include_path(const std::string& path);
         void clear_include_paths();
         std::vector<std::string> get_include_paths() const;
+        // Confinement (opt-in; empty, the default, lets the ladder open any path the process can read): include, import,
+        // resolve_path and file_data open only files whose canonical path lies under one of these folders. A file the ladder
+        // finds outside them is skipped, and when no rung finds one inside, the reach fails with "Path outside the confined
+        // roots: <path as written>". No .cache folder is written beside a source outside them.
+        void confine_paths(const std::vector<std::string>& roots);
+        std::vector<std::string> confine_paths() const;
+        bool outside_confined_paths(const std::string& canonicalPath) const;
 
         // The resolution ladder's memo (resolve_include_path): a name asked from a folder answers its earlier canonical result
         // while every rung before it still holds no file and the hit still exists (one attribute query each, instead of the

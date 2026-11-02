@@ -256,6 +256,46 @@ public:
             check_eq(script_int(23), eng->execute("probe.query()").as_int());
         });
 
+        test("confine_paths_limits_the_ladder_to_its_roots", [this]() {
+            // include, import, resolve_path and file_data open only files under the roots; a file found outside is skipped,
+            // its text never reaches an error, and no .cache is written beside a source outside them
+            namespace fs = std::filesystem;
+            const fs::path inside = test_temp_directory() / "confine_in";
+            const fs::path outside = test_temp_directory() / "confine_out";
+            fs::create_directories(inside);
+            fs::create_directories(outside);
+            std::ofstream(inside / "lib.jai", std::ios::binary) << "int confined_lib() { return 5; }\n";
+            std::ofstream(inside / "both.jai", std::ios::binary) << "int which() { return 1; }\n";
+            std::ofstream(outside / "both.jai", std::ios::binary) << "int which() { return 2; }\n";
+            std::ofstream(outside / "secret.txt", std::ios::binary) << "API_KEY=sk-secret\n";
+            std::ofstream(outside / "root.jai", std::ios::binary) << "40 + 2;\n";
+            auto eng = make_engine();
+            eng->add_include_path(outside.string());
+            eng->add_include_path(inside.string());
+            eng->confine_paths({inside.string()});
+            check_eq(size_t(1), eng->confine_paths().size());
+            check_eq(script_int(6), eng->execute("include \"lib.jai\"; include \"both.jai\"; confined_lib() + which();").as_int(),
+                     "the outside both.jai is skipped for the inside one");
+            const std::string secret = (outside / "secret.txt").generic_string();
+            const std::string escapes[] = {
+                "include \"" + secret + "\";", "import \"" + secret + "\";", "include \"../confine_out/secret.txt\";",
+                "resolve_path(\"" + secret + "\");", "file_data(\"" + secret + "\");"
+            };
+            for (const auto& source : escapes) {
+                const std::string text = failure([&]() { eng->execute(source); });
+                check_true(text.find("Path outside the confined roots: ") != std::string::npos, source + " -> " + text);
+                check_true(text.find("API_KEY") == std::string::npos, "the file's text never shows: " + text);
+            }
+            check_eq(std::string(), eng->jaibite_cache_path((outside / "root.jai").string()));
+            check_eq(script_int(42), eng->execute_file((outside / "root.jai").string()).as_int(), "the host still runs any file it names");
+            check_false(fs::exists(jaibite_cache_beside(outside / "root.jai")), "no .cache beside a source outside the roots");
+            check_true(fs::exists(jaibite_cache_beside(inside / "lib.jai")));
+            eng->confine_paths({});
+            check_false(eng->execute("resolve_path(\"" + secret + "\");").to_string().empty(), "empty roots open any readable path");
+            fs::remove_all(inside);
+            fs::remove_all(outside);
+        });
+
         test("host_path_queries_obey_the_same_gate", [this]() {
             auto eng = make_engine();
             filesystem_enabled(*eng, false);

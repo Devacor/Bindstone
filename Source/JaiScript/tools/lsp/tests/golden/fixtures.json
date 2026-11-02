@@ -160,14 +160,14 @@
  },
  "diagnostics.edit_breaks": [
   {
-   "message": "Expected expression",
+   "message": "expected expression",
    "range": {
     "end": {
-     "character": 16,
+     "character": 15,
      "line": 13
     },
     "start": {
-     "character": 15,
+     "character": 14,
      "line": 13
     }
    },
@@ -175,14 +175,14 @@
    "source": "jaiscript parser"
   },
   {
-   "message": "Expected expression",
+   "message": "expected expression",
    "range": {
     "end": {
-     "character": 2,
+     "character": 1,
      "line": 23
     },
     "start": {
-     "character": 1,
+     "character": 0,
      "line": 23
     }
    },
@@ -193,14 +193,14 @@
  "diagnostics.edit_fixes": [],
  "diagnostics.errors.broken_leaf.jai": [
   {
-   "message": "Expected ';' after return value",
+   "message": "expected ';' after return value",
    "range": {
     "end": {
-     "character": 2,
+     "character": 1,
      "line": 7
     },
     "start": {
-     "character": 1,
+     "character": 0,
      "line": 7
     }
    },

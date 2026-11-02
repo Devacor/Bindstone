@@ -196,6 +196,21 @@ struct conv_test_context {
     int multiplier = 1;
 };
 
+struct conv_context_scaled {
+    int value = 0;
+
+    template<typename Archive>
+    void save(Archive& ar) const {
+        auto* ctx = ar.template get_user_context<conv_test_context>();
+        ar.serialize("value", value * (ctx ? ctx->multiplier : -1));
+    }
+
+    template<typename Archive>
+    void load(Archive& ar) {
+        ar.serialize("value", value);
+    }
+};
+
 class convenience_function_tests : public suite {
 public:
     convenience_function_tests() : suite("Convenience Functions") {}
@@ -682,6 +697,13 @@ public:
 
             check_eq(loaded.health.get(), 60, "Health with context");
             check_eq(loaded.name.get(), std::string("Context Player"), "Name with context");
+
+            conv_context_scaled scaled;
+            scaled.value = 7;
+            check_eq(14, from_json<conv_context_scaled>(*eng, to_json(*eng, scaled, ctx)).value, "to_json's context reaches save");
+            check_eq(14, from_binary<conv_context_scaled>(*eng, to_binary(*eng, scaled, ctx)).value, "to_binary's context reaches save");
+            check_eq(14, from_binary_string<conv_context_scaled>(*eng, to_binary_string(*eng, scaled, ctx)).value, "to_binary_string's context reaches save");
+            check_eq(14, from_base64<conv_context_scaled>(*eng, to_base64(*eng, scaled, ctx)).value, "to_base64's context reaches save");
         });
 
         test("binary_little_endian_portable", [this]() {

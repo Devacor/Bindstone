@@ -178,7 +178,7 @@ namespace {
 	// the holder, constraint included. Element/field/map-entry refs
 	// keep their bind-time type constraint through a ref decl — auto& over an
 	// array<int> element enforces int on store exactly like direct element assignment
-	// (reverses the e43f8a6f constraint-dropping pin). Sharing also keeps container
+	// Sharing also keeps container
 	// re-resolution (realloc/shrink safe). KEEP BYTE-PARALLEL with decl_ref_alias.
 	checked_result<script_value> vm_decl_ref_alias(const script_value& source, engine*) {
 		return source;
@@ -936,8 +936,8 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 	// A top-level resume (no live VM frames) arms a fresh deadline; a resume nested inside
 	// a running script inherits the outer deadline (and the outer limit state).
 	// Depth alone is not enough: a TOP-LEVEL script statement calling next() also runs
-	// at call depth 0, and re-arming there let `for(..){ h.next(); }` push the deadline
-	// forever (fuzz livelock seeds 3507/8285/1213/8356/8391).
+	// at call depth 0, and re-arming there would let `for(..){ h.next(); }` push the deadline
+	// forever.
 	if (current_call_depth_ == 0 && frames_.empty() && !handle.continues_host_entry()) {
 		arm_execution_deadline();
 		limits_->reset_for_execute();
@@ -993,7 +993,7 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.current_env = state.entry_env;
 
 		// Method coroutine: the fiber frame is a method frame over the pinned receiver
-		// ('this' also resolves via the closure env; the frame copy serves the Tier-1
+		// ('this' also resolves via the closure env; the frame copy serves the
 		// lvalue-ref path, which reads the caller frame's this)
 		if (!handle.receiver().is_null()) {
 			state.locals.set_this(handle.receiver());
@@ -3218,9 +3218,8 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		}
 	}
 
-	// ONE fallback-free walk replaces the old contains() + get_value_ptr() +
-	// assign()-rewalk TRIPLE walk (non-null exactly when contains(); this/static
-	// field stores keep falling through to the kind-aware path below)
+	// one fallback-free walk, non-null exactly when the name is bound (this/static
+	// field stores fall through to the kind-aware path below)
 	script_value* store_target = nullptr;
 	if (ins.c & store_flag_global_only) {
 		// ::name store - GLOBAL env only; a miss is an error, never a member/implicit define
@@ -3504,7 +3503,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		}
 		script_value& target = varPtr->deref();
 		auto leftType = target.type();
-		// S8: a bound rhs decodes to a detached temp (the old shadow-index operand behavior)
+		// a bound rhs decodes to a detached temp
 		if (rightValue.deref().raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 			script_value decoded = rightValue.deref().bound_decoded_temp();
 			rightValue = std::move(decoded);
@@ -3876,10 +3875,11 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		}
 	}
 
-	// S8: bound-alias class fields decode-read LIVE; set_field stores the detached result.
+	// bound-alias class fields decode-read LIVE; set_field stores the detached result.
 	// KEEP BYTE-PARALLEL with the interpreter implicit-this compound normalization.
-	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
+	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 		currentValue = currentValue.bound_decoded_temp();
+	}
 	if (rightValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		rightValue = rightValue.bound_decoded_temp();
 
@@ -4025,7 +4025,7 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 		return op_status{};
 	};
 
-	// `!` consults truthiness BEFORE the S8 decode: is_truthy handles bound values in
+	// `!` consults truthiness BEFORE the bound decode: is_truthy handles bound values in
 	// full, and decoding an OPAQUE bound to null would lie about its truthiness
 	// (an opaque bound is truthy while its pointer is live). Identical result for bound primitives. Byte-parallel with the interpreter.
 	if (static_cast<token_type>(ins.a) == token_type::bang) {
@@ -4034,7 +4034,7 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 	}
 
 	size_t oi = operand.raw_storage_index();
-	// S8: bound operand decodes in place to a detached temp (byte-parallel with the interpreter unary switch)
+	// a bound operand decodes in place to a detached temp (byte-parallel with the interpreter unary switch)
 	if (oi == script_value::TYPEID_CPP_BOUND) [[unlikely]] {
 		operand = operand.bound_decoded_temp();
 		oi = operand.raw_storage_index();
@@ -4337,8 +4337,8 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	return nullptr;
 }
 
-// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md
-// Stage 3, N-level): array levels step a pointer IN PLACE - zero copies, no op_index
+// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md):
+// array levels step a pointer IN PLACE - zero copies, no op_index
 // dispatch. Sound because index resolution and the other operand's resolution run no
 // user code (idents/literals/element reads only) and the numeric fast path consumes
 // scalars immediately. Any other level (map key, string, object, borrow, non-int index,
@@ -6152,7 +6152,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-	// Slow replay: identical to the old two-op sequence
+	// Slow replay: the unfused INDEX + store pair, byte-identical
 	vm_instruction index_ins{opcode::op_index, index_flag_lvalue_write | (ins.a & index_flag_lvalue_shape) |
 	                                           (ins.c != k_invalid_u32 ? index_flag_string_target : 0u), 0, ins.c};
 	auto indexed = exec_index(f, index_ins);
@@ -11066,7 +11066,7 @@ op_status vm_backend::index_store_fused_rows(frame& f, const vm_instruction& ins
 
 // Fused a[i] op= v: the numeric plain-array shape (int/float element, raw int/float rhs,
 // no registered operator override) reads, computes, and writes in place. Everything else
-// replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, S8 bound
+// replays INDEX(shape)+INDEX_COMPOUND byte-identically (string concat routing, bound
 // decode, object operator methods, rvalue-target errors).
 // `a[i] += text` / `m[k] += text` on an element or entry holding text, the index in range or the key present: the bytes append to the
 // element's own node under the concatenation's charge, as the compound's store leaves it (a string buffer keeps its handle's node, a
@@ -11292,7 +11292,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 			}
 		}
 	}
-	// Slow replay: identical to the old two-op sequence
+	// Slow replay: the unfused INDEX + INDEX_COMPOUND pair, byte-identical
 	script_value rhs = std::move(stack_.back());
 	stack_.pop_back();
 	vm_instruction index_ins{opcode::op_index, (ins.b & index_flag_lvalue_shape) |
@@ -13231,7 +13231,7 @@ static JAI_FORCEINLINE bool binds_slice_in_place(const script_defined_function& 
 	return true;
 }
 
-// The parameters of a plain plan with references (frame plan 3): each a lean by-value slot in order or a T& without a default
+// The parameters of a plain plan with references (backend_frame_plan 3): each a lean by-value slot in order or a T& without a default
 static bool plain_reference_parameters(const script_defined_function& function) {
 	const auto& ps = function.parameters();
 	bool any = false;
@@ -13244,7 +13244,7 @@ static bool plain_reference_parameters(const script_defined_function& function) 
 	return any;
 }
 
-// bind_parameters for frame plan 3, every argument bound as its first row would: a primitive in place, a T& to the caller's frame-slot
+// bind_parameters for backend_frame_plan 3, every argument bound as its first row would: a primitive in place, a T& to the caller's frame-slot
 // local named at the site (bind_site_reference's first rung), the T& admission and the escape stamp after; false leaves whatever it
 // bound for the general binding, which binds it again identically and raises where this declines
 bool vm_backend::bind_plain_references(const script_defined_function& function, frame& caller, const call_site& site, size_t args_base, size_t argc) {
@@ -16664,7 +16664,7 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 		}
 	}
 
-	// S8: a bound-alias member decode-reads LIVE and assign_member stores the detached
+	// a bound-alias member decode-reads LIVE and assign_member stores the detached
 	// result. KEEP BYTE-PARALLEL with the interpreter member-compound normalization.
 	if (currentValue.raw_storage_index() == script_value::TYPEID_CPP_BOUND) [[unlikely]]
 		currentValue = currentValue.bound_decoded_temp();
@@ -17823,10 +17823,8 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				if (target && target.class_def && !target.has_field(member->member_id)) {
 					// Per-member getter probe: every
 					// field-bearing script class auto-registers _get_/_set_ accessors, so
-					// the old blanket has_property_getters() bail kept essentially every
-					// real class off this in-loop path (full bound-method mint per call,
-					// ~2.4 µs). Only an ACTUAL _get_<member> method forces the native path
-					// now — mirrors member_access_value's getter-before-field precedence
+					// only an ACTUAL _get_<member> method forces the native path
+					// — mirrors member_access_value's getter-before-field precedence
 					// (auto-getters exist only for fields, which has_field already
 					// excluded; the probe covers custom property getters).
 					uint64_t getter_id = member->getter_id;
@@ -20478,12 +20476,10 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_index_compound_fused: return exec_index_compound_fused(f, ins);
 		case opcode::op_parallel_for: return exec_parallel_for(f, ins);
 		case opcode::op_cast: return exec_cast(f, ins);
-		case opcode::op_take_temp: {
+		case opcode::op_take_temp: {   // keeps a reference whole, unlike take_temp_value: a staged T& argument binds through it
 			script_value* slot = frame_slot(f, ins.a);
 			assert(slot);
-			script_value value = std::move(*slot);
-			*slot = make_null();
-			stack_.push_back(std::move(value));
+			stack_.push_back(std::move(*slot));
 			return {};
 		}
 		case opcode::op_capture_arg:
@@ -22128,10 +22124,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 
 			case opcode::op_kill_slot: JAI_OP_LABEL(op_kill_slot)
 				if (ins.b) [[unlikely]] { kill_frame_slots(f, ins.a, ins.b); }
-				else if (script_value* slot = frame_slot(f, ins.a)) {
-					if (slot->is_reference() && !parallel_worker_) [[unlikely]] { kill_shared_cell_slot(*slot); }
-					else { script_value dying = std::move(*slot); }   // the destructor may reenter: the slot is null first
-				}
+				else { kill_frame_slot(f, ins.a); }
 				if (ins.c && !is_unwinding_) { f.ip = ins.c - 1; JAI_DISPATCH_HERE(); }
 				break;
 
@@ -22824,7 +22817,7 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	// Frame window: zero-copy callers' args ARE slots 0..argc-1 in place;
 	// pooled-vector callers build the window at the stack top during binding. stack_base
 	// is the callee slot (zero-copy) / the window base (pooled), so every pop/unwind
-	// truncation destroys the window (+pin) exactly where the old locals clear did.
+	// truncation destroys the window (+pin) at the frame's end.
 	rec.f.window_backed = true;
 	rec.f.window_base = args_on_stack ? args_base : stack_.size();
 	rec.f.window_live = args_on_stack ? static_cast<uint32_t>(argc) : 0;
@@ -23192,7 +23185,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		                                                : stack_[args_base - 1].deref();
 		if (!receiver_owned && rec.env_lazy && stack_[args_base - 1].raw_storage_index() != script_value::TYPEID_REFERENCE) {
 			// a lazy frame's receiver slot moves into the frame's this (the slot is read by nothing until the pop truncates it, and the pop
-			// nulls this after that truncation, where the slot's copy used to die): no handle copy, the same destruction point
+			// nulls this after that truncation): no handle copy, the slot's own destruction point
 			rec.locals.set_this(std::move(stack_[args_base - 1]));
 		} else if (receiver_owned && rec.env_lazy && receiver_owned->raw_storage_index() != script_value::TYPEID_REFERENCE) {
 			rec.locals.set_this(std::move(*receiver_owned));   // the owner's copy dies with the frame instead of after the push
@@ -23657,8 +23650,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	}
 	JAI_POP_SUB(0);
 	if (stack_.size() > rec.f.stack_base) {
-		// Window + operand temps + (zero-copy) the callee pin die HERE — the same
-		// boundary the old locals clear destroyed callee state at
+		// Window + operand temps + (zero-copy) the callee pin die HERE, at the frame's end
 		stack_.truncate(rec.f.stack_base);
 	}
 	JAI_POP_SUB(1);
@@ -24558,12 +24550,10 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
                                                  unit_stamp caller_unit,
                                                  size_t first_param, bool later_taken,
                                                  const statement* callee_body) {
-	// Stage-2 in-place binding: for zero-copy callers the args slice IS the window
+	// In-place binding: for zero-copy callers the args slice IS the window
 	// (window_base == args_base and param i sits in slot i), so a matching-type
-	// primitive argument is ALREADY its own slot - the bind copy is elided outright
-	// (Ruling 2 elision proof: the copy removed is the stack->locals transfer whose
-	// source died at the old post-bind erase before any script could observe it;
-	// the transient-count audit is stationary). All other branches write their
+	// primitive argument is ALREADY its own slot and needs no bind copy (no script
+	// can observe the argument apart from its slot). All other branches write their
 	// converted/cloned/boxed value INTO the slot, replacing the raw argument.
 	const bool in_place = callee.window_backed && args_are_stack(args) &&
 	                      callee.window_base == args_base;

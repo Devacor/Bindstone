@@ -222,8 +222,8 @@ std::string to_json(engine& eng, const T& value, int indent = 2) {
 
 template<typename T, typename Context>
 std::string to_json(engine& eng, const T& value, Context& ctx, int indent = 2) {
-    (void)ctx;
     serialization::json_archive_writer ar(indent, &eng);
+    ar.template set_user_context<Context>(&ctx);
     detail::write_root(ar, value);
     return ar.str();
 }
@@ -248,6 +248,14 @@ std::vector<uint8_t> to_binary(engine& eng, const T& value) {
     return ar.data();
 }
 
+template<typename T, typename Context>
+std::vector<uint8_t> to_binary(engine& eng, const T& value, Context& ctx) {
+    serialization::binary_archive_writer ar(&eng);
+    ar.template set_user_context<Context>(&ctx);
+    detail::write_root(ar, value);
+    return ar.data();
+}
+
 template<typename T>
 std::string to_binary_string(engine& eng, const T& value) {
     serialization::binary_archive_writer ar(&eng);
@@ -258,8 +266,11 @@ std::string to_binary_string(engine& eng, const T& value) {
 
 template<typename T, typename Context>
 std::string to_binary_string(engine& eng, const T& value, Context& ctx) {
-    (void)ctx;
-    return to_binary_string(eng, value);
+    serialization::binary_archive_writer ar(&eng);
+    ar.template set_user_context<Context>(&ctx);
+    detail::write_root(ar, value);
+    auto& data = ar.data();
+    return std::string(data.begin(), data.end());
 }
 
 template<typename T>

@@ -142,6 +142,33 @@ public:
 			check_eq((int64_t)~5, e->execute("~5").as_int());
 		});
 
+		test("a_long_left_leaning_chain_compiles_without_native_recursion", [this]() {
+			// compile_binary walks a stack-form chain's left spine in a loop: the chain the front end hands over runs at program scope and in a
+			// body, and the compiler alone takes a 100000-term chain
+			auto e = vm_engine();
+			stdlib::register_all(*e);
+			std::string chain = "y";
+			for (int i = 1; i < 1000; ++i) { chain += " + y"; }
+			check_eq(std::string("1000,1000,1000"), e->execute("int y = 1; int x = " + chain + "; int f() { int y = 1; return " + chain + "; } int g(int y) { return " +
+			                                                    chain + "; } to_string(x) + \",\" + to_string(f()) + \",\" + to_string(g(1));").as_string());
+			const source_location loc;
+			const token plus(token_type::plus, std::string_view("+"), loc);
+			expression_ptr acc = std::make_shared<literal_expr>(loc, script_value(int64_t(1), e.get()));
+			for (int i = 1; i < 100000; ++i) { acc = std::make_shared<binary_expr>(loc, acc, plus, std::make_shared<literal_expr>(loc, script_value(int64_t(1), e.get()))); }
+			{
+				std::vector<declaration_ptr> program{std::make_shared<expression_decl>(loc, acc)};
+				jai::vm::vm_compiler compiler(e->get_symbolizer());
+				const auto compiled = compiler.compile_program(program);
+				size_t adds = 0;
+				for (const auto& ins : compiled->code) { if (ins.op == jai::vm::opcode::op_binary) { ++adds; } }
+				check_eq(size_t(99999), adds, "one add per link");
+			}
+			while (acc && acc->get_type() == node_type::binary_expr) {   // the chain dies link by link, not by a recursive release
+				expression_ptr next = std::move(static_cast<binary_expr*>(acc.get())->left);
+				acc = std::move(next);
+			}
+		});
+
 		test("short_circuit_logic", [this]() {
 			auto e = vm_engine();
 			check_true(e->execute("true && true").as<bool>());

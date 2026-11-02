@@ -202,7 +202,8 @@ JAI_TEMPLATE_BINDER(TplRange, "TplRange",
     .property("lo", &TplRange<T>::lo)
     .property("hi", &TplRange<T>::hi)
 );
-JAI_BIND_TEMPLATE_VARIANTS_2(TplRange, int64_t, double);
+JAI_BIND_TEMPLATE(TplRange, int64_t);
+JAI_BIND_TEMPLATE(TplRange, double);
 
 JAI_TEMPLATE_BINDER_2(TplTagged, "TplTagged",
     .property("tag", &TplTagged<T1, T2>::tag)
@@ -215,7 +216,9 @@ JAI_TEMPLATE_BINDER_NAMED(TplSpan, jai::foundry::tests::TplSpan, "TplSpan",
     .property("count", &jai::foundry::tests::TplSpan<T>::count)
     .property("stride", &jai::foundry::tests::TplSpan<T>::stride)
 );
-JAI_BIND_TEMPLATE_VARIANTS_NAMED_3(TplSpan, jai::foundry::tests::TplSpan, int64_t, int, double);
+JAI_BIND_TEMPLATE_NAMED(TplSpan, jai::foundry::tests::TplSpan, int64_t);
+JAI_BIND_TEMPLATE_NAMED(TplSpan, jai::foundry::tests::TplSpan, int);
+JAI_BIND_TEMPLATE_NAMED(TplSpan, jai::foundry::tests::TplSpan, double);
 
 JAI_STATIC_BINDER_AUTO(TplCell,
     .property("col", &TplCell::col)

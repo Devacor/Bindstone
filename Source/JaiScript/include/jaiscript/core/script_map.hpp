@@ -347,11 +347,32 @@ namespace jai {
             remove_slot(i);
             return gone;
         }
-        // every entry, detached from the index: the map is empty and consistent before any value dies
+        // an entry whose death can run a destructor (an instance, a container or closure that may hold one, a reference's pin)
+        static bool dies_observably(const script_value& v) noexcept {
+            switch (v.raw_storage_index()) {
+                case script_value::TYPEID_ARRAY: return v.unchecked_get_array_storage()->kind() == script_array::kind_t::hetero;
+                case script_value::TYPEID_MAP: case script_value::TYPEID_OBJECT: case script_value::TYPEID_FUNCTION:
+                case script_value::TYPEID_REFERENCE: case script_value::TYPEID_CPP_BOUND:
+                    return true;
+                default:
+                    return false;
+            }
+        }
+        bool any_dies_observably() const noexcept {
+            for (const slot& s : slots_) {
+                if (s.e && (dies_observably(s.e->kv.second) || dies_observably(s.e->kv.first))) { return true; }
+            }
+            return false;
+        }
+        void order_by_key(std::vector<entry*>& entries) const noexcept;   // value.cpp: iteration's order, no key operator run
+        // every entry, detached from the index: the map is empty and consistent before any value dies; entries die first to
+        // last in key order when a death can be observed
         std::vector<entry*> detach_all() noexcept {
             std::vector<entry*> out;
             out.reserve(size_);
-            for (slot& s : slots_) { if (s.e) { out.push_back(s.e); s = slot{0, nullptr}; } }
+            for (const slot& s : slots_) { if (s.e) { out.push_back(s.e); } }
+            if (any_dies_observably()) { order_by_key(out); }
+            for (slot& s : slots_) { s = slot{0, nullptr}; }
             size_ = 0;
             class_keys_.reset();
             return out;
@@ -549,6 +570,15 @@ namespace jai {
             memo = entry_memo{this, gen_, e};
             return e ? &e->kv : nullptr;
         }
+        // the memo of the entry whose value is at `value`, found along its key's probe run by address: no key operator runs
+        entry_memo memo_at(const script_value& key, const script_value* value) const noexcept {
+            if (size_ == 0) return {};
+            for (size_t i = home(script_value_hash{}(key));; i = (i + 1) & mask()) {
+                const slot& s = slots_[i];
+                if (!s.e) return {};
+                if (&s.e->kv.second == value) return entry_memo{this, gen_, s.e};
+            }
+        }
         // the same for a store: an absent key is inserted (operator[]'s rule) and its new entry recorded
         value_type* recall_or_insert(entry_memo& memo, const script_value& key) {
             if (memo.owner == this && memo.gen == gen_ && memo.e) {
@@ -662,13 +692,11 @@ namespace jai {
     }
 
     inline script_map::~script_map() {
-        for (const slot& sl : slots_) {
-            if (sl.e && (sl.e->kv.second.release_flattens() || sl.e->kv.first.release_flattens())) {
-                std::vector<script_value> work;
-                hand_off_entries(work);
-                detail::release_work(work);
-                return;
-            }
+        if (any_dies_observably()) {
+            std::vector<script_value> work;
+            hand_off_entries(work);
+            detail::release_work(work);
+            return;
         }
         // the index leaves the map whole (no copy of the entry list): the map is empty and consistent before any value dies
         std::vector<slot> index;

@@ -18,9 +18,6 @@
 
 namespace jai::detail {
 
-    inline constexpr const char* parallel_operator_verdict_text =
-        "custom operator dispatch on class instances is not admitted in a parallel body";
-
     // The class of a class-instance operand (null for anything else); the parallel operator wall reads it without copying a
     // method value
     inline const class_definition* operand_instance_class(const script_value& v) {

@@ -21,6 +21,7 @@
 #include <jaiscript/thread_pool.hpp>
 #include <map>
 #include <functional>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -290,6 +291,13 @@ namespace jai::detail {
             }
             return nullptr;
         }
+        // A script operator whose walk refused: the violation it raises when a worker applies it (built at the barrier)
+        struct operator_refusal {
+            const void* cls = nullptr;
+            uint64_t name_id = 0;
+            std::string text;
+        };
+        std::vector<operator_refusal> refused_operators;
         // The worker's method sandbox: the root a construction without a constructor initializes its fields in
         std::shared_ptr<environment> definition_env;
         const parallel_method_pin* find(const void* cls, uint64_t name_id) const noexcept {
@@ -305,6 +313,22 @@ namespace jai::detail {
             return nullptr;
         }
     };
+
+    inline constexpr const char* parallel_operator_verdict_text =
+        "custom operator dispatch on class instances is not admitted in a parallel body";
+
+    // What a worker raises for a class operator its region did not pin: the operator's own violation when the barrier walked it,
+    // else the verdict. KEEP the one text both backends raise
+    inline std::string_view parallel_operator_refusal(const parallel_method_pin_table* pins, const void* cls, std::initializer_list<uint64_t> ids) noexcept {
+        if (pins && cls) {
+            for (const uint64_t id : ids) {
+                for (const auto& r : pins->refused_operators) {
+                    if (r.cls == cls && r.name_id == id) { return r.text; }
+                }
+            }
+        }
+        return parallel_operator_verdict_text;
+    }
 
     // A pinned host method's call on a chunk: a mutating one refuses a receiver the chunk did not make
     checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id,

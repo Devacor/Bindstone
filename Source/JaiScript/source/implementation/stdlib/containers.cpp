@@ -106,6 +106,13 @@ namespace stdlib {
 
 namespace jai::detail {
 
+namespace {
+// A pair a parallel chunk mints or re-aims is the chunk's own: a store through it lands in a map the chunk owns
+void tag_region_pair(class_instance& a_instance, engine* a_engine) {
+    if (a_engine && a_engine->parallel_region_active()) [[unlikely]] { a_instance.region_tag(a_engine->parallel_region_serial()); }
+}
+}
+
 bool reuse_map_entry_pair(script_value* cell, const class_definition* pair_class, script_value& first, script_value& second) {
     if (!cell || cell->raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
     const auto& holder = cell->unchecked_object_handle();
@@ -119,6 +126,7 @@ bool reuse_map_entry_pair(script_value* cell, const class_definition* pair_class
     auto* pair = static_cast<stdlib::script_pair*>(native_holder->object());
     pair->second = std::move(second);
     pair->first = std::move(first);
+    tag_region_pair(*instance, pair_class->get_engine());
     return true;
 }
 
@@ -126,6 +134,7 @@ script_value mint_map_entry_pair(const std::shared_ptr<class_definition>& pair_c
     auto native = std::make_shared<stdlib::script_pair>(first, std::move(second));
     auto instance = pair_class->create_instance();
     instance->set_native(script_value::make_cpp_object(pair_class->get_name(), pair_class->get_type_id(), native, eng));
+    tag_region_pair(*instance, eng);
     return script_value::make_object(pair_class->get_name(), instance, eng);
 }
 

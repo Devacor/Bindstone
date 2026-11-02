@@ -1523,7 +1523,7 @@ bool vm_backend::object_to_bool_via_method(const script_value& value) {
 		return true;
 	}
 	if (parallel_worker_ && !worker_operators_pinned(value, { to_bool_id_ })) [[unlikely]] {
-		if (!is_unwinding_ && !limits_->terminal_error) { raise_script_exception(std::string(detail::parallel_operator_verdict_text), source_location{}); }
+		if (!is_unwinding_ && !limits_->terminal_error) { raise_script_exception(std::string(worker_operator_refusal(value, { to_bool_id_ })), source_location{}); }
 		return false;
 	}
 	auto method_val = operator_value(target, to_bool_id_);
@@ -1673,6 +1673,9 @@ bool vm_backend::worker_operators_pinned(const script_value& v, std::initializer
 	}
 	return true;
 }
+std::string_view vm_backend::worker_operator_refusal(const script_value& v, std::initializer_list<uint64_t> ids) const {
+	return detail::parallel_operator_refusal(parallel_method_pins_, detail::operand_instance_class(v), ids);
+}
 script_value vm_backend::operator_value(const member_target& target, uint64_t id) const {
 	if (!parallel_worker_) { return target.method(id); }
 	const detail::parallel_method_pin* pin = parallel_method_pins_ && target.class_def ? parallel_method_pins_->find_operator(target.class_def, id) : nullptr;
@@ -1681,19 +1684,20 @@ script_value vm_backend::operator_value(const member_target& target, uint64_t id
 checked_result<script_value> vm_backend::operator_call(const script_value& self, const script_value& method_val, uint64_t id, std::vector<script_value> args) {
 	if (!parallel_worker_) { return call_value(make_bound_method(self, method_val).as_function(), args); }
 	const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
-	if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+	if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { id })); }
 	return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
 }
 
 std::optional<checked_result<script_value>> vm_backend::parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) {
-	const detail::parallel_method_pin* pin = parallel_worker_ ? worker_operator_pin(self, id) : nullptr;
-	if (!pin) { return std::nullopt; }
+	if (!parallel_worker_) { return std::nullopt; }
+	const detail::parallel_method_pin* pin = worker_operator_pin(self, id);
+	if (!pin) { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { id })); }
 	return detail::call_parallel_operator_pin(*this, *pin, id, self, std::move(args), engine_);
 }
 
 // self's method name_id called with no arguments; a parallel worker dispatches it only through its pin. KEEP BYTE-PARALLEL with the other backend
 checked_result<script_value> vm_backend::invoke_method(const script_value& self, uint64_t name_id) {
-	if (parallel_worker_ && !worker_operator_pin(self, name_id)) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text); }
+	if (parallel_worker_ && !worker_operator_pin(self, name_id)) [[unlikely]] { return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(self, { name_id })); }
 	auto target = resolve_member_target(self);
 	script_value method_val = target ? operator_value(target, name_id) : script_value(std::monostate{}, engine_);
 	if (!method_val.is_function()) { return checked_result<script_value>(make_error_code(runtime_error_code::member_not_found), "No method '{0}'", name_id); }
@@ -1704,7 +1708,7 @@ checked_result<script_value> vm_backend::invoke_method(const script_value& self,
 checked_result<detail::own_text_verdict> vm_backend::object_own_text(const script_value& val, std::string& out) {
 	using verdict = detail::own_text_verdict;
 	if (parallel_worker_ && !worker_operators_pinned(val, { to_string_id_ })) [[unlikely]] {
-		return checked_result<verdict>(make_error_code(runtime_error_code::unsupported_operation), detail::parallel_operator_verdict_text);
+		return checked_result<verdict>(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(val, { to_string_id_ }));
 	}
 	auto target = resolve_member_target(val);
 	if (!target) { return verdict::silent; }
@@ -2306,6 +2310,7 @@ struct vm_backend::binary_host {
 	script_value operator_value(const member_target& target, uint64_t id) const { return vm.operator_value(target, id); }
 	checked_result<script_value> operator_call(const script_value& self, const script_value& method, uint64_t id, std::vector<script_value> args) { return vm.operator_call(self, method, id, std::move(args)); }
 	bool worker_operators_pinned(const script_value& v, std::initializer_list<uint64_t> ids) const { return vm.worker_operators_pinned(v, ids); }
+	std::string_view worker_operator_refusal(const script_value& v, std::initializer_list<uint64_t> ids) const { return vm.worker_operator_refusal(v, ids); }
 	const detail::parallel_method_pin* worker_operator_pin(const script_value& v, uint64_t id) const { return vm.worker_operator_pin(v, id); }
 	bool comparison_free(const script_value& v) { return vm.comparison_free(v); }
 	const detail::operator_ids& ids() const noexcept { return vm.ops_; }
@@ -5850,8 +5855,7 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		if (parallel_worker_) [[unlikely]] {
 			const detail::parallel_method_pin* pin = worker_operator_pin(left, subscript_op_id_);
 			if (!pin) {
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"custom operator dispatch on class instances is not admitted in a parallel body");
+				return raise_(make_error_code(runtime_error_code::unsupported_operation), worker_operator_refusal(left, { subscript_op_id_ }));
 			}
 			auto result = detail::call_parallel_operator_pin(*this, *pin, subscript_op_id_, left, { right }, engine_);
 			if (!result) {

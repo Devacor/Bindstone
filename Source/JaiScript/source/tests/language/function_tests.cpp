@@ -1243,7 +1243,7 @@ public:
             auto engine = make_engine();
             std::string err;
             try { engine->execute("function f(a) { return 1; } function f(a) { return 2; } f(0);"); } catch (const std::exception& ex) { err = ex.what(); }
-            check_true(err.find("'f' is already defined at 1:10") != std::string::npos, err);
+            check_true(err.find("'f' is already defined (declared at 1:10)") != std::string::npos, err);
             engine->execute("function g(a) { return 1; }");
             check_eq(int64_t(2), engine->execute("function g(a) { return 2; } g(0);").as_int());   // another unit: a redefinition
         });

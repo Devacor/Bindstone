@@ -2162,7 +2162,7 @@ public:
                 {"class Base { void m() { } }\nclass Kid : Base { void m() { } }\n", "method 'm' redefines 'Base::m': mark it 'override'"},
                 {"class Kid { void m() override { } }\n", "method 'm' marked as override but no base class method found"},
                 {"class Kid : NoSuchBase { int k = 1; }\n", "Base class 'NoSuchBase' not found"},
-                {"namespace dn { int f() { return 1; } }\nnamespace dn { int f() { return 2; } }\n", "'f' is already defined with parameters () at "},
+                {"namespace dn { int f() { return 1; } }\nnamespace dn { int f() { return 2; } }\n", "'f' is already defined with parameters () (declared at "},
             };
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);

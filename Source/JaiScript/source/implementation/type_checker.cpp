@@ -951,8 +951,7 @@ private:
             }
             if (!inserted && !fn->is_override) {
                 diag(diag_level::error, fn->location,
-                     "'" + std::string(fn->name) + "' is already defined" + (by_name ? std::string() : " with parameters " + sig) + " at " +
-                     std::to_string(it->second->location.line) + ":" + std::to_string(it->second->location.column),
+                     "'" + std::string(fn->name) + "' is already defined" + (by_name ? std::string() : " with parameters " + sig),
                      it->second->location.line, it->second->location.column);
                 continue;
             }

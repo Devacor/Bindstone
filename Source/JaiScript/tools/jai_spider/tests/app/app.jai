@@ -49,6 +49,21 @@ routes.get("/session", (spider::Request req) => {
 	return r;
 });
 routes.get("/download", (spider::Request req) => spider::file("public/style.css", "text/x-test"));
+routes.get("/forged-sendfile", (spider::Request req) => {
+	spider::Response r = spider::plain_text("forged");
+	r.header("X-Sendfile", "app.jai");
+	return r;
+});
+routes.get("/bad-header", (spider::Request req) => {
+	spider::Response r = spider::plain_text("x");
+	r.headers["X-Bad"] = "a\r\nInjected: 1";
+	return r;
+});
+routes.get("/cookie-inject", (spider::Request req) => {
+	spider::Response r = spider::plain_text("x");
+	r.set_cookie("a", "1", {"path": "/; Domain=evil.example"});
+	return r;
+});
 routes.get("/boom", (spider::Request req) => 1 / 0);
 routes.get("/throw", (spider::Request req) => { throw "thrown from a handler"; });
 routes.get("/spin", (spider::Request req) => {

@@ -70,6 +70,10 @@ expect("a timeout is an error naming it", slow == "spider::get: " + base + "/cli
 expect("a generous timeout waits", spider::get(base + "/client/slow", {"timeout": 10}).body == "slow");
 string refused = error_of(() => spider::get("http://127.0.0.1:1/"));
 expect("a refused connection is an error with the URL", refused.starts_with("spider::get: http://127.0.0.1:1/: "), refused);
+string framing = error_of(() => spider::get(base + "/", {"headers": {"Host": "elsewhere"}}));
+expect("the transport's own headers are refused", framing == "spider::get: header 'Host' is the transport's to set", framing);
+string broken = error_of(() => spider::get(base + "/", {"headers": {"X-A": "b\r\nX-B: c"}}));
+expect("a header value with a line break is refused", broken == "spider::get: header 'X-A' holds a line break or NUL in its value", broken);
 string unknown = error_of(() => spider::get(base + "/", {"retries": 2}));
 expect("an unknown option is refused", unknown == "spider::get: unknown option 'retries' (method, headers, timeout, type, redirects)", unknown);
 

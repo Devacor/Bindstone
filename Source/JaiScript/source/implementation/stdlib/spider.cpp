@@ -128,9 +128,21 @@ namespace spider_detail {
 		return function_result(make_error_code(a_code), "{0}", a_engine->park_error_text(a_text));
 	}
 
+	bool is_token(std::string_view a_text) {
+		return !a_text.empty() && std::all_of(a_text.begin(), a_text.end(), [](char a_c) {
+			return (a_c >= '0' && a_c <= '9') || (a_c >= 'a' && a_c <= 'z') || (a_c >= 'A' && a_c <= 'Z') || std::string_view("!#$%&'*+-.^_`|~").find(a_c) != std::string_view::npos;
+		});
+	}
+
+	// An attribute value (RFC 6265 4.1.1 av-octet): visible ASCII and space, never ';'
+	bool is_cookie_attribute(std::string_view a_text) {
+		return std::all_of(a_text.begin(), a_text.end(), [](char a_c) { return a_c >= ' ' && a_c <= '~' && a_c != ';'; });
+	}
+
 	// The Set-Cookie line for name=value (RFC 6265 4.1): the value percent-encoded; options max_age, expires (unix seconds),
 	// path ("/"), domain, secure (false), http_only (true), same_site ("Lax"; "" leaves it out)
 	std::string cookie_line(engine* a_engine, const std::string& a_name, const std::string& a_value, const script_value& a_options) {
+		if (!is_token(a_name)) { throw runtime_error("Response.set_cookie: '" + a_name + "' is not a cookie name (letters, digits and !#$%&'*+-.^_`|~)"); }
 		std::string result = a_name + "=";
 		web_text_detail::append_percent_encoded(a_value, false, result);
 		std::string path = "/";
@@ -164,6 +176,9 @@ namespace spider_detail {
 					throw runtime_error("Response.set_cookie: option '" + (name ? *name : std::string("?")) + "' is unknown or of the wrong kind (max_age, expires: int; path, domain, same_site: string; secure, http_only: bool)");
 				}
 			}
+		}
+		for (const auto& [option, text] : {std::pair<const char*, const std::string*>{"path", &path}, {"domain", &domain}, {"same_site", &same_site}}) {
+			if (!is_cookie_attribute(*text)) { throw runtime_error(std::string("Response.set_cookie: option '") + option + "' holds a ';' or a control character"); }
 		}
 		result += "; Path=" + path;
 		if (!domain.empty()) { result += "; Domain=" + domain; }
@@ -211,8 +226,10 @@ namespace spider_detail {
 						!web_text_detail::query_value_text(header_raw.deref(), header_value, a_engine)) {
 						return refuse("option 'headers' takes text names and text, number or bool values");
 					}
-					if (header_name.find_first_of("\r\n:") != std::string::npos || header_value.find_first_of("\r\n") != std::string::npos) {
-						return refuse("header '" + header_name + "' holds a line break or a colon in its name");
+					if (!is_token(header_name)) { return refuse("'" + header_name + "' is not a header name"); }
+					if (header_value.find_first_of(std::string_view("\r\n\0", 3)) != std::string::npos) { return refuse("header '" + header_name + "' holds a line break or NUL in its value"); }
+					for (std::string_view framing : {"host", "content-length", "transfer-encoding", "connection"}) {
+						if (same_name(header_name, framing)) { return refuse("header '" + header_name + "' is the transport's to set"); }
 					}
 					a_out.headers.emplace_back(std::move(header_name), std::move(header_value));
 				}
@@ -504,8 +521,8 @@ namespace spider_detail {
 			})
 			.method("header", [eng](response_record& a_self, const std::string& a_name) { return a_self.header(eng, a_name); })
 			.method("header", [eng](response_record& a_self, const std::string& a_name, const std::string& a_value) -> response_record& {
-				if (a_name.empty() || a_name.find_first_of("\r\n:") != std::string::npos || a_value.find_first_of("\r\n") != std::string::npos) {
-					throw runtime_error("Response.header: '" + a_name + "' is not a header name, or its value holds a line break");
+				if (!is_token(a_name) || a_value.find_first_of(std::string_view("\r\n\0", 3)) != std::string::npos) {
+					throw runtime_error("Response.header: '" + a_name + "' is not a header name, or its value holds a line break or NUL");
 				}
 				a_self.set_header(eng, a_name, a_value);
 				return a_self;

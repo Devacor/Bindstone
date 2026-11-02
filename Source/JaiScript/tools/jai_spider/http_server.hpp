@@ -31,6 +31,7 @@ struct http_limits {
 	size_t max_head_bytes = 64 * 1024;
 	size_t max_body_bytes = 2 * 1024 * 1024;
 	size_t max_connections = 512;
+	size_t max_connections_per_address = 128;
 	double timeout_seconds = 30.0;
 };
 
@@ -146,7 +147,7 @@ public:
 			polled.push_back(pollfd{listener_, POLLIN, 0});
 			for (auto& c : connections_) {
 				short events = 0;
-				if (c->closing || !c->busy_writing()) { events |= POLLIN; }
+				if (c->closing || (!c->busy_writing() && !inbox_full(*c))) { events |= POLLIN; }
 				if (c->busy_writing()) { events |= POLLOUT; }
 				polled.push_back(pollfd{c->sock, events, 0});
 			}
@@ -206,7 +207,6 @@ private:
 		size_t scan = 0;                 // where the next parse of inbox begins
 		http_request request;
 		clock::time_point deadline;
-		bool request_started = false;
 		bool closing = false;            // send what is queued, then close
 		bool shut_down = false;          // our side has ended; reading until the client's side ends
 		bool dead = false;
@@ -254,7 +254,12 @@ private:
 			char text[INET_ADDRSTRLEN] = {0};
 			if (::inet_ntop(AF_INET, &peer.sin_addr, text, sizeof(text))) { c->remote = text; }
 			c->deadline = now + timeout();
-			if (connections_.size() >= limits_.max_connections) { reject(*c, 503, "too many connections"); }
+			const size_t from_peer = static_cast<size_t>(std::count_if(connections_.begin(), connections_.end(), [&](const auto& open) { return open->remote == c->remote; }));
+			if (connections_.size() >= limits_.max_connections) {
+				reject(*c, 503, "too many connections");
+			} else if (from_peer >= limits_.max_connections_per_address) {
+				reject(*c, 503, "too many connections from one address");
+			}
 			connections_.push_back(std::move(c));
 		}
 	}
@@ -270,15 +275,10 @@ private:
 			}
 		}
 		char chunk[16384];
-		for (;;) {
+		while (!inbox_full(c)) {
 			int got = static_cast<int>(::recv(c.sock, chunk, sizeof(chunk), 0));
 			if (got > 0) {
-				if (!c.request_started) {
-					c.request_started = true;
-					c.deadline = now + timeout();
-				}
 				c.inbox.append(chunk, static_cast<size_t>(got));
-				if (c.inbox.size() > limits_.max_head_bytes + limits_.max_body_bytes + 65536) { break; }
 				continue;
 			}
 			if (got == 0 || !jai_runner::net_would_block()) {
@@ -323,6 +323,9 @@ private:
 		}
 	}
 
+	// unread bytes past one whole request (head and body) wait in the socket: a pipelining client is read as it is answered
+	bool inbox_full(const connection& c) const { return c.inbox.size() - c.scan >= limits_.max_head_bytes + limits_.max_body_bytes + 65536; }
+
 	void reject(connection& c, int status, const std::string& why) {
 		if (rejected_) { rejected_(c.remote, status, why); }
 		queue_response(c, plain_response(status, std::to_string(status) + " " + status_reason(status) + ": " + why), false, true);
@@ -349,8 +352,10 @@ private:
 				if (!parse_chunks(c)) { return; }
 			}
 			if (c.state != phase::ready) { return; }
-			c.inbox.erase(0, c.scan);
-			c.scan = 0;
+			if (c.scan >= 65536 && c.scan * 2 >= c.inbox.size()) {   // compacted only once the answered part dominates, so pipelining stays linear
+				c.inbox.erase(0, c.scan);
+				c.scan = 0;
+			}
 			http_response response = handler(c.request);
 			const bool keep = c.request.keep_alive && !response.close;
 			if (response.stop_server) { stop_requested_ = true; }
@@ -362,7 +367,6 @@ private:
 			c.request = http_request{};
 			c.state = phase::head;
 			c.continue_sent = false;
-			c.request_started = !c.inbox.empty();
 			c.deadline = now + timeout();
 		}
 	}
@@ -431,6 +435,10 @@ private:
 			if (next == std::string_view::npos) { next = head.size(); }
 			std::string_view field = head.substr(position, next - position);
 			position = next + 2;
+			if (field.find_first_of(std::string_view("\r\n\0", 3)) != std::string_view::npos) {
+				reject(c, 400, "a bare CR, LF or NUL in a header field");
+				return false;
+			}
 			if (!field.empty() && (field.front() == ' ' || field.front() == '\t')) {
 				reject(c, 400, "obsolete header line folding");
 				return false;
@@ -513,8 +521,18 @@ private:
 		std::string_view path = target.substr(0, question);
 		if (question != std::string_view::npos) { request.query_string = std::string(target.substr(question + 1)); }
 		if (const size_t hash = request.query_string.find('#'); hash != std::string::npos) { request.query_string.resize(hash); }
-		request.path = percent_decode(path);
-		return request.path.find('\0') == std::string::npos;
+		// each segment decodes on its own: a "." or ".." segment, or a %2F, %5C or NUL inside one, is refused, so the decoded
+		// path a handler routes on (a *rest capture handed to spider::file) never climbs
+		request.path.clear();
+		size_t start = 1;
+		while (start <= path.size()) {
+			const size_t end = std::min(path.find('/', start), path.size());
+			const std::string segment = percent_decode(path.substr(start, end - start));
+			if (segment == "." || segment == ".." || segment.find_first_of(std::string_view("/\\\0", 3)) != std::string::npos) { return false; }
+			request.path += "/" + segment;
+			start = end + 1;
+		}
+		return true;
 	}
 
 	bool parse_chunks(connection& c) {
@@ -609,8 +627,7 @@ private:
 		uint64_t length = response.file_path.empty() ? response.body.size() : response.file_size;
 		out += "HTTP/1.1 " + std::to_string(response.status) + " " + status_reason(response.status) + "\r\n";
 		for (const auto& [name, value] : response.headers) {
-			if (iequals(name, "content-length") || iequals(name, "connection") || iequals(name, "transfer-encoding")) { continue; }
-			if (name.find_first_of("\r\n") != std::string::npos || value.find_first_of("\r\n") != std::string::npos) { continue; }
+			if (is_hop_header(name)) { continue; }
 			out += name;
 			out += ": ";
 			out += value;

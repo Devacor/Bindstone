@@ -15,7 +15,9 @@
 #include <algorithm>
 #include <atomic>
 #include <cctype>
+#include <charconv>
 #include <chrono>
+#include <cmath>
 #include <csignal>
 #include <cstdio>
 #include <cstring>
@@ -62,7 +64,8 @@ struct options {
 	std::string backend = "vm";
 	double budget = 30.0;
 	spider_host::http_limits limits;
-	bool allow_shutdown = false;
+	std::string shutdown_token;   // --allow-shutdown TOKEN: a loopback POST /__spider/shutdown carrying it stops the server
+	bool dev = false;             // --dev: error pages carry the error and its trace; lib/ is imported from the checkout
 	bool quiet = false;
 };
 
@@ -84,11 +87,14 @@ void print_usage() {
 		"  --host ADDR         IPv4 address to listen on (default 127.0.0.1; 0.0.0.0 for every interface)\n"
 		"  --root DIR          serve the files under DIR for GET and HEAD before the app sees the request\n"
 		"                      (default: the app's public/ folder when it exists)\n"
-		"  --max-body N        largest request body in bytes, K or M suffix allowed (default 2M); larger is 413\n"
+		"  --max-body N        largest request body in bytes, K, M or G suffix allowed (default 2M); larger is 413\n"
 		"  --timeout S         seconds a request may take to arrive and a response to leave (default 30)\n"
 		"  --budget S          execution budget per request in seconds (default 30; 0 = unlimited)\n"
 		"  --backend vm|interp execution backend (default vm)\n"
-		"  --allow-shutdown    POST /__spider/shutdown from this machine stops the server\n"
+		"  --dev               development: an error page shows the error and its trace, and lib/ is imported\n"
+		"                      from the source checkout so an edit to spider.jai applies on the next request\n"
+		"  --allow-shutdown T  POST /__spider/shutdown from this machine with the header X-Spider-Shutdown: T\n"
+		"                      stops the server\n"
 		"  --quiet             no request log\n"
 		"  --version / --help\n"
 		"\n"
@@ -105,52 +111,89 @@ bool parse_size(const std::string& text, size_t& out) {
 		multiplier = last == 'K' ? 1024 : last == 'M' ? 1024 * 1024 : size_t{1024} * 1024 * 1024;
 		digits.pop_back();
 	}
-	if (digits.empty() || !std::all_of(digits.begin(), digits.end(), [](char c) { return c >= '0' && c <= '9'; })) { return false; }
-	out = static_cast<size_t>(std::stoull(digits)) * multiplier;
+	size_t count = 0;
+	auto [end, ec] = std::from_chars(digits.data(), digits.data() + digits.size(), count);
+	if (digits.empty() || ec != std::errc{} || end != digits.data() + digits.size() || count > SIZE_MAX / multiplier) { return false; }
+	out = count * multiplier;
+	return out > 0;
+}
+
+// a whole number in [low, high], or a finite one for a double
+template<typename Number>
+bool parse_number(const std::string& text, Number low, Number high, Number& out) {
+	Number value{};
+	if constexpr (std::is_floating_point_v<Number>) {
+		char* end = nullptr;
+		value = static_cast<Number>(std::strtod(text.c_str(), &end));
+		if (text.empty() || end != text.c_str() + text.size() || !std::isfinite(value)) { return false; }
+	} else {
+		auto [end, ec] = std::from_chars(text.data(), text.data() + text.size(), value);
+		if (ec != std::errc{} || end != text.data() + text.size()) { return false; }
+	}
+	if (value < low || value > high) { return false; }
+	out = value;
 	return true;
 }
 
 int parse_args(int argc, char** argv, options& opt) {
 	for (int i = 1; i < argc; ++i) {
 		std::string a = argv[i];
-		auto value_of = [&](const std::string& flag) -> std::string {
-			if (a.size() > flag.size() && a[flag.size()] == '=') { return a.substr(flag.size() + 1); }
-			if (i + 1 < argc) { return argv[++i]; }
-			std::fprintf(stderr, "jai_spider: missing value for %s\n", flag.c_str());
-			std::exit(2);
-		};
 		auto is_flag = [&](const char* flag) {
 			const size_t n = std::strlen(flag);
 			return a.compare(0, n, flag) == 0 && (a.size() == n || a[n] == '=');
 		};
-		try {
-			if (is_flag("--port")) { opt.port = std::stoi(value_of("--port")); }
-			else if (is_flag("--host")) { opt.host = value_of("--host"); }
-			else if (is_flag("--root")) { opt.root = value_of("--root"); }
-			else if (is_flag("--backend")) { opt.backend = value_of("--backend"); }
-			else if (is_flag("--budget")) { opt.budget = std::stod(value_of("--budget")); }
-			else if (is_flag("--timeout")) { opt.limits.timeout_seconds = std::stod(value_of("--timeout")); }
-			else if (is_flag("--max-body")) {
-				if (!parse_size(value_of("--max-body"), opt.limits.max_body_bytes)) {
-					std::fprintf(stderr, "jai_spider: --max-body takes a byte count (2097152, 512K, 2M)\n");
-					return 2;
-				}
+		auto value_of = [&](const char* flag, std::string& out) {
+			const size_t n = std::strlen(flag);
+			if (a.size() > n) {
+				out = a.substr(n + 1);
+				return true;
 			}
-			else if (a == "--allow-shutdown") { opt.allow_shutdown = true; }
-			else if (a == "--quiet") { opt.quiet = true; }
-			else if (a == "--version" || a == "-v") { std::printf("jai_spider (JaiScript %s, SQLite %s)\n", jai::version().c_str(), sqlite3_libversion()); std::exit(0); }
-			else if (a == "--help" || a == "-h" || a == "/?") { print_usage(); std::exit(0); }
-			else if (!a.empty() && a[0] == '-') {
-				std::fprintf(stderr, "jai_spider: unknown flag: %s\n", a.c_str());
-				return 2;
+			if (i + 1 < argc) {
+				out = argv[++i];
+				return true;
 			}
-			else if (opt.app.empty()) { opt.app = a; }
-			else {
-				std::fprintf(stderr, "jai_spider: unexpected extra argument: %s\n", a.c_str());
-				return 2;
-			}
-		} catch (const std::exception&) {
-			std::fprintf(stderr, "jai_spider: bad value in %s\n", a.c_str());
+			std::fprintf(stderr, "jai_spider: missing value for %s\n", flag);
+			return false;
+		};
+		auto refuse = [](const char* text) {
+			std::fprintf(stderr, "jai_spider: %s\n", text);
+			return 2;
+		};
+		std::string value;
+		if (is_flag("--port")) {
+			if (!value_of("--port", value)) { return 2; }
+			if (!parse_number(value, 0, 65535, opt.port)) { return refuse("--port takes 0 to 65535"); }
+		}
+		else if (is_flag("--host")) { if (!value_of("--host", opt.host)) { return 2; } }
+		else if (is_flag("--root")) { if (!value_of("--root", opt.root)) { return 2; } }
+		else if (is_flag("--backend")) { if (!value_of("--backend", opt.backend)) { return 2; } }
+		else if (is_flag("--budget")) {
+			if (!value_of("--budget", value)) { return 2; }
+			if (!parse_number(value, 0.0, 1e9, opt.budget)) { return refuse("--budget takes seconds from 0 (0 is unlimited)"); }
+		}
+		else if (is_flag("--timeout")) {
+			if (!value_of("--timeout", value)) { return 2; }
+			if (!parse_number(value, 0.001, 1e6, opt.limits.timeout_seconds)) { return refuse("--timeout takes seconds above 0"); }
+		}
+		else if (is_flag("--max-body")) {
+			if (!value_of("--max-body", value)) { return 2; }
+			if (!parse_size(value, opt.limits.max_body_bytes)) { return refuse("--max-body takes a byte count above 0 (2097152, 512K, 2M, 1G)"); }
+		}
+		else if (is_flag("--allow-shutdown")) {
+			if (!value_of("--allow-shutdown", opt.shutdown_token)) { return 2; }
+			if (opt.shutdown_token.empty()) { return refuse("--allow-shutdown takes a token the shutdown request carries"); }
+		}
+		else if (a == "--dev") { opt.dev = true; }
+		else if (a == "--quiet") { opt.quiet = true; }
+		else if (a == "--version" || a == "-v") { std::printf("jai_spider (JaiScript %s, SQLite %s)\n", jai::version().c_str(), sqlite3_libversion()); std::exit(0); }
+		else if (a == "--help" || a == "-h" || a == "/?") { print_usage(); std::exit(0); }
+		else if (!a.empty() && a[0] == '-') {
+			std::fprintf(stderr, "jai_spider: unknown flag: %s\n", a.c_str());
+			return 2;
+		}
+		else if (opt.app.empty()) { opt.app = a; }
+		else {
+			std::fprintf(stderr, "jai_spider: unexpected extra argument: %s\n", a.c_str());
 			return 2;
 		}
 	}
@@ -161,10 +204,6 @@ int parse_args(int argc, char** argv, options& opt) {
 	}
 	if (opt.backend != "vm" && opt.backend != "interp") {
 		std::fprintf(stderr, "jai_spider: unknown backend: %s (use vm or interp)\n", opt.backend.c_str());
-		return 2;
-	}
-	if (opt.port < 0 || opt.port > 65535) {
-		std::fprintf(stderr, "jai_spider: --port takes 0 to 65535\n");
 		return 2;
 	}
 	return -1;
@@ -238,7 +277,40 @@ void register_http_text(jai::engine& eng) {
 	eng.add_function("content_type_for", [](const std::string& path) { return spider_host::content_type_for(fs::path(path).extension().string()); });
 }
 
-bool is_loopback(const std::string& address) { return address.rfind("127.", 0) == 0 || address == "::1"; }
+bool is_loopback(const std::string& address) { return address.rfind("127.", 0) == 0; }
+
+// A Host header naming this machine: localhost, a 127.x address or [::1], with any port. A server listening on loopback
+// answers only these, so a page whose own name resolves to 127.0.0.1 (DNS rebinding) cannot reach it.
+bool host_names_loopback(const std::string& host) {
+	std::string name = host;
+	if (!name.empty() && name.front() == '[') {
+		name = name.substr(0, name.find(']') + 1);
+	} else {
+		name = name.substr(0, name.find(':'));
+	}
+	return spider_host::iequals(name, "localhost") || name == "[::1]" || is_loopback(name);
+}
+
+// text for the console: control bytes and bytes past ASCII as \xNN, so a request cannot write terminal escapes
+std::string printable(std::string_view text) {
+	std::string result;
+	for (unsigned char c : text) {
+		if (c < 0x20 || c >= 0x7F) {
+			char escaped[8];
+			std::snprintf(escaped, sizeof(escaped), "\\x%02X", c);
+			result += escaped;
+		} else {
+			result += static_cast<char>(c);
+		}
+	}
+	return result;
+}
+
+bool is_header_name(std::string_view name) {
+	return !name.empty() && std::all_of(name.begin(), name.end(), [](char c) {
+		return std::isalnum(static_cast<unsigned char>(c)) || std::string_view("!#$%&'*+-.^_`|~").find(c) != std::string_view::npos;
+	});
+}
 
 class app_host {
 public:
@@ -256,13 +328,13 @@ public:
 		}
 		app_dir_ = app_path_.parent_path();
 		if (!opt_.root.empty()) {
-			static_root_ = fs::weakly_canonical(fs::absolute(opt_.root, ec), ec);
-			if (!fs::is_directory(static_root_, ec)) {
+			static_root_ = fs::canonical(fs::absolute(opt_.root, ec), ec);
+			if (ec || !fs::is_directory(static_root_, ec)) {
 				std::cerr << colors_.red("jai_spider: --root is not a folder: " + opt_.root) << "\n";
 				return false;
 			}
 		} else if (fs::is_directory(app_dir_ / "public", ec)) {
-			static_root_ = fs::weakly_canonical(app_dir_ / "public", ec);
+			static_root_ = fs::canonical(app_dir_ / "public", ec);
 		}
 		eng_ = jai::engine::make();
 		eng_->set_backend(opt_.backend == "interp" ? jai::backend_type::interpreter : jai::backend_type::vm);
@@ -296,10 +368,18 @@ public:
 		const auto start = std::chrono::steady_clock::now();
 		spider_host::http_response response;
 		bool from_disk = false;
-		if (opt_.allow_shutdown && request.path == "/__spider/shutdown" && request.method == "POST" && is_loopback(request.remote_address)) {
-			response = spider_host::plain_response(200, "jai_spider: stopping");
-			response.stop_server = true;
-			response.close = true;
+		const std::string* host = request.header("host");
+		if (is_loopback(opt_.host) && host && !host_names_loopback(*host)) {
+			response = spider_host::plain_response(421, "421 Misdirected Request: this server answers localhost, 127.x and [::1] only");
+		} else if (!opt_.shutdown_token.empty() && request.path == "/__spider/shutdown" && request.method == "POST" && is_loopback(request.remote_address)) {
+			const std::string* token = request.header("x-spider-shutdown");
+			if (token && *token == opt_.shutdown_token) {
+				response = spider_host::plain_response(200, "jai_spider: stopping");
+				response.stop_server = true;
+				response.close = true;
+			} else {
+				response = spider_host::plain_response(403, "403 Forbidden: the shutdown request needs X-Spider-Shutdown with the --allow-shutdown token");
+			}
 		} else if (auto file = static_file(request)) {
 			response = std::move(*file);
 			from_disk = true;
@@ -312,7 +392,7 @@ public:
 			std::snprintf(timing, sizeof(timing), "%.2f ms", ms);
 			const std::string status = std::to_string(response.status);
 			const std::string painted = response.status >= 500 ? colors_.red(status) : response.status >= 400 ? colors_.yellow(status) : colors_.green(status);
-			std::cout << request.method << " " << request.target << " " << painted << " " << colors_.dim(std::string(timing) + (from_disk ? " (file)" : "")) << "\n";
+			std::cout << request.method << " " << printable(request.target) << " " << painted << " " << colors_.dim(std::string(timing) + (from_disk ? " (file)" : "")) << "\n";
 		}
 		std::cout.flush();
 		return response;
@@ -325,12 +405,12 @@ public:
 
 private:
 
-	// the checkout's lib/ while it is there, so an edit to spider.jai applies like an edit to the app; else the copy
-	// the build put beside the executable
+	// the copy the build put beside the executable; under --dev the checkout's lib/ while it is there, so an edit to
+	// spider.jai applies like an edit to the app
 	fs::path library_dir() const {
 		std::error_code ec;
 		const fs::path source = fs::path(JAI_SPIDER_SOURCE_LIBRARY_DIR);
-		if (fs::is_regular_file(source / "spider.jai", ec)) { return source; }
+		if (opt_.dev && fs::is_regular_file(source / "spider.jai", ec)) { return source; }
 		return fs::path(jai::engine::executable_path()).parent_path() / "jai_spider_lib";
 	}
 
@@ -373,8 +453,8 @@ private:
 		return changed;
 	}
 
-	// the error and its trace go to the log; the page shows them to a browser on this machine only
-	spider_host::http_response error_page(const spider_host::http_request& request, const std::string& detail) {
+	// the error and its trace go to the log; the page shows them only under --dev
+	spider_host::http_response error_page(const std::string& detail) {
 		spider_host::http_response response;
 		response.status = 500;
 		response.set_header("Content-Type", "text/html; charset=utf-8");
@@ -382,14 +462,14 @@ private:
 		response.body = "<!doctype html><meta charset=\"utf-8\"><title>500 Internal Server Error</title>"
 			"<style>body{font:15px/1.5 system-ui,sans-serif;margin:2rem;color:#222}pre{background:#f6f6f6;padding:1rem;overflow:auto;"
 			"border-left:4px solid #c33}</style><h1>500 Internal Server Error</h1>";
-		if (is_loopback(request.remote_address)) { response.body += "<pre>" + html_text(detail) + "</pre>"; }
+		if (opt_.dev) { response.body += "<pre>" + html_text(detail) + "</pre>"; }
 		response.body += "\n";
 		return response;
 	}
 
 	spider_host::http_response run_app(const spider_host::http_request& request) {
 		reload();
-		if (!loaded_) { return error_page(request, "The app did not load:\n" + failure_); }
+		if (!loaded_) { return error_page("The app did not load:\n" + failure_); }
 		apply_spin_options();
 		jai::script_value raw = script_map_of(eng_.get(), {
 			{"method", jai::script_value(request.method, eng_.get())},
@@ -411,9 +491,9 @@ private:
 			error = e.what();
 		}
 		while (!error.empty() && (error.back() == '\n' || error.back() == ' ')) { error.pop_back(); }
-		std::cerr << colors_.red("jai_spider: " + request.method + " " + request.path + " failed:") << "\n" << error << "\n";
+		std::cerr << colors_.red("jai_spider: " + request.method + " " + printable(request.path) + " failed:") << "\n" << error << "\n";
 		std::cerr.flush();
-		return error_page(request, error);
+		return error_page(error);
 	}
 
 	// spider::spin(handler, {"budget": s, "max_body": n}) over --budget and --max-body, from the next request on
@@ -445,27 +525,34 @@ private:
 
 	spider_host::http_response response_from(const spider_host::http_request& request, const jai::script_value& parts) {
 		spider_host::http_response response;
-		response.status = static_cast<int>(field_of(parts, "status").as_int());
-		if (response.status < 100 || response.status > 999) {
-			throw std::runtime_error("Response status " + std::to_string(response.status) + " is not an HTTP status");
+		const jai::script_int status = field_of(parts, "status").as_int();
+		if (status < 200 || status > 599) {
+			throw std::runtime_error("Response status " + std::to_string(status) + " is not a final HTTP status (200 to 599)");
 		}
-		std::string file;
-		for (const auto& [name, text] : field_of(parts, "headers").as_map()) {
-			if (spider_host::iequals(name.as_string(), "x-sendfile")) {
-				file = text.as_string();
-				continue;
+		response.status = static_cast<int>(status);
+		const std::string file = field_of(parts, "file").as_string();
+		for (const auto& [key, value] : field_of(parts, "headers").as_map()) {
+			const std::string name = key.as_string();
+			const std::string text = value.as_string();
+			if (!is_header_name(name) || text.find_first_of(std::string_view("\r\n\0", 3)) != std::string::npos) {
+				throw std::runtime_error("Response header '" + printable(name) + "' is not a header name, or its value holds a line break or NUL");
 			}
-			response.set_header(name.as_string(), text.as_string());
+			if (spider_host::is_hop_header(name) || spider_host::iequals(name, "x-sendfile")) { continue; }
+			response.set_header(name, text);
 		}
 		field_of(parts, "cookies").unchecked_array_node()->for_each(eng_.get(), [&](const jai::script_value& cookie) {
-			response.headers.emplace_back("Set-Cookie", cookie.as_string());
+			const std::string line = cookie.as_string();
+			if (line.find_first_of(std::string_view("\r\n\0", 3)) != std::string::npos) {
+				throw std::runtime_error("Response cookie '" + printable(line) + "' holds a line break or NUL");
+			}
+			response.headers.emplace_back("Set-Cookie", line);
 		});
 		if (!file.empty()) {
 			fs::path path = fs::path(file);
 			if (path.is_relative()) { path = app_dir_ / path; }
 			auto served = file_response(path, request, response.status);
 			if (!served) {
-				std::cerr << colors_.red("jai_spider: file(\"" + file + "\"): no such file") << "\n";
+				std::cerr << colors_.red("jai_spider: file(\"" + printable(file) + "\"): no such file") << "\n";
 				return spider_host::plain_response(404, "Not Found");
 			}
 			for (auto& [name, text] : response.headers) { served->set_header(name, text); }
@@ -476,7 +563,8 @@ private:
 		return response;
 	}
 
-	// a file under --root for GET and HEAD; dot-files, ".." and anything outside the root are never served
+	// a file under --root for GET and HEAD; a dot-file or dot-folder (judged on the file's real name, so an 8.3 short name
+	// such as ENV~1 is no way around it) and anything outside the root are never served
 	std::optional<spider_host::http_response> static_file(const spider_host::http_request& request) {
 		if (static_root_.empty() || (request.method != "GET" && request.method != "HEAD")) { return std::nullopt; }
 		fs::path candidate = static_root_;
@@ -494,9 +582,12 @@ private:
 		std::error_code ec;
 		if (fs::is_directory(candidate, ec)) { candidate /= "index.html"; }
 		if (!fs::is_regular_file(candidate, ec)) { return std::nullopt; }
-		const fs::path resolved = fs::weakly_canonical(candidate, ec);
+		const fs::path resolved = fs::canonical(candidate, ec);
 		const std::string root_text = static_root_.generic_string() + "/";
 		if (ec || resolved.generic_string().rfind(root_text, 0) != 0) { return std::nullopt; }
+		for (const fs::path& part : resolved.lexically_relative(static_root_)) {
+			if (part.native().empty() || part.native().front() == '.') { return std::nullopt; }
+		}
 		return file_response(resolved, request, 200);
 	}
 

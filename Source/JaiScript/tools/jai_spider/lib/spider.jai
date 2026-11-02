@@ -3,7 +3,7 @@
 // calls spider_host_serve once per request; the app hands its handler to spider::spin.
 //
 // The host functions it stands on: parse_cookies, parse_multipart, read_file and write_file;
-// web::parse_query is the web library's.
+// web::parse_query is the web library's, crypto::random_hex the crypto library's.
 
 namespace spider {
 
@@ -107,11 +107,17 @@ spider::Response redirect(string url, int status = 303) {
 	return r;
 }
 
-// a file from disk, relative to the app's folder, streamed by the host (the X-Sendfile header names it and never
-// leaves the server); its Content-Type follows the extension unless one is given
+// The files this request's handler named through spider::file, by a random token. The X-Sendfile header carries only
+// the token, so a header that arrived from elsewhere (an upstream answer passed through) never names a file.
+map<string, string> sent_files;
+
+// a file from disk, relative to the app's folder, streamed by the host; its Content-Type follows the extension unless
+// one is given
 spider::Response file(string path, string content_type = "") {
 	spider::Response r = spider::Response(200);
-	r.header("X-Sendfile", path);
+	string token = crypto::random_hex(16);
+	spider::sent_files[token] = path;
+	r.header("X-Sendfile", token);
 	if (content_type != "") { r.header("Content-Type", content_type); }
 	return r;
 }
@@ -238,7 +244,10 @@ map<string, var> spider_host_options() { return spider::spun_options; }
 
 map<string, var> spider_host_serve(map<string, var> raw) {
 	if (spider::spun == null) { throw "the app never handed a handler to spider::spin(handler)"; }
+	spider::sent_files = {};
 	spider::Request req = spider::Request(raw);
 	spider::Response resp = spider::to_response(spider::spun(req));
-	return {"status": resp.status, "headers": resp.headers, "cookies": resp.cookies, "body": resp.body};
+	string token = resp.header("X-Sendfile");
+	string file = token == "" ? "" : spider::sent_files.get(token, "");
+	return {"status": resp.status, "headers": resp.headers, "cookies": resp.cookies, "body": resp.body, "file": file};
 }

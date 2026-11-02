@@ -463,6 +463,13 @@ private:
 		if (!c) { return finish(false, "download: curl init failed"); }
 		curl_easy_setopt(c, CURLOPT_URL, url_.c_str());
 		curl_easy_setopt(c, CURLOPT_FOLLOWLOCATION, 1L);
+#if LIBCURL_VERSION_NUM >= 0x075500
+		curl_easy_setopt(c, CURLOPT_PROTOCOLS_STR, "http,https");
+		curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+#else
+		curl_easy_setopt(c, CURLOPT_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+		curl_easy_setopt(c, CURLOPT_REDIR_PROTOCOLS, static_cast<long>(CURLPROTO_HTTP | CURLPROTO_HTTPS));
+#endif
 		curl_easy_setopt(c, CURLOPT_FAILONERROR, 1L);
 		curl_easy_setopt(c, CURLOPT_USERAGENT, "jaiscript/1.0");
 		curl_easy_setopt(c, CURLOPT_WRITEFUNCTION, &download::curl_write);
@@ -488,7 +495,7 @@ private:
 	}
 	void run() {
 		{
-			const std::string head = "curl -sIL --max-time 30 " + shell_quote(url_) + " 2>/dev/null";
+			const std::string head = "curl -sIL --proto =http,https --proto-redir =http,https --max-time 30 " + shell_quote(url_) + " 2>/dev/null";
 			if (FILE* p = popen(head.c_str(), "r")) {
 				char line[512];
 				int64_t last = -1;
@@ -501,7 +508,7 @@ private:
 				if (last > 0) { total_.store(last); }
 			}
 		}
-		const std::string cmd = "curl -fsSL --retry 3 -o " + shell_quote(path_) + " " + shell_quote(url_) + " 2>&1";
+		const std::string cmd = "curl -fsSL --proto =http,https --proto-redir =http,https --retry 3 -o " + shell_quote(path_) + " " + shell_quote(url_) + " 2>&1";
 		FILE* p = popen(cmd.c_str(), "r");
 		if (!p) { return finish(false, "download: curl is required on this platform and could not be started"); }
 		std::string output;
@@ -523,10 +530,12 @@ private:
 	std::atomic<int64_t> received_{ 0 }, total_{ -1 };
 };
 
+// A download reaches the network and writes a file: start needs both privileges
 inline void register_fetch(jai::engine& eng) {
+	eng.register_privilege("network");
 	jai::dynamic_binder<download>(eng, "Download")
 		.constructor<>()
-		.method("start", &download::start, jai::filesystem)
+		.method("start", &download::start, {"filesystem", "network"})
 		.method("pump", &download::pump)
 		.method("done", &download::done)
 		.method("success", &download::success)

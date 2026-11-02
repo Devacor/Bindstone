@@ -29,13 +29,14 @@ import time
 HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "app"
 EXAMPLE = HERE.parent / "examples" / "guestbook"
+SHUTDOWN_TOKEN = "spider-test-token"
 
 
 class Server:
 	def __init__(self, exe, app_dir, backend, extra):
 		self.lines = queue.Queue()
 		self.log = []
-		args = [exe, str(app_dir / "app.jai"), "--port", "0", "--allow-shutdown", "--backend", backend] + extra
+		args = [exe, str(app_dir / "app.jai"), "--port", "0", "--allow-shutdown", SHUTDOWN_TOKEN, "--backend", backend] + extra
 		self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(app_dir))
 		threading.Thread(target=self._pump, daemon=True).start()
 		self.port = None
@@ -221,7 +222,7 @@ class Suite:
 		self.check("multipart files land in files()", got.get("files") == {"upload": {"filename": "notes.txt", "size": 18, "type": "text/plain", "data": "line one\r\nline two"}}, r.text())
 		r = self.request("POST", "/echo/body", "x" * 1000)
 		self.check("a Content-Length body arrives whole", r.json() == {"method": "POST", "body": "x" * 1000, "length": 1000})
-		chunked = b"POST /echo/body HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5;ext=1\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: 1\r\n\r\n"
+		chunked = b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n5;ext=1\r\nhello\r\n6\r\n world\r\n0\r\nX-Trailer: 1\r\n\r\n"
 		raw = self.raw(chunked)
 		self.check("a chunked body is decoded", b'"body":"hello world"' in raw, raw[:200].decode("latin-1"))
 
@@ -299,13 +300,20 @@ class Suite:
 
 	def errors(self):
 		r = self.request("GET", "/boom")
-		self.check("a run-time error is a 500 with the error for a local browser", r.status == 500 and b"Division by zero" in r.body, r.text()[:200])
+		self.check("a run-time error is a 500 with the error under --dev", r.status == 500 and b"Division by zero" in r.body, r.text()[:200])
 		self.check("the error is logged with its trace", self.wait_for_log("Division by zero") and "at <lambda>" in self.server.log_text())
 		r = self.request("GET", "/throw")
 		self.check("an uncaught throw is a 500", r.status == 500 and b"thrown from a handler" in r.body)
 		start = time.time()
 		r = self.request("GET", "/spin")
 		self.check("a runaway handler meets the budget", r.status == 500 and b"budget" in r.body and time.time() - start < 20, r.text()[:200])
+		for code in ("101", "999"):
+			r = self.request("GET", "/status/" + code)
+			self.check("status " + code + " is refused with a 500", r.status == 500 and b"is not a final HTTP status (200 to 599)" in r.body, r.text()[:200])
+		r = self.request("GET", "/bad-header")
+		self.check("a header value with a line break is a 500, never a split header", r.status == 500 and r.header("Injected") is None and b"Response header &#39;X-Bad&#39; is not a header name" in r.body, r.text()[:200])
+		r = self.request("GET", "/cookie-inject")
+		self.check("a cookie attribute holding ';' is refused", r.status == 500 and b"option &#39;path&#39; holds a &#39;;&#39; or a control character" in r.body, r.text()[:200])
 		r = self.request("GET", "/")
 		self.check("the process serves on after errors", r.status == 200)
 
@@ -352,10 +360,24 @@ class Suite:
 		(self.app_dir / "public" / ".hidden").write_text("secret", encoding="utf-8")
 		r = self.request("GET", "/.hidden")
 		self.check("a dot-file is never served", r.status == 404)
-		raw = self.raw(b"GET /../app.jai HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
-		self.check("a path that climbs out of the root is not served", raw.startswith(b"HTTP/1.1 404") and b"import" not in raw, raw[:80].decode("latin-1"))
-		raw = self.raw(b"GET /%2e%2e/app.jai HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
-		self.check("an encoded climb is not served either", raw.startswith(b"HTTP/1.1 404") and b"import" not in raw, raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET /../app.jai HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+		self.check("a path with a .. segment is 400", raw.startswith(b"HTTP/1.1 400") and b"import" not in raw, raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET /%2e%2e/app.jai HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+		self.check("an encoded .. segment is 400 too", raw.startswith(b"HTTP/1.1 400") and b"import" not in raw, raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET /files/..%2fapp.jai HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+		self.check("an encoded / inside a segment is 400, so a *rest capture never climbs", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
+		if os.name == "nt":
+			import ctypes
+			(self.app_dir / "public" / ".environment").write_text("secret", encoding="utf-8")
+			buffer = ctypes.create_unicode_buffer(1024)
+			ctypes.windll.kernel32.GetShortPathNameW(str(self.app_dir / "public" / ".environment"), buffer, 1024)
+			short = pathlib.Path(buffer.value).name
+			if short and short != ".environment":
+				r = self.request("GET", "/" + short)
+				self.check("a dot-file is not served by its 8.3 short name (" + short + ")", r.status == 404 and b"secret" not in r.body, str(r.status))
+		r = self.request("GET", "/forged-sendfile")
+		self.check("an X-Sendfile header spider::file did not write serves no file", r.status == 200 and r.text() == "forged", r.text()[:80])
+		self.check("X-Sendfile never reaches the client", r.header("X-Sendfile") is None, str(r.headers))
 		r = self.request("GET", "/download")
 		self.check("file(path) streams a file with the type it was given", r.status == 200 and r.header("Content-Type") == "text/x-test" and r.body == css, str(r.headers))
 		big = self.app_dir / "public" / "big.bin"
@@ -364,7 +386,7 @@ class Suite:
 		self.check("a large file streams whole", r.status == 200 and len(r.body) == 256 * 8192 and r.body == big.read_bytes())
 
 	def limits_and_framing(self):
-		raw = self.raw(b"GET / HTTP/1.1\r\nHost: t\r\n\r\nGET /posts/7 HTTP/1.1\r\nHost: t\r\nConnection: close\r\n\r\n")
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\nGET /posts/7 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
 		self.check("pipelined requests are answered in order", raw.count(b"HTTP/1.1 200") == 2 and raw.index(b"home") < raw.index(b'"7"'), raw.decode("latin-1")[:300])
 		c = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=10)
 		c.request("GET", "/")
@@ -374,20 +396,40 @@ class Suite:
 		second = c.getresponse()
 		self.check("keep-alive serves two requests on one connection", first.status == 200 and second.status == 200 and second.read() == b'{"id":"1"}')
 		c.close()
-		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 70000\r\n\r\n" + b"x" * 1000)
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nContent-Length: 70000\r\n\r\n" + b"x" * 1000)
 		self.check("a body over spin's max_body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
 		chunk = b"%x\r\n" % 40000 + b"y" * 40000 + b"\r\n"
-		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk + chunk)
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nTransfer-Encoding: chunked\r\n\r\n" + chunk + chunk)
 		self.check("a chunked body over spin's max_body is 413", raw.startswith(b"HTTP/1.1 413"), raw[:80].decode("latin-1"))
-		raw = self.raw(b"GET / HTTP/1.1\r\nHost: t\r\nX-Big: " + b"z" * 70000 + b"\r\n\r\n")
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nX-Big: " + b"z" * 70000 + b"\r\n\r\n")
 		self.check("a head over the limit is 431", raw.startswith(b"HTTP/1.1 431"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nX-A: b\nInjected: c\r\nConnection: close\r\n\r\n")
+		self.check("a bare LF inside a header field is 400", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: rebound.example:8080\r\nConnection: close\r\n\r\n")
+		self.check("a Host that is not this machine is 421 on a loopback listener", raw.startswith(b"HTTP/1.1 421"), raw[:80].decode("latin-1"))
+		raw = self.raw(b"GET / HTTP/1.1\r\nHost: [::1]:80\r\nConnection: close\r\n\r\n")
+		self.check("Host [::1] is this machine", raw.startswith(b"HTTP/1.1 200"), raw[:80].decode("latin-1"))
+		idle = [socket.create_connection(("127.0.0.1", self.server.port), timeout=10) for _ in range(128)]
+		try:
+			raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+			self.check("one address holds at most 128 connections", raw.startswith(b"HTTP/1.1 503") and b"from one address" in raw, raw[:120].decode("latin-1"))
+		finally:
+			for s in idle:
+				s.close()
+		served = False
+		for _ in range(50):
+			if self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").startswith(b"HTTP/1.1 200"):
+				served = True
+				break
+			time.sleep(0.1)
+		self.check("closed connections free their address's share", served)
 		raw = self.raw(b"NOT A REQUEST\r\n\r\n")
 		self.check("a malformed request line is 400", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
 		raw = self.raw(b"GET / HTTP/2.0\r\n\r\n")
 		self.check("an unknown version is 505", raw.startswith(b"HTTP/1.1 505"), raw[:80].decode("latin-1"))
-		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\nabc")
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nContent-Length: 3\r\nTransfer-Encoding: chunked\r\n\r\nabc")
 		self.check("Content-Length with Transfer-Encoding is 400", raw.startswith(b"HTTP/1.1 400"), raw[:80].decode("latin-1"))
-		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: t\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n", read_until_close=False)
+		raw = self.raw(b"POST /echo/body HTTP/1.1\r\nHost: localhost\r\nContent-Length: 5\r\nExpect: 100-continue\r\nConnection: close\r\n\r\n", read_until_close=False)
 		self.check("Expect: 100-continue is answered", raw.startswith(b"HTTP/1.1 100 Continue"), raw[:80].decode("latin-1"))
 		r = self.request("GET", "/", fresh=True)
 		self.check("the server serves on after malformed traffic", r.status == 200)
@@ -424,7 +466,7 @@ def run_backend(exe, runner, backend, verbose):
 	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_test_"))
 	app_dir = work / "app"
 	shutil.copytree(FIXTURE, app_dir)
-	server = Server(exe, app_dir, backend, ["--max-body", "1M", "--budget", "1", "--timeout", "10"])
+	server = Server(exe, app_dir, backend, ["--max-body", "1M", "--budget", "1", "--timeout", "10", "--dev"])
 	suite = Suite(server, app_dir, verbose)
 	try:
 		suite.run()
@@ -432,7 +474,9 @@ def run_backend(exe, runner, backend, verbose):
 			for transport in client_transports():
 				run_client(suite, runner, backend, transport)
 		r = suite.request("POST", "/__spider/shutdown", fresh=True)
-		suite.check("POST /__spider/shutdown stops the server", r.status == 200)
+		suite.check("POST /__spider/shutdown without the token is 403", r.status == 403)
+		r = suite.request("POST", "/__spider/shutdown", headers={"X-Spider-Shutdown": SHUTDOWN_TOKEN}, fresh=True)
+		suite.check("POST /__spider/shutdown with the token stops the server", r.status == 200)
 		try:
 			code = server.process.wait(timeout=10)
 			suite.check("the process exits cleanly after the shutdown request", code == 0, "exit code " + str(code))
@@ -458,7 +502,7 @@ def run_broken_start(exe, backend, verbose):
 	try:
 		suite.check("an app that does not load is reported at start", suite.wait_for_log("jai_spider: the app did not load:") and suite.wait_for_log("missing_name"))
 		r = suite.request("GET", "/greeting")
-		suite.check("an app that never loaded answers 500 with its listing", r.status == 500 and b"did not load" in r.body and b"missing_name" in r.body, r.text()[:300])
+		suite.check("an app that never loaded answers 500, its listing only in the log without --dev", r.status == 500 and b"missing_name" not in r.body, r.text()[:300])
 		suite.write_module("greeting.jai", 'string greeting() { return "fixed"; }\n')
 		r = suite.request("GET", "/greeting")
 		suite.check("the fixed app serves on the next request", r.status == 200 and r.text() == "fixed", r.text()[:300])

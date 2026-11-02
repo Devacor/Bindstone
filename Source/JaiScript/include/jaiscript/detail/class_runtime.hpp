@@ -1303,7 +1303,9 @@ inline bool class_definition::structural_key_shape_matches(size_t member_count, 
     return !structural_key_.empty() && key_member_count_ == member_count && key_base_count_ == base_count;
 }
 
-inline void class_definition::redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults, const std::unordered_map<uint64_t, script_value>& new_methods, const std::unordered_map<uint64_t, script_value>& new_static_methods, engine* engine_ref, bool structurally_identical, const std::function<void()>& discard_unwinding) {
+inline void class_definition::redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults, const std::unordered_map<uint64_t, script_value>& migration_values,
+                                             const std::unordered_map<uint64_t, script_value>& new_methods, const std::unordered_map<uint64_t, script_value>& new_static_methods,
+                                             engine* engine_ref, bool structurally_identical, const std::function<void()>& discard_unwinding) {
     if (engine_ref) { engine_ref->recover_parallel_registrations(); }
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
@@ -1347,15 +1349,15 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
 
     // A field that kept its id but changed declared type (int -> string) leaves the id-set
     // identical, so the comparison above stays false and migration would be skipped. The old
-    // stored default can't reveal this (instance-field defaults are null placeholders until
-    // the first reload), so detect it against a live instance: a held value whose kind no
-    // longer matches the new non-null default means the type changed. migrate_fields then
+    // stored default can't reveal this (instance-field defaults are null placeholders), so
+    // detect it against a live instance: a held value whose kind no longer matches the
+    // initializer's reload value means the type changed. migrate_fields then
     // resets exactly those fields.
     if (!fields_changed) {
         for (const auto& weak : registered_instances()) {
             auto instance = weak.lock();
             if (!instance) continue;
-            for (const auto& [id, new_default] : new_field_defaults) {
+            for (const auto& [id, new_default] : migration_values) {
                 if (new_default.is_null() || !instance->has_field_value(id)) continue;
                 if (instance->get_field(id).deref().current_type() != new_default.deref().current_type()) {
                     fields_changed = true;
@@ -1397,7 +1399,8 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     recompute_property_getters(new_methods, engine_ref);
 
     store_field_defaults(new_field_defaults, engine_ref);
-    const std::unordered_map<uint64_t, script_value> migrated_fields = get_all_field_defaults();
+    std::unordered_map<uint64_t, script_value> migrated_fields = get_all_field_defaults();   // the whole chain's, this class's reload values over its placeholders
+    for (const auto& [id, value] : migration_values) { migrated_fields.insert_or_assign(id, value); }
 
     // Migrate against a SNAPSHOT of the current instances. A hot_reload_migrate hook can
     // construct new same-class instances, which register mid-migration;
@@ -1434,7 +1437,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     std::vector<std::weak_ptr<class_definition>> derived_snapshot = derived_classes_;
     for (auto& weak_derived : derived_snapshot) {
         if (auto derived = weak_derived.lock()) {
-            derived->update_instances_from_base();
+            derived->update_instances_from_base(migration_values);
         }
     }
     derived_classes_.erase(
@@ -1443,16 +1446,19 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
         derived_classes_.end());
 }
 
-inline void class_definition::update_instances_from_base() {
+inline void class_definition::update_instances_from_base(const std::unordered_map<uint64_t, script_value>& base_migration_values) {
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
-    const auto& all_fields = get_all_field_defaults();
+    std::unordered_map<uint64_t, script_value> all_fields = get_all_field_defaults();
+    for (const auto& [id, value] : base_migration_values) {
+        if (auto own = field_defaults_.find(id); own == field_defaults_.end() && all_fields.count(id)) { all_fields.insert_or_assign(id, value); }   // the class's own field shadows the base's
+    }
     std::set<uint64_t> dummy_old_fields;
 
     // migrate_fields keeps each instance's runtime value but resets any field whose declared
     // type changed against its new non-null default — so a base reload that retypes an
-    // inherited field resets it on derived instances, while a base field still carrying a
-    // null placeholder (never reloaded) leaves derived runtime data untouched.
+    // inherited field resets it on derived instances (the base's reload values stand in for its
+    // null placeholders), while every other field leaves derived runtime data untouched.
     for (const auto& weak : registered_instances()) {
         if (auto instance = weak.lock()) {
             instance->migrate_fields(dummy_old_fields, all_fields);
@@ -1464,7 +1470,7 @@ inline void class_definition::update_instances_from_base() {
 
     for (auto& weak_derived : derived_classes_) {
         if (auto derived = weak_derived.lock()) {
-            derived->update_instances_from_base();
+            derived->update_instances_from_base(base_migration_values);
         }
     }
 }

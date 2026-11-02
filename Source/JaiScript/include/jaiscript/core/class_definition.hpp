@@ -1268,14 +1268,19 @@ public:
     // Deterministic fast-path observability (tests assert this instead of wall-clock).
     size_t identical_redefinitions() const { return identical_redefinitions_; }
 
+    // new_field_defaults are the class's defaults exactly as a first declaration stores them (a field with an initializer holds
+    // a placeholder its initializer fills per instance); migration_values are what each initializer evaluated to at the reload,
+    // the values a live instance's added, reset or retyped fields take
     inline void redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults,
+                        const std::unordered_map<uint64_t, script_value>& migration_values,
                         const std::unordered_map<uint64_t, script_value>& new_methods,
                         const std::unordered_map<uint64_t, script_value>& new_static_methods,
                         engine* engine_ref,
                         bool structurally_identical = false,
                         const std::function<void()>& discard_unwinding = {});
 
-    inline void update_instances_from_base();
+    // A reloaded base's live derived instances migrate against the chain's defaults, the base's reload values over them
+    inline void update_instances_from_base(const std::unordered_map<uint64_t, script_value>& base_migration_values);
     // one instance's hot_reload_migrate: a failure goes to the engine's script-error handler and the reload goes on
     void run_migrate_hook(script_value instance_value, const script_value& hook, engine* engine_ref, const std::function<void()>& discard_unwinding);
 

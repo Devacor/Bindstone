@@ -1252,7 +1252,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
                 inherited.emplace_back(const_cast<script_class_definition*>(static_cast<const script_class_definition*>(level)), std::move(fields), std::move(objects));
             }
         }
-        class_def->redefine_class(field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical, host.discard_unwinding);
+        class_def->redefine_class(new_field_defaults, field_defaults_with_engine, new_methods, new_static_methods, eng, structurally_identical, host.discard_unwinding);
         class_def->set_auto_accessor_ids(std::move(synthesized_accessor_ids));
         initialize_reloaded_fields(host, *class_def, per_instance_fields, reloaded_fields);
         for (auto& [level, fields, objects] : inherited) { initialize_reloaded_fields(host, *level, fields, objects); }

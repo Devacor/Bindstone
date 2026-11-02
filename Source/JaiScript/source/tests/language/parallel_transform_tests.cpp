@@ -3239,6 +3239,17 @@ public:
 						if (total != 64 * (4 + 2)) { got = "class " + n + " totals " + std::to_string(total); }
 					} catch (const std::exception& ex) { got = "class " + n + " error " + ex.what(); }
 				}
+				// a reload declares the classes again, one holding another by value: every region constructs the current ones
+				const std::string reloaded = "class RP { float x = 1.0; }\n"
+				                             "class RB { RP pos; int n = 2; }\n"
+				                             "parallel_for (int x : xs) { RB b; out[x] = cast<int>(b.pos.x) + b.n; }\n"
+				                             "total = 0; for (int v : out) { total += v; } total;";
+				for (int run = 0; run < 3 && got.empty(); ++run) {
+					try {
+						const int64_t total = e->execute(reloaded).as_int();
+						if (total != 64 * 3) { got = "reload " + std::to_string(run) + " totals " + std::to_string(total); }
+					} catch (const std::exception& ex) { got = "reload " + std::to_string(run) + " error " + ex.what(); }
+				}
 				check_eq(std::string(), got, vm ? "vm" : "interp");
 			}
 		});

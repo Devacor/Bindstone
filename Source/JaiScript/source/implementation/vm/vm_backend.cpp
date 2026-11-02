@@ -20700,6 +20700,21 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		script_value derefed = operand.deref();
 		operand = std::move(derefed);
 	}
+	if (!expr->return_of.empty()) [[unlikely]] {   // a parallel body's return: its function's conversion and text (KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr)
+		if (lvalue_source) {
+			script_value copy = clone_for_assignment(operand);
+			operand = std::move(copy);
+		}
+		auto converted = convert_return_at_site(std::move(operand), expr->target, return_conv::unclassified, expr->return_of);
+		if (!converted) {
+			return raise_from(converted);
+		}
+		if (is_unwinding_) [[unlikely]] {
+			return {};
+		}
+		stack_.push_back(std::move(converted.value()));
+		return {};
+	}
 	if (detail::cast_target_is_class(*expr->target)) {
 		auto out = detail::cast_class_value(std::move(operand), *expr, lvalue_source, engine_, symbolizer_);
 		if (!out) {

@@ -2281,10 +2281,12 @@ private:
 			? container.ti->element_type().get()
 			: (container.kind == ctype::map_k ? container.ti->value_type().get() : nullptr);
 		ctype result = ctype_from_type_info(element);
-		// Tentative for diagnostics; a scalar element of a declared, non-tentative typed container is a
+		// Tentative for diagnostics; a scalar element of a declared, non-tentative typed array is a
 		// proof source for the operand class (the typed rows guard it at runtime)
 		result.tentative = true;
-		result.element_proof = (!container.tentative || container.alias_proof) && (result.kind == ctype::int_k || result.kind == ctype::float_k);
+		// a map's missing key reads null: only an array's element proves
+		result.element_proof = container.kind == ctype::array_k && (!container.tentative || container.alias_proof) &&
+		                       (result.kind == ctype::int_k || result.kind == ctype::float_k);
 		return result;
 	}
 

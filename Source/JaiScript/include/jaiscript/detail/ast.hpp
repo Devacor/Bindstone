@@ -560,6 +560,8 @@ namespace jai {
         // An implicit arm where a reference may bind (an argument, a T& declaration, default or return): the arm is read as a
         // value, and its storage, when it names one, replaces the value
         bool binding_ref = false;
+        // a parallel body's rewritten `return e;` (parallel_transform.cpp): e converts as that function's return does, with its text
+        std::string_view return_of;
         expression_ptr operand;
         mutable const_site const_check;   // cast<T&>(c) / cast<shared_ptr<T>>(c) of a const
 

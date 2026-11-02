@@ -1698,6 +1698,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		}
 		auto d = std::make_shared<variable_decl>(call->location, p.is_reference ? inline_ref_type() : p.type, p.name, p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name), a);   // an element: its alias, as the call binds it
 		d->slot_index = base + p.slot_index;
+		if (!p.is_reference) { d->site_kind = variable_decl::site_parameter; d->site_owner = fn->name; }   // a guard's miss converts with the call's text
 		ctx.pins.push_back(d);
 		params.push_back(d); param_arg.push_back(SIZE_MAX);
 	}

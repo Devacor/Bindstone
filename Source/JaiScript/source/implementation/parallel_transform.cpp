@@ -108,6 +108,7 @@ namespace jai::detail {
 		cell_counters cells_folded{};   // this worker's block counters already folded into the engine's
 		parallel_schedule_cursor sched;   // this worker's place in the region's shared blocks (schedule null: the static partition)
 		std::vector<script_value> cursors;   // [0] = the range's chunk cursor, then the zip's arrays
+		std::optional<parallel_counted_sequence> counted;   // the counted form's range: cursor 0 only counts its elements
 		std::vector<script_value> call_args; // prepared at the barrier; no worker-entry allocation
 		// Live input vector ("safe AND free"): workers read the
 		// caller's vector directly - all-primitive elements (typed proof or one dynamic
@@ -2958,17 +2959,19 @@ namespace {
 	// Built per arity (the zip walks m arrays with m loop variables): params `var& __c0 .. __c{m-1},
 	// int __n`; a by-value loop variable that keeps its copy gets `__cj = __jai_parallel_element(j);`
 	// at the top of each iteration; inline mode grafts the body in place of the placeholder, call
-	// mode calls the body function per element (a `return` inside a nested loop keeps its meaning).
-	std::string chunk_skeleton_source(size_t arity, const std::vector<bool>& copy_per_iteration, bool call_mode) {
+	// mode calls the body function per element (a `return` inside a nested loop keeps its meaning). The counted form's variable
+	// takes `__jai_parallel_counted()`, the element's value of the sequence, by value (no element is stored).
+	std::string chunk_skeleton_source(size_t arity, const std::vector<bool>& copy_per_iteration, bool call_mode, bool counted) {
 		std::string src = "function __jai_parallel_chunk(";
-		for (size_t j = 0; j < arity; ++j) { src += "var& __c" + std::to_string(j) + ", "; }
+		for (size_t j = 0; j < arity; ++j) { src += (counted && j == 0 ? "var __c" : "var& __c") + std::to_string(j) + ", "; }
 		src += "int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { ";
 		if (call_mode) {
 			src += "__jai_parallel_body(";
-			for (size_t j = 0; j < arity; ++j) { src += (j ? ", __c" : "__c") + std::to_string(j); }
+			for (size_t j = 0; j < arity; ++j) { src += (j ? ", " : "") + (counted && j == 0 ? std::string("__jai_parallel_counted()") : "__c" + std::to_string(j)); }
 			src += "); ";
 		} else {
 			for (size_t j = 0; j < arity; ++j) {
+				if (counted && j == 0) { src += "__c0 = __jai_parallel_counted(); "; continue; }
 				if (copy_per_iteration[j]) { src += "__c" + std::to_string(j) + " = __jai_parallel_element(" + std::to_string(j) + "); "; }
 			}
 			src += "__jai_parallel_placeholder(); ";
@@ -3052,14 +3055,15 @@ namespace {
 		const bool reads_only = !adm.element_reach_all && !adm.element_mutated;
 		std::vector<bool> copy_per_iteration(arity, false);
 		for (size_t j = 0; j < arity; ++j) { copy_per_iteration[j] = !loop_params[j].is_reference && !reads_only; }
-		auto decl = parse_chunk_skeleton(eng, chunk_skeleton_source(arity, copy_per_iteration, !inline_mode).c_str());
+		const bool counted = stmt->counted();
+		auto decl = parse_chunk_skeleton(eng, chunk_skeleton_source(arity, copy_per_iteration, !inline_mode, counted).c_str());
 		chunk_names names;
 		names.n_slot = stmt->local_count; names.k_slot = stmt->local_count + 1;
 		for (size_t j = 0; j < arity; ++j) {
 			parameter lp = loop_params[j];
 			lp.slot_index = j;
 			if (lp.symbol_id == UINT64_MAX) { lp.symbol_id = eng.symbolize(lp.name); }
-			if (inline_mode) { lp.is_reference = lp.is_reference || reads_only; }
+			if (inline_mode) { lp.is_reference = !(counted && j == 0) && (lp.is_reference || reads_only); }
 			names.params.emplace_back(eng.get_symbolizer()->get_string(lp.symbol_id), lp.symbol_id);
 			if (inline_mode) { decl->parameters[j] = lp; }
 		}
@@ -3403,6 +3407,11 @@ namespace {
 					if (which >= slot->cursors.size()) { return script_value(std::monostate{}, eng_ptr); }
 					return slot->cursors[which];
 				}, &eng));
+			ctx->root_env->define(eng.symbolize("__jai_parallel_counted"),
+				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>&) -> checked_result<script_value> {
+					if (!slot->counted || slot->cursors.empty()) { return script_value(std::monostate{}, eng_ptr); }
+					return script_value(static_cast<script_int>(slot->counted->at(slot->cursors.front().element_cursor_index())), eng_ptr);
+				}, &eng));
 			auto chunk_fn = std::make_shared<script_defined_function>(
 				wrapper->name, std::vector<parameter>(wrapper->parameters), wrapper->return_type,
 				wrapper->body, ctx->root_env, wrapper->local_count);
@@ -3426,7 +3435,7 @@ namespace {
 		// failing element, when any, is the cursor's index (the advance runs after a body call).
 		ctx.cursors = std::move(ctx.element_refs);   // [0] = the range, then the zip's arrays
 		ctx.element_refs.clear();
-		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors, ctx.block, ctx.stride_blocks, ctx.sched.schedule ? &ctx.sched : nullptr); }
+		if (ctx.vm) { ctx.vm->set_parallel_cursors(&ctx.cursors, ctx.block, ctx.stride_blocks, ctx.sched.schedule ? &ctx.sched : nullptr, ctx.counted ? &*ctx.counted : nullptr); }
 		struct cursor_reset {
 			parallel_worker_slot& c;
 			~cursor_reset() {
@@ -4853,6 +4862,7 @@ struct region_plan {
 	std::vector<size_t> bounds;                                      // empty: the flat partition
 	const parallel_admission* extra_seed_adm = nullptr;              // weight fn types (transform)
 	bool zip_arrays_fresh = false;                                   // the zip's arrays were allocated by the caller this call (the transform's output): exclusive by construction
+	const parallel_counted_sequence* counted = nullptr;              // the counted form: the range is this sequence, containers[0] its cursor's anchor
 	uint64_t sliced_input = UINT64_MAX;                              // a captured array each element of which one worker alone reads (the reduce's input)
 #ifdef JAISCRIPT_VM_PROFILE
 	parallel_engine_state::region_phase_prof* prof = nullptr;
@@ -5150,7 +5160,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	script_array& node = boxed_range.is_array() ? *boxed_range.unchecked_get_array_storage() : *const_cast<script_array*>(source_node);
-	const size_t n = node.size();
+	const size_t n = plan.counted ? plan.counted->n : node.size();
 
 	// ELEMENT PROOF + NORMALIZATION (prove_elements): every element must end this pass
 	// exclusively-mutable - shared strings detach in place, the declared class of an
@@ -5169,7 +5179,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 	element_proof proof;
 	state.element_host_values.clear();
 	state.element_host_field = UINT64_MAX;
-	const bool skip_proof = !plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value));
+	const bool skip_proof = plan.counted || (!plan.inplace && (statically_all_scalar(array_value) || parallel_content_all_scalar(array_value)));
 	if (!skip_proof) {
 		state.faults.checkpoint("region.element_proof");
 		proof = prove_elements(eng, array_value, node, reach, plan.prefix, plan.inplace ? nullptr : &value_types, &handle_objects);
@@ -5258,11 +5268,17 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		}
 	}
 	// Disjoint index writes: the loop variable indexing an enclosing array takes distinct values, so no two elements write one slot
-	// (a value that is no int in range raises in its own iteration, as the serial loop's store does)
+	// (a value that is no int in range raises in its own iteration, as the serial loop's store does). The counted form's values
+	// are distinct by construction
 	auto index_node_of = [&](size_t index_param) -> const script_array* {
 		if (index_param == 0) { return &node; }
 		return index_param - 1 < zip_nodes.size() ? zip_nodes[index_param - 1] : nullptr;
 	};
+	auto index_at = [&](const script_array& index_node, size_t index_param, size_t p) -> script_value {
+		if (plan.counted && index_param == 0) { return script_value(static_cast<script_int>(plan.counted->at(p)), &eng); }
+		return index_node.get(p, &eng).deref();
+	};
+	auto index_count = [&](const script_array& index_node, size_t index_param) { return plan.counted && index_param == 0 ? n : index_node.size(); };
 	auto written_capture = [&](uint64_t name_id) -> const resolved_capture* {
 		for (const auto& cap : captures) {
 			if (cap.kind == parallel_capture_kind::written && cap.entry->name_id == name_id) { return &cap; }
@@ -5277,17 +5293,37 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		const resolved_capture* target = written_capture(iw.name_id);
 		if (repeated || !index_node || !target) { continue; }
 		const size_t slot_count = target->source->unchecked_array_node()->size();
+		auto intern_out_of_range = [&](script_int index) {   // the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
+			(void)eng.get_symbolizer()->intern(std::to_string(index));
+			(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
+		};
+		if (plan.counted && iw.index_param == 0) {
+			// a monotonic sequence leaves the slots at its start, its end or both: the first texts in element order, jumping the run inside
+			const parallel_counted_sequence& seq = *plan.counted;
+			const auto in_range = [&](size_t p) { const script_int v = seq.at(p); return v >= 0 && static_cast<uint64_t>(v) < slot_count; };
+			size_t interned = 0;
+			for (size_t p = 0; p < n && interned < k_index_write_texts;) {
+				if (!in_range(p)) {
+					intern_out_of_range(seq.at(p));
+					++interned;
+					++p;
+					continue;
+				}
+				// the first element past the slots: the value moving up crosses slot_count, moving down crosses 0
+				const uint64_t from = static_cast<uint64_t>(seq.at(p));
+				const uint64_t room = seq.up ? slot_count - 1 - from : from;
+				const uint64_t steps = room / seq.size + 1;
+				p = steps > n - p ? n : p + static_cast<size_t>(steps);
+			}
+			continue;
+		}
 		std::vector<size_t> writer(slot_count, SIZE_MAX);
 		size_t out_of_range = 0;
 		for (size_t p = 0; p < n && p < index_node->size(); ++p) {
 			const script_value at = index_node->get(p, &eng);
 			const script_value& index = at.deref();
 			if (index.is_int() && (index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= slot_count)) {
-				// the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
-				if (out_of_range++ < k_index_write_texts) {
-					(void)eng.get_symbolizer()->intern(std::to_string(index.unchecked_as_int()));
-					(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
-				}
+				if (out_of_range++ < k_index_write_texts) { intern_out_of_range(index.unchecked_as_int()); }
 				continue;
 			}
 			if (!index.is_int()) { continue; }
@@ -5658,8 +5694,12 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		// touch no cross-thread counts). An admitted body cannot retain it past its iteration
 		// (no lambdas, no 'new', stores deref, captured state is read-only, the result is discarded).
 		state.faults.checkpoint("region.cursor_storage", k);
+		slot->counted.reset();
+		if (plan.counted) { slot->counted = *plan.counted; }
 		if (slot->count > 0) {
-			slot->element_refs.push_back(script_value::make_element_reference(range_handle, slot->begin, &eng, element_type));
+			// the counted form's cursor rides its one-element anchor: only its index moves, and no read goes through it
+			slot->element_refs.push_back(script_value::make_element_reference(range_handle, plan.counted ? 0 : slot->begin, &eng, element_type));
+			if (plan.counted) { slot->element_refs.back().element_cursor_set(slot->begin); }
 			for (size_t j = 0; j < zip_nodes.size(); ++j) {
 				script_value& zc = containers[j + 1].is_reference() ? containers[j + 1].deref() : containers[j + 1];
 				auto& zhandle = zc.unchecked_get_array_storage();
@@ -5673,6 +5713,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 		state.faults.checkpoint("region.worker_arguments", slot->begin);
 		slot->call_args.reserve(slot->element_refs.size() + 1);
 		for (const auto& cursor : slot->element_refs) { slot->call_args.push_back(cursor); }
+		if (plan.counted && !slot->call_args.empty()) { slot->call_args.front() = script_value(static_cast<script_int>(0), &eng); }   // the chunk's by-value variable
 		slot->call_args.emplace_back(static_cast<script_int>(slot->count), &eng);
 #ifdef JAISCRIPT_VM_PROFILE
 		pf_cursor += __rdtsc() - pf_s2;
@@ -6156,9 +6197,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			const resolved_capture* target = written_capture(iw.name_id);
 			if (!index_node || !target) { continue; }
 			script_array* live = const_cast<script_array*>(target->source->unchecked_array_node());
-			for (size_t p = 0; p < limit && p < index_node->size(); ++p) {
-				const script_value at = index_node->get(p, &eng);
-				const script_value& index = at.deref();
+			for (size_t p = 0; p < limit && p < index_count(*index_node, iw.index_param); ++p) {
+				const script_value index = index_at(*index_node, iw.index_param, p);
 				if (!index.is_int() || index.unchecked_as_int() < 0 || static_cast<size_t>(index.unchecked_as_int()) >= live->size()) { continue; }
 				const size_t slot = static_cast<size_t>(index.unchecked_as_int());
 				const size_t k = owner(p);
@@ -6671,7 +6711,19 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 
 	region_plan plan;
 	plan.prefix = "parallel_for";
-	if (stmt->counted()) { plan.counted_variable = stmt->loop_param.name; }
+	parallel_counted_sequence counted;
+	if (stmt->counted()) {
+		plan.counted_variable = stmt->loop_param.name;
+		const script_array* described = array_value.unchecked_array_node();   // parallel_counted_range's [start, up, size, n]
+		counted.start = described->get(0, &eng).as_int();
+		counted.up = described->get(1, &eng).as_int() != 0;
+		counted.size = static_cast<uint64_t>(described->get(2, &eng).as_int());
+		counted.n = static_cast<size_t>(described->get(3, &eng).as_int());
+		plan.counted = &counted;
+		script_value anchor = script_value::make_array(nullptr, &eng);
+		anchor.unchecked_get_array_storage()->values().emplace_back(static_cast<script_int>(0), &eng);
+		containers.front() = std::move(anchor);
+	}
 	plan.containers = &containers;
 	plan.root_fn = body_fn;
 	plan.adm = adm;
@@ -6809,6 +6861,9 @@ checked_result<script_value> parallel_counted_range(engine& eng, const std::vect
 	const script_int comparison = args[3].deref().as_int();
 	const script_int step_op = args[4].deref().as_int();   // 1 ++, -1 --, 2 +=, -2 -=
 	script_value result = script_value::make_array(type_info_ptr(eng.get_type_info_int()), &eng);
+	auto& described = result.unchecked_get_array_storage()->ints();
+	described.assign(4, 0);   // [start, up, size, n]: zero elements until the bound holds
+	described[0] = a;
 	const bool holds = comparison == 0 ? a < b : comparison == 1 ? a <= b : comparison == 2 ? a > b : a >= b;
 	if (!holds) { return result; }   // the serial loop runs zero times
 	const bool up = step_op > 0 ? k > 0 : k < 0;
@@ -6831,13 +6886,9 @@ checked_result<script_value> parallel_counted_range(engine& eng, const std::vect
 		static const char* const overflow[] = { "Integer overflow in '-='", "Integer overflow in '--'", "", "Integer overflow in '++'", "Integer overflow in '+='" };
 		return refuse(make_error_code(runtime_error_code::invalid_numeric_operand), overflow[step_op + 2]);
 	}
-	if (!eng.execution_limits().memory_charge_items(n, sizeof(script_int))) { return raise_memory_cap(eng.execution_limits()); }
-	auto& values = result.unchecked_get_array_storage()->ints();
-	values.resize(static_cast<size_t>(n));
-	uint64_t travel = 0;   // i * size, within room for every i < n: the sum is the int it names
-	for (size_t i = 0; i < values.size(); ++i, travel += size) {
-		values[i] = static_cast<script_int>(up ? static_cast<uint64_t>(a) + travel : static_cast<uint64_t>(a) - travel);
-	}
+	described[1] = up ? 1 : 0;
+	described[2] = static_cast<script_int>(size);
+	described[3] = static_cast<script_int>(n);
 	return result;
 }
 

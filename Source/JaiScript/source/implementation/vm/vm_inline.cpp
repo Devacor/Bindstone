@@ -1044,7 +1044,7 @@ bool vm_compiler::plan_hoist(const expression_ptr& root, bool statement_position
 			std::shared_ptr<const function_decl> efn = ever_stamped(ce->proven_callee_decl) ? ce->proven_callee_decl.lock() : nullptr;
 			if (efn && inline_eligible(ce.get(), efn.get()) == nullptr) { call = ce; out.call = call; args_call = true; break; }
 			const std::string_view nm = static_cast<const identifier_expr*>(ce->callee.get())->name;
-			if (nm == "weak_from_this" || nm == "shared_from_this" || nm == "__jai_parallel_advance" || nm == "__jai_parallel_element") { out.why = "a call in the arguments of a call no probe pins"; return false; }
+			if (nm == "weak_from_this" || nm == "shared_from_this" || nm == "__jai_parallel_advance" || nm == "__jai_parallel_element" || nm == "__jai_parallel_counted") { out.why = "a call in the arguments of a call no probe pins"; return false; }
 			probe_pins.push_back(ce.get());   // any other callee: its probe runs in its place and the call takes the parked callee
 		}
 	}

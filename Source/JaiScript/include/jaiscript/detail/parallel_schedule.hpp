@@ -11,6 +11,19 @@
 
 namespace jai::detail {
 
+// The counted form's range (parallel_for (int i = a; i < b; i += k)): element p is a + p * k, never stored. Every value is an int
+// (parallel_counted_range refused a last step that would overflow), so the unsigned walk names it exactly
+struct parallel_counted_sequence {
+	int64_t start = 0;
+	uint64_t size = 0;   // |k|
+	bool up = true;
+	size_t n = 0;
+	int64_t at(size_t p) const noexcept {
+		const uint64_t travel = static_cast<uint64_t>(p) * size;
+		return static_cast<int64_t>(up ? static_cast<uint64_t>(start) + travel : static_cast<uint64_t>(start) - travel);
+	}
+};
+
 // A region's blocks, handed out in increasing order to whichever worker finishes its block first: a busy core takes fewer blocks.
 // Each worker starts on its own first block; owner records who ran each block (the join reads an index-written slot back from it).
 // A worker stops at its first error, the least index it ran, and every lower block was taken and ran to its end or to a lower

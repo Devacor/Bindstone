@@ -116,18 +116,9 @@ namespace jai {
         std::optional<script_defined_function> function;
         engine* eng = nullptr;
 
-        // A coroutine dropped while suspended: its frames die here, then the cells they shared are checked for cycles
-        ~interpreter_coroutine_state() override {
-            std::vector<script_value> shared;
-            for (auto& frame : saved_call_stack) {
-                if (frame.boxed_cells || (frame.function && frame.function->body && frame.function->body->shares_cells)) {
-                    script_value::gather_shared_cells(frame.locals.data(), frame.locals.size(), shared);
-                }
-            }
-            if (shared.empty()) { return; }
-            saved_call_stack.clear();
-            script_value::release_cell_cycles(shared, eng);
-        }
+        // A coroutine dropped while suspended: its frames die here, innermost first, then the cells they shared are checked for
+        // cycles; a handler it suspended in holds its thrown value only through its catch variable (interpreter.cpp)
+        ~interpreter_coroutine_state() override;
 
         void push_continuation(ast_node* node, size_t index,
                                std::shared_ptr<environment> env = nullptr,
@@ -154,6 +145,9 @@ namespace jai {
             }
         }
         bool has_continuations() const { return !continuations_.empty(); }
+        void drop_saved_containers(uint32_t phase) {
+            for (auto& point : continuations_) { if (point.phase == phase) { point.saved_container.reset(); } }
+        }
 
     private:
         std::vector<continuation_point> continuations_;

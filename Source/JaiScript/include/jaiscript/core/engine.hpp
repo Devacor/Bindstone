@@ -1406,6 +1406,9 @@ namespace jai {
         // The handler that bound `caught` is done and its variable let go: the thrown value dies, as C++ destroys the exception
         // object when its handler exits, unless a copy of the error (a capture, a stored e) still holds it
         void end_caught_error(const script_value& caught) noexcept;
+        // A suspended coroutine's frame dropped whole: its values die last slot first, and a handler it was suspended in lets go
+        // of its thrown value as the slot of its catch variable dies
+        void release_suspended_values(script_value* values, size_t count) noexcept;
         
         // Import management
         void reset_imports();

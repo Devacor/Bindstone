@@ -10247,6 +10247,23 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
     return detail::typed_slot_rejection(derefed_arg, *target_type, site, engine_);
 }
 
+interpreter_coroutine_state::~interpreter_coroutine_state() {
+    drop_saved_containers(interpreter::rp_catch);
+    parked_exception_value.reset();
+    std::vector<script_value> shared;
+    for (auto& frame : saved_call_stack) {
+        if (frame.boxed_cells || (frame.function && frame.function->body && frame.function->body->shares_cells)) {
+            script_value::gather_shared_cells(frame.locals.data(), frame.locals.size(), shared);
+        }
+    }
+    if (eng) {
+        for (size_t f = saved_call_stack.size(); f-- > 0;) { eng->release_suspended_values(saved_call_stack[f].locals.data(), saved_call_stack[f].locals.size()); }
+    }
+    if (shared.empty()) { return; }
+    saved_call_stack.clear();
+    script_value::release_cell_cycles(shared, eng);
+}
+
 script_value interpreter::make_coroutine_object(engine* eng, uint64_t type_id, std::shared_ptr<coroutine_handle> handle) {
     return script_value::make_coroutine_handle(type_id, std::static_pointer_cast<void>(handle), eng);
 }

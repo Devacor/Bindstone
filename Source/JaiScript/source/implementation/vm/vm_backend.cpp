@@ -705,13 +705,18 @@ struct vm_backend::vm_coroutine_state : coroutine_backend_state {
 		if (parked) { ++*parked_counter; } else { --*parked_counter; }
 	}
 
-	// A fiber dropped while suspended: its window dies here, then the cells it shared are checked for cycles
+	// A fiber dropped while suspended: its window dies here, last slot first, then the cells it shared are checked for cycles; a
+	// handler it suspended in holds its thrown value only through its catch variable
 	~vm_coroutine_state() override {
 		if (parked_counted && parked_counter) { --*parked_counter; }
-		if (!body_chunk || !body_chunk->shares_cells || !f.window_backed) { return; }
+		if (!f.window_backed) { return; }
+		for (auto& record : try_storage) { if (record.caught_scope) { record.caught_scope->dismiss(); } }
+		parked_exception_value.reset();
 		std::vector<script_value> shared;
 		const size_t end = std::min(stack_storage.size(), f.window_base + f.window_live);
-		if (end > f.window_base) { script_value::gather_shared_cells(&stack_storage[f.window_base], end - f.window_base, shared); }
+		if (end <= f.window_base) { return; }
+		if (body_chunk && body_chunk->shares_cells) { script_value::gather_shared_cells(&stack_storage[f.window_base], end - f.window_base, shared); }
+		if (eng) { eng->release_suspended_values(&stack_storage[f.window_base], end - f.window_base); }
 		if (shared.empty()) { return; }
 		stack_storage.clear();
 		script_value::release_cell_cycles(shared, eng);

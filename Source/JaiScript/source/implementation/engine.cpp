@@ -5740,6 +5740,13 @@ void engine::end_caught_error(const script_value& caught) noexcept {
     } catch (...) {}
 }
 
+void engine::release_suspended_values(script_value* values, size_t count) noexcept {
+    for (size_t i = count; i-- > 0;) {
+        script_value dying = std::move(values[i]);
+        if (dying.raw_storage_index() == script_value::TYPEID_STRING && !impl->caught_errors_.empty()) { end_caught_error(dying); }
+    }
+}
+
 std::optional<script_value> engine::caught_error_member(const script_value& receiver, uint64_t member_id) {
     const script_value& r = receiver.deref();
     if (impl->caught_errors_.empty() || r.raw_storage_index() != script_value::TYPEID_STRING) { return std::nullopt; }

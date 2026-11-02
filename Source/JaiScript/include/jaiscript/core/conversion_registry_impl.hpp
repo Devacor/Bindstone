@@ -116,7 +116,7 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
     // copy-assignable, and the assignability trait lies for types holding vector<unique_ptr<...>>
     // members (hard error inside vector::operator=). Copy construction is all we require.
     auto registry = eng ? get_engine_conversion_registry(eng) : nullptr;
-    auto convertedKey = [&](const script_value& k) -> K {
+    auto converted_key = [&](const script_value& k) -> K {
         if constexpr (detail::is_script_value_v<K>) {
             return k;
         } else {
@@ -126,7 +126,7 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
             return k.as<K>();
         }
     };
-    auto convertedValue = [&](const script_value& val) -> V {
+    auto converted_value = [&](const script_value& val) -> V {
         if constexpr (detail::is_script_value_v<V>) {
             return val;
         } else {
@@ -137,9 +137,9 @@ std::map<K, V> convert_script_map_to_stdmap(const script_value& v, engine* eng) 
         }
     };
     for (const auto& [k, val] : m) {
-        K key = convertedKey(k);
+        K key = converted_key(k);
         result.erase(key); // last-wins if two script keys convert to the same K
-        result.emplace(std::move(key), convertedValue(val));
+        result.emplace(std::move(key), converted_value(val));
     }
     return result;
 }

@@ -636,7 +636,7 @@ private:
         const detail::native_constructor_state& st = *static_cast<const detail::native_constructor_state*>(state);
         std::shared_ptr<T> cpp_obj;
         if constexpr (sizeof...(Args) != 0) {
-            cpp_obj = dynamic_binder<T>::template createObjectImpl<Args...>(args, std::index_sequence_for<Args...>{}, st.eng);
+            cpp_obj = dynamic_binder<T>::template create_object<Args...>(args, std::index_sequence_for<Args...>{}, st.eng);
         } else if constexpr (has_engine_constructor<T>) {
             cpp_obj = std::make_shared<T>(st.eng);
         } else {
@@ -890,9 +890,9 @@ public:
         // args[0] is 'this'; the class's dispatch called this overload for its arity
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
         if constexpr (IsConst) {
-            return dynamic_binder<T>::callConstMethodImpl(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+            return dynamic_binder<T>::call_const_method(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
         } else {
-            return dynamic_binder<T>::callMethodImpl(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
+            return dynamic_binder<T>::call_method(cpp_obj, std::bit_cast<Method>(st.method), args, std::index_sequence_for<Args...>{}, st.eng);
         }
     }
 
@@ -904,9 +904,9 @@ public:
         T* cpp_obj = detail::extract_cpp_object_ptr<T>(args[0], st.native_type_id);
         if constexpr (stateless_callable<Callable>()) {
             Callable callable{};
-            return callLambdaWithSelf<R, ArgsTuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
+            return call_lambda_with_self<R, ArgsTuple>(callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
         } else {
-            return callLambdaWithSelf<R, ArgsTuple>(st.callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
+            return call_lambda_with_self<R, ArgsTuple>(st.callable, cpp_obj, args, std::make_index_sequence<traits::arity>{}, st.eng);
         }
     }
 
@@ -1056,7 +1056,7 @@ public:
         binding_traits::check_binding_validity<Callable>(name);
         using traits = detail::function_traits<std::decay_t<Callable>>;
         constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value;
-        class_def_->add_static_method(name, writeback_tagged<writeback>(make_functionBinder(std::forward<Callable>(callable), &engine_).bind()), traits::arity);
+        class_def_->add_static_method(name, writeback_tagged<writeback>(make_function_binder(std::forward<Callable>(callable), &engine_).bind()), traits::arity);
         return *this;
     }
 
@@ -1925,7 +1925,7 @@ private:
             make_carrier<std::tuple_element_t<Is + Skip, ArgsTuple>, Is, Offset>(args, eng)... };
     }
     template<typename R, typename ArgsTuple, size_t Skip, size_t Offset, typename Invoke, size_t... Is>
-    static checked_result<script_value> callWithWriteback(Invoke&& invoke, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static checked_result<script_value> call_with_writeback(Invoke&& invoke, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
         auto carriers = make_carriers<ArgsTuple, Skip, Offset>(args, eng, std::index_sequence<Is...>{});
@@ -1936,14 +1936,14 @@ private:
 
     // Helper method for creating objects with arguments
     template<typename... Args, size_t... Is>
-    static std::shared_ptr<T> createObjectImpl(const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static std::shared_ptr<T> create_object(const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
         if constexpr (detail::host_writeback_mask<Args...>() != 0) {
             std::shared_ptr<T> made;
-            auto result = callWithWriteback<void, std::tuple<Args...>, 0, 0>([&made](auto&&... a) { made = std::make_shared<T>(std::forward<decltype(a)>(a)...); },
+            auto result = call_with_writeback<void, std::tuple<Args...>, 0, 0>([&made](auto&&... a) { made = std::make_shared<T>(std::forward<decltype(a)>(a)...); },
                                                                          args, std::index_sequence<Is...>{}, eng);
             if (!result) { throw_checked_error(eng, result.message(), result.symbol_id(), result.symbol_id2()); }
             return made;
@@ -1956,13 +1956,13 @@ private:
 
     // Helper method for calling member functions
     template<typename R, typename... Args, size_t... Is>
-    static auto callMethodImpl(T* obj, R(T::*method)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto call_method(T* obj, R(T::*method)(Args...), const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
         if constexpr (detail::host_writeback_mask<Args...>() != 0) {
-            return callWithWriteback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
+            return call_with_writeback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
                                                                args, std::index_sequence<Is...>{}, eng);
         } else if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
@@ -1975,13 +1975,13 @@ private:
     
     // Helper method for calling const member functions
     template<typename R, typename... Args, size_t... Is>
-    static auto callConstMethodImpl(const T* obj, R(T::*method)(Args...) const, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto call_const_method(const T* obj, R(T::*method)(Args...) const, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
         if constexpr (detail::host_writeback_mask<Args...>() != 0) {
-            return callWithWriteback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
+            return call_with_writeback<R, std::tuple<Args...>, 0, 1>([obj, method](auto&&... a) -> decltype(auto) { return (obj->*method)(std::forward<decltype(a)>(a)...); },
                                                                args, std::index_sequence<Is...>{}, eng);
         } else if constexpr (std::is_void_v<R>) {
             (obj->*method)(detail::value_converter<Args>::from(args[Is + 1], eng)...);
@@ -1994,13 +1994,13 @@ private:
     
     // Helper method for calling lambdas/callables
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static auto callCallableImpl(Callable&& callable, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto call_callable(Callable&& callable, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
 
         if constexpr (detail::tuple_writeback_mask<ArgsTuple>::value != 0) {
-            return callWithWriteback<R, ArgsTuple, 0, 0>(callable, args, std::index_sequence<Is...>{}, eng);
+            return call_with_writeback<R, ArgsTuple, 0, 0>(callable, args, std::index_sequence<Is...>{}, eng);
         } else if constexpr (std::is_void_v<R>) {
             callable(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
             return script_value(std::monostate{}, eng); // null for void
@@ -2012,11 +2012,11 @@ private:
     
     // Helper method for calling lambdas with self parameter
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static auto callLambdaWithSelf(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto call_lambda_with_self(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // We need to call the lambda with:
         // - self as the first argument
         // - remaining args starting from args[1] mapped to tuple indices 1, 2, 3...
-        return callLambdaWithSelfImpl<R, ArgsTuple, Callable>(
+        return call_lambda_with_self_impl<R, ArgsTuple, Callable>(
             std::forward<Callable>(callable), self, args, 
             std::make_index_sequence<sizeof...(Is) - 1>{}, eng
         );
@@ -2024,7 +2024,7 @@ private:
     
     // implementation helper that correctly maps arguments
     template<typename R, typename ArgsTuple, typename Callable, size_t... Is>
-    static auto callLambdaWithSelfImpl(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
+    static auto call_lambda_with_self_impl(Callable&& callable, T* self, const std::vector<script_value>& args, std::index_sequence<Is...>, engine* eng) {
         // Create parameter storage on stack
         detail::parameter_storage storage;
         detail::parameter_storage::scope_guard guard(eng, &storage);
@@ -2032,11 +2032,11 @@ private:
         if constexpr (detail::tuple_writeback_mask<ArgsTuple, 1>::value != 0) {
             auto invoke = [&callable, self](auto&&... a) -> decltype(auto) { return callable(*self, std::forward<decltype(a)>(a)...); };
             if constexpr (std::is_reference_v<R> && std::is_same_v<std::remove_reference_t<R>, T>) {
-                auto result = callWithWriteback<void, ArgsTuple, 1, 1>([&invoke](auto&&... a) { invoke(std::forward<decltype(a)>(a)...); },
+                auto result = call_with_writeback<void, ArgsTuple, 1, 1>([&invoke](auto&&... a) { invoke(std::forward<decltype(a)>(a)...); },
                                                                    args, std::index_sequence<Is...>{}, eng);
                 return result ? checked_result<script_value>(args[0]) : result;
             } else {
-                return callWithWriteback<R, ArgsTuple, 1, 1>(invoke, args, std::index_sequence<Is...>{}, eng);
+                return call_with_writeback<R, ArgsTuple, 1, 1>(invoke, args, std::index_sequence<Is...>{}, eng);
             }
         } else if constexpr (std::is_void_v<R>) {
             // Call with self as first argument, then args[1], args[2], etc.

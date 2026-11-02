@@ -192,11 +192,11 @@ public:
 			// a script call meets the overload set first: the bound callable's own count check answers a host's direct call
 			auto e = host(true);
 			auto text = [](const checked_result<script_value>& r) { return format_error_message_numeric(r.message(), r.symbol_id(), r.symbol_id2()); };
-			auto by_value = make_functionBinder([](int64_t x) { return -x; }, e.get()).bind();
+			auto by_value = make_function_binder([](int64_t x) { return -x; }, e.get()).bind();
 			check_eq(std::string("Function expects 1 argument, got 2"), text(by_value(std::vector<script_value>(2, script_value(int64_t{1}, e.get())))));
-			auto by_reference = make_functionBinder([](int64_t& x) { x = 1; }, e.get()).bind();
+			auto by_reference = make_function_binder([](int64_t& x) { x = 1; }, e.get()).bind();
 			check_eq(std::string("Function expects 1 argument, got 0"), text(by_reference(std::vector<script_value>{})));
-			auto two = make_functionBinder([](int64_t a, int64_t b) { return a + b; }, e.get()).bind();
+			auto two = make_function_binder([](int64_t a, int64_t b) { return a + b; }, e.get()).bind();
 			check_eq(std::string("Function expects 2 arguments, got 1"), text(two(std::vector<script_value>(1, script_value(int64_t{1}, e.get())))));
 		});
 

@@ -836,16 +836,16 @@ class engine;
 
     // Main function binder
     template<typename Func>
-    class FunctionBinder {
+    class function_binder {
     public:
-        explicit FunctionBinder(Func f, engine* eng) : func_(std::move(f)), engine_(eng) {}
+        explicit function_binder(Func f, engine* eng) : func_(std::move(f)), engine_(eng) {}
         
         script_function bind() {
             using traits = detail::function_traits<Func>;
             using args_tuple = typename traits::argument_types;
             
             // IMPORTANT: capture func_ by value and engine pointer, not this!
-            // The FunctionBinder is temporary and will be destroyed after add_function returns
+            // The function_binder is temporary and will be destroyed after add_function returns
             
             if constexpr (!detail::host_lane_params<args_tuple>()) {
                 // Use reference-aware calling for functions with reference parameters
@@ -865,7 +865,7 @@ class engine;
 
                     // Call with reference support, catching any C++ exceptions
                     try {
-                        return FunctionBinder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                        return function_binder::call_with_reference_support<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                     } catch (const std::exception& e) {
                         return host_exception_error(eng, detail::native_exception_text(e));
                     }
@@ -894,7 +894,7 @@ class engine;
                 }
 
                 try {
-                    return FunctionBinder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
+                    return function_binder::call_impl_static<return_type, args_tuple>(func, args, std::make_index_sequence<traits::arity>{}, eng);
                 } catch (const std::exception& e) {
                     return host_exception_error(eng, detail::native_exception_text(e));
                 }
@@ -1106,8 +1106,8 @@ class engine;
     // Helper function to create a binder
     // The binding owns a copy of the callable: an lvalue argument is copied, never referenced
     template<typename Func>
-    FunctionBinder<std::decay_t<Func>> make_functionBinder(Func&& f, engine* eng) {
-        return FunctionBinder<std::decay_t<Func>>(std::forward<Func>(f), eng);
+    function_binder<std::decay_t<Func>> make_function_binder(Func&& f, engine* eng) {
+        return function_binder<std::decay_t<Func>>(std::forward<Func>(f), eng);
     }
     
 } // namespace jai

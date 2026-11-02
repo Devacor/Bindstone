@@ -10,7 +10,7 @@
 ## Current Implementation Status
 
 ✅ **Architecture Successfully Implemented**
-- Minimal template usage achieved - only in Value extraction and FunctionBinder
+- Minimal template usage achieved - only in Value extraction and function_binder
 - PIMPL pattern used for Engine class
 - Type-erased Value system working with std::variant
 - Clean separation of interface and implementation

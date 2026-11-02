@@ -35,10 +35,10 @@ public:
 		e->execution_budget(0);
 		jai::stdlib::register_all(e);
 		engine* eng = e.get();
-		e->add_functionWithArity("fraw", [eng](const std::vector<script_value>& a) -> checked_result<script_value> {
+		e->add_function_with_arity("fraw", [eng](const std::vector<script_value>& a) -> checked_result<script_value> {
 			return script_value(a[0].unchecked_as_float() + 1.0, eng);
 		}, 1);
-		e->add_functionWithArity("fbound", make_functionBinder([](double k) { return k + 1.0; }, eng).bind(), 1);
+		e->add_function_with_arity("fbound", make_function_binder([](double k) { return k + 1.0; }, eng).bind(), 1);
 		e->add_function("fs", [](double k) { return k + 1.0; });
 		e->add_function("fs2", [](double a, double b) { return a + b; });
 		e->add_function("fset", [](double k) { return k + 1.0; });

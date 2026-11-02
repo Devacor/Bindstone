@@ -114,6 +114,8 @@ namespace jai {
         bool literal_;
     };
 
+    // The host API is what the embedding pages and the reference document (docs/site/stability.html); the other public members
+    // are the backends' hooks into the engine and can change or go in any release
     class engine : public std::enable_shared_from_this<engine> {
     private:
         engine();
@@ -179,8 +181,8 @@ namespace jai {
         
         // Primary API - execute methods
         // A result handed out of the engine is a held_value (value.hpp): readable until the engine is destroyed, then it throws
-        held_value execute(const std::string& scriptContent);
-        held_value execute(const std::string& scriptContent, const instance_variables& instanceVars);
+        held_value execute(const std::string& script_content);
+        held_value execute(const std::string& script_content, const instance_variables& instanceVars);
 
         // Literal fast lane: execute(script_source("...")) re-executes through a
         // pointer+length-keyed cache — the content is never re-keyed on a hit. A
@@ -189,12 +191,12 @@ namespace jai {
         // std::string overloads are untouched.
         held_value execute(script_source source);
 
-        // execute_file attributes the script to `scriptPath`: the path is stamped onto
+        // execute_file attributes the script to `script_path`: the path is stamped onto
         // every AST node (file:line:col), so stack traces, error messages, and the
         // debugger name the originating file. Prefer this over execute() for files —
         // the source path is carried for free, no debugging-only parameter to pass.
-        held_value execute_file(const std::string& scriptPath);
-        held_value execute_file(const std::string& scriptPath, const instance_variables& instanceVars);
+        held_value execute_file(const std::string& script_path);
+        held_value execute_file(const std::string& script_path, const instance_variables& instanceVars);
 
         // Automatic jaibite disk cache (default ON). Every FILE-based load — execute_file,
         // script include (all forms), script import — transparently maintains a cache file
@@ -214,35 +216,35 @@ namespace jai {
         bool jaibite_cache() const;
         size_t jaibite_cache_write_failures() const;
         // Hosts whose sources are read-only (a mobile app bundle) send the cache elsewhere: with a
-        // directory set, every cache is written below it at the source's path relative to sourceRoot
-        // (a source outside sourceRoot, or with no root given, mirrors its whole path, a drive as its
+        // directory set, every cache is written below it at the source's path relative to source_root
+        // (a source outside source_root, or with no root given, mirrors its whole path, a drive as its
         // first folder). When the directory holds no valid cache for a source, a valid one in the .cache
         // folder beside it still loads (never rewritten there), so a bundle can ship its caches. Empty
         // restores the folder beside each source.
-        void jaibite_cache_directory(const std::string& directory, const std::string& sourceRoot = {});
+        void jaibite_cache_directory(const std::string& directory, const std::string& source_root = {});
         std::string jaibite_cache_directory() const;
-        // The cache file the engine writes for sourcePath (empty for a .jaibite source, which keeps none)
-        std::string jaibite_cache_path(const std::string& sourcePath) const;
+        // The cache file the engine writes for source_path (empty for a .jaibite source, which keeps none)
+        std::string jaibite_cache_path(const std::string& source_path) const;
 
         // Execute already-read script file contents with jaibite disk-cache maintenance
-        // keyed beside resolvedPath — for hosts that read files through their own VFS but
+        // keyed beside resolved_path — for hosts that read files through their own VFS but
         // still want the sibling cache (engine-side file loads use it internally).
         // Identical to execute(content) + path attribution when the cache is disabled or
         // the path is a .jaibite itself.
-        script_value execute_file_source(const std::string& resolvedPath, const std::string& content);
+        script_value execute_file_source(const std::string& resolved_path, const std::string& content);
         // include: the file runs at the include site, in the current scope and under the running unit, so
         // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
         // include runs in (empty at program scope): an enum the file declares there stays local to it.
-        script_value execute_include_source(const std::string& resolvedPath, const std::string& content, std::string_view scope = {});
+        script_value execute_include_source(const std::string& resolved_path, const std::string& content, std::string_view scope = {});
         // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
         // module's closure under the stamp it was read at, so a later change to it re-runs the module.
-        bool read_include_file(const std::string& resolvedPath, std::string& content);
+        bool read_include_file(const std::string& resolved_path, std::string& content);
 
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
         // backend also caches its compiled bytecode inside the bite). Engine-bound —
         // never share a jaibite across engines. Parse errors throw here.
-        jai::jaibite jaibite(const std::string& scriptContent);
+        jai::jaibite jaibite(const std::string& script_content);
         held_value execute(jai::jaibite& bite);
 
         // === SUSPENDABLE RUNS (<jaiscript/core/script_run.hpp>; docs/site/embedding/17-host-api.html#suspendable-runs) ===
@@ -250,9 +252,9 @@ namespace jai {
         // script_run resumes it. A run from source, a file or a jaibite reports a failure as execute() does (the call that ends
         // the run throws it); a callable's run reports it through result(). A jaibite must outlive its run. execute() never
         // suspends: a sleep outside a run blocks.
-        script_run start(const std::string& scriptContent);
-        script_run start_file(const std::string& scriptPath);
-        script_run start_file_source(const std::string& resolvedPath, const std::string& content);   // execute_file_source's run
+        script_run start(const std::string& script_content);
+        script_run start_file(const std::string& script_path);
+        script_run start_file_source(const std::string& resolved_path, const std::string& content);   // execute_file_source's run
         script_run start(jai::jaibite& bite);
         script_run start(const script_value& callable, std::vector<script_value> args = {});
 
@@ -310,7 +312,7 @@ namespace jai {
 
         // Parse (cached) + check, without running or gating — tooling entry point.
         // Throws parse_error if the source doesn't parse (checking is post-parse).
-        check_report check(const std::string& scriptContent);
+        check_report check(const std::string& script_content);
 
         // Diagnostics from the most recent checked execute()/jaibite path.
         const check_report& last_check_diagnostics() const;
@@ -821,7 +823,7 @@ namespace jai {
         void add_variadic_function(const std::string& name, script_function func, std::initializer_list<std::string_view> names) {
             add_variadic_function(name, std::move(func), std::span(names.begin(), names.size()));
         }
-        void add_functionWithArity(const std::string& name, script_function func, size_t arity);
+        void add_function_with_arity(const std::string& name, script_function func, size_t arity);
         
         // Typed function registration with automatic overloading
         // Use this for functions with specific C++ signatures
@@ -835,8 +837,8 @@ namespace jai {
             using return_type = typename traits::return_type;
             constexpr size_t arity = traits::arity;
             
-            auto binder = make_functionBinder(std::forward<Func>(func), this);
-            script_function boundFunc = binder.bind();
+            auto binder = make_function_binder(std::forward<Func>(func), this);
+            script_function bound_func = binder.bind();
             stage_host_result(host_result_kind<return_type>());
             if constexpr (detail::host_lane_params<typename traits::argument_types>() && std::is_same_v<Requirements, privilege>) {
                 if (required == privilege::none) {
@@ -845,20 +847,20 @@ namespace jai {
                 }
             }
             
-            script_function wrappedFunc = guard_function(std::move(boundFunc), std::move(required));
+            script_function wrapped_func = guard_function(std::move(bound_func), std::move(required));
             if constexpr (constexpr uint64_t writeback = detail::tuple_writeback_mask<typename traits::argument_types>::value; writeback != 0) {
-                wrappedFunc = host_writeback_function{ std::move(wrappedFunc), writeback };
+                wrapped_func = host_writeback_function{ std::move(wrapped_func), writeback };
             }
             
-            std::vector<param_type_info> paramTypes = extract_parameter_types_with_info<Func>();
+            std::vector<param_type_info> param_types = extract_parameter_types_with_info<Func>();
 
             // Check if this should be registered as an overload
             if (has_function(name)) {
                 // Automatically convert to overloaded function with type info
-                add_overloaded_function_with_full_types(name, arity, wrappedFunc, paramTypes);
+                add_overloaded_function_with_full_types(name, arity, wrapped_func, param_types);
             } else {
                 // Register normally but store arity info for future overloading
-                add_function_with_arity_and_full_types(name, wrappedFunc, arity, paramTypes);
+                add_function_with_arity_and_full_types(name, wrapped_func, arity, param_types);
             }
         }
 
@@ -888,18 +890,18 @@ namespace jai {
         void stage_host_direct(host_direct_entry entry);
 
         // The single overloaded-function registration algorithm shared by every public entry point
-        // (add_function*, add_overloaded_function*, add_variadic_function). createSetOnFirst is the
+        // (add_function*, add_overloaded_function*, add_variadic_function). create_set_on_first is the
         // only policy difference between the entry points.
         void register_overload_impl(const std::string& name, size_t arity, script_function func,
-                                    const std::vector<param_type_info>& paramTypes, bool createSetOnFirst);
+                                    const std::vector<param_type_info>& param_types, bool create_set_on_first);
 
     public:
         // Overloaded function registration
-        void add_overloaded_function(const std::string& name, size_t argCount, script_function func);
-        void add_overloaded_function_with_full_types(const std::string& name, size_t argCount, script_function func, const std::vector<param_type_info>& paramTypes);
-        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes);
+        void add_overloaded_function(const std::string& name, size_t arg_count, script_function func);
+        void add_overloaded_function_with_full_types(const std::string& name, size_t arg_count, script_function func, const std::vector<param_type_info>& param_types);
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types);
         // the same, declaring the scalar result the checker sees (add_function reads it from the C++ return type)
-        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& paramTypes, script_value_type result);
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types, script_value_type result);
         
         // Class registration
         // Register a class with its type information
@@ -1420,7 +1422,7 @@ namespace jai {
         script_value execute_import(const std::string& resolved_path);
         script_value execute_unheld(script_source source);
         script_value execute_unheld(jai::jaibite& bite);
-        script_value execute_file_unheld(const std::string& scriptPath, const instance_variables& instanceVars);
+        script_value execute_file_unheld(const std::string& script_path, const instance_variables& instanceVars);
         script_value get_variable_unheld(const std::string& name) const;
 
         // Parameter storage for function calls (replaces thread_local)
@@ -1534,13 +1536,13 @@ namespace jai {
                                     std::shared_ptr<void>& compiled_slot,
                                     const instance_variables* instanceVars, uint32_t unit, bool textual = false);
 
-        // The one lex+parse+run entry: stamps `sourcePath` onto every AST node and keys
-        // the parse cache on (sourcePath, content). Not public — attributing raw content
+        // The one lex+parse+run entry: stamps `source_path` onto every AST node and keys
+        // the parse cache on (source_path, content). Not public — attributing raw content
         // to a path is debugger plumbing, a sharp edge for callers. Reached via execute()
         // ("<script>"), execute_file() (the file path), and include/import (resolved path).
-        script_value execute_source(const std::string& scriptContent,
+        script_value execute_source(const std::string& script_content,
                                     const instance_variables& instanceVars,
-                                    const std::string& sourcePath,
+                                    const std::string& source_path,
                                     bool textual = false,   // textual: an include, run where it is written
                                     std::string_view include_scope = {});
 

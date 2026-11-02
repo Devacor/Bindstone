@@ -646,7 +646,7 @@ namespace jai::detail::regex_library {
 		mc.add_native_method(eng.symbolize("start"), &match_bound_lane<false>);
 		mc.add_native_method(eng.symbolize("end"), &match_bound_lane<true>);
 
-		eng.add_functionWithArity("regex", regex_constructor{lib, std::make_shared<pattern_cache>()}, SIZE_MAX);
+		eng.add_function_with_arity("regex", regex_constructor{lib, std::make_shared<pattern_cache>()}, SIZE_MAX);
 	}
 
 } // namespace jai::detail::regex_library

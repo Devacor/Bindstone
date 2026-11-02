@@ -80,6 +80,12 @@ struct Player {
 #include <jaiscript/properties/property_serialization.hpp>
 // [/sample]
 #include <jaiscript/thread_pool.hpp>
+// [sample serialization-savegame]
+#include <jaiscript/serialization/convenience.hpp>
+// [/sample]
+// [sample coroutine-native-handle]
+#include <jaiscript/core/coroutine.hpp>
+// [/sample]
 
 // [sample math-types]
 #pragma once
@@ -301,6 +307,32 @@ struct Monster : Entity {
 // [/sample]
 }
 
+
+namespace doc_serialization {
+// [sample serialization-savegame]
+struct SaveGame {
+    int level = 0; double time_played = 0; std::string hero; std::vector<int> inventory;
+    template<typename Archive>
+    void serialize(Archive& ar) {          // one method, both directions, both formats
+        ar("level", level);
+        ar("time_played", time_played);
+        ar("hero", hero);
+        ar("inventory", inventory);
+    }
+};
+// [/sample]
+// [sample serialization-link]
+struct Node {
+    int64_t v = 1;
+    template<class Archive> void serialize(Archive& ar) { ar("v", v); }
+};
+struct Link {
+    std::shared_ptr<Node> a, b;
+    std::weak_ptr<Node> w;
+    template<class Archive> void serialize(Archive& ar) { ar("a", a); ar("b", b); ar("w", w); }
+};
+// [/sample]
+}
 
 namespace doc_samples {
 
@@ -1172,6 +1204,124 @@ public:
 			expect_script(page, "chai-monster", eng);
 		});
 
+
+		test("serialization_convenience", [this]() {
+			using doc_serialization::SaveGame;
+			using doc_serialization::Node;
+			using doc_serialization::Link;
+			const std::string page = "embedding/08-serialization.html";
+			auto eng = make_engine();
+			cpp_sample save_block(*this, page, "serialization-savegame");
+			// [sample serialization-savegame]
+			SaveGame save{7, 123.5, "Alice", {1, 2, 3}};
+			std::string json = jai::to_json(*eng, save);                  // human-readable, indented 2 spaces
+			SaveGame loaded  = jai::from_json<SaveGame>(*eng, json);
+			std::cout << json << "\n";
+			std::cout << jai::to_json(*eng, save, 0) << "\n";              // indent 0: one line
+			std::cout << "loaded: level=" << loaded.level << " hero=" << loaded.hero << " items=" << loaded.inventory.size() << "\n";
+
+			std::vector<uint8_t> blob = jai::to_binary(*eng, save);       // compact little-endian
+			SaveGame fromBin = jai::from_binary<SaveGame>(*eng, blob);
+			std::cout << "binary: " << blob.size() << " bytes, hero=" << fromBin.hero << "\n";
+			// [/sample]
+			save_block.finish();
+			cpp_sample link_block(*this, page, "serialization-link");
+			// [sample serialization-link]
+			Link link;
+			link.a = std::make_shared<Node>();
+			link.b = link.a;
+			link.w = link.a;
+			std::cout << jai::to_json(*eng, link, 0) << "\n";
+			// [/sample]
+			link_block.finish();
+		});
+
+		test("coroutine_driving", [this]() {
+			const std::string page = "embedding/09-coroutine-hosting.html";
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			cpp_sample script_block(*this, page, "coroutine-drive-script");
+			// [sample coroutine-drive-script]
+			eng->execute(R"( coroutine int spawner(int n) {
+			                     for (int i = 1; i <= n; ++i) { yield i * 10; }
+			                     return -1;
+			                 }
+			                 var c = spawner(3); )");
+
+			for (int i = 0; i < 4; ++i) {
+			    auto v = eng->execute("c.next();");                   // 10, 20, 30, -1
+			    bool finished = eng->execute("c.done()").as<bool>();  // false ×3, then true
+			}
+			// [/sample]
+			script_block.finish();
+			cpp_sample native_block(*this, page, "coroutine-native-handle");
+			// [sample coroutine-native-handle]
+			eng->execute("var c2 = spawner(2);");
+			auto holder = eng->execute("c2").get_object_holder();
+			auto handle = std::static_pointer_cast<jai::coroutine_handle>(holder->host_object());
+
+			while (!handle->done()) {
+			    jai::checked_result<jai::script_value> step = handle->next(eng.get());
+			    if (!step) break;                     // error channel (checked_result)
+			    std::cout << "C++ next -> " << step.value().as_int() << "\n";   // 10, 20, then -1 (the return value)
+			}
+			// [/sample]
+			native_block.finish();
+		});
+
+		test("safety_rails_budgets", [this]() {
+			const std::string page = "embedding/05-safety-rails.html";
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			cpp_sample wall_clock(*this, page, "safety-execution-budget");
+			// [sample safety-execution-budget]
+			eng->execution_budget(0.05);
+			try {
+			    eng->execute("var caught = 0; try { while (true) { } } catch (e) { caught = 1; } caught;");
+			} catch (const std::exception& e) {
+			    std::cout << e.what() << "\n";          // the script's catch never saw it
+			}
+			std::cout << eng->execute("2 + 2").as_int() << "\n";   // the engine survives; each execute gets a fresh deadline
+			// [/sample]
+			wall_clock.finish();
+			eng->execution_budget(5.0);
+			cpp_sample steps(*this, page, "safety-step-budget");
+			// [sample safety-step-budget]
+			eng->execution_step_budget(4);       // about 4 * 1024 back-edges and calls per execute
+			try {
+			    eng->execute("int n = 0; try { while (true) { n++; } } catch (e) { n = -1; } n;");
+			} catch (const std::exception& e) {
+			    std::cout << e.what() << "\n";
+			}
+			std::cout << eng->execute("int k = 0; for (int i = 0; i < 3; i++) { k++; } k;").as_int() << "\n";   // each entry starts afresh
+			eng->execution_step_budget(0);       // off
+			// [/sample]
+			steps.finish();
+		});
+
+		test("hot_reload_fields", [this]() {
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			cpp_sample run(*this, "embedding/07-hot-reload.html", "hot-reload-fields");
+			// [sample hot-reload-fields]
+			eng->execute(R"( class Player { int hp = 100; float speed = 1.0; string name = "Unnamed"; }
+			                 var p = Player(); p.hp = 62; p.name = "Alice"; )");
+
+			eng->execute(R"( class Player {
+			                     string hp = "0";          // retyped
+			                     string name = "Unnamed";  // kept
+			                     int level = 1;            // new
+			                     // speed removed
+			                     void hot_reload_migrate() { level = 5; }
+			                 } )");
+
+			eng->execute(R"( print("hp: ", type_of(p.hp), " ", p.hp);
+			                 print("name: ", p.name);
+			                 print("level: ", p.level);
+			                 try { print(p.speed); } catch (e) { print("speed: ", e); } )");
+			// [/sample]
+			run.finish();
+		});
 
 		test("quickstart_errors", [this]() {
 			expect_cpp("embedding/01-embedding-quickstart.html", "quickstart-errors", [] {

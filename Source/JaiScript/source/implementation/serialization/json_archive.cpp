@@ -89,15 +89,22 @@ void json_archive_writer::append_escaped(std::string_view str) {
     out_.append(p + run, n - run);
 }
 
-void json_archive_writer::begin_scalar() {
+// An array's element starts its own line; a property's or map entry's value follows its key
+void json_archive_writer::begin_element() {
     auto ctx = this->current_context();
     bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
 
-    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        out_ += ',';
+    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array) {
+        if (!first_in_container_.top()) {
+            out_ += ',';
+        }
         write_newline();
         write_indent();
     }
+}
+
+void json_archive_writer::begin_scalar() {
+    begin_element();
 }
 
 void json_archive_writer::end_scalar() {
@@ -173,17 +180,8 @@ void json_archive_writer::write_binary(const void* data, size_t size) {
     end_scalar();
 }
 
-// A container opens after a separating comma when it follows a sibling in an array (a property's or map entry's value
-// follows its key)
 void json_archive_writer::open_container(char a_brace, ContainerType a_kind) {
-    auto ctx = this->current_context();
-    bool after_property = (ctx == SerializationContext::PropertyValue || ctx == SerializationContext::MapValue);
-
-    if (!after_property && in_container() && container_stack_.top() == ContainerType::Array && !first_in_container_.top()) {
-        out_ += ',';
-    }
-    write_newline();
-    write_indent();
+    begin_element();
     out_ += a_brace;
     json_depth_++;
     container_stack_.push(a_kind);
@@ -193,9 +191,12 @@ void json_archive_writer::open_container(char a_brace, ContainerType a_kind) {
 void json_archive_writer::close_container(char a_brace) {
     json_depth_--;
     container_stack_.pop();
+    const bool empty = first_in_container_.top();
     first_in_container_.pop();
-    write_newline();
-    write_indent();
+    if (!empty) {
+        write_newline();
+        write_indent();
+    }
     out_ += a_brace;
     if (in_container()) {
         first_in_container_.top() = false;

@@ -203,7 +203,7 @@ eng-&gt;execute(R"(
 std::vector&lt;std::shared_ptr&lt;jai::coroutine_handle&gt;&gt; brains;
 for (const char* name : {"brains[0]", "brains[1]"}) {
     auto holder = eng-&gt;execute(name).get_object_holder();
-    brains.push_back(std::static_pointer_cast&lt;jai::coroutine_handle&gt;(holder-&gt;data));
+    brains.push_back(std::static_pointer_cast&lt;jai::coroutine_handle&gt;(holder-&gt;host_object()));
 }
 for (int frame = 0; frame &lt; 3; ++frame) {
     for (auto&amp; brain : brains) {

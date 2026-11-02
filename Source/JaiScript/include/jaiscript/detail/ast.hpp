@@ -864,11 +864,11 @@ namespace jai {
         // result converts with the callee's return text); the parser leaves the declaration site
         static constexpr uint8_t site_declaration = 0, site_parameter = 1, site_return = 2;
         uint8_t site_kind = site_declaration;
+        uint8_t graft_source_class = 0;   // a graft's parameter: its argument's C++ category (detail::classify_source; 0 none), which decides the elision
         std::string_view site_owner;
         // a graft's by-value parameter (site_parameter): its inline site, its parameter index and the private temp its argument
         // was evaluated into, so the bind takes the call's read-only alias and prvalue elision (vm bind_graft_parameter)
         uint32_t graft_site = UINT32_MAX;
-        const expression* graft_source = nullptr;   // a graft's parameter: the call's argument expression (its C++ category decides the elision)
         uint32_t graft_param = UINT32_MAX;
         size_t graft_temp_slot = SIZE_MAX;
 

@@ -1224,6 +1224,7 @@ namespace jai::vm {
         void pop_scopes_through(const environment* scope);
         // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)
         uint8_t source_class(const expression* e);
+        bool argument_skips_copy(const chunk* caller_code, const call_site& site, size_t i, const script_value& arg);
 
         struct iter_state {
             std::optional<script_value> container;

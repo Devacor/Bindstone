@@ -17,15 +17,15 @@ headers, and everything else in this repository — the test suite, the runner, 
   library and the suite with the NDK it finds (`ANDROID_NDK_ROOT`, or the newest under the SDK).
   An NDK under a path with spaces needs `-DCMAKE_CXX_FLAGS=--driver-mode=g++`: CMake hands
   clang++ its short 8.3 name, which no longer selects the C++ driver, and libc++ goes unlinked.
-- **CMake 3.20+.**
+- **CMake 3.20+**, or 3.25+ for the presets in `CMakePresets.json` (`cmake --preset`, `cmake --workflow`).
 - **Ninja**, optional but recommended. It gives single-configuration build directories, which
   makes the output paths predictable.
 
 Two platform differences are worth knowing:
 
 - **The native-stack guard is Windows-only.** On Windows the engine reads the current thread's
-  stack bounds and raises the catchable `Maximum recursion depth exceeded` while 256 KiB of
-  headroom remain. Elsewhere only the numeric call-depth caps apply (interpreter 256, VM 250000
+  stack bounds and raises the catchable `Native stack exhausted before the call-depth cap: the host
+  thread's stack bounds this recursion` while 256 KiB of headroom remain. Elsewhere only the numeric call-depth caps apply (interpreter 256, VM 250000
   by default; `engine::max_call_depth(backend, depth)`), so a host with a small thread stack
   should lower them.
 - **`.jaibite` files are portable.** The format is little-endian on disk whatever the host's
@@ -34,6 +34,15 @@ Two platform differences are worth knowing:
 
 ## The short version
 
+One command configures a Release tree in `build/` with Ninja and builds the runner:
+
+```bash
+cmake --workflow --preset runner
+build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+```
+
+Everything, by hand:
+
 ```bash
 cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build build
@@ -41,7 +50,8 @@ build/bin/jaiscript_tests
 ```
 
 That builds everything: the library, the test suite, the differential fuzzer, the runner, the
-language server, the three example games and the embedding quickstart's host
+language server, the web application host `jai_spider` (which compiles the bundled SQLite), the gate
+watchdog `jai_gate_run`, the three example games and the embedding quickstart's host
 (`embed_quickstart`). Binaries land in `build/bin/`, the library in `build/lib/`.
 
 The library comes in two links over one set of compiled files. `jaiscript` is the VM alone: every host,
@@ -51,8 +61,9 @@ programs that compare the backends link it: the test suite, the fuzzer, the runn
 `--backend=interp` runs every documentation sample on both, and `jai_spider`, whose `--backend interp` its gate runs. In a program without it,
 `set_backend(backend_type::interpreter)` throws.
 
-`CMakePresets.json` names the same two trees: `cmake --preset release` / `cmake --build --preset release`
-configure and build `build/`, and `debug` does the same in `build-debug/`. Visual Studio's Open Folder lists the
+`CMakePresets.json` names the same two trees, both with Ninja: `cmake --preset release` / `cmake --build --preset release`
+configure and build `build/`, `debug` does the same in `build-debug/`, and `cmake --workflow --preset runner` configures
+`build/` and builds the runner in one step. Visual Studio's Open Folder lists the
 `x64-*` presets, which build under `out/build/<name>/`.
 
 ## Picking targets
@@ -121,6 +132,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
+| `JAISCRIPT_BUILD_SPIDER` | top-level | `jai_spider`, the web application host, and the SQLite amalgamation it compiles (`tools/jai_spider/third_party/sqlite`) |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
 | `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer, the runner and `jai_spider` link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |
@@ -129,14 +141,21 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_NATIVE_ARCH` | OFF | `-march=native` for Release. Faster; the binary stops being portable |
 | `JAISCRIPT_ENABLE_LTO` | OFF | `-flto` for GCC/Clang Release builds |
 | `JAISCRIPT_LTCG` | top-level | Whole-program optimization for MSVC Release (`/GL`, `/LTCG`). The measured performance numbers use it. OFF as a subproject: a `/GL` library would turn every consumer's Release link into a whole-program link (about a minute per edit instead of seconds) |
-| `JAISCRIPT_VM_COVERAGE` | OFF | Diagnostic build: the VM counts every instruction where it runs and why (`engine::vm_coverage_report`, `jaiscript --coverage`) |
-| `JAISCRIPT_MISS_INJECTION` | OFF | Testing build: the VM can force a cell-block miss at every nth plain cell instruction (`engine::cells_miss_every`, `jaiscript --miss-every`) |
-| `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | Measurement only: `/GS-` on `vm_backend.cpp` (MSVC). Never ship with it |
-| `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
 
 ```bash
 cmake -S . -B build -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_ENABLE_DEBUGGER=OFF
 ```
+
+### Diagnostic builds
+
+These build the engine differently for measuring or testing it. None belongs in a shipping build.
+
+| Option | Default | What it does |
+|---|---|---|
+| `JAISCRIPT_VM_COVERAGE` | OFF | The VM counts every instruction where it runs and why (`engine::vm_coverage_report`, `jaiscript --coverage`) |
+| `JAISCRIPT_MISS_INJECTION` | OFF | The VM can force a cell-block miss at every nth plain cell instruction (`engine::cells_miss_every`, `jaiscript --miss-every`) |
+| `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | `/GS-` on `vm_backend.cpp` (MSVC), to measure the stack-check cost |
+| `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |
 
 ### Integer overflow policy
 
@@ -188,8 +207,7 @@ Adding a **new** test `.cpp` requires re-running CMake — the test list is a
 ## Comparison benchmarks
 
 `JAISCRIPT_ENABLE_BENCHMARKS=ON` adds the performance suites, which time JaiScript alone. The cross-language
-comparisons (Lua, Squirrel, ChaiScript and the game ports) are a separate harness, not part of this package;
-nothing third-party ships here.
+comparisons (Lua, Squirrel, ChaiScript and the game ports) are a separate harness, not part of this package.
 
 ## Layout
 
@@ -217,8 +235,8 @@ JaiScript/
 ## Consuming it from another project
 
 The library target is `jaiscript`, also spelled `JaiScript::jaiscript`; link that name and the
-include path, the C++20 requirement and the platform libraries (`ws2_32` on Windows, for the
-debugger transport) come with it. There are two CMake routes, below. Visual Studio (MSBuild) and Xcode projects compile
+include path, the C++20 requirement and the platform libraries (`ws2_32` and `bcrypt` on Windows, for the
+debugger transport and `crypto::`'s random bytes) come with it. There are two CMake routes, below. Visual Studio (MSBuild) and Xcode projects compile
 the sources directly; [Building JaiScript into a Host](site/embedding/18-build-integration.html) gives the sources, include
 path, flags and defines for each, with a property sheet for MSBuild and the Xcode build settings by name.
 
@@ -234,11 +252,11 @@ turn the tools back on if you want them.
 
 **Installed, through `find_package`.** Build and install the library once per configuration;
 Debug and Release share a prefix (the Debug library is `jaiscriptd`). A top-level Release build
-compiles the library with `/GL` on MSVC; pass `-DJAISCRIPT_LTCG=OFF` for an install your Release
-edits link against quickly:
+compiles the library with `/GL` on MSVC; this command turns that off (`-DJAISCRIPT_LTCG=OFF`), so your Release
+edits link against the install quickly, and builds the library alone:
 
 ```bash
-cmake -S JaiScript -B build-jai -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/jaiscript       -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_LSP=OFF
+cmake -S JaiScript -B build-jai -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/jaiscript -DJAISCRIPT_LTCG=OFF -DJAISCRIPT_BUILD_TESTS=OFF -DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_SPIDER=OFF -DJAISCRIPT_BUILD_LSP=OFF
 cmake --build build-jai
 cmake --install build-jai
 ```

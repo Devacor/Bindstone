@@ -250,7 +250,7 @@ int run_smoke(script_adapter& adapter, const host_options& opt, console_host& co
 #endif
 		double t0 = now_seconds();
 		for (int64_t i = 0; i < opt.ticks; ++i) {
-			if (i == opt.profile_reset_tick) { session->profile_reset(); }
+			if (i == opt.coverage_reset_tick) { session->coverage_reset(); }
 			std::string text;
 			try {
 				text = session->frame(dt, "", 0.0, 0.0, 0.0);
@@ -358,7 +358,7 @@ void print_usage(script_adapter& adapter) {
 		"  --miss-every N  jai: the vm misses at every Nth plain cell instruction (a build with JAISCRIPT_MISS_INJECTION)\n"
 		"  --coverage FILE jai: write the vm's execution-coverage census to FILE at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
 		"  --dump-frame N  smoke: dump frame N per backend to gloom_frame_<backend>.txt\n"
-		"  --profile-reset-tick N  smoke: restart the VM profile accounting at tick N (diagnostic builds)\n"
+		"  --coverage-reset-tick N smoke: restart the VM's coverage counters at tick N (a coverage build)\n"
 		"  --bench N       run N frames autopilot with live rendering, report sim/draw split\n"
 		"  --fps N         frame pacing target (default 30)\n"
 		"  --w N / --h N   force console dimensions\n"
@@ -388,7 +388,7 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		if (a == "--seed") { opt.seed = std::stoll(next_arg("--seed")); }
 		else if (a == "--backend") { opt.backend = next_arg("--backend"); opt.backend_selected = true; }
 		else if (a == "--smoke") { opt.smoke = true; }
-		else if (a == "--profile-reset-tick") { opt.profile_reset_tick = std::stoll(next_arg("--profile-reset-tick")); }
+		else if (a == "--coverage-reset-tick") { opt.coverage_reset_tick = std::stoll(next_arg("--coverage-reset-tick")); }
 		else if (a == "--ticks") { opt.ticks = std::stoll(next_arg("--ticks")); }
 		else if (a == "--warmup") { opt.warmup_ticks = std::stoll(next_arg("--warmup")); }
 		else if (a == "--workers") { opt.workers = std::stoll(next_arg("--workers")); }

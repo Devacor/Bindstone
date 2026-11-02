@@ -113,7 +113,7 @@ public:
 	void summary() override { call_script(*eng_, "gloom_summary", {}); }
 
 	std::string stack_trace() override { return eng_->format_stack_trace(); }
-	void profile_reset() override { eng_->vm_profile_reset(); if (!coverage_.empty()) { eng_->vm_coverage_reset(); } }
+	void coverage_reset() override { if (!coverage_.empty()) { eng_->vm_coverage_reset(); } }
 
 	~jai_session() override {
 		if (!coverage_.empty()) { std::ofstream out(coverage_, std::ios::binary | std::ios::trunc); out << "jai_gloom vm\n" << eng_->vm_coverage_report(); }

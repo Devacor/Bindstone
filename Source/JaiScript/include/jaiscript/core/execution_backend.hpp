@@ -225,9 +225,6 @@ public:
 
     // Debugger hook: engine::debugger() wires the controller here.
     virtual void set_debug_controller(debug::controller*) = 0;
-    // Diagnostic builds (JAISCRIPT_VM_PROFILE): zero the per-opcode and per-script-function
-    // tables so a warm-up phase drops out of the report; a no-op everywhere else
-    virtual void profile_reset() {}
     virtual cell_counters cells_counters() const { return {}; }
 
     // Innermost active environment during execution — the debugger enumerates in-scope

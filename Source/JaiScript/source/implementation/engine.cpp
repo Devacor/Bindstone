@@ -3525,10 +3525,6 @@ const engine::disassembly_sink_fn& engine::disassembly_sink() const {
     return impl->disassembly_sink_;
 }
 
-void engine::vm_profile_reset() {
-    if (impl && impl->backend) { impl->backend->profile_reset(); }
-}
-
 bool engine::vm_coverage_available() {
 #ifdef JAISCRIPT_VM_COVERAGE
     return true;

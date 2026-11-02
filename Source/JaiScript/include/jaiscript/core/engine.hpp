@@ -376,10 +376,6 @@ namespace jai {
         using disassembly_sink_fn = std::function<void(const std::string& listing, const std::string& manifest)>;
         void disassembly_sink(disassembly_sink_fn sink);
         const disassembly_sink_fn& disassembly_sink() const;
-        // Diagnostic builds only (JAISCRIPT_VM_PROFILE): restart the VM's opcode and
-        // per-script-function accounting here, so what the process prints at exit covers
-        // the window from this call on. No effect in ordinary builds.
-        void vm_profile_reset();
         // === EXECUTION COVERAGE (a diagnostic build: JAISCRIPT_VM_COVERAGE; vm/coverage.hpp) ===
         // The vm counts every instruction where it runs (a cell block, the general form typed or untyped) and, for the
         // general form, the reason the compiler left it there, attributed to the function and the source line; the

@@ -204,11 +204,8 @@ the non-fast-path operator machinery; op[] and += get true fast paths").
   NOT symbol-checked; sharing role slot ip*3+2 for both operands' indexes aliased `i`/`j` at
   top level. Index lookups now pass a SIZE_MAX sentinel that skips the cache (hot code
   resolves indexes from frame slots anyway).
-- **JAISCRIPT_VM_PROFILE**: rdtsc opcode self-time histogram + in-loop-miss callee counts in
-  `run_dispatch`/`exec_call_from_scratch`, dumped by `~vm_backend`. Compile-flag-gated, zero
-  cost off; build a separate dir with `/DJAISCRIPT_VM_PROFILE` (the flag changes the class
-  layout — build-wide or not at all). The main engine's dump is the LARGEST "total N Mcycles"
-  block; small dumps are worker/startup engines.
+- **The timing build** (`JAISCRIPT_VM_COVERAGE_TIMING`): each instruction's own clock and each
+  function's exclusive and inclusive time in the coverage report.
 - **The GLOOM profile verdict** (600 ticks): element traffic (INDEX/INDEX_STORE/BINARY*)
   is ~15% combined — this campaign is done as a frame lever. The wall is the CALL BOUNDARY:
   `op_call_from_scratch` = 56.5% of cycles, and the in-loop-miss table names it — `itrunc`

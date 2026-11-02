@@ -176,7 +176,10 @@ public:
 			check_eq(std::string("spider::get: option 'method' takes GET, HEAD, POST, PUT, PATCH, DELETE or OPTIONS"), caught(e, R"(spider::get("http://h/", {"method": "BREW"});)"));
 			check_eq(std::string("spider::post: option 'timeout' takes a number of seconds above 0"), caught(e, R"(spider::post("http://h/", "x", {"timeout": 0});)"));
 			check_eq(std::string("spider::get: option 'redirects' takes an int from 0 to 100"), caught(e, R"(spider::get("http://h/", {"redirects": -1});)"));
-			check_eq(std::string("spider::get: header 'X-A' holds a line break or a colon in its name"), caught(e, "spider::get(\"http://h/\", {\"headers\": {\"X-A\": \"a\\r\\nInjected: 1\"}});"));
+			check_eq(std::string("spider::get: header 'X-A' holds a line break or NUL in its value"), caught(e, "spider::get(\"http://h/\", {\"headers\": {\"X-A\": \"a\\r\\nInjected: 1\"}});"));
+			check_eq(std::string("spider::get: 'X A' is not a header name"), caught(e, R"(spider::get("http://h/", {"headers": {"X A": "v"}});)"));
+			check_eq(std::string("spider::get: header 'host' is the transport's to set"), caught(e, R"(spider::get("http://h/", {"headers": {"host": "elsewhere"}});)"));
+			check_eq(std::string("spider::post: header 'Content-Length' is the transport's to set"), caught(e, R"(spider::post("http://h/", "x", {"headers": {"Content-Length": "99"}});)"));
 			check_eq(std::string("spider::post: type \"form\" takes a map of fields"), caught(e, R"(spider::post("http://h/", "x", {"type": "form"});)"));
 			check_eq(std::string("spider::get: 'ftp://h/file' is not an http or https URL"), caught(e, R"(spider::get("ftp://h/file");)"));
 			check_eq(std::string("spider::get: '/relative' is not an http or https URL"), caught(e, R"(spider::get("/relative");)"));
@@ -278,6 +281,11 @@ public:
 				r.cookies.join("|");
 			)"));
 			check(caught(e, R"(spider::Response r; r.set_cookie("a", "b", {"maxage": 1});)").find("Response.set_cookie: option 'maxage' is unknown") != std::string::npos, "an unknown cookie option is refused");
+			check(caught(e, R"(spider::Response r; r.set_cookie("a", "b", {"path": "/; Domain=evil.example"});)").find("Response.set_cookie: option 'path' holds a ';' or a control character") != std::string::npos,
+				"an option holding ';' cannot add an attribute");
+			check(caught(e, R"(spider::Response r; r.set_cookie("a=b; x", "c");)").find("Response.set_cookie: 'a=b; x' is not a cookie name") != std::string::npos, "a cookie name is a token");
+			check(caught(e, R"(spider::Response r; r.header("X-A", "a\nB: c");)").find("Response.header: 'X-A' is not a header name, or its value holds a line break or NUL") != std::string::npos,
+				"a header value with a line break is refused");
 		});
 
 		test("the_checker_knows_the_signatures", [this]() {

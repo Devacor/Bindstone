@@ -19066,7 +19066,7 @@ checked_result<void> vm_backend::run_level_initializers(class_instance& instance
 	const std::vector<std::pair<uint64_t, expression_ptr>> one = only ? std::vector<std::pair<uint64_t, expression_ptr>>{*only}
 	                                                                  : std::vector<std::pair<uint64_t, expression_ptr>>{};
 	const auto& initializers = only ? one : class_def.get_field_initializer_asts();
-	level_initializers& entry = only ? construction().single_initializers[only->second.get()] : construction().level_initializers[&class_def];
+	level_initializer_body& entry = only ? construction().single_initializers[only->second.get()] : construction().level_initializers[&class_def];
 	bool current = entry.fn && entry.unit == current_unit().id;
 	if (current) {
 		size_t at = 0;

@@ -245,9 +245,6 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 			case opcode::op_return_ident:
 				out << " slot=" << static_cast<int32_t>(ins.a) << " sym=" << ins.b;
 				break;
-			case opcode::op_return_binary:
-				out << " op=" << ins.a << " shape=" << ins.b;
-				break;
 			case opcode::op_const_guard:
 				out << " node=" << ins.a;
 				break;

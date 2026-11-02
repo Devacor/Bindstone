@@ -97,7 +97,7 @@ raise), and the readers take the slot itself otherwise, so a getter runs once an
 alias pays one tag test.
 
 A closed loop may branch inside itself: a typed compare-jump or a jump whose target lies forward inside the
-loop or at its back edge is copied as a cell branch (`op_c_jcmp`, `op_c_jump`), so one-arm and two-arm
+loop or at its back edge is copied as a cell branch (`op_c_jcmp_p`, `op_c_jump`), so one-arm and two-arm
 diamonds over typed work, a `continue` and a guarded store close; a branch that leaves the loop (a `break`,
 an early return) keeps it open. A container guard inside the loop keeps its place in the copy (`op_c_guard`:
 it clears the dirty bit of a dead temp cell sharing the guard's slot and, for a pinned table entry, restores
@@ -151,8 +151,8 @@ is a body compare, its exit a forward edge; the inner loop's own block stays for
 first generic update instruction, the compare back to the body, the generic cond and update code, the loop back and the pop
 dead in the block, and a miss inside it pushes the general form's counted state first, `cells_miss`), snapshots (a guard's container value,
 live from the guard to the read it guards) and int and float literals. The operations: `arith` (the ten
-binary operators, pinned kinds as `op_c_arith`, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
-`cmp` with its test (`op_c_cmp` and `op_c_jcmp` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for
+binary operators, pinned kinds as `op_c_arith_p` or a kind's own opcode, run-time kinds as `op_c_arith_any`), `mov` (`op_c_mov`),
+`cmp` with its test (`op_c_cmp_p` and `op_c_jcmp_p` for pinned kinds, `op_c_cmp_any` and `op_c_jcmp_any` for
 run-time kinds; a head's false edge exits the block), `load` (`op_c_load`, through a site row the typed
 lowering built or the translation builds for a general read), `store` (`op_c_index_store`), `math`
 (`op_c_math`), `jump`, the back edge (`op_c_back` or `op_c_cfor_back`) and `guard` (`op_c_guard`). A
@@ -353,8 +353,8 @@ prints each closed region's operations with their targets, writes and reads (`--
 A pinned cell (a declared int, float or bool) holds its kind for the whole block, since every write lands that kind or
 misses and the verifier proves no read ahead of a first declaration; an arithmetic or compare whose operand cells are
 pinned to its kind (constants of that kind included) is emitted in its unchecked form (`C_ARITH_P`, `C_CMP_P`,
-`C_JCMP_P`), the same handler with the per-read kind checks folded away; an adopted kind (a `var`, an unproven slot)
-keeps the checked form.
+`C_JCMP_P`), with no per-read kind checks; an adopted kind (a `var`, an unproven slot) takes the any-kind form
+(`C_ARITH_ANY`, `C_CMP_ANY`, `C_JCMP_ANY`).
 
 The checker's class pins operands the typed lowering left general: a comparison or arithmetic classed int_int or float_float whose typed operation exists gives its operand cells that kind as their contract, so an environment value (its kind checked at the entry and again at every landing, where a call is the only way a typed global changes inside the block: a host define, a host reference, a script callback, a reload of the unit, a parallel region whose writes are an error in safe mode and run inside the call otherwise) and a load's compiler value read unchecked. A compiler value's load lands its contract: an int contract takes the int row and misses on any other element, a contract the site's own proof expects lands as the general temp landing does, and any other contract lands through the landing rule. A truth test inside the body is `C_JTRUTH`, the cell's int, float or bool tested inline (a string, which an adopted cell may hold, misses).
 
@@ -407,7 +407,7 @@ timedemo) are reported separately from native-bound object workloads.
 A loop whose head is a typed compare-jump to the exit and whose body holds only typed arithmetic,
 `T_LOAD` into a stamped scalar declaration and no-result typed-lane index stores (the store's index
 chain included), with every scalar slot's kind agreed across its uses, gets a cell-form copy of its
-body appended to the chunk (`op_c_cmp`, `op_c_arith`, `op_c_load`, `op_c_index_store`, `op_c_back`;
+body appended to the chunk (`op_c_cmp_p`, `op_c_arith_p`, `op_c_load`, `op_c_index_store`, `op_c_back`;
 operands are cell indices). The loop's original back edge becomes `op_cells_back`: after one
 ordinary iteration it polls the budget, checks every cell's slot (the cell's kind, the engine's
 canonical stamp, the engine), resolves each load and store site's container once (a site whose

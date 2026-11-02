@@ -6991,7 +6991,7 @@ op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
 // the opcode the first instruction of a fused pair had before the peephole: what the site logic and the lever ask of it
 static opcode cell_first_op(opcode op) {
 	switch (op) {
-	case opcode::op_c_arith2: case opcode::op_c_arith_load: case opcode::op_c_arith_jump: return opcode::op_c_arith_p;
+	case opcode::op_c_arith2: case opcode::op_c_arith_load: return opcode::op_c_arith_p;
 	case opcode::op_c_jcmp2: return opcode::op_c_jcmp_p;
 	case opcode::op_c_load2: case opcode::op_c_load_jcmp: case opcode::op_c_load_f: return opcode::op_c_load;
 	default: return op;
@@ -7720,14 +7720,14 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 static bool cells_miss_plain(const vm_instruction& ci) {
 	if (ci.op == opcode::op_c_jtruth) return ci.b == 1;   // a truth test re-runs its load; a call's landed branch never misses
 	switch (ci.op) {
-	case opcode::op_c_cmp: case opcode::op_c_cmp_p: case opcode::op_c_jcmp: case opcode::op_c_jcmp_p:
-	case opcode::op_c_arith: case opcode::op_c_arith_p: case opcode::op_c_arith_any:
+	case opcode::op_c_cmp_p: case opcode::op_c_jcmp_p:
+	case opcode::op_c_arith_p: case opcode::op_c_arith_any:
 	case opcode::op_c_load: case opcode::op_c_load_any: case opcode::op_c_index_store:
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
 	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
-	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp: case opcode::op_c_arith_jump:
+	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
 	case opcode::op_c_add_ii: case opcode::op_c_sub_ii: case opcode::op_c_add_iik: case opcode::op_c_sub_iik: case opcode::op_c_mov_p: case opcode::op_c_mov_k:
@@ -7766,11 +7766,9 @@ next_frame:
 #endif
 		op_status st = op_status::ok;
 		switch (ci.op) {
-		case opcode::op_c_cmp: st = exec_c_cmp(f, ip, ci, regs, true); break;
-		case opcode::op_c_arith: st = exec_c_arith(f, ip, ci, regs, true); break;
-		case opcode::op_c_arith_p: st = exec_c_arith(f, ip, ci, regs, false); break;
-		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ip, ci, regs, false); break;
-		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ip, ci, regs, false); break;
+		case opcode::op_c_arith_p: st = exec_c_arith(f, ip, ci, regs); break;
+		case opcode::op_c_cmp_p: st = exec_c_cmp(f, ip, ci, regs); break;
+		case opcode::op_c_jcmp_p: st = exec_c_jcmp(f, ip, ci, regs); break;
 		case opcode::op_c_load: {
 			// the common row inline here only (the paired forms call exec_c_load): an int or float buffer, one int index cell in bounds,
 			// landing the buffer's own kind; the rest is exec_c_load's
@@ -7799,13 +7797,11 @@ next_frame:
 		case opcode::op_c_back: st = exec_c_back(f, ip, ci, regs); break;
 		case opcode::op_c_back_step: st = exec_c_back_step(f, ip, ci, regs); break;
 		case opcode::op_c_range: f.ip = ip; st = exec_c_range(f, ci); ip = f.ip; break;
-		case opcode::op_c_jcmp: st = exec_c_jcmp(f, ip, ci, regs, true); break;
 		case opcode::op_c_arith2: st = exec_c_arith2(f, ip, ci, regs); break;
 		case opcode::op_c_jcmp2: st = exec_c_jcmp2(f, ip, ci, regs); break;
 		case opcode::op_c_load2: st = exec_c_load2(f, ip, ci, regs); break;
 		case opcode::op_c_arith_load: st = exec_c_arith_load(f, ip, ci, regs); break;
 		case opcode::op_c_load_jcmp: st = exec_c_load_jcmp(f, ip, ci, regs); break;
-		case opcode::op_c_arith_jump: st = exec_c_arith_jump(f, ip, ci, regs); break;
 		case opcode::op_c_jump:
 			// c = 1: an inner loop's back edge inside the block, the budget's poll (a miss on exhaustion: the general form raises on the
 			// original back edge with materialized slots)
@@ -8707,15 +8703,15 @@ JAI_FORCEINLINE bool vm_backend::cells_second_half_injected(frame& f, size_t& ip
 // the second's executor on the second's own word; the pair is one dispatch of the block loop and nothing else changes
 JAI_FORCEINLINE op_status vm_backend::exec_c_arith2(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = ip + 1;
-	const op_status st = exec_c_arith(f, ip, ins, cr, false);
+	const op_status st = exec_c_arith(f, ip, ins, cr);
 	if (st != op_status::ok || ip != next || cells_second_half_injected(f, ip)) return st;
-	return exec_c_arith(f, ip, cr.code[next], cr, false);
+	return exec_c_arith(f, ip, cr.code[next], cr);
 }
 JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp2(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = ip + 1;
-	const op_status st = exec_c_jcmp(f, ip, ins, cr, false);
+	const op_status st = exec_c_jcmp(f, ip, ins, cr);
 	if (st != op_status::ok || ip != next || cells_second_half_injected(f, ip)) return st;
-	return exec_c_jcmp(f, ip, cr.code[next], cr, false);
+	return exec_c_jcmp(f, ip, cr.code[next], cr);
 }
 JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = ip + 1;
@@ -8725,7 +8721,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load2(frame& f, size_t& ip, const v
 }
 JAI_FORCEINLINE op_status vm_backend::exec_c_arith_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	const size_t next = ip + 1;
-	const op_status st = exec_c_arith(f, ip, ins, cr, false);
+	const op_status st = exec_c_arith(f, ip, ins, cr);
 	if (st != op_status::ok || ip != next || cells_second_half_injected(f, ip)) return st;
 	return exec_c_load(f, ip, cr.code[next], cr, false);
 }
@@ -8733,29 +8729,18 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load_jcmp(frame& f, size_t& ip, con
 	const size_t next = ip + 1;
 	const op_status st = exec_c_load(f, ip, ins, cr, false);
 	if (st != op_status::ok || ip != next || cells_second_half_injected(f, ip)) return st;
-	return exec_c_jcmp(f, ip, cr.code[next], cr, false);
-}
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith_jump(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
-	const size_t next = ip + 1;
-	const op_status st = exec_c_arith(f, ip, ins, cr, false);
-	if (st != op_status::ok || ip != next) return st;
-	const vm_instruction& j = cr.code[next];   // the block's jump (not a plain position: the lever never counts it): an inner back edge polls the budget
-	if (j.c == 1 && (execution_limit_exhausted() || debug_hook_)) [[unlikely]] { const chunk::cell_loop& loop = f.code->cell_loops[f.cells->loop]; cells_miss_ip(f, ip, loop, loop.origin[next - loop.copy_head], 0); return {}; }
-	ip = j.a;
-	return {};
+	return exec_c_jcmp(f, ip, cr.code[next], cr);
 }
 
-JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
 	bool truthy;
-	if (checked && cr.cells[lk].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); return {}; }
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
-		if (checked && rc.raw_storage_index() != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cr.cells[lk].bits), b = rc.unchecked_as_int();
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -8764,7 +8749,6 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, size_t& ip, const vm_
 			switch (op) { case opcode::op_t_jlt_ff: truthy = a < b; break; case opcode::op_t_jle_ff: truthy = a <= b; break; case opcode::op_t_jgt_ff: truthy = a > b; break; case opcode::op_t_jge_ff: truthy = a >= b; break; case opcode::op_t_jeq_ff: truthy = a == b; break; default: truthy = a != b; break; }
 		}
 	} else {
-		if (checked && cr.cells[ins.b].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 0); return {}; }
 		if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			const script_int a = static_cast<script_int>(cr.cells[lk].bits), b = static_cast<script_int>(cr.cells[ins.b].bits);
 			switch (op) { case opcode::op_t_jlt_ii: truthy = a < b; break; case opcode::op_t_jle_ii: truthy = a <= b; break; case opcode::op_t_jgt_ii: truthy = a > b; break; case opcode::op_t_jge_ii: truthy = a >= b; break; case opcode::op_t_jeq_ii: truthy = a == b; break; default: truthy = a != b; break; }
@@ -8779,20 +8763,17 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_cmp(frame& f, size_t& ip, const vm_
 	ip = ins.c;
 	return {};
 }
-JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t dk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_shr_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (checked && cr.cells[ins.b].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 	int64_t right_bits;
 	if (ins.c & k_typed_const_bit) {
 		const script_value& rc = cr.consts[ins.c & ~k_typed_const_bit];
-		if (checked && rc.raw_storage_index() != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 		right_bits = rc.unchecked_payload_bits();
 	} else {
-		if (checked && cr.cells[ins.c].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return {}; }
 		right_bits = cr.cells[ins.c].bits;
 	}
 	if (kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
@@ -8834,20 +8815,17 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_arith(frame& f, size_t& ip, const v
 }
 
 // an interior typed compare-jump: the head's comparison, but a false result stays in the block (it skips the arm)
-JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked) {
+JAI_FORCEINLINE op_status vm_backend::exec_c_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
 	JAI_CELLS_COUNT(7);
 	const chunk::cell_loop& loop = *cr.loop;
 	const opcode op = static_cast<opcode>(ins.a >> k_cell_op_shift);
 	const uint32_t lk = ins.a & k_cell_index_mask;
 	const uint8_t kind = op <= opcode::op_t_jne_ii ? static_cast<uint8_t>(script_value::TYPEID_INT) : static_cast<uint8_t>(script_value::TYPEID_FLOAT);
-	if (checked && cr.cells[lk].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
 	int64_t right_bits;
 	if (ins.b & k_typed_const_bit) {
 		const script_value& rc = cr.consts[ins.b & ~k_typed_const_bit];
-		if (checked && rc.raw_storage_index() != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
 		right_bits = rc.unchecked_payload_bits();
 	} else {
-		if (checked && cr.cells[ins.b].kind != kind) { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 3); return {}; }
 		right_bits = cr.cells[ins.b].bits;
 	}
 	bool truthy;
@@ -20014,7 +19992,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
 #ifndef JAISCRIPT_VM_COVERAGE
-#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
+#define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
 #define JAI_DISPATCH_AT(at) { if (debug_hook_) [[unlikely]] { continue; } cur = code_base + (at); switch (cur->op) { JAI_HOT_OPS(JAI_HOT_CASE) default: goto L_main_switch; } }
@@ -20551,16 +20529,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 					return {};
 				}
 				VM_TRY_OP(exec_return_ident<false>(fp, ins));
-				if (is_unwinding_) [[unlikely]] { break; }
-				JAI_SWITCH_FRAME(fp);
-			}
-			case opcode::op_return_binary: JAI_OP_LABEL(op_return_binary) {
-				if (call_records_top_ == records_base) {
-					VM_TRY_OP(exec_return_binary<true>(fp, ins));
-					if (is_unwinding_) [[unlikely]] { break; }
-					return {};
-				}
-				VM_TRY_OP(exec_return_binary<false>(fp, ins));
 				if (is_unwinding_) [[unlikely]] { break; }
 				JAI_SWITCH_FRAME(fp);
 			}
@@ -22387,35 +22355,6 @@ op_status vm_backend::exec_return_ident(frame*& fp, const vm_instruction& ins) {
 	script_value value(*resolved);
 	materialize_return(f, value, detail::return_operand_ident, ins.a);
 	return finish(std::move(value));
-}
-
-// Fused `return <a op b>;`: computes exactly like exec_binary's general tail (custom operator dispatch
-// included), then returns without the push+pop round trip. A custom operator that THROWS leaves the result pushed and the
-// ip parked here so the dispatch loop's unwind handling sees the same state op_binary
-// would have produced one op earlier (same statement, same trace line).
-template <bool Entry>
-op_status vm_backend::exec_return_binary(frame*& fp, const vm_instruction& ins) {
-	script_value left_raw = std::move(stack_[stack_.size() - 2]);   // the operands die right then left, as exec_binary's
-	script_value right_raw = std::move(stack_.back());
-	stack_.pop_back();
-	stack_.pop_back();
-	const token_type op = static_cast<token_type>(ins.a);
-	if (!has_custom_numeric_ops_ && !(operator_table_ && operator_table_->any()) && stack_numeric_rows(left_raw, right_raw, op)) {
-		if constexpr (Entry) { return entry_return_finish(*fp, std::move(left_raw), 0); }
-		else { return return_with_result(fp, std::move(left_raw)); }
-	}
-	auto result = binary_general(op, left_raw.deref(), right_raw.deref());
-	if (!result) {
-		return raise_from(result);
-	}
-	if (is_unwinding_) [[unlikely]] {
-		// Custom-op script throw mid-compute: reproduce op_binary's post-op state
-		// (result pushed, frame NOT popped) and let the loop bottom unwind
-		stack_.push_back(std::move(result.value()));
-		return {};
-	}
-	if constexpr (Entry) { return entry_return_finish(*fp, std::move(result.value()), 0); }
-	else { return return_with_result(fp, std::move(result.value())); }
 }
 
 op_status vm_backend::fall_off_script_frame(frame*& fp) {

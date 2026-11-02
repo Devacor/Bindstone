@@ -1260,7 +1260,6 @@ namespace jai::vm {
         // entry branch)
         template <bool Entry> op_status exec_return_ident(frame*& fp, const vm_instruction& ins);   // Entry: the entry frame's return door
         static fused_operand ident_operand_at(const frame& f, const vm_instruction& ins) noexcept;
-        template <bool Entry> op_status exec_return_binary(frame*& fp, const vm_instruction& ins);
         op_status fall_off_script_frame(frame*& fp);
         // Return-site conversion (op_return_convert inside try regions) and the
         // native-entry / fiber completion door; both run convert_return_at_site
@@ -2361,7 +2360,6 @@ namespace jai::vm {
         op_status exec_c_load2(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_arith_load(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         op_status exec_c_load_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
-        op_status exec_c_arith_jump(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
         JAI_FORCEINLINE bool cells_second_half_injected(frame& f, size_t& ip);   // the injection lever's count for a fused pair's second instruction (a build without the lever: false)
         script_array* velem_site(frame& f, const velem_proto& p, size_t& at, int& comp);   // a vector buffer's element and component for a velem site, else null
         op_status exec_velem_load(frame& f, const vm_instruction& ins);
@@ -2483,9 +2481,9 @@ namespace jai::vm {
         bool cell_cmp_text(frame& f, const vm_instruction& ins, bool& truthy);   // the string lane of the fused compare over string cells
         bool cell_cmp_any(frame& f, const vm_instruction& ins, bool& truthy);   // the general kernel's numeric compare rows on cells; false = a kind it does not take
         // checked: the per-read kind checks; false for the pinned forms, whose operand cells the emission proved hold the kind
-        JAI_FORCEINLINE op_status exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
-        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
-        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, bool checked);
+        JAI_FORCEINLINE op_status exec_c_arith(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_cmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        JAI_FORCEINLINE op_status exec_c_jcmp(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif

@@ -2117,7 +2117,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			check(listing.find("C_ARITH_P") != std::string::npos && listing.find("C_JCMP_P") != std::string::npos && listing.find("C_CMP_P") != std::string::npos, "the pinned forms are emitted: " + listing);
 			const std::string adopted_listing = listing_of("var adopted = function(int n) { var v = 1; int acc = 0; for (int i = 0; i < n; ++i) { v = v + i; acc = acc + math::itrunc(v); } return acc; };");
 			check(adopted_listing.find("C_ARITH_ANY") != std::string::npos, "an adopted kind keeps the run-time kinds: " + adopted_listing);
-			// the switch off: the checked forms only, the same results (the differential the fuzz's --no-passes chain runs)
+			// the switch off: the same pinned forms and the same results (the differential the fuzz's --no-passes chain runs)
 			auto run_passes_off = [&](bool vm, const std::string& script) -> std::string {
 				auto e = engine::make();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
@@ -2142,7 +2142,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 				jai::vm::vm_compiler compiler(symbolizer);
 				compiler.ir_passes(false);
 				const std::string off = jai::vm::disassemble(*compiler.compile_program(parse_result.value()), symbolizer);
-				check(off.find("C_ARITH_P") == std::string::npos && off.find("C_JCMP_P") == std::string::npos && off.find("C_CMP_P") == std::string::npos && off.find("C_ARITH ") != std::string::npos, "the switch off emits the checked forms only: " + off);
+				check(off.find("C_ARITH_P") != std::string::npos && off.find("C_JCMP_P") != std::string::npos && off.find("C_CMP_P") != std::string::npos, "the switch off keeps the pinned forms: " + off);
 			}
 		});
 		test("a_redeclared_global_after_a_call_lands_by_its_new_type", [this]() {

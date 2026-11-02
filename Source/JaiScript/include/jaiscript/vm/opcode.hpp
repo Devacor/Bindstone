@@ -109,7 +109,6 @@ namespace jai::vm {
 
         op_return_ident,    // a=slot, b=symbol index, c=load flags: fused `return <ident>;`
                             // (LOAD+RETURN; resolution mirrors op_load via fused_ident_value)
-        op_return_binary,   // a=token_type, b=operand shape: fused `return <a op b>;`
                             // (BINARY+RETURN; pops two, computes like op_binary, returns)
 
         op_inline_guard,    // a = inline site, b = the fallback ip: the site's name binds the site's function, or the fallback runs the original statement (internal/typed_regions_design.md, Inlined leaves)
@@ -247,16 +246,12 @@ namespace jai::vm {
         op_c_load2,         // C_LOAD then C_LOAD
         op_c_arith_load,    // C_ARITH_P then C_LOAD
         op_c_load_jcmp,     // C_LOAD then C_JCMP_P
-        op_c_arith_jump,    // C_ARITH_P then C_JUMP
-        op_c_arith,         // a = typed opcode << 24 | dst cell, b = left cell, c = right cell or const bit | index
-        op_c_cmp,           // a = typed opcode << 24 | left cell, b = right cell or const, c = the loop's exit ip
         op_c_load,          // a = dst cell, b = cell loop index, c = the original T_LOAD's ip (its typed_site)
         op_c_load_any,      // the same for a destination whose kind is adopted at run time: it lands through the declared-type rule
         op_c_index_store,   // a = fused index proto, b = cell loop index, c = the original instruction's ip
         op_c_range,         // a = cell loop index, b = the range index cell, c = the exit ip: a range-for block's head, the index against the container's live size; exhaustion syncs the iteration state, flushes and leaves for the exit
         op_c_back_step,     // a = cell loop index, b = the range index cell: the copy's back edge of a range-for block; the index steps, then the budget poll and the copy's head
         op_c_back,          // a = cell loop index: the copy's back edge; budget poll, then the copy's head
-        op_c_jcmp,          // (c bit 31 = jump when true: a comparison value followed by JUMP_IF_TRUE) // a = typed opcode << 24 | left cell, b = right cell or const, c = the copy ip taken when false
         op_c_jump,          // a = the copy ip (a forward jump inside the loop, or its back edge)
         op_c_guard,         // a container guard's place in the copy: a = guard slot, b = aliasing temp cell (low 9 bits, 0x1FF none) | guarded load's copy offset << 9 (0x7FFFFF none), c = original ip
         op_c_arith_any,     // a = token_type << 24 | dst cell, b = left cell or const, c = right cell or const: kinds from the cells
@@ -514,14 +509,10 @@ namespace jai::vm {
             case opcode::op_c_load2: return "C_LOAD2";
             case opcode::op_c_arith_load: return "C_ARITH_P+C_LOAD";
             case opcode::op_c_load_jcmp: return "C_LOAD+C_JCMP_P";
-            case opcode::op_c_arith_jump: return "C_ARITH_P+C_JUMP";
-            case opcode::op_c_arith: return "C_ARITH";
-            case opcode::op_c_cmp: return "C_CMP";
             case opcode::op_c_load: return "C_LOAD";
             case opcode::op_c_load_any: return "C_LOAD_ANY";
             case opcode::op_c_index_store: return "C_INDEX_STORE";
             case opcode::op_c_back: return "C_BACK";
-            case opcode::op_c_jcmp: return "C_JCMP";
             case opcode::op_c_jump: return "C_JUMP";
             case opcode::op_c_guard: return "C_GUARD";
             case opcode::op_c_arith_any: return "C_ARITH_ANY";
@@ -598,7 +589,6 @@ namespace jai::vm {
             case opcode::op_ref_return_bind: return "REF_RETURN_BIND";
             case opcode::op_ref_return_lvalue: return "REF_RETURN_LVALUE";
             case opcode::op_return_ident: return "RETURN_IDENT";
-            case opcode::op_return_binary: return "RETURN_BINARY";
             case opcode::op_return_convert: return "RETURN_CONVERT";
             case opcode::op_inline_guard: return "INLINE_GUARD";
             case opcode::op_probe_callee: return "PROBE_CALLEE";

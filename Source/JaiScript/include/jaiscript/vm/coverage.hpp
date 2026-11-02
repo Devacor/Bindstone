@@ -16,6 +16,15 @@
 #include "chunk.hpp"
 #include <array>
 #include <cstdint>
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+#if defined(_MSC_VER) && (defined(_M_X64) || defined(_M_IX86))
+#include <intrin.h>
+#elif defined(__x86_64__) || defined(__i386__)
+#include <x86intrin.h>
+#else
+#include <chrono>
+#endif
+#endif
 #include <memory>
 #include <string>
 #include <unordered_map>
@@ -62,6 +71,11 @@ namespace jai::vm {
         std::unordered_map<uint32_t, receiver_row> receivers;
         // untyped arithmetic and comparisons on the general form: per ip, the operand kinds seen (a mask per execution, counted)
         std::unordered_map<uint32_t, std::array<uint64_t, 8>> operands;
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+        std::vector<uint64_t> cycles;     // per general ip: the instruction's own clock (a block entry carries the block's run)
+        uint64_t inclusive_cycles = 0;    // frame entry to exit (a recursive activation counts again)
+        uint64_t entries = 0;
+#endif
     };
 
     // receiver kinds (coverage_chunk::receiver_row::kinds)
@@ -79,7 +93,28 @@ namespace jai::vm {
         uint64_t cell_dispatches = 0;          // block-loop dispatches (a fused pair is one)
         coverage_chunk& bind(const chunk& c, const string_symbolizer* symbolizer);
         void reset();
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+        // the running instruction, its clock started at timed_since (a null row: nothing is charged)
+        coverage_chunk* timed_row = nullptr;
+        size_t timed_ip = 0;
+        uint64_t timed_since = 0;
+        void charge(uint64_t now) {
+            if (timed_row && timed_ip < timed_row->cycles.size()) { timed_row->cycles[timed_ip] += now - timed_since; }
+            timed_since = now;
+        }
+#endif
     };
+
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+    // the timing build's clock: cycles on x86, nanoseconds elsewhere
+    inline uint64_t coverage_clock() noexcept {
+#if defined(_M_X64) || defined(__x86_64__) || defined(_M_IX86) || defined(__i386__)
+        return __rdtsc();
+#else
+        return static_cast<uint64_t>(std::chrono::steady_clock::now().time_since_epoch().count());
+#endif
+    }
+#endif
 
     // the census over every backend's tables: totals per class, the general form's reasons ranked by executed
     // operations, the top source sites per reason, the receivers of member operations, the operand kinds of untyped

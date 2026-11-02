@@ -21,8 +21,7 @@ path-separator assumptions). Every site is guarded and carries a portable branch
   parser.cpp and vm_backend.cpp directly, and interpreter.cpp, interpreter_dispatch.cpp and
   vm_backend.cpp through `detail/scalar_ops.hpp` (included by `detail/binary_handlers.hpp`); no
   public header includes those two. The other `<intrin.h>` includes sit in .cpp files behind
-  diagnostic build flags (`JAISCRIPT_VM_COVERAGE`, `JAISCRIPT_VM_PROFILE`,
-  `JAISCRIPT_VM_COARSE_PROFILE`). `implementation/thread_pool.cpp` includes `<immintrin.h>` on x86
+  diagnostic build flags (`JAISCRIPT_VM_COVERAGE`, `JAISCRIPT_VM_COVERAGE_TIMING`). `implementation/thread_pool.cpp` includes `<immintrin.h>` on x86
   only, for `_mm_pause`.
 - **OS calls in `engine.cpp`**: file stat for the `execute_file` fast lane
   (`GetFileAttributesExW` / `stat`), the process id in jaibite temporary names, environment

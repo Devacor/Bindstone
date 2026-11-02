@@ -152,7 +152,8 @@ These build the engine differently for measuring or testing it. None belongs in 
 
 | Option | Default | What it does |
 |---|---|---|
-| `JAISCRIPT_VM_COVERAGE` | OFF | The VM counts every instruction where it runs and why (`engine::vm_coverage_report`, `jaiscript --coverage`) |
+| `JAISCRIPT_VM_COVERAGE` | OFF | The VM counts every instruction where it runs and why, and every opcode that ran (`engine::vm_coverage_report`, `jaiscript --coverage`) |
+| `JAISCRIPT_VM_COVERAGE_TIMING` | OFF | Over `JAISCRIPT_VM_COVERAGE`: the report adds each instruction's own clock, each script function's exclusive and inclusive time, and the parallel regions' phase timers |
 | `JAISCRIPT_MISS_INJECTION` | OFF | The VM can force a cell-block miss at every nth plain cell instruction (`engine::cells_miss_every`, `jaiscript --miss-every`) |
 | `JAISCRIPT_EXPERIMENT_VM_NO_GS` | OFF | `/GS-` on `vm_backend.cpp` (MSVC), to measure the stack-check cost |
 | `JAISCRIPT_RUNNER_PADDING_CONTROL` | OFF | A code-placement control build of the runner, for benchmarking |

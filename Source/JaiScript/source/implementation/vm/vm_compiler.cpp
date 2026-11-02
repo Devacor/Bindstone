@@ -101,14 +101,6 @@ namespace {
 	// Lazy-env gate for function-body chunks: false only when EVERY op is on the explicit
 	// safe list (fail-closed: anything that can capture the frame env's identity — refs,
 	// closures, try records, scope pushes, decls into the env — keeps the eager env).
-#ifdef JAISCRIPT_VM_PROFILE
-	// Profile builds name each chunk's FIRST tripping opcode (compiles are ~once per
-	// function, so this is a bounded census, not per-call spam)
-	#define JAI_ENV_TRIP(op) fprintf(stderr, "[env-trip] %s: %.*s\n", \
-		body.function_name.c_str(), (int)opcode_name(op).size(), opcode_name(op).data())
-#else
-	#define JAI_ENV_TRIP(op)
-#endif
 	bool body_needs_frame_env(const chunk& body) {
 		for (const auto& ins : body.code) {
 			switch (ins.op) {
@@ -274,19 +266,19 @@ namespace {
 			case opcode::op_decl_var: {
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
 				assert(decl->slot_index != SIZE_MAX && "parser slots every function-body decl");
-				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				if (decl->slot_index == SIZE_MAX) { return true; }
 				break;
 			}
 			case opcode::op_binary_fused_decl: {
 				const auto& dp = body.fused_binary_dst_protos[ins.a];
 				auto* decl = static_cast<const variable_decl*>(body.nodes[dp.node_index].get());
-				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				if (decl->slot_index == SIZE_MAX) { return true; }
 				break;
 			}
 			case opcode::op_index_fused_decl: {
 				if (ins.c == k_invalid_u32) break;   // a compiler temp landing: a frame slot, never the env
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.c].get());
-				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				if (decl->slot_index == SIZE_MAX) { return true; }
 				break;
 			}
 			case opcode::op_decl_ref_ident:
@@ -295,12 +287,12 @@ namespace {
 				// the chain the frame already runs in (a global's cell, a this-field) or is the value the body
 				// just computed (an element, a member of an evaluated object): never this frame's env
 				auto* decl = static_cast<const variable_decl*>(body.nodes[ins.a].get());
-				if (decl->slot_index == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				if (decl->slot_index == SIZE_MAX) { return true; }
 				break;
 			}
 			case opcode::op_cast:
 				// value forms never touch the env; the reference arms resolve storage through it
-				if (ins.b != 0) { JAI_ENV_TRIP(ins.op); return true; }
+				if (ins.b != 0) { return true; }
 				break;
 			case opcode::op_field_init:   // a field initializer's store reaches this, never the env
 			case opcode::op_ctor_base:    // a constructor prologue's steps reach this and the stack, never the env
@@ -321,17 +313,16 @@ namespace {
 				// range-for is frame-env-free when the loop var is slot-resident (the
 				// iter's own scope env covers block scoping); iter_next and iter_entry carry
 				// the proto index in a
-				if ((ins.op == opcode::op_iter_next || ins.op == opcode::op_iter_entry) && body.iter_protos[ins.a].slot == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+				if ((ins.op == opcode::op_iter_next || ins.op == opcode::op_iter_entry) && body.iter_protos[ins.a].slot == SIZE_MAX) { return true; }
 				break;
 			}
 			case opcode::op_destructure: {
 				for (const auto& name : body.destructure_protos[ins.a].names) {
-					if (name.second == SIZE_MAX) { JAI_ENV_TRIP(ins.op); return true; }
+					if (name.second == SIZE_MAX) { return true; }
 				}
 				break;
 			}
 			default:
-				JAI_ENV_TRIP(ins.op);
 				return true;
 			}
 		}
@@ -989,9 +980,6 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 			callable_.slot_types[static_cast<uint32_t>(p.slot_index)] = p.type.get();
 			if (!p.type || p.type->may_own_instance()) { callable_.parameter_slots.insert(static_cast<uint32_t>(p.slot_index)); }
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		if (p.slot_index != SIZE_MAX) { chunk_->profile_params.push_back({ static_cast<uint32_t>(p.slot_index), p.type.get(), p.is_reference }); }
-#endif
 		if (p.is_reference && p.slot_index != SIZE_MAX) { chunk_->reference_slots.push_back(static_cast<uint32_t>(p.slot_index)); }   // its load dereferences the caller's binding, possibly through a getter
 		if (const type_info* declared = p.slot_index != SIZE_MAX ? detail::parameter_declared_ref(p) : nullptr) { note_slot_declared_ref(p.slot_index, declared); }
 		if (!p.binds_capture) { note_debug_local(p.slot_index, p.name); }
@@ -3936,7 +3924,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// when every instruction of its body translates into a canonical operation (arith, mov, cmp with its test, load, store,
 	// math, jump, guard, the back edge) over admitted values (semantic locals, compiler values, environment values,
 	// container bindings, snapshots, literals) and the legality pass accepts the result; anything else is a refusal with a
-	// class and the first offending instruction (chunk::cell_refusals: the profile's open-loop table, the disassembly).
+	// class and the first offending instruction (chunk::cell_refusals: the coverage report, the disassembly).
 	// Translation runs here, once per chunk after the typed lowering; the runtime executes the copy and translates
 	// nothing. The encoding is one cell instruction per original instruction with an explicit origin table.
 	const size_t original_size = code.size();

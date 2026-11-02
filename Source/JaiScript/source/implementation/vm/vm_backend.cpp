@@ -5,13 +5,6 @@
 #include <bit>
 #include <charconv>
 #include <jaiscript/vm/vm_backend.hpp>
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-#include <intrin.h>
-namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coarse_scope(uint64_t& a, uint64_t& c) : acc(a), cnt(c), t0(__rdtsc()) {} ~coarse_scope() { acc += __rdtsc() - t0; ++cnt; } }; }
-#define JAI_COARSE(acc, cnt) coarse_scope coarse_guard_{acc, cnt};
-#else
-#define JAI_COARSE(acc, cnt)
-#endif
 #include <jaiscript/detail/null_member_diagnostic.hpp>
 #include <jaiscript/detail/enum_value.hpp>
 #include <jaiscript/detail/inline_variable.hpp>
@@ -60,15 +53,6 @@ namespace { struct coarse_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; coa
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (interp parity)
 #include <jaiscript/detail/construction_kernel.hpp>
 #include <jaiscript/detail/function_overloads.hpp>
-#ifdef JAISCRIPT_VM_PROFILE
-#include <intrin.h>   // __rdtsc (diagnostic builds only; keep out of headers)
-// the cell blocks' own costs (inclusive cycles and counts): a block run from the dispatcher, the entry, a flush, a miss, a landing, a raw entry,
-// a raw return, a door call
-namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; cell_cost_scope(uint64_t& a, uint64_t& c) : acc(a), cnt(c), t0(__rdtsc()) {} ~cell_cost_scope() { acc += __rdtsc() - t0; ++cnt; } }; }
-#define JAI_CELL_COST(i) cell_cost_scope cell_cost_guard_{profile_cell_cost_cyc_[i], profile_cell_cost_n_[i]};
-#else
-#define JAI_CELL_COST(i)
-#endif
 #ifdef JAISCRIPT_VM_COVERAGE
 // the coverage census (vm/coverage.hpp): every instruction counted where it runs
 #define JAI_COVERAGE_GENERAL(f) coverage_general(f)
@@ -83,18 +67,19 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #define JAI_COVERAGE_ENTRY(f, loop, taken)
 #define JAI_COVERAGE_MISS(f)
 #endif
-// a block-loop case that cannot leave the block skips the loop's exit test (a profiled or counted build keeps the shared tail)
-#if defined(JAISCRIPT_VM_PROFILE) || defined(JAISCRIPT_VM_COVERAGE)
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+// the timing build (vm/coverage.hpp): each instruction's own clock, a function's inclusive time
+#define JAI_COVERAGE_FRAME_EXIT(f) coverage_frame_exit(f)
+#define JAI_COVERAGE_TIMING_PAUSE() coverage_timing_pause coverage_pause_{*coverage_}
+#else
+#define JAI_COVERAGE_FRAME_EXIT(f)
+#define JAI_COVERAGE_TIMING_PAUSE()
+#endif
+// a block-loop case that cannot leave the block skips the loop's exit test (a counted build keeps the shared tail)
+#ifdef JAISCRIPT_VM_COVERAGE
 #define JAI_CELL_NEXT break
 #else
 #define JAI_CELL_NEXT continue
-#endif
-#ifdef JAISCRIPT_VM_PROFILE
-
-// Op-layer TRY twins: callees returning op_status pass through vm_check; fat-returning
-// helpers route their failure into pending_error_ (see raise_from).
-
-#include <algorithm>
 #endif
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_borrow_subscript_read (captured reads)
 #include <jaiscript/detail/ast_serializer.hpp>   // structural_node_key (hot-reload identity)
@@ -108,11 +93,6 @@ namespace { struct cell_cost_scope { uint64_t& acc; uint64_t& cnt; uint64_t t0; 
 #define VM_TRY(expr) 	do { 		if (vm_check((expr)) == op_status::failed) [[unlikely]] { 			return op_status::failed; 		} 	} while(0)
 #define VM_TRY_ASSIGN(var, expr) 	auto JAISCRIPT_CONCAT(__vm_result_, __LINE__) = (expr); 	if (!JAISCRIPT_CONCAT(__vm_result_, __LINE__)) [[unlikely]] { 		return raise_from(JAISCRIPT_CONCAT(__vm_result_, __LINE__)); 	} 	var = std::move(JAISCRIPT_CONCAT(__vm_result_, __LINE__).value());
 
-#ifdef JAISCRIPT_VM_PROFILE
-#define JAI_ENV_CENSUS(i) ++profile_scope_kinds_[i]
-#else
-#define JAI_ENV_CENSUS(i) ((void)0)
-#endif
 namespace jai::detail::aggregate_lowering_impl { bool contains_yield(const statement* s); }
 namespace jai::vm {
 
@@ -222,6 +202,9 @@ struct vm_backend::frame_guard {
 		if (f->top_level) { vm->top_frame_mark_ = vm->frames_.size() - 1; }
 	}
 	~frame_guard() {
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		vm->coverage_frame_exit(*vm->frames_.back());
+#endif
 		vm->frames_.pop_back();
 		vm->top_frame_mark_ = top_mark;
 		truncate_detached(vm->try_records_, try_base);
@@ -238,9 +221,6 @@ vm_backend::vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environmen
 	stack_.owner = this;
 	stack_.reserve(256);
 	frames_.reserve(64);
-#ifdef JAISCRIPT_VM_PROFILE
-	if (const char* fn = std::getenv("JAI_VMPROF_FUNCTION")) { profile_filter_name_ = fn; }
-#endif
 }
 
 void vm_backend::set_engine_reference(engine* engine_ref) {
@@ -986,9 +966,6 @@ checked_result<script_value> vm_backend::resume_coroutine(coroutine_handle& hand
 		state.locals.function_name = function->name;
 
 		auto closure_env = handle.get_closure_env();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_births_[3];
-#endif
 		state.entry_env = std::make_shared<environment>(closure_env ? closure_env : environment_, symbolizer_);
 		state.current_env = state.entry_env;
 
@@ -1820,9 +1797,6 @@ bool vm_backend::comparison_free(const script_value& v) {
 }
 
 std::shared_ptr<environment> vm_backend::acquire_scope_env(std::shared_ptr<environment> parent) {
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_env_births_[0];
-#endif
 	if (!scope_env_pool_.empty()) {
 		auto env = std::move(scope_env_pool_.back());
 		scope_env_pool_.pop_back();
@@ -1839,9 +1813,6 @@ std::shared_ptr<environment> vm_backend::acquire_block_env(std::shared_ptr<envir
 }
 
 std::shared_ptr<environment> vm_backend::acquire_method_scope_env(std::shared_ptr<environment> parent, script_value this_obj, class_definition* access_ctx) {
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_env_births_[1];
-#endif
 	if (!scope_env_pool_.empty()) {
 		auto env = std::move(scope_env_pool_.back());
 		scope_env_pool_.pop_back();
@@ -1861,9 +1832,6 @@ std::shared_ptr<environment> vm_backend::acquire_static_scope_env(std::shared_pt
 		env->reset_as_static_method(std::move(parent), std::move(class_def));
 		return env;
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_env_births_[2];
-#endif
 	return std::make_shared<environment>(std::move(parent), env_symbolizer_, std::move(class_def));
 }
 
@@ -2042,9 +2010,6 @@ script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, 
 	bool cacheable = false;
 	script_value* ptr = environment_->vm_storage_lookup(symbol_id, cacheable);
 	if (ptr && cacheable) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[7];
-#endif
 		fast_entry->fast_env = environment_.get();
 		fast_entry->fast_serial = env_symbolizer_->env_epoch();
 		fast_entry->fast_ptr = ptr;
@@ -2119,9 +2084,6 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	// checked by {env, epoch} but NOT by symbol, so slot reuse across symbols would
 	// alias variables - skip the cache entirely instead.
 	if (cache_slot == SIZE_MAX) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[0];
-#endif
 		return nullptr;
 	}
 	// Entry storage + chain target by role: the main vm memoizes in the SHARED chunk
@@ -2148,16 +2110,10 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	if (fast_entry) {
 		if (fast_entry->fast_env == environment_.get() &&
 		    fast_entry->fast_serial == env_symbolizer_->env_epoch()) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_env_resolve_[6];
-#endif
 			return fast_entry->fast_ptr;
 		}
 	}
 	if (!chain_target) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[1];
-#endif
 		return nullptr;
 	}
 	// Top-level frames, call frames running directly in the global env (lazy-elided
@@ -2177,16 +2133,10 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 		int hops = 0;
 		while (e != chain_target) {
 			if (!e->vm_transparent_for_lookup() || ++hops > 4) {
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_env_resolve_[1];
-#endif
 				return env_arm_fast_head(fast_entry, symbol_id);
 			}
 			e = e->parent_raw();
 			if (!e) {
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_env_resolve_[1];
-#endif
 				return env_arm_fast_head(fast_entry, symbol_id);
 			}
 		}
@@ -2195,9 +2145,6 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	if (!fast_entry) {
 		// Worker frame on a chunk never pinned here (method/coroutine entry): no
 		// private row to memoize into - full walk as before
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[1];
-#endif
 		return nullptr;
 	}
 	env_lookup_cache_entry& entry = *fast_entry;
@@ -2205,9 +2152,6 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	// longer invalidates entries cached against the stable global/top-level envs
 	const uint64_t epoch = resolve_env->local_epoch();
 	if (entry.env == resolve_env && entry.epoch == epoch) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[2];
-#endif
 		if (fast_entry) {
 			// Transparency to resolve_env was (re)proved this access, so the current
 			// env resolves to the same cell - arm the two-compare head for next time
@@ -2220,9 +2164,6 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 	bool cacheable = false;
 	script_value* ptr = resolve_env->vm_storage_lookup(symbol_id, cacheable);
 	if (ptr && cacheable && epoch != 0) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[3];
-#endif
 		entry.env = resolve_env;
 		entry.epoch = epoch;
 		entry.ptr = ptr;
@@ -2232,9 +2173,6 @@ script_value* vm_backend::env_lookup_cached(frame& f, size_t cache_slot, uint64_
 			fast_entry->fast_ptr = ptr;
 		}
 	} else {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[4];
-#endif
 		entry.env = nullptr;
 	}
 	return ptr;
@@ -2720,14 +2658,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 // ============================================================
 
 op_status vm_backend::exec_load(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	const size_t depth_before = stack_.size();
-	const op_status st = exec_load_impl(f, ins);
-	if (stack_.size() > depth_before) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_load_kinds_[k < 16 ? k : 15]; }
-	return st;
-#else
 	return exec_load_impl(f, ins);
-#endif
 }
 
 fused_operand vm_backend::ident_operand_at(const frame& f, const vm_instruction& ins) noexcept {
@@ -2741,9 +2672,6 @@ fused_operand vm_backend::ident_operand_at(const frame& f, const vm_instruction&
 }
 
 op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_load_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
-#endif
 	if (ins.a != k_invalid_u32 && !(ins.c & load_flag_global_only) && has_slots(f)) {
 		if (auto* local = frame_slot(f, ins.a)) {
 			if (ins.c & load_flag_take) [[unlikely]] { take_temp_value(*local); return {}; }
@@ -2779,23 +2707,9 @@ op_status vm_backend::exec_load_impl(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_store(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip > 0) { ++profile_store_prev_[static_cast<size_t>(f.code->code[f.ip - 1].op)]; }
-#endif
 	script_value value = std::move(stack_.back());
 	stack_.pop_back();
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_t0 = __rdtsc();
-	profile_store_last_path_ = 7;
-	const op_status stored = store_popped_value(f, ins, std::move(value));
-	const uint64_t prof_dt = __rdtsc() - prof_t0;
-	profile_store_path_cycles_[profile_store_last_path_] += prof_dt;
-	++profile_store_path_counts_[profile_store_last_path_];
-	profile_store_name_cycles_[std::string(symbolizer_->get_string(f.code->symbols[ins.a]))] += prof_dt;
-	return stored;
-#else
 	return store_popped_value(f, ins, std::move(value));
-#endif
 }
 
 // The ONE identifier-store tail (everything op_store does after consuming its value),
@@ -3014,7 +2928,7 @@ JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_va
 // fallback never arms); null = the full path resolves the store
 script_value* vm_backend::env_store_cell(frame& f, size_t cache_slot, uint64_t symbol_id) {
 	std::vector<env_lookup_cache_entry>* rows = frame_lookup_rows(f);
-	if (!rows) { note_worker_decline(worker_decline::store_env); return nullptr; }
+	if (!rows) { return nullptr; }
 	auto& cache = *rows;
 	if (cache.size() > cache_slot) {
 		const env_lookup_cache_entry& e = cache[cache_slot];
@@ -3037,9 +2951,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 	// temp: assigning value.deref() straight into value destroys the holder that OWNS
 	// the deref target while the copy is still reading it.
 	if (value.is_reference()) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_store_paths_[2];
-#endif
 		script_value derefed = value.deref();
 		value = std::move(derefed);
 	}
@@ -3056,9 +2967,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 					storage = holder->cell();
 				} else {
-#ifdef JAISCRIPT_VM_PROFILE
-					profile_store_last_path_ = 3;
-#endif
 					{
 						const uint8_t declared_kind = slot_declared_kind(f, ins.b);
 						VM_TRY(detail::ref_store_through_named(*frameLocal, value, engine_, symbolizer_,
@@ -3075,20 +2983,11 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 				const size_t vi = value.raw_storage_index();
 				if ((vi == script_value::TYPEID_INT || vi == script_value::TYPEID_FLOAT) && storage->raw_storage_index() == vi &&
 				    storage->type_info_raw() == value.type_info_raw()) {
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_store_paths_[0];
-					profile_store_last_path_ = 1;
-#endif
 					*storage = value;
 					stack_.push_back(std::move(value));
 					return {};
 				}
 			}
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_store_paths_[3];
-			++profile_builtin_direct_names_[std::string("st:") + std::string(symbolizer_->get_string(sym))];
-			profile_store_last_path_ = 2;
-#endif
 			// Slot locals enforce their locked type like the env path below does
 			// (same-type fast guard keeps the hot store path call-free)
 			type_info_ptr slot_type = storage->get_type_info();
@@ -3240,9 +3139,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			if (holder && holder->has_cell && !(ins.c & store_flag_ref_alias)) {
 				currentVal = holder->cell();
 			} else {
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_store_last_path_ = 5;
-#endif
 				VM_TRY(detail::ref_store_through_named(*currentVal, value, engine_, symbolizer_, nullptr, 0, [this, sym] { return symbolizer_->get_string(sym); }));
 				stack_.push_back(std::move(value));
 				return {};
@@ -3255,9 +3151,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			*currentVal = std::move(v);
 			return {};
 		};
-#ifdef JAISCRIPT_VM_PROFILE
-		profile_store_last_path_ = 6;
-#endif
 		if (currentVal && currentVal->is_cpp_bound()) {
 			currentVal->assign_through(value);
 			stack_.push_back(std::move(value));
@@ -3271,9 +3164,6 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 		if (handle_store && !result_used()) { host_rhs = value; }
 
 		// Regular variable assignment with strong-types enforcement
-#ifdef JAISCRIPT_VM_PROFILE
-		profile_store_last_path_ = 4;
-#endif
 		type_info_ptr target_type = currentVal ? currentVal->get_type_info() : nullptr;
 
 		if (currentVal && !detail::handle_rebinds(*currentVal, value) && detail::slot_value_assign_candidate(*currentVal) &&
@@ -4198,9 +4088,6 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	// with a live cell returns *find_field_value); a null probe (unarmed / stale serial
 	// / absent cell — defaults, methods, statics) falls through to the full ladder.
 	if (script_value* ic_field = this_field_ic_probe(f, cache_slot, sym)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_resolve_[8];
-#endif
 		scratch.emplace(*ic_field);
 		return &scratch.value();
 	}
@@ -4280,10 +4167,6 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	if (script_value* cached = env_lookup_cached(f, cache_slot, sym)) {
 		return &binding_value(*cached, observed);
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_env_resolve_[5];
-	++profile_env_walk_names_[std::string(symbolizer_->get_string(sym))];
-#endif
 	// get_value_ptr IS get_ref's exact resolution ladder minus the error wrapper;
 	// env storage is deque-stable, so the pointer outlives this call like get_ref's did
 	if (script_value* env_val = environment_->get_value_ptr(sym)) {
@@ -4309,9 +4192,6 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 					// The walk above just MISSED and this site resolves a field: bank
 					// the proof so the next access skips the walk while the serial holds
 					this_field_ic_arm(f, cache_slot, instance.get(), sym);
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_env_resolve_[9];
-#endif
 					scratch.emplace(instance->get_field(sym));
 					return &scratch.value();
 				}
@@ -4567,7 +4447,6 @@ op_status vm_backend::exec_math_pair(frame& f, const vm_instruction& ins, detail
 int vm_backend::math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot) {
 	const void* identity = math_alias_rows_ ? math_alias_rows_[fn].identity : nullptr;
 	std::vector<env_lookup_cache_entry>* rows = identity && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only)) ? frame_lookup_rows(f) : nullptr;
-	if (identity && !rows) { note_worker_decline(worker_decline::math_alias); }
 	if (rows) {
 		bool plain_frame = !f.locals || f.top_level;
 		if (!plain_frame && !f.locals->is_method) { ensure_frame_member_scope(f, environment_.get()); plain_frame = !frame_scope_active(f); }
@@ -4703,9 +4582,6 @@ op_status vm_backend::exec_unary_temp(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_binary_fused(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_binary_fused_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
-#endif
 	return binary_fused_compute(f, ins.a, [this](script_value&& v) { stack_.push_back(std::move(v)); });
 }
 
@@ -4784,18 +4660,9 @@ bool vm_backend::typed_binary_head(frame& f, const fused_binary_proto& p, Sink& 
 template <typename Sink>
 op_status vm_backend::binary_fused_compute(frame& f, uint32_t proto_index, Sink&& sink) {
 	const fused_binary_proto& p = f.code->fused_binary_protos[proto_index];
-#ifdef JAISCRIPT_VM_PROFILE
-	if (p.typed_class == 0) { ++profile_typed_head_[2]; }
-#endif
 	if (p.typed_class != 0 && !has_custom_numeric_ops_ && typed_binary_head(f, p, sink)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_typed_head_[0];
-#endif
 		return {};
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	if (p.typed_class != 0) { ++profile_typed_head_[1]; }
-#endif
 	const token_type op = static_cast<token_type>(p.op);
 
 	std::optional<script_value> lscratch, rscratch;
@@ -5191,18 +5058,12 @@ const script_value* vm_backend::fused_cmp_operand(frame& f, const fused_operand&
 	if (cached_global_env_ && cache_slot < f.code->env_lookup_cache.size() && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
 		const env_lookup_cache_entry& e = f.code->env_lookup_cache[cache_slot];
 		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_env_resolve_[6];
-#endif
 			return e.fast_ptr;
 		}
 	} else if (f.env_table_code == f.code && cache_slot < f.code->code.size() * 3 && (!f.locals || f.top_level || (f.locals->scope_state != 0 && !frame_scope_active(f)))) {
 		// a worker's own row for this chunk, by the same rule
 		const env_lookup_cache_entry& e = f.env_table[cache_slot];
 		if (e.fast_env == environment_.get() && e.fast_serial == env_symbolizer_->env_epoch()) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_env_resolve_[6];
-#endif
 			return e.fast_ptr;
 		}
 	}
@@ -5325,14 +5186,8 @@ op_status vm_backend::exec_fused_cmp_jump(frame& f, const vm_instruction& ins) {
 	// Numeric fast path: mirrors exec_binary_fused's comparison rows without the bool
 	// round-trip through the value stack. Any non-trivial shape bails to the pair.
 	if (!has_custom_numeric_ops_) {
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t prof_c0 = __rdtsc();
-#endif
 		const script_value* lp = fused_cmp_operand(f, p.left, f.ip * 3);
 		const script_value* rp = lp ? fused_cmp_operand(f, p.right, f.ip * 3 + 1) : nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-		profile_cmp_operands_cyc_ += __rdtsc() - prof_c0; ++profile_cmp_count_;
-#endif
 		if (rp) {
 			const int verdict = fused_cmp_rows(*lp, *rp, op);
 			if (verdict >= 0) {
@@ -5688,14 +5543,7 @@ op_status vm_backend::cfor_advance(counted_for_state& st, bool& again) {
 }
 
 op_status vm_backend::exec_index(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	const size_t depth_before = stack_.size();   // INDEX pops two and pushes one: a result means size == before - 1
-	const op_status st = exec_index_impl(f, ins);
-	if (stack_.size() + 1 == depth_before) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_index_kinds_[k < 16 ? k : 15]; }
-	return st;
-#else
 	return exec_index_impl(f, ins);
-#endif
 }
 
 op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
@@ -6385,9 +6233,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 		if (!resolved) return op_status::failed;
 		container_ptr = resolved;
 		if (p.container.member_node != k_invalid_u32) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_index_read_paths_[7];
-#endif
 			VM_TRY(fused_member_container(f, static_cast<size_t>(&ins - f.code->code.data()),
 			                              *container_ptr, p.container.member_node, mscratch, container_ptr));
 			if (is_unwinding_) [[unlikely]] {
@@ -6432,9 +6277,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			const bool lvalue_shape = (flags & index_flag_lvalue_shape) != 0;
 			const bool transient_read = (flags & index_flag_transient_read) != 0 && !has_custom_binary_ops_;
 			if (lvalue_shape && !transient_read) {
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_index_read_paths_[3];
-#endif
 				auto array_type_info = left.get_type_info();
 				type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 				// slot/env storage is mutable by nature; the resolver's constness is
@@ -6448,14 +6290,8 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				// (the decl lane lands it straight in the slot); byte kinds box through get()
 				if constexpr (requires(Sink& s, script_int iv) { s.raw_int(iv); }) {
 					if (node->kind() == script_array::kind_t::i64) {
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_index_read_paths_[0];
-#endif
 						sink.raw_int(node->ints()[static_cast<size_t>(index)]);
 					} else if (node->kind() == script_array::kind_t::f64) {
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_index_read_paths_[1];
-#endif
 						sink.raw_float(node->floats()[static_cast<size_t>(index)]);
 					} else {
 						sink(node->get(static_cast<size_t>(index), engine_));
@@ -6476,24 +6312,15 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 					const script_value& el = node->values()[index];
 					const size_t ei = el.raw_storage_index();
 					if (ei == script_value::TYPEID_INT) {
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_index_read_paths_[0];
-#endif
 						sink.raw_int(el.unchecked_as_int());
 						return {};
 					}
 					if (ei == script_value::TYPEID_FLOAT) {
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_index_read_paths_[1];
-#endif
 						sink.raw_float(el.unchecked_as_float());
 						return {};
 					}
 				}
 			}
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_index_read_paths_[2];
-#endif
 			sink(script_value(node->values()[index]));
 			return {};
 		}
@@ -6533,9 +6360,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			}
 		}
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_index_read_paths_[5];
-#endif
 	if (p.container.const_index != k_invalid_u32) { stack_.push_back(materialize_constant(*f.code, p.container.const_index)); }
 	else { stack_.push_back(*container_ptr); }
 	if (have_raw_index) { stack_.push_back(script_value(raw_index, engine_)); }
@@ -6556,9 +6380,6 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 }
 
 op_status vm_backend::index_fused_push(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip + 1 < f.code->code.size()) { ++profile_index_fused_next_[static_cast<size_t>(f.code->code[f.ip + 1].op)]; }
-#endif
 	// a read whose next instruction dereferences it (DEREF_TOP) takes the value: the array and map rows a transient read takes are the
 	// element a dereferenced reference holds, and the dereference instruction is skipped
 	const vm_instruction& next = f.code->code[f.ip + 1];
@@ -6712,9 +6533,6 @@ JAI_FORCEINLINE bool vm_backend::typed_element_read(frame& f, const script_value
 // proto and the chain vector)
 JAI_FORCEINLINE bool vm_backend::typed_load_fast(frame& f, const vm_instruction& ins) {
 	const chunk::typed_site& site = f.code->typed_sites[f.ip];
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_typed_cont_src_[site.cont_slot != k_invalid_u32 ? 0 : 1];
-#endif
 	if (has_custom_numeric_ops_) return false;
 	const script_value* cp = site.cont_slot != k_invalid_u32
 		? frame_slot(f, site.cont_slot)
@@ -6760,24 +6578,14 @@ op_status vm_backend::exec_typed_load(frame& f, const vm_instruction& ins) {
 	const bool release = site.release;   // the guard's container was read: its temp gives it up
 	op_status st {};
 	if (typed_load_fast(f, ins)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		if (site.speculative) { ++profile_typed_spec_[0]; }
-#endif
 	} else {
-#ifdef JAISCRIPT_VM_PROFILE
-		if (site.speculative) { ++profile_typed_spec_[1]; }
-#endif
 		st = index_fused_decl_rows<false>(f, site.orig);   // the lane just declined: the general decl read
 	}
 	if (release && st != op_status::failed) [[unlikely]] { kill_frame_slot(f, site.guard_temp); }
 	return st;
 }
 
-#ifdef JAISCRIPT_VM_PROFILE
-#define JAI_CELLS_COUNT(k) ++profile_cells_[k]
-#else
 #define JAI_CELLS_COUNT(k) ((void)0)
-#endif
 namespace {
 	inline int64_t cell_bits_of_float(script_float d) { int64_t b; std::memcpy(&b, &d, sizeof b); return b; }
 	// a scalar value's cell word: its payload's bits, a bool normalized to 0 or 1 (the value's other payload bytes are not part of a bool)
@@ -6861,8 +6669,6 @@ void vm_backend::build_raw_window(frame& f) {
 }
 
 void vm_backend::cells_flush(frame& f, const chunk::cell_loop& loop) {
-	JAI_CELL_COST(2)
-	JAI_COARSE(coarse_flush_, coarse_flushes_)
 	materialize_raw_window(f);
 	cells_writeback(f, loop);
 	f.cells->reset(loop.cells.size());
@@ -6900,7 +6706,6 @@ void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 // resume copy ip. Otherwise the block stays closed (its cells were clean at the park) and the general form continues at f.ip, inside the
 // inner counted loops the block ran with their states in place
 const chunk::cell_loop* vm_backend::cells_unpark(frame& f) {
-	JAI_CELL_COST(9)
 	cell_state& cs = *f.cells;
 	const uint32_t li = cs.park_loop;
 	cs.park_at = k_invalid_u32;
@@ -6965,7 +6770,6 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		cs.cells[k].kind = cl.kind;
 		cs.cells[k].set_stamp(nullptr);
 	}
-	JAI_CELL_COST(6)
 	return cells_reland_effects(f, loop);
 }
 
@@ -7040,19 +6844,12 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 	*p = std::move(nv);
 }
 
-void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {	JAI_CELL_COST(3)
-	JAI_COARSE(coarse_miss_, coarse_misses_)
+void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 	JAI_COVERAGE_MISS(f);
 	++cells_counters_.misses;
 	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_cells_miss_step_[step < 8 ? step : 7];
-	static const char* const step_names[] = { "cmp", "arith", "load", "store", "after a call", "bail", "rebind", "injected" };
-	++profile_cells_miss_sites_[std::string(f.code->function_name) + " ip " + std::to_string(original_ip) + " " + (original_ip < f.code->code.size() ? std::string(opcode_name(f.code->code[original_ip].op)) : std::string("?")) + " " + step_names[step < 8 ? step : 7]];
-#else
 	(void)step;
-#endif
 	if (loop.iter_proto != k_invalid_u32 && loop.iter_index_cell != k_invalid_u32 && !iter_states_.empty()) {
 		// the iteration state's next index: the element the block bound this iteration is done with (a miss inside the body), or is the
 		// general ITER_NEXT's to bind again (a miss at the head or its landing: an element the cells do not take, which refuses the
@@ -7094,7 +6891,6 @@ JAI_FORCEINLINE void vm_backend::cells_flush_ip(frame& f, size_t& ip, const chun
 // a counted loop's back edge that is also a block entry: the general step and compare (the state's cached pointers,
 // the overflow text), then the next iteration runs as a block when the cells admit it
 op_status vm_backend::exec_cells_cfor_back(frame& f, const vm_instruction& ins) {
-	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	if (f.cells && f.cells->park_at == f.ip) [[unlikely]] {
 		// a boundary statement ending at the back edge: the parked block's own back edge steps the var cell (the slot's value, re-read)
 		const size_t here = f.ip;
@@ -7152,7 +6948,6 @@ op_status vm_backend::cells_counted_head_entry(frame& f, uint32_t li) {
 op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 	if (ins.op == opcode::op_cells_enter) return exec_cells_enter(f, ins);
 	if (ins.op == opcode::op_cells_resume) return exec_cells_resume(f, ins);
-	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	if (f.cells && f.cells->park_at == f.ip) [[unlikely]] {
 		// a boundary statement ending at the back edge: the parked block resumes at its own back edge (the budget polls there)
 		const size_t here = f.ip;
@@ -7177,7 +6972,6 @@ op_status vm_backend::exec_cells_back(frame& f, const vm_instruction& ins) {
 // a straight-line region's entry (its first instruction) or a compare-headed loop's (its head): the live-in guards and the unboxing, then the
 // copy; a refusal runs the replaced instruction at the trampoline
 op_status vm_backend::exec_cells_enter(frame& f, const vm_instruction& ins) {
-	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.a];
 	if (debug_hook_ || has_custom_numeric_ops_ || !f.cells || !f.window_backed || (ins.a < 64 && ((f.cells->refused_loops >> ins.a) & 1)) || !cells_enter(f, loop, !loop.straight && !loop.frame_program)) { JAI_COVERAGE_ENTRY(f, ins.a, false); f.ip = ins.b; return {}; }
 	JAI_COVERAGE_ENTRY(f, ins.a, true);
@@ -7308,11 +7102,7 @@ bool vm_backend::cells_resolve_sites(frame& f, const chunk::cell_loop& loop) {
 		pinned[pinned_count++] = table; return true;
 	};
 	auto refuse_site = [&](uint32_t ip, const char* why) -> bool {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_entry_refusals_[std::string(f.code->function_name) + " container site ip " + std::to_string(ip) + ": " + why];
-#else
 		(void)ip; (void)why;
-#endif
 		return false;
 	};
 	if (cs.site_node.size() < span) { cs.site_node.resize(span, nullptr); }
@@ -7752,12 +7542,11 @@ std::vector<chunk::entry_memo_row>* vm_backend::cells_entry_rows(frame& f) {
 const chunk::entry_memo_row* vm_backend::cells_entry_row(frame& f, const chunk::cell_loop& loop) {
 	const std::vector<chunk::entry_memo_row>* rows = cells_entry_rows(f);
 	const size_t li = static_cast<size_t>(&loop - f.code->cell_loops.data());
-	if (!rows || li >= rows->size()) { note_entry_row(worker_decline::entry_row_none); return nullptr; }
+	if (!rows || li >= rows->size()) { return nullptr; }
 	const chunk::entry_memo_row& row = (*rows)[li];
-	if (row.env_of != environment_.get()) { note_entry_row(worker_decline::entry_row_env); return nullptr; }
-	if (row.env_serial != env_symbolizer_->env_epoch()) { note_entry_row(worker_decline::entry_row_serial); return nullptr; }
-	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) { note_entry_row(worker_decline::entry_row_shape); return nullptr; }
-	note_entry_row(worker_decline::count);
+	if (row.env_of != environment_.get()) { return nullptr; }
+	if (row.env_serial != env_symbolizer_->env_epoch()) { return nullptr; }
+	if (row.sites.size() != loop.sites.size() || !cells_entry_scope_free(f)) { return nullptr; }
 	return &row;
 }
 
@@ -7814,7 +7603,6 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	// an enum's map is const (internal/const.md 11): while the name holds the same map node, the entry found last time answers
 	const strong_ptr<script_map>& node = base.unchecked_get_map_storage();
 	if (er.enum_map && er.enum_map == node && !parallel_worker_) { return er.enum_entry; }
-	note_worker_decline(worker_decline::enum_entry);
 	const script_map& map = base.as_map();
 	auto it = map.find(map_string_key_probe{ static_cast<const member_expr*>(f.code->nodes[er.member_node].get())->member });
 	if (it == map.end() || it->second.raw_storage_index() != script_value::TYPEID_INT) return nullptr;
@@ -7823,8 +7611,6 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 }
 // the entry: every cell's guard, the container sites resolved once, the unboxing; false = the general form runs
 bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) {
-	JAI_CELL_COST(1)
-	JAI_COARSE(coarse_enter_, coarse_enters_)
 #ifdef JAISCRIPT_MISS_INJECTION
 	miss_every_ = engine_ ? engine_->cells_miss_every() : 0;
 	if (miss_countdown_ == 0 || miss_countdown_ > miss_every_) { miss_countdown_ = miss_every_; }
@@ -7850,20 +7636,9 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 	if (row) { for (const chunk::entry_memo_row::env_cell& e : row->env_cells) { cs.env_ptr[e.cell] = e.binding; } }
 	const bool env_known = env_reuse || row != nullptr;
 	if (cs.cells.size() < loop.cells.size()) {
-#ifdef JAISCRIPT_VM_PROFILE
-		if (cs.cells.empty()) { ++profile_cells_records_; }
-#endif
 		cs.cells.resize(loop.cells.size());
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t bytes = static_cast<uint64_t>(cs.cells.capacity()) * sizeof(cell_word);
-		if (bytes > profile_cells_area_bytes_max_) { profile_cells_area_bytes_max_ = bytes; }
-#endif
 	}
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL), kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-	uint64_t ct0 = __rdtsc();
-	coarse_ncells_ += loop.cells.size(); coarse_nenv_ += loop.env_operands.size(); coarse_nsites_ += loop.sites.size();
-#endif
 	// one walk: every cell's guard, then its unboxing (a refusal leaves partial cell state behind, which nothing reads: the loop stays unentered).
 	// Every cell's slot, live-in or body-defined, must already hold the cell's kind with this engine's canonical stamp and engine: the general
 	// form's first iteration established it, and a landing whose slot holds another kind (a declared-type conversion on a store) stays general.
@@ -7891,9 +7666,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 			const uint8_t vk = v ? static_cast<uint8_t>(v->raw_storage_index()) : 0;
 			if (!v || (vk != kint && vk != kflt && vk != kbool && vk != kstr) || (cl.kind != 0 && vk != cl.kind)) {
 				JAI_CELLS_COUNT(1);
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_cells_entry_refusals_[std::string(f.code->function_name) + " env " + std::string(symbolizer_->get_string(f.code->symbols[er.operand.symbol])) + " want=" + std::to_string(cl.kind) + " have=" + (v ? std::to_string(vk) : std::string("none"))];
-#endif
 				return false;
 			}
 			cs.env_ptr[k] = er.member_node == k_invalid_u32 && ce && ce->fast_ptr == binding && ce->fast_env == cs.env_of && ce->fast_serial == cs.env_serial ? v : nullptr;   // the binding the lookup cache answered, re-read directly while the environment holds
@@ -7914,11 +7686,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		    (st != canonical && !(st && st->base_type == script_value_type::jai_any_type) &&
 		     !(!st && loop.frame_program && cl.kind != 0 && cl.slot < loop.param_cells.size() && loop.param_cells[cl.slot] == k))) {
 			JAI_CELLS_COUNT(1);
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_cells_refused_slot_[k < 64 ? k : 63];
-			++profile_cells_entry_refusals_[std::string(f.code->function_name) + " slot " + std::to_string(cl.slot) + " want=" + std::to_string(want) + " have=" + (s ? std::to_string(s->raw_storage_index()) : std::string("none"))
-			                                 + (st == canonical ? " stamp=canonical" : st && st->base_type == script_value_type::jai_any_type ? " stamp=any" : st ? " stamp=other:" + std::string(st->canonical_name()) : " stamp=none") + (s && s->payload_engine() && s->payload_engine() != engine_ ? " foreign-engine" : "")];
-#endif
 			return false;
 		}
 		// live-in or body-defined alike: the slot holds the general form's last value of the cell's kind (checked above), so a read ahead of the body's
@@ -7930,9 +7697,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		cs.cells[k].set_stamp(cl.kind != 0 ? nullptr : st);   // restored by the flush when recorded
 		JAI_CELLS_COUNT(3);
 	}
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-	{ const uint64_t t1 = __rdtsc(); coarse_ecells_ += t1 - ct0; ct0 = t1; }
-#endif
 	bool resolved = !env_known;
 	if (!loop.sites.empty()) {
 		if (row) { cells_restore_sites(f, loop, *row); }
@@ -7941,10 +7705,6 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 			resolved = true;
 		}
 	}
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-	{ const uint64_t t1 = __rdtsc(); coarse_esites_ += t1 - ct0; ct0 = t1; }
-	struct guard_span { uint64_t& acc; uint64_t t0; ~guard_span() { acc += __rdtsc() - t0; } } guard_span_{coarse_eguards_, ct0};
-#endif
 	if (!loop.inline_sites.empty()) for (const uint32_t si : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // an inlined leaf's callee rebound: the general form's guard takes the fallback
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) { JAI_CELLS_COUNT(1); if (!head) { refuse_container_site(f, loop); } return false; } }   // a stdlib alias's name rebound: the general form makes the real call
 	++cells_counters_.entries;
@@ -7985,7 +7745,7 @@ template <bool Raw>
 op_status vm_backend::cells_run_frame(frame*& fp, const chunk::cell_loop& entry_loop) {
 	const chunk::cell_loop* lp = &entry_loop;
 next_frame:
-#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE) && !defined(JAISCRIPT_MISS_INJECTION)
+#if !defined(JAISCRIPT_VM_COVERAGE) && !defined(JAISCRIPT_MISS_INJECTION)
 	if constexpr (Raw) { cells_run_lean(fp, lp); }   // the frame programs' common operations and their raw calls; this loop takes the first other one
 #endif
 	frame& f = *fp;
@@ -7993,18 +7753,10 @@ next_frame:
 	cell_state& cs = *f.cells;
 	const cell_regs regs{cs.cells.data(), &cs.dirty, block_constants(*f.code), f.code->code.data(), &loop};   // the run's registers: the vectors never move during a run (the entry sized them)
 	const cell_regs hot = regs;   // the inline cases' copy: regs goes by reference to the out-of-line executors, this one stays in registers
-#ifdef JAISCRIPT_VM_PROFILE
-	size_t prof_prev_cell = k_opcode_space;
-	if (profile_cell_pairs_.size() < k_opcode_space * k_opcode_space) { profile_cell_pairs_.assign(k_opcode_space * k_opcode_space, 0); profile_fn_cell_pairs_.assign(k_opcode_space * k_opcode_space, 0); }
-#endif
 	size_t ip = f.ip;
 	for (;;) {
 		const vm_instruction& ci = hot.code[ip];
 		JAI_COVERAGE_CELL(f, ip, ci);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cell_ops_[static_cast<size_t>(ci.op) & 0xFF];
-		const uint64_t prof_c0 = __rdtsc();
-#endif
 #ifdef JAISCRIPT_MISS_INJECTION
 		if (miss_every_ && cells_miss_plain(ci) && --miss_countdown_ == 0) {
 			miss_countdown_ = miss_every_;
@@ -8246,18 +7998,6 @@ next_frame:
 			[[fallthrough]];
 		default: f.ip = ip; st = cells_run_cold(f, loop, ci); ip = f.ip; if (switch_to_) return st; break;   // the call door (a callee runs in the dispatcher, or raw; the block resumes at the landing)
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		{
-			const uint64_t prof_dt = __rdtsc() - prof_c0; const size_t prof_k = static_cast<size_t>(ci.op);
-			profile_cell_cycles_[prof_k] += prof_dt;
-			if (prof_prev_cell < k_opcode_space) { ++profile_cell_pairs_[prof_prev_cell * k_opcode_space + prof_k]; }
-			if (!profile_filter_name_.empty()) {
-				if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
-				if (f.code == profile_filter_chunk_) { ++profile_fn_cell_ops_[prof_k]; profile_fn_cell_cycles_[prof_k] += prof_dt; if (prof_prev_cell < k_opcode_space) { ++profile_fn_cell_pairs_[prof_prev_cell * k_opcode_space + prof_k]; } }
-			}
-			prof_prev_cell = prof_k;
-		}
-#endif
 		JAI_COVERAGE_CELL_AFTER(f, ip);
 		if (st == op_status::failed) { f.ip = ip; return st; }
 		if (cs.loop == k_invalid_u32) { f.ip = ip; return {}; }   // flushed at an exit or a miss: ip is the general form's
@@ -8268,7 +8008,6 @@ next_frame:
 // its status; the budget is polled at the cell back edge as before. A raw call or a raw return hands the block loop
 // another frame (raw_switch_): the raw chain runs it next, and the dispatcher takes whichever frame the chain ends in
 op_status vm_backend::cells_run(frame& entry, const chunk::cell_loop& entry_loop) {
-	JAI_CELL_COST(0)
 	// general code may have run since the last block run: a block that can call raw re-validates its sites' plans (a raw chain starts at such a
 	// block, so no plan outlives general code; a block without raw sites pays nothing)
 	if (entry_loop.raw_sites) [[unlikely]] { raw_epoch_advance(); }
@@ -8392,7 +8131,6 @@ op_status vm_backend::cells_run_cold(frame& f, const chunk::cell_loop& loop, con
 	case opcode::op_c_boundary: {
 		// a boundary operation: the dirty cells the statement may read go back, the block parks (its cells stay valid), and the general form runs
 		// the statement from its first instruction; the statement's end resumes the block (cells_unpark)
-		JAI_CELL_COST(8)
 		cell_state& cs = *f.cells;
 		materialize_raw_window(f);
 		cells_writeback(f, loop);
@@ -8511,7 +8249,6 @@ op_status vm_backend::exec_c_args(frame& f, const vm_instruction& ins) {
 	return {};
 }
 op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
-	JAI_CELL_COST(7)
 	JAI_CELLS_COUNT(7); JAI_CELLS_COUNT(11);
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	if (loop.raw_sites) { raw_epoch_advance(); }   // user code may run: plans re-validate, and a raw call in flight around this one re-validates its caller at its return
@@ -8530,7 +8267,7 @@ op_status vm_backend::exec_c_call(frame& f, const vm_instruction& ins) {
 // frame program of the call's arity; the general probe's own resolution otherwise
 bool vm_backend::raw_probe(frame& f, const chunk::cell_loop& loop, uint32_t index) {
 	const chunk::cell_loop::cell_call& cc = loop.calls[index];
-	if (parallel_worker_) { note_worker_decline(worker_decline::raw_probe); return false; }
+	if (parallel_worker_) { return false; }
 	if (debug_hook_ || has_custom_numeric_ops_ || !cached_global_env_ || !f.window_backed || !f.locals || f.top_level || f.locals->is_method) return false;
 	const call_site& site = f.code->call_sites[f.code->code[cc.probe_ip].a];
 	if (!site.ic_fn || site.ic_argc != cc.args.size() || site.callee.slot != k_invalid_u32 || (site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) return false;
@@ -8576,7 +8313,6 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 // returns through the general return and the door's landing. A depth or budget limit raises at the caller's call instruction, as the general push
 // raises it. false: the callee is parked and the general door runs
 bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop) {
-	JAI_CELL_COST(5)
 	cell_state& cs = *f.cells;
 	if (cs.raw_call != ins.a + 1) return false;   // the probe parked the callee
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
@@ -8700,6 +8436,7 @@ JAI_FORCEINLINE vm_backend::frame& vm_backend::raw_push(frame& f, const chunk::c
 }
 // the raw return's pop (the landing and the caller's resume are the caller's): the window truncated, the record and its frame popped
 JAI_FORCEINLINE void vm_backend::raw_pop(call_record& rec) {
+	JAI_COVERAGE_FRAME_EXIT(rec.f);
 	if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
 	if (rec.direct_pin) [[unlikely]] { rec.direct_pin = {}; }
 	rec.f.raw = false;
@@ -8742,7 +8479,6 @@ vm_backend::frame* vm_backend::raw_return_lean(frame& f, uint8_t kind, int64_t b
 // its landing; when a general call ran during the raw call or the landing converts, the door's landing takes the boxed result. Any other frame
 // (entered by a general call, a native entry, a result the declared type converts) boxes the result and runs the general return at the pad
 op_status vm_backend::exec_c_ret(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr, frame*& back, const chunk::cell_loop*& back_loop) {
-	JAI_CELL_COST(6)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT), kflt = static_cast<uint8_t>(script_value::TYPEID_FLOAT), kbool = static_cast<uint8_t>(script_value::TYPEID_BOOL);
 	uint8_t kind;
 	int64_t bits;
@@ -8832,7 +8568,6 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop, co
 	if (debug_hook_ || has_custom_numeric_ops_) [[unlikely]] return false;
 	// the environment and its epoch as at entry: the bindings recorded there still answer (the lookup cache's own rule)
 	const bool env_ok = environment_.get() == cs.env_of && env_symbolizer_->env_epoch() == cs.env_serial;
-	{ JAI_CELL_COST(10)
 	for (const uint32_t k : loop.env_cells) {
 		const chunk::cell_loop::cell& cl = loop.cells[k];
 		const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
@@ -8846,8 +8581,6 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop, co
 		if (!v || static_cast<uint8_t>(v->raw_storage_index()) != cs.cells[k].kind || v->type_info_raw() != cs.cells[k].stamp()) return false;
 		cs.cells[k].bits = cell_bits(*v, cs.cells[k].kind);
 	}
-	}
-	{ JAI_CELL_COST(15)
 	for (const uint32_t k : loop.string_candidates) {
 		// a string cell backed by a slot borrows the slot's node: re-borrowed after a call or an observed callee getter (a callee may have rebound the slot
 		// through a reference parameter); another kind in the slot is the general form's business
@@ -8857,27 +8590,16 @@ bool vm_backend::cells_reland_effects(frame& f, const chunk::cell_loop& loop, co
 		if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return false;
 		cs.cells[k].bits = reinterpret_cast<int64_t>(s->unchecked_string_handle().get());
 	}
-	}
 	const bool narrowed = landing && landing->narrowed;   // a landing checks what it can reach before the next one
-	{ JAI_CELL_COST(11)
 	if (!loop.sites.empty() && !cells_sites_hold(f, loop, env_ok, narrowed ? landing->land_sites : loop.land_sites) && !cells_resolve_sites(f, loop)) return false;
-	}
-	{ JAI_CELL_COST(12)
 	if (!loop.rebinds.empty() && !cells_rebinds_hold(f, loop)) return false;
-	}
-	{ JAI_CELL_COST(13)
 	for (const uint32_t si : narrowed ? landing->inline_sites : loop.inline_sites) { if (!inline_site_holds(f, f.code->inline_sites[si])) return false; }   // a callee rebound the inlined leaf's name
-	}
-	{ JAI_CELL_COST(14)
 	for (const auto& ms : loop.math_alias_sites) { if (!math_alias_holds(f, ms)) return false; }
-	}
 	return true;
 }
 // the landing after a call: the effect point's checks, then the result lands by the declared-type rule or is dropped; any
 // change misses at the consumer with the result on the stack, exactly the general form's state there
 op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const chunk::cell_loop::cell_call& cc) {
-	JAI_CELL_COST(4)
-	JAI_COARSE(coarse_land_, coarse_lands_)
 	const uint8_t kint = static_cast<uint8_t>(script_value::TYPEID_INT);
 	auto miss = [&]() -> op_status { JAI_CELLS_COUNT(12); cells_miss(f, loop, cc.consumer == 0 ? cc.consumer_ip + 1 : cc.consumer_ip, 4); return {}; };   // a statement's result is not on the stack here (a script callee never pushed it, the native path dropped it): the general form resumes after its drop
 	bool raw = false;
@@ -8911,7 +8633,6 @@ op_status vm_backend::cells_land(frame& f, const chunk::cell_loop& loop, const c
 }
 // the dispatcher reaches the landing when a callee returned to the caller parked on the call's copy
 op_status vm_backend::cells_resume(frame& f, const vm_instruction& ins) {
-	JAI_COARSE(coarse_blocks_, coarse_block_runs_)
 	const chunk::cell_loop& loop = f.code->cell_loops[ins.b];
 	const chunk::cell_loop::cell_call& cc = loop.calls[ins.a];
 	if (!f.cells || f.cells->loop != ins.b) [[unlikely]] { f.ip = cc.consumer_ip; return {}; }   // no block is active here: the general consumer takes the result
@@ -9472,9 +9193,6 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 	if (form == src_form::value) {
 		const script_value& v = pv->deref();
 		const size_t vi = v.raw_storage_index();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_push_[3];
-#endif
 		switch (node->kind()) {
 		case script_array::kind_t::hetero: {
 			const type_info* ti = recv->get_type_info().get();
@@ -9515,16 +9233,10 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
 		if (form != src_form::raw_int || !limits_->memory_charge(sizeof(script_value))) return miss();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_push_[0];
-#endif
 		node->ints().push_back(raw_int);
 		break;
 	case script_array::kind_t::f64:
 		if ((form != src_form::raw_float && form != src_form::raw_int) || !limits_->memory_charge(sizeof(script_value))) return miss();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_push_[1];
-#endif
 		node->floats().push_back(form == src_form::raw_float ? raw_float : static_cast<script_float>(raw_int));
 		break;
 	case script_array::kind_t::u8:
@@ -9535,9 +9247,6 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 		break;
 	case script_array::kind_t::str:
 		if (form != src_form::raw_str || !raw_str->get() || !limits_->memory_charge(sizeof(script_value) + raw_str->get()->size())) return miss();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_push_[2];
-#endif
 		node->strs().push_back(*raw_str);   // one handle copy (the source's node stays where it is); a self push reads the handle before the vector grows
 		break;
 	case script_array::kind_t::hetero: {
@@ -9549,9 +9258,6 @@ JAI_NOINLINE op_status vm_backend::exec_c_push(frame& f, const vm_instruction& i
 		const type_info* et = ti ? ti->element_type().get() : nullptr;
 		if (et && et->base_type != script_value_type::jai_any_type) return miss();
 		if (!limits_->memory_charge(sizeof(script_value) + (vi == script_value::TYPEID_STRING ? v.unchecked_as_string().size() : 0))) return miss();
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_cells_push_[3];
-#endif
 		node->values().push_back(v);
 		break;
 	}
@@ -10107,13 +9813,8 @@ bool vm_backend::lane_deref_silent(const script_value& v) noexcept {
 	return h && !h->property;
 }
 
-#ifdef JAISCRIPT_VM_PROFILE
-#define JAI_TYPED_LAND(k) ++profile_typed_land_[k]
-#define JAI_TYPED_INPLACE(k) ++profile_typed_inplace_[k]
-#else
 #define JAI_TYPED_LAND(k) ((void)0)
 #define JAI_TYPED_INPLACE(k) ((void)0)
-#endif
 
 bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 	const uint32_t slot = a & k_typed_slot_mask;
@@ -10123,9 +9824,6 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 		// a temp this engine built already carries the canonical int stamp and the engine pointer the construct path would give it
 		if (s && s->raw_storage_index() == script_value::TYPEID_INT && s->stamped_as(ti_int_)) { JAI_TYPED_LAND(0); s->unchecked_set_int_payload(v); return true; }
 		JAI_TYPED_LAND(1);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_INT ? 1 : 2];
-#endif
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
@@ -10171,9 +9869,6 @@ bool vm_backend::typed_land_float(frame& f, uint32_t a, script_float v) {
 	case k_typed_dst_temp:
 		if (s && s->raw_storage_index() == script_value::TYPEID_FLOAT && s->stamped_as(ti_float_)) { JAI_TYPED_LAND(0); s->unchecked_set_float_payload(v); return true; }
 		JAI_TYPED_LAND(1);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_FLOAT ? 1 : 2];
-#endif
 		frame_slot_set(f, slot, script_value(v, engine_));
 		return true;
 	case k_typed_dst_decl: {
@@ -10591,9 +10286,6 @@ bool vm_backend::typed_decl_read(frame& f, const fused_index_proto& p, uint32_t)
 }
 
 bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no_result) {
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_typed_cont_src_[p.container.slot != k_invalid_u32 ? 2 : 3];
-#endif
 	const bool folded = p.index_binary != k_invalid_u32;
 	const bool value_operand = p.store_value.const_index != k_invalid_u32 || p.store_value.symbol != k_invalid_u32;
 	// the value first (the kernel resolves it first, so an undefined name keeps its position)
@@ -10667,13 +10359,7 @@ template <bool Lane>
 op_status vm_backend::index_fused_decl_rows(frame& f, const vm_instruction& ins) {
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	if (Lane && p.typed_lane && !has_custom_numeric_ops_ && has_slots(f)) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_typed_decl_read_[0];
-#endif
 		if (typed_decl_read(f, p, ins.b)) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_typed_decl_read_[1];
-#endif
 			return {};
 		}
 	}
@@ -10851,13 +10537,7 @@ op_status vm_backend::index_store_fused_rows(frame& f, const vm_instruction& ins
 	const fused_index_proto& p = f.code->fused_index_protos[ins.a];
 	const bool no_result = ins.c != 0;
 	if (p.typed_lane && !has_custom_numeric_ops_) {
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_typed_store_[0];
-#endif
 		if (typed_index_store(f, p, no_result)) {
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_typed_store_[1];
-#endif
 			return {};
 		}
 	}
@@ -11522,10 +11202,6 @@ op_status vm_backend::exec_decl_var(frame& f, const vm_instruction& ins) {
 
 JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<variable_decl*>(f.code->nodes[ins.a].get());
-#ifdef JAISCRIPT_VM_PROFILE
-	if (f.ip > 0) { ++profile_decl_var_prev_[static_cast<size_t>(f.code->code[f.ip - 1].op)]; }
-	if (ins.b != 0 && !stack_.empty()) { const size_t k = stack_.back().deref().raw_storage_index(); ++profile_decl_var_kinds_[k < 16 ? k : 15]; }
-#endif
 	const bool has_init = ins.b != 0;
 	const bool lvalue_init = ins.c != 0;
 	type_info_ptr effective_decl_type = decl->type;   // explicit, or inferred from a uniform literal
@@ -12098,7 +11774,6 @@ bool vm_backend::inline_site_holds(frame& f, const chunk::inline_site& site) {
 	if (!parallel_worker_ && site.holds_fn.get() == &fn) return true;   // every condition below is fixed for one function object
 	const script_function** worker_holds = parallel_worker_ ? worker_inline_holds(f, site) : nullptr;
 	if (worker_holds && *worker_holds == &fn) return true;
-	note_worker_decline(worker_decline::inline_fn_memo);
 	const auto* thunk = fn.target<script_callable_thunk>();
 	const bool holds = thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && !thunk->payload.fn->converted() && (!thunk->payload.fn->closure_env || (parallel_worker_ && thunk->payload.fn->closure_env.get() == worker_root_env_)) && thunk->payload.fn->body.get() == site.body;   // a worker's copy of the callee closes over the worker's root
 	if (holds && !parallel_worker_) { site.holds_fn = *v->get_storage().get_if<script_value::TYPEID_FUNCTION>(); }
@@ -12182,9 +11857,9 @@ bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const cla
 // a worker's method graft: the receiver's class holds the region's pin of the method, whose body is the graft's, and the bare fields the
 // body names resolve as on the main engine; validated once per class and method epoch in the worker's own row
 bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& site) {
-	if (site.receiver_slot == k_invalid_u32 || !site.global_ids.empty()) { note_worker_decline(worker_decline::inline_method); return false; }   // the pinned call answers
+	if (site.receiver_slot == k_invalid_u32 || !site.global_ids.empty()) { return false; }   // the pinned call answers
 	const script_value* r = frame_slot(f, site.receiver_slot);
-	if (!r || !parallel_method_pins_) { note_worker_decline(worker_decline::inline_method); return false; }
+	if (!r || !parallel_method_pins_) { return false; }
 	const script_value& v = r->deref();
 	const size_t k = v.raw_storage_index();
 	if (k != script_value::TYPEID_OBJECT) return false;
@@ -12195,13 +11870,12 @@ bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& 
 	if (!cd) return false;
 	if (inst->has_user_overflow_fields() && inst->has_field(site.member_id)) return false;
 	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
-	if (!rec) { note_worker_decline(worker_decline::inline_method); return false; }
+	if (!rec) { return false; }
 	const size_t site_index = index_within(site, f.code->inline_sites);
 	if (site_index == SIZE_MAX) return false;
 	if (!rec->rows_sized) [[unlikely]] { size_worker_rows(*rec); }
 	auto& row = rec->method_holds[site_index];
 	if (row.first == cd && row.second == cd->method_epoch()) return true;
-	note_worker_decline(worker_decline::inline_method);
 	if (site.field_class && cd != site.field_class) return false;
 	if (cd->chain_has_nonpublic() || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
 	const detail::parallel_method_pin* pin = parallel_method_pins_->find(cd, site.member_id);
@@ -12226,16 +11900,9 @@ op_status vm_backend::exec_inline_guard(frame& f, const vm_instruction& ins) {
 }
 
 op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, bool* observed) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_p0 = __rdtsc();
-	++profile_probe_count_;
-#define JAI_PROBE_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_probe_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
-#else
-#define JAI_PROBE_SECTION(idx)
-#endif
 	const call_site& site = f.code->call_sites[ins.a];
 	const size_t argc = ins.b;
-	if (f.this_inst && site.mic_cd == f.this_cd && site.mic_dispatch && park_frame_sibling(f, site)) { JAI_PROBE_SECTION(0); JAI_PROBE_SECTION(1); return {}; }
+	if (f.this_inst && site.mic_cd == f.this_cd && site.mic_dispatch && park_frame_sibling(f, site)) { return {}; }
 	if (parallel_worker_ && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
 		if (const worker_chunk_env_cache::call_ic* ic = worker_call_ic(f, site); ic && ic->identity && (ic->fn ? argc == ic->argc : ic->native)) {
 			bool plain_frame = !f.locals || f.top_level;
@@ -12249,7 +11916,6 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 				pc.staged_slots = site.staged_argument_slots.empty() ? nullptr : &site.staged_argument_slots;
 				return {};
 			}
-			note_worker_decline(worker_decline::probe_ic);
 		}
 	}
 	if (cached_global_env_ && ((site.ic_fn && argc == site.ic_argc) || site.ic_native) && site.callee.slot == k_invalid_u32 && !(site.callee.load_flags & (load_flag_type_ctor | load_flag_global_only))) {
@@ -12272,7 +11938,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 			}
 		}
 	}
-	if (site.mic_cd && park_sibling_method(f, site)) { JAI_PROBE_SECTION(0); JAI_PROBE_SECTION(1); return {}; }
+	if (site.mic_cd && park_sibling_method(f, site)) { return {}; }
 	if (parallel_worker_) [[unlikely]] {
 		if (const int sibling = worker_park_sibling(f, site); sibling > 0) { return {}; }
 		else if (sibling < 0) {
@@ -12284,11 +11950,8 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed, true);
 	if (!resolved) return op_status::failed;
-	JAI_PROBE_SECTION(0);
 	if (scratch && &*scratch == resolved) { arm_sibling_method(f, site, *resolved); }
 	const op_status parked = park_callee(f, site, argc, *resolved);
-	JAI_PROBE_SECTION(1);
-#undef JAI_PROBE_SECTION
 	return parked;
 }
 
@@ -12296,7 +11959,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 // and method epoch (no own-scope binding, no field of the name, one overload on an all-public chain) is the class's dispatcher on this
 // frame's receiver, parked as such; the call enters it as the bound method it would have minted
 bool vm_backend::park_sibling_method(frame& f, const call_site& site) {
-	if (parallel_worker_ && f.locals && !f.top_level && f.locals->is_method) { note_worker_decline(worker_decline::sibling_method); return false; }
+	if (parallel_worker_ && f.locals && !f.top_level && f.locals->is_method) { return false; }
 	if (parallel_worker_ || !cached_global_env_ || !f.locals || f.top_level || !f.locals->is_method) return false;
 	ensure_frame_member_scope(f, environment_.get());
 	if (frame_scope_state(f) != detail::member_scope_state::instance || !f.locals->scope_this) return false;
@@ -12783,7 +12446,6 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins) {
 	pending_callee& top = pending_callees_.back();
 	if (top.fn) {
-		JAI_COARSE(coarse_push_, coarse_pushes_)
 		const script_defined_function& fn = *top.fn;
 		strong_ptr<script_function_node> pin = std::move(top.pin);
 		pending_callees_.pop_back();
@@ -12796,7 +12458,6 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			top.pin = hs.ic_pin;   // declined: the general path holds the callee itself
 		}   // else refilled since the probe: the probed callee is retired until the outermost entry returns
 	}
-#ifndef JAISCRIPT_VM_PROFILE
 	if (top.method && !parallel_worker_) {
 		// the general path's sibling method under its dispatcher's memo (the resolution it would reuse), entered as it enters it
 		const script_method_dispatch& md = *top.method;
@@ -12809,7 +12470,6 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 			return enter_script_method_sliced(f, pc.value, md, *md.resolved_memo, &receiver, slice_base, slice_base, argc, f.code->call_sites[ins.b]);
 		}
 	}
-#endif
 	return exec_call_from_scratch_general(f, ins);
 }
 
@@ -12955,31 +12615,11 @@ JAI_NOINLINE bool vm_backend::call_host_direct(const script_function& callee, si
 }
 
 JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, const vm_instruction& ins) {
-	JAI_COARSE(coarse_push_, coarse_pushes_)
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	pending_callee pc = std::move(pending_callees_.back());
 	pending_callees_.pop_back();
 
-#ifdef JAISCRIPT_VM_PROFILE
-	// Path-bucketed self-cost (see profile_cfs_cycles_): dtor charges the bucket the
-	// taken path selected; the opaque tail keeps the default and splits by callee name
-	struct cfs_probe {
-		vm_backend* vm;
-		int bucket = 2;
-		std::string opaque_name;
-		uint64_t t0 = __rdtsc();
-		~cfs_probe() {
-			const uint64_t dt = __rdtsc() - t0;
-			vm->profile_cfs_cycles_[bucket] += dt;
-			++vm->profile_cfs_counts_[bucket];
-			if (bucket == 2 && !opaque_name.empty()) { vm->profile_cfs_opaque_cycles_[opaque_name] += dt; }
-		}
-	} cfs_probe_{this};
-	if (site.callee.symbol != k_invalid_u32) {
-		cfs_probe_.opaque_name = std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]));
-	}
-#endif
 
 	if (pc.method) {
 		// a sibling method parked by the probe's IC: entered as its bound method would be, else minted for the opaque path
@@ -12995,9 +12635,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 			md.resolved_memo_argc = argc;
 		}
 		if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
-#ifdef JAISCRIPT_VM_PROFILE
-			cfs_probe_.bucket = 1;
-#endif
 			script_value receiver = *f.locals->scope_this;
 			return enter_script_method_sliced(f, std::move(pc.value), *pc.method, *resolved.value(), &receiver, slice_base, slice_base, argc, site);
 		}
@@ -13042,9 +12679,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 				auto resolved = dispatch->cls->resolve_method_overload_ref(dispatch->name_id,
 					stack_.data() + slice_base, argc);
 				if (resolved && (*resolved.value())->body && !(*resolved.value())->is_coroutine) {
-#ifdef JAISCRIPT_VM_PROFILE
-					cfs_probe_.bucket = 1;
-#endif
 					const script_value& method_val = *bthunk->payload.bound_dispatch();
 					script_value receiver = *bthunk->payload.this_obj();
 					return enter_script_method_sliced(f, std::move(method_val), *dispatch,
@@ -13056,23 +12690,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_from_scratch_general(frame& f, cons
 	}
 
 	// Opaque / arity-window path: today's pooled invoke with the parked value
-#ifdef JAISCRIPT_VM_PROFILE
-	// Who misses the in-loop fast path: count native-boundary callees by site symbol.
-	// Bound-method thunks are NOT misses (invoke_callee enters them in-loop below).
-	{
-		const auto* parked_thunk = pc.value.is_function()
-			? pc.value.as_function().target<script_callable_thunk>() : nullptr;
-		const bool parked_bound = parked_thunk &&
-			parked_thunk->payload.kind == script_callable::kind_type::bound_method;
-		if (!parked_bound) {
-			if (ins.b < f.code->call_sites.size() && site.callee.symbol != k_invalid_u32) {
-				profile_native_callees_[std::string(symbolizer_->get_string(f.code->symbols[site.callee.symbol]))]++;
-			} else {
-				profile_native_callees_["<unnamed-site>"]++;
-			}
-		}
-	}
-#endif
 	if (pc.native()) {
 		if (op_status st{}; call_host_direct(pc.native_fn(), argc, st)) { return st; }
 	}
@@ -13281,9 +12898,6 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 // arguments are already its parameter slots (or its T& parameters name the caller's frame-slot locals), takes push_script_frame_pinned's
 // lazy lane (env-untouched, or the closure environment installed) with nothing that can throw; false = the general push
 bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const script_defined_function& function, strong_ptr<script_function_node>& pin, size_t args_base, size_t argc) {
-#ifdef JAISCRIPT_VM_PROFILE
-	return false;   // the profile's push sections account the general push
-#endif
 	chunk* body_chunk = static_cast<chunk*>(function.backend_body_cache.get());
 	if (!body_chunk || current_call_depth_ >= limits_->vm_depth_gate || call_records_top_ == call_records_.size()) { return false; }
 	if (function.backend_frame_plan == 0) {
@@ -13357,13 +12971,6 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
                                                           strong_ptr<script_function_node> pin,
                                                           size_t args_base, size_t argc,
                                                           const call_site* site) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_p0 = __rdtsc();
-	++profile_call_push_count_;
-#define JAI_CALL_PUSH_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_push_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
-#else
-#define JAI_CALL_PUSH_SECTION(idx)
-#endif
 	if (current_call_depth_ >= limits_->vm_depth_gate) {
 		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
@@ -13390,14 +12997,10 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			call_records_.push_back(std::make_unique<call_record>());
 		}
 	}
-	JAI_CALL_PUSH_SECTION(0);
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	if (function.backend_return_conv == 0) {
@@ -13413,7 +13016,6 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.locals.reset_member_scope();
 	if (!body_chunk->cell_loops.empty()) { rec.cells.reset_call(body_chunk->max_cells); }
 	rec.f.cells = &rec.cells;
-	JAI_CALL_PUSH_SECTION(1);
 	rec.env_lazy = !body_chunk->needs_frame_env &&
 	               (!function.closure_env ||
 	                (!function.closure_env->is_method_env() && !function.closure_env->is_static_method_env()));
@@ -13442,7 +13044,6 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			throw;
 		}
 	}
-	JAI_CALL_PUSH_SECTION(2);
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
@@ -13459,7 +13060,6 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 	rec.f.unit = function.unit;
 	enter_unit(function.unit);
 	enter_frame(rec.f, &function);
-	JAI_CALL_PUSH_SECTION(3);
 
 	const bool bound_in_place = binds_slice_in_place(function, stack_.data() + args_base, argc);
 	if (!bound_in_place) {
@@ -13477,13 +13077,10 @@ op_status vm_backend::push_script_frame_pinned(frame& caller,
 			return bound;
 		}
 	}
-	JAI_CALL_PUSH_SECTION(4);
 	assert(stack_.size() == args_base + argc);
 	const size_t window_slots = std::max(function.local_count, static_cast<size_t>(body_chunk->local_count));
 	stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	switch_to_ = &rec.f;
-	JAI_CALL_PUSH_SECTION(5);
-#undef JAI_CALL_PUSH_SECTION
 	return {};
 }
 
@@ -13642,7 +13239,6 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 	// (call_record::method_result_anchor). Coroutine methods, foreign engines, and
 	// parallel workers fall to the opaque path (identical behavior; the worker rules
 	// live there). A resolution decline falls through for the identical error.
-	if (parallel_worker_ && thunk && thunk->eng == engine_ && thunk->payload.kind == script_callable::kind_type::bound_method) { note_worker_decline(worker_decline::bound_in_loop); }
 	if (thunk && thunk->eng == engine_ &&
 	    thunk->payload.kind == script_callable::kind_type::bound_method &&
 	    thunk->payload.this_obj() && thunk->payload.bound_dispatch() &&
@@ -13651,9 +13247,6 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 		if (dispatch && dispatch->eng == engine_) {
 			auto resolved = dispatch->cls->resolve_method_overload(dispatch->name_id, arguments);
 			if (resolved && resolved.value()->body && !resolved.value()->is_coroutine) {
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_bound_method_paths_[1]++;
-#endif
 				script_value method_val = *thunk->payload.bound_dispatch();
 				script_value receiver = *thunk->payload.this_obj();
 				return enter_script_method(f, std::move(method_val), *dispatch,
@@ -13697,13 +13290,6 @@ op_status vm_backend::invoke_callee(frame& f, script_value&& callee, std::vector
 		}
 	}
 
-#ifdef JAISCRIPT_VM_PROFILE
-	if (thunk && thunk->payload.kind == script_callable::kind_type::bound_method) {
-		profile_bound_method_paths_[2]++;
-	} else if (!direct) {
-		profile_bound_method_paths_[3]++;
-	}
-#endif
 
 	if (in_loop) {
 		// Same in-loop entry as exec_call; op_call_method's dispatch case consumes switch_to_
@@ -13794,9 +13380,6 @@ op_status vm_backend::exec_func_decl(frame& f, const vm_instruction& ins) {
 							// pooled-env recycle hazard for escaping handles)
 							auto global = engine_ ? engine_->get_global_environment() : nullptr;
 							captureEnv = std::make_shared<environment>(global, symbolizer_);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_births_[4];
-#endif
 						}
 						captureEnv->define(sym, detail::clone_for_capture(slot_val->deref()));
 					}
@@ -14186,9 +13769,6 @@ op_status vm_backend::exec_closure(frame& f, const vm_instruction& ins) {
 		final_closure_env = std::move(method_env);
 	} else if (needs_capture_env) {
 		auto captureEnv = std::make_shared<environment>(detail::lambda_parent_scope(closure_env), symbolizer_);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_env_births_[4];
-#endif
 
 		if (captures_this && has_default_capture) {
 			auto result = environment_->get(this_id_);
@@ -15218,7 +14798,6 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 
 bool vm_backend::bare_host_read(frame& f, size_t cache_slot, script_value& out) {
 	const auto& table = f.code->bare_host_ic;
-	if (parallel_worker_ && cache_slot < table.size()) { note_worker_decline(worker_decline::bare_host); }
 	if (cache_slot >= table.size() || parallel_worker_) { return false; }
 	const chunk::bare_host_entry& entry = table[cache_slot];
 	if (!entry.hit.lane || !f.locals->scope_this) { return false; }
@@ -15247,7 +14826,6 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 }
 
 class_instance* vm_backend::ordinary_site_instance(const call_site& site, const script_value& receiver) const {
-	if (parallel_worker_ && site.ord_cd) { const_cast<vm_backend*>(this)->note_worker_decline(worker_decline::ordinary_site); }
 	if (!site.ord_cd || parallel_worker_) { return nullptr; }
 	const script_value& objv = receiver.deref();
 	if (objv.raw_storage_index() != script_value::TYPEID_OBJECT) { return nullptr; }
@@ -15315,7 +14893,7 @@ JAI_FORCEINLINE void* vm_backend::worker_native_self(const frame& f, const call_
 		return nullptr;
 	}
 	worker_chunk_env_cache* rec = worker_chunk_record(f.code);
-	if (!rec) { note_worker_decline(worker_decline::native_lane); return nullptr; }
+	if (!rec) { return nullptr; }
 	const size_t site_index = index_within(site, f.code->call_sites);
 	if (site_index == SIZE_MAX) { return nullptr; }
 	if (!rec->rows_sized) [[unlikely]] { size_worker_rows(*rec); }
@@ -15498,16 +15076,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_get_member_at(frame& f, const vm_inst
 	{
 		script_value host_value{std::monostate{}, nullptr};
 		if (const script_value* cell = site_field(*f.code, receiver->deref(), expr, ip, host_value)) {
-#ifdef JAISCRIPT_VM_PROFILE
-			profile_get_member_paths_[0]++;
-#endif
 			stack_.push_back(*cell);
 			return {};
 		}
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	profile_get_member_paths_[2]++;
-#endif
 	// the ladder may run a getter that rebinds the local: it owns the snapshot LOAD would have made
 	if (receiver != &object) { object = *receiver; }
 	script_value out = make_null();
@@ -15891,7 +15463,7 @@ std::optional<script_value> vm_backend::folded_static_value(const member_expr* e
 }
 
 void vm_backend::fold_static_read(frame& f, const vm_instruction& ins, const member_expr* expr, const script_value& out) {
-	if (parallel_worker_) { note_worker_decline(worker_decline::static_fold); return; }
+	if (parallel_worker_) { return; }
 	if (debug_hook_ || (engine_ && engine_->parallel_region_active()) || !f.code) { return; }
 	if (!f.pin && !body_chunks_.count(f.code)) { return; }   // a chunk whose lifetime the fold can hold
 	if (f.ip >= f.code->code.size() || f.code->code[f.ip].op != opcode::op_get_static || f.code->code[f.ip].a != ins.a) { return; }
@@ -16865,17 +16437,11 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 			const push_append lane = typed_push_append(objd, val->deref());
 			if (lane == push_append::failed) return op_status::failed;
 			if (lane == push_append::appended) {
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_push_fused_lane_[0];
-#endif
 				land_discarded();
 				return {};
 			}
 		}
 		{
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_push_fused_lane_[1];
-#endif
 			auto array_type_info = objd.get_type_info();
 			type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 			if (!vm_is_element_type_compatible(*val, element_type, engine_)) {
@@ -16899,9 +16465,6 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 			return {};
 		}
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_push_fused_lane_[2];
-#endif
 	// replay: exactly what the unfused sequence leaves on the stack, in its order: the
 	// receiver (LOAD pushes the cell's referent), the member probe when the argument owed
 	// one, the argument (an element read as its lvalue-shaped op_index), then the call
@@ -17438,10 +17001,6 @@ op_status vm_backend::exec_call_method(frame& f, const vm_instruction& ins) {
 }
 
 JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_instruction& ins) {
-	JAI_COARSE(coarse_method_, coarse_methods_)
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t cm_entry = __rdtsc();
-#endif
 	const size_t argc = ins.a;
 	const call_site& site = f.code->call_sites[ins.b];
 	auto* member = static_cast<member_expr*>(f.code->nodes[site.member_node].get());
@@ -17492,9 +17051,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				const strong_ptr<script_value::object_holder>& holder = receiver_type == script_value::TYPEID_OBJECT ? objd.unchecked_object_handle() : held;
 				if (holder && holder->is_instance() &&
 				    holder->type_id() != coroutine_handle_type_id_) {
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_slice_gate_[0];   // reached instance receiver
-#endif
 					auto* inst = holder->unchecked_instance();
 					class_definition* cd = inst->get_class_definition();
 					// A host class's direct lane (class_definition::native_method): the bound method's body on the
@@ -17531,9 +17087,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 					} else if (cached_global_env_ && site.mic_cd && cd == site.mic_cd &&
 					           cd->method_epoch() == site.mic_epoch &&
 					           !mic_field_shadowed(site, *inst, member->member_id)) {
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_slice_gate_[1];   // mic guard passed
-#endif
 						if (site.mic_static) {
 							const script_value& method_val = site.mic_method;
 							return enter_script_method_sliced(f, std::move(method_val), *site.mic_dispatch,
@@ -17549,9 +17102,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 							                                  args_base, argc, site);
 						}
 						// resolution declined (arg types): the vector ladder reports identically
-#ifdef JAISCRIPT_VM_PROFILE
-						++profile_slice_gate_[2];   // resolution declined in the slice branch
-#endif
 					} else if (cached_global_env_ && site.mic_cd && cd) {
 						for (const call_site::mic_entry& entry : site.mic_poly) {
 							if (entry.cd != cd || cd->method_epoch() != entry.epoch) { continue; }
@@ -17562,9 +17112,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 							                                  args_base, argc, site);
 						}
 					}
-#ifdef JAISCRIPT_VM_PROFILE
-					else { ++profile_slice_gate_[3]; }   // mic guard failed (unarmed/epoch/class/field)
-#endif
 					// a script layer's C++ base method (the script method cache never holds one, so a script method it serves never gets here)
 					if (cd && cd->is_script_class()) {
 						const void* nat_entry = nullptr;
@@ -17610,50 +17157,25 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 					member->member_id = push_member_id;
 				}
 				if (push_member_id == builtin_push_id_) {
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_builtin_direct_names_["<push-sliced>"];
-					const uint64_t push_t0 = __rdtsc();
-					profile_push_prologue_ += push_t0 - cm_entry;
-					{
-						const script_array* pn = objd.unchecked_get_array_storage().get();
-						if (pn->is_typed()) { ++profile_push_sections_[0]; }
-						else { ++profile_push_sections_[1]; if (pn->values().size() == pn->values().capacity()) { ++profile_push_sections_[2]; } }
-					}
-#endif
 					auto array_type_info = objd.get_type_info();
 					type_info_ptr element_type = array_type_info ? array_type_info->element_type() : nullptr;
 					if (!vm_is_element_type_compatible(stack_[args_base], element_type, engine_)) {
 						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", stack_[args_base].deref(), element_type));
 					}
-#ifdef JAISCRIPT_VM_PROFILE
-					const uint64_t push_t1 = __rdtsc(); profile_push_sections_[3] += push_t1 - push_t0;
-#endif
 					auto converted_result = vm_convert_pushed_element(engine_, stack_[args_base], element_type);
 					if (!converted_result) { return raise_from(converted_result); }
 					script_value converted = std::move(converted_result.value());
-#ifdef JAISCRIPT_VM_PROFILE
-					const uint64_t push_t2 = __rdtsc(); profile_push_sections_[4] += push_t2 - push_t1;
-#endif
 					const size_t bytes = sizeof(script_value) +
 						(converted.is_string() ? converted.unchecked_as_string().size() : 0);
 					if (!limits_->memory_charge(bytes)) [[unlikely]] {
 						return raise_from(detail::raise_memory_cap(*limits_));
 					}
-#ifdef JAISCRIPT_VM_PROFILE
-					const uint64_t push_t3 = __rdtsc(); profile_push_sections_[5] += push_t3 - push_t2;
-#endif
 					// Conversions can run user code and the stack can move (invariant
 					// 2b): re-resolve the receiver by INDEX before the append
 					script_value& recv_after = stack_[args_base - 1].deref();
 					recv_after.unchecked_get_array_storage()->push(std::move(converted));
-#ifdef JAISCRIPT_VM_PROFILE
-					const uint64_t push_t4 = __rdtsc(); profile_push_sections_[6] += push_t4 - push_t3;
-#endif
 					stack_.pop_back();                    // the arg
 					stack_.back() = make_null();          // receiver slot becomes the call result
-#ifdef JAISCRIPT_VM_PROFILE
-					profile_push_sections_[7] += __rdtsc() - push_t4;
-#endif
 					return {};
 				}
 			} else if (receiver_type == script_value::TYPEID_PARALLEL_BORROW && objd.parallel_object_borrow()) [[unlikely]] {
@@ -17694,9 +17216,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 		stack_.pop_back();
 		script_value& var_ref = string_recv->deref();
 		detail::deref_builtin_args_in_place(arguments);
-#ifdef JAISCRIPT_VM_PROFILE
-		profile_call_method_paths_[3]++;
-#endif
 		auto result = (*string_builtin)(builtin_ctx(), var_ref, arguments);
 		if (!result) {
 			return raise_from(result);
@@ -17758,7 +17277,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				auto* cd = holder->unchecked_instance()->get_class_definition();
 				if (const detail::parallel_method_pin* host = parallel_method_pins_ && cd ? parallel_method_pins_->find(cd, member->member_id) : nullptr;
 				    host && !host->resolved) {
-					note_worker_decline(worker_decline::host_method_pin);
 					std::vector<script_value> host_args(arguments.begin(), arguments.end());
 					auto called = detail::call_parallel_host_pin(*host, object, member->member_id, std::move(host_args), engine_);
 					if (!called) { return raise_from(called); }
@@ -17874,9 +17392,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 										site.mic_resolved = resolved.value();
 										site.mic_static = true;
 									}
-#ifdef JAISCRIPT_VM_PROFILE
-									profile_call_method_paths_[2]++;
-#endif
 									return enter_script_method(f, std::move(method_val), *dispatch,
 									                           resolved.value(), std::move(objv), arguments, site);
 								}
@@ -17925,10 +17440,6 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				break;
 			}
 			if (direct) {
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_call_method_paths_[6]++;
-				++profile_builtin_direct_names_[std::string(member->member)];
-#endif
 				// member_id warms lazily (interp idiom) - main thread only: workers get pre-warmed ids from region setup and must
 				// never intern (frozen tables).
 				uint64_t direct_member_id = member->member_id;
@@ -18011,18 +17522,12 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 		if (!call_operator.is_function()) { return raise_not_callable(member->member_id, callee); }
 		callee = std::move(call_operator);
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	profile_call_method_paths_[5]++;
-#endif
 	return invoke_callee(f, std::move(callee), arguments, site);
 }
 
 op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 	auto* expr = static_cast<new_expr*>(f.code->nodes[ins.a].get());
 	const size_t argc = ins.b;
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_new0 = __rdtsc();
-#endif
 
 	auto args = acquire_arg_vector(argc);
 	arg_vector_return arg_return{this, &args, argc};
@@ -18227,9 +17732,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 			}
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t prof_sp1 = __rdtsc();
-#endif
 		pending_call_site saved_pending = pending_site_ctx_;
 		pending_site_ctx_ = args.empty() || !ins.c ? saved_pending : pending_call_site{&f.code->call_sites[ins.c - 1], &f, f.code, &args};
 		struct pending_restore {
@@ -18237,11 +17739,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
 		auto result = call_value(func, args);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_new_count_;
-		profile_new_resolve_cyc_ += prof_sp1 - prof_new0;
-		profile_new_invoke_cyc_ += __rdtsc() - prof_sp1;
-#endif
 		if (!result) {
 			return raise_from(result);
 		}
@@ -18274,7 +17771,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 			}
 		}
-		note_worker_decline(worker_decline::new_in_loop);
 	}
 	if (cached_global_env_ && !parallel_worker_ && expr->type->base_type == script_value_type::jai_object_type) {
 		script_value* ctor_cell = new_class_cell(f, ins, *expr->type);
@@ -18328,9 +17824,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 				}
 			}
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		const uint64_t prof_new1 = __rdtsc();
-#endif
 		pending_call_site saved_pending = pending_site_ctx_;
 		pending_site_ctx_ = args.empty() || !ins.c ? saved_pending : pending_call_site{&f.code->call_sites[ins.c - 1], &f, f.code, &args};
 		struct pending_restore {
@@ -18338,11 +17831,6 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 			~pending_restore() { vm->pending_site_ctx_ = saved; }
 		} restore_pending{this, saved_pending};
 		auto result = call_value(func, args);
-#ifdef JAISCRIPT_VM_PROFILE
-		++profile_new_count_;
-		profile_new_resolve_cyc_ += prof_new1 - prof_new0;
-		profile_new_invoke_cyc_ += __rdtsc() - prof_new1;
-#endif
 		if (!result) {
 			return raise_from(result);
 		}
@@ -18953,14 +18441,7 @@ checked_result<script_value> vm_backend::construct_instance_pre_body(const std::
                                                             const frame* caller, bool check_access, const call_site* site) {
 	construction_lender host(*this, caller, site);
 	std::optional<detail::call_depth_guard> initializer_depth;
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c0 = __rdtsc();
-#endif
 	auto result = detail::prepare_construction(host, class_def, args, initializer_depth, matching_ctor_out, captured_out, check_access);
-#ifdef JAISCRIPT_VM_PROFILE
-	++profile_ctor_count_;
-	profile_ctor_cyc_[0] += __rdtsc() - prof_c0;
-#endif
 	return result;
 }
 
@@ -19247,14 +18728,8 @@ checked_result<script_value> vm_backend::construct_instance(std::shared_ptr<scri
 	}
 	script_value this_value = std::move(pre.value());
 	owned_args_scope owned{this, captured.empty() ? nullptr : &captured};
-#ifdef JAISCRIPT_VM_PROFILE
-	const uint64_t prof_c4 = __rdtsc();
-#endif
 	auto result = run_constructor_natively(class_def, matching_ctor, definition_env, this_value, captured.empty() ? args : captured);
 	if (result && !is_unwinding_) { detail::construction_completed(this_value); }
-#ifdef JAISCRIPT_VM_PROFILE
-	profile_ctor_cyc_[1] += __rdtsc() - prof_c4;
-#endif
 	if (!result) { return result; }
 	return this_value;
 }
@@ -19552,7 +19027,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			if (handler.catch_slot != k_invalid_u32 && has_slots(f)) {
 				frame_slot_set(f, handler.catch_slot, std::move(caught));
 			} else {
-				JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
+				environment_ = acquire_block_env(environment_);
 				environment_->define(handler.catch_var, std::move(caught));
 				try_records_[handler_index].catch_env_pushed = true;
 				try_records_[handler_index].catch_env = environment_.get();
@@ -19700,7 +19175,7 @@ op_status vm_backend::exec_iter_init(frame& f, const vm_instruction& ins) {
 	iter_state state;
 	state.env_pushed = proto.slot == SIZE_MAX || !has_slots(f);
 	if (state.env_pushed) {
-		JAI_ENV_CENSUS(0); environment_ = acquire_block_env(environment_);
+		environment_ = acquire_block_env(environment_);
 	} else if (proto.is_reference || proto.binds_map_entry) {
 		state.slot = proto.slot;
 		state.owner = &f;
@@ -20506,25 +19981,9 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 // them in exec_call at each recursion level); with no in-loop frames they rethrow
 // byte-identically. Kept separate so its EH funclets never touch run_dispatch's frame.
 checked_result<void> vm_backend::run(frame& entry) {
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-	struct coarse_total_scope { vm_backend& b; uint64_t t0; explicit coarse_total_scope(vm_backend& x) : b(x), t0(__rdtsc()) { ++b.coarse_depth_; } ~coarse_total_scope() { if (--b.coarse_depth_ == 0) { b.coarse_total_ += __rdtsc() - t0; } } } coarse_total_guard_{*this};
-#endif
 	frame* fp = &entry;
 	const size_t records_base = call_records_top_;
 	if (debug_hook_) [[unlikely]] { debug_last_frame_ = nullptr; }   // a host-entered frame at ip 0 is a new frame, whatever record holds it
-#ifdef JAISCRIPT_VM_PROFILE
-	// host-entered frames (execute, execute_callable, a fiber's body) never go through the
-	// in-loop push and pop, so their inclusive span is taken here
-	struct entry_inclusive {
-		vm_backend* vm; const chunk* code; uint64_t t0;
-		~entry_inclusive() {
-			if (vm->parallel_worker_ || !code) return;
-			auto& st = vm->profile_stats_for(*code);
-			st.inclusive_cycles += __rdtsc() - t0;
-			++st.entries;
-		}
-	} entry_span{this, entry.code, __rdtsc()};
-#endif
 	for (;;) {
 		try {
 			if (run_dispatch(fp, records_base) == op_status::failed) {
@@ -20549,954 +20008,12 @@ checked_result<void> vm_backend::run(frame& entry) {
 	}
 }
 
-#ifdef JAISCRIPT_VM_COARSE_PROFILE
-void vm_backend::dump_coarse_profile() const {
-	if (!coarse_total_) return;
-	const double total = double(coarse_total_);
-	auto pct = [&](uint64_t v) { return 100.0 * double(v) / total; };
-	auto avg = [](uint64_t v, uint64_t n) { return n ? double(v) / double(n) : 0.0; };
-	const uint64_t named = coarse_blocks_ + coarse_push_ + coarse_pop_ + coarse_method_;
-	fprintf(stderr, "[vm-coarse] total %.0f Mtick | blocks %.1f%% (%llu runs, %.0f avg) | call push %.1f%% (%llu, %.0f avg) | frame pop %.1f%% (%llu, %.0f avg) | method calls %.1f%% (%llu, %.0f avg) | rest %.1f%%\n",
-		total / 1e6, pct(coarse_blocks_), (unsigned long long)coarse_block_runs_, avg(coarse_blocks_, coarse_block_runs_),
-		pct(coarse_push_), (unsigned long long)coarse_pushes_, avg(coarse_push_, coarse_pushes_),
-		pct(coarse_pop_), (unsigned long long)coarse_pops_, avg(coarse_pop_, coarse_pops_),
-		pct(coarse_method_), (unsigned long long)coarse_methods_, avg(coarse_method_, coarse_methods_),
-		named <= coarse_total_ ? pct(coarse_total_ - named) : 0.0);
-	fprintf(stderr, "[vm-coarse] of the blocks: entry %.1f%% (%llu, %.0f avg) | flush %.1f%% (%llu, %.0f avg) | miss %.1f%% (%llu, %.0f avg) | land %.1f%% (%llu, %.0f avg) | body %.1f%%\n",
-		pct(coarse_enter_), (unsigned long long)coarse_enters_, avg(coarse_enter_, coarse_enters_),
-		pct(coarse_flush_), (unsigned long long)coarse_flushes_, avg(coarse_flush_, coarse_flushes_),
-		pct(coarse_miss_), (unsigned long long)coarse_misses_, avg(coarse_miss_, coarse_misses_),
-		pct(coarse_land_), (unsigned long long)coarse_lands_, avg(coarse_land_, coarse_lands_),
-		coarse_blocks_ >= coarse_enter_ + coarse_flush_ + coarse_miss_ + coarse_land_ ? pct(coarse_blocks_ - coarse_enter_ - coarse_flush_ - coarse_miss_ - coarse_land_) : 0.0);
-	fprintf(stderr, "[vm-coarse] entry split: cells %.0f | sites %.0f | guards %.0f avg ticks; per entry %.1f cells, %.1f env operands, %.1f sites\n",
-		avg(coarse_ecells_, coarse_enters_), avg(coarse_esites_, coarse_enters_), avg(coarse_eguards_, coarse_enters_),
-		avg(coarse_ncells_, coarse_enters_), avg(coarse_nenv_, coarse_enters_), avg(coarse_nsites_, coarse_enters_));
-}
-#endif
 
-#ifdef JAISCRIPT_VM_PROFILE
-// Diagnostic builds only (define JAISCRIPT_VM_PROFILE in this TU): sorted opcode
-// self-time histogram on backend teardown. Percentages are of total dispatched cycles.
-#ifdef JAISCRIPT_VM_PROFILE
-namespace {
-	enum : uint8_t { census_use_typed = 1, census_use_read = 2, census_use_write = 4, census_use_ref = 8, census_use_capture = 16, census_use_unproven = 32 };
-	enum : uint8_t { census_decl_none = 0, census_decl_scalar = 1, census_decl_other = 2 };
-
-	bool census_scalar_type(const type_info* t) {
-		if (!t) { return false; }
-		switch (t->base_type) {
-		case script_value_type::jai_int_type: case script_value_type::jai_float_type:
-		case script_value_type::jai_bool_type: case script_value_type::jai_char_type: return true;
-		default: return false;
-		}
-	}
-
-	vm_backend::slot_census census_chunk(const chunk& c, const string_symbolizer* symbolizer) {
-		vm_backend::slot_census r;
-		const size_t n = c.local_count;
-		r.use.assign(n, 0);
-		r.decl_kind.assign(n, census_decl_none);
-		r.decl_type.assign(n, std::string());
-		r.first_general_ip.assign(n, UINT32_MAX);
-		r.first_reject_ip.assign(n, UINT32_MAX);
-		r.slot_names.assign(n, std::string());
-		r.read_slots_at_ip.resize(c.code.size());
-		r.write_slots_at_ip.resize(c.code.size());
-		r.typed_slots_at_ip.resize(c.code.size());
-		r.code = c.code;
-		auto name_slot = [&](uint32_t slot, std::string_view name) {
-			if (slot != k_invalid_u32 && slot < n && r.slot_names[slot].empty() && !name.empty()) { r.slot_names[slot] = std::string(name); }
-		};
-		auto sym_name = [&](uint32_t sym_idx) -> std::string_view {
-			return symbolizer && sym_idx < c.symbols.size() ? symbolizer->get_string(c.symbols[sym_idx]) : std::string_view();
-		};
-		auto declare = [&](uint32_t slot, const type_info* t, bool is_reference) {
-			if (slot == k_invalid_u32 || slot >= n || r.decl_kind[slot] != census_decl_none) { return; }
-			if (is_reference) { r.decl_kind[slot] = census_decl_other; r.decl_type[slot] = "reference"; return; }
-			if (census_scalar_type(t)) { r.decl_kind[slot] = census_decl_scalar; r.decl_type[slot] = std::string(t->canonical_name()); return; }
-			r.decl_kind[slot] = census_decl_other;
-			r.decl_type[slot] = t ? std::string(t->canonical_name()) : std::string("var/auto");
-		};
-		auto mark = [&](uint32_t slot, uint8_t bits, uint32_t ip) {
-			if (slot == k_invalid_u32 || slot >= n) { return; }
-			r.use[slot] |= bits;
-			if (bits & (census_use_ref | census_use_capture | census_use_unproven)) {
-				if (r.first_reject_ip[slot] == UINT32_MAX && ip != UINT32_MAX) { r.first_reject_ip[slot] = ip; }
-			}
-			if (ip == UINT32_MAX) { return; }
-			if (bits & census_use_read) { r.read_slots_at_ip[ip].push_back(slot); }
-			if (bits & census_use_write) { r.write_slots_at_ip[ip].push_back(slot); }
-			if ((bits & (census_use_read | census_use_write)) && r.first_general_ip[slot] == UINT32_MAX) { r.first_general_ip[slot] = ip; }
-			if (bits & census_use_typed) { r.typed_slots_at_ip[ip].push_back(slot); }
-		};
-		auto operand = [&](const fused_operand& o, uint32_t ip) {
-			if (o.slot == k_invalid_u32) { return; }
-			mark(o.slot, census_use_read, ip);
-			if (o.symbol != k_invalid_u32) { name_slot(o.slot, sym_name(o.symbol)); }
-		};
-		auto typed_slot = [&](uint32_t v, uint32_t ip) { if (!(v & (k_typed_const_bit | k_typed_env_bit))) { mark(v & k_typed_slot_mask, census_use_typed, ip); } };
-		auto decl_of = [&](uint32_t node) -> uint32_t {
-			if (node >= c.nodes.size() || !c.nodes[node] || c.nodes[node]->get_type() != node_type::variable_decl) { return k_invalid_u32; }
-			const auto* vd = static_cast<const variable_decl*>(c.nodes[node].get());
-			if (vd->slot_index == SIZE_MAX) { return k_invalid_u32; }
-			const uint32_t slot = static_cast<uint32_t>(vd->slot_index);
-			name_slot(slot, vd->name);
-			declare(slot, vd->type.get(), false);   // reference declarations are their own opcodes (marked at the op)
-			if (vd->ref_escaping) { mark(slot, census_use_ref, UINT32_MAX); }   // boxed into a cell from birth
-			return slot;
-		};
-		for (const auto& pp : c.profile_params) { declare(pp.slot, pp.type, pp.is_reference); if (pp.is_reference) { mark(pp.slot, census_use_ref, UINT32_MAX); } }
-		auto binary_proto = [&](uint32_t idx, uint32_t ip) {
-			if (idx < c.fused_binary_protos.size()) { operand(c.fused_binary_protos[idx].left, ip); operand(c.fused_binary_protos[idx].right, ip); }
-		};
-		auto typed_operand = [&](const fused_operand& o, uint32_t ip) {
-			if (o.slot == k_invalid_u32) { return; }
-			mark(o.slot, census_use_typed, ip);
-			if (o.symbol != k_invalid_u32) { name_slot(o.slot, sym_name(o.symbol)); }
-		};
-		auto typed_binary_proto = [&](uint32_t idx, uint32_t ip) {
-			if (idx < c.fused_binary_protos.size()) { typed_operand(c.fused_binary_protos[idx].left, ip); typed_operand(c.fused_binary_protos[idx].right, ip); }
-		};
-		// a store lane reads its index and value operands as raw payloads (typed traffic); the
-		// container is a handle read; a general index op reads everything as values
-		auto index_proto = [&](uint32_t idx, uint32_t ip, bool raw_lane) {
-			if (idx >= c.fused_index_protos.size()) { return; }
-			const auto& p = c.fused_index_protos[idx];
-			operand(p.container, ip);
-			if (raw_lane) { typed_operand(p.index, ip); typed_operand(p.store_value, ip); typed_binary_proto(p.index_binary, ip); }
-			else { operand(p.index, ip); operand(p.store_value, ip); binary_proto(p.index_binary, ip); }
-			mark(p.decl_slot, census_use_write, ip);
-		};
-		for (uint32_t ip = 0; ip < c.code.size(); ++ip) {
-			const vm_instruction& ins = c.code[ip];
-			const opcode op = ins.op;
-			if (op >= opcode::op_t_add_ii && op <= opcode::op_t_mod_ff) {
-				mark(ins.a & k_typed_slot_mask, census_use_typed, ip); typed_slot(ins.b, ip); typed_slot(ins.c, ip);
-				if ((ins.a >> k_typed_dst_shift) == k_typed_dst_decl && ip < c.typed_sites.size()) {
-					const vm_instruction& orig = c.typed_sites[ip].orig;
-					if (orig.op == opcode::op_binary_fused_decl && orig.a < c.fused_binary_dst_protos.size()) { decl_of(c.fused_binary_dst_protos[orig.a].node_index); }
-				}
-				continue;
-			}
-			if (op >= opcode::op_t_jlt_ii && op <= opcode::op_t_jne_ff) { typed_slot(ins.a, ip); typed_slot(ins.b, ip); continue; }
-			switch (op) {
-			case opcode::op_t_decl_mov: mark(ins.a, census_use_typed, ip); typed_slot(ins.b, ip); decl_of(ins.c); break;
-			case opcode::op_kill_slot: for (uint32_t n = 0; n <= ins.b; ++n) { mark(ins.a - n, census_use_write, ip); } break;
-			case opcode::op_t_decl_const: mark(ins.a, census_use_typed, ip); decl_of(ins.c); break;
-			case opcode::op_t_store_mov:
-			case opcode::op_t_store_const: {
-				mark(ins.a, census_use_typed, ip);
-				if (op == opcode::op_t_store_mov) { mark(ins.b, census_use_typed, ip); }
-				if (ip < c.typed_sites.size()) {
-					const auto& site = c.typed_sites[ip];
-					name_slot(ins.a, sym_name(site.orig2.a));
-					if (op == opcode::op_t_store_mov && site.orig.a != k_invalid_u32) { name_slot(site.orig.a, sym_name(site.orig.b)); }
-				}
-				break;
-			}
-			case opcode::op_t_push: mark(ins.a, census_use_read, ip); typed_slot(ins.b, ip); break;
-			case opcode::op_t_load: {
-				mark(ins.a, census_use_typed, ip);
-				if (ip < c.typed_sites.size()) {
-					const auto& site = c.typed_sites[ip];
-					mark(site.cont_slot, census_use_read, ip);
-					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { typed_slot(site.operands[k], ip); }
-					decl_of(site.orig.c);
-					if ((site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a) < c.fused_index_protos.size()) { operand(c.fused_index_protos[(site.index_proto != k_invalid_u32 ? site.index_proto : site.orig.a)].container, UINT32_MAX); }
-				}
-				break;
-			}
-			case opcode::op_load: mark(ins.a, census_use_read, ip); name_slot(ins.a, sym_name(ins.b)); break;
-			case opcode::op_return_ident: mark(ins.a, census_use_read, ip); name_slot(ins.a, sym_name(ins.b)); break;
-			case opcode::op_ref_return_bind: mark(ins.a, census_use_read | census_use_ref, ip); name_slot(ins.a, sym_name(ins.b)); break;
-			case opcode::op_store: mark(ins.b, census_use_write, ip); name_slot(ins.b, sym_name(ins.a)); break;
-			case opcode::op_compound_store:
-			case opcode::op_incdec: mark(ins.b, census_use_read | census_use_write, ip); name_slot(ins.b, sym_name(ins.a)); break;
-			case opcode::op_decl_var: mark(decl_of(ins.a), census_use_write, ip); break;
-			case opcode::op_decl_ref_ident:
-			case opcode::op_decl_ref_value: mark(decl_of(ins.a), census_use_write | census_use_ref, ip); break;
-			case opcode::op_index_fused_decl: if (ins.c != k_invalid_u32) { mark(decl_of(ins.c), census_use_write, ip); } index_proto(ins.a, ip, false); break;
-			case opcode::op_index_fused: index_proto(ins.a, ip, false); break;
-			case opcode::op_index_store_fused: index_proto(ins.a, ip, ins.a < c.fused_index_protos.size() && c.fused_index_protos[ins.a].typed_lane); break;
-			case opcode::op_index_compound_operand: index_proto(ins.a, ip, false); break;
-			case opcode::op_binary_fused: binary_proto(ins.a, ip); break;
-			case opcode::op_binary_fused_temp: {
-				binary_proto(ins.a, ip);
-				// the general kernel lands in the temp: a proven class is a boundary definition, no proof is a rejection
-				const bool proven = ins.a < c.fused_binary_protos.size() && c.fused_binary_protos[ins.a].typed_class != 0;
-				mark(ins.b, static_cast<uint8_t>(census_use_write | (proven ? 0 : census_use_unproven)), ip);
-				break;
-			}
-			case opcode::op_fused_cmp_jump: binary_proto(ins.b, ip); break;
-			case opcode::op_compound_fused: {
-				if (ins.a < c.compound_fused_protos.size()) {
-					const auto& cp = c.compound_fused_protos[ins.a];
-					mark(cp.slot, census_use_read | census_use_write, ip); name_slot(cp.slot, sym_name(cp.symbol));
-					operand(cp.rhs, ip);
-					if (cp.rhs_proto != k_invalid_u32) { binary_proto(cp.rhs_proto, ip); }
-				}
-				break;
-			}
-			case opcode::op_binary_fused_decl:
-			case opcode::op_binary_fused_store: {
-				if (ins.a < c.fused_binary_dst_protos.size()) {
-					const auto& dp = c.fused_binary_dst_protos[ins.a];
-					mark(dp.slot, census_use_write, ip);
-					mark(decl_of(dp.node_index), census_use_write, ip);
-					binary_proto(dp.binary_proto, ip);
-				}
-				break;
-			}
-			case opcode::op_push_fused: {
-				if (ins.a < c.push_protos.size()) { operand(c.push_protos[ins.a].receiver, ip); operand(c.push_protos[ins.a].value, ip); }
-				break;
-			}
-			case opcode::op_call:
-			case opcode::op_call_method:
-			case opcode::op_call_builtin:
-			case opcode::op_call_from_scratch:
-				r.call_ips.push_back(ip);
-				if (ins.b < c.call_sites.size()) {
-					const auto& cs = c.call_sites[ins.b];
-					operand(cs.callee, ip);
-					mark(cs.receiver_slot, census_use_read, ip); mark(cs.chain_root_slot, census_use_read, ip);
-				}
-				break;
-			case opcode::op_closure:
-				if (ins.a < c.closure_protos.size()) {
-					for (const auto& [sym, slot] : c.closure_protos[ins.a].outer_slot_plan) {
-						if (slot != SIZE_MAX) { mark(static_cast<uint32_t>(slot), census_use_read | census_use_capture, ip); if (symbolizer) { name_slot(static_cast<uint32_t>(slot), symbolizer->get_string(sym)); } }
-					}
-				}
-				break;
-			case opcode::op_iter_init:
-			case opcode::op_iter_next:
-			case opcode::op_iter_pop:
-				if (ins.a < c.iter_protos.size() && c.iter_protos[ins.a].slot != SIZE_MAX) {
-					const auto& it = c.iter_protos[ins.a];
-					const uint32_t slot = static_cast<uint32_t>(it.slot);
-					if (symbolizer && it.var_symbol != UINT64_MAX) { name_slot(slot, symbolizer->get_string(it.var_symbol)); }
-					if (slot < n && r.decl_kind[slot] == census_decl_none) { r.decl_kind[slot] = census_decl_other; r.decl_type[slot] = it.is_reference ? "range-for binding (auto&)" : "range-for binding"; }
-					if (op == opcode::op_iter_next) { mark(slot, static_cast<uint8_t>(census_use_write | (it.is_reference ? census_use_ref : 0)), ip); }
-				}
-				break;
-			case opcode::op_iter_entry:
-				if (ins.a < c.iter_protos.size() && c.iter_protos[ins.a].slot != SIZE_MAX) { mark(static_cast<uint32_t>(c.iter_protos[ins.a].slot), census_use_read, ip); }
-				break;
-			case opcode::op_try_push:
-				if (ins.c != k_invalid_u32 && ins.c < n) {
-					name_slot(ins.c, sym_name(ins.b));
-					if (r.decl_kind[ins.c] == census_decl_none) { r.decl_kind[ins.c] = census_decl_other; r.decl_type[ins.c] = "catch variable"; }
-					mark(ins.c, census_use_write, ip);
-				}
-				break;
-			case opcode::op_loop_back: r.loops.emplace_back(ins.a, ip); break;
-			case opcode::op_yield: r.has_yield = true; break;
-			default: ++r.opaque_ops; break;
-			}
-		}
-		for (const auto& p : c.counted_for_protos) { operand(p.var, UINT32_MAX); operand(p.end, UINT32_MAX); operand(p.step, UINT32_MAX); }
-		return r;
-	}
-
-	// candidate = a proven-scalar declaration, or a temp with only proven definitions, not escaped
-	bool census_candidate(const vm_backend::slot_census& cs, size_t slot) {
-		const uint8_t u = cs.use[slot];
-		if (u & (census_use_ref | census_use_capture | census_use_unproven)) { return false; }
-		if (cs.decl_kind[slot] == census_decl_other) { return false; }
-		if (cs.decl_kind[slot] == census_decl_none && !(u & census_use_typed)) { return false; }   // an undeclared binding, not a compiler temp
-		return u != 0;
-	}
-	const char* census_reject_reason(const vm_backend::slot_census& cs, size_t slot) {
-		const uint8_t u = cs.use[slot];
-		if (u & census_use_ref) { return "address taken"; }
-		if (u & census_use_capture) { return "captured by a closure"; }
-		if (cs.decl_kind[slot] == census_decl_other) { return "declared"; }
-		if (u & census_use_unproven) { return "unproven kernel definition"; }
-		if (cs.decl_kind[slot] == census_decl_none) { return "undeclared binding"; }
-		return "";
-	}
-}
-#endif
-
-vm_backend::profile_chunk_stats& vm_backend::profile_stats_for(const chunk& code) {
-	auto& st = profile_chunks_[&code];
-	// a recycled chunk address with a different body starts a fresh row
-	if (st.lines.size() != code.code.size() || st.name != code.function_name) {
-		st = profile_chunk_stats{};
-		st.name = code.function_name;
-		st.census = census_chunk(code, symbolizer_);
-		st.refusals = code.cell_refusals;
-		st.inline_refusals = code.inline_refusals;
-		st.closed_loops = code.cell_loops.size();
-		st.lines.assign(code.code.size(), 0);
-		for (size_t ip = 0; ip < code.code.size(); ++ip) {
-			const ast_node* stmt = ip < code.stmt_nodes.size() ? code.stmt_nodes[ip] : nullptr;
-			if (stmt) {
-				st.lines[ip] = static_cast<uint32_t>(stmt->location.line);
-				if (st.file.empty()) { st.file = stmt->location.filename; }
-			}
-		}
-		st.ip_cycles.assign(code.code.size(), 0);
-		st.ip_counts.assign(code.code.size(), 0);
-	}
-	return st;
-}
-
-void vm_backend::profile_reset() {
-	// Every table, the opcode rows and the auxiliary taxonomies alike: a --profile-reset-tick
-	// capture reports the measured span only (bootstrap and warmup work differ, no divisor recovers a rate)
-	std::fill(std::begin(profile_cycles_), std::end(profile_cycles_), 0ull);
-	std::fill(std::begin(profile_counts_), std::end(profile_counts_), 0ull);
-	std::fill(std::begin(profile_decl_paths_), std::end(profile_decl_paths_), 0ull);
-	std::fill(std::begin(profile_store_paths_), std::end(profile_store_paths_), 0ull);
-	std::fill(std::begin(profile_store_path_cycles_), std::end(profile_store_path_cycles_), 0ull);
-	std::fill(std::begin(profile_store_path_counts_), std::end(profile_store_path_counts_), 0ull);
-	std::fill(std::begin(profile_env_births_), std::end(profile_env_births_), 0ull);
-	std::fill(std::begin(profile_scope_kinds_), std::end(profile_scope_kinds_), 0ull);
-	std::fill(std::begin(profile_call_method_paths_), std::end(profile_call_method_paths_), 0ull);
-	std::fill(std::begin(profile_get_member_paths_), std::end(profile_get_member_paths_), 0ull);
-	std::fill(std::begin(profile_bound_method_paths_), std::end(profile_bound_method_paths_), 0ull);
-	std::fill(std::begin(profile_env_resolve_), std::end(profile_env_resolve_), 0ull);
-	std::fill(std::begin(profile_cfs_cycles_), std::end(profile_cfs_cycles_), 0ull);
-	std::fill(std::begin(profile_cfs_counts_), std::end(profile_cfs_counts_), 0ull);
-	std::fill(std::begin(profile_call_push_cyc_), std::end(profile_call_push_cyc_), 0ull);
-	std::fill(std::begin(profile_probe_cyc_), std::end(profile_probe_cyc_), 0ull);
-	std::fill(std::begin(profile_call_ret_cyc_), std::end(profile_call_ret_cyc_), 0ull);
-	std::fill(std::begin(profile_mpush_cyc_), std::end(profile_mpush_cyc_), 0ull);
-	std::fill(std::begin(profile_mpush_sub_), std::end(profile_mpush_sub_), 0ull);
-	std::fill(std::begin(profile_pop_sub_), std::end(profile_pop_sub_), 0ull);
-	std::fill(std::begin(profile_slice_gate_), std::end(profile_slice_gate_), 0ull);
-	std::fill(std::begin(profile_push_sections_), std::end(profile_push_sections_), 0ull);
-	std::fill(std::begin(profile_typed_head_), std::end(profile_typed_head_), 0ull);
-	std::fill(std::begin(profile_push_fused_lane_), std::end(profile_push_fused_lane_), 0ull);
-	std::fill(std::begin(profile_typed_decl_read_), std::end(profile_typed_decl_read_), 0ull);
-	std::fill(std::begin(profile_typed_spec_), std::end(profile_typed_spec_), 0ull);
-	std::fill(std::begin(profile_typed_store_), std::end(profile_typed_store_), 0ull);
-	std::fill(std::begin(profile_typed_land_), std::end(profile_typed_land_), 0ull);
-	std::fill(std::begin(profile_temp_miss_), std::end(profile_temp_miss_), 0ull);
-	std::fill(std::begin(profile_typed_inplace_), std::end(profile_typed_inplace_), 0ull);
-	std::fill(std::begin(profile_cells_), std::end(profile_cells_), 0ull);
-	std::fill(std::begin(profile_cells_refused_slot_), std::end(profile_cells_refused_slot_), 0ull);
-	std::fill(std::begin(profile_cells_push_), std::end(profile_cells_push_), 0ull);
-	std::fill(std::begin(profile_cells_miss_step_), std::end(profile_cells_miss_step_), 0ull);
-	std::fill(std::begin(profile_cell_ops_), std::end(profile_cell_ops_), 0ull);
-	std::fill(std::begin(profile_cell_cycles_), std::end(profile_cell_cycles_), 0ull);
-	std::fill(std::begin(profile_cell_cost_cyc_), std::end(profile_cell_cost_cyc_), 0ull);
-	std::fill(std::begin(profile_cell_cost_n_), std::end(profile_cell_cost_n_), 0ull);
-	std::fill(std::begin(profile_fn_counts_), std::end(profile_fn_counts_), 0ull); std::fill(std::begin(profile_fn_cycles_), std::end(profile_fn_cycles_), 0ull);
-	std::fill(std::begin(profile_fn_cell_ops_), std::end(profile_fn_cell_ops_), 0ull); std::fill(std::begin(profile_fn_cell_cycles_), std::end(profile_fn_cell_cycles_), 0ull);
-	profile_cells_area_bytes_max_ = 0; profile_cells_records_ = 0;
-	std::fill(std::begin(profile_typed_cont_src_), std::end(profile_typed_cont_src_), 0ull);
-	std::fill(std::begin(profile_load_kinds_), std::end(profile_load_kinds_), 0ull);
-	std::fill(std::begin(profile_index_kinds_), std::end(profile_index_kinds_), 0ull);
-	std::fill(std::begin(profile_bind_paths_), std::end(profile_bind_paths_), 0ull);
-	std::fill(std::begin(profile_ctor_cyc_), std::end(profile_ctor_cyc_), 0ull);
-	std::fill(std::begin(profile_binary_fused_next_), std::end(profile_binary_fused_next_), 0ull);
-	std::fill(std::begin(profile_load_next_), std::end(profile_load_next_), 0ull);
-	std::fill(std::begin(profile_index_fused_next_), std::end(profile_index_fused_next_), 0ull);
-	std::fill(std::begin(profile_decl_var_prev_), std::end(profile_decl_var_prev_), 0ull);
-	std::fill(std::begin(profile_store_prev_), std::end(profile_store_prev_), 0ull);
-	std::fill(std::begin(profile_decl_var_kinds_), std::end(profile_decl_var_kinds_), 0ull);
-	std::fill(std::begin(profile_index_read_paths_), std::end(profile_index_read_paths_), 0ull);
-	std::fill(std::begin(profile_decl_sub_), std::end(profile_decl_sub_), 0ull);
-	profile_call_push_count_ = 0;
-	profile_probe_count_ = 0;
-	profile_call_ret_count_ = 0;
-	profile_cmp_operands_cyc_ = 0;
-	profile_cmp_count_ = 0;
-	profile_cmp_sptr_null_ = 0;
-	profile_mpush_count_ = 0;
-	profile_pop_sub_count_ = 0;
-	profile_push_prologue_ = 0;
-	profile_new_count_ = 0;
-	profile_new_resolve_cyc_ = 0;
-	profile_new_invoke_cyc_ = 0;
-	profile_ctor_count_ = 0;
-	profile_nested_cycles_ = 0;
-	profile_native_callees_.clear();
-	profile_cells_entry_refusals_.clear();
-	profile_cells_miss_sites_.clear();
-	profile_store_name_cycles_.clear();
-	profile_cfs_inloop_names_.clear();
-	profile_cfs_opaque_cycles_.clear();
-	profile_env_walk_names_.clear();
-	profile_builtin_direct_names_.clear();
-	profile_store_last_path_ = 7;
-	for (auto& [code, st] : profile_chunks_) {
-		std::fill(st.ip_cycles.begin(), st.ip_cycles.end(), 0ull);
-		std::fill(st.ip_counts.begin(), st.ip_counts.end(), 0ull);
-		st.inclusive_cycles = 0;
-		st.entries = 0;
-	}
-}
-
-void vm_backend::dump_slot_census() const {
-	struct row { const profile_chunk_stats* st; uint64_t excl; };
-	std::vector<row> rows;
-	for (const auto& [code, st] : profile_chunks_) {
-		uint64_t excl = 0;
-		for (uint64_t cyc : st.ip_cycles) { excl += cyc; }
-		if (excl && !st.census.use.empty()) { rows.push_back({&st, excl}); }
-	}
-	if (rows.empty()) { return; }
-	std::sort(rows.begin(), rows.end(), [](const row& a, const row& b) { return a.excl > b.excl; });
-	fprintf(stderr, "[vm-profile] slot census (measured span; top functions by exclusive cycles). candidate = declared proven scalar or proven temp, not escaped; boundary = a general op on a candidate (reads box, definitions unbox), executions; rejected = address taken / captured / declared non-scalar or dynamic / unproven kernel definition:\n");
-	const size_t shown = rows.size() < 14 ? rows.size() : 14;
-	for (size_t i = 0; i < shown; ++i) {
-		const profile_chunk_stats& st = *rows[i].st;
-		const slot_census& cs = st.census;
-		const size_t n = cs.use.size();
-		size_t cand_typed_only = 0, cand_boundary = 0, cand_no_typed = 0, rej_ref = 0, rej_capture = 0, rej_declared = 0, rej_unproven = 0, rej_undeclared = 0, unused = 0, auto_with_typed = 0;
-		std::vector<uint64_t> bread(n, 0), bwrite(n, 0), rej_exec(n, 0);
-		for (size_t ip = 0; ip < st.ip_counts.size() && ip < cs.read_slots_at_ip.size(); ++ip) {
-			for (uint32_t slot : cs.read_slots_at_ip[ip]) { if (census_candidate(cs, slot)) { bread[slot] += st.ip_counts[ip]; } else { rej_exec[slot] += st.ip_counts[ip]; } }
-			for (uint32_t slot : cs.write_slots_at_ip[ip]) { if (census_candidate(cs, slot)) { bwrite[slot] += st.ip_counts[ip]; } else { rej_exec[slot] += st.ip_counts[ip]; } }
-		}
-		uint64_t bread_total = 0, bwrite_total = 0;
-		for (size_t slot = 0; slot < n; ++slot) {
-			const uint8_t u = cs.use[slot];
-			if (!u) { ++unused; continue; }
-			if (census_candidate(cs, slot)) {
-				const bool general = (u & (census_use_read | census_use_write)) != 0;
-				const bool typed = (u & census_use_typed) != 0;
-				if (typed && !general) { ++cand_typed_only; } else if (typed) { ++cand_boundary; } else { ++cand_no_typed; }
-				bread_total += bread[slot]; bwrite_total += bwrite[slot];
-			} else {
-				if (u & census_use_ref) { ++rej_ref; } else if (u & census_use_capture) { ++rej_capture; }
-				else if (cs.decl_kind[slot] == census_decl_other) { ++rej_declared; if ((u & census_use_typed) && cs.decl_type[slot] == "var/auto") { ++auto_with_typed; } }
-				else if (u & census_use_unproven) { ++rej_unproven; }
-				else { ++rej_undeclared; }
-			}
-		}
-		fprintf(stderr, "  %-26s slots %zu: candidates typed-only %zu | with boundaries %zu | no typed use %zu; rejected: address %zu | capture %zu | declared %zu (var/auto with typed uses %zu) | unproven %zu | undeclared %zu; unused %zu; opaque ops %u; yield %s; boundary executions: reads %llu writes %llu\n",
-			st.name.empty() ? "<top level>" : st.name.c_str(), n, cand_typed_only, cand_boundary, cand_no_typed, rej_ref, rej_capture, rej_declared, auto_with_typed, rej_unproven, rej_undeclared, unused, cs.opaque_ops, cs.has_yield ? "yes" : "no",
-			(unsigned long long)bread_total, (unsigned long long)bwrite_total);
-		std::vector<size_t> order;
-		for (size_t slot = 0; slot < n; ++slot) { if (bread[slot] + bwrite[slot] + rej_exec[slot]) { order.push_back(slot); } }
-		std::sort(order.begin(), order.end(), [&](size_t a, size_t b) { return bread[a] + bwrite[a] + rej_exec[a] > bread[b] + bwrite[b] + rej_exec[b]; });
-		for (size_t k = 0; k < order.size() && k < 8; ++k) {
-			const size_t slot = order[k];
-			const std::string nm = cs.slot_names[slot].empty() ? "slot" + std::to_string(slot) : cs.slot_names[slot];
-			if (census_candidate(cs, slot)) {
-				const uint32_t fip = cs.first_general_ip[slot];
-				fprintf(stderr, "      boundary %-14s %-8s reads %llu writes %llu   first %s at L%u\n", nm.c_str(), cs.decl_type[slot].empty() ? "temp" : cs.decl_type[slot].c_str(),
-					(unsigned long long)bread[slot], (unsigned long long)bwrite[slot],
-					fip < cs.code.size() ? std::string(opcode_name(cs.code[fip].op)).c_str() : "-", fip < st.lines.size() ? st.lines[fip] : 0u);
-			} else {
-				const uint32_t fip = cs.first_reject_ip[slot] != UINT32_MAX ? cs.first_reject_ip[slot] : cs.first_general_ip[slot];
-				fprintf(stderr, "      rejected %-14s %s %s   uses %llu   first %s at L%u\n", nm.c_str(), census_reject_reason(cs, slot), cs.decl_type[slot].c_str(),
-					(unsigned long long)rej_exec[slot],
-					fip < cs.code.size() ? std::string(opcode_name(cs.code[fip].op)).c_str() : "-", fip < st.lines.size() ? st.lines[fip] : 0u);
-			}
-		}
-		for (const auto& [target, back] : cs.loops) {
-			if (back >= st.ip_counts.size() || target > back) { continue; }
-			const uint64_t iterations = st.ip_counts[back];
-			if (!iterations) { continue; }
-			uint64_t typed_exec = 0, boundary_exec = 0, rejected_exec = 0, call_exec = 0, other_exec = 0;
-			std::vector<uint8_t> touched(n, 0);
-			for (uint32_t ip = target; ip <= back; ++ip) {
-				const uint64_t cnt = st.ip_counts[ip];
-				bool typed = !cs.typed_slots_at_ip[ip].empty(), boundary = false, rejected = false;
-				for (uint32_t slot : cs.read_slots_at_ip[ip]) { touched[slot] = 1; (census_candidate(cs, slot) ? boundary : rejected) = true; }
-				for (uint32_t slot : cs.write_slots_at_ip[ip]) { touched[slot] = 1; (census_candidate(cs, slot) ? boundary : rejected) = true; }
-				for (uint32_t slot : cs.typed_slots_at_ip[ip]) { touched[slot] = 1; }
-				if (typed) { typed_exec += cnt; }
-				if (boundary) { boundary_exec += cnt; }
-				if (rejected) { rejected_exec += cnt; }
-				if (!typed && !boundary && !rejected) { other_exec += cnt; }
-			}
-			for (uint32_t cip : cs.call_ips) { if (cip >= target && cip <= back) { call_exec += st.ip_counts[cip]; } }
-			std::string bnames, rnames;
-			for (size_t slot = 0; slot < n; ++slot) {
-				if (!touched[slot]) { continue; }
-				const std::string nm = cs.slot_names[slot].empty() ? "slot" + std::to_string(slot) : cs.slot_names[slot];
-				if (census_candidate(cs, slot)) { if (cs.use[slot] & (census_use_read | census_use_write)) { if (!bnames.empty()) { bnames += ","; } bnames += nm; } }
-				else { if (!rnames.empty()) { rnames += ","; } rnames += nm; }
-			}
-			fprintf(stderr, "      loop L%u..L%u [ip %u..%u] iterations %llu: per iteration typed %.2f | boundary %.2f | rejected-slot %.2f | calls %.2f | other %.2f; boundary slots {%s} rejected slots {%s}\n",
-				target < st.lines.size() ? st.lines[target] : 0u, st.lines[back], target, back, (unsigned long long)iterations,
-				(double)typed_exec / (double)iterations, (double)boundary_exec / (double)iterations, (double)rejected_exec / (double)iterations,
-				(double)call_exec / (double)iterations, (double)other_exec / (double)iterations, bnames.empty() ? "none" : bnames.c_str(), rnames.empty() ? "none" : rnames.c_str());
-			if (back - target < 48) {
-				std::string listing;
-				for (uint32_t ip = target; ip <= back && ip < cs.code.size(); ++ip) {
-					const vm_instruction& li = cs.code[ip];
-					char buf[96];
-					snprintf(buf, sizeof(buf), "%s%u:%s(%u,%u,%u)x%llu", listing.empty() ? "" : " ", ip, std::string(opcode_name(li.op)).c_str(), li.a, li.b, li.c, (unsigned long long)st.ip_counts[ip]);
-					listing += buf;
-				}
-				fprintf(stderr, "        %s\n", listing.c_str());
-			}
-		}
-	}
-}
-
-void vm_backend::dump_opcode_profile() const {
-	{
-		// Script functions by exclusive opcode self time, then the hot lines of the top rows
-		struct row { const profile_chunk_stats* st; uint64_t excl; uint64_t ops; };
-		std::vector<row> rows;
-		uint64_t total = 0;
-		for (const auto& [code, st] : profile_chunks_) {
-			uint64_t excl = 0, ops = 0;
-			for (size_t i = 0; i < st.ip_cycles.size(); ++i) { excl += st.ip_cycles[i]; ops += st.ip_counts[i]; }
-			if (excl) { rows.push_back({&st, excl, ops}); total += excl; }
-		}
-		if (!rows.empty()) {
-			std::sort(rows.begin(), rows.end(), [](const row& a, const row& b) { return a.excl > b.excl; });
-			fprintf(stderr, "\n[vm-profile] script functions (main engine; exclusive = opcode self time in rdtsc cycles, callee bodies excluded, call/return machinery included; inclusive = frame entry to exit, recursion counts inner activations again; total exclusive %llu Mcycles)\n",
-				(unsigned long long)(total / 1000000));
-			fprintf(stderr, "%-32s %-28s %12s %7s %12s %12s %10s\n", "function", "file", "excl Mcyc", "pct", "ops", "incl Mcyc", "entries");
-			size_t shown = 0;
-			for (const row& r : rows) {
-				std::string file = r.st->file;
-				if (const size_t cut = file.find_last_of("/\\"); cut != std::string::npos) { file = file.substr(cut + 1); }
-				fprintf(stderr, "%-32.32s %-28.28s %12.1f %6.2f%% %12llu %12.1f %10llu\n",
-					r.st->name.empty() ? "<top level>" : r.st->name.c_str(), file.c_str(),
-					r.excl / 1e6, 100.0 * r.excl / total, (unsigned long long)r.ops,
-					r.st->inclusive_cycles / 1e6, (unsigned long long)r.st->entries);
-				if (++shown >= 30) break;
-			}
-			fprintf(stderr, "[vm-profile] hot lines of the top functions (exclusive Mcyc, ops):\n");
-			shown = 0;
-			for (const row& r : rows) {
-				std::map<uint32_t, std::pair<uint64_t, uint64_t>> by_line;
-				for (size_t i = 0; i < r.st->ip_cycles.size(); ++i) {
-					if (!r.st->ip_cycles[i]) continue;
-					auto& e = by_line[r.st->lines[i]];
-					e.first += r.st->ip_cycles[i];
-					e.second += r.st->ip_counts[i];
-				}
-				std::vector<std::pair<uint32_t, std::pair<uint64_t, uint64_t>>> lines(by_line.begin(), by_line.end());
-				std::sort(lines.begin(), lines.end(), [](const auto& a, const auto& b) { return a.second.first > b.second.first; });
-				fprintf(stderr, "  %s\n", r.st->name.empty() ? "<top level>" : r.st->name.c_str());
-				size_t ln = 0;
-				for (const auto& [line, e] : lines) {
-					fprintf(stderr, "    line %-6u %10.1f %12llu\n", line, e.first / 1e6, (unsigned long long)e.second);
-					if (++ln >= 6) break;
-				}
-				if (++shown >= 12) break;
-			}
-		}
-	}
-	fprintf(stderr, "[vm-profile] scope kinds: iter %llu | scope_push %llu | call_closure %llu | call_plain %llu\n", (unsigned long long)profile_scope_kinds_[0], (unsigned long long)profile_scope_kinds_[1], (unsigned long long)profile_scope_kinds_[2], (unsigned long long)profile_scope_kinds_[3]);
-	fprintf(stderr, "[vm-profile] env births: scope %llu | method %llu | static %llu | coroutine %llu | capture %llu\n", (unsigned long long)profile_env_births_[0], (unsigned long long)profile_env_births_[1], (unsigned long long)profile_env_births_[2], (unsigned long long)profile_env_births_[3], (unsigned long long)profile_env_births_[4]);
-	const uint64_t cm_total = profile_call_method_paths_[0] + profile_call_method_paths_[1] + profile_call_method_paths_[2] +
-	                          profile_call_method_paths_[3] + profile_call_method_paths_[4] + profile_call_method_paths_[5] +
-	                          profile_call_method_paths_[6];
-	if (cm_total) {
-		fprintf(stderr, "[vm-profile] CALL_METHOD paths: mic-static %llu | mic-resolve %llu | ladder-fill %llu | string-builtin %llu | worker-pin %llu | native %llu | builtin-direct %llu\n",
-			(unsigned long long)profile_call_method_paths_[0], (unsigned long long)profile_call_method_paths_[1],
-			(unsigned long long)profile_call_method_paths_[2], (unsigned long long)profile_call_method_paths_[3],
-			(unsigned long long)profile_call_method_paths_[4], (unsigned long long)profile_call_method_paths_[5],
-			(unsigned long long)profile_call_method_paths_[6]);
-	}
-	const uint64_t gm_total = profile_get_member_paths_[0] + profile_get_member_paths_[1] + profile_get_member_paths_[2];
-	if (gm_total) {
-		fprintf(stderr, "[vm-profile] GET_MEMBER paths: ic-hit %llu | negative/absent %llu | non-instance %llu\n",
-			(unsigned long long)profile_get_member_paths_[0], (unsigned long long)profile_get_member_paths_[1],
-			(unsigned long long)profile_get_member_paths_[2]);
-	}
-	const uint64_t bm_total = profile_bound_method_paths_[0] + profile_bound_method_paths_[2] + profile_bound_method_paths_[3];
-	if (bm_total) {
-		fprintf(stderr, "[vm-profile] exec_call bound-method: entered %llu | in-loop %llu | bound-opaque %llu | other-opaque %llu\n",
-			(unsigned long long)profile_bound_method_paths_[0], (unsigned long long)profile_bound_method_paths_[1],
-			(unsigned long long)profile_bound_method_paths_[2], (unsigned long long)profile_bound_method_paths_[3]);
-	}
-	{
-		static const char* const k_decline_names[] = { "entry-row-none", "entry-row-env", "entry-row-serial", "entry-row-shape", "probe-ic", "raw-probe",
-			"inline-fn-memo", "inline-method", "sibling-method", "math-alias", "store-env", "enum-entry", "native-lane", "bound-in-loop",
-			"ctor-in-loop", "new-in-loop", "bare-host", "ordinary-site", "static-fold", "host-method-pin" };
-		std::string line;
-		for (size_t k = 0; k < static_cast<size_t>(worker_decline::count); ++k) {
-			if (profile_worker_declines_[k]) { line += std::string(line.empty() ? "" : " | ") + k_decline_names[k] + " " + std::to_string(profile_worker_declines_[k]); }
-		}
-		if (!line.empty()) { fprintf(stderr, "[vm-profile] worker declines: %s\n", line.c_str()); }
-		if (profile_entry_rows_[4] + profile_entry_rows_[0]) {
-			fprintf(stderr, "[vm-profile] entry rows: hit %llu | none %llu | env %llu | serial %llu | shape %llu\n", (unsigned long long)profile_entry_rows_[4],
-				(unsigned long long)profile_entry_rows_[0], (unsigned long long)profile_entry_rows_[1], (unsigned long long)profile_entry_rows_[2], (unsigned long long)profile_entry_rows_[3]);
-		}
-	}
-	const uint64_t er_total = profile_env_resolve_[0] + profile_env_resolve_[1] + profile_env_resolve_[2] +
-	                          profile_env_resolve_[3] + profile_env_resolve_[4] + profile_env_resolve_[6];
-	if (er_total) {
-		fprintf(stderr, "[vm-profile] ENV resolve: no-slot %llu | frame-ineligible %llu | cache-hit %llu | fill %llu | fill-uncacheable %llu | full-walks %llu | fast-hit %llu | fast-arm %llu | this-field-hit %llu | this-field-arm %llu\n",
-			(unsigned long long)profile_env_resolve_[0], (unsigned long long)profile_env_resolve_[1],
-			(unsigned long long)profile_env_resolve_[2], (unsigned long long)profile_env_resolve_[3],
-			(unsigned long long)profile_env_resolve_[4], (unsigned long long)profile_env_resolve_[5],
-			(unsigned long long)profile_env_resolve_[6], (unsigned long long)profile_env_resolve_[7],
-			(unsigned long long)profile_env_resolve_[8], (unsigned long long)profile_env_resolve_[9]);
-	}
-	if (!profile_env_walk_names_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> walks(profile_env_walk_names_.begin(), profile_env_walk_names_.end());
-		std::sort(walks.begin(), walks.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] ENV full-walk symbols:\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : walks) {
-			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
-			if (++shown >= 15) break;
-		}
-	}
-	auto dump_next_histogram = [](const char* label, const uint64_t (&hist)[k_opcode_space]) {
-		std::vector<std::pair<int, uint64_t>> rows;
-		for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (hist[i]) rows.push_back({i, hist[i]});
-		if (rows.empty()) return;
-		std::sort(rows.begin(), rows.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] %s result consumers (next opcode):\n", label);
-		size_t shown = 0;
-		for (const auto& [op, count] : rows) {
-			fprintf(stderr, "  %-24.*s %10llu\n",
-				(int)opcode_name(static_cast<opcode>(op)).size(), opcode_name(static_cast<opcode>(op)).data(),
-				(unsigned long long)count);
-			if (++shown >= 12) break;
-		}
-	};
-	dump_next_histogram("BINARY_FUSED", profile_binary_fused_next_);
-	dump_slot_census();
-	dump_next_histogram("LOAD", profile_load_next_);
-	dump_next_histogram("INDEX_FUSED", profile_index_fused_next_);
-	dump_next_histogram("DECL_VAR producers (previous opcode, not consumers)", profile_decl_var_prev_);
-	dump_next_histogram("STORE producers (previous opcode, not consumers)", profile_store_prev_);
-	fprintf(stderr, "[vm-profile] DECL_VAR initializer kinds: null %llu int %llu float %llu string %llu char %llu bool %llu array %llu map %llu object %llu function %llu reference %llu shared %llu weak %llu other %llu\n",
-		(unsigned long long)profile_decl_var_kinds_[0], (unsigned long long)profile_decl_var_kinds_[1], (unsigned long long)profile_decl_var_kinds_[2], (unsigned long long)profile_decl_var_kinds_[3],
-		(unsigned long long)profile_decl_var_kinds_[4], (unsigned long long)profile_decl_var_kinds_[5], (unsigned long long)profile_decl_var_kinds_[6], (unsigned long long)profile_decl_var_kinds_[7],
-		(unsigned long long)profile_decl_var_kinds_[8], (unsigned long long)profile_decl_var_kinds_[9], (unsigned long long)profile_decl_var_kinds_[10], (unsigned long long)profile_decl_var_kinds_[11],
-		(unsigned long long)profile_decl_var_kinds_[12], (unsigned long long)profile_decl_var_kinds_[13] + profile_decl_var_kinds_[14] + profile_decl_var_kinds_[15]);
-	fprintf(stderr, "[vm-profile] typed decl read: tried %llu hit %llu | typed store: tried %llu hit %llu | speculative T_LOAD: hit %llu miss %llu\n",
-		(unsigned long long)profile_typed_decl_read_[0], (unsigned long long)profile_typed_decl_read_[1],
-		(unsigned long long)profile_typed_store_[0], (unsigned long long)profile_typed_store_[1],
-		(unsigned long long)profile_typed_spec_[0], (unsigned long long)profile_typed_spec_[1]);
-	fprintf(stderr, "[vm-profile] push_fused lanes: append %llu | kernel %llu | replay %llu\n",
-		(unsigned long long)profile_push_fused_lane_[0], (unsigned long long)profile_push_fused_lane_[1], (unsigned long long)profile_push_fused_lane_[2]);
-	fprintf(stderr, "[vm-profile] typed heads: binary hit %llu miss %llu unstamped %llu\n",
-		(unsigned long long)profile_typed_head_[0], (unsigned long long)profile_typed_head_[1], (unsigned long long)profile_typed_head_[2]);
-	if (profile_push_sections_[0] + profile_push_sections_[1]) {
-		const double n = double(profile_push_sections_[0] + profile_push_sections_[1]);
-		fprintf(stderr, "[vm-profile] push slice: prologue %.1f | typed %llu | hetero %llu (realloc %llu) | avg cyc: compat %.1f convert %.1f charge %.1f append %.1f tail %.1f\n",
-			profile_push_prologue_ / n, (unsigned long long)profile_push_sections_[0], (unsigned long long)profile_push_sections_[1], (unsigned long long)profile_push_sections_[2],
-			profile_push_sections_[3] / n, profile_push_sections_[4] / n, profile_push_sections_[5] / n, profile_push_sections_[6] / n, profile_push_sections_[7] / n);
-	}
-	if (!profile_builtin_direct_names_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> bns(profile_builtin_direct_names_.begin(), profile_builtin_direct_names_.end());
-		std::sort(bns.begin(), bns.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] builtin-direct calls by name:\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : bns) {
-			fprintf(stderr, "  %-24s %10llu\n", name.c_str(), (unsigned long long)count);
-			if (++shown >= 10) break;
-		}
-	}
-	uint64_t total = 0;
-	for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) total += profile_cycles_[i];
-	if (total == 0) return;
-	std::vector<int> order;
-	for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (profile_counts_[i]) order.push_back(i);
-	std::sort(order.begin(), order.end(), [&](int a, int b) { return profile_cycles_[a] > profile_cycles_[b]; });
-	fprintf(stderr, "\n[vm-profile] opcode self-time (total %llu Mcycles)\n", (unsigned long long)(total / 1000000));
-	fprintf(stderr, "%-24s %10s %14s %8s %7s\n", "opcode", "count", "cycles(M)", "avg", "pct");
-	for (int i : order) {
-		fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n",
-			(int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(),
-			(unsigned long long)profile_counts_[i],
-			profile_cycles_[i] / 1e6,
-			(double)profile_cycles_[i] / (double)profile_counts_[i],
-			100.0 * (double)profile_cycles_[i] / (double)total);
-	}
-	if (profile_new_count_) {
-		fprintf(stderr, "[vm-profile] exec_new class path: %llu ctors | resolve avg %.0f cyc | invoke avg %.0f cyc\n",
-			(unsigned long long)profile_new_count_,
-			(double)profile_new_resolve_cyc_ / (double)profile_new_count_,
-			(double)profile_new_invoke_cyc_ / (double)profile_new_count_);
-	}
-	if (profile_ctor_count_) {
-		fprintf(stderr, "[vm-profile] construct_instance sections (%llu ctors, avg cyc): pre-body %.0f | ctor-body %.0f\n",
-			(unsigned long long)profile_ctor_count_,
-			(double)profile_ctor_cyc_[0] / (double)profile_ctor_count_,
-			(double)profile_ctor_cyc_[1] / (double)profile_ctor_count_);
-	}
-	if (profile_cfs_counts_[0] + profile_cfs_counts_[1] + profile_cfs_counts_[2]) {
-		fprintf(stderr, "[vm-profile] CALL_FROM_SCRATCH exec decomposition (cycles exclude in-loop callee bodies; opaque INCLUDES the native execution):\n");
-		static constexpr const char* cfs_names[3] = { "pinned in-loop", "sliced bound-method", "opaque invoke" };
-		for (int i = 0; i < 3; ++i) {
-			if (!profile_cfs_counts_[i]) continue;
-			fprintf(stderr, "  %-20s %10llu calls %12.1f Mcyc %10.1f avg\n", cfs_names[i],
-				(unsigned long long)profile_cfs_counts_[i], profile_cfs_cycles_[i] / 1e6,
-				(double)profile_cfs_cycles_[i] / (double)profile_cfs_counts_[i]);
-		}
-	}
-	if (profile_call_push_count_) {
-		fprintf(stderr, "[vm-profile] call-floor push sections (%llu pushes, avg cyc, ~10-15 probe baseline each): entry+chunk+rec %.0f | rec-init %.0f | env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
-			(unsigned long long)profile_call_push_count_,
-			(double)profile_call_push_cyc_[0] / (double)profile_call_push_count_,
-			(double)profile_call_push_cyc_[1] / (double)profile_call_push_count_,
-			(double)profile_call_push_cyc_[2] / (double)profile_call_push_count_,
-			(double)profile_call_push_cyc_[3] / (double)profile_call_push_count_,
-			(double)profile_call_push_cyc_[4] / (double)profile_call_push_count_,
-			(double)profile_call_push_cyc_[5] / (double)profile_call_push_count_);
-	}
-	if (profile_probe_count_) {
-		fprintf(stderr, "[vm-profile] probe-callee sections (%llu probes, avg cyc): resolve %.0f | ic+park %.0f\n",
-			(unsigned long long)profile_probe_count_,
-			(double)profile_probe_cyc_[0] / (double)profile_probe_count_,
-			(double)profile_probe_cyc_[1] / (double)profile_probe_count_);
-	}
-	if (profile_call_ret_count_) {
-		fprintf(stderr, "[vm-profile] call-floor return sections (%llu returns, avg cyc): conv %.0f | pop-core %.0f | swap+push %.0f\n",
-			(unsigned long long)profile_call_ret_count_,
-			(double)profile_call_ret_cyc_[0] / (double)profile_call_ret_count_,
-			(double)profile_call_ret_cyc_[1] / (double)profile_call_ret_count_,
-			(double)profile_call_ret_cyc_[2] / (double)profile_call_ret_count_);
-	}
-	if (profile_pop_sub_count_) {
-		fprintf(stderr, "[vm-profile] pop-core sub-split (%llu pops, avg cyc, ~10-15 probe baseline each): this+envswap %.0f | window-erase %.0f | aux-truncates %.0f | env-release %.0f | scrub %.0f\n",
-			(unsigned long long)profile_pop_sub_count_,
-			(double)profile_pop_sub_[0] / (double)profile_pop_sub_count_,
-			(double)profile_pop_sub_[1] / (double)profile_pop_sub_count_,
-			(double)profile_pop_sub_[2] / (double)profile_pop_sub_count_,
-			(double)profile_pop_sub_[3] / (double)profile_pop_sub_count_,
-			(double)profile_pop_sub_[4] / (double)profile_pop_sub_count_);
-	}
-	if (profile_slice_gate_[0] + profile_slice_gate_[3]) {
-		fprintf(stderr, "[vm-profile] slice-gate: instance-receiver %llu | mic-pass %llu | slice-declined %llu | mic-fail %llu\n",
-			(unsigned long long)profile_slice_gate_[0], (unsigned long long)profile_slice_gate_[1],
-			(unsigned long long)profile_slice_gate_[2], (unsigned long long)profile_slice_gate_[3]);
-	}
-	{
-		uint64_t bind_total = 0;
-		for (int i = 0; i < 7; ++i) bind_total += profile_bind_paths_[i];
-		if (bind_total) {
-			fprintf(stderr, "[vm-profile] bind paths: in-place %llu | prim-slot %llu | exact-class %llu | convert %llu | ref %llu | default %llu | escape-boxed %llu\n",
-				(unsigned long long)profile_bind_paths_[0], (unsigned long long)profile_bind_paths_[1],
-				(unsigned long long)profile_bind_paths_[2], (unsigned long long)profile_bind_paths_[3],
-				(unsigned long long)profile_bind_paths_[4], (unsigned long long)profile_bind_paths_[5],
-				(unsigned long long)profile_bind_paths_[6]);
-		}
-	}
-	if (profile_mpush_count_) {
-		fprintf(stderr, "[vm-profile] method-push receiver+env sub-split (avg cyc): set_this %.0f | env-acquire/rebind %.0f\n",
-			(double)profile_mpush_sub_[0] / (double)profile_mpush_count_,
-			(double)profile_mpush_sub_[1] / (double)profile_mpush_count_);
-		fprintf(stderr, "[vm-profile] method-push prologue split (avg cyc from entry): depth+limit %.0f | +chunk-cache %.0f | +records %.0f\n",
-			(double)profile_mpush_pro_[0] / (double)profile_mpush_count_, (double)profile_mpush_pro_[1] / (double)profile_mpush_count_, (double)profile_mpush_pro_[2] / (double)profile_mpush_count_);
-		fprintf(stderr, "[vm-profile] decl fast-path sub-sections (avg cyc): flags+top %.0f | move+pop %.0f | tag+slot %.0f (%llu fast decls)\n",
-			profile_decl_paths_[0] ? (double)profile_decl_sub_[1] / (double)profile_decl_paths_[0] : 0.0,
-			profile_decl_paths_[0] ? (double)profile_decl_sub_[2] / (double)profile_decl_paths_[0] : 0.0, profile_decl_paths_[0] ? (double)profile_decl_sub_[3] / (double)profile_decl_paths_[0] : 0.0, (unsigned long long)profile_decl_paths_[0]);
-		fprintf(stderr, "[vm-profile] fused_cmp_jump: operand resolution %.0f avg cyc over %llu compares; %llu had a shared_ptr side\n",
-			profile_cmp_count_ ? (double)profile_cmp_operands_cyc_ / (double)profile_cmp_count_ : 0.0, (unsigned long long)profile_cmp_count_, (unsigned long long)profile_cmp_sptr_null_);
-		fprintf(stderr, "[vm-profile] method-push sections (%llu pushes, avg cyc): entry+chunk+rec %.0f | rec-init+pins %.0f | receiver+env %.0f | frame-init %.0f | bind %.0f | window+stage %.0f\n",
-			(unsigned long long)profile_mpush_count_,
-			(double)profile_mpush_cyc_[0] / (double)profile_mpush_count_,
-			(double)profile_mpush_cyc_[1] / (double)profile_mpush_count_,
-			(double)profile_mpush_cyc_[2] / (double)profile_mpush_count_,
-			(double)profile_mpush_cyc_[3] / (double)profile_mpush_count_,
-			(double)profile_mpush_cyc_[4] / (double)profile_mpush_count_,
-			(double)profile_mpush_cyc_[5] / (double)profile_mpush_count_);
-	}
-	if (!profile_cfs_inloop_names_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_inloop_names_.begin(), profile_cfs_inloop_names_.end());
-		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] call_from_scratch pinned in-loop callees:\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : callees) {
-			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
-			if (++shown >= 12) break;
-		}
-	}
-	if (!profile_cfs_opaque_cycles_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> callees(profile_cfs_opaque_cycles_.begin(), profile_cfs_opaque_cycles_.end());
-		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] call_from_scratch opaque cycles by callee:\n");
-		for (const auto& [name, cyc] : callees) {
-			fprintf(stderr, "  %-32s %12.1f Mcyc\n", name.c_str(), cyc / 1e6);
-		}
-	}
-	if (!profile_cells_miss_sites_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> sites(profile_cells_miss_sites_.begin(), profile_cells_miss_sites_.end());
-		std::sort(sites.begin(), sites.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] cell misses by site (function, the original instruction's ip and opcode, the step):\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : sites) { fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count); if (++shown >= 12) break; }
-	}
-	if (!profile_cells_entry_refusals_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> refusals(profile_cells_entry_refusals_.begin(), profile_cells_entry_refusals_.end());
-		std::sort(refusals.begin(), refusals.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] cell entries refused by cell or by a container site (function, then the slot or environment name with the kind the cell wants and the kind and stamp found, or the site's instruction and its reason; kinds: 1 int 2 float 5 bool):\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : refusals) {
-			fprintf(stderr, "  %-72s %10llu\n", name.c_str(), (unsigned long long)count);
-			if (++shown >= 12) break;
-		}
-	}
-	if (!profile_native_callees_.empty()) {
-		std::vector<std::pair<std::string, uint64_t>> callees(profile_native_callees_.begin(), profile_native_callees_.end());
-		std::sort(callees.begin(), callees.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-		fprintf(stderr, "[vm-profile] call_from_scratch in-loop MISSES by callee (native/opaque boundary):\n");
-		size_t shown = 0;
-		for (const auto& [name, count] : callees) {
-			fprintf(stderr, "  %-32s %10llu\n", name.c_str(), (unsigned long long)count);
-			if (++shown >= 20) break;
-		}
-	}
-	const uint64_t decl_total = profile_decl_paths_[0] + profile_decl_paths_[1] + profile_decl_paths_[2] +
-	                            profile_decl_paths_[3] + profile_decl_paths_[4];
-	if (decl_total) {
-		fprintf(stderr, "[vm-profile] DECL_VAR paths: hit %llu | flags/slot %llu | ref-top %llu | storage %llu | type %llu\n",
-			(unsigned long long)profile_decl_paths_[0], (unsigned long long)profile_decl_paths_[1],
-			(unsigned long long)profile_decl_paths_[2], (unsigned long long)profile_decl_paths_[3],
-			(unsigned long long)profile_decl_paths_[4]);
-	}
-	const uint64_t store_total = profile_store_paths_[0] + profile_store_paths_[3] + profile_store_paths_[4];
-	if (store_total) {
-		fprintf(stderr, "[vm-profile] STORE paths: provable-hit %llu | unproven-slot %llu | proven-missed %llu | ref-top %llu\n",
-			(unsigned long long)profile_store_paths_[0], (unsigned long long)profile_store_paths_[3],
-			(unsigned long long)profile_store_paths_[4], (unsigned long long)profile_store_paths_[2]);
-	}
-	{
-		static const char* const store_path_names[8] = {"?", "slot-provable", "slot-other", "slot-ref-through", "env-cell", "env-ref-through", "env-handle-ladder", "member/other"};
-		bool any = false;
-		for (int i = 1; i < 8; ++i) { any = any || profile_store_path_counts_[i]; }
-		if (any) {
-			fprintf(stderr, "[vm-profile] STORE cycles by landing path (count / avg cyc):");
-			for (int i = 1; i < 8; ++i) {
-				if (profile_store_path_counts_[i]) {
-					fprintf(stderr, " %s %llu/%.0f |", store_path_names[i], (unsigned long long)profile_store_path_counts_[i],
-						(double)profile_store_path_cycles_[i] / (double)profile_store_path_counts_[i]);
-				}
-			}
-			fprintf(stderr, "\n");
-			std::vector<std::pair<std::string, uint64_t>> by_name(profile_store_name_cycles_.begin(), profile_store_name_cycles_.end());
-			std::sort(by_name.begin(), by_name.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
-			fprintf(stderr, "[vm-profile] STORE cycles by name (top 14):\n");
-			for (size_t i = 0; i < by_name.size() && i < 14; ++i) {
-				fprintf(stderr, "  %-28s %10.1f Mcyc\n", by_name[i].first.c_str(), by_name[i].second / 1e6);
-			}
-		}
-	}
-	{
-		auto kinds_line = [](const char* label, const uint64_t* k) {
-			fprintf(stderr, "[vm-profile] %s (measured span): null %llu int %llu float %llu string %llu char %llu bool %llu array %llu map %llu object %llu function %llu reference %llu shared %llu weak %llu other %llu\n", label,
-				(unsigned long long)k[0], (unsigned long long)k[1], (unsigned long long)k[2], (unsigned long long)k[3],
-				(unsigned long long)k[4], (unsigned long long)k[5], (unsigned long long)k[6], (unsigned long long)k[7],
-				(unsigned long long)k[8], (unsigned long long)k[9], (unsigned long long)k[10], (unsigned long long)k[11],
-				(unsigned long long)k[12], (unsigned long long)(k[13] + k[14] + k[15]));
-		};
-		fprintf(stderr, "[vm-profile] typed landings (measured span): temp in-place %llu | temp construct %llu | decl stamp-hit %llu | decl construct %llu | store refused %llu | store payload+stamp %llu | store construct %llu | compound in-place %llu | compound refused %llu | fallback entries %llu\n",
-			(unsigned long long)profile_typed_land_[0], (unsigned long long)profile_typed_land_[1], (unsigned long long)profile_typed_land_[2],
-			(unsigned long long)profile_typed_land_[3], (unsigned long long)profile_typed_land_[4], (unsigned long long)profile_typed_land_[5],
-			(unsigned long long)profile_typed_land_[6], (unsigned long long)profile_typed_land_[7], (unsigned long long)profile_typed_land_[8],
-			(unsigned long long)profile_typed_land_[9]);
-		fprintf(stderr, "[vm-profile] typed temp misses (measured span): no live slot %llu | wrong payload or reference %llu | other stamp %llu\n",
-			(unsigned long long)profile_temp_miss_[0], (unsigned long long)profile_temp_miss_[1], (unsigned long long)profile_temp_miss_[2]);
-		fprintf(stderr, "[vm-profile] typed store and move landings (measured span): store in-place %llu | move in-place %llu (no in-place move lane: stays 0) | move assign %llu | move fallback %llu\n",
-			(unsigned long long)profile_typed_inplace_[0], (unsigned long long)profile_typed_inplace_[1], (unsigned long long)profile_typed_inplace_[2], (unsigned long long)profile_typed_inplace_[3]);
-		fprintf(stderr, "[vm-profile] cell loops (measured span): entries %llu | refused %llu (by a container site %llu) | cell iterations %llu | unboxes %llu | exit events %llu | miss events %llu | misses %llu (cmp %llu arith %llu load %llu store %llu after a call %llu) | calls from a block %llu (landings missed %llu, by the result's kind %llu) | cell instructions %llu (head compares plus body ops; entry and back edge excluded) | cells flushed in place %llu, fully replaced %llu | raw area: records %llu, largest %llu bytes (8 payload + 1 kind per cell, capacity; the boxed slots stay allocated)\n",
-			(unsigned long long)profile_cells_[0], (unsigned long long)profile_cells_[1], (unsigned long long)profile_cells_[10], (unsigned long long)profile_cells_[2], (unsigned long long)profile_cells_[3], (unsigned long long)profile_cells_[4], (unsigned long long)profile_cells_[5], (unsigned long long)profile_cells_[6],
-			(unsigned long long)profile_cells_miss_step_[0], (unsigned long long)profile_cells_miss_step_[1], (unsigned long long)profile_cells_miss_step_[2], (unsigned long long)profile_cells_miss_step_[3], (unsigned long long)profile_cells_miss_step_[4], (unsigned long long)profile_cells_[11], (unsigned long long)profile_cells_[12], (unsigned long long)profile_cells_[13], (unsigned long long)profile_cells_[7],
-			(unsigned long long)profile_cells_[8], (unsigned long long)profile_cells_[9], (unsigned long long)profile_cells_records_, (unsigned long long)profile_cells_area_bytes_max_);
-		fprintf(stderr, "[vm-profile] cell counters: entries %llu | boundaries %llu | resumes %llu | misses %llu | row entries %llu\n", cells_counters_.entries, cells_counters_.boundaries, cells_counters_.resumes, cells_counters_.misses, cells_counters_.row_entries);		fprintf(stderr, "[vm-profile] cell pushes: direct int %llu | direct float %llu | direct string %llu | value %llu\n",
-			(unsigned long long)profile_cells_push_[0], (unsigned long long)profile_cells_push_[1], (unsigned long long)profile_cells_push_[2], (unsigned long long)profile_cells_push_[3]);
-		{
-			// inclusive: a block run holds its entry, its body, its flushes and misses; a miss holds its flush; a landing may hold a miss
-			static const char* const cost_names[16] = { "block runs from the dispatcher", "entries (guards, unboxing, sites)", "flushes (reboxing)", "misses", "landings after a call", "raw entries", "raw returns", "door calls (callee push or a native callee's run)", "boundary parks", "resumes (resync, reland)", "reland: environment cells", "reland: sites", "reland: rebinds", "reland: grafts", "reland: stdlib aliases", "reland: strings" };
-			fprintf(stderr, "[vm-profile] cell block costs (inclusive Mcycles, count, avg cycles):");
-			for (int i = 0; i < 16; ++i) {
-				fprintf(stderr, " %s %.1f / %llu / %.0f |", cost_names[i], profile_cell_cost_cyc_[i] / 1e6, (unsigned long long)profile_cell_cost_n_[i],
-					profile_cell_cost_n_[i] ? double(profile_cell_cost_cyc_[i]) / double(profile_cell_cost_n_[i]) : 0.0);
-			}
-			fprintf(stderr, "\n");
-		}
-		fprintf(stderr, "[vm-profile] cell instructions by opcode (measured span):");
-		for (size_t k = 0; k < k_opcode_space; ++k) { if (profile_cell_ops_[k]) { fprintf(stderr, " %s %llu |", std::string(opcode_name(static_cast<opcode>(k))).c_str(), (unsigned long long)profile_cell_ops_[k]); } }
-		fprintf(stderr, "\n");
-		{
-			// the block loop's own switch, cycles per cell opcode; then the named function's general and cell tables
-			auto table = [&](const char* title, const uint64_t* counts, const uint64_t* cycles) {
-				uint64_t tot = 0; for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) tot += cycles[i];
-				if (tot == 0) return;
-				std::vector<int> ord; for (int i = 0; i < static_cast<int>(k_opcode_space); ++i) if (counts[i]) ord.push_back(i);
-				std::sort(ord.begin(), ord.end(), [&](int a, int b) { return cycles[a] > cycles[b]; });
-				fprintf(stderr, "\n[vm-profile] %s (total %llu Mcycles)\n%-24s %10s %14s %8s %7s\n", title, (unsigned long long)(tot / 1000000), "opcode", "count", "cycles(M)", "avg", "pct");
-				for (int i : ord) { fprintf(stderr, "%-24.*s %10llu %14.1f %8.1f %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i)).size(), opcode_name(static_cast<opcode>(i)).data(), (unsigned long long)counts[i], cycles[i] / 1e6, (double)cycles[i] / (double)counts[i], 100.0 * (double)cycles[i] / (double)tot); }
-			};
-			table("cell instruction self-time (the block loop's switch)", profile_cell_ops_, profile_cell_cycles_);
-			auto pairs = [&](const char* title, const std::vector<uint64_t>& counts) {
-				if (counts.size() < k_opcode_space * k_opcode_space) return;
-				std::vector<size_t> ord; uint64_t tot = 0; for (size_t i = 0; i < counts.size(); ++i) { if (counts[i]) { ord.push_back(i); tot += counts[i]; } }
-				std::sort(ord.begin(), ord.end(), [&](size_t a, size_t b) { return counts[a] > counts[b]; });
-				fprintf(stderr, "\n[vm-profile] %s (%llu pairs)\n", title, (unsigned long long)tot);
-				size_t shown = 0;
-				for (size_t i : ord) { fprintf(stderr, "  %-16.*s -> %-16.*s %12llu %6.2f%%\n", (int)opcode_name(static_cast<opcode>(i / k_opcode_space)).size(), opcode_name(static_cast<opcode>(i / k_opcode_space)).data(), (int)opcode_name(static_cast<opcode>(i % k_opcode_space)).size(), opcode_name(static_cast<opcode>(i % k_opcode_space)).data(), (unsigned long long)counts[i], 100.0 * (double)counts[i] / (double)tot); if (++shown >= 24) break; }
-			};
-			pairs("consecutive cell instruction pairs", profile_cell_pairs_);
-			if (!profile_filter_name_.empty()) { const std::string t3 = "consecutive cell instruction pairs of " + profile_filter_name_; pairs(t3.c_str(), profile_fn_cell_pairs_); }
-			if (!profile_filter_name_.empty()) {
-				const std::string t1 = "general instructions of " + profile_filter_name_, t2 = "cell instructions of " + profile_filter_name_;
-				table(t1.c_str(), profile_fn_counts_, profile_fn_cycles_);
-				table(t2.c_str(), profile_fn_cell_ops_, profile_fn_cell_cycles_);
-			}
-		}
-		{
-			// the translation's verdict per loop: closed loops and the refused ones with their class and first offending instruction
-			size_t closed = 0, by_class[9] = {};
-			for (const auto& [code, st] : profile_chunks_) { closed += st.closed_loops; for (const auto& r : st.refusals) { ++by_class[r.reason < 9 ? r.reason : 0]; } }
-			fprintf(stderr, "[vm-profile] cell translation: loops closed %llu | refused: head %llu, representation %llu, effect %llu, translation %llu, malformed %llu, no cells %llu, too many cells %llu, bail dominates the back edge %llu\n",
-				(unsigned long long)closed, (unsigned long long)by_class[1], (unsigned long long)by_class[2], (unsigned long long)by_class[3], (unsigned long long)by_class[4], (unsigned long long)by_class[5], (unsigned long long)by_class[6], (unsigned long long)by_class[7], (unsigned long long)by_class[8]);
-			for (const auto& [code, st] : profile_chunks_) {
-				for (const auto& r : st.refusals) {
-					fprintf(stderr, "[vm-profile]   open loop: %s line %u (ips %u..%u): %s at ip %u (%s)\n", st.name.empty() ? "<top level>" : st.name.c_str(),
-						r.head < st.lines.size() ? st.lines[r.head] : 0u, r.head, r.back, chunk::cell_refusal_name(r.reason), r.ip, std::string(opcode_name(static_cast<opcode>(r.op))).c_str());
-				}
-			}
-		}
-		{
-			// the areas resident at dump time (a warm-up allocates them before the reset): every call record's
-			// payload plus kind capacity, and the bookkeeping the raw area rides on
-			uint64_t resident = 0, bytes_sum = 0, bytes_max = 0;
-			for (const auto& r : call_records_) {
-				if (!r || r->cells.cells.empty()) continue;
-				++resident;
-				const uint64_t b = static_cast<uint64_t>(r->cells.cells.capacity()) * sizeof(cell_word);
-				bytes_sum += b; if (b > bytes_max) { bytes_max = b; }
-			}
-			fprintf(stderr, "[vm-profile] cell areas resident at dump: records with an area %llu of %llu allocated records | payload+kind capacity sum %llu bytes, max %llu bytes | sizeof(call_record) %llu, sizeof(frame) %llu, sizeof(cell_state) %llu, sizeof(script_value) %llu\n",
-				(unsigned long long)resident, (unsigned long long)call_records_.size(), (unsigned long long)bytes_sum, (unsigned long long)bytes_max,
-				(unsigned long long)sizeof(call_record), (unsigned long long)sizeof(frame), (unsigned long long)sizeof(cell_state), (unsigned long long)sizeof(script_value));
-		}
-		fprintf(stderr, "[vm-profile] typed container source (measured span): T_LOAD slot %llu env %llu | INDEX_STORE_FUSED lane slot %llu env %llu\n",
-			(unsigned long long)profile_typed_cont_src_[0], (unsigned long long)profile_typed_cont_src_[1],
-			(unsigned long long)profile_typed_cont_src_[2], (unsigned long long)profile_typed_cont_src_[3]);
-		kinds_line("LOAD result kinds", profile_load_kinds_);
-		kinds_line("INDEX result kinds", profile_index_kinds_);
-	}
-	{
-		uint64_t idx_total = 0;
-		for (int i = 0; i < 8; ++i) { idx_total += profile_index_read_paths_[i]; }
-		if (idx_total) {
-			fprintf(stderr, "[vm-profile] INDEX-read paths: raw-int %llu | raw-float %llu | untyped-elem %llu | elem-ref %llu | conststr-map %llu | replay %llu | raw-idx-fold %llu | member-container %llu\n",
-				(unsigned long long)profile_index_read_paths_[0], (unsigned long long)profile_index_read_paths_[1],
-				(unsigned long long)profile_index_read_paths_[2], (unsigned long long)profile_index_read_paths_[3],
-				(unsigned long long)profile_index_read_paths_[4], (unsigned long long)profile_index_read_paths_[5],
-				(unsigned long long)profile_index_read_paths_[6], (unsigned long long)profile_index_read_paths_[7]);
-		}
-	}
-	{
-		// the calls the inliner kept, by callee and rule (sites, over the chunks that ran)
-		std::map<std::string, std::map<std::string, uint32_t>> kept;
-		for (const auto& [code, st] : profile_chunks_) { for (const auto& r : st.inline_refusals) { ++kept[r.callee][r.reason ? r.reason : "?"]; } }
-		if (!kept.empty()) {
-			fprintf(stderr, "\n[vm-profile] calls the inliner kept (callee: rule x sites):\n");
-			for (const auto& [callee, rules] : kept) { for (const auto& [rule, n] : rules) { fprintf(stderr, "  %-28s %s x %u\n", callee.c_str(), rule.c_str(), n); } }
-		}
-	}
-}
-#endif
 
 // Replicated dispatch: a hot handler fetches and dispatches its successor itself, so each such tail is its own indirect
 // branch with its own history; an op without a label re-enters the main switch. The tail keeps the loop bottom's
 // unwinding check and the loop top's debug hook (a hooked op takes the loop top); diagnostic builds keep the one loop.
-#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
+#ifndef JAISCRIPT_VM_COVERAGE
 #define JAI_HOT_OPS(X) X(op_const) X(op_pop) X(op_load) X(op_store) X(op_compound_store) X(op_incdec) X(op_decl_var) X(op_binary_fused) X(op_binary_fused_temp) X(op_t_add_ii) X(op_t_sub_ii) X(op_t_mul_ii) X(op_t_div_ii) X(op_t_mod_ii) X(op_t_and_ii) X(op_t_or_ii) X(op_t_xor_ii) X(op_t_shl_ii) X(op_t_shr_ii) X(op_t_add_ff) X(op_t_sub_ff) X(op_t_mul_ff) X(op_t_div_ff) X(op_t_mod_ff) X(op_t_jlt_ii) X(op_t_jle_ii) X(op_t_jgt_ii) X(op_t_jge_ii) X(op_t_jeq_ii) X(op_t_jne_ii) X(op_t_jlt_ff) X(op_t_jle_ff) X(op_t_jgt_ff) X(op_t_jge_ff) X(op_t_jeq_ff) X(op_t_jne_ff) X(op_t_decl_mov) X(op_t_decl_const) X(op_t_store_mov) X(op_t_store_const) X(op_fused_cmp_jump) X(op_math_temp) X(op_math) X(op_d_add) X(op_d_sub) X(op_d_mul) X(op_d_div) X(op_d_mod) X(op_d_and) X(op_d_or) X(op_d_xor) X(op_d_shl) X(op_d_shr) X(op_d_jlt) X(op_d_jle) X(op_d_jgt) X(op_d_jge) X(op_d_jeq) X(op_d_jne) X(op_cfor_back) X(op_binary_fused_decl) X(op_binary_fused_store) X(op_index_fused) X(op_index_store_fused) X(op_index_fused_decl) X(op_get_member) X(op_get_member_this) X(op_member_temp) X(op_set_member_value) X(op_t_load) X(op_halt) X(op_probe_callee) X(op_call_from_scratch) X(op_call_typed) X(op_call_method) X(op_call_builtin) X(op_return) X(op_return_ident) X(op_return_binary) X(op_jump) X(op_jump_if_false) X(op_jump_if_true) X(op_loop_back) X(op_kill_slot)
 #define JAI_HOT_CASE(o) case opcode::o: goto L_##o;
 #define JAI_OP_LABEL(o) L_##o:
@@ -21514,33 +20031,8 @@ void vm_backend::dump_opcode_profile() const {
 #define JAI_ENTER_SWITCHED() { fp = switch_to_; switch_to_ = nullptr; JAI_SWITCH_FRAME(fp); }
 #define ins (*cur)
 
-#ifdef JAISCRIPT_VM_PROFILE
 op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
-	// Published as (counter at entry) + (this loop's whole span): a span already contains
-	// every deeper loop, so an outer loop's delta since its own mark is exactly the one
-	// nested span beneath its opcode, at any depth (the depth-two control); the guard
-	// publishes on an exception exit too
-	struct span_publisher {
-		vm_backend* vm; uint64_t mark; uint64_t start;
-		~span_publisher() { vm->profile_nested_cycles_ = mark + (__rdtsc() - start); }
-	} publish{this, profile_nested_cycles_, __rdtsc()};
-	return run_dispatch_profiled(fp, records_base);
-}
-op_status vm_backend::run_dispatch_profiled(frame*& fp, const size_t records_base) {
-#else
-op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
-#endif
-#ifdef JAISCRIPT_VM_PROFILE
-	// Self-time opcode histogram (diagnostic builds only; dumped by ~vm_backend).
-	// Elapsed cycles attribute to the PREVIOUS op at the next fetch, so call ops
-	// charge only their own machinery, not their callee's body.
-	uint64_t prof_t0 = __rdtsc();
-	unsigned prof_prev = static_cast<unsigned>(k_opcode_space);
-	const chunk* prof_chunk = nullptr;
-	profile_chunk_stats* prof_stats = nullptr;
-	size_t prof_ip = 0;
-	uint64_t prof_nested_mark = profile_nested_cycles_;
-#endif
+	JAI_COVERAGE_TIMING_PAUSE();
 	const chunk* code_owner = nullptr;
 	const vm_instruction* code_base = nullptr;
 	const vm_instruction* cur = nullptr;
@@ -21557,35 +20049,6 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 		if (debug_hook_) [[unlikely]] { debug_statement_boundary(f); }
 		cur = code_base + f.ip;
 		JAI_COVERAGE_GENERAL(f);
-#ifdef JAISCRIPT_VM_PROFILE
-		{
-			const uint64_t prof_now = __rdtsc();
-			if (prof_prev < k_opcode_space) {
-				// the previous opcode's own span, less any dispatch loop that ran inside it
-				const uint64_t nested = profile_nested_cycles_ - prof_nested_mark;
-				const uint64_t raw = prof_now - prof_t0;
-				const uint64_t dt = raw > nested ? raw - nested : 0;
-				profile_cycles_[prof_prev] += dt;
-				++profile_counts_[prof_prev];
-				if (!profile_filter_name_.empty()) {
-					if (!profile_filter_chunk_ && f.code->function_name == profile_filter_name_) { profile_filter_chunk_ = f.code; }
-					if (f.code == profile_filter_chunk_) { profile_fn_cycles_[prof_prev] += dt; ++profile_fn_counts_[prof_prev]; }
-				}
-				if (prof_stats && prof_ip < prof_stats->ip_cycles.size()) {
-					prof_stats->ip_cycles[prof_ip] += dt;
-					++prof_stats->ip_counts[prof_ip];
-				}
-			}
-			prof_t0 = prof_now;
-			prof_nested_mark = profile_nested_cycles_;
-			prof_prev = static_cast<unsigned>(ins.op);
-			prof_ip = f.ip;
-			if (f.code != prof_chunk) {
-				prof_chunk = f.code;
-				prof_stats = parallel_worker_ ? nullptr : &profile_stats_for(*f.code);
-			}
-		}
-#endif
 	L_main_switch:
 		switch (ins.op) {
 			case opcode::op_halt: JAI_OP_LABEL(op_halt)
@@ -22111,7 +20574,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 			}
 
 			case opcode::op_scope_push:
-				JAI_ENV_CENSUS(1); environment_ = acquire_block_env(environment_);
+				environment_ = acquire_block_env(environment_);
 				break;
 
 			case opcode::op_scope_pop:
@@ -22158,7 +20621,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 #undef JAI_NEXT_OP
 #undef JAI_SWITCH_FRAME
 #undef JAI_ENTER_SWITCHED
-#if !defined(JAISCRIPT_VM_PROFILE) && !defined(JAISCRIPT_VM_COVERAGE)
+#ifndef JAISCRIPT_VM_COVERAGE
 #undef JAI_HOT_OPS
 #undef JAI_HOT_CASE
 #undef JAI_DISPATCH_AT
@@ -22331,9 +20794,6 @@ void vm_backend::retire_unreachable_code() {
 			for (const chunk* code : retired) {
 				body_chunks_.erase(code);
 				prefolded_chunks_.erase(code);
-#ifdef JAISCRIPT_VM_PROFILE
-				profile_chunks_.erase(code);
-#endif
 			}
 			for (auto& rec : call_records_) { rec->raw_prepared = nullptr; }
 			debug_last_code_ = nullptr;
@@ -22748,9 +21208,6 @@ op_status vm_backend::push_script_frame(frame& caller, script_value&& callee,
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = function.return_type;
 	if (function.backend_return_conv == 0) {
@@ -22887,9 +21344,6 @@ JAI_FORCEINLINE vm_backend::frame* vm_backend::push_lean_method_frame(frame& cal
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = decl.return_type;
 	rec.return_conv_class = decl.backend_return_conv;
@@ -22938,10 +21392,6 @@ bool vm_backend::lean_method_site(const chunk& code, const call_site& site) cons
 // op_call_method's lane: a script instance whose class one of the site's rows holds (the monomorphic row, then the polymorphic ones)
 // enters the row's method on a lean frame. Null leaves the call to exec_call_method_general, which answers the same rows first
 JAI_NOINLINE vm_backend::frame* vm_backend::enter_lean_method_call(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	(void)f; (void)ins;
-	return nullptr;
-#else
 	const call_site& site = f.code->call_sites[ins.b];
 	if (!site.mic_cd || !cached_global_env_ || parallel_worker_) { return nullptr; }
 	if (site.mic_lean == 0) [[unlikely]] { site.mic_lean = lean_method_site(*f.code, site) ? 1 : 2; }
@@ -22985,16 +21435,11 @@ JAI_NOINLINE vm_backend::frame* vm_backend::enter_lean_method_call(frame& f, con
 		return push_lean_method_frame(f, *dispatch, *ast, target, inst, args_base - 1, args_base, argc);
 	}
 	return push_lean_method_frame(f, *dispatch, *ast, slot, inst, args_base - 1, args_base, argc);
-#endif
 }
 
 // op_call_from_scratch's lane for a parked sibling method: its dispatcher's memoized overload on a lean frame over a copy of this frame's
 // receiver, the parked entry dropped after the push as the general branch drops it
 JAI_NOINLINE vm_backend::frame* vm_backend::enter_lean_sibling_call(frame& f, const vm_instruction& ins) {
-#ifdef JAISCRIPT_VM_PROFILE
-	(void)f; (void)ins;
-	return nullptr;
-#else
 	pending_callee& top = pending_callees_.back();
 	if (!top.method || top.fn || top.host_fn || parallel_worker_) { return nullptr; }
 	const script_method_dispatch& md = *top.method;
@@ -23012,14 +21457,13 @@ JAI_NOINLINE vm_backend::frame* vm_backend::enter_lean_sibling_call(frame& f, co
 		call_records_[call_records_top_ - 1]->pending_base = pending_callees_.size();
 	}
 	return callee;
-#endif
 }
 
 // a probe whose call follows it with no arguments: nothing runs between the two, so the callee the probe would park is entered at once
 // (a sibling method on a lean frame, a script function on a plain frame), the caller parked on the call as the pair leaves it. Null:
 // nothing changed, the probe runs
 JAI_NOINLINE vm_backend::frame* vm_backend::enter_probed_call(frame& f, const vm_instruction& ins) {
-#if defined(JAISCRIPT_VM_PROFILE) || defined(JAISCRIPT_VM_COVERAGE)
+#ifdef JAISCRIPT_VM_COVERAGE
 	(void)f; (void)ins;
 	return nullptr;
 #else
@@ -23109,15 +21553,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
                                                script_value* receiver_owned, size_t frame_base,
                                                size_t args_base, size_t argc,
                                                const call_site* site) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_p0 = __rdtsc();
-	++profile_mpush_count_;
-#define JAI_MPUSH_SUB(idx) { const uint64_t prof_q1 = __rdtsc(); profile_mpush_pro_[idx] += prof_q1 - prof_p0; }
-#define JAI_MPUSH_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_mpush_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
-#else
-#define JAI_MPUSH_SECTION(idx)
-#define JAI_MPUSH_SUB(idx)
-#endif
 	if (current_call_depth_ >= limits_->vm_depth_gate) {
 		if (auto blocked = pass_depth_gate()) { return raise_from(*blocked); }
 	}
@@ -23125,7 +21560,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		return raise_from(execution_limit_failure());
 	}
 	assert(!has_return_value_);
-	JAI_MPUSH_SUB(0);
 
 	chunk* body_chunk;
 	{
@@ -23139,20 +21573,14 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 			dispatch.body_cache_key = ast->body.get();
 			body_chunk = compiled.get();
 		}
-		JAI_MPUSH_SUB(1);
 		if (call_records_top_ == call_records_.size()) {
 			call_records_.push_back(std::make_unique<call_record>());
 		}
 	}
-	JAI_MPUSH_SUB(2);
-	JAI_MPUSH_SECTION(0);
 
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	if (ast->backend_return_conv == 0) {
@@ -23175,7 +21603,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	rec.f.cells = &rec.cells;
 	rec.env_lazy = !body_chunk->needs_frame_env && dispatch.definition_env && dispatch.cls;
 	rec.env_untouched = false;
-	JAI_MPUSH_SECTION(1);
 	try {
 		// Slot receivers stay put (the slot is the pin) and this/env bindings COPY the
 		// deref'd value — the vector path's caller made that same copy itself (objv =
@@ -23192,9 +21619,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		} else {
 			rec.locals.set_this(receiver_v);
 		}
-#ifdef JAISCRIPT_VM_PROFILE
-		{ const uint64_t prof_s = __rdtsc(); profile_mpush_sub_[0] += prof_s - prof_p0; prof_p0 = prof_s; }
-#endif
 		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
 			// Recursion/sibling calls within one class: the resolution env is already
 			// the definition env — skip the atomic swap pair entirely and leave nothing
@@ -23241,10 +21665,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		--call_records_top_;
 		throw;
 	}
-#ifdef JAISCRIPT_VM_PROFILE
-	{ const uint64_t prof_s = __rdtsc(); profile_mpush_sub_[1] += prof_s - prof_p0; prof_p0 = prof_s; }
-#endif
-	JAI_MPUSH_SECTION(2);
 	++current_call_depth_;
 	rec.f.code = body_chunk;
 	rec.f.ip = 0;
@@ -23262,7 +21682,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	enter_unit(ast->unit);
 	enter_frame(rec.f);   // before binding: the ref-param frames_ scan must see this frame
 	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
-	JAI_MPUSH_SECTION(3);
 
 	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
 		op_status bound{};
@@ -23280,7 +21699,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 			return bound;
 		}
 	}
-	JAI_MPUSH_SECTION(4);
 	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
 	assert(stack_.size() == args_base + rec.f.window_live);
 	{
@@ -23288,8 +21706,6 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 		stack_.fill_null_to(rec.f.window_base + window_slots, engine_);
 	}
 	switch_to_ = &rec.f;
-	JAI_MPUSH_SECTION(5);
-#undef JAI_MPUSH_SECTION
 	return {};
 }
 
@@ -23328,9 +21744,6 @@ op_status vm_backend::push_method_frame(frame& caller, const script_value& metho
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	if (ast->backend_return_conv == 0) {
@@ -23500,9 +21913,6 @@ op_status vm_backend::push_static_method_frame(frame& caller, const script_value
 	call_record& rec = *call_records_[call_records_top_];
 	++call_records_top_;
 	rec.raw_prepared = nullptr;
-#ifdef JAISCRIPT_VM_PROFILE
-	rec.profile_entry_tsc = __rdtsc();
-#endif
 	rec.caller = &caller;
 	rec.return_type = ast->return_type;
 	if (ast->backend_return_conv == 0) {
@@ -23591,6 +22001,7 @@ void vm_backend::anchor_method_result(script_value& result, script_value& receiv
 // A lean frame (push_lean_method_frame's, push_plain_frame's on an untouched environment): lazy, no entry environment, static class,
 // callee pin or constructor stamp (every pop clears them and the lean pushes set none), so of the general exit only these run
 JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
+	JAI_COVERAGE_FRAME_EXIT(rec.f);
 	rec.lean = false;
 	if (stack_.size() > rec.f.stack_base) { stack_.truncate(rec.f.stack_base); }
 	truncate_detached(try_records_, rec.try_base);
@@ -23622,21 +22033,9 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		pop_lean_frame(rec);
 		return;
 	}
+	JAI_COVERAGE_FRAME_EXIT(rec.f);
 	rec.lean = false;
 	if (rec.ctor_exit) [[unlikely]] { leave_constructor_frame(rec); }
-	JAI_COARSE(coarse_pop_, coarse_pops_)
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_pc0 = __rdtsc();
-	++profile_pop_sub_count_;
-	if (!parallel_worker_ && rec.f.code && rec.profile_entry_tsc) {
-		auto& st = profile_stats_for(*rec.f.code);
-		st.inclusive_cycles += prof_pc0 - rec.profile_entry_tsc;
-		++st.entries;
-	}
-#define JAI_POP_SUB(idx) { const uint64_t prof_pc1 = __rdtsc(); profile_pop_sub_[idx] += prof_pc1 - prof_pc0; prof_pc0 = prof_pc1; }
-#else
-#define JAI_POP_SUB(idx)
-#endif
 	if (!rec.env_lazy) {
 		// Lazy frames never created an env (environment_ is the CALLER's), so there is
 		// nothing to clear; clearing it poisoned a method caller's this-binding.
@@ -23648,19 +22047,16 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 		// it would CLOBBER the live caller env)
 		environment_ = std::move(rec.prev_env);
 	}
-	JAI_POP_SUB(0);
 	if (stack_.size() > rec.f.stack_base) {
 		// Window + operand temps + (zero-copy) the callee pin die HERE, at the frame's end
 		stack_.truncate(rec.f.stack_base);
 	}
-	JAI_POP_SUB(1);
 	truncate_detached(try_records_, rec.try_base);
 	truncate_detached(iter_states_, rec.iter_base);
 	if (cfor_states_.size() > rec.cfor_base) {
 		cfor_states_.erase(cfor_states_.begin() + rec.cfor_base, cfor_states_.end());
 	}
 	truncate_detached(pending_callees_, rec.pending_base);
-	JAI_POP_SUB(2);
 	if (!rec.env_lazy) {
 		// Moved out first so the pool's use_count()==1 guard sees today's count
 		release_scope_env(std::move(rec.f.entry_env));
@@ -23668,7 +22064,6 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	} else if (rec.f.entry_env) {
 		rec.f.entry_env = nullptr;
 	}
-	JAI_POP_SUB(3);
 	// Scrub only what this frame actually dirtied (function frames leave method/static
 	// metadata untouched, and their callee pin lives on the stack, not the record)
 	if (rec.locals.is_method) {
@@ -23704,8 +22099,6 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	frames_.pop_back();
 	sync_unit();   // the caller's unit again (a store only while a name has versions)
 	--call_records_top_;
-	JAI_POP_SUB(4);
-#undef JAI_POP_SUB
 }
 
 // A frame one of whose slots was boxed on demand (note_boxed_slot): its cells are gathered before the ordinary pop and
@@ -23864,13 +22257,6 @@ op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction&
 }
 
 op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32_t mode) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_p0 = __rdtsc();
-	++profile_call_ret_count_;
-#define JAI_CALL_RET_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_ret_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
-#else
-#define JAI_CALL_RET_SECTION(idx)
-#endif
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	// The record's cached classification picks the epilogue without re-deriving it from
 	// type_info per return. none = convert_return_value's no-op route inline (deref only);
@@ -23930,26 +22316,16 @@ op_status vm_backend::return_with_result(frame*& fp, script_value result, uint32
 		if (rec.ctor_result_stamp && result.type() == script_value_type::jai_object_type) [[unlikely]] {
 			result.set_type_info(type_info_ptr{rec.ctor_result_stamp});
 		}
-		JAI_CALL_RET_SECTION(0);
 		if (pops_lean(rec)) { pop_lean_frame(rec); } else { pop_script_frame_core(rec); }
-		JAI_CALL_RET_SECTION(1);
 		fp = rec.caller;
 		land_call_result(*fp, std::move(result));
-		JAI_CALL_RET_SECTION(2);
 		return {};
 	}
-#undef JAI_CALL_RET_SECTION
 	return return_with_conversion(fp, std::move(result), mode);
 }
 
 // the converting return, out of line so the identity return keeps a small frame
 JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_value result, uint32_t mode) {
-#ifdef JAISCRIPT_VM_PROFILE
-	uint64_t prof_p0 = __rdtsc();
-#define JAI_CALL_RET_SECTION(idx) { const uint64_t prof_p1 = __rdtsc(); profile_call_ret_cyc_[idx] += prof_p1 - prof_p0; prof_p0 = prof_p1; }
-#else
-#define JAI_CALL_RET_SECTION(idx)
-#endif
 	call_record& rec = *call_records_[call_records_top_ - 1];
 	// Deref + conversion run while the callee's env/frame are still live (native order);
 	// a reference return validated at its in-region site passes its handle through
@@ -23973,13 +22349,9 @@ JAI_NOINLINE op_status vm_backend::return_with_conversion(frame*& fp, script_val
 	if (rec.ctor_result_stamp && conv.value().type() == script_value_type::jai_object_type) [[unlikely]] {
 		conv.value().set_type_info(type_info_ptr{rec.ctor_result_stamp});
 	}
-	JAI_CALL_RET_SECTION(0);
 	pop_script_frame_core(rec);
-	JAI_CALL_RET_SECTION(1);
 	fp = rec.caller;
 	land_call_result(*fp, std::move(conv.value()));
-	JAI_CALL_RET_SECTION(2);
-#undef JAI_CALL_RET_SECTION
 	return {};
 }
 
@@ -24111,10 +22483,10 @@ void vm_backend::setup_callee_env(const script_defined_function& function, call_
 			environment_ = acquire_static_scope_env(
 				function.closure_env->get_parent(), function.closure_env->get_class_definition());
 		} else {
-			JAI_ENV_CENSUS(2); environment_ = acquire_scope_env(function.closure_env);
+			environment_ = acquire_scope_env(function.closure_env);
 		}
 	} else {
-		JAI_ENV_CENSUS(3); environment_ = acquire_scope_env(environment::past_idle_call_scopes(environment::call_parent(prev_env, function.block_defined), function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)
+		environment_ = acquire_scope_env(environment::past_idle_call_scopes(environment::call_parent(prev_env, function.block_defined), function.block_defined));   // past the caller's block scopes (KEEP BYTE-PARALLEL with the interpreter's call_function)
 		environment_->set_call_scope();
 	}
 }
@@ -24718,18 +23090,12 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				// the arg's type_info verbatim (copy IS clone for primitives) - nothing
 				// to do unless the escape mark boxes it
 				if (in_place && param.slot_index == i) {
-#ifdef JAISCRIPT_VM_PROFILE
-					++profile_bind_paths_[param.ref_escaping ? 6 : 0];
-#endif
 					if (param.ref_escaping) {
 						script_value inner = std::move(stack_[args_base + i]);
 						stack_[args_base + i] = script_value::make_cell_reference(std::move(inner), engine_);
 					}
 					continue;
 				}
-#ifdef JAISCRIPT_VM_PROFILE
-				++profile_bind_paths_[1];
-#endif
 				frame_slot_set(callee, param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
@@ -24740,9 +23106,6 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 				frame_slot_set(callee, param.slot_index, boxed_param(script_value(arg)));
 				continue;
 			}
-#ifdef JAISCRIPT_VM_PROFILE
-			++profile_bind_paths_[3];
-#endif
 			// a handle (or null) already tagged with the parameter's exact type shares as it is: no conversion, nothing re-enters
 			if (param.type && param.type->base_type == script_value_type::jai_shared_ptr_type) {
 				const script_value& handle = arg.is_reference() ? arg.deref() : arg;

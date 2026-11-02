@@ -306,6 +306,9 @@ namespace {
 		r.size = c.code.size();
 		const size_t n = c.code.size();
 		r.general.assign(n, 0); r.cells.assign(n, 0); r.line.assign(n, 0); r.file.assign(n, 0); r.op.resize(n);
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		r.cycles.assign(n, 0);
+#endif
 		r.files.push_back("");
 		r.region.assign(n, coverage_region::none); r.region_index.assign(n, k_invalid_u32); r.site.assign(n, k_invalid_u32);
 		for (size_t ip = 0; ip < n; ++ip) {
@@ -479,6 +482,11 @@ namespace {
 		for (auto& l : r.loops) { l.entries = 0; l.misses = 0; for (auto& x : l.refused) x = 0; }
 		r.receivers.clear();
 		r.operands.clear();
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		std::fill(r.cycles.begin(), r.cycles.end(), 0);
+		r.inclusive_cycles = 0;
+		r.entries = 0;
+#endif
 	}
 
 	bool pair_first_falls(opcode o) {
@@ -490,6 +498,9 @@ namespace {
 coverage_chunk& coverage_tables::bind(const chunk& c, const string_symbolizer* symbolizer) {
 	auto it = chunks.find(&c);
 	if (it != chunks.end() && (it->second.identity != static_cast<const void*>(c.code.data()) || it->second.size != c.code.size())) {
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		if (timed_row == &it->second) { timed_row = nullptr; }
+#endif
 		retired.push_back(std::move(it->second));
 		chunks.erase(it);
 		it = chunks.end();
@@ -504,6 +515,9 @@ void coverage_tables::reset() {
 	for (auto& [k, r] : chunks) { zero_row(r); }
 	retired.clear();
 	cell_dispatches = 0;
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+	timed_row = nullptr;
+#endif
 }
 
 namespace {
@@ -521,8 +535,17 @@ coverage_chunk& vm_backend::coverage_row(const chunk& c) {
 }
 
 void vm_backend::coverage_general(frame& f) {
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+	coverage_->charge(coverage_clock());
+	coverage_->timed_row = nullptr;
+	struct restart_clock { coverage_tables& t; ~restart_clock() { t.timed_since = coverage_clock(); } } restart{*coverage_};
+#endif
 	coverage_chunk& row = coverage_row(*f.code);
 	if (f.ip >= row.general.size()) return;
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+	coverage_->timed_row = &row;
+	coverage_->timed_ip = f.ip;
+#endif
 	++row.general[f.ip];
 	const opcode op = f.code->code[f.ip].op;
 	census_position(op, row, f.ip);
@@ -533,6 +556,15 @@ void vm_backend::coverage_general(frame& f) {
 	default: break;
 	}
 }
+
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+void vm_backend::coverage_frame_exit(const frame& f) {
+	if (!f.code || !f.timed_entry) return;
+	coverage_chunk& row = coverage_row(*f.code);
+	row.inclusive_cycles += coverage_clock() - f.timed_entry;
+	++row.entries;
+}
+#endif
 
 void vm_backend::coverage_cell(const frame& f, size_t ip, opcode op) {
 	coverage_chunk& row = coverage_row(*f.code);
@@ -772,6 +804,76 @@ void coverage_summary(const std::vector<std::shared_ptr<coverage_tables>>& table
 	std::stable_sort(out.reasons.begin(), out.reasons.end(), [](const auto& a, const auto& b) { return a.second > b.second; });
 }
 
+namespace {
+	// every opcode that ran, on the dispatcher and in blocks; a timing build adds each one's own clock and the script functions'
+	void opcode_tables(std::ostringstream& o, const std::vector<const coverage_chunk*>& rows, uint64_t total, size_t top) {
+		struct op_row { uint64_t general = 0, cells = 0, cycles = 0; };
+		std::vector<op_row> ops(k_opcode_space);
+		for (const coverage_chunk* rp : rows) {
+			for (size_t ip = 0; ip < rp->general.size(); ++ip) {
+				op_row& e = ops[rp->op[ip] < k_opcode_space ? rp->op[ip] : 0];
+				e.general += rp->general[ip];
+				e.cells += rp->cells[ip];
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+				e.cycles += rp->cycles[ip];
+#endif
+			}
+		}
+		std::vector<std::pair<uint64_t, size_t>> ranked;
+		for (size_t k = 0; k < ops.size(); ++k) if (ops[k].general + ops[k].cells) ranked.emplace_back(ops[k].general + ops[k].cells, k);
+		std::sort(ranked.rbegin(), ranked.rend());
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		uint64_t all_cycles = 0;
+		for (const op_row& e : ops) all_cycles += e.cycles;
+		o << "\n-- instructions by opcode (dispatcher | in blocks | share | own clock, a block entry's covering its run | share | clock per dispatch)\n";
+#else
+		o << "\n-- instructions by opcode (dispatcher | in blocks | share)\n";
+#endif
+		for (const auto& [n, k] : ranked) {
+			const op_row& e = ops[k];
+			o << "  " << pad(std::string(opcode_name(static_cast<opcode>(k))), 28) << lpad(num(e.general), 14) << lpad(num(e.cells), 14) << "  " << pct(n, total);
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+			o << "  " << lpad(num(e.cycles), 16) << "  " << pct(e.cycles, all_cycles) << "  " << (e.general ? e.cycles / e.general : 0);
+#endif
+			o << "\n";
+		}
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+		struct fn_row { std::string name; uint64_t exclusive = 0, ops = 0, inclusive = 0, entries = 0; std::map<uint32_t, uint64_t> lines; };
+		std::map<std::string, fn_row> fns;
+		for (const coverage_chunk* rp : rows) {
+			std::string file = rp->files.empty() ? std::string() : rp->files.front();
+			if (const size_t cut = file.find_last_of("/\\"); cut != std::string::npos) file = file.substr(cut + 1);
+			fn_row& fr = fns[rp->name + "\t" + file];
+			fr.name = (rp->name.empty() ? std::string("<top level>") : rp->name) + (file.empty() ? std::string() : "  " + file);
+			fr.inclusive += rp->inclusive_cycles;
+			fr.entries += rp->entries;
+			for (size_t ip = 0; ip < rp->cycles.size(); ++ip) {
+				fr.exclusive += rp->cycles[ip];
+				fr.ops += rp->general[ip] + rp->cells[ip];
+				if (rp->cycles[ip]) fr.lines[rp->line[ip]] += rp->cycles[ip];
+			}
+		}
+		std::vector<const fn_row*> by_time;
+		for (const auto& [k, fr] : fns) if (fr.exclusive) by_time.push_back(&fr);
+		std::sort(by_time.begin(), by_time.end(), [](const fn_row* a, const fn_row* b) { return a->exclusive > b->exclusive; });
+		o << "\n-- script functions by own clock (exclusive: its instructions, callees' excluded, the call and return machinery included; inclusive: frame entry to exit, a recursive activation counted again)\n";
+		o << "  " << pad("function", 52) << lpad("exclusive", 16) << "        " << lpad("operations", 14) << lpad("inclusive", 16) << lpad("entries", 12) << "\n";
+		for (size_t i = 0; i < by_time.size() && i < top; ++i) {
+			const fn_row& fr = *by_time[i];
+			o << "  " << pad(fr.name, 52) << lpad(num(fr.exclusive), 16) << "  " << pct(fr.exclusive, all_cycles) << lpad(num(fr.ops), 14) << lpad(num(fr.inclusive), 16) << lpad(num(fr.entries), 12) << "\n";
+			std::vector<std::pair<uint64_t, uint32_t>> lines;
+			for (const auto& [line, c] : fr.lines) lines.emplace_back(c, line);
+			std::sort(lines.rbegin(), lines.rend());
+			o << "      hot lines:";
+			for (size_t l = 0; l < lines.size() && l < 6; ++l) o << " L" << lines[l].second << " " << pct(lines[l].first, fr.exclusive);
+			o << "\n";
+		}
+#else
+		(void)top;
+#endif
+	}
+}
+
 std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>& tables, size_t top) {
 	uint64_t cell_dispatches = 0;
 	const std::vector<const coverage_chunk*> rows = all_rows(tables, cell_dispatches);
@@ -983,6 +1085,7 @@ std::string coverage_report(const std::vector<std::shared_ptr<coverage_tables>>&
 		std::sort(v.rbegin(), v.rend());
 		for (size_t i = 0; i < v.size() && i < top; ++i) o << "    " << lpad(num(v[i].first), 10) << "  " << pct(v[i].first, total) << "  " << v[i].second << "\n";
 	}
+	opcode_tables(o, rows, total, top);
 	return o.str();
 }
 

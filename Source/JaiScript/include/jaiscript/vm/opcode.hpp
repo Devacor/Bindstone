@@ -342,7 +342,7 @@ namespace jai::vm {
         op_member_temp_this, // a=nodes index (member_expr), b=temp slot, c=the base's this-field slot + 1: op_member_temp over a member-class body's bare field
         op_mfold,           // a=chunk::member_folds index: the member temps here folded into the consumer after them (their fields read in place); a miss runs the first member temp
     };
-    inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the profile's histograms) are this long
+    inline constexpr size_t k_opcode_space = 512;   // tables indexed by opcode (the coverage report's) are this long
     static_assert(static_cast<size_t>(opcode::op_mfold) < k_opcode_space, "the opcode space is full: widen k_opcode_space");
     static_assert(static_cast<uint32_t>(opcode::op_d_jne) < 256 && static_cast<uint32_t>(opcode::op_t_load) < 256, "a cell instruction packs a typed opcode above k_cell_op_shift in 8 bits");
     // op_capture_arg forms: where the callee stands while its arguments evaluate

@@ -67,219 +67,8 @@ namespace jai::vm {
 		checked_result<script_value> map_transform(uint64_t a_member, script_value& a_self, const std::vector<script_value>& a_args) override;
 
         vm_backend(string_symbolizer* symbolizer, std::shared_ptr<environment> global_env);
-#if defined(JAISCRIPT_VM_COARSE_PROFILE) && !defined(JAISCRIPT_VM_PROFILE)
-        // The coarse profile (a Release build with the define): two clock reads per block run, per call push, per frame pop and per
-        // method call, one pair around the dispatcher's outermost run, the shares at exit. The fine profile's per-instruction clocks
-        // distort what they measure; this one costs a few reads per call.
-        void dump_coarse_profile() const;
-        uint64_t coarse_total_ = 0, coarse_blocks_ = 0, coarse_block_runs_ = 0, coarse_push_ = 0, coarse_pushes_ = 0, coarse_pop_ = 0, coarse_pops_ = 0, coarse_method_ = 0, coarse_methods_ = 0;
-        uint32_t coarse_depth_ = 0;
-        uint64_t coarse_ecells_ = 0, coarse_esites_ = 0, coarse_eguards_ = 0, coarse_ncells_ = 0, coarse_nenv_ = 0, coarse_nsites_ = 0, coarse_unused_ = 0;
-        uint64_t coarse_enter_ = 0, coarse_enters_ = 0, coarse_flush_ = 0, coarse_flushes_ = 0, coarse_miss_ = 0, coarse_misses_ = 0, coarse_land_ = 0, coarse_lands_ = 0;   // inside the block bucket
-#endif
         cell_counters cells_counters() const override { return cells_counters_; }
-#ifdef JAISCRIPT_VM_PROFILE
-        ~vm_backend() override { dump_opcode_profile(); release_site_pins(); release_retained_decls(); }
-        void dump_opcode_profile() const;
-        void profile_reset() override;
-        uint64_t profile_cycles_[k_opcode_space] = {};
-        uint64_t profile_counts_[k_opcode_space] = {};
-        // Per-script-function accounting (the sampling interface; main
-        // engine only, workers are not attributed). Exclusive = the opcode self time of the
-        // function's own instructions (the same rdtsc pairs as the opcode table: callee
-        // bodies excluded, the call and return machinery included); inclusive = frame entry
-        // to frame exit for in-loop script frames (a recursive activation counts its inner
-        // activations again). Names, files and lines are copied when a chunk is first seen,
-        // so the report does not depend on chunk lifetime.
-        // Slot census (serial plan, measurement 1). Per frame slot: use bits (1 typed-op operand,
-        // 2 general-op read, 4 general-op definition, 8 address taken, 16 captured by a closure,
-        // 32 an unproven kernel definition into a temp) and decl_kind (0 none = a compiler temp,
-        // 1 declared proven scalar, 2 declared non-scalar or dynamic). A raw-cell CANDIDATE is a
-        // proven-scalar declaration (or a temp with only proven definitions) that is not escaped;
-        // its general uses are BOUNDARY materializations (reads box, definitions unbox), weighted
-        // by ip_counts at report time. Everything else is a rejection with its first rejecting
-        // use named. Chunk-level uses (counted-for and call-site operands) carry no ip.
-        struct slot_census {
-            std::vector<uint8_t> use;
-            std::vector<uint8_t> decl_kind;
-            std::vector<std::string> decl_type;                  // spelled declared type (rejection text)
-            std::vector<uint32_t> first_general_ip;
-            std::vector<uint32_t> first_reject_ip;
-            std::vector<std::vector<uint32_t>> read_slots_at_ip;
-            std::vector<std::vector<uint32_t>> write_slots_at_ip;
-            std::vector<std::vector<uint32_t>> typed_slots_at_ip;
-            std::vector<uint32_t> call_ips;
-            std::vector<std::pair<uint32_t, uint32_t>> loops;   // [target, back-edge ip]
-            std::vector<std::string> slot_names;
-            std::vector<vm_instruction> code;                   // the chunk's instructions (the chunk may be gone at report time)
-            uint32_t opaque_ops = 0;
-            bool has_yield = false;
-        };
-        struct profile_chunk_stats {
-            std::string name;
-            std::string file;
-            std::vector<uint32_t> lines;
-            std::vector<chunk::cell_refusal> refusals;   // the loops the translation refused (copied once from the chunk)
-            std::vector<chunk::inline_refusal> inline_refusals;   // the calls the inliner kept (copied once: the chunk may be gone by the dump)
-            size_t closed_loops = 0;
-            std::vector<uint64_t> ip_cycles;
-            std::vector<uint64_t> ip_counts;
-            uint64_t inclusive_cycles = 0;
-            uint64_t entries = 0;
-            slot_census census;
-        };
-        void dump_slot_census() const;
-        std::unordered_map<const chunk*, profile_chunk_stats> profile_chunks_;
-        profile_chunk_stats& profile_stats_for(const chunk& code);
-        std::map<std::string, uint64_t> profile_native_callees_;   // in-loop fast-path misses by name
-        // exec_decl_var / exec_store fast-path miss taxonomy (why the hot rows average
-        // hundreds of cycles): [0]=hit [1]=flags/slot gate [2]=reference top [3]=storage
-        // kind [4]=declared-type mismatch
-        uint64_t profile_decl_paths_[5] = {};
-        uint64_t profile_store_paths_[5] = {};
-        // op_store cycle taxonomy by landing path: [1]=slot provable [2]=slot other
-        // [3]=slot ref-through [4]=env cell [5]=env ref-through [6]=env handle ladder
-        // [7]=member/other; plus per-name cycles so hot store sites are named
-        uint64_t profile_store_path_cycles_[8] = {};
-        uint64_t profile_store_path_counts_[8] = {};
-        unsigned profile_store_last_path_ = 7;
-        std::map<std::string, uint64_t> profile_store_name_cycles_;
-        // env production census: [0]=scope [1]=method [2]=static [3]=coroutine [4]=closure-capture
-        uint64_t profile_env_births_[5] = {};
-        uint64_t profile_scope_kinds_[4] = {};   // iter / scope_push / call_closure / call_plain
-        // exec_call_method composition: [0]=mic static hit [1]=mic resolve hit
-        // [2]=ladder enter (fill) [3]=string builtin [4]=worker pin [5]=native fallthrough
-        // [6]=builtin direct (array/map)
-        uint64_t profile_call_method_paths_[7] = {};
-        // exec_get_member composition: [0]=IC hit [1]=negative/absent -> ladder
-        // [2]=non-instance receiver (map sugar, arrays, statics) -> ladder
-        uint64_t profile_get_member_paths_[3] = {};
-        // exec_call bound-method routing: [0]=branch entered [1]=in-loop dispatch
-        // [2]=bound thunk seen but opaque [3]=other opaque callee
-        uint64_t profile_bound_method_paths_[4] = {};
-        // env identifier resolution taxonomy (the flat_lookup_ kill): [0]=no cache slot
-        // [1]=frame ineligible (scope env, not global/pinned) [2]=cache hit
-        // [3]=fill cacheable [4]=fill uncacheable [5]=full get_value_ptr walk
-        // [6]=fast-head hit (env identity + engine serial) [7]=fast-head arm
-        // [8]=this-field IC hit [9]=this-field IC arm
-        uint64_t profile_env_resolve_[10] = {};
-        uint64_t profile_worker_declines_[32] = {};   // by worker_decline: a fast path a worker passed over for the slower general form
-        // exec_call_from_scratch decomposition (the 38%-row honesty check): brackets the
-        // EXEC BODY only, so [0]/[1] are pure call machinery (in-loop callee bodies run
-        // after return) while [2] swallows the whole native execution — region waits,
-        // fiber slices, builtin bodies — exactly what the op row double-counts.
-        // [0]=pinned in-loop entry [1]=sliced bound-method entry [2]=opaque invoke
-        uint64_t profile_cfs_cycles_[3] = {};
-        uint64_t profile_cfs_counts_[3] = {};
-        std::map<std::string, uint64_t> profile_cfs_inloop_names_;   // pinned-path callees
-        std::map<std::string, uint64_t> profile_cfs_opaque_cycles_;  // opaque-path cycles by callee
-        // Call-floor decomposition (the 348-cyc/call honesty check vs Squirrel's ~100
-        // ROUND TRIP). Sections are rdtsc-bracketed, so each carries ~10-15 cyc of probe
-        // baseline: read them as a RANKING, not absolutes, and sanity-check the sum
-        // against the CFS pinned row. push_script_frame_pinned sections:
-        // [0]=entry checks + chunk + record acquire [1]=record init (fields/pins/bases/name)
-        // [2]=env decision + setup [3]=frame init + frames_ push [4]=bind_parameters
-        // [5]=window null-fill + switch staging
-        uint64_t profile_call_push_cyc_[6] = {};
-        uint64_t profile_call_push_count_ = 0;
-        // exec_probe_callee sections: [0]=callee resolve (fused_ident_value + checks)
-        // [1]=IC compare/park + pending_callees_ push
-        uint64_t profile_probe_cyc_[2] = {};
-        uint64_t profile_probe_count_ = 0;
-        // return_with_result sections: [0]=conv classify + deref/convert
-        // [1]=pop_script_frame_core [2]=caller swap + result push
-        uint64_t profile_call_ret_cyc_[3] = {};
-        uint64_t profile_call_ret_count_ = 0;
-        // push_method_frame_sliced sections (the CALL_METHOD push side; the row's
-        // remainder above this sum is resolve/mic/arg staging):
-        // [0]=entry checks + chunk + record acquire [1]=record init + pins (ast_pin
-        // atomic copy lives here) [2]=receiver deref + set_this + method env
-        // [3]=frame init + frames_ push [4]=bind_parameters [5]=window fill + stage
-        uint64_t profile_mpush_cyc_[6] = {};
-        uint64_t profile_mpush_pro_[3] = {0, 0, 0};
-        uint64_t profile_decl_sub_[4] = {0, 0, 0, 0};
-        uint64_t profile_cmp_operands_cyc_ = 0, profile_cmp_count_ = 0, profile_cmp_sptr_null_ = 0;
-        uint64_t profile_mpush_count_ = 0;
-        // receiver+env sub-split: [0]=receiver deref + set_this [1]=env acquire/rebind
-        uint64_t profile_mpush_sub_[2] = {};
-        // pop-core sub-split: [0]=this-clear + env swap [1]=window/stack erase
-        // [2]=aux truncates (try/iter/cfor/pending) [3]=env release [4]=scrub chain
-        uint64_t profile_pop_sub_[5] = {};
-        uint64_t profile_pop_sub_count_ = 0;
-        // Slice-gate diagnosis: [0]=reached instance receiver [1]=mic guard passed
-        // [2]=slice resolution declined [3]=mic guard failed
-        uint64_t profile_slice_gate_[4] = {};
-        uint64_t profile_push_sections_[8] = {};
-        uint64_t profile_push_prologue_ = 0;
-        uint64_t profile_typed_head_[3] = {};
-        uint64_t profile_push_fused_lane_[3] = {};   // append lane, slice kernel, replay
-        uint64_t profile_typed_decl_read_[2] = {};   // tried, hit
-        uint64_t profile_typed_spec_[2] = {};        // speculative T_LOAD sites: hit, miss
-        uint64_t profile_typed_store_[2] = {};       // tried, hit
-        // Serial census, reset with the opcode tables: typed landings by kind x outcome
-        // [0]=temp in-place [1]=temp construct [2]=decl stamp-hit [3]=decl construct [4]=store refused
-        // [5]=store payload+stamp [6]=store construct [7]=compound in-place [8]=compound refused
-        // [9]=typed fallback entries
-        uint64_t profile_typed_land_[10] = {};
-        // temp landing misses: [0]=no live slot [1]=wrong payload kind or a reference [2]=other stamp (or engine)
-        uint64_t profile_temp_miss_[3] = {};
-        // store and move landings: [0]=store in place [1]=move in place [2]=move assign [3]=move fallback
-        uint64_t profile_typed_inplace_[4] = {};
-        // cell loops: [0]=entries taken [1]=entries refused by a live-in guard [2]=cell iterations
-        // [3]=unboxes [4]=flushes at exit [5]=flushes at miss [6]=misses [7]=cell instructions dispatched
-        uint64_t profile_cells_[14] = {};                // [8] flushed cells written in place [9] flushed cells fully replaced [10] entries refused by a container site [11] calls made from a block [12] landings after a call that missed [13] of those, missed by the result's kind
-        uint64_t profile_cells_area_bytes_max_ = 0;      // the largest raw area on any record: the cells' capacity
-        uint64_t profile_cells_records_ = 0;             // records that allocated a raw area
-        uint64_t profile_cells_refused_slot_[64] = {};   // refused entries by live-in cell index
-        std::map<std::string, uint64_t> profile_cells_entry_refusals_;   // refused entries by function, cell and the kinds involved
-        std::map<std::string, uint64_t> profile_cells_miss_sites_;       // misses by function, the original instruction and the step
-        uint64_t profile_cells_miss_step_[8] = {};       // misses by step kind: 0 cmp 1 arith 2 load 3 store 4 after a call
-        uint64_t profile_cells_push_[4] = {};            // block pushes: 0 a raw int into a typed buffer, 1 a raw float, 2 a string handle, 3 a value (boxed or a value source)
-        uint64_t profile_cell_ops_[k_opcode_space] = {};            // cell instructions dispatched by the block loop, by opcode
-        uint64_t profile_cell_cycles_[k_opcode_space] = {};         // rdtsc cycles per cell opcode (the block loop's own switch; diagnostic builds)
-        uint64_t profile_cell_cost_cyc_[16] = {}, profile_cell_cost_n_[16] = {};   // block runs, entries, flushes, misses, landings, raw entries, raw returns, door calls, boundary parks, resumes (inclusive)
-        std::string profile_filter_name_;                // JAI_VMPROF_FUNCTION: one function's own tables (empty = none)
-        const chunk* profile_filter_chunk_ = nullptr;    // the first chunk whose function_name matched, bound when it first runs
-        uint64_t profile_fn_counts_[k_opcode_space] = {}, profile_fn_cycles_[k_opcode_space] = {};           // that function's general instructions
-        uint64_t profile_fn_cell_ops_[k_opcode_space] = {}, profile_fn_cell_cycles_[k_opcode_space] = {};   // that function's cell instructions
-        std::vector<uint64_t> profile_cell_pairs_, profile_fn_cell_pairs_;   // consecutive cell opcode pairs (prev * k_opcode_space + this), all functions and the named one
-        // typed container-operand source: [0]=T_LOAD frame slot [1]=T_LOAD env-resident
-        // [2]=INDEX_STORE_FUSED typed lane slot [3]=INDEX_STORE_FUSED typed lane env-resident
-        uint64_t profile_typed_cont_src_[4] = {};
-        uint64_t profile_load_kinds_[32] = {};    // LOAD result storage kind (the DECL_VAR initializer kinds' twin)
-        uint64_t profile_index_kinds_[32] = {};   // INDEX result storage kind
-        // typed heads: binary: stamped hit / stamped miss / unstamped; cmp_jump: hit / miss / unstamped   // push slice: typed n, hetero n, hetero-realloc n, compat cyc, convert cyc, charge cyc, append cyc, tail cyc
-        // bind_parameters branch taxonomy (the method-bind-136 diagnosis):
-        // [0]=in-place elide [1]=primitive frame_slot_set [2]=exact-class clone
-        // [3]=full convert [4]=reference bind [5]=default arg [6]=escape-boxed
-        uint64_t profile_bind_paths_[7] = {};
-        // exec_new class-path split: resolve = string + intern + env get; invoke = the
-        // opaque ctor lambda -> execute_callable native re-entry (the suspected heat)
-        uint64_t profile_new_count_ = 0;
-        uint64_t profile_new_resolve_cyc_ = 0;
-        uint64_t profile_new_invoke_cyc_ = 0;
-        // construct_instance sections: [0]=the overload and the instance (detail::prepare_construction) [1]=the constructor's frame
-        uint64_t profile_ctor_cyc_[2] = {};
-        uint64_t profile_ctor_count_ = 0;
-        std::map<std::string, uint64_t> profile_env_walk_names_;   // full-walk symbols by name
-        // Result-consumer histograms (lanes stage-1 targeting): the opcode FOLLOWING
-        // each BINARY_FUSED / LOAD / INDEX_FUSED dispatch — who eats the pushed value
-        uint64_t profile_binary_fused_next_[k_opcode_space] = {};
-        uint64_t profile_load_next_[k_opcode_space] = {};
-        uint64_t profile_index_fused_next_[k_opcode_space] = {};
-        uint64_t profile_decl_var_prev_[k_opcode_space] = {};    // what produced DECL_VAR's initializer (previous opcode)
-        uint64_t profile_store_prev_[k_opcode_space] = {};       // what produced STORE's value
-        uint64_t profile_decl_var_kinds_[32] = {};    // DECL_VAR initializer storage index
-        // index_fused_read branch taxonomy: [0]=raw-int lane [1]=raw-float lane
-        // [2]=untyped array element copy [3]=lvalue element-ref [4]=const-string map
-        // [5]=general replay [6]=binary-index raw fold [7]=member-node container
-        uint64_t profile_index_read_paths_[8] = {};
-        std::map<std::string, uint64_t> profile_builtin_direct_names_;   // builtin-direct calls by name
-#elif defined(JAISCRIPT_VM_COARSE_PROFILE)
-        ~vm_backend() override { dump_coarse_profile(); release_site_pins(); release_retained_decls(); }
-#else
         ~vm_backend() override { release_site_pins(); release_retained_decls(); }
-#endif
         // A call site pins the callee it cached (ABA): a recursive function's own body pins the function, function -> body
         // chunk -> site -> function; the backend drops every pin as it dies so the engine's functions die with the engine
         void release_site_pins() noexcept;
@@ -448,21 +237,6 @@ namespace jai::vm {
         // wall (methods aren't provisioned per worker - their shared body caches and
         // arbitrary env reach are unsafe off-thread) checks this. Never set on the engine's own backend.
         bool parallel_worker_ = false;
-        // A fast path a worker passes over for the general form (profile builds count each on workers: the parallel inventory)
-        enum class worker_decline : uint8_t {
-            entry_row_none, entry_row_env, entry_row_serial, entry_row_shape, probe_ic, raw_probe, inline_fn_memo, inline_method,
-            sibling_method, math_alias, store_env, enum_entry, native_lane, bound_in_loop, ctor_in_loop, new_in_loop, bare_host,
-            ordinary_site, static_fold, host_method_pin, count
-        };
-#ifdef JAISCRIPT_VM_PROFILE
-        void note_worker_decline(worker_decline k) noexcept { if (parallel_worker_) { ++profile_worker_declines_[static_cast<size_t>(k)]; } }
-        // a cell block's entry row outcome on every backend: none / env / serial / shape, count = the row answered
-        void note_entry_row(worker_decline k) noexcept { ++profile_entry_rows_[k == worker_decline::count ? 4 : static_cast<size_t>(k)]; }
-        uint64_t profile_entry_rows_[5] = {};
-#else
-        void note_worker_decline(worker_decline) noexcept {}
-        void note_entry_row(worker_decline) noexcept {}
-#endif
         size_t structural_equality_depth_ = 0;   // memberwise ==/<=> levels nested natively (detail/structural_equality.hpp)
         // parallel_for chunk loop: the worker's element cursor (a reference value owned by the
         // worker slot) that op_parallel_advance re-points and op_parallel_element pushes
@@ -694,6 +468,9 @@ namespace jai::vm {
             class_instance* this_inst = nullptr;
             const class_definition* this_cd = nullptr;
             uint64_t this_gen = 0;
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+            uint64_t timed_entry = 0;                  // the clock at entry: its function's inclusive time
+#endif
         };
         // a byte per cell: a cell store marks its cell with one byte write, so consecutive stores carry no read-modify-write chain
         struct cell_dirty {
@@ -917,6 +694,9 @@ namespace jai::vm {
         // frame_guard): it joins frames_, and its function's captures bind into its slots (a raw-entered frame's slots are its cells until
         // build_raw_window builds its window).
         JAI_FORCEINLINE void enter_frame(frame& f, const script_defined_function* function = nullptr) {
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+            f.timed_entry = coverage_clock();
+#endif
             frames_.push_back(&f);
             bind_frame_captures(f, function);
         }
@@ -981,9 +761,6 @@ namespace jai::vm {
         // hold raw frame*).
         struct call_record {
             frame f;                                   // frames_ gets &f; f.locals = &locals
-#ifdef JAISCRIPT_VM_PROFILE
-            uint64_t profile_entry_tsc = 0;            // inclusive per-function accounting
-#endif
             call_frame locals;                         // record-owned slot storage; vector capacity reused across calls
             cell_state cells;                          // cell loops: the raw area, capacity reused across calls
             script_value callee_pin{std::monostate{}, nullptr};   // moved-off-stack callee value: pins the callable
@@ -1113,6 +890,23 @@ namespace jai::vm {
     private:
         void coverage_observe(frame& f, const vm_instruction& ins, coverage_chunk& row);
         coverage_chunk& coverage_row(const chunk& c);
+#ifdef JAISCRIPT_VM_COVERAGE_TIMING
+        void coverage_frame_exit(const frame& f);
+        // a nested dispatch loop's instructions are its own: the running instruction's clock stops for its span
+        struct coverage_timing_pause {
+            coverage_tables& t; coverage_chunk* row; size_t ip;
+            explicit coverage_timing_pause(coverage_tables& a_tables) : t(a_tables), row(a_tables.timed_row), ip(a_tables.timed_ip) {
+                t.charge(coverage_clock());
+                t.timed_row = nullptr;
+            }
+            ~coverage_timing_pause() {
+                t.charge(coverage_clock());
+                t.timed_row = row;
+                t.timed_ip = ip;
+                t.timed_since = coverage_clock();
+            }
+        };
+#endif
 #endif
         // Step-debugger controller (engine-owned, shared with the interpreter backend), wired by the first engine::debugger()
         // call, which runs before the script thread starts or on it; read only at the sync points, where sync_debug_hook
@@ -1378,13 +1172,6 @@ namespace jai::vm {
 
         checked_result<void> run(frame& entry);
         op_status run_dispatch(frame*& fp, const size_t records_base);
-#ifdef JAISCRIPT_VM_PROFILE
-        // A nested dispatch (a coroutine resume, a native callback re-entering script) runs
-        // inside one opcode of the outer loop; its whole span is added here at its exit so
-        // the outer loop subtracts it from that opcode instead of charging it twice
-        uint64_t profile_nested_cycles_ = 0;
-        op_status run_dispatch_profiled(frame*& fp, const size_t records_base);
-#endif
         // In-loop call machinery: push/pop of call_records_ without native recursion.
         // ArgsT is value_stack (zero-copy slice [args_base, args_base+argc) with the
         // callee slot at args_base-1 — args IS stack_, which conversions can relocate
@@ -2525,14 +2312,9 @@ namespace jai::vm {
                                       script_value& receiver, class_instance* inst, size_t frame_base, size_t args_base, size_t argc);
         bool lean_method_site(const chunk& code, const call_site& site) const;
         void pop_lean_frame(call_record& rec);
-        // a lean frame pops through pop_lean_frame (a profiled build accounts every pop through the general one)
+        // a lean frame pops through pop_lean_frame
         static bool pops_lean(const call_record& rec) noexcept {
-#ifdef JAISCRIPT_VM_PROFILE
-            (void)rec;
-            return false;
-#else
             return rec.lean && !rec.locals.boxed_cells;
-#endif
         }
         // the call instructions' lanes into a lean frame: the frame pushed, or null when the instruction's general path runs
         frame* enter_lean_method_call(frame& f, const vm_instruction& ins);
@@ -2783,9 +2565,6 @@ namespace jai::vm {
                     s->unchecked_set_int_payload(iv);
                     return;
                 }
-#ifdef JAISCRIPT_VM_PROFILE
-                ++vm->profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_INT ? 1 : 2];
-#endif
                 (*this)(script_value(iv, vm->engine_));
             }
             void raw_float(script_float fv) {
@@ -2794,9 +2573,6 @@ namespace jai::vm {
                     s->unchecked_set_float_payload(fv);
                     return;
                 }
-#ifdef JAISCRIPT_VM_PROFILE
-                ++vm->profile_temp_miss_[!s ? 0 : s->raw_storage_index() != script_value::TYPEID_FLOAT ? 1 : 2];
-#endif
                 (*this)(script_value(fv, vm->engine_));
             }
         };

@@ -679,8 +679,8 @@ namespace jai::vm {
         };
         std::vector<cell_loop> cell_loops;
         uint32_t max_cells = 0;   // the most cells any loop of this chunk holds: a frame's dirty bytes past it are never read
-        // a loop the translation refused: its span, the first offending instruction and the refusal class (the profile's
-        // open-loop table and the disassembly); a `translation` refusal is a supported core operation in an encoding the
+        // a loop the translation refused: its span, the first offending instruction and the refusal class (the coverage
+        // report and the disassembly); a `translation` refusal is a supported core operation in an encoding the
         // translation does not normalize yet, a coverage gap rather than a limit of the model
         struct cell_refusal { uint32_t head, back, ip; uint8_t reason; opcode op; };
         static constexpr uint8_t cell_refusal_none = 0, cell_refusal_head = 1, cell_refusal_representation = 2, cell_refusal_effect = 3,
@@ -778,7 +778,7 @@ namespace jai::vm {
         std::vector<inline_site> inline_sites;
         bool graft_calls = false;   // an inline site's body makes calls (the trace names its frame above them)
         struct inline_refusal { std::string callee; const char* reason = nullptr; uint32_t line = 0; };   // a call the inliner kept and the rule that kept it
-        std::vector<inline_refusal> inline_refusals;   // the listing and the profile build name them; no instruction reads the table
+        std::vector<inline_refusal> inline_refusals;   // the listing and the coverage report name them; no instruction reads the table
         // Typed scalar ops (opcode.hpp op_t_*): the instruction each one was lowered from
         // (two for a move: the LOAD or CONST and the DECL_VAR or STORE it replaced) and the
         // decl's type stamp. Indexed by ip; rows for other instructions are empty.
@@ -824,11 +824,6 @@ namespace jai::vm {
         size_t local_count = 0;
         size_t first_temp_slot = 0;   // the parser's locals end here; every slot from it on is the compiler's (temps, a graft's slots)
         bool is_function_body = false;
-#ifdef JAISCRIPT_VM_PROFILE
-        // slot census input: each parameter's slot, declared type (null = untyped) and by-reference flag
-        struct profile_param { uint32_t slot; type_info* type; bool is_reference; };
-        std::vector<profile_param> profile_params;
-#endif
         // Compile-time lazy-env gate: false = every op proven not to need the per-call
         // scope environment, so plain in-loop callees skip creating it (fail-closed default)
         bool needs_frame_env = true;

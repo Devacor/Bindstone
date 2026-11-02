@@ -5630,7 +5630,8 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 			}
 		}
 	} region_guard{ eng, state, pool->worker_slots, worker_count };
-	std::unordered_map<uint64_t, uint64_t> snapshot_validated;
+	std::unordered_map<uint64_t, uint64_t>& snapshot_validated = state.snapshot_validated;
+	snapshot_validated.clear();
 
 	auto& range_handle = boxed_range.is_array() ? boxed_range.unchecked_get_array_storage()
 	                                            : const_cast<script_value&>(array_value).unchecked_get_array_storage();
@@ -6564,7 +6565,8 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 	}
 	execution_backend* backend = eng.get_execution_backend();
 	const size_t n = xs.unchecked_array_node()->size();
-	parallel_admission adm;
+	const uint64_t xs_id = eng.symbolize("__jai_reduce_xs"), s_id = eng.symbolize("__jai_reduce_s"), n_id = eng.symbolize("__jai_reduce_n");
+	const parallel_admission* adm = nullptr;
 	std::shared_ptr<function_decl> wrapper;
 	{
 		region_running_guard guard(state);
@@ -6572,15 +6574,26 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		if (!step_adm->admitted) {
 			return raise(step_adm->code, step_adm->message);
 		}
-		const parallel_admission* combine_adm = admit_cached(eng, state, script_defined_function::environment_form(callbacks[1]->fn, &eng), /*inplace_root*/ true, "parallel_reduce");
-		if (!combine_adm->admitted) {
-			return raise(combine_adm->code, combine_adm->message);
+		parallel_engine_state::reduce_admission& cached = state.reduce_admissions[static_cast<const void*>(step->body.get())];
+		if (cached.generation == 0 || cached.generation != step_adm->generation) {
+			for (const auto& capture : step_adm->captures) {
+				if (capture.name_id == xs_id) { return usage("parallel_reduce: step names '__jai_reduce_xs', the reduction's own input"); }
+			}
+			cached.adm = *step_adm;
+			// the chunk loop's own reads ride the captures: the input (a borrow when it holds primitives), the chunk size and the count
+			auto* sym = eng.get_symbolizer();
+			cached.adm.captures.push_back({ xs_id, sym->get_string(xs_id), true });
+			cached.adm.captures.push_back({ s_id, sym->get_string(s_id), true });
+			cached.adm.captures.push_back({ n_id, sym->get_string(n_id), true });
+			// the graft declares step's parameters and stores its results in the chunk loop: their shapes warm with the region's
+			for (const auto& p : step->parameters()) {
+				if (p.type) { cached.adm.referenced_types.push_back(p.type.get()); }
+				if (const type_info* declared = parameter_declared_ref(p)) { eng.get_type_info_declared_reference(const_cast<type_info*>(declared)); }   // an escaping T& parameter's bind marks its reference with it
+			}
+			if (step->return_type) { cached.adm.referenced_types.push_back(step->return_type.get()); }
+			cached.generation = step_adm->generation;
 		}
-		adm = *step_adm;
-		const uint64_t input_id = eng.symbolize("__jai_reduce_xs");
-		for (const auto& capture : adm.captures) {
-			if (capture.name_id == input_id) { return usage("parallel_reduce: step names '__jai_reduce_xs', the reduction's own input"); }
-		}
+		adm = &cached.adm;
 		wrapper = build_reduce_wrapper(eng, state, step);
 	}
 	if (n == 0) {
@@ -6600,23 +6613,11 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 			id_values.emplace_back(static_cast<script_int>(c), &eng);
 		}
 	}
-	// the chunk loop's own reads ride the captures: the input (a borrow when it holds primitives), the chunk size and the count,
-	// resolved beside step's closure so a lambda's captures provision as parallel_for's do
+	// the chunk loop's reads resolve beside step's closure, so a lambda's captures provision as parallel_for's do
 	auto capture_env = std::make_shared<environment>(step->closure_env ? step->closure_env : eng.get_global_environment(), eng.get_symbolizer());
-	const uint64_t xs_id = eng.symbolize("__jai_reduce_xs"), s_id = eng.symbolize("__jai_reduce_s"), n_id = eng.symbolize("__jai_reduce_n");
 	capture_env->define(xs_id, xs);
 	capture_env->define(s_id, script_value(static_cast<script_int>(chunk), &eng));
 	capture_env->define(n_id, script_value(static_cast<script_int>(n), &eng));
-	auto* sym = eng.get_symbolizer();
-	adm.captures.push_back({ xs_id, sym->get_string(xs_id), true });
-	adm.captures.push_back({ s_id, sym->get_string(s_id), true });
-	adm.captures.push_back({ n_id, sym->get_string(n_id), true });
-	// the graft declares step's parameters and stores its results in the chunk loop: their shapes warm with the region's
-	for (const auto& p : step->parameters()) {
-		if (p.type) { adm.referenced_types.push_back(p.type.get()); }
-		if (const type_info* declared = parameter_declared_ref(p)) { eng.get_type_info_declared_reference(const_cast<type_info*>(declared)); }   // an escaping T& parameter's bind marks its reference with it
-	}
-	if (step->return_type) { adm.referenced_types.push_back(step->return_type.get()); }
 
 	std::vector<script_value> containers;
 	containers.reserve(2);
@@ -6628,7 +6629,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		plan.prefix = "parallel_reduce";
 		plan.containers = &containers;
 		plan.root_fn = step;
-		plan.adm = &adm;
+		plan.adm = adm;
 		plan.chunk_wrapper = &wrapper;
 		plan.capture_env = capture_env;
 		plan.inplace = true;

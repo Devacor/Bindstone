@@ -604,13 +604,26 @@ namespace jai::vm {
                     if (own.raw_storage_index() == script_value::TYPEID_STRING && !worker_string_private(own)) { own = script_value(std::monostate{}, engine_); }
                 }
             }
-            worker_block_constants_.clear();
+            // a block's copies stay for the next region: a string this region published leaves, a chunk it did not enter leaves whole
+            const uint32_t region = engine_->parallel_region_serial();
+            for (auto it = worker_block_constants_.begin(); it != worker_block_constants_.end();) {
+                if (it->second.region != region) { it = worker_block_constants_.erase(it); continue; }
+                for (script_value& own : it->second.values) {
+                    if (own.raw_storage_index() == script_value::TYPEID_STRING && !worker_string_private(own)) { own = script_value(std::monostate{}, engine_); }
+                }
+                ++it;
+            }
             worker_block_constants_code_ = nullptr;
             worker_block_constants_mru_ = nullptr;
         }
         // a block's constants on a worker: the chunk's, each string its own copy (a block borrows a string constant's node into its
-        // cells and pushes, and the main engine and the other workers hold the chunk's node; the counts are not atomic)
-        std::unordered_map<const chunk*, std::vector<script_value>> worker_block_constants_;
+        // cells and pushes, and the main engine and the other workers hold the chunk's node; the counts are not atomic). A copy kept
+        // from an earlier region is checked against the chunk at its first use in a region (the address may name a new chunk)
+        struct worker_constants {
+            uint32_t region = 0;   // engine::parallel_region_serial of the region that last checked it
+            std::vector<script_value> values;
+        };
+        std::unordered_map<const chunk*, worker_constants> worker_block_constants_;
         const chunk* worker_block_constants_code_ = nullptr;
         const script_value* worker_block_constants_mru_ = nullptr;
         const script_value* block_constants(const chunk& code) {

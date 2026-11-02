@@ -2055,15 +2055,20 @@ script_value* vm_backend::env_arm_fast_head(env_lookup_cache_entry* fast_entry, 
 }
 
 const script_value* vm_backend::worker_block_constants_for(const chunk& code) {
-	auto [it, made] = worker_block_constants_.try_emplace(&code);
-	if (made) {
-		it->second.reserve(code.constants.size());
-		for (const script_value& c : code.constants) {
-			it->second.push_back(c.raw_storage_index() == script_value::TYPEID_STRING ? script_value(*c.unchecked_string_handle(), engine_) : c);
+	worker_constants& own = worker_block_constants_[&code];
+	if (const uint32_t region = engine_->parallel_region_serial(); own.region != region) {
+		own.region = region;
+		own.values.resize(code.constants.size(), script_value(std::monostate{}, engine_));
+		for (size_t i = 0; i < code.constants.size(); ++i) {
+			const script_value& c = code.constants[i];
+			script_value& mine = own.values[i];
+			if (c.raw_storage_index() != script_value::TYPEID_STRING) { mine = c; continue; }
+			const script_string& text = *c.unchecked_string_handle();
+			if (mine.raw_storage_index() != script_value::TYPEID_STRING || *mine.unchecked_string_handle() != text) { mine = script_value(text, engine_); }
 		}
 	}
 	worker_block_constants_code_ = &code;
-	worker_block_constants_mru_ = it->second.data();
+	worker_block_constants_mru_ = own.values.data();
 	return worker_block_constants_mru_;
 }
 

@@ -407,6 +407,12 @@ namespace jai::detail {
         // top level; otherwise the call-form skeleton above. Hot reload mints a fresh body.
         std::unordered_map<const void*, std::shared_ptr<function_decl>> transform_inline_wrappers;
         std::unordered_map<const void*, std::shared_ptr<function_decl>> reduce_wrappers;   // parallel_reduce chunk loops by step body
+        // parallel_reduce's region admission by step body: the step's admission (its generation) plus the chunk loop's own reads
+        struct reduce_admission {
+            uint64_t generation = 0;
+            parallel_admission adm;
+        };
+        std::unordered_map<const void*, reduce_admission> reduce_admissions;
         std::string error_text;                            // owns the message a re-raise views
         std::vector<size_t> last_chunk_bounds;             // instrumentation (tests/bench)
         // Instrumentation: how the most recent region provisioned each captured name
@@ -445,6 +451,7 @@ namespace jai::detail {
         // fixed ns a pool worker costs to submit, wake and join on THIS machine. 0 = not yet.
         double worker_overhead_ns = 0.0;
         uint64_t region_use_counter = 0;
+        std::unordered_map<uint64_t, uint64_t> snapshot_validated;   // a region's snapshot validations by capture key, cleared per region
         cell_counters worker_cells{};   // what the workers' blocks counted, folded in at each join (engine::cells_counters adds it)
 
 #ifdef JAISCRIPT_VM_PROFILE

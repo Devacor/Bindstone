@@ -132,8 +132,15 @@ struct control_block : control_block_base {
 // Conditionally-supported offsetof on a non-standard-layout type: fine on MSVC/clang/gcc.
 // NEVER hardcode this — over-aligned T (align > 8) shifts storage past the counts, and the
 // Debug-only magic member changes the base size between configs.
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
+#endif
 template<typename T>
 inline constexpr size_t cb_storage_offset = offsetof(control_block<T>, storage);
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 // Derive the control block from an object pointer. Sound because make_strong and
 // adopt_pooled are the ONLY producers of a non-null handle (raw ctor deleted, converting

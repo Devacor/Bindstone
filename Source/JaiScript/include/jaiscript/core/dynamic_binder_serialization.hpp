@@ -1,26 +1,7 @@
 #pragma once
 
-// This header provides implementations for context-based deserialization factories.
-//
-// IMPORTANT: This header must be included AFTER both dynamic_binder.hpp and archive.hpp
-// to ensure archive_reader is fully defined before template instantiation.
-//
-// Usage pattern:
-//   #include <jaiscript/core/dynamic_binder.hpp>
-//   #include <jaiscript/serialization/archive.hpp>
-//   #include <jaiscript/core/dynamic_binder_serialization.hpp>  // Include last
-//
-// These factories enable deserialization with user-provided context objects:
-//   - make_context_only_factory: Factory function receives only user context pointer
-//   - make_context_archive_factory: Factory function receives context pointer and archive reference
-
-#ifndef JAISCRIPT_dynamic_binder_HPP_INCLUDED
-#error "dynamic_binder.hpp must be included before dynamic_binder_serialization.hpp"
-#endif
-
-#ifndef JAISCRIPT_ARCHIVE_HPP_INCLUDED
-#error "archive.hpp must be included before dynamic_binder_serialization.hpp"
-#endif
+// Context-based deserialization factories: make_context_only_factory hands the factory the archive's user context,
+// make_context_archive_factory the context and the archive
 
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/serialization/archive_impl.hpp>
@@ -56,7 +37,7 @@ namespace dynamic_binder_detail {
                 engine_ptr,
                 extractor = std::move(extractor),
                 context_type_name = std::move(context_type_name)]
-               (serialization::any_archive_reader& archive, uint32_t version) -> script_value {
+               (serialization::any_archive_reader& archive, uint32_t) -> script_value {
 
             void* raw_context = extractor(archive, context_type_name);
             auto* user_context = static_cast<ContextType*>(raw_context);
@@ -78,7 +59,7 @@ namespace dynamic_binder_detail {
                 engine_ptr,
                 extractor = std::move(extractor),
                 context_type_name = std::move(context_type_name)]
-               (serialization::any_archive_reader& archive, uint32_t version) -> script_value {
+               (serialization::any_archive_reader& archive, uint32_t) -> script_value {
 
             void* raw_context = extractor(archive, context_type_name);
             auto* user_context = static_cast<ContextType*>(raw_context);

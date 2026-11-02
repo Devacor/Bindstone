@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <type_traits>
 #include <vector>
 #include <map>
@@ -80,7 +81,7 @@ struct function_param_checker<R(C::*)(Args...) const> {
 
 // Permissive mode - allow with warnings
 template<typename Func>
-inline void check_binding_validity(const std::string& name) {
+inline void check_binding_validity(const std::string&) {
     if constexpr (function_param_checker<std::decay_t<Func>>::has_rejected_refs) {
         // Could log warning here in the future
         // For now, the warning will be in the engine implementation
@@ -91,7 +92,7 @@ inline void check_binding_validity(const std::string& name) {
 
 // Strict mode (default) - reject at compile time
 template<typename Func>
-inline void check_binding_validity(const std::string& name) {
+inline void check_binding_validity(const std::string&) {
     static_assert(!function_param_checker<std::decay_t<Func>>::has_rejected_refs,
         "\n"
         "╔════════════════════════════════════════════════════════════════╗\n"

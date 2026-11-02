@@ -307,7 +307,7 @@ namespace jai {
 
     // A frame of `function` standing at `at` (null: no statement located yet)
     inline stack_frame trace_frame_at(std::string function, const source_location* at) {
-        return at ? stack_frame{ std::move(function), at->filename, at->line, at->column } : stack_frame{ std::move(function) };
+        return at ? stack_frame{ std::move(function), at->filename, at->line, at->column, 0 } : stack_frame{ std::move(function), {}, 0, 0, 0 };
     }
 
     // A trace lists the innermost frames and one final marker for the rest, so a catch deep in a recursion costs the same

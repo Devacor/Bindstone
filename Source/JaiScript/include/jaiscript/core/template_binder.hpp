@@ -3,6 +3,7 @@
 #ifndef __JAISCRIPT_CORE_TEMPLATE_BINDER_HPP__
 #define __JAISCRIPT_CORE_TEMPLATE_BINDER_HPP__
 
+#include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/static_binder.hpp>
 #include <jaiscript/core/type_info.hpp>
 #include <cstdint>

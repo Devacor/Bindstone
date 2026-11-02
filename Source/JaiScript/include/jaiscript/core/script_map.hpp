@@ -1,6 +1,7 @@
-#pragma once
-
-#ifndef __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_SCRIPT_MAP_HPP__)
 #define __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
 
 // script_map: the map behind TYPEID_MAP. Lookup is hashed through an open-addressing index (keys are equal exactly when

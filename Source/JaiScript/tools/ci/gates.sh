@@ -225,6 +225,52 @@ gate_android() {
 	done
 }
 
+# The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each
+# compile alone, and tools/ci/host_warnings.cpp, a host file over the headers the embedding pages name, builds under
+# -Wall -Wextra -Werror: with HEADER_CXX, else with each of g++ and clang++ found (on Windows, Visual Studio's clang++ when
+# none is on PATH). JAI_BUILD_JOBS sets the parallel compiles (default 4).
+header_compilers() {
+	local c vswhere install
+	if [ -n "${HEADER_CXX:-}" ]; then echo "$HEADER_CXX"; return; fi
+	for c in g++ clang++; do command -v "$c" > /dev/null 2>&1 && echo "$c"; done
+	command -v clang++ > /dev/null 2>&1 && return
+	vswhere="$(printenv 'ProgramFiles(x86)' 2>/dev/null)/Microsoft Visual Studio/Installer/vswhere.exe"
+	[ -f "$vswhere" ] || return 0
+	install="$("$vswhere" -latest -products '*' -property installationPath 2>/dev/null | tr -d '' | head -n 1)"
+	[ -n "$install" ] && [ -f "$install/VC/Tools/Llvm/x64/bin/clang++.exe" ] && echo "$install/VC/Tools/Llvm/x64/bin/clang++.exe"
+	return 0
+}
+
+gate_headers() {
+	local work compilers=() headers=() cxx failed=0 bad
+	mapfile -t compilers < <(header_compilers)
+	[ "${#compilers[@]}" -gt 0 ] || { echo "::error::headers: no g++ or clang++ found (set HEADER_CXX)"; exit 1; }
+	mapfile -t headers < <(cd "$ROOT/include" && find jaiscript -name '*.hpp' ! -path 'jaiscript/detail/*' ! -path 'jaiscript/vm/*' 		! -path 'jaiscript/testing/*' ! -name openssl_tls.hpp | sort)
+	work="$(mktemp -d)"
+	for cxx in "${compilers[@]}"; do
+		echo "headers: $cxx, ${#headers[@]} headers alone"
+		bad="$(printf '%s
+' "${headers[@]}" | xargs -P "${JAI_BUILD_JOBS:-4}" -I{} "$BASH" -c 			'printf "#include <%s>
+" "$2" | "$1" -std=c++20 -I"$3" -fsyntax-only -x c++ - > "$4/$(printf %s "$2" | tr / _).log" 2>&1 || echo "$2"' 			_ "$cxx" {} "$ROOT/include" "$work")"
+		if [ -n "$bad" ]; then
+			failed=1
+			for h in $bad; do
+				echo "::error::$h does not compile alone with $cxx"
+				grep -m 3 -E "error" "$work/$(printf %s "$h" | tr / _).log" | cut -c1-240
+			done
+		fi
+		echo "headers: $cxx, the host file under -Wall -Wextra -Werror"
+		if ! "$cxx" -std=c++20 -I"$ROOT/include" -Wall -Wextra -Werror -O2 -c "$ROOT/tools/ci/host_warnings.cpp" -o "$work/host_warnings.o" > "$work/host.log" 2>&1; then
+			failed=1
+			echo "::error::tools/ci/host_warnings.cpp warns or fails with $cxx"
+			grep -m 12 -E "warning|error" "$work/host.log" | cut -c1-240
+		fi
+	done
+	rm -rf "$work"
+	[ "$failed" = 0 ] || exit 1
+	echo "headers: every public header compiles alone, and the host file builds warning-free"
+}
+
 gate_embed_quickstart() {
 	local work
 	vm_only embed_quickstart || return 0
@@ -297,7 +343,7 @@ gate_asan() {
 
 ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
-CROSS=(android)
+CROSS=(android headers)
 SANITIZER=(asan)
 
 [ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2; }
@@ -306,7 +352,7 @@ SANITIZER=(asan)
 for gate in "$@"; do
 	case "$gate" in
 		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | fuzz-order | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
-		gloom-workers | gloom-long | timedemo | amalgamation | android | asan) ;;
+		gloom-workers | gloom-long | timedemo | amalgamation | android | asan | headers) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"

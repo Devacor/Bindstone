@@ -2,7 +2,6 @@
 
 #ifndef __JAISCRIPT_CORE_dynamic_binder_HPP__
 #define __JAISCRIPT_CORE_dynamic_binder_HPP__
-#define JAISCRIPT_dynamic_binder_HPP_INCLUDED
 
 #include "engine.hpp"
 #include "engine_impl.hpp"
@@ -133,7 +132,7 @@ namespace dynamic_binder_detail {
     std::function<script_value(serialization::any_archive_reader&, uint32_t)>
     make_archive_only_factory(FactoryFunc&& factory, std::string class_name, engine* engine_ptr) {
         return [factory = std::forward<FactoryFunc>(factory), class_name = std::move(class_name), engine_ptr]
-               (serialization::any_archive_reader& archive, uint32_t version) -> script_value {
+               (serialization::any_archive_reader& archive, uint32_t) -> script_value {
             auto cpp_obj = factory(archive);
             return wrap_cpp_object<T>(cpp_obj, class_name, engine_ptr);
         };
@@ -1387,7 +1386,7 @@ public:
         // Add getter method
         std::string getter_name = "_get_" + name;
         uint64_t getter_id = engine_.symbolize(getter_name);
-        class_def_->add_static_method(getter_id, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>& args) -> script_value {
+        class_def_->add_static_method(getter_id, [getter = std::forward<Getter>(getter), engine_ptr = &engine_](const std::vector<script_value>&) -> script_value {
             return detail::value_converter<decltype(getter())>::to(getter(), engine_ptr);
         });
 

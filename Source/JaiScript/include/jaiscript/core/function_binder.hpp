@@ -1,4 +1,8 @@
-#pragma once
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_FUNCTION_BINDER_HPP__)
+#define __JAISCRIPT_CORE_FUNCTION_BINDER_HPP__
 
 #include "types.hpp"
 #include "value.hpp"
@@ -178,7 +182,7 @@ class engine;
         template<>
         struct value_converter<int> {
             // Non-throwing version - returns checked_result for error propagation
-            static checked_result<int> checked_from(const script_value& v, engine* eng) {
+            static checked_result<int> checked_from(const script_value& v, engine*) {
                 return v.checked_as<int>();
             }
 
@@ -203,7 +207,7 @@ class engine;
         template<>
         struct value_converter<float> {
             // Non-throwing version
-            static checked_result<float> checked_from(const script_value& v, engine* eng) {
+            static checked_result<float> checked_from(const script_value& v, engine*) {
                 return v.checked_as<float>();
             }
 
@@ -227,7 +231,7 @@ class engine;
         template<>
         struct value_converter<double> {
             // Non-throwing version
-            static checked_result<double> checked_from(const script_value& v, engine* eng) {
+            static checked_result<double> checked_from(const script_value& v, engine*) {
                 return v.checked_as<double>();
             }
 
@@ -250,11 +254,11 @@ class engine;
         // Specialization for script_value itself (no conversion needed!)
         template<>
         struct value_converter<script_value> {
-            static const script_value& from(const script_value& v, engine* eng) {
+            static const script_value& from(const script_value& v, engine*) {
                 return v;
             }
 
-            static script_value to(const script_value& v, engine* eng) {
+            static script_value to(const script_value& v, engine*) {
                 return v;  // Return as-is, no wrapping!
             }
         };
@@ -268,7 +272,7 @@ class engine;
         // Specialization for const script_value& - pass through directly
         template<>
         struct value_converter<const script_value&> {
-            static const script_value& from(const script_value& v, engine* eng) {
+            static const script_value& from(const script_value& v, engine*) {
                 return v;
             }
         };
@@ -276,7 +280,7 @@ class engine;
         // Specialization for std::shared_ptr<T> - auto-unwrap to T
         template<typename T>
         struct value_converter<std::shared_ptr<T>> {
-            static std::shared_ptr<T> from(const script_value& v, engine* eng) {
+            static std::shared_ptr<T> from(const script_value& v, engine*) {
                 return v.as<std::shared_ptr<T>>();
             }
             
@@ -304,7 +308,7 @@ class engine;
         
         template<typename T>
         struct value_converter<std::weak_ptr<T>> {
-            static std::weak_ptr<T> from(const script_value& v, engine* eng) {
+            static std::weak_ptr<T> from(const script_value& v, engine*) {
                 return v.as<std::weak_ptr<T>>();
             }
 
@@ -508,7 +512,7 @@ class engine;
         // Specialization for bound_array<T> - zero-copy wrapper
         template<typename T>
         struct value_converter<bound_array<T>> {
-            static bound_array<T> from(const script_value& v, engine* eng) {
+            static bound_array<T> from(const script_value& v, engine*) {
                 if (!v.is_array()) {
                     throw runtime_error("Cannot convert non-array to bound_array<T>");
                 }
@@ -537,7 +541,7 @@ class engine;
         // Specialization for bound_map<K,V> - zero-copy wrapper
         template<typename K, typename V>
         struct value_converter<bound_map<K, V>> {
-            static bound_map<K, V> from(const script_value& v, engine* eng) {
+            static bound_map<K, V> from(const script_value& v, engine*) {
                 if (!v.is_map()) {
                     throw runtime_error("Cannot convert non-map to bound_map<K,V>");
                 }
@@ -545,7 +549,7 @@ class engine;
                 return bound_map<K, V>(v);
             }
             
-            static script_value to(const bound_map<K, V>& map, engine* eng) {
+            static script_value to(const bound_map<K, V>& map, engine*) {
                 // If the map owns its data, return the owned value
                 if (map.is_owned()) {
                     return map.as_script_value();
@@ -600,7 +604,7 @@ class engine;
         template<typename... Ps>
         consteval uint64_t host_writeback_mask() {
             uint64_t mask = 0;
-            uint64_t bit = 1;
+            [[maybe_unused]] uint64_t bit = 1;
             ((mask |= host_writes_back<Ps>() ? bit : 0, bit <<= 1), ...);
             return mask;
         }
@@ -863,12 +867,12 @@ class engine;
         // the call path free of engine writes lets ref-free bindings (the whole math
         // stdlib) run inside parallel regions without touching shared engine state.
         template<typename ArgsTuple, typename F, size_t... Is>
-        static void call_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
+        static void call_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, [[maybe_unused]] engine* eng) {
             func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
 
         template<typename R, typename ArgsTuple, typename F, size_t... Is>
-        static R call_non_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, engine* eng) {
+        static R call_non_void_impl_static(F&& func, const script_value* args, std::index_sequence<Is...>, [[maybe_unused]] engine* eng) {
             return func(detail::value_converter<std::tuple_element_t<Is, ArgsTuple>>::from(args[Is], eng)...);
         }
         
@@ -1047,3 +1051,5 @@ class engine;
     }
     
 } // namespace jai
+
+#endif // __JAISCRIPT_CORE_FUNCTION_BINDER_HPP__

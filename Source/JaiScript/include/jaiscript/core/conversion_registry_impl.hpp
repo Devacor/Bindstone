@@ -1,4 +1,8 @@
-#pragma once
+// Part of the engine's closure, which includes it in its order: a translation unit that names it first is sent there
+#if !defined(__JAISCRIPT_CORE_ENGINE_HPP__)
+#include "engine.hpp"
+#elif !defined(__JAISCRIPT_CORE_CONVERSION_REGISTRY_IMPL_HPP__)
+#define __JAISCRIPT_CORE_CONVERSION_REGISTRY_IMPL_HPP__
 
 #include "conversion_registry.hpp"
 #include "value.hpp"
@@ -146,3 +150,5 @@ script_value convert_stdmap_to_script_map(const std::map<K, V>& stdmap, engine* 
 
 } // namespace conversions
 } // namespace jai
+
+#endif // __JAISCRIPT_CORE_CONVERSION_REGISTRY_IMPL_HPP__

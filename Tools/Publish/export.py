@@ -37,7 +37,8 @@ CPP_EXT = (".cpp", ".hpp", ".h", ".c", ".cc", ".inl")
 BINARY_OK_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".otf")
 SIZE_LIMIT = 1024 * 1024
 SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-catalog.json",
-                   "source/implementation/vm/vm_backend.cpp")
+                   "source/implementation/vm/vm_backend.cpp", "tools/jai_spider/third_party/sqlite/sqlite3.c")
+LEAK_SCAN_SKIP = re.compile(r"^(?:.*/)?third_party/")    # vendored upstream sources ship exactly as their authors wrote them
 INTERNAL_BLOCK = re.compile(r"[ \t]*<!-- internal-only -->.*?<!-- /internal-only -->[ \t]*\r?\n", re.S)
 
 PUBLIC_GITIGNORE = """out/
@@ -348,7 +349,7 @@ def stage(args):
     exceptions = read_exceptions(os.path.join(HERE, "leak_exceptions.txt"))
     leaks = 0
     for rel, data in sorted(kept.items()):
-        if not is_text(data):
+        if not is_text(data) or LEAK_SCAN_SKIP.match(rel):
             continue
         for lineno, line in enumerate(data.decode("utf-8").splitlines(), 1):
             for cid, rx in LEAK_CHECKS:
@@ -488,6 +489,7 @@ def publish(args):
     print(f"published {message} (tag v{args.version}) to {target}")
 
 def main():
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("stage")

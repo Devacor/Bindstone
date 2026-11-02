@@ -32,24 +32,6 @@ file: include/jaiscript/detail/ast.hpp
     // parallel_for (auto& x : arr) { ... } — the in-place fork-join loop. The body is parsed as a
 >>>
 
-file: source/interpreter/interpreter.cpp
-<<<
-            // A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
-            // S1): re-point the handle itself, so every copy of it - and every receiver site,
-===
-            // A plain wrapper of an extended object IS the object's layer: re-point the handle
-            // itself, so every copy of it - and every receiver site,
->>>
-
-file: source/implementation/vm/vm_backend.cpp
-<<<
-			// A plain wrapper of an extended object IS the object's layer (internal/script_extensible.md
-			// S1): re-point the handle itself, so every copy of it - and every receiver site,
-===
-			// A plain wrapper of an extended object IS the object's layer: re-point the handle
-			// itself, so every copy of it - and every receiver site,
->>>
-
 file: source/implementation/vm/vm_backend.cpp
 <<<
 // Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md
@@ -85,15 +67,6 @@ file: source/implementation/parser.cpp
     // postfix on a literal (internal/grammar.md's own splice example was unparseable)
 ===
     // postfix on a literal (the grammar's own splice example was unparseable)
->>>
-
-file: source/implementation/vm/vm_backend.cpp
-<<<
-			// String keys share their node (the copy-on-write gate detaches any write -
-			// internal/invariants.md 11), other key kinds snapshot; values deep-copy, shared_ptr share
-===
-			// String keys share their node (the copy-on-write gate detaches any write), other key
-			// kinds snapshot; values deep-copy, shared_ptr share
 >>>
 
 file: source/implementation/vm/vm_backend.cpp

@@ -3,9 +3,8 @@
 #ifndef __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 #define __JAISCRIPT_DETAIL_TYPE_PROOFS_HPP__
 
-// The VM's identity guard for typed stores, declarations, arguments and returns
-// (internal/type_proofs_design.md): TRUE only when the skipped conversion is provably the
-// identity on the value actually in hand. Guard failure = the conversion runs.
+// The VM's identity guard for typed stores, declarations, arguments and returns: TRUE only
+// when the skipped conversion is provably the identity on the value actually in hand. Guard failure = the conversion runs.
 
 #include <jaiscript/core/value.hpp>
 #include <cstdint>

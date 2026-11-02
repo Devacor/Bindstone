@@ -7733,7 +7733,7 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
         bool moved = false;
         // a returned parameter moves out unless a user copy constructor would run (KEEP BYTE-PARALLEL with the vm's materialize_return)
         if (operand_class == detail::return_operand_ident ||
-            (operand_class == detail::return_operand_parameter && !detail::value_runs_copy_constructor(*out))) {
+            (operand_class == detail::return_operand_parameter && !detail::move_runs_copy_constructor(*out))) {
             auto* ident = static_cast<identifier_expr*>(stmt->value.get());
             if (!ident->global_qualified && ident->slot_index != SIZE_MAX) {
                 if (script_value* payload = detail::return_own_slot_payload(call_stack_.back().get_local(ident->slot_index), *out)) {

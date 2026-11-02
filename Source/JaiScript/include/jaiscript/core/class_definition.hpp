@@ -46,8 +46,9 @@ namespace detail {
     // A copy of the value can be observed: an instance, element or entry whose class runs a destructor or a user copy
     // constructor (value_tree_copies_observably), so no copy of it is skipped unless C++ skips it
     bool value_copies_observably(const script_value& v);
-    // A copy of the value runs a user copy constructor somewhere in its tree
-    bool value_runs_copy_constructor(const script_value& v);
+    // A move of the value runs a user copy constructor: an instance whose class, or a by-value field's, declares one (C++ then
+    // has no move constructor); a container moves its storage
+    bool move_runs_copy_constructor(const script_value& v);
     // The call yields a class instance by value (a construction, or the checker's resolved callee declared to return a class):
     // a member read off its result is C++'s xvalue
     bool call_returns_class_value(const call_expr& call, engine& eng);
@@ -713,7 +714,8 @@ public:
     // A copy of a value of this class can be observed: its value tree (as value_tree_runs_destructor walks it) runs a
     // destructor or a user copy constructor, so no copy of it may be skipped (moved or aliased instead)
     bool value_tree_copies_observably() const;
-    // A copy of a value of this class runs a user copy constructor somewhere in its tree (the chain's, a member's, an element's)
+    // A move of a value of this class runs a user copy constructor (the chain's, or a by-value field's through its own
+    // fields); a container field moves its storage
     bool value_tree_runs_copy_constructor() const;
     // C++ destruction of a dying instance from `level` down: the level's destructor body, its own fields in reverse
     // declaration order, then its bases in reverse order

@@ -173,7 +173,7 @@ namespace jai::detail {
     inline bool source_skips_copy(uint8_t operand_class, const script_value& v) {
         if (operand_class == return_operand_temporary) { return true; }
         if (!uniquely_held(v)) { return false; }
-        if (operand_class == return_operand_value_member) { return !value_runs_copy_constructor(v); }
+        if (operand_class == return_operand_value_member) { return !move_runs_copy_constructor(v); }
         return operand_class == return_operand_temporary_member && !value_copies_observably(v);
     }
 

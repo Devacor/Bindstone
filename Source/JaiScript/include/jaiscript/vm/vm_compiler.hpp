@@ -408,7 +408,7 @@ namespace jai::vm {
         void compile_continue();
         // Emits op_try_pop/op_catch_end/switch stack pops for every region between the current point and target_region (SIZE_MAX = all
         // regions, for return), then kills the scopes down to kill_depth; a handler's own locals die ahead of the thrown object it holds
-        void emit_region_exits(size_t target_region, size_t kill_depth = SIZE_MAX);
+        size_t emit_region_exits(size_t target_region, size_t kill_depth = SIZE_MAX);   // returns the scope depth the exits left
         void collect_declared_symbols(const statement_ptr& stmt, std::unordered_set<uint64_t>& out) const;
         void collect_outer_slot_candidates(const statement_ptr& stmt,
                                            const std::unordered_set<uint64_t>& declared,

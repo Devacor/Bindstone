@@ -1204,6 +1204,7 @@ namespace jai::vm {
             uint64_t catch_var = 0;
             uint32_t catch_slot = k_invalid_u32;   // frame slot of the catch variable (k_invalid_u32 = scope env)
             bool catch_env_pushed = false;         // handler entry pushed the catch variable's scope env
+            const environment* catch_env = nullptr;   // that env, which an error leaving the handler pops with the scopes inside it
             std::optional<script_exception> saved_exception;
             std::optional<script_value> saved_exception_value;
             uint64_t saved_catch_var_id = 0;
@@ -1219,6 +1220,7 @@ namespace jai::vm {
         };
         std::vector<try_record> try_records_;
         void release_catch_variable(frame& f, const try_record& rec);
+        void pop_scopes_through(const environment* scope);
         // C++'s category of an argument's, a capture's or a return's source expression (detail::classify_source)
         uint8_t source_class(const expression* e);
 

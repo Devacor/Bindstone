@@ -721,7 +721,8 @@ namespace jai {
         mutable uint8_t static_return_proof = proof_none;
         mutable const_site const_check;   // a const returned by reference
         // Interpreter memo of detail::classify_return_operand (by-value return
-        // materialization); derived at first visit, never serialized
+        // materialization); derived at first visit, never serialized. The vm compiler stamps
+        // return_operand_parameter, which its return reads only for a value a copy constructor builds
         mutable uint8_t return_operand_class = 0;
 
         return_stmt(const source_location& loc, expression_ptr v = nullptr)

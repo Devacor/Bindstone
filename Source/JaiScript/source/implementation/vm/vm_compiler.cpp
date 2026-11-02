@@ -4703,8 +4703,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// body grows it); an environment receiver's site carries the general instruction's ip (its lookup's cache slot) and its call site
 				const call_site& cs2 = c.call_sites[st.b];
 				if (st.c != 2 || (cs2.receiver_slot != k_invalid_u32 && cs2.receiver_slot >= k_typed_slot_mask)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!(ip + 1 < back && code[ip + 1].op == opcode::op_call_temp && code[ip + 1].a == st.a)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				use_slot(st.a, kint, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::size; op.a = st.a; op.writes = st.a; op.container = cs2.receiver_slot; op.proto = st.b;
+				ops.push_back(op);
+				op = ir_op{}; op.kind = ir::skip;   // the call's landing: the block's size reads an array, a miss leaves at the size
+				++ip;
 			} else if (st.op == opcode::op_member_temp && member_base_slot_of(st.c) < k_typed_slot_mask && st.b < k_typed_slot_mask) {
 				// a member read of a frame-slot instance into a compiler temp (`p.x`): a load site whose container is the base slot and whose
 				// field the entry resolves once (the class, the plain field slot, no user accessor); the temp takes the field's own kind; a
@@ -7200,6 +7204,8 @@ void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operan
 		++temp_next_;
 		if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
 		emit(opcode::op_size_temp, t, static_cast<uint32_t>(chunk_->call_sites.size() - 1), call->builtin_receiver);
+		emit(opcode::op_call_temp, t);   // a receiver of another kind: the method call's result lands here
+		note_landing(e.get());
 		out = fused_operand{};
 		out.slot = t;
 		out.symbol = temp_symbol_index();

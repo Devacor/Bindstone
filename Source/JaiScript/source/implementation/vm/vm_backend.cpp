@@ -15874,8 +15874,9 @@ op_status vm_backend::exec_get_member_this(frame& f, const vm_instruction& ins) 
 // a member read of a frame-slot base landing in a compiler temp: the base pushed as its LOAD would have, op_get_member's kernel
 // (its cache, its proofs, its texts; a user getter runs inside it, as it does for the general read) and the value popped into the
 // temp, so the read keeps its place among the statement's operands and its consumers take a direct operand
-// s.size() on a slot receiver the checker proved: the proven kind's count into the temp (the builtin's body), any other receiver
-// through op_call_method whole (a null raises its text) with the result into the temp
+// s.size() on a slot receiver the checker proved: the proven kind's count into the temp (the builtin's body), stepping past the op_call_temp
+// that follows; any other receiver makes the call through op_call_method whole (a null raises its text, a script method enters its frame)
+// and that op_call_temp lands its result
 op_status vm_backend::exec_size_temp(frame& f, const vm_instruction& ins) {
 	const call_site& site = f.code->call_sites[ins.b];
 	const script_value* r = site.receiver_slot != k_invalid_u32 ? frame_slot(f, site.receiver_slot) : fused_cmp_operand(f, site.callee, f.ip * 3);
@@ -15887,15 +15888,14 @@ op_status vm_backend::exec_size_temp(frame& f, const vm_instruction& ins) {
 		else if (ins.c == 2 && k == script_value::TYPEID_ARRAY) { count = v.unchecked_array_node()->size(); }
 		else if (ins.c == 3 && k == script_value::TYPEID_MAP) { count = v.unchecked_as_map().size(); }
 		else { ok = false; }
-		if (ok) { frame_slot_set(f, ins.a, script_value(static_cast<script_int>(count), engine_)); return {}; }
+		if (ok) {
+			frame_slot_set(f, ins.a, script_value(static_cast<script_int>(count), engine_));
+			++f.ip;
+			return {};
+		}
 	}
 	stack_.push_back(r ? *r : make_null());
-	VM_TRY(exec_call_method(f, vm_instruction{opcode::op_call_method, 0, ins.b, 0}));
-	if (switch_to_) [[unlikely]] { return raise_(make_error_code(runtime_error_code::internal_error), "size temp across a frame switch"); }
-	script_value out = std::move(stack_.back());
-	stack_.pop_back();
-	frame_slot_set(f, ins.a, std::move(out));
-	return {};
+	return exec_call_method(f, vm_instruction{opcode::op_call_method, 0, ins.b, 0});
 }
 
 op_status vm_backend::local_member_receiver(frame& f, const member_expr* member, uint32_t slot, script_value& out) {
@@ -22191,6 +22191,7 @@ op_status vm_backend::run_dispatch(frame*& fp, const size_t records_base) {
 				JAI_NEXT_OP();
 			case opcode::op_size_temp:
 				VM_TRY_OP(exec_size_temp(f, ins));
+				if (switch_to_) { JAI_ENTER_SWITCHED(); }   // a script size() entered its frame
 				break;
 			case opcode::op_set_member_fused:
 				VM_TRY_OP(exec_set_member_fused(f, ins));

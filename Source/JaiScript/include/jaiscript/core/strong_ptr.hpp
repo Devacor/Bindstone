@@ -30,6 +30,45 @@ namespace jai::census { void rc_add() noexcept; void node_freed(const void* node
 #define JAI_SP_CENSUS_FREED(p) ((void)0)
 #endif
 
+// NDEBUG and the diagnostic builds change core layouts, so a host and the library must agree on them: the library defines
+// one symbol naming its configuration and every translation unit that includes this header names its own (MSVC and
+// clang-cl compare a detect_mismatch record instead), so a mismatch fails to link rather than corrupting memory
+#ifdef NDEBUG
+#define JAI_BUILD_CONFIG_DEBUG 0
+#else
+#define JAI_BUILD_CONFIG_DEBUG 1
+#endif
+#ifdef JAISCRIPT_DIAG_ATOMIC_RC
+#define JAI_BUILD_CONFIG_ATOMIC_RC 1
+#else
+#define JAI_BUILD_CONFIG_ATOMIC_RC 0
+#endif
+#ifdef JAISCRIPT_DIAG_XTHREAD_RC
+#define JAI_BUILD_CONFIG_XTHREAD_RC 1
+#else
+#define JAI_BUILD_CONFIG_XTHREAD_RC 0
+#endif
+#ifdef JAISCRIPT_VM_COVERAGE
+#define JAI_BUILD_CONFIG_COVERAGE 1
+#else
+#define JAI_BUILD_CONFIG_COVERAGE 0
+#endif
+#define JAI_BUILD_CONFIG_NAME_(d, a, x, c) build_config_debug##d##_atomic_rc##a##_xthread_rc##x##_coverage##c
+#define JAI_BUILD_CONFIG_NAME(d, a, x, c) JAI_BUILD_CONFIG_NAME_(d, a, x, c)
+#define JAI_BUILD_CONFIG_TEXT_(d, a, x, c) "debug" #d "_atomic_rc" #a "_xthread_rc" #x "_coverage" #c
+#define JAI_BUILD_CONFIG_TEXT(d, a, x, c) JAI_BUILD_CONFIG_TEXT_(d, a, x, c)
+#define JAI_BUILD_CONFIG JAI_BUILD_CONFIG_NAME(JAI_BUILD_CONFIG_DEBUG, JAI_BUILD_CONFIG_ATOMIC_RC, JAI_BUILD_CONFIG_XTHREAD_RC, JAI_BUILD_CONFIG_COVERAGE)
+namespace jai::detail {
+extern const int JAI_BUILD_CONFIG;
+}
+#if defined(_MSC_VER)
+#pragma detect_mismatch("jaiscript_build_config", JAI_BUILD_CONFIG_TEXT(JAI_BUILD_CONFIG_DEBUG, JAI_BUILD_CONFIG_ATOMIC_RC, JAI_BUILD_CONFIG_XTHREAD_RC, JAI_BUILD_CONFIG_COVERAGE))
+#else
+namespace jai::detail {
+[[gnu::used]] static const int* const build_config_reference = &JAI_BUILD_CONFIG;
+}
+#endif
+
 namespace jai {
 
 template<typename T> class strong_ptr;

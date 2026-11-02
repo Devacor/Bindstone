@@ -140,7 +140,11 @@ namespace jai {
 	class property : public property_base {
 	protected:
 		T m_value;
-		std::function<void(property<T>&, property<T>&)> m_custom_clone;
+	public:
+		// A custom clone: a plain function (a captureless lambda converts), one pointer per property
+		using clone_function = void (*)(property<T>&, property<T>&);
+	protected:
+		clone_function m_custom_clone = nullptr;
 
 		template<typename F>
 		static constexpr bool is_clone_function_v =
@@ -188,11 +192,10 @@ namespace jai {
 		}
 
 		// Constructor 6: With T constructed from initializer list and clone function
-		inline property(property_manager& reg, std::string name, T def,
-			std::function<void(property<T>&, property<T>&)> cl)
+		inline property(property_manager& reg, std::string name, T def, clone_function cl)
 			: property_base(reg, std::move(name))
 			, m_value(std::move(def))
-			, m_custom_clone(std::move(cl)) {
+			, m_custom_clone(cl) {
 		}
 
 		// Constructor 7: With serialize_mode
@@ -586,7 +589,7 @@ namespace jai {
 		void serialize(serialization::any_archive_reader& ar) override;
 
 		// Clone method
-		void set_custom_clone(std::function<void(property<T>&, property<T>&)> custom_clone) {
+		void set_custom_clone(clone_function custom_clone) {
 			m_custom_clone = custom_clone;
 		}
 

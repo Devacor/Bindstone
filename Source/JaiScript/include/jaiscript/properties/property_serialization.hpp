@@ -320,7 +320,7 @@ namespace jai {
 			// at different inheritance levels (Sprite → Drawable → Component) read the same
 			// flat object; consuming the sequential iterator would lose position.
 			for (const auto& [name, prop] : m_properties) {
-				if (type_erased.seek_property(name)) {
+				if (type_erased.seek_property(prop->name())) {
 					prop->serialize(type_erased);
 				}
 			}

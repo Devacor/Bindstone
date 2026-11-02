@@ -286,9 +286,9 @@ namespace MV {
 
 			std::unique_ptr<Task> rootTask;
 			JAI_PROPERTY((std::string), componentId);
-			//does not clone - use explicit std::function to avoid SFINAE issues with forward-declared Node
+			//does not clone - an explicit clone_function avoids SFINAE issues with forward-declared Node
 			JAI_PROPERTY((std::weak_ptr<Node>), componentOwner,
-				std::function<void(jai::property<std::weak_ptr<Node>>&, jai::property<std::weak_ptr<Node>>&)>{
+				jai::property<std::weak_ptr<Node>>::clone_function{
 					[](jai::property<std::weak_ptr<Node>>&, jai::property<std::weak_ptr<Node>>&){}
 				});
 		};

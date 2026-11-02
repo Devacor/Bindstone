@@ -2,6 +2,7 @@
 
 #include <string>
 #include <map>
+#include <string_view>
 #include <unordered_map>
 #include <vector>
 #include <memory>
@@ -36,7 +37,8 @@ namespace jai {
 		property_manager& operator=(const property_manager&) = delete;
 
 		void add(property_base* prop);
-		const std::map<std::string, property_base*>& all() const { return m_properties; }
+		// keyed by each property's own name: an entry holds no copy of it
+		const std::map<std::string_view, property_base*>& all() const { return m_properties; }
 
 		// Track a script-created receiver - keeps it alive for the lifetime of the property_manager
 		template<typename T>
@@ -49,7 +51,7 @@ namespace jai {
 		template<typename Fn>
 		void visit(Fn&& func) const {
 			for (const auto& [key, prop] : m_properties) {
-				func(key, prop);
+				func(prop->name(), prop);
 			}
 		}
 
@@ -71,7 +73,7 @@ namespace jai {
 		void clone_to_target(property_manager& target) const;
 
 	private:
-		std::map<std::string, property_base*> m_properties;
+		std::map<std::string_view, property_base*> m_properties;
 		receiver_owner script_receivers_;  // Holds receivers created by script callbacks
 	};
 
@@ -280,7 +282,7 @@ namespace jai {
 				(try_collect_base<Bases>(out), ...);
 			}
 			for (const auto& [name, prop] : property_mgr.all()) {
-				out.emplace_back(&name, prop);
+				out.emplace_back(&prop->name(), prop);
 			}
 		}
 

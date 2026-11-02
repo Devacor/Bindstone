@@ -4,10 +4,22 @@ JaiScript is an embedded scripting language for C++ engines: C++-flavored syntax
 classes with hot reload, coroutines, a three-rung type ladder (`int` / `auto` / `var`) with a
 static checker that is strict by default, value semantics with references by declaration, and
 two interchangeable backends — a tree-walking interpreter and a bytecode VM — kept at
-byte-for-byte parity by 4,000+ tests and a differential fuzzer. It has no dependencies and
+byte-for-byte parity by 4,700+ tests and a differential fuzzer. It has no dependencies and
 builds as a static library plus headers.
 
-The documentation — a 15-chapter language guide, a 15-chapter embedding guide, language bridges
+## Get JaiScript
+
+You need a C++20 compiler, CMake 3.25+ and Ninja (on Windows, a Visual Studio developer prompt
+has all three). Clone, build the runner with one command, and play Gator Quest on it:
+
+```bash
+git clone https://github.com/Devacor/JaiScript.git
+cd JaiScript
+cmake --workflow --preset runner
+build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+```
+
+The documentation — an 18-chapter language guide, a 19-chapter embedding guide, language bridges
 and code migrations, the examples and a reference — is a static site in [`docs/site/`](docs/site/). Open
 `docs/site/index.html` in a browser; a clone is all you need.
 
@@ -131,7 +143,7 @@ integer overflow.
 
 ## Build
 
-You need a C++20 compiler and CMake 3.20+; Ninja is recommended. Verified — the full suite on
+You need a C++20 compiler and CMake 3.20+ (3.25+ for the presets); Ninja is recommended. Verified — the full suite on
 both backends — with MSVC 19.51 (Visual Studio 18, toolset 14.51), Clang 20 and GCC 16; the
 CI workflow targets MSVC, GCC 14 and Clang on Ubuntu 24.04. Older compilers may work and are
 untested.
@@ -152,7 +164,9 @@ Release pass.
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server (`jaiscript_lsp`) |
+| `JAISCRIPT_BUILD_SPIDER` | top-level | The web application host `jai_spider` and the SQLite it compiles |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
+| `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter (the suite, the fuzzer, the runner and `jai_spider` link it) |
 | `JAISCRIPT_INSTALL` | top-level | Install rules and the `find_package(JaiScript)` package |
 | `JAISCRIPT_ENABLE_DEBUGGER` | ON | The DAP-over-TCP debug listener; turn it off for shipping builds |
 | `JAISCRIPT_ENABLE_BENCHMARKS` | OFF | Performance suites inside `jaiscript_tests` |
@@ -164,8 +178,10 @@ Release pass.
 pulls it in with `add_subdirectory`; [`docs/BUILD.md`](docs/BUILD.md) has every option and both
 consumption routes (`add_subdirectory` and `find_package(JaiScript)`).
 
-Nothing third-party ships in this repository. The cross-language comparison benchmarks compile
-only if you supply those sources yourself — see [`docs/BUILD.md`](docs/BUILD.md). Integer
+Two third-party sources ship, unmodified: [minicoro](source/third_party/minicoro) (public domain or
+MIT-0), which the library compiles, and the [SQLite amalgamation](tools/jai_spider/third_party/sqlite)
+(public domain), which only `jai_spider` compiles. The cross-language comparison benchmarks are a
+separate harness, not part of this repository. Integer
 arithmetic raises a catchable error on overflow by default; define `JAISCRIPT_WRAP_ON_OVERFLOW`
 for the whole build to opt into silent two's-complement wrap instead.
 
@@ -199,9 +215,9 @@ script loads through the strict checker. Details in [`tools/jaiscript/README.md`
 
 ## Examples
 
-Four complete programs live in [`examples/`](examples). Three have a C++ host that is a thin
-console shell — a VT terminal, key input, a clock — and *all* of the actual program in script;
-the fourth runs on the stock runner alone.
+Five complete programs live in [`examples/`](examples): the four below, and JaiDoom after them.
+Three have a C++ host that is a thin console shell — a VT terminal, key input, a clock — and *all*
+of the actual program in script; Gator Quest and JaiDoom run on the stock runner alone.
 
 - **GLOOM** (`examples/gloom`) — a real-time raycast shooter: four maps, keycards, secrets,
   enemy brains as coroutines, particles through `parallel_transform`.
@@ -248,7 +264,7 @@ Bugs and questions: [github.com/Devacor/JaiScript/issues](https://github.com/Dev
 ## Status
 
 JaiScript 0.5 beta, released @RELEASE_DATE@. The language, both backends, the embedding API and
-the `.jaibite` format are complete and covered by 4,000+ tests run on both backends and a
+the `.jaibite` format are complete and covered by 4,700+ tests run on both backends and a
 differential fuzzer. Beta means the C++ API may still change between minor versions;
 [`docs/site/stability.html`](docs/site/stability.html) lists what is settled and what may change
 before 1.0.

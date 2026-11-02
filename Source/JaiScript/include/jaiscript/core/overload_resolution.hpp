@@ -184,7 +184,7 @@ inline size_t table_conversion_cost(const script_value& arg, const parameter& pa
     const t from = arg.type();
     const bool number_to = to == t::jai_int_type || to == t::jai_float_type;
     if (number_to && (from == t::jai_int_type || from == t::jai_float_type)) { return 1; }
-    if (param.is_reference) { return 0; }
+    if (param.is_reference && !param.is_const) { return 0; }   // a const T& binds a T made from the argument
     switch (to) {
         case t::jai_int_type:
         case t::jai_float_type:

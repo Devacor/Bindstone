@@ -25229,6 +25229,15 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 		if (!param.is_reference || !param.type) { continue; }
 		const script_value* bound = frame_slot(callee, param.slot_index);
 		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
+			// a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with the interpreter)
+			if (param.is_const) {
+				auto converted = try_convert_for_parameter(bound->deref(), param.type,
+					detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, false}, nullptr);
+				if (converted) {
+					frame_slot_set(callee, param.slot_index, script_value::make_cell_reference(std::move(converted.value()), engine_));
+					continue;
+				}
+			}
 			return raise_from(detail::typed_slot_rejection(bound->deref(), *param.type,
 				detail::slot_site{detail::slot_kind::parameter, param.name, body_chunk.function_name, param.is_reference}, engine_));
 		}

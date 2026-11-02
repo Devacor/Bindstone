@@ -3287,9 +3287,11 @@ private:
              best->location.line, best->location.column);
     }
 
-    // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass
+    // A T& parameter's argument: a primitive of exactly that kind, a class T or a subclass; unknown and var& / auto& pass; a const T&
+    // binds a temporary T made from whatever a T parameter takes (C++)
     bool reference_parameter_binds(const parameter& p, const ctype& arg) {
         if (!p.type || arg.is_unknown()) { return true; }
+        if (p.is_const && assignable(arg, ctype_from_type_info(p.type.get()))) { return true; }
         switch (p.type->base_type) {
             case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
             case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
@@ -3359,7 +3361,7 @@ private:
 				if (p.is_reference) {
 					if (!reference_parameter_binds(p, args[i])) {
 						diag(diag_level::error, loc, "argument " + std::to_string(i + 1) + " of '" + std::string(fname) + "': cannot bind '" +
-							 ctype_name(args[i]) + "' to '" + p.name + "' declared '" + p.type->canonical_name() + "&'", rl, rc);
+							 ctype_name(args[i]) + "' to '" + p.name + "' declared '" + (p.is_const ? "const " : "") + p.type->canonical_name() + "&'", rl, rc);
 						return;
 					}
 					continue;

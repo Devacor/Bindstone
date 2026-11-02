@@ -9981,6 +9981,15 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
         if (!param.is_reference || !param.type) { continue; }
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);
         if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
+            // a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with vm_backend::bind_parameters)
+            if (param.is_const) {
+                auto converted = try_convert_for_parameter(bound->deref(), param.type,
+                    detail::slot_site{detail::slot_kind::parameter, param.name, function.name, false}, nullptr);
+                if (converted) {
+                    call_stack_[frame_index].set_local(param.slot_index, script_value::make_cell_reference(std::move(converted.value()), engine_));
+                    continue;
+                }
+            }
             auto rejection = detail::typed_slot_rejection(bound->deref(), *param.type, detail::slot_site{detail::slot_kind::parameter, param.name, function.name, param.is_reference}, engine_);
             cleanup();
             return rejection;

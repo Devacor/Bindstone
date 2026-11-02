@@ -546,7 +546,7 @@ public:
             expect("array<math::ivec2> b = [math::vec2(1.5, 2.5)]; to_string(b[0])", "(1, 2)", "the element boundary converts");
             expect("map<math::ivec2, int> grid; grid[math::ivec2(1, 2)] = 5; grid[math::ivec2(1, 2)] += 1; to_string(grid[math::ivec2(1, 2)]) + to_string(grid.size())", "61", "a typed map keyed by ivec2");
             expect("var m = {}; m[math::ivec2(1, 2)] = \"a\"; m[math::ivec2(1, 2)]", "a", "a dynamic map key");
-            expect("var m = {}; m[math::vec2(0.0, 1)] = 1; m[math::vec2(-0.0, 1)] = 2; to_string(m.size())", "2", "keys order floats totally, as float keys do");
+            expect("var m = {}; m[math::vec2(0.0, 1)] = 1; m[math::vec2(-0.0, 1)] = 2; m[math::vec2(math::NAN_VALUE, 1)] = 3; m[math::vec2(-math::NAN_VALUE, 1)] = 4; to_string(m.size())", "2", "keys order float components as float keys do: -0.0 is 0.0, every NaN one");
             expect("var m = {}; m[math::vec2(1, 2)] = 1; m[math::vec3(1, 2, 0)] = 2; m[math::ivec2(1, 2)] = 3; to_string(m.size()) + to_string(m[math::vec3(1, 2, 0)])",
                    "32", "keys of different kinds are different keys");
             expect("var s = 0.0; for (auto v : [math::vec2(1, 2), math::vec2(3, 4)]) { s += v.x + v.y; } to_string(s)", "10.0", "range-for");

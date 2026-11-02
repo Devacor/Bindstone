@@ -1185,6 +1185,19 @@ public:
                 same_ab && !same_ac
             )");
             check_eq(result.as<bool>(), true);
+            // one identity rule (same_object): a weak handle names its owner's object both ways round, an expired handle is
+            // its own object's still, and the method and same_object agree
+            check_eq(std::string("true true true true | false false false false | true false false"), eng->execute(R"(
+                auto s = shared_ptr<LifetimeTracker>(1);
+                weak_ptr<LifetimeTracker> w = s;
+                string out = "" + (s.same_as(w)) + " " + (w.same_as(s)) + " " + (same_object(s, w)) + " " + (same_object(w, s));
+                weak_ptr<LifetimeTracker> e1 = shared_ptr<LifetimeTracker>(2);
+                weak_ptr<LifetimeTracker> e2 = shared_ptr<LifetimeTracker>(3);
+                out += " | " + (e1.same_as(e2)) + " " + (same_object(e1, e2)) + " " + (e1.same_as(null)) + " " + (same_object(e1, null));
+                auto e1_again = e1;
+                out += " | " + (e1.same_as(e1_again)) + " " + (s.same_as(e1)) + " " + (e1.same_as(s));
+                out;
+            )").to_string());
         });
 
         // Test same_as() for regular objects (value semantics)

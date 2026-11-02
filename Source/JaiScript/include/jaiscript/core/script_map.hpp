@@ -4,7 +4,7 @@
 #define __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
 
 // script_map: the map behind TYPEID_MAP. Lookup is hashed through an open-addressing index (keys are equal exactly when
-// script_value::operator<=> calls them equivalent: type rank, then payload; floats by bits, heavy values by identity); key order exists only where it is observed -
+// script_value::operator<=> calls them equivalent: type rank, then payload; floats by value with every NaN one key and both zeros one, heavy values by identity); key order exists only where it is observed -
 // iteration and everything built on it (serialization, keys()/values(), structural equality) - through a key-sorted view of the
 // entries built on the first iteration after a change. Entries never move: a reference or pointer to a key or value stays valid
 // until that entry is erased. An iteration iterator carries its key, so after the map changes under it (the body of a range-for
@@ -200,7 +200,8 @@ namespace jai {
         void changed() noexcept { ++gen_; }
         class_probe probe_class(const script_value& key, const class_definition* cls) const;
         void insert_class_entry(const class_definition* cls, const class_probe& at, entry* e);
-        void erase_class_entry(entry* e) noexcept;
+        void erase_class_entry(const class_probe& at) noexcept;
+        void refresh_class_runs() const;
         void copy_class_keys(const script_map& o, const std::vector<std::pair<const entry*, entry*>>& copies);
         void build_order_with_class_keys() const;
         size_t index_after_class_key(const script_value& key, const class_definition* cls) const;
@@ -327,9 +328,10 @@ namespace jai {
             if (size_ == 0) return nullptr;
             if (key.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
                 if (const class_definition* cls = map_class_key_class(key)) {
-                    entry* gone = probe_class(key, cls).found;
+                    const class_probe at = probe_class(key, cls);
+                    entry* gone = at.found;
                     if (!gone) return nullptr;
-                    erase_class_entry(gone);
+                    erase_class_entry(at);
                     unlink_entry(gone);
                     return gone;
                 }
@@ -376,8 +378,8 @@ namespace jai {
         }
 
         void build_order() const {
+            if (class_keys_) [[unlikely]] { build_order_with_class_keys(); return; }   // a reload may have changed a class's order
             if (order_gen_ == gen_) return;
-            if (class_keys_) [[unlikely]] { build_order_with_class_keys(); return; }
             order_.clear();
             order_.reserve(size_);
             for (const slot& s : slots_) { if (s.e) order_.push_back(&s.e->kv); }

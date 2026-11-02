@@ -2040,7 +2040,8 @@ namespace detail {
         void assign_through_reference(V&& value);
     public:
         
-        // Operators
+        // C++ equality: both sides dereferenced, then the same kind (a string is never a utf8_string here) and the payload
+        // equal; floats by IEEE ==, heavy kinds by the identity operator<=> orders them by. Script == is structural
         bool operator==(const script_value& other) const;
         // the map-key hash: equal for keys operator<=> calls equivalent (core/script_map.hpp)
         uint64_t map_key_hash() const noexcept;

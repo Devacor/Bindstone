@@ -609,7 +609,7 @@ u["ab"] = 1;
 u[utf8_string("ab")] = 2;
 log += " | " + to_string(u.size());
 var f = {};
-f[0.0] = 1; f[-0.0] = 2; f[math::NAN_VALUE] = 3; f[-math::NAN_VALUE] = 4; f[1] = 5; f[1.0] = 6;
+f[0.0] = 1; f[-0.0] = 2; f[math::NAN_VALUE] = 3; f[-math::NAN_VALUE] = 4; f[1] = 5; f[1.0] = 6; f[math::vec2(0.0, 1.0)] = 7; f[math::vec2(-0.0, 1.0)] = 8;
 string fs = "";
 for (auto [k, v] : f) { fs += to_string(v) + ","; }
 log += " | " + to_string(f.size()) + " " + fs;
@@ -633,13 +633,29 @@ log += " | " + to_string(calls) + " " + ds;
 log;
 )JAI";
             auto [i_out, v_out] = both_mode(src, false);
-            check_eq(std::string("true 1334 1334 | 1:4,3:2,2.5:5,a:3,b:1,c:7,true:6, | 01235678911 | 42 3001 | 2 | 5 5,4,2,6,3, | "
+            check_eq(std::string("true 1334 1334 | 1:4,3:2,2.5:5,a:3,b:1,c:7,true:6, | 01235678911 | 42 3001 | 2 | 5 5,2,6,4,8, | "
                                  "true {\"x\":[1,2],\"y\":2,\"z\":1} {\"x\":[1,2],\"y\":2,\"z\":1} | 349 349 | 19 0,2,4,8,10,12,14,16,18,500,"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
         });
 
         // string keys around the eight-byte short form: lengths 0..9, embedded NULs, a string and a utf8_string of the same
         // bytes, a key read as a member, a built key equal to a stored one, an erase
+        // the host's script_value == agrees with <=> and the key hash: a heavy value equals itself (its identity), a string
+        // and a utf8_string are two kinds
+        test("cpp_equality_agrees_with_the_key_order", [this]() {
+            auto eng = make_engine();
+            const script_value arr = eng->execute("[1, 2]");
+            const script_value other = eng->execute("[1, 2]");
+            const script_value text(std::string("ab"), eng.get());
+            const script_value utf = eng->execute("utf8_string u = \"ab\"; u;");
+            check_true(arr == arr, "an array is == itself");
+            check_false(arr == other, "two arrays are two identities");
+            check_eq((arr <=> other) == 0, arr == other);
+            check_eq(arr.map_key_hash(), script_value(arr).map_key_hash());
+            check_false(text == utf, "a string is not a utf8_string in C++");
+            check_eq((text <=> utf) == 0, text == utf);
+        });
+
         test("map_short_string_keys", [this, both_mode]() {
             const char* src = R"JAI(
 var m = {};

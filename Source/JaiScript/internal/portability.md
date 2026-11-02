@@ -40,18 +40,16 @@ path-separator assumptions). Every site is guarded and carries a portable branch
 - **Compiler attributes**: `__declspec(noinline)` vs `__attribute__((noinline))` in
   `vm/vm_backend.hpp` and the cold-path macros (`JAI_MATH_COLD`, `JAI_VM_COLD_PATH`);
   `vm_coverage.cpp` (a diagnostic build) uses `dbghelp` on MSVC.
-- **`native_stack_low()`** and **`native_stack_mark`** (`source/implementation/environment.cpp`): the `windows.h`
-  dependency stays `.cpp`-local, `WIN32_LEAN_AND_MEAN`+`NOMINMAX` guarded. The Windows
-  implementation queries the current thread's stack bounds and checks a 256 KiB headroom
-  margin. Guarded recursive execution paths raise the catchable `max_recursion_depth`
-  text, `Maximum recursion depth exceeded - possible infinite recursion`; `.jaibite`
-  reads and writes instead raise `jaibite: AST nesting too deep` or
-  `jaibite: type nesting too deep`. The reader/writer also retain their existing
-  1000-level traversal limit, independently of headroom. Non-Windows builds return
-  `false` and have **no native-stack headroom measurement**. Their numeric call-depth
-  and traversal limits still apply, but do not establish safety for every native
-  recursion path or host stack size. A POSIX implementation needs platform-specific
-  stack-bound discovery (there is no pure-std way to read stack bounds).
+- **`native_stack_low()`** and **`native_stack_mark`** (`source/implementation/environment.cpp`): the `windows.h` and
+  `pthread.h` dependencies stay `.cpp`-local. The guard asks for the lowest address of the stack the caller runs on and checks
+  256 KiB of headroom at a call (192 KiB in a walk over source). Windows asks `GetCurrentThreadStackLimits`, which an
+  `engine::start` fiber keeps current while it runs. Elsewhere a running fiber answers from its own block
+  (`detail::running_fiber_stack`, minicoro's running coroutine); glibc's initial thread from `__libc_stack_end` and
+  `RLIMIT_STACK` (no walk of `/proc/self/maps`); macOS from `pthread_get_stackaddr_np`/`pthread_get_stacksize_np`; other
+  Linux threads (glibc, bionic, musl) from `pthread_getattr_np`. A stack the OS calls unlimited counts 1 GiB below its top,
+  the most an `engine::start` fiber reserves. A platform with none of these answers false, so only the numeric caps bound it.
+  Guarded recursive execution paths raise the catchable `max_recursion_depth` text; `.jaibite` reads and writes instead
+  raise `jaibite: AST nesting too deep` or `jaibite: type nesting too deep`, and keep their 1000-level traversal limit.
 - **`JAI_FORCEINLINE`/`JAI_NOINLINE`** (`jaiscript_fwd.hpp`) and **`static_type_name.hpp`**
   (`__FUNCSIG__` vs `__PRETTY_FUNCTION__`) carry three-way splits. Unknown-compiler behavior:
   plain `inline`, and an empty type-name signature (degrades binder diagnostics, not
@@ -67,11 +65,10 @@ constant space without increasing call depth; the execution budget still applies
 
 Source nesting has no count of levels. Each recursive walk over source (the parser, the
 marking and slot passes, the checker, the VM compiler, the interpreter's evaluation) holds a
-`detail::native_stack_mark` (`detail/native_stack.hpp`) and asks it at every level: on Windows
-it asks the thread's bounds for 192 KiB of headroom (the call guard's 256 KiB fires first in a
-recursion of calls); elsewhere a walk may take 1 MiB below the frame that armed the mark, so a
-host that parses or runs scripts on a thread with less stack than that plus its own use gives
-the thread more. The walk unwinds to its phase's entry, which reports the one nesting error.
+`detail::native_stack_mark` (`detail/native_stack.hpp`) and asks it at every level for 192 KiB of
+headroom (the call guard's 256 KiB fires first in a recursion of calls): Windows asks the thread's
+bounds at each check, elsewhere the mark asks once when it is armed; where the platform cannot say,
+a walk may take 1 MiB below the frame that armed the mark. The walk unwinds to its phase's entry, which reports the one nesting error.
 
 ## 2. Layout / representation assumptions
 
@@ -141,6 +138,5 @@ Guaranteed (standard C++20, built by CI on three compilers):
 - jaibite files written on any conforming host load on any other (§2).
 
 Windows-only (all deliberate, all guarded):
-- The `native_stack_low()` headroom guard's actual measurement (§1).
 - `examples/` (crawler, demoreel, gloom): VT-mode console setup, `_kbhit`/`_getch`.
 - The MSVC-specific fast paths (`_mul128`) — equivalents exist for GCC/Clang.

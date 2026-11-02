@@ -745,7 +745,7 @@ public:
             check_eq(1.25f, static_cast<float>(bound_single), "bound float as float");
             std::string text;
             try { (void)static_cast<int>(script_value(std::string("x"), eng.get())); } catch (const jai::runtime_error& e) { text = e.what(); }
-            check_true(text.find("not an integer or float") != std::string::npos, text);
+            check_eq(std::string("Cannot convert string to int"), text);
         });
 
         test("a_host_store_through_a_typed_element_reference_converts_like_a_script_store", [this]() {

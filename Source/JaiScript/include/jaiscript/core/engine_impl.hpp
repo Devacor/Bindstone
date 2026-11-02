@@ -156,10 +156,7 @@ script_value engine::make_value_object(std::shared_ptr<T> data) {
 
 template<typename T>
 script_value engine::extend(const std::shared_ptr<T>& object, std::string_view script_class, const std::string& fields_json) {
-    if (!object) {
-        throw runtime_error("extend: cannot extend a null object with '" + std::string(script_class) + "'");
-    }
-    return extend(make_value_object(object), script_value(std::string(script_class), this), fields_json);
+    return extend(object ? make_value_object(object) : script_value(std::monostate{}, this), script_value(std::string(script_class), this), fields_json);
 }
 
 template<typename T>

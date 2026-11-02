@@ -49,6 +49,13 @@ namespace jai {
         return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), "{0}", id);
     }
 
+    namespace detail {
+        // A value that does not convert to the C++ type a host asked for, named as the script spells what it holds
+        // (value.cpp): "Cannot convert string to int"
+        [[noreturn]] void throw_conversion_error(const script_value& value, const char* target);
+        error_propagator conversion_error(const script_value& value, const char* target, runtime_error_code code = runtime_error_code::type_mismatch);
+    }
+
     // shared_ptr extraction (engine.cpp): locks an extended object's weakly held owner
     // (null once the object died); an owning native object is returned as is.
     namespace detail { class object_ref; struct object_borrow_record; }
@@ -1056,7 +1063,7 @@ namespace detail {
             // For non-const, we can't use checked_as_array() which returns const&
             // So we check type and return mutable reference directly
             if (type() != script_value_type::jai_array_type) {
-                throw runtime_error("script_value is not an array");
+                detail::throw_conversion_error(deref(), "array");
             }
             const auto& node = storage_.get<strong_ptr<script_array>>();
             if (node->is_typed()) {
@@ -1077,7 +1084,7 @@ namespace detail {
         
         inline script_map& as_map() {
             if (type() != script_value_type::jai_map_type) {
-                throw runtime_error("script_value is not a map");
+                detail::throw_conversion_error(deref(), "map");
             }
             return *storage_.get<strong_ptr<script_map>>();
         }
@@ -1091,7 +1098,7 @@ namespace detail {
         inline script_int& as_int_ref() {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_int_type) {
-                throw runtime_error("script_value is not an integer");
+                detail::throw_conversion_error(deref(), "int");
             }
             if (auto* box = val.bound_box()) {
                 if (box->size_and_sign == sizeof(script_int)) {  // size 8, signed (no 0x80 bit)
@@ -1105,7 +1112,7 @@ namespace detail {
         inline script_float& as_float_ref() {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_float_type) {
-                throw runtime_error("script_value is not a float");
+                detail::throw_conversion_error(deref(), "float");
             }
             if (auto* box = val.bound_box()) {
                 if ((box->size_and_sign & 0x7F) == sizeof(script_float)) {
@@ -1119,7 +1126,7 @@ namespace detail {
         inline script_bool& as_bool_ref() {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_bool_type) {
-                throw runtime_error("script_value is not a boolean");
+                detail::throw_conversion_error(deref(), "bool");
             }
             if (auto* box = val.bound_box()) {
                 if ((box->size_and_sign & 0x7F) == sizeof(script_bool)) {
@@ -1133,7 +1140,7 @@ namespace detail {
         inline script_char& as_char_ref() {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_char_type) {
-                throw runtime_error("script_value is not a character");
+                detail::throw_conversion_error(deref(), "char");
             }
             if (auto* box = val.bound_box()) {
                 if ((box->size_and_sign & 0x7F) == sizeof(script_char)) {
@@ -1148,7 +1155,7 @@ namespace detail {
         inline script_string& as_string_ref(engine* a_engine = nullptr) {
             script_value& val = deref();
             if (val.type() != script_value_type::jai_string_type) {
-                throw runtime_error("script_value is not a string");
+                detail::throw_conversion_error(deref(), "string");
             }
             if (auto* box = val.bound_box()) {
                 // string bindings are only ever created over std::string/script_string - exact type
@@ -1250,10 +1257,7 @@ namespace detail {
                 return checked_result<const script_string*>(&val.storage_.get<strong_ptr<script_utf8>>()->bytes);
             }
             if (val.type() != script_value_type::jai_string_type) {
-                return checked_result<const script_string*>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a string"
-                );
+                return detail::conversion_error(deref(), "string");
             }
             if (auto* box = val.bound_box()) {
                 return checked_result<const script_string*>(static_cast<const script_string*>(box->ptr));
@@ -1263,10 +1267,7 @@ namespace detail {
 
         inline checked_result<const std::vector<script_value>*> checked_as_array() const {
             if (type() != script_value_type::jai_array_type) {
-                return checked_result<const std::vector<script_value>*>(
-                    make_error_code(runtime_error_code::not_an_array),
-                    "script_value is not an array"
-                );
+                return detail::conversion_error(deref(), "array", runtime_error_code::not_an_array);
             }
             const auto& node = storage_.get<strong_ptr<script_array>>();
             if (node->is_typed()) {
@@ -1278,10 +1279,7 @@ namespace detail {
 
         inline checked_result<const script_map*> checked_as_map() const {
             if (type() != script_value_type::jai_map_type) {
-                return checked_result<const script_map*>(
-                    make_error_code(runtime_error_code::not_a_map),
-                    "script_value is not a map"
-                );
+                return detail::conversion_error(deref(), "map", runtime_error_code::not_a_map);
             }
             return checked_result<const script_map*>(storage_.get<strong_ptr<script_map>>().get());
         }
@@ -1299,10 +1297,7 @@ namespace detail {
                 }
                 return checked_result<script_int>(float_to_script_int(val.storage_.get<script_float>()));
             }
-            return checked_result<script_int>(
-                make_error_code(runtime_error_code::type_mismatch),
-                "script_value is not an integer or float"
-            );
+            return detail::conversion_error(deref(), "int");
         }
 
         inline checked_result<script_float> checked_as_float() const {
@@ -1324,19 +1319,13 @@ namespace detail {
                 }
                 return checked_result<script_float>(static_cast<script_float>(val.storage_.get<script_int>()));
             }
-            return checked_result<script_float>(
-                make_error_code(runtime_error_code::type_mismatch),
-                "script_value is not a float or integer"
-            );
+            return detail::conversion_error(deref(), "float");
         }
 
         inline checked_result<script_bool> checked_as_bool() const {
             const script_value& val = deref();
             if (val.type() != script_value_type::jai_bool_type) {
-                return checked_result<script_bool>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a boolean"
-                );
+                return detail::conversion_error(deref(), "bool");
             }
             if (auto* box = val.bound_box()) {
                 return checked_result<script_bool>(*static_cast<const script_bool*>(box->ptr));
@@ -1347,10 +1336,7 @@ namespace detail {
         inline checked_result<script_char> checked_as_char() const {
             const script_value& val = deref();
             if (val.type() != script_value_type::jai_char_type) {
-                return checked_result<script_char>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a character"
-                );
+                return detail::conversion_error(deref(), "char");
             }
             if (auto* box = val.bound_box()) {
                 return checked_result<script_char>(*static_cast<const script_char*>(box->ptr));
@@ -1417,11 +1403,7 @@ namespace detail {
                 } else if (val.type() == script_value_type::jai_float_type) {
                     return checked_result<T>(float_to_script_int(val.storage_.get<script_float>()));
                 }
-                return checked_result<T>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not an integer or float. Actual type: {0}",
-                    val.type_id()
-                );
+                return detail::conversion_error(deref(), "int");
             }
             else if constexpr (std::is_same_v<T, script_float> || std::is_same_v<T, double>) {
                 const script_value& val = deref();
@@ -1437,11 +1419,7 @@ namespace detail {
                         val.is_cpp_bound_primitive() ? val.unchecked_as_int()
                                                      : val.storage_.get<script_int>()));
                 }
-                return checked_result<T>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a float or integer. Actual type: {0}",
-                    val.type_id()
-                );
+                return detail::conversion_error(deref(), "float");
             }
             else if constexpr (std::is_same_v<T, script_bool>) {
                 const script_value& val = deref();
@@ -1451,11 +1429,7 @@ namespace detail {
                 if (val.type() == script_value_type::jai_bool_type) {
                     return checked_result<T>(val.storage_.get<script_bool>());
                 }
-                return checked_result<T>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a boolean. Actual type: {0}",
-                    val.type_id()
-                );
+                return detail::conversion_error(deref(), "bool");
             }
             else if constexpr (std::is_same_v<T, script_char>) {
                 const script_value& val = deref();
@@ -1465,11 +1439,7 @@ namespace detail {
                 if (val.type() == script_value_type::jai_char_type) {
                     return checked_result<T>(val.storage_.get<script_char>());
                 }
-                return checked_result<T>(
-                    make_error_code(runtime_error_code::type_mismatch),
-                    "script_value is not a character. Actual type: {0}",
-                    val.type_id()
-                );
+                return detail::conversion_error(deref(), "char");
             }
             // MEDIUM PATH: Common integral conversions
             else if constexpr (std::is_same_v<T, int>) {
@@ -1526,34 +1496,22 @@ namespace detail {
                 if constexpr (std::is_const_v<std::remove_reference_t<T>>) {
                     if constexpr (std::is_same_v<base_type, script_int>) {
                         if (type() != script_value_type::jai_int_type) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "script_value is not an integer"
-                            );
+                            return detail::conversion_error(deref(), "int");
                         }
                         return checked_result<T>(storage_.get<script_int>());
                     } else if constexpr (std::is_same_v<base_type, script_float>) {
                         if (type() != script_value_type::jai_float_type) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "script_value is not a float"
-                            );
+                            return detail::conversion_error(deref(), "float");
                         }
                         return checked_result<T>(storage_.get<script_float>());
                     } else if constexpr (std::is_same_v<base_type, script_bool>) {
                         if (type() != script_value_type::jai_bool_type) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "script_value is not a boolean"
-                            );
+                            return detail::conversion_error(deref(), "bool");
                         }
                         return checked_result<T>(storage_.get<script_bool>());
                     } else if constexpr (std::is_same_v<base_type, script_char>) {
                         if (type() != script_value_type::jai_char_type) {
-                            return checked_result<T>(
-                                make_error_code(runtime_error_code::type_mismatch),
-                                "script_value is not a character"
-                            );
+                            return detail::conversion_error(deref(), "char");
                         }
                         return checked_result<T>(storage_.get<script_char>());
                     } else if constexpr (std::is_same_v<base_type, script_string> || std::is_same_v<base_type, std::string>) {
@@ -1564,8 +1522,7 @@ namespace detail {
                         return checked_result<T>(*str_result.value());
                     } else if constexpr (std::is_same_v<base_type, std::vector<script_value>>) {
                         if (type() != script_value_type::jai_array_type || raw_storage_index() != TYPEID_ARRAY) {
-                            return checked_result<T>(make_error_code(runtime_error_code::not_an_array),
-                                                     "script_value is not an array");
+                            return detail::conversion_error(deref(), "array", runtime_error_code::not_an_array);
                         }
                         const script_array* node = unchecked_array_node();
                         if constexpr (std::is_reference_v<T>) {
@@ -1731,8 +1688,7 @@ namespace detail {
                 using element_type = typename T::value_type;
                 T result;
                 if (raw_storage_index() != TYPEID_ARRAY) {
-                    return checked_result<T>(make_error_code(runtime_error_code::not_an_array),
-                                             "script_value is not an array");
+                    return detail::conversion_error(deref(), "array", runtime_error_code::not_an_array);
                 }
                 const script_array* node = unchecked_array_node();
                 result.reserve(node->size());
@@ -1829,48 +1785,30 @@ namespace detail {
             else if constexpr (std::is_same_v<T, jai::strong_ptr<jai::class_instance>>) {
                 auto t = type();
                 if (t != script_value_type::jai_object_type && t != script_value_type::jai_shared_ptr_type) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_an_object),
-                        "script_value is not an object. Actual type: {0}",
-                        type_id()
-                    );
+                    return detail::conversion_error(deref(), "object", runtime_error_code::not_an_object);
                 }
                 // type() reports the DECLARED type: a class-typed variable legally holds
                 // null (and references wrap), so probe the deref'd storage — the old
                 // std::get threw bad_variant_access through the host boundary here
                 auto* objHolder = deref().storage_.get_if<strong_ptr<object_holder>>();
                 if (!objHolder) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_an_object),
-                        "script_value is not an object. Actual type: {0}",
-                        type_id()
-                    );
+                    return detail::conversion_error(deref(), "object", runtime_error_code::not_an_object);
                 }
                 if (!(*objHolder)->is_instance()) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_a_class),
-                        "Object is not a class_instance. Actual type: {0}",
-                        type_id()
-                    );
+                    return detail::conversion_error(deref(), "script class instance", runtime_error_code::not_a_class);
                 }
                 return checked_result<T>((*objHolder)->instance_handle());
             }
             // Support for shared_ptr<void> extraction
             else if constexpr (std::is_same_v<T, std::shared_ptr<void>>) {
                 if (type() != script_value_type::jai_object_type) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_an_object),
-                        "script_value is not an object"
-                    );
+                    return detail::conversion_error(deref(), "object", runtime_error_code::not_an_object);
                 }
                 // Declared-type guard: null-valued / reference-wrapped variables probe
                 // the deref'd storage (see the class_instance branch above)
                 auto* objHolder = deref().storage_.get_if<strong_ptr<object_holder>>();
                 if (!objHolder) {
-                    return checked_result<T>(
-                        make_error_code(runtime_error_code::not_an_object),
-                        "script_value is not an object"
-                    );
+                    return detail::conversion_error(deref(), "object", runtime_error_code::not_an_object);
                 }
                 return checked_result<T>((*objHolder)->held());
             }
@@ -1927,10 +1865,7 @@ namespace detail {
                     return checked_result<T>(std::static_pointer_cast<typename T::element_type>(objHolder->host_object()));
                 }
 
-                return checked_result<T>(
-                    make_error_code(runtime_error_code::not_an_object),
-                    "script_value is not an object"
-                );
+                return detail::conversion_error(deref(), "object", runtime_error_code::not_an_object);
             }
             // weak_ptr<T>: from null, a shared handle, or a script weak_ptr (an expired one is empty)
             else if constexpr (is_specialization_v<T, std::weak_ptr>) {
@@ -2778,15 +2713,14 @@ namespace detail {
 
         // Get the array NODE handle for interpreter operations
         JAI_FORCEINLINE strong_ptr<script_array>& get_array_storage() {
-            if (type() != script_value_type::jai_array_type) [[unlikely]] { throw_not_an_array(); }
+            if (type() != script_value_type::jai_array_type) [[unlikely]] { detail::throw_conversion_error(*this, "array"); }
             return storage_.get<strong_ptr<script_array>>();
         }
-        [[noreturn]] JAI_NOINLINE static void throw_not_an_array() { throw runtime_error("script_value is not an array"); }
 
         // Get raw map storage for interpreter operations
         strong_ptr<script_map>& get_map_storage() {
             if (type() != script_value_type::jai_map_type) {
-                throw runtime_error("script_value is not a map");
+                detail::throw_conversion_error(deref(), "map");
             }
             return storage_.get<strong_ptr<script_map>>();
         }
@@ -2794,7 +2728,7 @@ namespace detail {
         // Get raw weak_ptr storage for interpreter operations
         jai::weaker_ptr<object_holder>& get_weak_ptr_storage() {
             if (type() != script_value_type::jai_weak_ptr_type) {
-                throw runtime_error("script_value is not a weak_ptr");
+                detail::throw_conversion_error(deref(), "weak_ptr");
             }
             return storage_.get<jai::weaker_ptr<object_holder>>();
         }

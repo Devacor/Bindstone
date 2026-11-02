@@ -4757,6 +4757,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 }
 
                 const bool had_init = init != nullptr;
+                if (!init && reference_member) { report_error("reference variable '" + std::string(member_name.lexeme) + "' must be initialized: a reference names a variable from its declaration on", member_name); }
                 if (!init && !reference_member) { init = default_initializer(type, member_name.location); }
                 auto var_decl = std::make_shared<variable_decl>(member_name.location, type, member_name.lexeme, get_symbol_id(member_name), init);
                 var_decl->function_spelling = function_spelling;
@@ -5376,6 +5377,9 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     } else if (check(token_type::left_brace)) {
         // Auto type with brace initializer - parse as expression
         JAISCRIPT_TRY_ASSIGN(initializer, expression());
+    }
+    if (!initializer && is_reference) {
+        report_error("reference variable '" + std::string(name.lexeme) + "' must be initialized: a reference names a variable from its declaration on", name);
     }
     const bool default_initialized = !initializer && !is_reference;
     if (default_initialized) {

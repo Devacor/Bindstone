@@ -3421,11 +3421,6 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             }
         }
     } else if (is_reference) {
-        // Reference variable - must have initializer
-        if (!decl->initializer) {
-            return checked_result<void>(make_error_code(runtime_error_code::uninitialized_reference), "Reference variable must be initialized", decl->name_id);
-        }
-        
         // Check if initializer is an identifier (can take reference)
         if (decl->initializer->get_type() == node_type::identifier_expr) {
             auto* identExpr = static_cast<identifier_expr*>(decl->initializer.get());

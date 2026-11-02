@@ -179,12 +179,12 @@ x++ = 4;                      // postfix yields the old value
 &lt;script&gt;:5:16: error: cannot assign to the result of cast&lt;float&gt;(x): it is a temporary value (cast&lt;float&amp;&gt;(x) names the variable)
     cast&lt;float&gt;(x) = 3.0;         // a value cast is a temporary
                    ^
-&lt;script&gt;:6:6: error: cannot assign to x++: it yields the old value
+&lt;script&gt;:6:5: error: cannot assign to x++: it yields the old value
     x++ = 4;                      // postfix yields the old value
-         ^
-&lt;script&gt;:7:14: error: cannot assign to a conditional: its arm &#x27;5&#x27; names no storage
+        ^
+&lt;script&gt;:7:13: error: cannot assign to a conditional: its arm &#x27;5&#x27; names no storage
     (c ? x : 5) = 6;              // one arm names no storage
-                 ^</code></pre></div>
+                ^</code></pre></div>
 <p>A lambda that names an enclosing local its capture list does not admit is rejected even earlier, by the parser: <code>Lambda capture list does not capture enclosing local 'hp'; name it or use [=] or [&amp;]</code> (<a href="06-functions.html#lambdas-and-captures">Lambdas and captures</a>). Two more shapes stop at the parser: a named function declared inside a function body that uses the body's locals (<code>Nested function 'helper' cannot use enclosing local 'y': a named function captures nothing; ...</code>), and a class declared inside a function, method or lambda body (<code>a class cannot be declared inside a function body (a class is a program-scope type); declare it at program scope or import its file</code>).</p>
 <h2 id="the-promise">The promise: a clean program is never rejected<a class="hlink" href="#the-promise" aria-label="link">&#8203;</a></h2>
 <p>A checker that guesses is worse than no checker, because you stop reading it. So this one is held to a contract: <strong>a program that runs clean and does not genuinely violate a declared type produces zero errors.</strong> Wherever it is not certain, it is silent, and the runtime&#x27;s own checks take over. A regression gate runs two hundred generated programs through both paths and fails if anything that executes cleanly draws an error.</p>

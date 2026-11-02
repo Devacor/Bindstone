@@ -359,9 +359,9 @@ var n = v.dot();</code></pre></div>
 &lt;script&gt;:6:7: error: cannot initialize &#x27;len&#x27; declared &#x27;float&#x27; with &#x27;math::vec3&#x27;
     float len = math::floor(v);
           ^
-&lt;script&gt;:7:16: error: &#x27;dot&#x27; expects 1 argument
+&lt;script&gt;:7:15: error: &#x27;dot&#x27; expects 1 argument
     var n = v.dot();
-                   ^</code></pre></div>
+                  ^</code></pre></div>
 <p>Mixed kinds and dimensions in arithmetic, a zero divisor and an int32 overflow depend on values, so they are run-time errors, catchable like any other.</p>
 <h2 id="where-to-next">Where to next<a class="hlink" href="#where-to-next" aria-label="link">&#8203;</a></h2>
 <p>That completes the language tour. From here: <a href="../embedding/index.html">Embedding</a> covers the C++ side, including <a href="../embedding/15-math-adapters.html">Math Adapters</a>, which make a host's own vector and color types arrive in script as these types; <a href="../examples/index.html">Examples</a> walks complete programs; and the <a href="../reference/index.html">Reference</a> is the one-page lookup.</p>

@@ -6480,12 +6480,7 @@ checked_result<void> interpreter::visit_parallel_for_stmt(parallel_for_stmt* stm
 // BYTE-PARALLEL with vm_compiler::compile_range_for)
 checked_result<void> interpreter::visit_range_for_stmt(range_for_stmt* stmt) {
     if (stmt->const_check) [[unlikely]] { JAISCRIPT_TRY(const_guard_at(stmt, stmt->const_check)); }
-    auto result = run_range_for_stmt(stmt);
-    if (!hasYieldRequest_ && !stmt->is_reference && stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty() &&
-        (!stmt->element_type || stmt->element_type->may_own_instance())) {
-        if (script_value* slot = call_stack_.back().get_local(stmt->variable_slot_index)) { script_value dying = std::move(*slot); }
-    }
-    return result;
+    return run_range_for_stmt(stmt);
 }
 
 checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
@@ -6538,6 +6533,16 @@ checked_result<void> interpreter::run_range_for_stmt(range_for_stmt* stmt) {
 
     // Determine if we can use slot-based access (inside a function with an assigned slot)
     const bool use_slot = stmt->variable_slot_index != SIZE_MAX && !call_stack_.empty();
+    // The last by-value loop variable dies on every exit but a yield, before the range (C++ ends the variable's scope inside the
+    // range's): declared after `container`, this guard runs first
+    struct loop_variable_release {
+        interpreter* self; size_t slot; bool armed;
+        ~loop_variable_release() {
+            if (!armed || self->hasYieldRequest_ || self->call_stack_.empty()) { return; }
+            if (script_value* held = self->call_stack_.back().get_local(slot)) { script_value dying = std::move(*held); }
+        }
+    } release_loop_variable{this, stmt->variable_slot_index,
+                            use_slot && !stmt->is_reference && (!stmt->element_type || stmt->element_type->may_own_instance())};
     // The body can move the frame's locals (a declaration at a new slot, a callee's frame): the loop variable's pointer is
     // re-resolved before each write (a use-after-free write otherwise)
     auto loop_variable = [&]() -> script_value* {
@@ -7205,7 +7210,9 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
     bool caught_error = resuming_catch;
 
     if (!try_result) {
-        // Checked_result error - treat as catchable exception
+        // Checked_result error - treat as catchable exception; a destructor that threw while the error left its scope goes to the
+        // script error handler (KEEP BYTE-PARALLEL with vm_backend::unwind_to_handler)
+        if (is_unwinding_ && current_exception_) { engine_->report_script_error(current_exception_->what(), {}); }
         std::string error_msg = format_error(try_result, *string_symbolizer_);
         active_exception_value_ = make_value(error_msg);
         current_exception_ = script_exception(error_msg);
@@ -8273,7 +8280,8 @@ struct interpreter::construction_lender final : detail::construction_host {
 checked_result<script_value> interpreter::execute_callable(const script_callable& payload, const std::vector<script_value>& args) {
     detail::release_sync release_first(engine_);
     // A destructor a throw's unwinding released runs under its own exception state and the throw resumes after it (C++:
-    // destructors run during unwinding); what the destructor raised dies with it (KEEP BYTE-PARALLEL with vm_backend::execute_callable)
+    // destructors run during unwinding); what the destructor raised goes to the script error handler, where C++ would terminate
+    // (KEEP BYTE-PARALLEL with vm_backend::execute_callable)
     struct unwind_park {
         interpreter* self;
         std::optional<script_exception> exception;
@@ -8295,6 +8303,7 @@ checked_result<script_value> interpreter::execute_callable(const script_callable
             self->is_unwinding_ = false;
         }
         ~unwind_park() {
+            if (self->is_unwinding_ && self->current_exception_) { self->engine_->report_script_error(self->current_exception_->what(), {}); }
             self->current_exception_ = std::move(exception);
             self->active_exception_value_ = std::move(value);
             self->captured_trace_ = std::move(trace);
@@ -9544,6 +9553,20 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
 }
 
 interpreter_coroutine_state::~interpreter_coroutine_state() {
+    // a suspended loop's interior (its variable's slot and the slots above it) dies before its range, the innermost loop first
+    // (KEEP BYTE-PARALLEL with vm_backend::vm_coroutine_state)
+    if (saved_call_stack.size() == 1) {
+        auto& locals = saved_call_stack.back().locals;
+        for (continuation_point& point : continuations_) {
+            if (!point.saved_container || !point.node || point.node->get_type() != node_type::range_for_stmt) { continue; }
+            const size_t first = static_cast<const range_for_stmt*>(point.node)->variable_slot_index;
+            if (first == SIZE_MAX) { continue; }
+            for (size_t at = locals.size(); at-- > first;) {
+                if (!locals[at].is_reference()) { script_value dying = std::move(locals[at]); }
+            }
+            point.saved_container.reset();
+        }
+    }
     drop_saved_containers(interpreter::rp_catch);
     parked_exception_value.reset();
     std::vector<script_value> shared;
@@ -9683,7 +9706,13 @@ checked_result<script_value> interpreter::resume_coroutine(coroutine_handle& han
 
         // A first resume nested inside another call's argument list must not see that
         // call's in-flight arg metadata (a zero-arg .next() never saves/clears it)
-        auto call_result = call_function(*state.function, handle.get_args());
+        // the handle's captured arguments are owned: a prvalue one moves into its parameter, and the rest go once bound (KEEP
+        // BYTE-PARALLEL with vm_backend::run_fiber)
+        std::vector<script_value>& args = handle.binding_args();
+        std::vector<script_value>* previous_owned = exchange_owned_arguments(&args);
+        auto call_result = call_function(*state.function, args);
+        exchange_owned_arguments(previous_owned);
+        handle.release_args();
 
         if (hasYieldRequest_) {
             // call_function already saved state into this coroutine

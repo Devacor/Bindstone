@@ -3049,14 +3049,33 @@ namespace detail {
             case lane_t::objs: new (&objs_) std::vector<obj_slot>(); break;
         }
     }
+    namespace detail {
+        template <class Buffer>
+        inline constexpr bool elements_observe_death = std::is_same_v<typename Buffer::value_type, script_value> ||
+                                                       std::is_same_v<typename Buffer::value_type, obj_slot>;
+        // A buffer's elements die last to first, as a C++ array's do (std::vector leaves its order to the library)
+        template <class Buffer>
+        inline void drop_elements_from(Buffer& buffer, size_t n) noexcept {
+            while (buffer.size() > n) { buffer.pop_back(); }
+        }
+        // ... and a cleared buffer is detached before they die, so a destructor sees the array already empty; the capacity
+        // comes back unless a destructor refilled it
+        template <class Buffer>
+        inline void clear_elements(Buffer& buffer) noexcept {
+            Buffer dying;
+            dying.swap(buffer);
+            drop_elements_from(dying, 0);
+            if (buffer.empty()) { buffer.swap(dying); }
+        }
+    }
     inline void script_array::destroy_lane() noexcept {
         switch (lane_of(kind_)) {
-            case lane_t::values: values_.~vector(); break;
+            case lane_t::values: detail::drop_elements_from(values_, 0); values_.~vector(); break;
             case lane_t::ints: ints_.~vector(); break;
             case lane_t::floats: floats_.~vector(); break;
             case lane_t::bytes: bytes_.~vector(); break;
             case lane_t::strs: strs_.~vector(); break;
-            case lane_t::objs: objs_.~vector(); break;
+            case lane_t::objs: detail::drop_elements_from(objs_, 0); objs_.~vector(); break;
         }
     }
     // an empty lane of kind k replaces the current one; a kind on the same lane keeps the buffer
@@ -3147,12 +3166,12 @@ namespace detail {
     }
     inline void script_array::clear() noexcept {
         switch (lane_of(kind_)) {
-            case lane_t::values: values_.clear(); break;
+            case lane_t::values: detail::clear_elements(values_); break;
             case lane_t::ints: ints_.clear(); break;
             case lane_t::floats: floats_.clear(); break;
             case lane_t::bytes: bytes_.clear(); break;
             case lane_t::strs: strs_.clear(); break;
-            case lane_t::objs: objs_.clear(); break;
+            case lane_t::objs: detail::clear_elements(objs_); break;
         }
     }
     inline void script_array::reserve(size_t n) {
@@ -3191,9 +3210,17 @@ namespace detail {
 	}
 
 	inline void script_array::retain_range(size_t a_start, size_t a_end) {
+		// the dropped elements die last to first: the tail, then the head
 		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
-			a_buffer.erase(a_buffer.begin() + a_end * a_stride, a_buffer.end());
-			a_buffer.erase(a_buffer.begin(), a_buffer.begin() + a_start * a_stride);
+			using buffer_t = std::remove_reference_t<decltype(a_buffer)>;
+			detail::drop_elements_from(a_buffer, a_end * a_stride);
+			if constexpr (detail::elements_observe_death<buffer_t>) {
+				buffer_t head(std::make_move_iterator(a_buffer.begin()), std::make_move_iterator(a_buffer.begin() + a_start));
+				a_buffer.erase(a_buffer.begin(), a_buffer.begin() + a_start);
+				detail::drop_elements_from(head, 0);
+			} else {
+				a_buffer.erase(a_buffer.begin(), a_buffer.begin() + a_start * a_stride);
+			}
 		};
 		switch (kind_) {
 			case kind_t::i64: retain(ints_); break;
@@ -3205,17 +3232,27 @@ namespace detail {
 		}
 	}
 	inline void script_array::retain_selected(const std::vector<uint8_t>& a_selected) {
+		// the dropped elements die last to first, once the kept ones have closed ranks
 		auto retain = [&](auto& a_buffer, size_t a_stride = 1) {
+			using buffer_t = std::remove_reference_t<decltype(a_buffer)>;
+			buffer_t dropped;
 			size_t out = 0;
 			const size_t count = std::min(a_selected.size(), a_buffer.size() / a_stride);
 			for (size_t i = 0; i < count; ++i) {
-				if (!a_selected[i]) { continue; }
+				if (!a_selected[i]) {
+					if constexpr (detail::elements_observe_death<buffer_t>) { dropped.push_back(std::move(a_buffer[i])); }
+					continue;
+				}
 				if (out != i) {
 					for (size_t lane = 0; lane < a_stride; ++lane) { a_buffer[out * a_stride + lane] = std::move(a_buffer[i * a_stride + lane]); }
 				}
 				++out;
 			}
+			if constexpr (detail::elements_observe_death<buffer_t>) {
+				for (size_t i = count; i < a_buffer.size(); ++i) { dropped.push_back(std::move(a_buffer[i])); }
+			}
 			a_buffer.erase(a_buffer.begin() + out * a_stride, a_buffer.end());
+			detail::drop_elements_from(dropped, 0);
 		};
 		switch (kind_) {
 			case kind_t::i64: retain(ints_); break;
@@ -3375,13 +3412,13 @@ namespace detail {
             case kind_t::i8:
             case kind_t::c8: if (n < bytes_.size()) { bytes_.resize(n); } break;
             case kind_t::str: if (n < strs_.size()) { strs_.erase(strs_.begin() + static_cast<std::ptrdiff_t>(n), strs_.end()); } break;
-            case kind_t::obj: if (n < objs_.size()) { objs_.erase(objs_.begin() + static_cast<std::ptrdiff_t>(n), objs_.end()); } break;
+            case kind_t::obj: detail::drop_elements_from(objs_, n); break;
             case kind_t::v2: case kind_t::iv2: case kind_t::v3: case kind_t::iv3: case kind_t::v4: case kind_t::rgba: {
                 const size_t n_bytes = n * vec_stride(kind_) * 4;
                 if (n_bytes < bytes_.size()) { bytes_.resize(n_bytes); }
                 break;
             }
-            default: if (n < values_.size()) { values_.erase(values_.begin() + static_cast<std::ptrdiff_t>(n), values_.end()); } break;
+            default: detail::drop_elements_from(values_, n); break;
         }
     }
 

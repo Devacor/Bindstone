@@ -16118,7 +16118,7 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 		receiver = next;
 	}
 	if (k > 0) {
-		script_value object = receiver == &root ? std::move(root) : *receiver;
+		script_value object = *receiver;   // a copy: root holds the chain's temporary until the outer read completes
 		for (; k > 0; --k) {
 			script_value out = make_null();
 			if (path.links[k].subscript) {
@@ -16147,7 +16147,7 @@ op_status vm_backend::exec_get_member_path(frame& f, const vm_instruction& ins) 
 		stack_.push_back(*cell);
 		return {};
 	}
-	stack_.push_back(receiver == &root ? std::move(root) : *receiver);
+	stack_.push_back(*receiver);
 	return exec_get_member(f, ins);
 }
 

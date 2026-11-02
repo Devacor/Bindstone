@@ -4,7 +4,7 @@ import * as vscode from 'vscode';
 import { LanguageClient, LanguageClientOptions, ServerOptions, TransportKind } from 'vscode-languageclient/node';
 
 // Two halves. The debugger uses the attach model with no bundled adapter process: the DAP server
-// lives inside the C++ host (jai::debug_connector opens a TCP port), so VS Code's DAP client is
+// lives inside the C++ host (jai::debug::listen opens a TCP port), so VS Code's DAP client is
 // pointed straight at that socket. The language server (jaiscript_lsp) is a separate executable
 // speaking LSP over stdio; this extension launches it for every .jai file.
 
@@ -25,7 +25,7 @@ function serverExecutable(context: vscode.ExtensionContext): string | undefined 
 	for (const tree of ['build', 'build-debug']) {
 		candidates.push(path.join(root, tree, 'bin', exe));
 	}
-	for (const config of ['x64-Release BENCHMARKS', 'x64-Release', 'x64-Debug']) {
+	for (const config of ['x64-Release', 'x64-Debug']) {
 		candidates.push(path.join(root, 'out', 'build', config, 'bin', exe));
 	}
 	for (const candidate of candidates) {
@@ -82,7 +82,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 	const factory: vscode.DebugAdapterDescriptorFactory = {
 		createDebugAdapterDescriptor(session: vscode.DebugSession): vscode.ProviderResult<vscode.DebugAdapterDescriptor> {
 			const cfg = session.configuration;
-			const port: number = cfg.port ?? 1234;
+			const port: number = cfg.port ?? 52477;
 			const host: string = cfg.host ?? '127.0.0.1';
 			return new vscode.DebugAdapterServer(port, host);
 		}

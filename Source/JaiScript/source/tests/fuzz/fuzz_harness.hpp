@@ -225,7 +225,7 @@ namespace jai::fuzz {
 		auto eng = jai::engine::make();
 		eng->set_backend(cfg.use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 		eng->vm_reference_mode(cfg.vm_reference);
-		// both backends run under one call-depth cap (the interpreter's): the documented defaults differ (256 / 10,000),
+		// both backends run under one call-depth cap (the interpreter's): the documented defaults differ (256 / 250,000),
 		// and the contract compared here is that equal caps raise the same catchable error at the same call
 		eng->max_call_depth(jai::backend_type::vm, eng->max_call_depth(jai::backend_type::interpreter));
 		eng->type_proofs(cfg.proofs);
@@ -430,39 +430,17 @@ namespace jai::fuzz {
 		return diff;
 	}
 
-	// ------------------------------------------------------------------
-	// Suppressions for KNOWN divergences (fixes currently in flight on this
-	// branch). A suppression matches when every program needle appears in the
-	// program text AND every diff needle appears in the divergence summary.
-	// One list serves both pairs: an entry names the side at fault (interp, vm,
-	// or an optimized vm lane against vm-ref) in its description.
-	// ------------------------------------------------------------------
+	// Suppressions for known divergences, empty while none is open. An entry matches when every program needle appears in the
+	// program text and every diff needle in the divergence summary; one list serves both pairs, and an entry's comment names the
+	// side at fault (interp, vm, or an optimized vm lane against vm-ref). Fixing the divergence removes its entry.
 	struct suppression {
 		std::string id;
-		std::string description;
 		std::vector<std::string> program_needles;
 		std::vector<std::string> diff_needles;
 	};
 
 	inline const std::vector<suppression>& known_suppressions() {
-		// Shapes observed and triaged in real fuzz runs.
-		static const std::vector<suppression> list = {
-			// throw inside a class ordering operator swallowed by one backend
-			// (fix in flight; not observed since - matcher kept).
-			{"KD-ORDERING-THROW", "throw inside operator< swallowed by one backend",
-				{"operator<"}, {"op-lt-boom"}},
-			// Both backends run under the interpreter's call-depth cap (run_program), so a deep recursion raises at the same
-			// call on both; what remains of this accepted class is the vm's bare self
-			// tail call, which reuses its frame (guide ch.6, G06-080) and completes where the interpreter raises
-			// (uncaught or caught: the text is the same). The reference vm makes no tail call, so the --vm-reference pair
-			// splits the same way: the optimized vm completes where vm-ref raises
-			{"KD-ENV-RECURSION-LIMIT", "vm tail call reuses its frame where the interpreter's (or vm-ref's) depth cap raises",
-				{}, {"Maximum recursion depth exceeded"}},
-			// The FZ-* matchers (typed-fn-no-return, undef-var eval order,
-			// neg-zero, overflow op names, float divzero text, recursion text,
-			// spaceship overflow swallow) were removed with their fixes; recorded
-			// seeds re-verified agreeing with --no-suppressions.
-		};
+		static const std::vector<suppression> list;
 		return list;
 	}
 

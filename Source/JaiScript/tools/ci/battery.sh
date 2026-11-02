@@ -4,7 +4,7 @@
 # differential (BATTERY_FUZZ_ITERATIONS: the interpreter against the VM, the VM against the VM reference), every example's
 # hashes (GLOOM with and without workers and at 600 ticks, the demoreel and the crawler on the VM, their one backend; Gator
 # Quest and JaiDOOM's timedemo, where the checkout has it, on both through the runner), the embedding quickstart, the
-# language server and the one-file build's include list.
+# language server, the one-file build's include list, the runner's selftest and the documentation site.
 #
 #   tools/ci/battery.sh [--build]
 #
@@ -31,7 +31,7 @@ else
 	{ jai_debug_suites interp vm vm-reference || echo "DEBUG-SUITES-RED"; } > "$JAI_CI_LOG_DIR/battery_debug.out" 2>&1 &
 	debug_pid=$!
 fi
-jai_gates_side_by_side release tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp amalgamation
+jai_gates_side_by_side release tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference gloom gloom-workers gloom-long demoreel crawler gatorquest timedemo embed-quickstart lsp amalgamation selftest site
 FAILED="$FAILED$JAI_RED"
 if [ -n "${debug_pid:-}" ]; then
 	wait "$debug_pid" || true

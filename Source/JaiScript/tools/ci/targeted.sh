@@ -73,13 +73,13 @@ vm_tier() {
 classify() {
 	local p="$1"
 	case "$p" in
-		docs/site/* | docs/site_tools/*) pick verify-site "the documentation site ($p)" ;;
+		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;
 		*.md | internal/* | docs/* | LICENSE* | .gitignore | .gitattributes) NOTES="$NOTES $p" ;;
 		.github/*) pick ci-scripts "the CI workflow ($p)" ;;
 		tools/ci/*) pick ci-scripts "the CI scripts ($p)" ;;
 		tools/lsp/*) pick lsp "the language server ($p)" ;;
 		tools/vscode-jaiscript/*) NOTES="$NOTES $p" ;;
-		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick verify-site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
+		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick selftest "the runner's smoke tests ($p)"; pick site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
 		tools/jai_spider/*) pick spider "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
 		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
@@ -159,7 +159,8 @@ if [ "$BUILD" = 1 ]; then
 			demoreel) release_targets="$release_targets jai_demoreel" ;;
 			crawler) release_targets="$release_targets jai_crawler" ;;
 			gatorquest | timedemo) release_targets="$release_targets jaiscript_runner" ;;
-			verify-site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
+			site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
+			selftest) release_targets="$release_targets jaiscript_runner" ;;
 			lsp) release_targets="$release_targets jaiscript_lsp" ;;
 			embed-quickstart) release_targets="$release_targets embed_quickstart" ;;
 			spider) release_targets="$release_targets jai_spider jaiscript_runner" ;;
@@ -183,23 +184,13 @@ for check in $CHECKS; do
 			{ jai_debug_suites $SUITE_BACKENDS || echo "DEBUG-SUITES-RED"; } > "$JAI_CI_LOG_DIR/targeted_debug.out" 2>&1 &
 			debug_pid=$!
 			;;
-		verify-site | ci-scripts) ;;
+		ci-scripts) ;;
 		*) if jai_timing_gate "$check"; then TIMING_GATES+=("$check"); else SIDE_GATES+=("$check"); fi ;;
 	esac
 done
 [ "${#SIDE_GATES[@]}" = 0 ] || { jai_gates_side_by_side release "${SIDE_GATES[@]}"; FAILED="$FAILED$JAI_RED"; }
 for check in $CHECKS; do
 	case "$check" in
-		verify-site)
-			runner="$JAI_RELEASE_DIR/bin/jaiscript"
-			if (cd "$JAI_ROOT" && jai_watched "$(command -v "$(jai_python)")" docs/site_tools/verify_site.py --runner "$runner") > "$JAI_CI_LOG_DIR/verify_site.log" 2>&1; then
-				echo "green: verify_site"
-			else
-				echo "red: verify_site (log: $JAI_CI_LOG_DIR/verify_site.log)"
-				grep -aE "^FAIL|failed:" "$JAI_CI_LOG_DIR/verify_site.log" | head -8 | cut -c1-220
-				FAILED="$FAILED verify-site"
-			fi
-			;;
 		ci-scripts)
 			bad=0
 			for script in "$JAI_ROOT"/tools/ci/*.sh; do bash -n "$script" || bad=1; done

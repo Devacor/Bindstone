@@ -177,9 +177,19 @@ namespace jai::detail {
         return operand_class == return_operand_temporary_member && !value_copies_observably(v);
     }
 
-    // A by-value return of this operand class copies the value it read
+    // A by-value return of this operand class copies the value it read: a temporary never, a member read off a call's
+    // result unless it stands for its copy, any other lvalue always
     inline bool return_operand_copies(uint8_t operand_class, const script_value& v) {
-        return !source_skips_copy(operand_class, v);
+        if (operand_class == return_operand_temporary) { return false; }
+        if (operand_class == return_operand_temporary_member || operand_class == return_operand_value_member) { return !source_skips_copy(operand_class, v); }
+        return true;
+    }
+
+    // Only an instance held by value can run a user copy constructor when it moves (a handle shares, a container moves its storage)
+    inline bool may_run_copy_constructor_on_move(const script_value& v) noexcept {
+        if (v.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
+        const type_info* tag = v.type_info_raw();
+        return !tag || tag->base_type != script_value_type::jai_shared_ptr_type;
     }
 
     // A yield hands out what a return of the same operand would (materialize_return_value), except that no slot moves

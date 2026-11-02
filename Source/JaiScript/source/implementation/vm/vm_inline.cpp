@@ -9,6 +9,7 @@
 #include <jaiscript/vm/vm_compiler.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/return_flow.hpp>
+#include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/transient_read.hpp>
@@ -1690,7 +1691,9 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 			d->slot_index = base + p.slot_index;
 			d->site_kind = variable_decl::site_parameter; d->site_owner = fn->name;
 			d->graft_site = site_index; d->graft_param = static_cast<uint32_t>(i); d->graft_temp_slot = value_temp[i]->slot_index;
-			d->graft_source = a.get();
+			d->graft_source_class = detail::classify_source(a.get(), [this](const call_expr& c) {
+				return engine_ && detail::call_returns_class_value(c, const_cast<engine&>(*engine_));
+			});
 			d->decl_fast_flags = 0;   // the declaration binds by the parameter's lane (exec_decl_var), never a declaration's fast store
 			ctx.pins.push_back(d);
 			deferred.push_back(d);

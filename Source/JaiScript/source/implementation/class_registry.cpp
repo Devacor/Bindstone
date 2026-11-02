@@ -515,23 +515,27 @@ release_sync::~release_sync() {
 
 } // namespace detail
 
-bool class_definition::value_tree_copies_observably() const {
+// A copy fact under the destructor fact's epoch (value_tree_runs_destructor refreshes it and forgets the copy facts): mode 1 and 2
+// walk the value tree, mode 0 asks the chain for a copy constructor
+bool class_definition::copy_fact(uint8_t fact, uint8_t mode) const {
     const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
-    if (copy_tree_epoch_ == epoch && engine_) { return copy_tree_cached_; }
-    std::vector<const class_definition*> in_progress;
-    copy_tree_cached_ = value_tree_runs_destructor_impl(in_progress, 1);
-    copy_tree_epoch_ = epoch;
-    return copy_tree_cached_;
+    if (destructor_tree_epoch_ != epoch || !engine_) { value_tree_runs_destructor(); }
+    if (!(copy_facts_ & fact)) {
+        bool answer;
+        if (mode == 0) {
+            answer = find_copy_constructor_level() != nullptr;
+        } else {
+            std::vector<const class_definition*> in_progress;
+            answer = value_tree_runs_destructor_impl(in_progress, mode);
+        }
+        copy_facts_ = static_cast<uint8_t>(copy_facts_ | fact | (answer ? fact << 1 : 0));
+    }
+    return (copy_facts_ & (fact << 1)) != 0;
 }
 
-bool class_definition::value_tree_runs_copy_constructor() const {
-    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
-    if (copy_ctor_tree_epoch_ == epoch && engine_) { return copy_ctor_tree_cached_; }
-    std::vector<const class_definition*> in_progress;
-    copy_ctor_tree_cached_ = value_tree_runs_destructor_impl(in_progress, 2);
-    copy_ctor_tree_epoch_ = epoch;
-    return copy_ctor_tree_cached_;
-}
+bool class_definition::value_tree_copies_observably() const { return copy_fact(copy_fact_tree, 1); }
+
+bool class_definition::value_tree_runs_copy_constructor() const { return copy_fact(copy_fact_ctor_tree, 2); }
 
 namespace {
 // A constructor's one parameter names the class: T(const T&) or T(T&)
@@ -558,11 +562,7 @@ const class_definition* class_definition::find_copy_constructor_level() const {
 }
 
 const class_definition* class_definition::copy_constructor_level() const {
-    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
-    if (copy_ctor_epoch_ == epoch && engine_) { return copy_ctor_level_cached_; }
-    copy_ctor_level_cached_ = find_copy_constructor_level();
-    copy_ctor_epoch_ = epoch;
-    return copy_ctor_level_cached_;
+    return copy_fact(copy_fact_level, 0) ? find_copy_constructor_level() : nullptr;
 }
 
 namespace detail {
@@ -669,6 +669,7 @@ bool class_definition::value_tree_runs_destructor() const {
     std::vector<const class_definition*> in_progress;
     destructor_tree_cached_ = value_tree_runs_destructor_impl(in_progress);
     destructor_tree_epoch_ = epoch;
+    copy_facts_ = 0;
     return destructor_tree_cached_;
 }
 

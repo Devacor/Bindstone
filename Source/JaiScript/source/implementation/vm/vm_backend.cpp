@@ -11402,7 +11402,7 @@ op_status vm_backend::bind_graft_parameter(frame& f, const variable_decl* decl) 
 		const size_t ai = arg.raw_storage_index();
 		if (ai == script_value::TYPEID_OBJECT || ai == script_value::TYPEID_ARRAY || ai == script_value::TYPEID_MAP) {
 			if (script_value* temp = frame_slot(f, decl->graft_temp_slot); temp && detail::same_heavy_node(*temp, arg)) { *temp = make_null(); }
-			elide = detail::uniquely_held(arg) && (!decl->graft_source || detail::source_skips_copy(source_class(decl->graft_source), arg));
+			elide = detail::uniquely_held(arg) && (!decl->graft_source_class || detail::source_skips_copy(decl->graft_source_class, arg));
 		}
 	}
 	{
@@ -19414,6 +19414,14 @@ op_status vm_backend::exec_catch_end(frame& f, const vm_instruction&) {
 	return {};
 }
 
+// The argument stands for its parameter only as C++ allows it: its source expression's category decides when the copy is observable
+JAI_NOINLINE bool vm_backend::argument_skips_copy(const chunk* caller_code, const call_site& site, size_t i, const script_value& arg) {
+	if (!caller_code || site.call_node >= caller_code->nodes.size()) { return true; }
+	const auto* call = static_cast<const call_expr*>(caller_code->nodes[site.call_node].get());
+	if (!call || call->get_type() != node_type::call_expr || i >= call->arguments.size()) { return true; }
+	return detail::source_skips_copy(source_class(call->arguments[i].get()), arg);
+}
+
 uint8_t vm_backend::source_class(const expression* e) {
 	return detail::classify_source(e, [this](const call_expr& call) { return detail::call_returns_class_value(call, *engine_); });
 }
@@ -23804,7 +23812,7 @@ void vm_backend::materialize_return(frame& f, script_value& result, uint32_t ope
 		script_value* payload = detail::return_own_slot_payload(frame_slot(f, own_slot), result);
 		// a returned parameter (the compiler stamps its return statement) copies when a user copy constructor would run:
 		// C++ elides only a local's return
-		if (payload) {
+		if (payload && detail::may_run_copy_constructor_on_move(result)) {
 			const ast_node* stmt = frame_statement(f);
 			if (stmt && stmt->get_type() == node_type::return_stmt &&
 			    static_cast<const return_stmt*>(stmt)->return_operand_class == detail::return_operand_parameter &&
@@ -24727,13 +24735,7 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 			// C++17 guaranteed elision
 			std::vector<script_value>* const owned = owned_args(args);
 			bool elide = (args_are_stack(args) || owned) && !arg.is_reference() && detail::uniquely_held(arg);
-			// the argument stands for its parameter only as C++ allows it: its source expression's category decides when the copy is observable
-			if (elide && site && site->call_node != k_invalid_u32 && caller_code && site->call_node < caller_code->nodes.size()) {
-				const auto* call = static_cast<const call_expr*>(caller_code->nodes[site->call_node].get());
-				if (call && call->get_type() == node_type::call_expr && i < call->arguments.size()) {
-					elide = detail::source_skips_copy(source_class(call->arguments[i].get()), arg);
-				}
-			}
+			if (elide && site && site->call_node != k_invalid_u32) { elide = argument_skips_copy(caller_code, *site, i, arg); }
 			auto bind_elided = [&]() {
 				JAI_CENSUS_F(move_hit, 4);
 				if (in_place && param.slot_index == i && !param.ref_escaping) { return; }

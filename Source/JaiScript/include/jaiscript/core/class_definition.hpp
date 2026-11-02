@@ -1382,13 +1382,8 @@ private:
     mutable std::atomic<bool> field_slots_current_{false};   // re-walk the chain on next query
     mutable std::atomic_flag field_slots_building_;
     mutable bool destructor_tree_cached_ = false;
+    mutable uint8_t copy_facts_ = 0;   // in the destructor fact's padding: the class keeps its layout
     mutable uint64_t destructor_tree_epoch_ = UINT64_MAX;
-    mutable bool copy_tree_cached_ = false;
-    mutable uint64_t copy_tree_epoch_ = UINT64_MAX;
-    mutable bool copy_ctor_tree_cached_ = false;
-    mutable uint64_t copy_ctor_tree_epoch_ = UINT64_MAX;
-    mutable const class_definition* copy_ctor_level_cached_ = nullptr;
-    mutable uint64_t copy_ctor_epoch_ = UINT64_MAX;
     mutable script_value null_field_value_;
     mutable uint64_t to_bool_memo_epoch_ = UINT64_MAX;
     mutable uint64_t destructor_id_ = 0;
@@ -1472,6 +1467,9 @@ private:
     // mode 0: a destructor runs; 1: a destructor or a user copy constructor; 2: a user copy constructor
     bool value_tree_runs_destructor_impl(std::vector<const class_definition*>& in_progress, uint8_t mode = 0) const;
     const class_definition* find_copy_constructor_level() const;
+    // the copy facts known under destructor_tree_epoch_ (copy_fact_* bits): a known bit, then its answer
+    static constexpr uint8_t copy_fact_tree = 1, copy_fact_ctor_tree = 4, copy_fact_level = 16;
+    bool copy_fact(uint8_t fact, uint8_t mode) const;
 
     inline void recompute_property_getters(const std::unordered_map<uint64_t, script_value>& new_methods, engine* engine_ref);
 

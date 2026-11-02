@@ -3118,6 +3118,7 @@ namespace {
 		uint64_t out_symbol = UINT64_MAX;
 		size_t out_slot = 0;
 		type_info_ptr cast_to;   // null: no conversion (auto / var / reference return)
+		std::string_view cast_owner;   // the function whose return conversion and text cast_to stands for
 		// The checker's return proofs read off the ORIGINAL body in traversal order (the clone
 		// carries no runtime stamps; both trees have the same shape): a proven same-type
 		// return needs no cast, exactly as the typed return skipped its conversion
@@ -3176,7 +3177,11 @@ namespace {
 				auto target = std::make_shared<identifier_expr>(r->location, ctx.out_name, ctx.out_symbol);
 				target->slot_index = ctx.out_slot;
 				expression_ptr value = r->value;
-				if (ctx.cast_to && proof != proof_same_type) { value = std::make_shared<cast_expr>(r->location, ctx.cast_to, false, value); }
+				if (ctx.cast_to && proof != proof_same_type) {
+					auto converted = std::make_shared<cast_expr>(r->location, ctx.cast_to, false, value);
+					converted->return_of = ctx.cast_owner;
+					value = std::move(converted);
+				}
 				token eq(token_type::equal, std::string_view("="), r->location);
 				decls.push_back(std::make_shared<expression_decl>(r->location, std::make_shared<assignment_expr>(r->location, target, eq, value)));
 			}
@@ -3263,7 +3268,7 @@ namespace {
 		rctx.out_symbol = out_symbol;
 		rctx.out_slot = n_locals;
 		const return_conv conv = classify_return_conv(fn->return_type.get());
-		if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = fn->return_type; }
+		if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = fn->return_type; rctx.cast_owner = fn->name; }
 		collect_return_proofs(body_view, rctx.return_proofs);
 		statement_ptr grafted = clone_statement(eng, body_view, *fn);
 		rewrite_transform_returns(grafted, 0, rctx);
@@ -6450,7 +6455,7 @@ namespace {
 			rctx.out_symbol = eng.symbolize("__c0");
 			rctx.out_slot = map.base;
 			const return_conv conv = classify_return_conv(step->return_type.get());
-			if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = step->return_type; }
+			if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = step->return_type; rctx.cast_owner = step->name; }
 			collect_return_proofs(body_view, rctx.return_proofs);
 		}
 		statement_ptr grafted = clone_statement(eng, body_view, *step);

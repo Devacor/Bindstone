@@ -6614,6 +6614,26 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
         script_value derefed = operand.deref();
         operand = std::move(derefed);
     }
+    if (!expr->return_of.empty()) [[unlikely]] {   // a parallel body's return: its function's conversion and text (KEEP BYTE-PARALLEL with the vm's exec_cast)
+        if (lvalue_source) {
+            script_value copy = clone_for_assignment(operand);
+            operand = std::move(copy);
+        }
+        if (!detail::return_conv_identity(detail::classify_return_conv(expr->target.get()), operand)) {
+            auto converted = try_convert_for_parameter(operand, expr->target,
+                detail::slot_site{detail::slot_kind::return_value, {}, expr->return_of}, detail::uniquely_held(operand) ? &operand : nullptr);
+            if (!converted) {
+                return converted.error_value();
+            }
+            if (is_unwinding_) [[unlikely]] {
+                push_value(make_value());
+                return {};
+            }
+            operand = std::move(converted.value());
+        }
+        push_value(std::move(operand));
+        return {};
+    }
     if (detail::cast_target_is_class(*expr->target)) {
         auto out = detail::cast_class_value(std::move(operand), *expr, lvalue_source, engine_, string_symbolizer_);
         if (!out) {

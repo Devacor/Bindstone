@@ -1339,6 +1339,9 @@ public:
                 "string name(int v) { return v; } name(3)",
                 "class C { int v = 1; } C make() { return C(); } C m = make(); m.v",
                 "var d = 1; d = \"x\"; auto a = 2; a = 3; a",
+                // a map's missing key reads null: its element proves nothing, so the grafted parameter and the parallel return convert
+                "map<string, int> M = {\"a\": 1}; int dbl(int a) { return a * 2; } int run() { int s = 0; array<string> ks = [\"a\", \"b\"]; for (string k : ks) { s += dbl(M[k]); } return s; } run()",
+                "map<string, int> M = {\"a\": 1}; int pick(int x) { return M[\"k\"]; } parallel_transform([0], pick)",
             };
             for (const char* src : snippets) {
                 // twice each: the second run is the cache hit (re-checked after class registration)

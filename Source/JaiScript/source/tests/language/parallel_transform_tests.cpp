@@ -1392,6 +1392,23 @@ public:
 			check_eq((int64_t)25, v[7].as_int());
 			check_eq((int64_t)313, v[8].as_int());
 			check_eq((int64_t)489, v[9].as_int());
+			// a grafted return that cannot convert raises the function's return text, as the call form of the transform does, proofs on and
+			// off (a missing map key reads null)
+			for (const bool proofs : {true, false}) {
+				auto m = make_engine();
+				m->type_proofs(proofs);
+				auto raised = [&](const char* fn) {
+					std::string got = "no error";
+					try { m->execute(std::string(R"(map<string, int> M = {"a": 1}; int pick(int x) { return M["k"]; })"
+					                             R"( int pick_call(int x) { for (int i = 0; i < 2; ++i) { if (i == 1) { return M["k"]; } } return 0; })"
+					                             " parallel_transform([0, 1, 2], ") + fn + ");"); }
+					catch (const std::exception& ex) { got = ex.what(); }
+					return got;
+				};
+				const std::string grafted = raised("pick");
+				check_true(grafted.rfind("Cannot return null from ", 0) == 0, std::string(proofs ? "proofs on: " : "proofs off: ") + grafted);
+				check_eq(raised("pick_call"), grafted, proofs ? "the graft raises the call form's text, proofs on" : "the graft raises the call form's text, proofs off");
+			}
 		});
 
 		test("by_ref_loop_cursor_dies_with_its_loop", [this]() {

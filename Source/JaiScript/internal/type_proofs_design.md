@@ -1,8 +1,9 @@
 # Parse-time type proofs
 
 The static checker stamps proofs on the AST (checker/AST), and the VM's compiler reads them to choose
-lanes that keep total runtime guards. The interpreter reads none. Symbols are the anchors; this note
-carries no line numbers.
+lanes that keep total runtime guards. The interpreter's own evaluation reads none; `parallel_transform`'s
+rewritten body, which both backends run, reads the return proofs (section 5). Symbols are the anchors; this
+note carries no line numbers.
 
 ## 0. Contract
 
@@ -107,7 +108,10 @@ through `object_of(name)` (`ti = eng_.get_type_info_object(name)`, the parser's 
         return target.kind != ctype::object_k || target.ti == rhs.ti;
     }
 ```
-NOT certain, by construction: `unknown`, `null_k`, `array_k`, `map_k`, `function_k`,
+`element_proof` makes an element of a declared typed array certain (an `array<int>` holds ints); a map's
+value stays tentative, because a missing key reads null.
+
+NOT certain, by construction: `unknown`, `null_k`, `array_k`, `map_k`, a map's value, `function_k`,
 `class_ref_k`, `enum_ref_k`, objects reached through a shared_ptr/weak_ptr/cpp_bound/any
 type_info, every `var_entry.dynamic` (var, auto-without-init, reference decls, ref params,
 ref/parallel range-for, catch vars, destructured names), global-tier-ambiguous names
@@ -178,8 +182,17 @@ Cost: one checker walk per unique source per surface epoch; `type_proofs(false)`
 
 ## 5. Interpreter
 
-The interpreter reads no proof: every store, declaration, argument and return runs its conversion,
-whose identity rows return the value unchanged.
+The interpreter's own evaluation reads no proof: every store, declaration, argument and return runs its
+conversion, whose identity rows return the value unchanged.
+
+`parallel_transform` and `parallel_reduce` graft a read-only function's body into their chunk loop and
+rewrite each top-level `return e;` into a store of `cast_expr(e)` whose `return_of` names the function, so
+the store converts with the function's own return conversion and text, the text the transform's call form
+raises (a worker's symbolizer is frozen, so both spell the slotless `Cannot return null from a function declared
+-> int`). The rewrite reads `static_return_proof` and leaves
+out the conversion for a proven same-type return; both backends run the rewritten body, so this is the one
+proof the interpreter observes. It has no runtime guard: it relies on the proof being certain (section
+4.2), and a stale proof of the cached wrapper would land the unconverted value.
 
 ## 6. VM — `source/implementation/vm/vm_compiler.cpp`, `vm_inline.cpp`, `vm_backend.cpp`
 

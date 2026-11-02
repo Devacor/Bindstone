@@ -95,7 +95,8 @@ namespace {
             pthread_attr_destroy(&attr);
         }
 #endif
-        return std::max<size_t>(result, MCO_MIN_STACK_SIZE * 4);
+        // glibc reports an unlimited RLIMIT_STACK as the gap below the main thread's stack (terabytes, varying with ASLR): too large to map
+        return std::clamp<size_t>(result, MCO_MIN_STACK_SIZE * 4, size_t(1) << 30);
     }
 
     void run_body(detail::run_record& run) noexcept;

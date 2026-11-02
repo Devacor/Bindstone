@@ -253,8 +253,8 @@ public:
                 e->execution_step_budget(4);
                 check_eq(uint64_t(4), e->execution_step_budget());
                 const std::string looped = outcome(*e, "int n = 0; try { while (true) { n++; } } catch (e) { n = -1; } n;");
-                check_true(looped.find("Script execution budget exceeded") != std::string::npos,
-                           std::string(use_vm ? "vm" : "interpreter") + ": the spent budget is terminal: " + looped);
+                check_true(looped.find("Script execution budget exceeded - raise engine::execution_step_budget or break up the work") != std::string::npos,
+                           std::string(use_vm ? "vm" : "interpreter") + ": the spent budget is terminal and names its knob: " + looped);
                 check_eq(std::string("3"), outcome(*e, "int k = 0; for (int i = 0; i < 3; i++) { k++; } k;"), "the next entry starts afresh");
                 e->execution_step_budget(0);
                 check_eq(std::string("100000"), outcome(*e, "int m = 0; for (int i = 0; i < 100000; i++) { m++; } m;"), "zero is unlimited");

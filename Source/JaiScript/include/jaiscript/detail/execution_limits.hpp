@@ -129,6 +129,15 @@ namespace jai::detail {
 		call_depth_guard& operator=(const call_depth_guard&) = delete;
 	};
 
+	// The budget that ran out names the knob that raises it: the step budget (engine::execution_step_budget) once its count is
+	// spent, else the wall-clock one (engine::execution_budget). Both backends raise through this.
+	inline error_propagator raise_execution_budget(const execution_limits& limits) noexcept {
+		const bool steps = limits.step_budget != 0 && limits.steps_taken > limits.step_budget;
+		return error_propagator{ make_error_code(runtime_error_code::execution_budget_exceeded),
+			steps ? std::string_view("Script execution budget exceeded - raise engine::execution_step_budget or break up the work")
+			      : std::string_view("Script execution budget exceeded - raise engine::execution_budget or break up the work") };
+	}
+
 	// Style-matched to the budget error text; {0} resolves to the interned cap size.
 	inline constexpr std::string_view k_memory_cap_message =
 		"Script memory cap exceeded ({0} bytes) - raise engine::memory_cap or break up the work";

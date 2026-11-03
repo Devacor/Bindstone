@@ -54,6 +54,8 @@ TIMEDEMO_STATE=1746772898
 ulimit -s 131072 2>/dev/null || true
 
 . "$ROOT/tools/ci/python.sh"
+# Python buffers a pipe's output, and the watchdog (jai_gate_run --idle) reads silence as a hang
+export PYTHONUNBUFFERED=1
 
 LOG="$(mktemp)"
 trap 'rm -f "$LOG"' EXIT

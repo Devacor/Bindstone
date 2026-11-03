@@ -628,6 +628,7 @@ int main(int argc, char** argv) {
 	uint64_t agree = 0, new_div = 0, suppressed_div = 0, budget = 0, crashes = 0, hangs = 0, parse_valid = 0;
 	order_stats ost;
 	std::vector<uint64_t> new_div_seeds, crash_seeds, suppressed_seeds, hang_seeds;
+	auto last_progress = std::chrono::steady_clock::now();
 
 	for (uint64_t seed = begin; seed < end; ++seed) {
 		{
@@ -641,7 +642,10 @@ int main(int argc, char** argv) {
 			} catch (...) { ok = false; }
 			if (ok) ++parse_valid;
 		}
-		if (!opt.seed_given && (seed - begin) % 500 == 0 && seed != begin) {
+		// at least once a minute too: a gate's watchdog (tools/ci/jai_gate_run --idle) takes a long silence for a hang
+		if (!opt.seed_given && seed != begin &&
+			((seed - begin) % 500 == 0 || std::chrono::steady_clock::now() - last_progress >= std::chrono::minutes(1))) {
+			last_progress = std::chrono::steady_clock::now();
 			std::cout << "[progress] seed " << seed << " | agree " << agree << " | new-div " << new_div
 			          << " | suppressed " << suppressed_div << " | budget " << budget << " | crashes " << crashes << "\n";
 			std::cout.flush();

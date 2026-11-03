@@ -343,6 +343,11 @@ namespace jai::detail {
     script_value* parallel_script_field(class_instance& inst, uint64_t member_id);
     // A worker's call of a method no region pin admits, on any receiver shape
     checked_result<void> parallel_method_not_admitted(uint64_t name_id);
+    // What the calling chunk's method sandbox binds name_id to (the worker's own constructor of a class the region admitted), null
+    // when it binds none; nullopt off a parallel chunk
+    std::optional<script_value> parallel_chunk_binding(engine& eng, uint64_t name_id);
+    // A conversion that constructs class_name_id on a chunk whose region did not admit the construction
+    checked_result<void> parallel_conversion_not_admitted(uint64_t class_name_id);
 
     // Member access through an object borrow (detail/object_borrow.hpp), the one rule both backends' member reads, calls and
     // stores take: a script field of the shared instance reads as a worker-local copy (nullopt: no such script field), a host

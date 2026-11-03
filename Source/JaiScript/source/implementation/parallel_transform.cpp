@@ -867,6 +867,78 @@ namespace {
 			}
 			return false;
 		}
+		// A slot declared a class takes another value through its converting constructor: the construction t(value), admitted with
+		// the body's others (a conversion into a slot the walk cannot type, unadmitted, is refused when it runs)
+		void note_converting_construction(const type_info_ptr& t, const expression_ptr& value, const ast_node* site) {
+			if (proof_mode || !value || !class_type(t) || !conversion_may_run_code(t, value)) { return; }
+			const uint64_t name_id = sym->intern(t->type_name);
+			const std::shared_ptr<class_definition> cls = constructor_class(name_id);
+			if (cls && has_true_single_param_conversion_ctor(cls)) { adm.constructions.push_back({ name_id, sym->get_string(name_id), 1, site }); }
+		}
+		// The declared type of a store's target: a field of the walked method's object by its bare name or this.name, else the chain's
+		type_info_ptr store_slot_type(expression* target) {
+			uint64_t field = UINT64_MAX;
+			if (method_class && target && target->get_type() == node_type::identifier_expr) {
+				auto* n = static_cast<identifier_expr*>(target);
+				if (!n->global_qualified && !local(n->symbol_id) && self_field(n->symbol_id)) { field = n->symbol_id; }
+			} else if (method_class && target && target->get_type() == node_type::member_expr) {
+				auto* m = static_cast<member_expr*>(target);
+				if (m->object && m->object->get_type() == node_type::this_expr) {
+					if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
+					if (self_field(m->member_id)) { field = m->member_id; }
+				}
+			}
+			return field != UINT64_MAX ? method_class->get_field_declared_type(field) : proof_chain_type(target);
+		}
+		// A plain store converts its value into the target's declared type; a member of a receiver the walk cannot type (an element's)
+		// may be the field of that name of any class
+		void note_store_conversions(expression* target, const expression_ptr& value, const ast_node* site) {
+			if (proof_mode) { return; }
+			if (const type_info_ptr t = store_slot_type(target)) {
+				note_converting_construction(t, value, site);
+				return;
+			}
+			if (!target || target->get_type() != node_type::member_expr) { return; }
+			auto* m = static_cast<member_expr*>(target);
+			if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
+			for (const auto& entry : eng->get_class_registry().script_classes_) {
+				if (entry.second && entry.second->find_field_declaring_class(m->member_id) == entry.second.get()) {
+					note_converting_construction(entry.second->get_field_declared_type(m->member_id), value, site);
+				}
+			}
+		}
+		// The by-value parameters of the declarations a call's argument count reaches convert its arguments
+		void note_argument_conversions(const std::vector<std::shared_ptr<function_decl>>& decls, const std::vector<expression_ptr>& args) {
+			for (const auto& decl : decls) {
+				if (!decl || !arity_accepts(decl->parameters, args.size())) { continue; }
+				for (size_t i = 0; i < args.size() && i < decl->parameters.size(); ++i) {
+					if (!decl->parameters[i].is_reference) { note_converting_construction(decl->parameters[i].type, args[i], args[i].get()); }
+				}
+			}
+		}
+		// The script class a receiver is declared (this: the class whose method the walk is in), null when the walk cannot type it
+		const class_definition* receiver_class(const expression* receiver) {
+			if (receiver && receiver->get_type() == node_type::this_expr) { return method_class; }
+			const type_info_ptr t = proof_chain_type(receiver);
+			return class_type(t) ? eng->get_class_registry().find_script_class(std::string(t->type_name)).get() : nullptr;
+		}
+		// A method call on a receiver declared cls reaches the overloads of the name its chain and its subclasses declare; on a
+		// receiver the walk cannot type (an element: its class is the barrier's), those of every class
+		void note_method_argument_conversions(const class_definition* cls, uint64_t name_id, const call_expr* call) {
+			if (proof_mode || call->arguments.empty()) { return; }
+			for (const auto& entry : eng->get_class_registry().script_classes_) {
+				const class_definition* level = entry.second.get();
+				if (!level || (cls && level != cls && !level->derives_from(cls) && !cls->derives_from(level))) { continue; }
+				const auto& table = level->script_method_overloads();
+				if (const auto found = table.find(name_id); found != table.end()) { note_argument_conversions(found->second, call->arguments); }
+			}
+		}
+		// A construction's arguments convert into the parameters of the constructors its argument count reaches
+		void note_constructor_argument_conversions(uint64_t name_id, const std::vector<expression_ptr>& args) {
+			if (proof_mode || args.empty()) { return; }
+			const std::shared_ptr<class_definition> cls = constructor_class(name_id);
+			if (cls && cls->is_script_class()) { note_argument_conversions(std::static_pointer_cast<script_class_definition>(cls)->get_constructor_asts(), args); }
+		}
 		// A plain store into a local: the slot's declared type converts, and a slot that may hold an instance runs its
 		// class's operator= for anything but that class
 		bool local_store_may_run_code(const local_info& l, const expression_ptr& value) {
@@ -1053,6 +1125,7 @@ namespace {
 		void note_captured_method_call(identifier_expr* root, const member_expr* m, const call_expr* call) {
 			adm.captured_method_calls.push_back({ root->symbol_id, m->member_id, m->member, m });
 			collect_element_method(m->member_id, m->member, m, call);
+			note_method_argument_conversions(nullptr, m->member_id, call);
 		}
 
 		// Every touch of a captured name, with the loop variable that indexes it (SIZE_MAX: not indexed by one): an index-written
@@ -1376,6 +1449,7 @@ namespace {
 				collect_type(p.type);
 				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
 				if (proof_mode && p.default_value && conversion_may_run_code(p.type, p.default_value)) { root_escaped = true; }
+				note_converting_construction(p.type, p.default_value, p.default_value.get());
 			}
 			if (ok) {
 				collect_type(fn->return_type);
@@ -1456,6 +1530,7 @@ namespace {
 
 			const class_definition* saved_class = method_class;
 			method_class = declaring;
+			const type_info_ptr saved_return = std::exchange(return_type, decl->return_type);
 			decltype(scopes) saved;
 			saved.swap(scopes);
 			scopes.emplace_back();
@@ -1465,6 +1540,7 @@ namespace {
 				declare(p.symbol_id, typed_local(p.type));
 				collect_type(p.type);
 				if (p.default_value && !walk_expr(p.default_value)) { ok = false; break; }
+				note_converting_construction(p.type, p.default_value, p.default_value.get());
 			}
 			if (ok) {
 				collect_type(decl->return_type);
@@ -1474,6 +1550,7 @@ namespace {
 			}
 			scopes.swap(saved);
 			method_class = saved_class;
+			return_type = saved_return;
 			return ok;
 		}
 
@@ -1654,6 +1731,7 @@ namespace {
 			const class_definition* saved_class = method_class;
 			std::string saved_context = std::move(context);
 			method_class = cls;
+			const type_info_ptr saved_return = std::exchange(return_type, nullptr);   // a constructor or initializer returns no value
 			context = std::move(where);
 			decltype(scopes) saved;
 			saved.swap(scopes);
@@ -1662,6 +1740,7 @@ namespace {
 			scopes.swap(saved);
 			context = std::move(saved_context);
 			method_class = saved_class;
+			return_type = saved_return;
 			return ok;
 		}
 
@@ -1704,6 +1783,7 @@ namespace {
 					if (!initializer) { continue; }
 					if (!walk_expr(initializer)) { return false; }
 					admitted_expressions.push_back(initializer);
+					note_converting_construction(cls->get_field_declared_type(field_id), initializer, initializer.get());
 				}
 				return true;
 			});
@@ -1723,6 +1803,7 @@ namespace {
 					declare(p.symbol_id, typed_local(p.type));
 					collect_type(p.type);
 					if (p.default_value && !walk_expr(p.default_value)) { return false; }
+					note_converting_construction(p.type, p.default_value, p.default_value.get());
 				}
 				for (const auto& init : cls->effective_initializers(*ctor)) {
 					for (const auto& arg : init.arguments) {
@@ -1859,7 +1940,7 @@ namespace {
 		std::vector<uint64_t> operator_names() {
 			std::vector<uint64_t> ids;
 			for (const char* op : { "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "<=>", "~", "[]", "=", "()",
-			                        "to_string", "to_bool" }) {
+			                        "to_string", "to_bool", "to_int", "to_float", "to_char" }) {
 				const uint64_t id = sym->intern(op);
 				ids.push_back(id);
 				if (const uint64_t compound = eng->compound_operator_id(id)) { ids.push_back(compound); }
@@ -1929,11 +2010,13 @@ namespace {
 				if (!visited_methods.insert(decl.get()).second) { continue; }
 				note_body(decl);
 				const bool walked = walk_as_member_of(declaring, where, [&] {
+					return_type = decl->return_type;
 					for (const auto& p : decl->parameters) {
 						if (p.symbol_id == UINT64_MAX) { p.symbol_id = sym->intern(p.name); }
 						declare(p.symbol_id, typed_local(p.type));
 						collect_type(p.type);
 						if (p.default_value && !walk_expr(p.default_value)) { return false; }
+						note_converting_construction(p.type, p.default_value, p.default_value.get());
 					}
 					collect_type(decl->return_type);
 					for (const auto& d : decl->body->declarations) {
@@ -2029,6 +2112,7 @@ namespace {
 			case node_type::return_stmt: {
 				auto* n = static_cast<return_stmt*>(s.get());
 				if (proof_mode && n->value && conversion_may_run_code(return_type, n->value)) { root_escaped = true; }
+				note_converting_construction(return_type, n->value, n);
 				return walk_expr(n->value);
 			}
 			case node_type::break_stmt:
@@ -2075,6 +2159,7 @@ namespace {
 					ok = walk_target(n->initializer, "reference declaration", /*aliasing*/ true);
 				} else {
 					ok = walk_expr(n->initializer);
+					note_converting_construction(n->type, n->initializer, n);
 				}
 				if (!ok) { return false; }
 				local_info info = typed_local(n->type);
@@ -2173,6 +2258,7 @@ namespace {
 				if (proof_mode && store_may_run_code(n->target, n->value, n->op.type != token_type::equal)) { root_escaped = true; }
 				check_local_write(n->target.get(), true);
 				note_replaced(n->target.get());
+				if (n->op.type == token_type::equal) { note_store_conversions(n->target.get(), n->value, n); }
 				return walk_target(n->target, "assignment") && walk_expr(n->value);
 			}
 			case node_type::call_expr:
@@ -2216,6 +2302,7 @@ namespace {
 				collect_type(n->type);
 				collect_type(named);
 				adm.constructions.push_back({ name_id, sym->get_string(name_id), n->arguments.size(), e.get() });
+				note_constructor_argument_conversions(name_id, n->arguments);
 				for (const auto& a : n->arguments) {
 					if (!walk_expr(a)) { return false; }
 				}
@@ -2252,6 +2339,7 @@ namespace {
 				auto* n = static_cast<cast_expr*>(e.get());
 				if (n->by_reference) { return fail(e.get(), "cast<T&> is not allowed in a parallel body"); }
 				if (proof_mode && conversion_may_run_code(n->target, n->operand)) { root_escaped = true; }
+				note_converting_construction(n->target, n->operand, n);
 				note_death(n->target);   // the cast's value is a temporary
 				return walk_expr(n->operand);
 			}
@@ -2434,6 +2522,7 @@ namespace {
 					} else {
 						collect_element_method(m->member_id, m->member, m, call);
 					}
+					note_method_argument_conversions(receiver_class(m->object.get()), m->member_id, call);
 					if (chain_root_is_element(m->object) && !parallel_readonly_method(m->member)) { adm.element_mutated = true; }
 					if (proof_mode && !chain_root_is_element(m->object) && (!parallel_readonly_method(m->member) || builtin_runs_script(m->member, proof_chain_type(m->object.get())))) {
 						if (global_rooted(m->object.get())) { return fail(m, "method '" + std::string(m->member) + "' may mutate program state"); }
@@ -2475,6 +2564,7 @@ namespace {
 					               "()' in a parallel body (a bare call of a C++ base method)");
 				}
 				collect_element_method(callee->symbol_id, callee->name, callee, call);
+				note_method_argument_conversions(method_class, callee->symbol_id, call);
 				for (const auto& a : call->arguments) {
 					if (!walk_expr(a)) { return false; }
 				}
@@ -2483,6 +2573,7 @@ namespace {
 			// A script class's construction: the barrier walks what it runs (admit_construction)
 			if (!proof_mode && !primitive_ctor_name(callee->name) && constructor_class(callee->symbol_id)) {
 				adm.constructions.push_back({ callee->symbol_id, callee->name, call->arguments.size(), callee });
+				note_constructor_argument_conversions(callee->symbol_id, call->arguments);
 				for (const auto& a : call->arguments) {
 					if (!walk_expr(a)) { return false; }
 				}
@@ -2514,6 +2605,7 @@ namespace {
 					const auto& params = callee_fn->parameters();
 					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
 						if (proof_mode && !params[i].is_reference && conversion_may_run_code(params[i].type, call->arguments[i])) { root_escaped = true; }
+						if (!params[i].is_reference) { note_converting_construction(params[i].type, call->arguments[i], call->arguments[i].get()); }
 						if (!params[i].is_reference) { continue; }
 						const expression* arg = call->arguments[i].get();
 						const bool const_ref = !proof_mode && params[i].is_const;
@@ -4464,6 +4556,20 @@ JAI_NOINLINE checked_result<void> parallel_method_not_admitted(uint64_t name_id)
 	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 		"method '{0}' was not admitted in this parallel body (admitted: single-overload public methods of the element's class or its "
 		"bases touching only element, local, or captured-read state)", name_id);
+}
+
+std::optional<script_value> parallel_chunk_binding(engine& eng, uint64_t name_id) {
+	const parallel_region_table* region = eng.parallel_region_active() ? eng.parallel_state().active_region : nullptr;
+	const parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
+	if (!chunk || !chunk->definition_env || !*chunk->definition_env) { return std::nullopt; }
+	auto bound = (*chunk->definition_env)->get(name_id);
+	return bound ? std::move(bound.value()) : script_value(std::monostate{}, &eng);
+}
+
+JAI_NOINLINE checked_result<void> parallel_conversion_not_admitted(uint64_t class_name_id) {
+	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+		"converting constructor of '{0}' was not admitted in this parallel body (the statement admits a conversion into a slot it can "
+		"type)", class_name_id);
 }
 
 // === Shared objects: what a worker reaches through a host call is read through a borrow, never through its handle ===

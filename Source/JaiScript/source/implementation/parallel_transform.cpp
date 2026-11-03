@@ -3496,14 +3496,14 @@ namespace {
 					ctx.error = parallel_worker_error{ failing(),
 						make_error_code(runtime_error_code::evaluation_failed),
 						ctx.backend->get_current_exception().what(),
-						ctx.limits.terminal_error };
+						ctx.limits.terminal_error, {} };
 				} else if (!r) {
 					ctx.error = parallel_worker_error{ failing(), r.error(),
-						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error };
+						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error, {} };
 				}
 			} catch (const std::exception& e) {
 				ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
-					e.what(), ctx.limits.terminal_error };
+					e.what(), ctx.limits.terminal_error, {} };
 			}
 		} catch (...) {
 			ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),

@@ -1888,30 +1888,29 @@ struct engine::implementation {
         }
         return result;
     }
-    // A name's host registrations as the checker reads them (host_function_signatures, host_function_result, a host class's
-    // tables), kept per name while the registration surface and the class's own tables stand
-    struct host_signature_entry {
-        uint64_t surface = UINT64_MAX;
-        const class_definition* cls = nullptr;
-        uint64_t methods = 0, fields = 0, digest = 0;
+    // A host class's tables digested once while the registration surface and its own method and field epochs stand
+    struct host_class_entry {
+        uint64_t surface = UINT64_MAX, methods = 0, fields = 0, digest = 0;
     };
-    std::unordered_map<std::string, host_signature_entry> host_signatures_;
+    std::unordered_map<const class_definition*, host_class_entry> host_classes_;
+    // A name's host registrations as the checker reads them (host_function_signatures, host_function_result, a host class's
+    // tables); a name the host never registered costs three lookups
     uint64_t host_signature(engine& self, const std::string& name) {
-        const auto found = classes.find(name);
-        const class_definition* cls = found != classes.end() && found->second && found->second->is_cpp_class() ? found->second.get() : nullptr;
-        host_signature_entry& entry = host_signatures_[name];
-        if (entry.surface == check_surface_epoch_ && entry.cls == cls &&
-            (!cls || (entry.methods == cls->method_epoch() && entry.fields == cls->field_shape_epoch()))) {
-            return entry.digest;
-        }
         uint64_t result = 0;
-        std::vector<engine::host_overload_signature> overloads;
-        if (self.host_function_signatures(name, overloads)) {
-            for (const auto& o : overloads) { result += overload_signature(self, o.arity, o.param_types, {}); }
+        if (auto it = overloadedFunctions.find(name); it != overloadedFunctions.end()) {
+            for (const auto& o : it->second.overloads) { result += overload_signature(self, o.argCount, o.paramTypes, {}); }
+        } else if (auto arity = functionArities.find(name); arity != functionArities.end()) {
+            result = mix_key(arity->second, 0);
         }
-        if (script_value_type kind; self.host_function_result(name, kind)) { result = mix_key(result, uint64_t(kind) + 1); }
-        if (cls) { result = mix_key(result, host_class_signature(self, *cls, 0)); }
-        entry = {check_surface_epoch_, cls, cls ? cls->method_epoch() : 0, cls ? cls->field_shape_epoch() : 0, result};
+        if (auto kind = host_results_.find(name); kind != host_results_.end()) { result = mix_key(result, uint64_t(kind->second) + 1); }
+        if (auto found = classes.find(name); found != classes.end() && found->second && found->second->is_cpp_class()) {
+            const class_definition& cls = *found->second;
+            host_class_entry& entry = host_classes_[&cls];
+            if (entry.surface != check_surface_epoch_ || entry.methods != cls.method_epoch() || entry.fields != cls.field_shape_epoch()) {
+                entry = {check_surface_epoch_, cls.method_epoch(), cls.field_shape_epoch(), host_class_signature(self, cls, 0)};
+            }
+            result = mix_key(result, entry.digest);
+        }
         return result;
     }
     // What a check can learn about a name outside the unit asking (check_options::outside): the program's declarations of it by

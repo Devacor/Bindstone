@@ -312,7 +312,7 @@ void finish_forwarding(std::vector<std::thread>& a_forwarders) {
 	long long give_up_ms = steady_ms() + drain_grace_ms;
 	bool gave_up = false;
 	for (std::thread& forwarder : a_forwarders) {
-		HANDLE thread = forwarder.native_handle();
+		HANDLE thread = reinterpret_cast<HANDLE>(forwarder.native_handle());
 		while (WaitForSingleObject(thread, check_period_ms) == WAIT_TIMEOUT) {
 			if (steady_ms() >= give_up_ms) {
 				gave_up = true;

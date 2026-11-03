@@ -226,6 +226,17 @@ int scope_reference(const std::string& buf, const std::string& name) {
     return p == std::string::npos ? -1 : extract_int(buf.substr(p), "variablesReference");
 }
 
+// A failed check throws: every exit disarms the debugger (a parked script runs on) and joins, since destroying a joinable
+// std::thread calls std::terminate
+struct joined_script {
+    jai::debug::controller& debugger;
+    std::thread& thread;
+    ~joined_script() {
+        debugger.set_enabled(false);
+        if (thread.joinable()) { thread.join(); }
+    }
+};
+
 // Keep the regression buildable against the pre-privilege baseline: that engine
 // cannot revoke filesystem access, so the virtual-label assertion must fail there.
 template<typename Engine>
@@ -297,14 +308,7 @@ public:
             }
             script_done = true;
         });
-        struct script_guard {
-            jai::debug::controller& debugger;
-            std::thread& thread;
-            ~script_guard() {
-                debugger.set_enabled(false);
-                if (thread.joinable()) thread.join();
-            }
-        } join{eng->debugger(), script};
+        joined_script join{eng->debugger(), script};
 
         // a script that ran to its end never parked: no stop is coming
         const bool stopped = wait_for_unless(cli, buf, "\"event\":\"stopped\"", script_done);
@@ -395,6 +399,7 @@ public:
                 eng->execute("var x = 1;\nvar y = 2;\nvar z = x + y;\n");
                 done = true;
             });
+            joined_script join{eng->debugger(), script};
 
             check_true(wait_for(cli, buf, "\"event\":\"stopped\""));
             check_true(buf.find("\"reason\":\"breakpoint\"") != std::string::npos);
@@ -568,11 +573,7 @@ public:
                              "}\n"
                              "auto result = tick(counter);\n");
             });
-            struct script_guard {
-                jai::debug::controller& debugger;
-                std::thread& thread;
-                ~script_guard() { debugger.set_enabled(false); if (thread.joinable()) thread.join(); }
-            } join{eng->debugger(), script};
+            joined_script join{eng->debugger(), script};
             check_true(wait_for(cli, buf, "\"event\":\"stopped\""));
 
             std::string frames_buf;
@@ -710,6 +711,7 @@ public:
             send_dap(cli, R"({"seq":3,"type":"request","command":"setBreakpoints","arguments":{"source":{"path":")" + escaped + R"("},"breakpoints":[{"line":2},{"line":5}]}})");
             check_true(wait_for(cli, buf, "\"command\":\"setBreakpoints\""));
             std::thread script([&] { eng->execute_file(path); });
+            joined_script join{eng->debugger(), script};
             std::string stop_buf;
             check_true(wait_for(cli, stop_buf, "\"event\":\"stopped\""));
             check_true(stop_buf.find("\"verified\":true,\"line\":4") != std::string::npos, "the blank line's breakpoint binds to line 4: " + stop_buf);
@@ -766,6 +768,7 @@ public:
             dbg.set_breakpoints("<script>", {1});
             dbg.set_enabled(true);
             std::thread script([&] { second_engine->execute("var q = 1;\n"); });
+            joined_script join{dbg, script};
             for (auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs); !dbg.is_paused() && std::chrono::steady_clock::now() < deadline;) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
             check_true(dbg.is_paused());
             dbg.set_enabled(false);

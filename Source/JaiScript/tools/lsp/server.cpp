@@ -380,7 +380,7 @@ json server::dispatch(const std::string& method, const json& params, bool& handl
 	if (method == "workspace/didChangeConfiguration" || method == "$/setTrace" || method == "window/workDoneProgress/cancel") { return nullptr; }
 	if (method == "jaiscript/status") {
 		json result = json::object();
-		result.set("pending", dirty_.size() + stale_.size());
+		result.set("pending", dirty_.size() + stale_.size()).set("parses", ws_->parses());
 		{
 			std::lock_guard<std::mutex> lock(mutex_);
 			result.set("cancelled", cancelled_.size());
@@ -389,7 +389,7 @@ json server::dispatch(const std::string& method, const json& params, bool& handl
 		for (const unit* u : ws_->loaded_units()) {
 			if (u->checked_epoch == UINT64_MAX) { continue; }
 			json item = json::object();
-			item.set("uri", uri_for(u->path)).set("diagnostics", u->diagnostics.size()).set("checkMs", u->last_check_ms).set("parsed", u->parse_ok);
+			item.set("uri", uri_for(u->path)).set("diagnostics", u->diagnostics.size()).set("checkMs", u->last_check_ms).set("checks", u->checks).set("parsed", u->parse_ok);
 			units.push(std::move(item));
 		}
 		result.set("units", std::move(units));

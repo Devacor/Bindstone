@@ -575,6 +575,7 @@ void workspace::analyze(unit& u, bool want_model) {
 		failure = ex.what();
 	}
 	u.last_check_ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
+	++u.checks;
 
 	u.diagnostics = u.parse_errors;
 	if (!failure.empty()) {

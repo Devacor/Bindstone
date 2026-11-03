@@ -7,9 +7,11 @@
 #   JAI_BUILD_JOBS                   parallel build jobs (default 4)
 #   JAI_CI_LOG_DIR                   where build and check logs go (default jaiscript-ci-<checkout id> in the system temp
 #                                    directory: one folder per checkout, so worktrees running checks at once keep their logs apart)
-#   JAI_GATE_TIMEOUT                 seconds a gate may run before its watchdog (jai_gate_run, tools/ci/jai_gate_run.cpp)
-#                                    writes minidumps of its processes to <log dir>/dumps and kills them (default 1800; 0:
-#                                    none); JAI_WATCHDOG names the watchdog (default: from either build; empty: none)
+#   JAI_GATE_IDLE                    seconds a gate may print nothing before its watchdog (jai_gate_run,
+#                                    tools/ci/jai_gate_run.cpp) writes minidumps of its processes to <log dir>/dumps and kills
+#                                    them (default 900; 0: none): a hang ends a gate, slowness under load never does
+#   JAI_GATE_TIMEOUT                 seconds a gate may run in all before the same (default 0: none); JAI_WATCHDOG names the
+#                                    watchdog (default: from either build; empty: none)
 #                                    Values passed through the watchdog get MSYS path conversion (/W4 arrives as C:/.../W4)
 #   VSDEVCMD                         on Windows, the VsDevCmd.bat a build runs under when cl is not on PATH (default: the
 #                                    latest Visual Studio vswhere reports)
@@ -101,7 +103,10 @@ jai_watchdog() {
 	local exe
 	JAI_WATCHDOG=""
 	for exe in "$JAI_RELEASE_DIR/bin/jai_gate_run" "$JAI_DEBUG_DIR/bin/jai_gate_run"; do
-		[ -f "$exe" ] || [ -f "$exe.exe" ] && { JAI_WATCHDOG="$exe"; break; }
+		[ -f "$exe" ] || [ -f "$exe.exe" ] || continue
+		# a build from before --idle refuses it, which would turn every gate red
+		"$exe" --idle=1 -- "$BASH" -c : > /dev/null 2>&1 && { JAI_WATCHDOG="$exe"; break; }
+		echo "$exe predates --idle: rebuild it (jai_build builds it with any target)"
 	done
 	export JAI_WATCHDOG
 	[ -n "$JAI_WATCHDOG" ] || echo "no jai_gate_run in either build: the gates run without a watchdog"
@@ -110,7 +115,7 @@ jai_watchdog() {
 # jai_watched <program> <args...>: the program under the watchdog when jai_watchdog found one, else as is
 jai_watched() {
 	if [ -n "$JAI_WATCHDOG" ]; then
-		"$JAI_WATCHDOG" "--timeout=${JAI_GATE_TIMEOUT:-1800}" "--dump-dir=$JAI_CI_LOG_DIR/dumps" -- "$@"
+		"$JAI_WATCHDOG" "--idle=${JAI_GATE_IDLE:-900}" "--timeout=${JAI_GATE_TIMEOUT:-0}" "--dump-dir=$JAI_CI_LOG_DIR/dumps" -- "$@"
 	else
 		"$@"
 	fi
@@ -128,7 +133,7 @@ jai_gates() {
 		return 0
 	fi
 	echo "red: $* ($cfg; log: $log)"
-	grep -aE "::error::|^  x |Failed tests|FAIL|watchdog: .* exceeded [0-9]+ s" "$log" | head -8 | cut -c1-220
+	grep -aE "::error::|^  x |Failed tests|FAIL|watchdog: .* (exceeded|printed nothing for) [0-9]+ s" "$log" | head -8 | cut -c1-220
 	return 1
 }
 

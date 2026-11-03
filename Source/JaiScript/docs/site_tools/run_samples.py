@@ -261,6 +261,7 @@ def main():
         rel = page.relative_to(SITE).as_posix()
         samples, pool, notes = plan_page(page)
         notes_all.extend("%s: %s" % (rel, n) for n in notes)
+        print("%s: %d samples" % (rel, len(samples)), flush=True)
         for s in samples:
             total += 1
             tag = "%s:%d (sample %d, %s)" % (rel, s["line"], s["index"], s["file"])

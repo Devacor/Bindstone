@@ -527,8 +527,8 @@ public:
 
             std::filesystem::remove(fileA);
             std::filesystem::remove(fileB);
-            check(!std::filesystem::equivalent(std::filesystem::path(fileA).parent_path(), std::filesystem::temp_directory_path()),
-                  "File fixtures must live in a process-owned directory, not the shared temp root");
+            check(std::filesystem::equivalent(std::filesystem::path(fileA).parent_path(), jai::foundry::test_temp_directory()),
+                  "File fixtures live in the run's own directory");
         });
 
         test("current_and_root_source_file_follow_the_executing_frame", [this]() {

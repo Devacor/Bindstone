@@ -23601,6 +23601,7 @@ JAI_FORCEINLINE void vm_backend::pop_lean_frame(call_record& rec) {
 	rec.method_result_anchor = false;
 	rec.f.code = nullptr;
 	rec.f.this_inst = nullptr;
+	rec.cells.loop = k_invalid_u32;   // a raise unwinds a frame with its block active, and a loop-free body pushed here next resets no cells
 	--current_call_depth_;
 	frames_.pop_back();
 	sync_unit();
@@ -23694,6 +23695,7 @@ void vm_backend::pop_script_frame_core(call_record& rec) {
 	rec.f.code = nullptr;   // record frames borrow the chunk (chunk_cache_ pins it), no f.pin
 	rec.f.this_inst = nullptr;
 	rec.raw_prepared = nullptr;
+	rec.cells.loop = k_invalid_u32;
 	--current_call_depth_;
 	frames_.pop_back();
 	sync_unit();   // the caller's unit again (a store only while a name has versions)

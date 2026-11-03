@@ -7938,9 +7938,9 @@ bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binary_expr>& expr
 	// op_binary. Sub-lifts emit left-then-right (subtree evaluation order preserved);
 	// a subscript operand LEFT of a lifting right subtree materializes into a temp first
 	// (op_operand_temp) so its read - and any index error - keeps the interpreter's
-	// left-to-right place (fuzz seed 100991); an identifier or literal there still
-	// resolves at op time (only an undefined name or a getter-backed field could observe
-	// that, and the shape is the method-body hot path). Gated to real function-body
+	// left-to-right place (fuzz seed 100991), as does a name user code can reach (fuzz seeds
+	// 4200550, 5202391); a private local or a literal there still resolves at op time
+	// (nothing the right subtree runs can write or unbind it). Gated to real function-body
 	// chunks (top level and default-arg chunks have no window of their own).
 	if (!reference_ && temps_active_ && chunk_->is_function_body) {
 		auto operand_shape = [this](const expression* e) -> bool { return lift_operand_shape(e); };
@@ -7965,7 +7965,7 @@ bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binary_expr>& expr
 			// before the sink writes).
 			auto sequence_left = [&](fused_operand& lo, const expression* l, const expression* r) {
 				const bool ref_left = reference_slot_operand(l) && (temp_only(r) || !operand_shape(r));
-				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && observing_hoist_in(r)) || (env_identifier(l) && hoist_in(r)) || read_ahead_of(l, r));   // its value precedes a read in the right subtree that may run user code; an environment name that may be a property reference reads ahead of any hoisted read; a call to its right may take it by reference
+				const bool snap_left = l->get_type() == node_type::identifier_expr && ((!private_local(l) && (observing_hoist_in(r) || !operand_shape(r))) || (env_identifier(l) && hoist_in(r)) || read_ahead_of(l, r));   // its value precedes a read or a lifted binary in the right subtree that may run user code (any binary may: a custom operator) or raise; an environment name that may be a property reference reads ahead of any hoisted read; a call to its right may take it by reference
 				if (!ref_left && !snap_left && (!lo.is_subscript() || operand_shape(r))) { return; }
 				fused_binary_proto p;
 				p.left = std::move(lo);

@@ -64,7 +64,7 @@ public:
         });
 
         test("vm_deep_catch_and_rethrow_is_linear", [this]() {
-            auto engine = engine::make();
+            auto engine = jai::foundry::make_default_engine();
             engine->set_backend(backend_type::vm);
             engine->execution_budget(0);
             check_eq(script_int(20000), engine->execute(R"(
@@ -323,7 +323,7 @@ public:
                 "r;\n";
             std::string first_runtime, first_throw;
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(*e);
                 const std::string runtime = e->execute_file_source(path, runtime_src).to_string();
@@ -1432,7 +1432,7 @@ public:
             for (const char* source : sources) {
                 std::string texts[2];
                 for (int b = 0; b < 2; ++b) {
-                    auto eng = engine::make();
+                    auto eng = jai::foundry::make_default_engine();
                     eng->set_backend(b == 0 ? backend_type::interpreter : backend_type::vm);
                     try { eng->execute(source); texts[b] = "<no throw>"; } catch (const std::exception& e) { texts[b] = e.what(); }
                     check_eq((int64_t)3, eng->execute("1 + 2").as_int(), source);

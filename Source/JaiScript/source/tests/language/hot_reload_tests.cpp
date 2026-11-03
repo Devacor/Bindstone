@@ -11,6 +11,10 @@
 #include <filesystem>
 #include <fstream>
 
+#ifndef __has_feature
+#define __has_feature(x) 0
+#endif
+
 using namespace jai::foundry;
 
 #ifdef _WIN32
@@ -84,7 +88,10 @@ public:
 				check_eq((int64_t)1, engine->execute("KEPT.next()").as_int(), label + ": the suspended coroutine runs its own body");
 				check_eq((int64_t)200000, engine->execute("counter().next()").as_int(), label + ": a new coroutine runs the last version");
 				check_eq(engine->execute("drive()").as_int(), engine->execute("drive()").as_int(), label + ": the last version still runs");
+#if !defined(__SANITIZE_ADDRESS__) && !__has_feature(address_sanitizer)
+				// ASan's quarantine holds freed memory, so private bytes keep growing there
 				check(at_200 <= at_100 + 4 * 1024 * 1024, label + ": 100 more reloads keep memory flat (" + std::to_string(at_100) + " -> " + std::to_string(at_200) + ")");
+#endif
 				std::error_code ignored;
 				std::filesystem::remove(file, ignored);
 			}
@@ -853,14 +860,18 @@ public:
                     check(false, result);
                 }
             }
-            // migrating ten times the instances costs about ten times as much on any machine
-            auto reload_cost = [](int n) -> double {
+            // migrating ten times the instances does ten times the field work: each instance migrates once
+            auto reload_work = [](int n) -> size_t {
                 auto eng = jai::foundry::make_engine();
                 eng->execute("class Entity { auto x = 0.0; auto health = 100; auto active = true; } auto entities = []; "
                              "for (auto i = 0; i < " + std::to_string(n) + "; i = i + 1) { auto e = Entity(); e.x = i * 1.0; entities.push(e); }");
-                return time_seconds([&] { eng->execute("class Entity { auto x = 0.0; auto z = 0.0; auto health = 100; auto armor = 0; }"); });
+                const size_t before = eng->hot_reload_field_migrations();
+                eng->execute("class Entity { auto x = 0.0; auto z = 0.0; auto health = 100; auto armor = 0; }");
+                return eng->hot_reload_field_migrations() - before;
             };
-            check_scales_linearly(reload_cost, 100, 1000, 3.0, 5, "hot reload migration of 1000 vs 100 instances");
+            const size_t at_hundred = reload_work(100);
+            check(at_hundred > 0, "a reload migrates the live instances");
+            check_eq(10 * at_hundred, reload_work(1000), "hot reload migration of 1000 vs 100 instances");
         });
 
         test("fields_unchanged_optimization", [this]() {

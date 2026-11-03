@@ -89,7 +89,7 @@ public:
 	}
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		if (vm) { e->max_call_depth(backend_type::vm, 10000); }   // a runaway recursion raises the cap text, as the interpreter does, inside the budget
 		stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -100,7 +100,7 @@ public:
 
 	// the VM's listing of a snippet (the closed loops and the refusals appear under each chunk)
 	std::string listing_of(const std::string& source) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(backend_type::vm);
 		stdlib::register_all(*e); register_host_math_fixture(*e);
 		auto* symbolizer = e->get_symbolizer();
@@ -119,7 +119,7 @@ public:
 	// the listing of every chunk the engine's own compiler makes for a script (the checker's proofs stamped, so the grafts of the
 	// inliner appear), through the disassembly sink; the script runs on the vm
 	std::string listing_run(const std::string& source) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(backend_type::vm);
 		stdlib::register_all(*e); register_host_math_fixture(*e);
 		std::string out;
@@ -130,7 +130,7 @@ public:
 	// the compiled program of a snippet and its symbolizer (the manifest controls mutate a copy)
 	struct compiled_snippet { std::shared_ptr<engine> eng; std::shared_ptr<jai::vm::chunk> program; std::shared_ptr<jai::vm::chunk> function; };   // function: the first function's body (its loops close; program-scope loops run over environment values)
 	compiled_snippet compile_snippet(const std::string& source) {
-		compiled_snippet c; c.eng = engine::make();
+		compiled_snippet c; c.eng = jai::foundry::make_default_engine();
 		c.eng->set_backend(backend_type::vm);
 		stdlib::register_all(*c.eng);
 		auto* symbolizer = c.eng->get_symbolizer();
@@ -267,7 +267,7 @@ public:
 				std::string seen[2];
 				for (int backend = 0; backend < 2; ++backend) {
 					probe_box box;
-					auto e = engine::make();
+					auto e = jai::foundry::make_default_engine();
 					e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -301,7 +301,7 @@ public:
 			const char* spin = "function spin(int n, int k) -> int { int y = 0; int acc = 0; while (y < n) { acc += k; y = y + 1; } return acc; }";
 			std::string seen[2];
 			for (int backend = 0; backend < 2; ++backend) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execute(spin);
@@ -541,7 +541,7 @@ public:
 			both(script, "105", "env-resident container");   // 45 + 45 + 7 + 8
 		});
 		test("the_expression_form_lowers_to_a_typed_load_and_the_loop_closes", [this]() {
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -628,7 +628,7 @@ public:
 		});
 		test("a_reference_alias_of_a_typed_global_proves_its_element_reads", [this]() {
 			// var& g = G with G an array<int>: the alias's reads are proven int, the loop closes as a cell block
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -670,7 +670,7 @@ public:
 		});
 		test("a_store_to_a_typed_parameter_takes_the_typed_row_and_the_loop_closes", [this]() {
 			// v = v + dv with both declared int parameters: a parse-proven typed store, so the loop is a cell block
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -725,7 +725,7 @@ public:
 				std::string seen[2];
 				for (int backend = 0; backend < 2; ++backend) {
 					order_box box;
-					auto e = engine::make();
+					auto e = jai::foundry::make_default_engine();
 					e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 					stdlib::register_all(*e); register_host_math_fixture(*e);
 					dynamic_binder<order_box>(*e, "order_box")
@@ -744,7 +744,7 @@ public:
 		});
 		test("a_reference_declaration_keeps_a_function_on_the_lazy_env_path", [this]() {
 			// var& g = G lands in a frame slot: the body needs no per-call scope environment
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -795,7 +795,7 @@ public:
 			std::string seen[2];
 			for (int backend = 0; backend < 2; ++backend) {
 				shadow_box box;
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend((backend == 1) ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				dynamic_binder<shadow_box>(*e, "shadow_box")
@@ -825,7 +825,7 @@ public:
 		test("a_read_inside_an_index_expression_lands_in_a_temp_and_the_outer_read_fuses", [this]() {
 			// p[k + Q[i % 8]]: the inner read lands in a temp first, the outer read takes the T_LOAD row with the temp
 			// as an index operand, and the loop closes as a cell block
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -910,7 +910,7 @@ public:
 			check_true(vm.rfind("90,203,2.5,22,throw:", 0) == 0, "typed, postfix, float and reference shapes: " + vm);
 			check_true(vm.find("Integer overflow in '++'") != std::string::npos && vm.find("Integer overflow in '--'") != std::string::npos, "the general op's overflow texts: " + vm);
 			check_true(vm.size() >= 4 && vm.compare(vm.size() - 4, 4, ",2,7") == 0, "the shared cell and the var slot: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -952,7 +952,7 @@ public:
 			both(script, "", "unproven index binary, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("110,110,", 0) == 0, "the array and the map land the same sum: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -991,7 +991,7 @@ public:
 			const std::string interp = run_on(false, script);
 			const size_t tail = vm.rfind(",throw:");
 			check_true(tail != std::string::npos && vm.substr(tail) == interp.substr(interp.rfind(",throw:")), "the read-first and call-first texts agree: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1029,7 +1029,7 @@ public:
 			both(script, "", "index trees, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("131,40,throw:", 0) == 0, "the texel, the tree and the conversion error: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1078,7 +1078,7 @@ public:
 			both(script, "", "branching cells, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("-3,0,0,62,44,10,throw:", 0) == 0 && vm.find("|6") != std::string::npos, "diamonds, the guarded arm, continue, break and the overflow in the arm: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1117,7 +1117,7 @@ public:
 			both(script, "", "env cell, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("", 0) == 0 && vm.find(",") != std::string::npos, "ran: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1174,7 +1174,7 @@ public:
 			both(script, "", "flat column, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find(",") != std::string::npos, "ran: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1249,7 +1249,7 @@ public:
 			both(script, "", "counted loops, proofs off", false);
 			const std::string vm = run_on(true, script);
 			check_true(vm.rfind("14,", 0) == 0 && vm.find("throw:Integer overflow in '+='") != std::string::npos, "the clear and the overflow text: " + vm);
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			auto* symbolizer = e->get_symbolizer();
@@ -1774,7 +1774,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 					std::error_code ec;
 					std::filesystem::last_write_time(dir / module, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
 				};
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->add_include_path(dir.string());
@@ -1830,7 +1830,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				"function f() { int i = 0; while (i < 2) { for (int j = 0; j < 8; ++j) {} } } var r = 0; try { f(); } catch (e) { r = 7; } r;",
 			};
 			auto run = [](bool vm, const char* src, uint64_t steps, double seconds, uint32_t miss_every) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				if (steps) { e->execution_step_budget(steps); }
@@ -1866,7 +1866,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				"sink(s, a[1]); for (int r = 0; r < 6; r++) { i = (-((r * 0))); } } } f();",
 			};
 			auto run = [](bool vm, const char* src, uint64_t steps) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				e->add_variadic_function("sink", [raw = e.get()](const std::vector<script_value>&) { return script_value(std::monostate{}, raw); });
 				e->execution_step_budget(steps);
@@ -1919,7 +1919,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 			both(script, expected, "proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(script).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(expected, got, "under an injected miss at every " + std::to_string(every));
@@ -2048,7 +2048,7 @@ var looping = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int b
 var across = function(int n) { string s = ""; try { s = to_string(looping(n)); } catch (e) { s = "caught " + e; } return s + "|" + to_string(looping(2)); };
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2119,7 +2119,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			check(adopted_listing.find("C_ARITH_ANY") != std::string::npos, "an adopted kind keeps the run-time kinds: " + adopted_listing);
 			// the switch off: the same pinned forms and the same results (the differential the fuzz's --no-passes chain runs)
 			auto run_passes_off = [&](bool vm, const std::string& script) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->ir_passes(false);
@@ -2128,7 +2128,7 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 			};
 			for (const probe& p : probes) { check_eq(run_passes_off(false, std::string(defs) + " " + p.call), run_passes_off(true, std::string(defs) + " " + p.call), std::string(p.call) + " passes off: both backends"); }
 			{
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(backend_type::vm);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				auto* symbolizer = e->get_symbolizer();
@@ -2157,7 +2157,7 @@ var probe = function(int n, int at) { int i = 0; while (i < n) { retag_at(i, at)
 			// same_unit: the host redeclares through the program's own unit (a reload of its file writes in place, the retag this row
 			// is about); otherwise through a literal, another unit, which shadows and leaves the loop on its own cell
 			auto run_with = [&](bool vm, const std::string& script, bool proofs, bool same_unit) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2209,7 +2209,7 @@ function probe(int n, int at, int how) -> string {
 )JAI";
 			struct outcome { std::string value; unsigned long long misses = 0; };
 			auto run_with = [&](bool vm, const std::string& call, bool proofs) -> outcome {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2255,7 +2255,7 @@ function probe(int n, int at, int how) -> string {
 			check_eq(expected_seen, seen, "each change rereads or misses at the landing: " + observed);
 			std::string listing;
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->add_function("host_change", [](int) {});
 				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
 				try { e->execute(std::string(defs) + " probe(8, 2, 0);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
@@ -2279,7 +2279,7 @@ function nreads(int n) -> int { int acc = 0; for (int i = 0; i < n; ++i) { if (i
 function nwrites(int n) -> string { for (int i = 0; i < n; ++i) { G = G + i; F = F + 0.25; } return to_string(G) + " " + to_string(F); }
 )JAI";
 			auto run_with = [&](bool vm, const std::string& call, bool proofs, unsigned long long* entries) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2333,7 +2333,7 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 )JAI";
 			enum class mode { interp, vm, vm_off };
 			auto run_with = [&](mode m, const std::string& call, unsigned long long* entries, size_t depth_cap = 0) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(m == mode::interp ? backend_type::interpreter : backend_type::vm);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (m == mode::vm_off) { e->ir_passes(false); }
@@ -2360,7 +2360,7 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 			check(run_with(mode::vm, "traced_rec(3);", nullptr).find("graft_calls.jai:11 ") != std::string::npos, "the grafted hop's frame names its line: " + run_with(mode::vm, "traced_rec(3);", nullptr));
 			std::string listing;
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
 				try { e->execute(std::string(defs) + " run(4, -1); straight(3);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
 			}
@@ -2383,7 +2383,7 @@ int slow(int n) { if (n > 0) { return spin(n); } return 0; }
 int burn(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + slow(4000000); } return acc; }
 )JAI";
 			auto run_with = [&](bool vm, const std::string& call, double budget = 0.0) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (budget > 0.0) { e->execution_budget(budget); }
@@ -2414,7 +2414,7 @@ int burn(int n) { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc + slow(40
 			}
 			std::string listing;
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->disassembly_sink([&listing](const std::string& l, const std::string&) { listing += l; listing += "\n"; });
 				try { e->execute(std::string(defs) + " via(3);"); } catch (const std::exception& ex) { listing += std::string("throw:") + ex.what(); }
 			}
@@ -2459,7 +2459,7 @@ var via_local = function(int n) { var& p = box.number; box.arm(); int acc = 0; f
 var via_callee = function(int n) { box.arm(); int acc = 0; for (int i = 0; i < n; ++i) { G = 10; int z = F(G + 1); acc = acc + z; } return to_string(acc); };
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2526,7 +2526,7 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2586,7 +2586,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 )JAI";
 			auto run_with = [&](bool vm, const char* first, const char* second, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2632,7 +2632,7 @@ function loop_scalar(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + X
 			struct nulls { bool armed = false; bool flips = false; int calls = 0; };
 			auto run_null = [&](bool vm, bool flips, bool proofs) -> std::string {
 				nulls source; source.flips = flips;
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2666,7 +2666,7 @@ var overflow = function(int n, int limit) { array<int> Q = [0, 1, 2, 3]; int tot
 var conversion = function(int n) { array<int> Q = [0, 1, 2, 3]; int total = 0; int value = 0; int i = 0; while (i < n) { total = total + P[Q[i]]; value = (i + 0.5) * 2.0; i = i + 1; } return to_string(total) + "|" + to_string(value); };
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -2716,7 +2716,7 @@ var MIXED = [3, 1, 4, 1, 5, "s", 2, 6];
 			}
 			// the memory cap reached inside the loop: the general form's text and post-state on both backends
 			auto capped = [&](bool vm) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
@@ -2749,7 +2749,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 )JAI";
 			auto run_with = [&](bool vm, const std::string& script, bool proofs) -> std::string {
 				stepper source;   // outlives the engine below
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -3064,7 +3064,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string spin = "var h = function(int n) -> int { int total = 0; for (int i = 0; i < n; ++i) { int k = 0; while (k >= 0) { k = k + 1; total = total + (k & 1); } } return total; };"
 			                         " string out = \"\"; try { out = to_string(h(3)); } catch (e) { out = \"caught \" + e; } out;";
 			for (bool vm : { false, true }) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->execution_budget(0.00001);
@@ -3124,7 +3124,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// older boundary gap on both backends: the native exception is not the script's to catch through an element read)
 			struct source_t { engine* eng = nullptr; int mode = 0; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int mode, const char* body) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -3408,7 +3408,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(alias_break, "", "an alias live at a break");
 			check_eq(std::string("32"), run_on(true, alias_break));
 			auto budget_run = [&](bool vm, bool proofs, const std::string& src) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (!proofs) { e->type_proofs(false); }
@@ -3454,7 +3454,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("C_PUSH") != std::string::npos && l.find("-- open loop") == std::string::npos, "the typed pushes close the loop: " + l);
 		});
 		test("the_recognizer_marks_the_column_loop", [this]() {
-			auto vm = engine::make();
+			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
 			auto* symbolizer = vm->get_symbolizer();
@@ -3502,7 +3502,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				probe();
 			)";
 			auto run = [&](bool vm, uint32_t every) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (every) { e->cells_miss_every(every); }
 				stdlib::register_all(*e); register_host_math_fixture(*e);
@@ -3586,7 +3586,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(refl.find("CALL_TEMP") == std::string::npos, "a partner the call names as an argument keeps the stack form (the binary reads x before the call writes it): " + refl);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "calls as operands under an injected miss at every " + std::to_string(every)); }
@@ -3629,7 +3629,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string sv = run_on(true, stores);
 			check_true(sv.rfind(";|3|int|6#s|string#,;,#1|", 0) == 0 && sv.size() > 25, "the stores ran and the int local raised: " + sv);
 			auto capped = [&](bool vm) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->memory_cap(65536);
@@ -3645,7 +3645,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string vm = run_on(true, prelude + body);
 			auto injected = [&](const std::string& src, uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(src).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
@@ -3680,7 +3680,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop over p.x closes: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member read sites under an injected miss at every " + std::to_string(every)); }
@@ -3714,7 +3714,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("-- cell loop") >= 4, "the loops over the aliases close: " + std::to_string(count("-- cell loop")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias member sites under an injected miss at every " + std::to_string(every)); }
@@ -3747,7 +3747,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_MSTORE") >= 6, "the stores are block sites: " + std::to_string(count("C_MSTORE")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "member stores under an injected miss at every " + std::to_string(every)); }
@@ -3775,7 +3775,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_PROBE") + count("-- inlined ") >= 3, "the loops with the calls close through the door or take the leaf inline: " + std::to_string(count("C_PROBE")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "alias arguments under an injected miss at every " + std::to_string(every)); }
@@ -3797,7 +3797,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3808,7 +3808,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(count("C_LOAD2") >= 1, "the element loads pair: " + std::to_string(count("C_LOAD2")) + "\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "fused pairs under an injected miss at every " + std::to_string(every)); }
@@ -3830,7 +3830,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0 && vm.find("Integer overflow") != std::string::npos, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3841,7 +3841,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (const char* op : { "C_LOAD_F ", "C_JLT_FFK ", "C_JGE_FF ", "C_JGT_IIK " }) { check_true(l.find(op) != std::string::npos, std::string("the listing names ") + op + "\n" + l); }
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "pinned by kind under an injected miss at every " + std::to_string(every));
 			}
@@ -3862,7 +3862,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3886,7 +3886,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "moves at their definitions under an injected miss at every " + std::to_string(every));
 			}
@@ -3910,7 +3910,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3918,7 +3918,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("C_SIZE") != std::string::npos && l.find("SIZE_TEMP") != std::string::npos, "the size lands in a temp and the block reads it\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a program-scope size under an injected miss at every " + std::to_string(every));
 			}
@@ -3941,7 +3941,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -3954,7 +3954,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "logical chains as values under an injected miss at every " + std::to_string(every));
 			}
@@ -3979,7 +3979,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.find("-- cell loop", at) != std::string::npos && l.find("C_BAIL", at) != std::string::npos, "scan's loop closes with a bail\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a door the block cannot land under an injected miss at every " + std::to_string(every));
 			}
@@ -4009,7 +4009,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(run_on(true, prelude + body).rfind("95060|354612|456.0|24|", 0) == 0, "the values: " + run_on(true, prelude + body));
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -4020,7 +4020,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at5 != std::string::npos && l.find("-- cell loop", at5) != std::string::npos && l.find("C_ARGS", at5) != std::string::npos, "run5's loop closes over the kept call\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "element arguments under an injected miss at every " + std::to_string(every));
 			}
@@ -4042,7 +4042,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -4051,7 +4051,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.find("C_JTRUTH", at) != std::string::npos, "scan's block branches on the landed result\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "a call's result as a branch under an injected miss at every " + std::to_string(every));
 			}
@@ -4075,7 +4075,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -4085,7 +4085,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(at != std::string::npos && l.substr(at, end == std::string::npos ? std::string::npos : end - at).find("-- cell loop") != std::string::npos, "count_mon's loop closes\n" + l);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "enum values read by name under an injected miss at every " + std::to_string(every));
 			}
@@ -4106,7 +4106,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -4118,7 +4118,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "while (true) loops under an injected miss at every " + std::to_string(every));
 			}
@@ -4146,7 +4146,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "25|21|3|4.5|0", "loops entered at their heads, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
@@ -4159,7 +4159,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "loops entered at their heads under an injected miss at every " + std::to_string(every));
 			}
@@ -4188,12 +4188,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, expected, "counted loops entered at their prep, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->execute(prelude);
 				struct shape { const char* call; uint64_t entries; };
 				for (const shape& sh : { shape{ "once(1);", 1 }, shape{ "once(0);", 0 }, shape{ "once(6);", 1 }, shape{ "brk(5);", 1 }, shape{ "later(4);", 1 } }) {
@@ -4234,7 +4234,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					"}\n";
 				const std::string call = "auto p = find_tile_near(0, 2, 0, 12); auto q = find_tile_near(0, 3, 0, 5); to_string(p[0]) + \",\" + to_string(p[1]) + \"|\" + to_string(q[0]);";
 				both(defs + call, "26,29|-1", "a member site on a body-declared local");
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->execute(defs);
 				e->execute("find_tile_near(0, 2, 0, 12);");
 				for (int k = 0; k < 3; ++k) {
@@ -4247,7 +4247,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "counted loops entered at their prep under an injected miss at every " + std::to_string(every));
 			}
@@ -4266,7 +4266,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t at = l.find("== walk ");
 			const std::string part = at == std::string::npos ? l : l.substr(at, l.find("\n== ", at + 1) - at);
 			check_true(part.find("-- cell loop") != std::string::npos && part.find("(boundaries") != std::string::npos, "walk's loop closes with a boundary\n" + part);
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 			e->execute(defs);
 			e->execute("walk(8);");
 			for (int k = 0; k < 3; ++k) {
@@ -4298,7 +4298,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(vm.rfind("throw:", 0) != 0, "the answer: " + vm);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "landings under an injected miss at every " + std::to_string(every));
 			}
@@ -4327,12 +4327,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, expected, "range-fors entered at their head, proofs off", false);
 			const std::string vm = run_on(true, prelude + body);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off answers the same");
 			}
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->execute(prelude);
 				struct shape { const char* call; uint64_t entries; };
 				for (const shape& sh : { shape{ "sum([4]);", 1 }, shape{ "sum([]);", 0 }, shape{ "sum([1, 2, 3, 4, 5]);", 1 }, shape{ "brk([3, 4, 5]);", 1 } }) {
@@ -4345,7 +4345,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got; try { got = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(vm, got, "range-fors entered at their head under an injected miss at every " + std::to_string(every));
 			}
@@ -4369,7 +4369,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string vm = run_on(true, prelude + body);
 			check_true(vm.rfind("throw:", 0) != 0, "the shapes ran: " + vm);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(vm, off, "the middle end's switch off (no graft) agrees");
 			}
@@ -4378,7 +4378,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the loop closes around the grafts: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) { check_eq(vm, injected(every), "inlined leaves under an injected miss at every " + std::to_string(every)); }
@@ -4401,7 +4401,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts");
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("50.0,8,20.0,9.0,60.0,12.0"), off, "the middle end's switch off (no graft) agrees");
 			}
@@ -4412,7 +4412,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string vm = run_on(true, prelude + body);
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(vm, injected(every), "method grafts under an injected miss at every " + std::to_string(every)); }
@@ -4441,7 +4441,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var run = function(Q& q, int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + q.get(); } return s; };\n"
 				"Q qq = Q();\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(qq, 4);").to_string();
@@ -4474,7 +4474,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + body, "", "element member reads, proofs off", false);
 			check_true(interp.find("226.0,32.0,3,3.0,1|") == 0, interp.c_str());
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(interp, off, "the middle end's switch off agrees");
 			}
@@ -4486,7 +4486,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(l.find("-- cell loop") != std::string::npos, "the element member loop closes: " + l);
 			if (!engine::miss_injection_available()) { return; }
 			auto injected = [&](uint32_t every) -> std::string {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try { return e->execute(prelude + body).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
 			for (uint32_t every : { 1u, 2u, 3u, 7u }) { check_eq(interp, injected(every), "element member reads under an injected miss at every " + std::to_string(every)); }
@@ -4530,7 +4530,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "45,112.5,200,21,9", "lambda grafts");
 			both(script, "45,112.5,200,21,9", "lambda grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("45,112.5,200,21,9"), off, "the middle end's switch off agrees");
 			}
@@ -4582,7 +4582,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts");
 			both(script, "28,51.0,4,26.5,0", "untyped lambda grafts, proofs off", false);
 			{
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->ir_passes(false); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string off; try { off = e->execute(script).to_string(); } catch (const std::exception& ex) { off = std::string("throw:") + ex.what(); }
 				check_eq(std::string("28,51.0,4,26.5,0"), off, "the middle end's switch off agrees");
 			}
@@ -4597,7 +4597,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int f(int a) { return a * 2; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(6);").to_string();
@@ -4616,7 +4616,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string first = "int f(int a) { return a * 2; }\n";
 			const std::string prelude = first + "var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(i); } return s; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					std::string out;
 					e->execute(prelude);
@@ -4642,7 +4642,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int leaf(int a) { return a * 2 + 1; }\n"
 				"int caller(int n) { int s = 0; for (int i = 0; i < n; ++i) { int v = leaf(i); s = s + v; } return s; }\n";
 			auto sequence = [&](bool vm, bool redefine, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				try {
 					{ auto bite = e->jaibite(program); bite.execute(); }
@@ -4664,7 +4664,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int f(int a) { return 100 / a; }\n"
 				"var run = function(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + f(3 - i); } return s; };\n";
 			both(prelude + "run(6);", "", "a raise inside an inlined body");
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
 			std::string text;
 			try { e->execute(prelude + "run(6);"); } catch (const std::exception& ex) { text = ex.what(); }
 			check_true(text.find("zero") != std::string::npos || text.find("Zero") != std::string::npos, "the division text: " + text);
@@ -4832,7 +4832,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"int lim(int a) { return a + 10; }\n"
 				"var run = function(int n) { int c = 0; for (int i = 0; i < n; ++i) { if (lim(i) > 12) { c = c + 1; } } return c; };\n";
 			auto sequence = [&](bool vm) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				try {
 					e->execute(prelude);
 					const std::string a = e->execute("run(5);").to_string();
@@ -4871,7 +4871,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                  "var probe = function(int x) { if (cell_at(x, 1) != 0) { return 7; } return add1(x); };\n"
 			                                  "to_string(run(6)) + \"|\" + to_string(probe(0)) + \"|\" + to_string(probe(1));\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4897,7 +4897,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "float walk(int n) { float acc = 0.0; for (int i = 0; i < n; ++i) { acc = acc + span(i * 1.0); } return acc; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nG = new World();\nto_string(sum(8)) + \"|\" + to_string(walk(4)) + \"|\" + to_string(width());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
 				try { return e->execute_file((dir / "main.jai").string()).as_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -4924,7 +4924,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int once() { return add1(MX[0]); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nto_string(total(4)) + \"|\" + to_string(once());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -4962,7 +4962,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { int n = 0; if (live(0)) { n = n + 1; } if (live(1)) { n = n + 10; } if (live(7)) { n = n + 100; } int d = cheb(1, 2, 4, -3); return n + d; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -5046,7 +5046,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"Ledger LED;\n"
 				"int probe() { return peek(LED, mark(5)); }\n"
 				"var r = \"\"; try { r = to_string(probe()); } catch (e) { r = e; } r + \"|\" + to_string(seen);";
-			auto ie = engine::make(); ie->set_backend(backend_type::interpreter); auto ve = engine::make(); ve->set_backend(backend_type::vm);
+			auto ie = jai::foundry::make_default_engine(); ie->set_backend(backend_type::interpreter); auto ve = jai::foundry::make_default_engine(); ve->set_backend(backend_type::vm);
 			stdlib::register_all(*ie); stdlib::register_all(*ve);
 			std::string iv, vv;
 			try { iv = ie->execute(nc).as_string(); } catch (const std::exception& ex) { iv = std::string("throw:") + ex.what(); }
@@ -5066,7 +5066,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                 "int probe() { return boxv(BX, 1) * 10 + tagis(TAG); }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nto_string(probe());\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e); register_host_math_fixture(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& l, const std::string&) { *listing += l; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -5227,7 +5227,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("5|22"), got, "a miss at every " + std::to_string(every));
@@ -5274,7 +5274,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string want = run_on(false, prelude + run);
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -5309,7 +5309,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			                                  "int by_enum() { for (int m = 0; m < X.size(); ++m) { fx_at(X[m], Fx.poison); } return LOG.size(); }\n"
 			                                  "to_string(by_enum()) + \"|\" + to_string(LOG[3]);\n";
 			auto run_file = [&](bool vm, std::string* listing) -> std::string {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
 				e->import_recheck_interval(0);
 				if (listing) { e->disassembly_sink([listing](const std::string& text, const std::string&) { *listing += text; *listing += "\n"; }); }
 				e->add_include_path(dir.string());
@@ -5350,7 +5350,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("2222222205500557|31.5"), got, "a miss at every " + std::to_string(every));
@@ -5379,7 +5379,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(prelude + run, want, "the value, the container, the index, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -5436,7 +5436,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(gl.find("-- cell loop") != std::string::npos && gl.find("-- open loop") == std::string::npos && gl.find("C_BAIL") == std::string::npos && gl.find("boundaries") == std::string::npos, "gen runs whole as blocks: " + gl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -5466,7 +5466,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -5497,7 +5497,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(want.find("E:Division by zero") != std::string::npos && want.find("overflow") != std::string::npos, "the errors keep their texts: " + want);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e);
 				std::string got;
 				try { got = e->execute(prelude + run).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -5775,7 +5775,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("host_math_alias_host_reregistration", [this]() {
 			auto run = [](bool vm) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
@@ -5802,7 +5802,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every) + " re-runs the alias from its guard's mark");
@@ -5903,7 +5903,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -5972,7 +5972,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6005,7 +6005,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6036,7 +6036,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6067,7 +6067,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6134,7 +6134,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6165,7 +6165,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 4; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6210,7 +6210,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 7; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6239,7 +6239,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6271,7 +6271,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, loop);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(loop).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6313,7 +6313,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6353,7 +6353,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6433,7 +6433,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (const std::string* p : { &src, &more, &scope, &loop }) {
 				const std::string oracle = run_on(false, *p);
 				for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-					auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+					auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 					std::string got;
 					try { got = e->execute(*p).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 					check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6474,7 +6474,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6507,7 +6507,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6536,7 +6536,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6566,7 +6566,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6619,7 +6619,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6645,7 +6645,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6670,7 +6670,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6698,7 +6698,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6723,7 +6723,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6753,7 +6753,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6775,7 +6775,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "nested calls in raw arguments, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 6u, 7u, 9u, 11u, 13u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6807,7 +6807,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->max_call_depth(backend_type::vm, 10000); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->max_call_depth(backend_type::vm, 10000); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6817,7 +6817,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// the raw call reads the callee's binding at every call: a reload that rebinds it (another body, another parameter kind) is the general
 			// call's; an argument of another kind than its parameter takes the binder's conversion on the general door
 			auto session = [](bool vm) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string out;
@@ -6854,7 +6854,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t tb = l.find("== tail_store ");
 			const std::string tl = tb == std::string::npos ? l : l.substr(tb, l.find("\n== ", tb + 1) - tb);
 			check_true(tl.find("(boundaries") != std::string::npos && tl.find("C_BOUNDARY") != std::string::npos && tl.find("-- open loop") == std::string::npos, "tail_store's loop closes with a boundary: " + tl);
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e); register_host_math_fixture(*e);
 			e->execute(defs);
 			struct shape { const char* call; uint64_t iterations; uint64_t boundaries_per_iteration; };
 			for (const shape& sh : { shape{ "tail_store();", 1000, 1 }, shape{ "mid_store();", 1000, 1 }, shape{ "while_store();", 1000, 1 }, shape{ "writes_cell();", 200, 1 } }) {
@@ -6878,7 +6878,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6903,7 +6903,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t rb = l.find("== run ");
 			const std::string rl = rb == std::string::npos ? l : l.substr(rb, l.find("\n== ", rb + 1) - rb);
 			check_true(rl.find("C_BOUNDARY") != std::string::npos && rl.find("defines") != std::string::npos && rl.find("-- open loop") == std::string::npos, "run's loop closes with boundaries inside its grafts: " + rl);
-			auto e = engine::make(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
+			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 			e->execute(defs);
 			const cell_counters c0 = e->cells_counters();
 			e->execute("run(500);");
@@ -6913,7 +6913,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(uint64_t{0}, c1.misses - c0.misses, "nothing misses: " + label);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6940,7 +6940,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("math w") != std::string::npos && fl.find("-- open loop") == std::string::npos, "f's loop closes with its math in cells: " + fl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6963,7 +6963,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "one scalar table, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em); register_host_math_fixture(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em); register_host_math_fixture(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -6998,7 +6998,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rl.find("-- cell loop") != std::string::npos && rl.find("-- open loop") == std::string::npos && rl.find("C_REBIND") != std::string::npos, "run's loop closes: " + rl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7041,7 +7041,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string reload = "class Body { int x = 0; float vx = 0.0; int n = 0; Body(float a, float b, int c) { x = a; vx = b; n = c; } }\n"
 			                           "BS = [Body(1.0, 0.5, 1), Body(4.0, 1.0, 3)];\n";
 			auto sequence = [&](bool vm) {
-				auto e = engine::make(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(vm ? backend_type::vm : backend_type::interpreter); stdlib::register_all(*e);
 				std::string got;
 				try { e->execute(defs); got = e->execute("to_string(f(BS, 3))").as_string(); e->execute(reload); got += " " + e->execute("to_string(f(BS, 2))").as_string(); }
 				catch (const std::exception& ex) { got += std::string(" throw:") + ex.what(); }
@@ -7050,7 +7050,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_eq(sequence(false), sequence(true), "a reload that retypes the field");
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7096,7 +7096,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "alias rebind memo, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7139,7 +7139,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(fl.find("-- cell loop") != std::string::npos && fl.find("-- open loop") == std::string::npos && fl.find("boundaries") == std::string::npos, "sum's loops are blocks with no boundary: " + fl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7177,7 +7177,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "forwarded parameters, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7242,7 +7242,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(fl.find("C_PUSH") != std::string::npos && fl.find("-- open loop") == std::string::npos, "fill's pushes run inside the block: " + fl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7287,7 +7287,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "539827 4,9,4", "a loop inside a graft, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("539827 4,9,4"), got, "a miss at every " + std::to_string(every));
@@ -7325,7 +7325,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "337122", "a bailed graft in a loop, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every = 1; every <= 30; ++every) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("337122"), got, "a miss at every " + std::to_string(every));
@@ -7394,7 +7394,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, "523522", "a river walk and grafted fills, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u, 13u, 17u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("523522"), got, "a miss at every " + std::to_string(every));
@@ -7423,7 +7423,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, oracle, "what the statement changed, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 4u, 5u, 7u, 11u }) {
-				auto em = engine::make(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
+				auto em = jai::foundry::make_default_engine(); em->set_backend(backend_type::vm); em->cells_miss_every(every); stdlib::register_all(*em);
 				std::string got;
 				try { got = em->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7449,7 +7449,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(wl.find("-- frame program") != std::string::npos && wl.find("(general entry only)") != std::string::npos, "w is a frame program entered generally: " + wl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("-5.75 1 21"), got, "a miss at every " + std::to_string(every));
@@ -7460,7 +7460,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// (the next raw probe resolves the new body), and a callee redefined with another parameter kind takes the door from a site whose
 			// arguments were proven against the old kind
 			auto session = [](bool vm) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
 				engine* raw = e.get();
@@ -7487,7 +7487,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		// what a caller learns of a callee at its call sites (its result kind, whether it raises, whether it runs user code, whether a reference
 		// escapes) holds only for the callee's definition: each reload below changes one of these facts under callers that already ran
 		auto reload_session = [](bool vm, const std::vector<std::string>& steps, const std::string& probe) {
-			auto e = engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
 			std::string out;
@@ -7579,7 +7579,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7626,7 +7626,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, expected, "enclosing callees, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(expected, got, "a miss at every " + std::to_string(every));
@@ -7649,7 +7649,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			both(src, expected, "element references, proofs off", false);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(expected, got, "a miss at every " + std::to_string(every));
@@ -7708,7 +7708,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7746,7 +7746,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7773,7 +7773,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(r3.find("-- inlined outer2") != std::string::npos && r3.find("-- inlined inner") != std::string::npos && r3.find("-- cell loop") != std::string::npos, "the nested leaves over the callee's own local graft: " + r3);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(std::string("75091 276 98"), got, "a miss at every " + std::to_string(every));
@@ -7824,7 +7824,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(fl.find("-- inlined A") != std::string::npos && fl.find("-- inlined sq") != std::string::npos && fl.find("-- cell loop") != std::string::npos, "an argument of arithmetic grafts and the loop closes: " + fl);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -7863,7 +7863,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rb.find("-- call kept A") != std::string::npos, "a local stored two kinds keeps the call: " + rb);
 			if (!engine::miss_injection_available()) { return; }
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u, 11u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(want, got, "a miss at every " + std::to_string(every));
@@ -7926,7 +7926,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 40; ++every) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7969,7 +7969,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
@@ -7999,7 +7999,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u, 7u }) {
-				auto e = engine::make(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
 				std::string got;
 				try { got = e->execute(src).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));

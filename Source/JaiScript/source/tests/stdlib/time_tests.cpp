@@ -25,7 +25,7 @@ namespace {
     };
 
     std::shared_ptr<engine> make_timed(bool use_vm, virtual_clock& clk, bool install = true) {
-        auto e = engine::make();
+        auto e = jai::foundry::make_default_engine();
         e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         e->execution_budget(0);
         stdlib::register_all(e);
@@ -193,7 +193,7 @@ public:
             expect(R"("" + time::now() + " " + time::engine_elapsed();)", "100.0 100.0", "a host source's reading is engine_elapsed");
             expect(R"(advance(1.5); "" + time::now() + " " + time::engine_elapsed();)", "101.5 101.5", "advancing the host clock");
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(e);
                 auto r = e->execute(R"(var a = time::now(); var b = time::engine_elapsed(); var c = time::now(); a >= 0.0 && b >= a && c >= b && a < 3600.0;)");
@@ -252,13 +252,16 @@ public:
             expect(R"("" + time::unix_ms() + " " + (time::unix_time() - 1700000000.0 > 0.1229) + " " + (time::unix_time() - 1700000000.0 < 0.1231);)", "1700000000123 true true", "a host wall clock");
             expect(R"(advance(0.5); "" + time::unix_ms();)", "1700000000623", "advancing the wall clock");
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(e);
-                const auto host_ms = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+                // each reading lies between the ones taken before and after it, however long the machine takes between them
+                auto host_ms = [] { return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count(); };
+                const auto before_ms = host_ms();
                 const auto script_ms = e->execute("time::unix_ms();").as_int();
-                check_true(script_ms - host_ms < 5000 && host_ms - script_ms < 5000, "the system wall clock");
-                check_true(e->execute("var t = time::unix_time(); var m = time::unix_ms(); m / 1000.0 - t < 1.0 && t - m / 1000.0 < 1.0;").as<bool>(), "unix_time and unix_ms agree");
+                const auto after_ms = host_ms();
+                check_true(before_ms <= script_ms && script_ms <= after_ms, "the system wall clock");
+                check_true(e->execute("var m0 = time::unix_ms(); var t = time::unix_time(); var m1 = time::unix_ms(); m0 <= t * 1000.0 + 1.0 && t * 1000.0 < m1 + 1.0;").as<bool>(), "unix_time and unix_ms agree");
             }
         });
 
@@ -442,7 +445,7 @@ public:
 
         test("a_simulation_clock_drives_scripts", [this]() {
             for (bool use_vm : {false, true}) {
-                auto eng = engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(eng);
                 auto out = std::make_shared<std::ostringstream>();

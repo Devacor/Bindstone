@@ -26,6 +26,9 @@
 #include <chrono>
 #include <sstream>
 #include <jaiscript/testing/unattended.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
+#include <cstdio>
+#include <cstdlib>
 
 namespace jai::foundry {
 
@@ -35,15 +38,45 @@ namespace {
     bool g_test_vm_reference = false;   // --backend=vm-reference: the vm in engine::vm_reference_mode
     std::atomic<const char*> g_running_suite{nullptr};
     std::atomic<const char*> g_running_test{nullptr};
+    bool g_progress = false;   // --progress: a line per suite and a dot per test on stdout, so a watchdog sees a slow run move
+    const char* g_progress_suite = nullptr;
 }
 
 void note_running_test(const char* suite_name, const char* test_name) {
     g_running_suite.store(suite_name, std::memory_order_relaxed);
     g_running_test.store(test_name, std::memory_order_relaxed);
+    if (!g_progress || !suite_name || !test_name || std::strcmp(test_name, "(forge_tests)") == 0) {
+        return;
+    }
+    if (suite_name != g_progress_suite) {
+        g_progress_suite = suite_name;
+        std::fprintf(stdout, "\n%s ", suite_name);
+    }
+    std::fputc('.', stdout);
+    std::fflush(stdout);
+}
+
+// the run's own directory becomes the process's temp directory: a test's fixed temp name never meets another run's (shards
+// and backends run side by side, and other checkouts share the machine's temp)
+void use_run_temp_directory() {
+    const std::filesystem::path& run_directory = test_temp_directory();
+#if defined(_WIN32)
+    for (const wchar_t* name : {L"TMP", L"TEMP"}) {
+        _wputenv_s(name, run_directory.c_str());
+    }
+#else
+    setenv("TMPDIR", run_directory.c_str(), 1);
+#endif
+}
+
+std::shared_ptr<jai::engine> make_default_engine() {
+    auto eng = jai::engine::make();
+    eng->execution_budget(k_test_budget_seconds);
+    return eng;
 }
 
 std::shared_ptr<jai::engine> make_engine() {
-    auto eng = jai::engine::make();
+    auto eng = make_default_engine();
     eng->set_backend(g_test_backend);
     eng->vm_reference_mode(g_test_vm_reference);
     eng->import_recheck_interval(0);   // test engines touch a file and re-import at once: every reach checks (the throttle has its own tests)
@@ -468,6 +501,10 @@ int main(int argc, char** argv) {
             verbose = true;
             continue;
         }
+        if (arg == "--progress") {
+            g_progress = true;
+            continue;
+        }
 
         // gtest style: --gtest_filter=pattern
         if (arg.rfind("--gtest_filter=", 0) == 0) {
@@ -524,6 +561,9 @@ int main(int argc, char** argv) {
             return 1;
         }
     }
+
+    use_run_temp_directory();
+    g_progress = g_progress && !verbose;
 
     // Run all test suites
     auto suites = test_registry::instance().create_all_suites();
@@ -592,6 +632,9 @@ int main(int argc, char** argv) {
     if (original_cout) {
         std::cout.rdbuf(original_cout);
         std::cerr.rdbuf(original_cerr);
+    }
+    if (jai::foundry::g_progress) {
+        std::cout << "\n";
     }
 
     // Summary

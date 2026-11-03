@@ -14,7 +14,7 @@ public:
 	// the script's result on both backends, each against the expected text
 	void both(const std::string& src, const std::string& expected, const std::string& what) {
 		for (bool use_vm : {false, true}) {
-			auto e = jai::engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 			jai::stdlib::register_all(e);
 			std::string got;
@@ -249,7 +249,7 @@ public:
 
 		test("hot_reload_keeps_a_live_builder", [this]() {
 			for (bool use_vm : {false, true}) {
-				auto e = jai::engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				jai::stdlib::register_all(e);
 				e->execute("class Page { string html; void add(string x) { html += x; } }\nPage p;\nstring g = \"\";\nvoid emit(string x) { g = g + x; }\nfor (int i = 0; i < 3; ++i) { p.add(\"a\"); emit(\"a\"); }");
@@ -267,7 +267,7 @@ public:
 			for (const auto& step : spellings) {
 				std::string texts[2];
 				for (int b = 0; b < 2; ++b) {
-					auto e = jai::engine::make();
+					auto e = jai::foundry::make_default_engine();
 					e->set_backend(b ? jai::backend_type::vm : jai::backend_type::interpreter);
 					jai::stdlib::register_all(e);
 					e->memory_cap(256 * 1024);
@@ -284,9 +284,8 @@ public:
 		test("a_long_build_is_linear", [this]() {
 			// 200k appends of every in-place spelling on the vm: a copy per append would move tens of GB and run for minutes (the
 			// interpreter, the oracle, copies the `s = s + x` spellings)
-			auto e = jai::engine::make();
+			auto e = jai::foundry::make_default_engine();
 			e->set_backend(jai::backend_type::vm);
-			e->execution_budget(120);   // a loaded Debug run outlasts the 5 s default; a copy per append still runs for minutes
 			jai::stdlib::register_all(e);
 			auto r = e->execute(R"(
 				class Holder { string s; }

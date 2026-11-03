@@ -47,7 +47,7 @@ public:
 	)";
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true, double budget = 0.0) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		if (!proofs) { e->type_proofs(false); }

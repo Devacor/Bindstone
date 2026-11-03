@@ -23,7 +23,7 @@ public:
 
 	// the first step defines the unit at a virtual path; "reload:" re-runs that unit with new source; any other step runs as its own execute
 	static std::vector<step_result> run_steps(bool vm, const std::vector<std::string>& steps, bool proofs, const setup_fn& setup = {}) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		if (!proofs) { e->type_proofs(false); }

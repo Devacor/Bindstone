@@ -48,7 +48,7 @@ public:
 
 	static std::shared_ptr<engine> host(bool use_vm) {
 		using namespace writeback_hosts;
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
 		e->execution_budget(0);
 		stdlib::register_all(e);

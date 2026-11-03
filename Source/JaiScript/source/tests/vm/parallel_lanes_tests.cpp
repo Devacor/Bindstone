@@ -21,7 +21,7 @@ public:
 	parallel_lanes_tests() : suite("Parallel Lanes") {}
 
 	static std::string run(bool vm, size_t workers, const std::vector<std::string>& steps) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		e->parallel_thread_count(workers);
@@ -150,7 +150,7 @@ function par(int n) -> string { array<Body> bs = fill(n); parallel_for (auto& b 
 			// a C++ class's operators: the const ones on any object, op= on the chunk's own objects (an element, one it made)
 			using parallel_lanes_hosts::gauge;
 			auto run_bound = [](bool vm, size_t workers) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->parallel_thread_count(workers);

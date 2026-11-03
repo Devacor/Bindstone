@@ -19,7 +19,7 @@ public:
             // runtime too): a slot locked to a callable takes null, then a callable again; a
             // call through the null raises a catchable error; a non-callable still rejects
             for (bool vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 const std::string label = vm ? "vm" : "interp";
                 auto run = [&](const char* src) {
@@ -66,7 +66,7 @@ public:
             )";
             std::vector<std::string> seen[2];
             for (bool vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 const auto rows = e->execute(src).as_array();
@@ -141,7 +141,7 @@ public:
 			)";
 			std::vector<std::string> seen[2];
 			for (bool vm : {false, true}) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				const auto rows = e->execute(src).as_array();
@@ -225,7 +225,7 @@ public:
             )";
             std::vector<std::string> seen[2];
             for (bool vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 const auto rows = e->execute(src).as_array();
@@ -278,7 +278,7 @@ public:
 			)";
 			std::vector<std::string> seen[2];
 			for (bool vm : {false, true}) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				const auto rows = e->execute(src).as_array();
@@ -1425,7 +1425,7 @@ public:
             int idx = 0;
             const std::string program = (warn_region ? std::string("[[warn_mode]]; ") : std::string()) + src;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -1535,7 +1535,7 @@ public:
 
         test("compound_overflow_policy_covers_intermediate", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 if (!e->throw_on_overflow()) { return; }  // wrap build: policy off by design
                 bool threw = false;
@@ -2148,7 +2148,7 @@ public:
 
         test("typed_field_set_field_cpp_api", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int v = 0; var w = 0; }  auto c = C();");
                 auto obj = e->execute("c");
@@ -2287,7 +2287,7 @@ public:
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -2461,9 +2461,9 @@ public:
             // run time's verdict stands on both backends
             const auto check_runtime = [this, &q](const char* tail, const std::string& expected, const char* what) {
                 const std::string src = q(tail);
-                check_true(jai::engine::make()->check(src).has_errors(), std::string("strict rejects: ") + what);
+                check_true(jai::foundry::make_default_engine()->check(src).has_errors(), std::string("strict rejects: ") + what);
                 for (bool use_vm : {false, true}) {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
                     jai::stdlib::register_all(e);
@@ -2505,7 +2505,7 @@ public:
             // must step aside so the overload sees `obj == null` exactly like the interpreter
             std::string out[2];
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->add_function("==", [](const jai::script_value&, const jai::script_value&) { return true; });
@@ -2582,7 +2582,7 @@ public:
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -2822,7 +2822,7 @@ public:
             // array<uint8> / array<int8>: one raw byte per element, element reads are ints, every store runs the range kernel;
             // both backends, proofs on and off, byte-identical outputs and error texts
             auto run = [](const std::string& src, bool use_vm, bool proofs) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->type_proofs(proofs);
                 e->execution_budget(0);
@@ -2905,7 +2905,7 @@ public:
             // the host boundary: a std::vector<uint8_t> parameter takes the buffer, a bound_array writes it in place under
             // the range, a std::vector<uint8_t> result is an array<uint8>
             for (bool use_vm : {false, true}) {
-                auto h = jai::engine::make();
+                auto h = jai::foundry::make_default_engine();
                 h->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(h);
                 h->add_function("host_sum", [](std::vector<uint8_t> b) -> script_int { script_int s = 0; for (uint8_t x : b) { s += x; } return s; });
@@ -3202,7 +3202,7 @@ public:
             int idx = 0;
             for (bool use_vm : {false, true}) {
                 for (bool proofs : {true, false}) {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->type_proofs(proofs);
                     e->execution_budget(0);
@@ -3492,7 +3492,7 @@ public:
         test("accessor_hot_reload_adds_and_removes", [this]() {
             for (bool use_vm : {false, true}) {
                 const std::string tag = use_vm ? "vm: " : "interp: ";
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(
                     "class R { int f = 1; int log = 0; int raw() { return f; } }\n"
@@ -3737,7 +3737,7 @@ public:
             // host set_field runs the table without its script rows; hot reload likewise falls back
             // to the initializer default when the live value converts only through script
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class C { int a = 0; C() {} C(int v) { a = v; } } class H { C c; string s = \"\"; } auto h = H();");
                 auto instance = e->execute("h").as<jai::strong_ptr<jai::class_instance>>();

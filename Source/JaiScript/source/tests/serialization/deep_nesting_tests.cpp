@@ -61,6 +61,11 @@ namespace deep_detail {
 
 	constexpr int k_depth = 100000;
 
+	// a host record's native frames differ by build (Release, Debug, ASan): no build fills the roomy stack before the 1024-record
+	// backstop, and the tight one is the stack margin (256 KB on Windows) and one allocation unit, which no chain of records fits
+	constexpr size_t k_roomy_stack = size_t(512) << 20;
+	constexpr size_t k_tight_stack = 320 * 1024;
+
 	std::string nested_arrays(int depth, const std::string& leaf = "") { return std::string(depth, '[') + leaf + std::string(depth, ']'); }
 	std::string nested_maps(int depth, const std::string& leaf = "1") {
 		std::string result;
@@ -298,8 +303,7 @@ public:
 
 		test("a_deep_host_record_chain_meets_the_record_guard_on_load", [this]() {
 			// a host type's own load recurses natively once per record: an ordinary chain loads, and a deep one meets the
-			// 1024-record backstop on a roomy stack and the stack margin on a tight one (on a 1 MB thread a Debug build meets
-			// the margin and a Release build the backstop, so each guard is pinned where its outcome is certain)
+			// 1024-record backstop on a roomy stack and the stack margin on a tight one, whatever the build's frame size
 			auto load = [](engine& eng, int depth, bool binary) {
 				std::string error;
 				size_t length = 0;
@@ -314,14 +318,14 @@ public:
 			auto eng = make_engine();
 			for (bool binary : {false, true}) {
 				const std::string format = binary ? "binary" : "json";
-				on_small_stack([&]() { check_eq(std::string("200"), load(*eng, 200, binary), format); });
+				on_small_stack([&]() { check_eq(std::string("200"), load(*eng, 200, binary), format); }, k_roomy_stack);
 				on_small_stack([&]() {
 					check_eq(std::string("Maximum record nesting depth (1024) exceeded"), load(*eng, 1500, binary), format);
-				}, 64 * 1024 * 1024);
+				}, k_roomy_stack);
 #if defined(_WIN32)
 				on_small_stack([&]() {
 					check_eq(std::string("Record nesting depth exceeds the host thread's stack"), load(*eng, 1000, binary), format);
-				}, 320 * 1024);
+				}, k_tight_stack);
 #endif
 			}
 		});
@@ -349,16 +353,16 @@ public:
 			for (bool binary : {false, true}) {
 				const std::string format = binary ? "binary" : "json";
 				auto ordinary = chain(200);
-				on_small_stack([&]() { check_eq(std::string("saved"), save(*eng, ordinary, binary), format); });
+				on_small_stack([&]() { check_eq(std::string("saved"), save(*eng, ordinary, binary), format); }, k_roomy_stack);
 				host_chain_length(std::move(ordinary));
 				auto deep = chain(1500);
 				on_small_stack([&]() {
 					check_eq(std::string("Maximum record nesting depth (1024) exceeded"), save(*eng, deep, binary), format);
-				}, 64 * 1024 * 1024);
+				}, k_roomy_stack);
 #if defined(_WIN32)
 				on_small_stack([&]() {
 					check_eq(std::string("Record nesting depth exceeds the host thread's stack"), save(*eng, deep, binary), format);
-				}, 320 * 1024);
+				}, k_tight_stack);
 #endif
 				host_chain_length(std::move(deep));
 			}

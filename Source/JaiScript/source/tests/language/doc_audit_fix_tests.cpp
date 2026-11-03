@@ -23,7 +23,7 @@ public:
     doc_audit_fix_tests() : suite("Doc Audit Fixes") {}
 
     static std::shared_ptr<engine> fresh(bool use_vm) {
-        auto e = engine::make();
+        auto e = jai::foundry::make_default_engine();
         e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
         e->execution_budget(0);
         stdlib::register_all(e);

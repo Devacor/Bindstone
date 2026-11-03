@@ -35,7 +35,7 @@ public:
 				"int ta = 7; int tb = 3; int tm = ta % tb; bool tl = ta < tb;\n"
 				"shapes(7, 3, 7, 3) + \"|\" + shapes(2, 2, 2, 2) + \"|\" + to_string(tm) + to_string(tl);\n";
 			auto run = [&](backend_type type, bool reference, bool raw) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(type);
 				eng->vm_reference_mode(reference);
 				jai::stdlib::register_all(*eng);
@@ -123,7 +123,7 @@ public:
 				"out = out + \"|\" + fail(1, 64, 3) + \"|\" + fail(-9223372036854775807, 2, 4) + \"|\" + fail(\"s\", 1, 4);\n"
 				"out;\n";
 			auto run = [&](backend_type type, bool proofs) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
@@ -153,7 +153,7 @@ public:
 				"function big(var x) { try { return to_string(id(x) * id(x)); } catch (e) { return \"caught: \" + e; } }\n"
 				"rows(7, 3) + \"|\" + rows(2.5, 4) + \"|\" + rows(9, 0) + \"|\" + rows(1.0, 0.0) + \"|\" + rows(-4, 2.0) + \"|\" + big(4000000000) + \"|\" + big(3.0);\n";
 			auto run = [&](backend_type type, bool proofs) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
@@ -213,7 +213,7 @@ public:
 				"g = 9; gi = 3;\n"
 				"floats(2.0, 1.0) + \"|\" + widen(7) + \"|\" + strs(\"x\", \"y\") + \"|\" + strs(\"q\", \"q\") + \"|\" + globals() + \"|\" + to_string(g) + to_string(gi) + \"|\" + mixed(2.0, 4) + \"|\" + mixed(3, 2) + \"|\" + refs();\n";
 			auto run = [&](backend_type type, bool proofs) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);
@@ -245,7 +245,7 @@ public:
 				"var xs = [3, 1.5, 2, -4]; xs.sort(lt); out += \",\" + to_string(xs);\n"
 				"out;\n";
 			auto run = [&](backend_type type, bool proofs) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(type);
 				eng->type_proofs(proofs);
 				jai::stdlib::register_all(*eng);

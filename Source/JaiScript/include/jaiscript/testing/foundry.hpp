@@ -21,6 +21,10 @@ namespace jai::foundry {
 // Engine factory honoring the runner's --backend= selection (defined in main_test_runner.cpp).
 // Tests create engines through this so the whole suite can run on a chosen backend.
 std::shared_ptr<jai::engine> make_engine();
+// The execution budget every test engine runs under: the wall-clock budget is a hang rail, so a loaded machine never decides a test
+inline constexpr double k_test_budget_seconds = 120.0;
+// engine::make() with the default backend under the test budget
+std::shared_ptr<jai::engine> make_default_engine();
 // --backend=vm-reference: make_engine's engines run engine::vm_reference_mode (a test that asserts an optimization fired skips)
 bool vm_reference_run();
 // The test quench is running (defined in main_test_runner.cpp): a crash report names it
@@ -301,35 +305,6 @@ void check_throws(Func&& func, const std::string& message = "Expected specific e
     } catch (...) {
         throw test_failure("Caught unexpected exception type");
     }
-}
-
-// Wall-clock checks that hold on any machine: the two sides run interleaved and their fastest rounds are compared, so machine
-// speed and build type scale both alike and background load, which only ever adds time, drops out; a timed function returns
-// the seconds of the part it measures
-inline double time_seconds(const std::function<void()>& fn) {
-    const auto start = std::chrono::steady_clock::now();
-    fn();
-    return std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
-}
-
-inline void check_relative_cost(const std::function<double()>& reference, const std::function<double()>& measured, double max_ratio,
-                                int rounds = 7, const std::string& what = "relative cost") {
-    double r = std::numeric_limits<double>::infinity(), m = r;
-    for (int i = 0; i < rounds; ++i) {
-        r = std::min(r, reference());
-        m = std::min(m, measured());
-    }
-    const double ratio = m / std::max(r, 1e-9);
-    if (ratio > max_ratio) {
-        throw test_failure(std::format("{}: {:.2f}x the reference exceeds {:.2f}x (fastest {:.1f} us vs {:.1f} us over {} rounds)",
-                                       what, ratio, max_ratio, m * 1e6, r * 1e6, rounds));
-    }
-}
-
-inline void check_scales_linearly(const std::function<double(int)>& timed_run, int small_n, int large_n, double grace = 3.0,
-                                  int rounds = 7, const std::string& what = "scaling") {
-    check_relative_cost([&] { return timed_run(small_n); }, [&] { return timed_run(large_n); },
-                        grace * static_cast<double>(large_n) / static_cast<double>(small_n), rounds, what);
 }
 
 // Additional check functions

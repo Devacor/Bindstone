@@ -75,7 +75,7 @@ inline std::vector<run_config> configs() {
 }
 
 inline std::shared_ptr<engine> make(const run_config& c) {
-	auto e = engine::make();
+	auto e = jai::foundry::make_default_engine();
 	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
 	if (!c.proofs) { e->type_proofs(false); }
@@ -1580,7 +1580,7 @@ private:
 			)", "3,22223,3,11");
 		});
 		test("binary_minus_overflow_follows_the_build_policy", [this]() {
-			auto probe = engine::make();
+			auto probe = jai::foundry::make_default_engine();
 			const std::string expected = probe->throw_on_overflow() ? "Integer overflow in '-'" : "9223372036854775807";
 			expect("minus overflow", R"(
 				var a = -9223372036854775807 - 1; var b = 1; string m = "";
@@ -1702,7 +1702,7 @@ private:
 		test("engines_share_no_script_state", [this]() {
 			every_config("two engines", "Undefined variable 'g'", [](engine& e) {
 				e.execute("var g = 1;");
-				auto other = engine::make();
+				auto other = jai::foundry::make_default_engine();
 				other->set_backend(e.get_backend_type());
 				return other->execute(spec::in_warn_region("var r = \"\"; try { r = \"\" + g; } catch (x) { r = x; } r;")).as_string();
 			});
@@ -2442,7 +2442,7 @@ private:
 		});
 		test("a_bare_engine_has_no_host_file_functions", [this]() {
 			every_config("bare engine", "Undefined variable 'read_file'", [](engine& e) {
-				auto bare = engine::make();
+				auto bare = jai::foundry::make_default_engine();
 				bare->set_backend(e.get_backend_type());
 				return bare->execute(spec::in_warn_region("var r = \"\"; try { read_file(\"x\"); } catch (e) { r = e; } r;")).as_string();
 			});

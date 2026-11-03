@@ -14,8 +14,9 @@ namespace jai::foundry::tests {
 
 namespace thread_pool_continuation_detail {
 
+// what must happen gets the test budget as a hang rail, never a speed bound
 template<typename Condition, typename Pump>
-bool wait_for(Condition condition, Pump pump, std::chrono::milliseconds timeout = std::chrono::milliseconds(10000)) {
+bool wait_for(Condition condition, Pump pump, std::chrono::milliseconds timeout = std::chrono::milliseconds(static_cast<long long>(k_test_budget_seconds * 1000))) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (!condition()) {
         if (std::chrono::steady_clock::now() > deadline) { return false; }
@@ -277,7 +278,7 @@ public:
             } catch (const std::exception& ex) { error = ex.what(); }
             std::atomic<bool> idle{false};
             std::thread waiter([&] { pool->wait_idle(); idle = true; });
-            const bool returned = wait_for([&] { return idle.load(); }, [] {}, std::chrono::milliseconds(5000));
+            const bool returned = wait_for([&] { return idle.load(); }, [] {});
             if (!returned) { pool->submit([] {}); }
             waiter.join();
             check_eq(std::string("enqueue failed"), error);

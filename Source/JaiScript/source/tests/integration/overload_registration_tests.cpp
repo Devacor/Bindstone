@@ -160,7 +160,7 @@ public:
                 std::string pick_s(const std::string&) { return "s"; }
             };
             auto run = [&](bool vm, const std::string& src, std::string* lanes = nullptr) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 dynamic_binder<Acc>(*e, "Acc").constructor<>()
@@ -244,7 +244,7 @@ public:
                 probe();
             )";
             auto run = [&](bool vm, bool proofs) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 if (!proofs) { e->type_proofs(false); }
@@ -299,7 +299,7 @@ public:
                 out;
             )";
             auto run = [&](bool vm, bool proofs) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 if (!proofs) { e->type_proofs(false); }
@@ -323,7 +323,7 @@ public:
                 int64_t add(int64_t v) { total += v; return total; }
             };
             for (bool vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 stdlib::register_all(*e);
                 dynamic_binder<Acc>(*e, "Acc").constructor<>().method("add", &Acc::add).build();

@@ -118,7 +118,7 @@ public:
             )";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
@@ -138,7 +138,7 @@ public:
                 to_string(a.use_count()) + ":" + to_string(w.expired());
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("2:false"), e->execute(src).as<std::string>(),
@@ -175,7 +175,7 @@ public:
             )";
             std::string expected[2] = {"3:1", "2:1"};   // interp, vm
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(expected[use_vm ? 1 : 0], e->execute(src).as<std::string>(),
@@ -187,7 +187,7 @@ public:
         test("cpp_ref_count_sees_cpp_extraction", [this]() {
             // a script instance's one count is every owner's: script aliases and a C++-side share each count
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 e->execute(R"(

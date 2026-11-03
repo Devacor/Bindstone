@@ -18,7 +18,7 @@ public:
 
     void forge_tests() override {
         auto run = [](const std::string& src, bool use_vm, bool proofs) {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             e->type_proofs(proofs);
             e->execution_budget(0);
@@ -158,9 +158,9 @@ public:
         });
 
         test("the_engine_bounds_every_null_terminated_scan", [this, caught]() {
-            check_eq((size_t)1048576, jai::engine::make()->binary_scan_limit(), "the default limit is 1 MiB");
+            check_eq((size_t)1048576, jai::foundry::make_default_engine()->binary_scan_limit(), "the default limit is 1 MiB");
             auto run_limited = [](const std::string& src, bool use_vm, bool proofs, size_t limit) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->type_proofs(proofs);
                 e->binary_scan_limit(limit);

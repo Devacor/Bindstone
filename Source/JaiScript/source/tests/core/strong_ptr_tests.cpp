@@ -409,7 +409,7 @@ public:
     void forge_tests() override {
         test("partial_batch_failure_wakes_accepted_tasks", [this]() {
             // Baseline lacks the exceptional wake. Let its worker park before the
-            // injected partial enqueue, then observe a BOUNDED completion wait.
+            // injected partial enqueue, then observe a completion wait bounded by the test budget.
             // A rescue submission wakes/drains accepted work before assertions, so
             // this regression fails red without hanging or leaking captured storage.
             for (size_t fail_at : {size_t{1}, size_t{2}, size_t{3}}) {
@@ -441,7 +441,7 @@ public:
                 batch.clear();   // drop never-submitted captures before testing worker ownership
                 storage.reset();
                 const bool completed_without_rescue =
-                    done.wait_for(std::chrono::milliseconds(250)) == std::future_status::ready;
+                    done.wait_for(std::chrono::duration<double>(k_test_budget_seconds)) == std::future_status::ready;
                 if (!completed_without_rescue) {
                     pool.submit_to(0, [] {});   // known-good wake, even on the broken baseline
                 }

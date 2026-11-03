@@ -19,7 +19,7 @@ public:
 
 	// defs run first; the counters are read between the two executes, so entries counts what run alone entered
 	static outcome run_split(bool vm, const std::string& defs, const std::string& run, size_t workers) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		e->execution_budget(0);   // a loaded machine runs the Debug interpreter's defs past the default budget, cutting its serial loop short
@@ -131,7 +131,7 @@ function total() -> int { int t = 0; for (auto& p : ps) { t = t + p.a * 1000 + p
 )JAI";
 			std::string results[2];
 			for (bool vm : { false, true }) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->parallel_thread_count(4);
@@ -185,7 +185,7 @@ array<int> xs = []; for (int i = 0; i < 600; ++i) { xs.push(i); }
 
 		test("a_hosts_call_into_a_script_function_runs_its_loop_as_a_block", [this]() {
 			for (bool vm : { false, true }) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->execute("function dot(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { s = s + i * 0.5; } return s; }");

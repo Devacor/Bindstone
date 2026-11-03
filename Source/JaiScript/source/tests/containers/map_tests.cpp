@@ -456,7 +456,7 @@ public:
             int idx = 0;
             const std::string program = (warn_region ? std::string("[[warn_mode]]; ") : std::string()) + src;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -682,7 +682,7 @@ out;
         // unchanged and the remembered key equals the asked key; a copy's memo names its source; a new map at a dead map's address
         // starts with no memo
         test("map_entry_memo_through_every_mutator", [this]() {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             auto key = [&](const std::string& t) { return jai::script_value(t, e.get()); };
             auto num = [&](int64_t v) { return jai::script_value(static_cast<jai::script_int>(v), e.get()); };
             jai::script_map m;
@@ -785,7 +785,7 @@ out;
             check_eq(std::string("13 -1 100 2 6 1 7 2 1616 22"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 const char* unit = "map<string, int> kept;\nint bump(string k) { kept[k] = kept.get(k, 0) + 1; return kept[k]; }\n";
@@ -799,7 +799,7 @@ out;
 
         test("map_field_survives_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("class Inv { map<string, int> items = {}; }\nvar inv = Inv();\n"
@@ -817,7 +817,7 @@ out;
         // and strings: every lookup, the size, the key order of iteration, copies, and the address of every live value
         // (an entry stays where it was made until its key is erased)
         test("map_storage_against_a_model", [this]() {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             jai::engine* eng = e.get();
             std::map<jai::script_value, int64_t, jai::script_value_map_less> model;
             jai::script_map m;
@@ -876,7 +876,7 @@ out;
         // int keys filled out of order, below the first key and far away keep their addresses, their order and their lookups; a
         // bound int finds and replaces the int key it equals
         test("map_int_keys_grow_rebase_erase_and_bound_keys", [this]() {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             jai::engine* eng = e.get();
             auto key = [eng](int64_t x) { return jai::script_value(static_cast<jai::script_int>(x), eng); };
             jai::script_map m;

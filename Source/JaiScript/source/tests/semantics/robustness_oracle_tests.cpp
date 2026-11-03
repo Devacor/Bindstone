@@ -50,7 +50,7 @@ inline std::vector<run_config> configs() {
 }
 
 inline std::shared_ptr<engine> make(const run_config& c) {
-	auto e = engine::make();
+	auto e = jai::foundry::make_default_engine();
 	e->set_backend(c.vm ? backend_type::vm : backend_type::interpreter);
 	stdlib::register_all(*e);
 	if (!c.proofs) { e->type_proofs(false); }

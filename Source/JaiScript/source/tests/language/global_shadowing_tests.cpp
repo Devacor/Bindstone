@@ -26,7 +26,7 @@ public:
 	void every_backend(const std::string& label, const std::string& expected, const std::function<std::string(engine&)>& body) {
 		for (bool vm : { false, true }) {
 			for (bool proofs : { true, false }) {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				if (!proofs) { e->type_proofs(false); }

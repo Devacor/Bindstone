@@ -104,7 +104,8 @@ classify() {
 			vm_tier "the interpreter ($p)"; interp_tier "the interpreter ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
 		include/jaiscript/detail/* | source/implementation/parser.cpp | source/implementation/lexer.cpp | source/implementation/type_checker.cpp | \
 		source/implementation/builtin_methods.cpp)
-			vm_tier "a kernel both backends share ($p)"; interp_tier "a kernel both backends share ($p)"; pick android "libc++ and 32-bit compile the library ($p)" ;;
+			vm_tier "a kernel both backends share ($p)"; interp_tier "a kernel both backends share ($p)"; pick android "libc++ and 32-bit compile the library ($p)"
+			pick selftest "the runner's REPL retries on the parser's missing-';' text ($p)" ;;
 		include/jaiscript/properties/* | include/jaiscript/properties.hpp | include/jaiscript/serialization/* | source/implementation/serialization/* | \
 		source/implementation/properties.cpp | source/implementation/schema_binding.cpp)
 			vm_tier "the property system or the archives ($p)"; HOST_ARCHIVES=1; pick android "libc++ and 32-bit compile the library ($p)" ;;

@@ -1506,7 +1506,7 @@ struct repl_session {
 		try {
 			return finish_run(*eng, eng->start(source));
 		} catch (const jai::parse_error& ex) {
-			if (std::string_view(ex.what()).find("Expected ';'") == std::string_view::npos) { throw; }
+			if (std::string_view(ex.what()).find("expected ';'") == std::string_view::npos) { throw; }
 			original = std::current_exception();
 		}
 		try {
@@ -1827,7 +1827,7 @@ int run_selftest(const console_state& con) {
 		session.run(in, out, false);
 		const std::string text = out.str();
 		expect(text.rfind("6\n42\n\"hi!\"\n42\nerror:", 0) == 0, "repl: declarations, compound assignment and import need no ';'");
-		expect(text.find("1:25: Expected ';'") != std::string::npos && text.find("1:13: Expected ';'") != std::string::npos,
+		expect(text.find("1:24: error: expected ';'") != std::string::npos && text.find("1:13: error: expected ';'") != std::string::npos,
 			"repl: inside braces and mid-line ';' is still required");
 	}
 

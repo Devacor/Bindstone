@@ -239,12 +239,42 @@ sum;
 			for (size_t workers : { size_t(1), size_t(8) }) {
 				check_eq(expected, run(with("parallel_for (int x, auto& o : xs, out) " + compare), workers, bind_shared), "compared borrows on " + std::to_string(workers) + " workers");
 			}
+			// a value comparison reads each side as the worker's own copy, which runs (or fails) no destructor the serial loop does not run
+			auto deaths = std::make_shared<std::atomic<int64_t>>(0);
+			auto bind_dying = [deaths](engine& e) {
+				auto object = std::make_shared<shared_probe>();
+				dynamic_binder<shared_probe>(e, "Probe").constructor<>().method("read", &shared_probe::read).build();
+				e.add_function("probe", [object]() { return object; });
+				e.add_function("death", [deaths]() { deaths->fetch_add(1); return true; });
+				e.set_script_error_handler([deaths](const std::string&) { deaths->fetch_add(1); });   // a destructor that fails reports
+			};
+			const std::string dying = R"JAI(
+class Leaf { int n = 3; Leaf() {} ~Leaf() { death(); } }
+class Layered : Probe { Leaf leaf = Leaf(); Layered() : super() {} }
+var held = probe();
+extend(held, Layered);
+var warm = probe();
+array<int> xs = []; array<int> out = [];
+for (int i = 0; i < 512; ++i) { xs.push(i); out.push(0); }
+LOOP
+int sum = 0;
+for (int v : out) { sum = sum + v; }
+sum;
+)JAI";
+			const std::string leaves = "{ var p = probe(); var q = probe(); o = (p.leaf == q.leaf ? 1 : 0) + x; }";
+			auto with_dying = [&](const std::string& loop) { std::string p = dying; p.replace(p.find("LOOP"), 4, loop); return p; };
+			const std::string serial = run(with_dying("for (int x = 0; x < 512; ++x) { auto& o = out[x]; " + leaves + " }"), 1, bind_dying);
+			const int64_t serial_deaths = deaths->exchange(0);
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(serial, run(with_dying("parallel_for (int x, auto& o : xs, out) " + leaves), workers, bind_dying), "compared leaves on " + std::to_string(workers) + " workers");
+				check_eq(serial_deaths, deaths->exchange(0), "destructor runs on " + std::to_string(workers) + " workers");
+			}
 		});
 
 		test("a_shared_layer_converts_as_the_serial_loop_does", [this, bind_shared]() {
 			// a by-value use of the shared object converts the worker's own copy of it through its class: a typed slot (to_int,
 			// to_float, to_bool, to_string), a condition and its text; a class without to_string shows its fields, and one that runs a
-			// destructor is refused (the copy would die)
+			// destructor converts too (the copy is inert). The layer is first wrapped inside the region
 			const std::string body = R"JAI(
 CLASS
 var held = probe();
@@ -277,9 +307,9 @@ caught + "|" + to_string(sum);
 				check_eq(expected, run(with(converting, "parallel_for (int x, auto& o : xs, out) " + convert), workers, bind_shared), "converted borrows on " + std::to_string(workers) + " workers");
 				check_eq(shown, run(with(plain, "parallel_for (int x, auto& o : xs, out) " + show), workers, bind_shared), "shown borrows on " + std::to_string(workers) + " workers");
 				const std::string dying = "class Num : Probe { int extra = 2; Num() : super() {} ~Num() {} int to_int() { return extra; } }";
-				const std::string refused = run(with(dying, "parallel_for (int x, auto& o : xs, out) { var q = probe(); int k = q; o = k; }"), workers, bind_shared);
-				check(refused.rfind("a shared object whose class runs a destructor cannot be read by value in a parallel body (a conversion, a condition or its text)", 0) == 0,
-				      "a copy that would run a destructor is refused on " + std::to_string(workers) + " workers: " + refused);
+				check_eq(run(with(dying, "for (int x = 0; x < 512; ++x) { auto& o = out[x]; { var q = probe(); int k = q; o = k; } }"), 1, bind_shared),
+				         run(with(dying, "parallel_for (int x, auto& o : xs, out) { var q = probe(); int k = q; o = k; }"), workers, bind_shared),
+				         "a class with a destructor converts on " + std::to_string(workers) + " workers");
 			}
 		});
 

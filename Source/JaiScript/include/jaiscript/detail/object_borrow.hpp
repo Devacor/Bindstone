@@ -33,7 +33,7 @@ script_value parallel_shared_object(const script_value& object, engine& eng);
 // A worker's copy of an object borrow (clone, a by-value store): the borrow again for a shared_ptr handle, else a new instance of
 // the source's class holding worker-local copies of its fields
 script_value parallel_object_copy(const script_value& borrow, const object_borrow_record& record);
-// The value a by-value use reads (a conversion, a condition, its text): an object borrow, a handle's too, as the worker's own copy
+// The value a by-value use reads (==, a conversion, a condition, its text): an object borrow, a handle's too, as the worker's own inert copy
 // of the shared object, so its class's conversions run on the copy through their pins; any other value as itself
 script_value parallel_by_value(const script_value& value);
 

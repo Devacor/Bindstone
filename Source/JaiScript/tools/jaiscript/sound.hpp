@@ -14,6 +14,7 @@
 #include <cctype>
 #include <chrono>
 #include <condition_variable>
+#include <cstdlib>
 #include <deque>
 #include <filesystem>
 #include <fstream>
@@ -185,6 +186,17 @@ private:
 		return ok;
 	}
 
+	// the device's mode can say "playing" for seconds after a short sound's last sample, while its position already stands at
+	// the end
+	static bool ran_out_of_sound(const std::string& alias) {
+		std::string mode, position, length;
+		if (!mci("status " + alias + " mode", &mode)) { return false; }
+		if (mode != "playing") { return true; }
+		if (!mci("status " + alias + " position", &position) || !mci("status " + alias + " length", &length)) { return false; }
+		const unsigned long long end = std::strtoull(length.c_str(), nullptr, 10);
+		return end > 0 && std::strtoull(position.c_str(), nullptr, 10) >= end;
+	}
+
 	void post_locked(std::function<void()> command) {
 		commands_.push_back(std::move(command));
 		wake_.notify_one();
@@ -211,8 +223,7 @@ private:
 			lock.unlock();
 			std::vector<std::shared_ptr<sound_voice>> ran_out;
 			for (auto& [voice, plays] : watch) {
-				std::string mode;
-				if (mci("status " + voice->alias + " mode", &mode) && mode != "playing") { ran_out.push_back(voice); }
+				if (ran_out_of_sound(voice->alias)) { ran_out.push_back(voice); }
 			}
 			lock.lock();
 			for (auto& [voice, plays] : watch) {

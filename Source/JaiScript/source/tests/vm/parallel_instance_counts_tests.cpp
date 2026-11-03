@@ -115,6 +115,11 @@ total;
 			for (size_t workers : { size_t(1), size_t(8) }) {
 				check_eq(std::string("260"), run(program, workers, bind), "rewrapped on " + std::to_string(workers) + " workers");
 			}
+			// the first wrap of an object the script never saw happens inside the region, and works as the warm one does
+			const std::string cold = program.substr(std::string("var warm = probe(); ").size());
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(std::string("260"), run(cold, workers, bind), "first wrapped on " + std::to_string(workers) + " workers");
+			}
 		});
 
 		test("objects_a_region_returns_outlive_it_and_die_on_the_calling_thread", [this]() {
@@ -244,7 +249,6 @@ sum;
 CLASS
 var held = probe();
 extend(held, Num);
-var warm = probe();
 array<int> xs = []; array<int> out = [];
 for (int i = 0; i < 512; ++i) { xs.push(i); out.push(0); }
 string caught = "";

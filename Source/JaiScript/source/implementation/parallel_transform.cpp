@@ -6072,6 +6072,7 @@ struct region_run {
 		}
 		for (class_definition* cd : made) {
 			prime_construction_memos(*cd);
+			eng.prewarm_handle_type(*cd);   // a host call hands a chunk the object as a handle of its class
 			seed.push_back(cd->get_type_info().get());
 		}
 		seed_classes_by_member(eng, adm->element_reached_members, seed);

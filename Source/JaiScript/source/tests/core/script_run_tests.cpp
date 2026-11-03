@@ -393,9 +393,7 @@ public:
         test("deep_recursion_in_a_run_meets_the_same_guard", [this]() {
             run_host h;
             const std::string be = backend_label(*h.eng);
-#if defined(_WIN32)
-            h.eng->max_call_depth(backend_type::interpreter, INT_MAX - 1);   // the native-stack guard (Windows-only) stops it
-#endif
+            h.eng->max_call_depth(backend_type::interpreter, INT_MAX - 1);   // the native-stack guard stops it
             h.eng->max_call_depth(backend_type::vm, 200000);
             const std::string src = "int deepest = 0;\nvoid r(int n) { deepest = n; r(n + 1); }\nvar m = \"\";\ntry { r(0); } catch (e) { m = e; }\nm + \"|\" + deepest;";
             const std::string direct = h.eng->execute(src).to_string();

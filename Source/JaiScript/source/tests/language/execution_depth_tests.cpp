@@ -150,7 +150,6 @@ public:
 			check_eq(script_int(49999), eng->execute("int up(int n) { if (n == 0) { return 0; } return up(n - 1) + 1; } up(49999);").as_int());
 		});
 
-#if defined(_WIN32)   // the native-stack guard is Windows-only; elsewhere these recursions overflow the host stack
 		// A recursion through a host callback re-enters run() natively per level: the native-stack headroom check raises
 		// its own catchable text at the re-entry (the cap is out of reach), and the engine stays usable
 		test("vm_host_reentry_recursion_fails_cleanly", [this]() {
@@ -185,7 +184,6 @@ public:
 			check_true(message.find("Native stack exhausted before the call-depth cap") != std::string::npos, "got: " + message);
 			check_eq(script_int(11), eng->execute("left = 10; f();").as_int());
 		});
-#endif
 
 		test("configured_boundary_and_recovery", [this]() {
 			auto eng = make_engine();

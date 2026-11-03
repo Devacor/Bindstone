@@ -6,6 +6,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -99,6 +100,8 @@ namespace stdlib {
 	std::string random::next_bytes(int64_t a_count) {
 		if (a_count < 0) { throw runtime_error("random::next_bytes count cannot be negative"); }
 		follow_region();
+		// ASan aborts on an allocation whose size plus bookkeeping overflows instead of throwing; length_error reads as "Out of memory" like bad_alloc
+		if (static_cast<uint64_t>(a_count) > std::string().max_size() - 64) { throw std::length_error("next_bytes"); }
 		std::string result(static_cast<size_t>(a_count), '\0');
 		for (size_t at = 0; at < result.size(); at += 8) {
 			uint64_t word = core_.next();

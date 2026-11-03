@@ -57,6 +57,7 @@ namespace {
         if (target_len <= static_cast<script_int>(str.size())) { return self; }
         const size_t total = detail::saturating_count(target_len) - str.size();
         if (!detail::builtin_memory_charge(ctx.get_engine(), total)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
+        if (total > std::string().max_size() - 64) { throw std::length_error("pad"); }
         const size_t left = side < 0 ? total : side > 0 ? 0 : total / 2;
         auto tiled = [&](size_t n) {
             std::string out;

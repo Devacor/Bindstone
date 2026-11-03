@@ -3696,15 +3696,11 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     // rule): barrier-admitted methods dispatch through pinned
                     // worker-private state (fresh dispatcher value, pre-resolved overload —
                     // no shared count, cache, or IC is ever touched); anything unpinned
-                    // keeps the wall error. KEEP the verdict text BYTE-PARALLEL with vm
-                    // exec_call_method's twin.
+                    // keeps the wall error (detail::parallel_method_not_admitted).
                     const detail::parallel_method_pin* worker_pin = (parallel_worker_ && cls_raw && parallel_method_pins_)
                         ? parallel_method_pins_->find(cls_raw, member->member_id) : nullptr;
                     if (parallel_worker_ && cls_raw && !worker_pin) [[unlikely]] {
-                        return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                            "method '{0}' was not admitted in this parallel body (admitted: single-overload "
-                            "public methods of the element's class or its bases touching only element, local, or "
-                            "captured-read state)", member->member_id);
+                        return detail::parallel_method_not_admitted(member->member_id);
                     }
                     if (worker_pin && !worker_pin->resolved) [[unlikely]] {
                         std::vector<script_value> arguments;
@@ -3810,10 +3806,7 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                     } else if (!own) {
                         const script_value* bound = cls_raw->method_ptr(member_id);
                         if (bound && bound->is_function() && bound->as_function().target<script_method_dispatch>()) {
-                            return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-                                "method '{0}' was not admitted in this parallel body (admitted: single-overload "
-                                "public methods of the element's class or its bases touching only element, local, or "
-                                "captured-read state)", member_id);
+                            return detail::parallel_method_not_admitted(member_id);
                         }
                     }
                 } else if (cls_raw && !cls_raw->chain_has_nonpublic()) {
@@ -4034,11 +4027,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
     // The call-site context rides a single save/restored pointer: the next call_function
     // entered consumes it to bind reference parameters against the caller's variables
     // (the arg expressions outlive the call - they live in this frame).
-    // Own-trampoline fast path (vm invoke_callee parity): a plain script-function thunk
-    // dispatches straight into THIS backend's call machinery - skips std::function +
-    // the engine-backend hop, and keeps parallel-worker interpreters on their own
-    // instance (the thunk's operator() routes to the ENGINE's backend, which is the
-    // wrong one inside a provisioned worker).
+    // A plain script-function thunk enters this backend's call machinery directly (vm invoke_callee's twin); any other callee
+    // runs through its trampoline, which enters engine::calling_backend (a parallel chunk's own backend)
     const script_function* callee_func = &callee.as_function();
     const auto* callee_thunk = callee_func->target<script_callable_thunk>();
     if (callee_thunk && callee_thunk->eng == engine_ && callee_thunk->payload.kind == script_callable::kind_type::overload_set &&
@@ -4661,8 +4651,11 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
                 push_value(field->is_reference() ? field->deref() : *field);
                 return {};
             }
-            // a barrier-admitted method on a receiver the call's fast entry does not take (a member chain): its pinned dispatcher
-            if (const detail::parallel_method_pin* pin = as_callee && parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr) {
+            // a call on a receiver the call's fast entry does not take (a member chain) enters the method's pin, else meets the
+            // call's wall (KEEP BYTE-PARALLEL with vm_backend::exec_probe_member)
+            if (as_callee && expr->member_id != same_as_id_) {
+                const detail::parallel_method_pin* pin = parallel_method_pins_ ? parallel_method_pins_->find(cls, expr->member_id) : nullptr;
+                if (!pin) { return detail::parallel_method_not_admitted(expr->member_id); }
                 push_value(pin->resolved ? create_bound_method(objectValue, pin->method_value) : detail::parallel_bound_pin(*pin, objectValue, expr->member_id, engine_));
                 return {};
             }

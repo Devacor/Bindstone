@@ -4464,6 +4464,12 @@ script_value* parallel_script_field(class_instance& inst, uint64_t member_id) {
 	return inst.find_field_value(member_id);
 }
 
+JAI_NOINLINE checked_result<void> parallel_method_not_admitted(uint64_t name_id) {
+	return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
+		"method '{0}' was not admitted in this parallel body (admitted: single-overload public methods of the element's class or its "
+		"bases touching only element, local, or captured-read state)", name_id);
+}
+
 // === Shared objects: what a worker reaches through a host call is read through a borrow, never through its handle ===
 
 script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng) {
@@ -4564,12 +4570,7 @@ std::optional<checked_result<script_value>> parallel_borrow_field(const script_v
 checked_result<void> parallel_borrow_call(const script_value& borrow, uint64_t name_id, const parallel_method_pin_table* pins) {
 	const class_definition* cd = borrow.parallel_object_borrow()->source->get_class_definition();
 	const parallel_method_pin* pin = pins && cd ? pins->find(cd, name_id) : nullptr;
-	if (!pin) {
-		return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
-			"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-			"public methods of the element's class or its bases touching only element, local, or "
-			"captured-read state)", name_id);
-	}
+	if (!pin) { return parallel_method_not_admitted(name_id); }
 	if (pin->resolved || !parallel_borrow_view(borrow)) {
 		return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
 			"method '{0}' cannot run on a shared object in a parallel body (an object reached through a host call takes only its "

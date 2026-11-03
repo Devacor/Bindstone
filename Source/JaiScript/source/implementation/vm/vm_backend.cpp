@@ -11943,11 +11943,7 @@ op_status vm_backend::exec_probe_callee(frame& f, const vm_instruction& ins, boo
 	if (site.mic_cd && park_sibling_method(f, site)) { return {}; }
 	if (parallel_worker_) [[unlikely]] {
 		if (const int sibling = worker_park_sibling(f, site); sibling > 0) { return {}; }
-		else if (sibling < 0) {
-			return raise_(make_error_code(runtime_error_code::unsupported_operation), "method '{0}' was not admitted in this parallel body (admitted: single-overload "
-						"public methods of the element's class or its bases touching only element, local, or "
-						"captured-read state)", f.code->symbols[site.callee.symbol]);
-		}
+		else if (sibling < 0) { return raise_from(detail::parallel_method_not_admitted(f.code->symbols[site.callee.symbol])); }
 	}
 	std::optional<script_value> scratch;
 	const script_value* resolved = fused_ident_value(f, site.callee, scratch, f.ip * 3, observed, true);
@@ -12286,12 +12282,10 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			auto* inst = holder->unchecked_instance();
 			class_definition* cd = inst->get_class_definition();
 			if (parallel_worker_) [[unlikely]] {
-				// Worker verdict (parallel-method-admission rule): a pinned method answers, any other raises the call op's text
+				// Worker verdict (parallel-method-admission rule): a pinned method answers, any other raises the call op's text (KEEP
+				// BYTE-PARALLEL with interpreter::member_read_on)
 				if (parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member_id)) { return {}; }
-				return raise_(make_error_code(runtime_error_code::unsupported_operation),
-					"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-					"public methods of the element's class or its bases touching only element, local, or "
-					"captured-read state)", member_id);
+				return raise_from(detail::parallel_method_not_admitted(member_id));
 			}
 			if (cached_global_env_ && cd) {
 				const uint64_t epoch = cd->method_epoch();
@@ -17298,10 +17292,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 					return {};
 				}
 				if (!(parallel_method_pins_ && cd && parallel_method_pins_->find(cd, member->member_id))) {
-					return raise_(make_error_code(runtime_error_code::unsupported_operation),
-						"method '{0}' was not admitted in this parallel body (admitted: single-overload "
-						"public methods of the element's class or its bases touching only element, local, or "
-						"captured-read state)", member->member_id);
+					return raise_from(detail::parallel_method_not_admitted(member->member_id));
 				}
 			}
 			// Coroutine next()/done() dispatch directly: the native branch mints a fresh

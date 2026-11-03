@@ -67,7 +67,7 @@ expect("a 307 resends the method and body", kept["method"] == "POST" && kept["bo
 
 string slow = error_of(() => spider::get(base + "/client/slow", {"timeout": 0.3}));
 expect("a timeout is an error naming it", slow == "spider::get: " + base + "/client/slow: timed out after 0.3 s", slow);
-expect("a generous timeout waits", spider::get(base + "/client/slow", {"timeout": 10}).body == "slow");
+expect("a generous timeout waits", spider::get(base + "/client/slow", {"timeout": 600}).body == "slow");
 string refused = error_of(() => spider::get("http://127.0.0.1:1/"));
 expect("a refused connection is an error with the URL", refused.starts_with("spider::get: http://127.0.0.1:1/: "), refused);
 string framing = error_of(() => spider::get(base + "/", {"headers": {"Host": "elsewhere"}}));

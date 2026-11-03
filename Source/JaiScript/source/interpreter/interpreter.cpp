@@ -9947,6 +9947,7 @@ struct interpreter::interpreter_run_state : backend_run_state {
     std::vector<construction_trace_frame> construction_traces;
     constructor_prologue_hook* pending_prologue = nullptr;
     size_t prologue_frame = SIZE_MAX;
+    detail::native_stack_mark stack_mark;   // a run's walk stops near its fiber's stack end, the host's near the host thread's
 };
 
 std::unique_ptr<backend_run_state> interpreter::make_run_state() {
@@ -10005,6 +10006,7 @@ void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
     swap(construction_traces_, s.construction_traces);
     swap(pending_prologue_, s.pending_prologue);
     swap(prologue_frame_, s.prologue_frame);
+    swap(stack_mark_, s.stack_mark);
     sync_unit();
 }
 

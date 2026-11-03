@@ -1137,12 +1137,17 @@ struct engine::implementation {
     detail::program_function_map program_functions_;   // the closure units' free functions (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
     detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (internal/static_checking.md "Proofs")
     std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> program_name_units_;   // name -> unit path -> unit_key of the unit declaring it
-    // A unit's declarations into the program pools, each name under the unit that declares it
+    std::unordered_map<std::string, uint64_t> pooled_unit_keys_;   // unit path -> the unit_key its names were pooled under
+    // A unit's declarations into the program pools, each name under the unit that declares it; a unit pooled again under the
+    // key it was pooled with brings the names it brought before
     void pool_unit(const std::vector<declaration_ptr>& decls, const std::string& path, uint64_t key) {
-        std::unordered_set<std::string> names;
-        detail::collect_unit_names(decls, names);
-        for (const auto& n : names) { program_name_units_[n][path] = key; }
-        program_names_.insert(names.begin(), names.end());
+        if (auto [pooled, fresh] = pooled_unit_keys_.try_emplace(path, key); fresh || pooled->second != key) {
+            pooled->second = key;
+            std::unordered_set<std::string> names;
+            detail::collect_unit_names(decls, names);
+            for (const auto& n : names) { program_name_units_[n][path] = key; }
+            program_names_.insert(names.begin(), names.end());
+        }
         detail::collect_unit_classes(decls, program_classes_);
         detail::collect_unit_enums(decls, path, program_enums_);
         detail::collect_unit_functions(decls, path, program_functions_);
@@ -1635,11 +1640,15 @@ struct engine::implementation {
         detail::program_function_map functions;
         detail::program_global_map globals;
         std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> name_units;
+        std::unordered_map<std::string, uint64_t> unit_keys;
     };
-    program_pools save_program_pools() const { return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_}; }
+    program_pools save_program_pools() const {
+        return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_};
+    }
     void restore_program_pools(program_pools&& saved) {
         program_names_ = std::move(saved.names);
         program_name_units_ = std::move(saved.name_units);
+        pooled_unit_keys_ = std::move(saved.unit_keys);
         program_classes_ = std::move(saved.classes);
         program_enums_ = std::move(saved.enums);
         program_functions_ = std::move(saved.functions);

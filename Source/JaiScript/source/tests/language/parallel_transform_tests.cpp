@@ -2384,11 +2384,9 @@ public:
 				}
 				return [to_json(par), to_json(ser)];
 			)";
-			for (size_t workers : {size_t(1), size_t(4), size_t(16)}) {
-				auto e = make_engine();
-				jai::stdlib::register_all(*e);
-				check_matches_serial_at(e, src, {workers});
-			}
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			check_matches_serial_at(e, src, {1, 4, 16});
 		});
 
 		test("captured_scalar_and_borrow_reads", [this]() {

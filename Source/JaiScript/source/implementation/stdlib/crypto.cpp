@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <fstream>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -846,6 +847,7 @@ namespace crypto_detail {
 		const script_int count = a_count.as_int();
 		if (count < 0) { return value_error(a_negative); }
 		if (!detail::builtin_memory_charge(a_engine, static_cast<size_t>(count))) [[unlikely]] { return detail::builtin_memory_cap(a_engine); }
+		if (static_cast<uint64_t>(count) > std::string().max_size() - 64) { throw std::length_error("random_bytes"); }
 		a_out.assign(static_cast<size_t>(count), '\0');
 		if (!detail::os_random_bytes(a_out.data(), a_out.size())) { return value_error(a_failed); }
 		return script_value(std::monostate{}, a_engine);

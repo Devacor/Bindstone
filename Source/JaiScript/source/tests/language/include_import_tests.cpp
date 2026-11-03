@@ -1138,6 +1138,42 @@ public:
             std::filesystem::remove_all(dir);
         });
 
+        test("a_cached_stamp_holds_only_under_the_host_signatures_it_was_checked_against", [=, this]() {
+            // two builds of one host register the same names (one registration fingerprint) with other signatures
+            struct gauge { int64_t level = 4; };
+            const auto first_build = [](engine& eng) {
+                eng.add_function("ctx_scale", [](script_int v) -> script_int { return v * 2; });
+                dynamic_binder<gauge>(eng, "CtxGauge").constructor<>().method("read", [](gauge& g) -> script_int { return g.level; }).strict_signatures().build();
+            };
+            const auto second_build = [](engine& eng) {
+                eng.add_function("ctx_scale", [](script_int v, script_int by) -> script_int { return v * by; });
+                dynamic_binder<gauge>(eng, "CtxGauge").constructor<>().method("read", [](gauge& g) -> std::string { return std::to_string(g.level); }).strict_signatures().build();
+            };
+            const auto registration_fingerprint_of = [this](const auto& build) {
+                auto eng = make_engine();
+                build(*eng);
+                return eng->registration_fingerprint();
+            };
+            const auto dir = context_dir("host");
+            put_file(dir / "ctx_scaled.jai", "int ctx_scaled() { return ctx_scale(3); }\n0;\n");
+            put_file(dir / "ctx_reading.jai", "int ctx_reading(CtxGauge g) { return g.read(); }\n0;\n");
+            for (const char* file : {"ctx_scaled.jai", "ctx_reading.jai"}) {
+                const auto run = [&](const auto& build) {
+                    auto eng = make_engine();
+                    build(*eng);
+                    return outcome_of(*eng, dir / file);
+                };
+                check_eq(std::string("VALUE 0"), run(first_build), std::string(file) + " checks clean under the first build and caches");
+                check_eq(registration_fingerprint_of(first_build), registration_fingerprint_of(second_build), "the builds register the same names");
+                const std::string warm = run(second_build);
+                std::filesystem::remove_all(dir / ".cache");
+                const std::string cold = run(second_build);
+                check_true(cold.find("static check failed") != std::string::npos, cold);
+                check_eq(cold, warm, std::string(file) + ": the second build checks the cached file as it checks a parsed one");
+            }
+            std::filesystem::remove_all(dir);
+        });
+
         test("a_reimport_runs_the_saved_source_whatever_its_mtime", [=, this]() {
             // a revision put in place with an older mtime (a copy keeping its source file's time), with the same size, or
             // with the same mtime runs its own definitions on the re-run: the sibling written for the version before it

@@ -192,7 +192,8 @@ independent of the stamp: a loaded bite re-derives them.</li>
 <li id="the-stamp-holds-its-context">The stamp <strong>holds for the context the file was checked in</strong>. It records every
 name the check resolved outside the file (a global, function, class or enum another unit of the program declares or the
 engine holds, a namespace and its members) and what each resolved to: the unit that declared it, a cell&#x27;s type, a
-script declaration by the unit that ran it. A load trusts the stamp only where each of those names resolves the same, so
+script declaration by the unit that ran it, a host function&#x27;s overloads and a bound class&#x27;s methods, fields and bases
+by their C++ signatures (the registration fingerprint holds only their names). A load trusts the stamp only where each of those names resolves the same, so
 a leaf that checked clean inside one program (<a href="06-static-checking.html#programs">its names declared by a
 sibling unit</a>) is checked again when a <em>different</em> program reaches it, or when the sibling&#x27;s declaration
 changes, and gets exactly the verdict a fresh parse would. A re-check that comes out clean writes the cache again under

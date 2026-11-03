@@ -618,6 +618,10 @@ come from a proof-only walk after it), so no load-time text changes. A class-typ
 and a unit whose proofs waited for a class re-stamps after each import completes (`proof_stats::deferred`); a body compiled
 before that (a lambda compiles with its unit's top level; a named function compiles at its first call) keeps the proofs it had.
 Every such proof stays behind the runtime guards, so a declaration the runtime contradicts costs a guard, never a value.
+A reload that passes its dependents' check moves the declarations those units' proofs read (a program function's result, the
+inliner's decl): every other loaded unit re-stamps once the reload's modules ran (`script_cache_entry::proofs_moved`), so a
+body compiled after it meets the proofs a fresh engine stamps; the verdict needs no re-key, since the dependents' check is
+the reload's gate (`reload_dependents_listing`).
 
 **Differential gate** — the contract is pinned four ways: `static_check_tests.cpp::
 proof_differential_gate` runs 200 generator seeds on {interpreter, vm} × {proofs on, off}

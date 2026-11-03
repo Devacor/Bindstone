@@ -50,10 +50,11 @@ sleep(0.02);
 float waited = time::now() - t0;
 print("waited at least 20 ms: {}", waited &gt;= 0.02);
 print("this execute has run at least that long: {}", time::execute_elapsed() &gt;= waited);
-print("unix_ms is unix_time in milliseconds: {}", math::abs(time::unix_ms() / 1000.0 - time::unix_time()) &lt; 0.5);</code></pre></div>
+float unix_seconds = time::unix_time();
+print("unix_ms reads the same clock, in milliseconds: {}", time::unix_ms() + 1 &gt; unix_seconds * 1000.0);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">waited at least 20 ms: true
 this execute has run at least that long: true
-unix_ms is unix_time in milliseconds: true</code></pre></div>
+unix_ms reads the same clock, in milliseconds: true</code></pre></div>
 <p>Use the monotonic clocks (<code>now</code>, <code>execute_elapsed</code>, stopwatches) to measure durations: the wall clock can jump when the system clock is set. Use the wall clock (<code>unix_time</code>, dates) to say what time it is.</p>
 <p>Waiting is the language&#x27;s own <code>sleep(seconds)</code> (<a href="08-coroutines.html#sleep">Coroutines</a>), which reads the same time source: in a run the host started with <code>engine::start</code> it suspends the run and hands control back to the host until the time has passed, and in a plain <code>execute()</code> it blocks the thread, counting against the execution budget like any other time.</p>
 <p><strong>The engine&#x27;s own deadlines run on the real clock.</strong> The execution budget and the window between import check passes (<a href="10-modules.html">Modules</a>) always measure real time, so a host&#x27;s virtual clock can neither stall nor trip them. The engine keeps a sample of the real clock, taken at each call from the host and at the budget&#x27;s periodic checks; while the time source is the system clock, a <code>time::</code> reading (and waking from a <code>sleep</code> that blocks) refreshes that sample too, and a run resumed after a <code>sleep</code> is a call from the host, which is what keeps a sleep-paced frame loop&#x27;s hot reload prompt. A replaced source never touches it.</p>
@@ -73,17 +74,19 @@ unix_ms is unix_time in milliseconds: true</code></pre></div>
 frame.delta();                      // the first delta starts the stopwatch and returns 0.0
 sleep(0.01);
 float dt = frame.delta();           // seconds since the previous delta
-frame.pause();
+float at_pause = frame.pause();    // pause returns the elapsed time
 sleep(0.05);                        // paused: none of this counts
+print("the pause stood still: {}", frame.elapsed() == at_pause);
 frame.resume();
 print("dt covered the sleep: {}", dt &gt;= 0.01);
-print("the pause was skipped: {}", frame.elapsed() &lt; 0.05);
+print("resumed from where it paused: {}", frame.elapsed() &gt;= at_pause);
 print("running: {}, paused: {}", frame.is_running(), frame.is_paused());
 auto lap = frame;                   // a copy has its own state
 lap.stop();
 print("copy running: {}, original running: {}", lap.is_running(), frame.is_running());</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">dt covered the sleep: true
-the pause was skipped: true
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">the pause stood still: true
+dt covered the sleep: true
+resumed from where it paused: true
 running: true, paused: false
 copy running: false, original running: true</code></pre></div>
 <p>Declaring a stopwatch reads no clock, and each method reads the monotonic clock at most once: a paused stopwatch answers <code>elapsed()</code>, <code>delta()</code>, <code>pause()</code> and <code>stop()</code> without reading it at all.</p>

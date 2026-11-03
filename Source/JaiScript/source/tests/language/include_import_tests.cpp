@@ -1041,6 +1041,101 @@ public:
             std::filesystem::remove_all(base);
         });
 
+        // A cache holds a parse and a checked-clean stamp for the context the file met: the namespace classes the parse asked
+        // about and the outside declarations the check resolved against. A warm load answers exactly as a cold one would.
+        auto context_dir = [](const std::string& name) {
+            const auto result = jai::foundry::test_temp_directory() / ("cache_context_" + name);
+            std::filesystem::remove_all(result);
+            std::filesystem::create_directories(result);
+            return result;
+        };
+        auto outcome_of = [](engine& eng, const std::filesystem::path& file) {
+            try {
+                return "VALUE " + eng.execute_file(file.string()).to_string();
+            } catch (const std::exception& e) {
+                return std::string("ERROR ") + e.what();
+            }
+        };
+
+        test("a_cached_stamp_holds_only_where_the_names_it_resolved_mean_the_same", [=, this]() {
+            const auto dir = context_dir("verdict");
+            put_file(dir / "ctx_state.jai", "int CTX_G = 7;\nclass CtxStats { int power = 3; }\n");
+            put_file(dir / "ctx_rules.jai", "int ctx_damage(int hits) { return hits * CTX_G; }\nint ctx_power(CtxStats s) { return s.power; }\n");
+            put_file(dir / "ctx_game.jai", "import \"ctx_rules.jai\";\nimport \"ctx_state.jai\";\nctx_damage(3);\n");
+            put_file(dir / "ctx_alone.jai", "import \"ctx_rules.jai\";\n0;\n");
+            check_eq(std::string("VALUE 21"), outcome_of(*make_engine(), dir / "ctx_game.jai"), "the game checks the rules clean and caches them");
+            const std::string warm = outcome_of(*make_engine(), dir / "ctx_alone.jai");
+            std::filesystem::remove_all(dir / ".cache");
+            const std::string cold = outcome_of(*make_engine(), dir / "ctx_alone.jai");
+            check_true(cold.find("undeclared identifier 'CTX_G'") != std::string::npos, cold);
+            check_eq(cold, warm, "a program that never declares the name refuses the cached rules as it refuses parsed ones");
+
+            check_eq(std::string("VALUE 21"), outcome_of(*make_engine(), dir / "ctx_game.jai"));
+            put_file(dir / "ctx_state.jai", "int CTX_G = 7;\nclass CtxStats { string power = \"three\"; }\n");
+            const std::string retyped_warm = outcome_of(*make_engine(), dir / "ctx_game.jai");
+            std::filesystem::remove_all(dir / ".cache");
+            const std::string retyped_cold = outcome_of(*make_engine(), dir / "ctx_game.jai");
+            check_true(retyped_cold.find("static check failed") != std::string::npos, retyped_cold);
+            check_eq(retyped_cold, retyped_warm, "a sibling's changed declaration re-checks the unit that resolved against it");
+            std::filesystem::remove_all(dir);
+        });
+
+        // geo::Point exists only where ctx_points.jai ran; ctx_probe.jai's bare Point inside its namespace geo names it there,
+        // and its own global Point everywhere else
+        const std::string points = "namespace geo { class Point { int x = 1; } }\n";
+        const std::string probe = "class Point { var x = 2; }\n"
+                                  "namespace geo {\n"
+                                  "    int probe() { Point p = Point(); return p.x; }\n"
+                                  "    void reseat() { Point p = Point(); geo::Point q; p = q; }\n"
+                                  "}\n"
+                                  "geo::probe();\n";
+
+        test("a_cached_parse_of_a_reopened_namespace_holds_only_under_the_namespace_classes_it_asked_about", [=, this]() {
+            const auto dir = context_dir("namespace");
+            put_file(dir / "ctx_points.jai", points);
+            put_file(dir / "ctx_probe.jai", probe);
+            {   // the cache is written where geo::Point exists
+                auto eng = make_engine();
+                eng->execute_file((dir / "ctx_points.jai").string());
+                check_eq(std::string("VALUE 1"), outcome_of(*eng, dir / "ctx_probe.jai"));
+            }
+            const std::string warm = outcome_of(*make_engine(), dir / "ctx_probe.jai");
+            std::filesystem::remove_all(dir / ".cache");
+            const std::string cold = outcome_of(*make_engine(), dir / "ctx_probe.jai");
+            check_eq(std::string("VALUE 2"), cold);
+            check_eq(cold, warm, "loaded where geo::Point does not exist, the bare Point names the global class");
+            {   // in memory: the parse taken before geo::Point existed is not reused once it does
+                auto eng = make_engine();
+                check_eq(std::string("VALUE 2"), outcome_of(*eng, dir / "ctx_probe.jai"));
+                eng->execute_file((dir / "ctx_points.jai").string());
+                check_eq(std::string("VALUE 1"), outcome_of(*eng, dir / "ctx_probe.jai"), "the in-memory parse asks again");
+            }
+            std::filesystem::remove_all(dir);
+        });
+
+        test("a_cache_loaded_under_other_namespace_classes_stamps_the_proofs_a_parse_would", [=, this]() {
+            const auto dir = context_dir("proofs");
+            put_file(dir / "ctx_points.jai", points);
+            put_file(dir / "ctx_probe.jai", probe);
+            check_eq(std::string("VALUE 2"), outcome_of(*make_engine(), dir / "ctx_probe.jai"), "the cache is written where geo::Point does not exist");
+            auto run_after_points = [&](proof_stats& stats) {
+                auto eng = make_engine();
+                eng->execute_file((dir / "ctx_points.jai").string());
+                const std::string result = outcome_of(*eng, dir / "ctx_probe.jai");
+                stats = eng->last_proof_stats();
+                return result;
+            };
+            proof_stats warm_stats, cold_stats;
+            const std::string warm = run_after_points(warm_stats);
+            std::filesystem::remove_all(dir / ".cache");
+            const std::string cold = run_after_points(cold_stats);
+            check_true(cold_stats.stores > 0, "reseat's bare Point is geo::Point: the store of a geo::Point is proven");
+            check_eq(cold_stats.stores, warm_stats.stores, "the loaded program carries the store proof the parsed one does");
+            check_eq(std::string("VALUE 1"), cold);
+            check_eq(cold, warm, "the probe reads geo::Point's field");
+            std::filesystem::remove_all(dir);
+        });
+
         test("a_reimport_runs_the_saved_source_whatever_its_mtime", [=, this]() {
             // a revision put in place with an older mtime (a copy keeping its source file's time), with the same size, or
             // with the same mtime runs its own definitions on the re-run: the sibling written for the version before it

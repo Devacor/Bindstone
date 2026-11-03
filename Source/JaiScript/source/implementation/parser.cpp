@@ -846,6 +846,7 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
     auto& spaces = engine_->script_namespaces();
     auto names_class = [&](const std::string& space, std::string_view name) {
         if (auto d = declared.find(space); d != declared.end() && d->second.count(name)) { return true; }
+        namespace_queries_.insert(space + "::" + std::string(name));
         const auto space_id = symbolizer_->find(space);
         const auto name_id = space_id ? symbolizer_->find(name) : std::nullopt;
         if (!name_id) { return false; }
@@ -855,6 +856,7 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
     // a name no namespace declares as a class needs no qualified name built
     auto some_namespace_class = [&](std::string_view name) {
         if (declared_anywhere.count(name)) { return true; }
+        namespace_queries_.emplace(name);
         const auto name_id = symbolizer_->find(name);
         if (!name_id) { return false; }
         return std::any_of(spaces.begin(), spaces.end(), [&](const auto& ns) { return ns.second && ns.second->classes.count(*name_id) != 0; });

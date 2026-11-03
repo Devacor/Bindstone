@@ -11,7 +11,9 @@
 // are written little-endian on every host; the source hash reads its words in host order.
 //
 // Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
-// size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), declaration count, node tree.
+// size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), the context section when
+// flag bit 1 says so (jaibite_context: namespace query count + table indices, u64 key, outside name count + table indices, u64
+// key), declaration count, node tree.
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
@@ -32,11 +34,13 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 49;
-    // Header flags (u32; readers ignore unknown bits, so no version bump needed):
+    inline constexpr uint32_t k_jaibite_version = 50;
+    // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
     inline constexpr uint32_t k_jaibite_flag_checked_clean = 0x1;
+    // bit 1 = a context section follows the string table (the writer sets it whenever the context is not empty)
+    inline constexpr uint32_t k_jaibite_flag_context = 0x2;
     // BUMP THIS whenever the static checker's rules change (a new diagnostic, a rule that rejects more): a checked-clean
     // stamp records the revision that checked it (flag bits 8..31), and a bite stamped under another revision is checked
     // again on load instead of trusted. A parse change bumps k_jaibite_version instead, which re-parses as well.
@@ -116,9 +120,15 @@ namespace jai::detail {
         }
 
         std::vector<uint8_t> serialize(const std::vector<declaration_ptr>& decls, uint64_t fingerprint,
-                                       uint32_t flags = 0, jaibite_source_identity source = {}) {
+                                       uint32_t flags = 0, jaibite_source_identity source = {}, const jaibite_context* context = nullptr) {
             varint(decls.size());
             for (const auto& d : decls) node(d.get());
+            std::vector<uint64_t> namespace_queries, outside;
+            if (context && !context->empty()) {
+                flags |= k_jaibite_flag_context;
+                for (const auto& q : context->namespace_queries) { namespace_queries.push_back(table_index(q)); }
+                for (const auto& n : context->outside) { outside.push_back(table_index(n)); }
+            }
 
             std::vector<uint8_t> out;
             out.reserve(24 + body_.size() + table_.size() * 8);
@@ -132,6 +142,14 @@ namespace jai::detail {
             for (const auto& s : table_) {
                 append_varint(out, s.size());
                 out.insert(out.end(), s.begin(), s.end());
+            }
+            if (flags & k_jaibite_flag_context) {
+                append_varint(out, namespace_queries.size());
+                for (uint64_t i : namespace_queries) { append_varint(out, i); }
+                fixed_u64(out, context->namespace_key);
+                append_varint(out, outside.size());
+                for (uint64_t i : outside) { append_varint(out, i); }
+                fixed_u64(out, context->outside_key);
             }
             out.insert(out.end(), body_.begin(), body_.end());
             return out;
@@ -653,7 +671,7 @@ namespace jai::detail {
         // the function frames the read entered (the context's own frame included): a copied body holding a nested function has more
         size_t frame_count() const noexcept { return frames_.size(); }
 
-        std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr) {
+        std::vector<declaration_ptr> deserialize(uint64_t& fingerprint_out, uint32_t* flags_out = nullptr, jaibite_context* context_out = nullptr) {
             if (size_ < k_jaibite_header_size) jaibite_fail("truncated header");
             if (std::memcmp(data_, k_jaibite_magic, 4) != 0) jaibite_fail("not a jaibite file (bad magic)");
             pos_ = 4;
@@ -675,6 +693,23 @@ namespace jai::detail {
                 pos_ += size_t(len);
             }
             interned_.assign(table_.size(), { UINT64_MAX, std::string_view{} });
+            if (flags & k_jaibite_flag_context) {
+                jaibite_context context;
+                const auto names = [this](std::vector<std::string>& out) {
+                    const uint64_t count = varint();
+                    check_count(count);
+                    for (uint64_t i = 0; i < count; ++i) {
+                        const uint64_t index = varint();
+                        if (index >= table_.size()) jaibite_fail("context name out of range");
+                        out.emplace_back(table_[size_t(index)]);
+                    }
+                };
+                names(context.namespace_queries);
+                context.namespace_key = fixed_u64();
+                names(context.outside);
+                context.outside_key = fixed_u64();
+                if (context_out) *context_out = std::move(context);
+            }
 
             uint64_t decl_count = varint();
             check_count(decl_count);
@@ -1543,16 +1578,16 @@ namespace jai::detail {
     inline std::vector<uint8_t> serialize_jaibite(const std::vector<declaration_ptr>& decls,
                                                   const string_symbolizer& symbols, uint64_t fingerprint,
                                                   uint32_t flags = 0, std::string own_path = {},
-                                                  jaibite_source_identity source = {}) {
-        return ast_writer(symbols, /*include_locations=*/true, std::move(own_path)).serialize(decls, fingerprint, flags, source);
+                                                  jaibite_source_identity source = {}, const jaibite_context* context = nullptr) {
+        return ast_writer(symbols, /*include_locations=*/true, std::move(own_path)).serialize(decls, fingerprint, flags, source, context);
     }
 
     inline std::vector<declaration_ptr> deserialize_jaibite(const uint8_t* data, size_t size,
                                                             engine* eng, uint64_t& fingerprint_out,
                                                             uint32_t* flags_out = nullptr,
                                                             const ast_frame_context* context = nullptr,
-                                                            std::string own_path = {}) {
-        return ast_reader(data, size, eng, context, std::move(own_path)).deserialize(fingerprint_out, flags_out);
+                                                            std::string own_path = {}, jaibite_context* stamp_out = nullptr) {
+        return ast_reader(data, size, eng, context, std::move(own_path)).deserialize(fingerprint_out, flags_out, stamp_out);
     }
 
     // Position-insensitive structural identity key for one AST subtree (hot-reload

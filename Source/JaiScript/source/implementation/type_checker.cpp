@@ -269,11 +269,74 @@ ctype binary_result(const ctype& l, token_type op, const ctype& r) {
 
 // ------------------------------------------------------------------ checker
 
+// The engine as the walk asks it. Each name asked is one the unit resolved outside itself; a walk that keeps them
+// (check_options::outside) hands them back sorted, the names its verdict depends on beyond its own text.
+class outside_engine {
+public:
+    outside_engine(engine& eng, bool recording) : engine_(eng), recording_(recording) {}
+
+    void note(std::string_view name) const {
+        if (recording_ && !names_.count(std::string(name))) { names_.emplace(name); }
+    }
+    engine& asking(std::string_view name) const { note(name); return engine_; }
+    std::vector<std::string> take_names() {
+        std::vector<std::string> result(names_.begin(), names_.end());
+        std::sort(result.begin(), result.end());
+        return result;
+    }
+
+    bool has_variable(const std::string& name) const { note(name); return engine_.has_variable(name); }
+    bool has_function(const std::string& name) const { note(name); return engine_.has_function(name); }
+    bool is_type_name(const std::string& name) const { note(name); return engine_.is_type_name(name); }
+    bool is_const_global(const std::string& name) const { note(name); return engine_.is_const_global(name); }
+    held_value get_variable(const std::string& name) const { note(name); return engine_.get_variable(name); }
+    std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_.get_class_definition(name); }
+    std::shared_ptr<script_class_definition> find_script_class(const std::string& name) const { note(name); return engine_.get_class_registry().find_script_class(name); }
+    std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const {
+        auto result = engine_.get_class_definition_by_type(type);
+        if (result) { note(result->get_name()); }
+        return result;
+    }
+    bool host_function_signatures(const std::string& name, std::vector<engine::host_overload_signature>& out) const { note(name); return engine_.host_function_signatures(name, out); }
+    bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_.host_function_result(name, out); }
+    std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_.constant_argument_indexes(callable); }
+    const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const { note(k_outside_constants); return engine_.constant_texts_by_name(); }
+    script_namespace_data* find_namespace(const std::string& path) const {
+        note(path);
+        const auto id = engine_.get_symbolizer()->find(path);
+        if (!id) { return nullptr; }
+        auto& all = engine_.script_namespaces();
+        auto it = all.find(*id);
+        return it == all.end() ? nullptr : it->second.get();
+    }
+
+    uint64_t symbolize(std::string_view text) const { return engine_.symbolize(text); }
+    string_symbolizer* get_symbolizer() const { return engine_.get_symbolizer(); }
+    std::shared_ptr<environment> get_global_environment() const { return engine_.get_global_environment(); }
+    std::unordered_set<std::string> get_registered_template_types() const { return engine_.get_registered_template_types(); }
+    bool has_constant_arguments() const { return engine_.has_constant_arguments(); }
+    bool sleep_callee(const void* fn) const noexcept { return engine_.sleep_callee(fn); }
+    uint8_t math_alias_fn(uint64_t symbol) const { return engine_.math_alias_fn(symbol); }
+    const std::unordered_set<uint64_t>& builtin_method_ids(int kind) const { return engine_.builtin_method_ids(kind); }
+    type_info* get_type_info_object(const std::string& cls) const { return engine_.get_type_info_object(cls); }
+    type_info* get_type_info_int() const { return engine_.get_type_info_int(); }
+    type_info* get_type_info_float() const { return engine_.get_type_info_float(); }
+    type_info* get_type_info_bool() const { return engine_.get_type_info_bool(); }
+    type_info* get_type_info_any() const { return engine_.get_type_info_any(); }
+    type_info* get_type_info_uint8() const { return engine_.get_type_info_uint8(); }
+    type_info* get_type_info_array(type_info* element) const { return engine_.get_type_info_array(element); }
+
+private:
+    engine& engine_;
+    bool recording_;
+    mutable std::unordered_set<std::string> names_;
+};
+
 class static_checker {
 public:
     static_checker(engine& eng, const std::vector<declaration_ptr>& decls,
                    const std::vector<std::string>* extra_globals, const check_options& opts)
-        : eng_(eng), decls_(decls), proofs_(opts.proofs), collect_diagnostics_(opts.diagnostics), stats_out_(opts.stats) {
+        : eng_(eng, opts.outside != nullptr), decls_(decls), proofs_(opts.proofs), collect_diagnostics_(opts.diagnostics), stats_out_(opts.stats) {
         if (extra_globals) {
             for (const auto& n : *extra_globals) {
                 extra_globals_.insert(n);
@@ -287,6 +350,7 @@ public:
         program_enums_ = opts.program_enums;
         deferred_out_ = opts.deferred_classes;
         observer_ = opts.observer;
+        outside_out_ = opts.outside;
     }
 
     check_report run() {
@@ -306,6 +370,7 @@ public:
         }
 
         if (stats_out_) { counts_.deferred = deferred_ ? 1 : 0; *stats_out_ = counts_; }
+        if (outside_out_) { *outside_out_ = eng_.take_names(); }
         check_report report;
         report.capped = capped_;
         report.diagnostics = std::move(diags_);
@@ -335,7 +400,8 @@ private:
         bool provable = true;
     };
 
-    engine& eng_;
+    outside_engine eng_;
+    std::vector<std::string>* outside_out_ = nullptr;
     const std::vector<declaration_ptr>& decls_;
 
     // Proof pass (internal/type_proofs_design.md): independent of diagnostics - a stamp never
@@ -415,7 +481,11 @@ private:
     std::unordered_map<std::string_view, std::vector<const expression*>> layout_inits_;
     std::unordered_set<std::string> extra_globals_;
     const std::unordered_set<std::string>* program_names_ = nullptr;   // the program's names, consulted beside extra_globals_ (never copied per check)
-    bool extra_global(const std::string& name) const { return extra_globals_.count(name) || (program_names_ && program_names_->count(name)); }
+    bool extra_global(const std::string& name) const {
+        if (extra_globals_.count(name)) { return true; }
+        eng_.note(name);
+        return program_names_ && program_names_->count(name);
+    }
     std::unordered_set<std::string> instance_names_;   // the host's per-call instance variables (a subset of extra_globals_)
     // Top-level (and namespace-flattened) variable names. Runtime resolution reads the
     // scope chain THROUGH the globals before falling back to this-fields, so a name that
@@ -519,6 +589,7 @@ private:
         if (fn_stack_.empty() || !fn_stack_.back().file || *fn_stack_.back().file == fn->location.filename) { return; }
         const std::string name(fn->name);
         auto top = functions_.find(fn->name);
+        eng_.note(name);
         const bool program_has = top != functions_.end() || (program_functions_ && program_functions_->count(name)) || eng_.has_variable(name);
         if (!program_has) { return; }
         const std::string where = fn_stack_.back().name == "lambda" ? std::string("a lambda") : "function '" + std::string(fn_stack_.back().name) + "'";
@@ -605,6 +676,7 @@ private:
                 out.push_back(ref_write_callee_of(it->second.front()));
                 return true;
             }
+            eng_.note(id.name);
             if (program_functions_) {
                 if (auto pit = program_functions_->find(std::string(id.name)); pit != program_functions_->end()) {
                     if (pit->second.size() != 1 || pit->second.begin()->second.size() != 1) { return false; }
@@ -612,7 +684,7 @@ private:
                     return true;
                 }
             }
-            return resolve_global_ref_write_callee(eng_, id, out);
+            return resolve_global_ref_write_callee(eng_.asking(id.name), id, out);
         });
         return analysis.analyze(ref_write_callee_of(fn), i);
     }
@@ -761,6 +833,7 @@ private:
     // class the engine holds under a different shape is open like a same-unit redefinition).
     sclass* find_sclass(std::string_view cls) {
         if (auto it = classes_.find(cls); it != classes_.end()) { return &it->second; }
+        eng_.note(cls);
         if (auto it = program_sclasses_.find(cls); it != program_sclasses_.end()) { return &it->second; }
         if (!program_classes_) { return nullptr; }
         auto pit = program_classes_->find(std::string(cls));
@@ -779,6 +852,7 @@ private:
     // once with a spelled non-reference type; a class-typed one needs its class defined, or the unit's proofs wait for the next import (deferred_)
     const variable_decl* program_global(const std::string& name) {
         if (!semantic_walk() || !program_globals_) { return nullptr; }
+        eng_.note(name);
         auto it = program_globals_->find(name);
         if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return nullptr; }
         const variable_decl* g = it->second.begin()->second.front().get();
@@ -936,7 +1010,7 @@ private:
     // The engine already holds a script class of this name with a different instance/static
     // field set: this unit hot-reloads it (an identical re-execution keeps the same set).
     bool unit_redefines(const class_decl* cd) {
-        auto def = eng_.get_class_registry().find_script_class(std::string(cd->name));
+        auto def = eng_.find_script_class(std::string(cd->name));
         if (!def) { return false; }
         size_t own_fields = 0;
         for (const auto& [id, _] : def->get_all_field_defaults()) {
@@ -1093,6 +1167,7 @@ private:
         std::unordered_set<std::string> warned;
         for (const function_decl* fn : fns) {
             if (!warned.insert(std::string(fn->name) + parameter_signature(fn)).second) { continue; }
+            eng_.note(fn->name);
             auto pit = program_functions_->find(std::string(fn->name));
             if (pit == program_functions_->end()) { continue; }
             for (const auto& [unit, decls] : pit->second) {
@@ -1210,14 +1285,14 @@ private:
         if (eng_.has_function(name) || eng_.has_variable(name) || eng_.is_type_name(name)) {
             return true;
         }
-        if (eng_.get_class_registry().find_script_class(name)) {
+        if (eng_.find_script_class(name)) {
             return true;
         }
         auto templates = eng_.get_registered_template_types();
         if (templates.count(name)) {
             return true;
         }
-        return eng_.script_namespaces().count(eng_.symbolize(name)) != 0;
+        return eng_.find_namespace(name) != nullptr;
     }
 
     // Static type of an engine global, trusted only when unambiguous.
@@ -1267,7 +1342,7 @@ private:
         std::string n(name);
         auto def = eng_.get_class_definition(n);
         if (def) { return def; }
-        auto script_def = eng_.get_class_registry().find_script_class(n);
+        auto script_def = eng_.find_script_class(n);
         return script_def ? std::static_pointer_cast<class_definition>(script_def) : nullptr;
     }
 
@@ -1625,6 +1700,7 @@ private:
 
     // the const program-scope declaration another unit of the program makes (one unit, once)
     const variable_decl* program_const_global(const std::string& name) {
+        eng_.note(name);
         if (!program_globals_) { return nullptr; }
         auto it = program_globals_->find(name);
         if (it == program_globals_->end() || it->second.size() != 1 || it->second.begin()->second.size() != 1) { return nullptr; }
@@ -1846,7 +1922,7 @@ private:
                 out.push_back(ref_write_callee_of(it->second.front()));
                 return true;
             }
-            return resolve_global_ref_write_callee(eng_, id, out);
+            return resolve_global_ref_write_callee(eng_.asking(id.name), id, out);
         };
         return v;
     }
@@ -2671,13 +2747,13 @@ private:
         std::string path(static_cast<const identifier_expr*>(e)->name);
         for (size_t i = segments.size(); i-- > 0;) { path += "::"; path += segments[i]; }
         if (namespaces_.count(std::string_view(path))) { return {}; }
-        auto& all = eng_.script_namespaces();
-        auto nit = all.find(eng_.symbolize(path));
-        if (nit == all.end() || !nit->second) { return {}; }
+        script_namespace_data* space = eng_.find_namespace(path);
+        if (!space) { return {}; }
+        eng_.note(path + "::" + std::string(m->member));
         const uint64_t member_id = eng_.symbolize(m->member);
-        if (nit->second->functions.count(member_id)) { return {}; }
-        auto sit = nit->second->signatures.find(member_id);
-        if (sit == nit->second->signatures.end()) { return {}; }
+        if (space->functions.count(member_id)) { return {}; }
+        auto sit = space->signatures.find(member_id);
+        if (sit == space->signatures.end()) { return {}; }
         const host_entry_signature& sig = sit->second;
         const std::string qualified = path + "::" + std::string(m->member);
         if (args.size() < sig.min_args || args.size() > sig.max_args) {
@@ -2735,7 +2811,7 @@ private:
 
     bool namespace_known(const std::string& path) {
         return namespaces_.count(std::string_view(path)) != 0 ||
-               eng_.script_namespaces().count(eng_.symbolize(path)) != 0;
+               eng_.find_namespace(path) != nullptr;
     }
 
     // A method call on a declared container or string: the name must be one the builtin registry dispatches (the runtime's
@@ -3969,7 +4045,7 @@ private:
         report_use_before_declaration(id->name, id->location, false, [&] { return eng_.has_variable(name); });
         if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
         if (extra_global(name)) { note_global_use(id->name); return {}; }
-        if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
+        if (eng_.is_type_name(name) || eng_.find_script_class(name)) {
             return ctype{ctype::class_ref_k, id->name};
         }
         if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
@@ -3991,6 +4067,7 @@ private:
         if (recv.kind == ctype::enum_ref_k) return t.kind == ctype::int_k;
         if (!recv.is_unknown() || class_ctx_ || id->slot_index != SIZE_MAX || id->global_qualified || !program_enums_) return false;
         if (find_named(id) || functions_.count(id->name) || enums_.count(id->name)) return false;
+        eng_.note(name);
         const auto it = program_enums_->find(name);
         if (it == program_enums_->end() || it->second.size() != 1 || !it->second.begin()->second) return false;
         for (const auto& [vname, _] : it->second.begin()->second->values) { if (vname == m->member) return true; }
@@ -4189,6 +4266,7 @@ private:
         if (!ov && program_functions_ && c->callee && c->callee->get_type() == node_type::identifier_expr) {
             const std::string_view name = static_cast<identifier_expr*>(c->callee.get())->name;
             if (functions_.find(name) == functions_.end()) {
+                eng_.note(name);
                 auto pit = program_functions_->find(std::string(name));
                 if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
             }
@@ -4362,7 +4440,7 @@ private:
         report_use_before_declaration(name, at, call, [&] { return eng_.has_function(std::string(name)); });
     }
     void report_class_before_declaration(std::string_view name, const source_location& at) {
-        report_use_before_declaration(name, at, false, [&] { return eng_.get_class_registry().find_script_class(std::string(name)) != nullptr; });
+        report_use_before_declaration(name, at, false, [&] { return eng_.find_script_class(std::string(name)) != nullptr; });
     }
 
     ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
@@ -4406,7 +4484,7 @@ private:
             std::string name(id->name);
             if (extra_global(name)) { note_global_use(id->name); return {}; }
             if (name == "regex") { check_regex_constant(c); }
-            if (eng_.is_type_name(name) || eng_.get_class_registry().find_script_class(name)) {
+            if (eng_.is_type_name(name) || eng_.find_script_class(name)) {
                 check_strict_host_constructor(name, args, c->location);
                 return object_of(id->name);   // registered class ctor: args lenient unless the host class is strict
             }
@@ -5449,6 +5527,7 @@ private:
     // turns the cell in place
     void check_inline_redefinition(const variable_decl* decl) {
         if (decl->is_inline || scopes_.size() != 1 || !program_globals_) { return; }
+        eng_.note(decl->name);
         auto it = program_globals_->find(std::string(decl->name));
         if (it == program_globals_->end()) { return; }
         for (const auto& [unit, globals] : it->second) {
@@ -5715,7 +5794,7 @@ private:
         std::vector<std::string> result;
         if (const sclass* sc = find_sclass(name); sc && sc->decl) {
             for (std::string_view base : sc->decl->base_classes) { result.emplace_back(base); }
-        } else if (auto def = eng_.get_class_registry().find_script_class(std::string(name))) {
+        } else if (auto def = eng_.find_script_class(std::string(name))) {
             for (const auto& parent : def->get_parent_classes()) { if (parent) { result.push_back(parent->get_name()); } }
         }
         return result;

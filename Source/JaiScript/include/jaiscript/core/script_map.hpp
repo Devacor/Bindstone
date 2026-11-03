@@ -366,13 +366,16 @@ namespace jai {
             return false;
         }
         void order_by_key(std::vector<entry*>& entries) const noexcept;   // value.cpp: iteration's order, no key operator run
-        // every entry, detached from the index: the map is empty and consistent before any value dies; entries die first to
-        // last in key order when a death can be observed
+        // every entry, detached from the index: the map is empty and consistent before any value dies; entries die last key
+        // first when a death can be observed, as a container's elements die last to first (and std::map's nodes do)
         std::vector<entry*> detach_all() noexcept {
             std::vector<entry*> out;
             out.reserve(size_);
             for (const slot& s : slots_) { if (s.e) { out.push_back(s.e); } }
-            if (any_dies_observably()) { order_by_key(out); }
+            if (any_dies_observably()) {
+                order_by_key(out);
+                std::reverse(out.begin(), out.end());
+            }
             for (slot& s : slots_) { s = slot{0, nullptr}; }
             size_ = 0;
             class_keys_.reset();

@@ -7,6 +7,7 @@
 #include <jaiscript/detail/regex.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <cctype>
 #include <chrono>
 #include <functional>
 #include <random>
@@ -376,6 +377,35 @@ public:
                     default: { piece x = gen(depth - 1, groups_ok), y = gen(depth - 1, groups_ok), z = gen(depth - 1, groups_ok); return {x.text + y.text + z.text, x.nullable && y.nullable && z.nullable}; }
                 }
             };
+            auto ecmascript_search = [](const std::string& pattern, const std::regex& theirs, const std::string& text) {
+                std::smatch m;
+                const bool want = std::regex_search(text, m, theirs);
+                std::string result = want ? "match" : "none";
+                if (want) { for (size_t g = 0; g < m.size(); ++g) { result += !m[g].matched ? " -" : " " + std::to_string(m.position(g)) + "," + std::to_string(m.position(g) + m.length(g)); } }
+#ifdef _LIBCPP_VERSION
+                // libc++ reads \b as false in the attempt that starts at the end of a non-empty text (it ignores match_prev_avail
+                // there), so that attempt is rerun on an empty text with each \b fixed to its value at the end
+                const bool end_attempt_decides = !want || static_cast<size_t>(m.position(0)) == text.size();
+                if (end_attempt_decides && !text.empty() && pattern[0] != '^' && pattern.find("\\b") != std::string::npos) {
+                    const bool word_before = std::isalnum(static_cast<unsigned char>(text.back())) || text.back() == '_';
+                    std::string fixed;
+                    for (size_t i = 0; i < pattern.size(); ++i) {
+                        if (pattern.compare(i, 2, "\\b") == 0) {
+                            fixed += word_before ? "(?:)" : "(?!)";
+                            ++i;
+                        } else {
+                            fixed += pattern[i];
+                        }
+                    }
+                    const std::string empty;
+                    std::smatch at_end;
+                    result = std::regex_search(empty, at_end, std::regex(fixed, std::regex::ECMAScript)) ? "match" : "none";
+                    const std::string end = std::to_string(text.size());
+                    if (result == "match") { for (size_t g = 0; g < at_end.size(); ++g) { result += at_end[g].matched ? " " + end + "," + end : " -"; } }
+                }
+#endif
+                return result;
+            };
             size_t compared = 0, mismatches = 0;
             std::string first;
             for (int trial = 0; trial < 3000; ++trial) {
@@ -394,11 +424,8 @@ public:
                     std::vector<size_t> slots;
                     jai::detail::regex::searcher searcher(*ours, jai::detail::regex::subject::bytes);
                     const bool found = searcher.find(text, 0, true, slots);
-                    std::smatch m;
-                    const bool want = std::regex_search(text, m, theirs);
-                    std::string a = found ? "match" : "none", b = want ? "match" : "none";
+                    std::string a = found ? "match" : "none", b = ecmascript_search(pattern, theirs, text);
                     if (found) { for (size_t g = 0; g * 2 < slots.size(); ++g) { a += slots[2 * g] == jai::detail::regex::npos ? " -" : " " + std::to_string(slots[2 * g]) + "," + std::to_string(slots[2 * g + 1]); } }
-                    if (want) { for (size_t g = 0; g < m.size(); ++g) { b += !m[g].matched ? " -" : " " + std::to_string(m.position(g)) + "," + std::to_string(m.position(g) + m.length(g)); } }
                     ++compared;
                     if (a != b && mismatches++ == 0) { first = "/" + pattern + "/ on '" + text + "': ours " + a + ", ECMAScript " + b; }
                     const bool full = jai::detail::regex::searcher(*ours, jai::detail::regex::subject::bytes).full(text);

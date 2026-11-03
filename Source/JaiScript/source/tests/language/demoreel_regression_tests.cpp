@@ -14,7 +14,7 @@ namespace jai::foundry::tests {
 namespace {
 
 std::shared_ptr<jai::engine> demoreel_engine(bool use_vm) {
-	auto e = jai::engine::make();
+	auto e = jai::foundry::make_default_engine();
 	e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 	jai::stdlib::register_all(e);
 	return e;

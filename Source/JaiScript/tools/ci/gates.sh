@@ -76,10 +76,11 @@ want() {
 HASH_BACKENDS="${HASH_BACKENDS:-vm interp}"
 hash_on() { case " $HASH_BACKENDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
-# JAI_TEST_SHARD=i/n runs one shard of the suites (jaiscript_tests --shard; tools/ci/ci_lib.sh jai_debug_suites)
-gate_tests_interp() { run "$BIN/jaiscript_tests" --backend=interpreter ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
-gate_tests_vm() { run "$BIN/jaiscript_tests" --backend=vm ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
-gate_tests_vm_reference() { run "$BIN/jaiscript_tests" --backend=vm-reference ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
+# JAI_TEST_SHARD=i/n runs one shard of the suites (jaiscript_tests --shard; tools/ci/ci_lib.sh jai_debug_suites); --progress prints a
+# dot per test, the output the watchdog reads as progress
+gate_tests_interp() { run "$BIN/jaiscript_tests" --progress --backend=interpreter ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
+gate_tests_vm() { run "$BIN/jaiscript_tests" --progress --backend=vm ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
+gate_tests_vm_reference() { run "$BIN/jaiscript_tests" --progress --backend=vm-reference ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
 
 fuzz_run() {
 	local corpus=()
@@ -342,8 +343,8 @@ gate_asan() {
 		run cp -f "$dll" "$build/bin/"
 	fi
 	BIN="$build/bin"
-	run "$BIN/jaiscript_tests" --backend=interpreter
-	run "$BIN/jaiscript_tests" --backend=vm
+	run "$BIN/jaiscript_tests" --progress --backend=interpreter
+	run "$BIN/jaiscript_tests" --progress --backend=vm
 	FUZZ_ITERATIONS="${FUZZ_ITERATIONS:-100}"
 	fuzz_run --timeout-ms 2000
 	want "asan fuzz: expected no crash" "^crashes: +0\b"

@@ -172,8 +172,7 @@ public:
 			};
 			std::vector<std::thread> threads;
 			for (int t = 0; t < 6; ++t) { threads.emplace_back(worker, t % 2, t < 2); }
-			const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(1500);
-			while (std::chrono::steady_clock::now() < deadline && reads.load() < 400) {
+			while (reads.load() < 400 && failures.load() == 0) {
 				std::this_thread::yield();
 			}
 			stop = true;

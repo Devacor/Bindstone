@@ -203,7 +203,6 @@ public:
         // the engine (instances_ mutated while iterated). The budget caps the runaway.
         test("migrate_hook_constructing_instance_terminates", [&]() {
             auto eng = make_engine();
-            eng->execution_budget(1.0);
             eng->execute(R"(
                 class Node {
                     int v = 0;

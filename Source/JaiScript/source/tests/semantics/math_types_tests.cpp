@@ -29,7 +29,7 @@ public:
 
     void forge_tests() override {
         auto run = [](const std::string& src, bool use_vm, bool proofs, bool lowering) {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             e->type_proofs(proofs);
             e->aggregate_lowering(lowering);
@@ -352,7 +352,7 @@ public:
                     }
                 }
             }
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(jai::backend_type::vm);
             e->aggregate_lowering(true);
             e->execution_budget(0);
@@ -422,7 +422,7 @@ public:
             expect("function f() -> string { math::ivec2 a = math::ivec2(1, 2); var big = 3000000000; string m = \"\"; try { a.x = big; } catch (e) { m = e; } try { a = math::ivec2(1e100, 0); } catch (e) { m += \"|\" + e; } return m + to_string(a); } f()",
                    "Integer overflow: the value does not fit an int32 component|Cannot convert float to integer: non-finite or out of range(1, 2)", "int32 narrowing texts");
             // the VM runs component slots
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(jai::backend_type::vm);
             e->execution_budget(0);
             std::string listings;
@@ -471,7 +471,7 @@ public:
                 const std::string src = std::string("function f() -> string { ") + row[0] + " string m = \"\"; try { for (int i = 0; i < 6; i++) { " + row[1] + " } } catch (e) { m = e; } var sa = a; return m + to_string(sa); } f()";
                 agree(src, row[2]);
                 for (bool use_vm : {false, true}) {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
                     jai::stdlib::register_all(e);
@@ -479,7 +479,7 @@ public:
                     check(got.rfind(row[2], 0) == 0, std::string(row[2]) + (use_vm ? " (vm): " : " (interpreter): ") + got);
                 }
             }
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(jai::backend_type::vm);
             e->execution_budget(0);
             std::string listing;
@@ -506,7 +506,7 @@ public:
                   "var k = 1.5; int w = 0; string n = \"\"; try { for (int i = 0; i < 3; i++) { w = math::wrap_add(w, 2); if (i == 1) { w = 0; var q = math::wrap_sub(k, 1); } } } catch (e) { n = e; } "
                   "var p = 1; string o = \"\"; try { for (int i = 0; i < 3; i++) { var r = math::min(p, 4); if (i == 1) { p = \"s\"; } } } catch (e) { o = e; } return m + \"|\" + n + \"|\" + o + to_string(s); } f()",
                   "an operand that is no number raises the kernel's text", false);
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(jai::backend_type::vm);
             e->execution_budget(0);
             std::string listing;
@@ -604,7 +604,7 @@ public:
                   "array<math::ivec2> c = [math::ivec2(0, 1)]; math::ivec2 w = math::ivec2(1, 2147483647); try { c[0] += w; } catch (e) { m += e + \"|\"; } c[0] += math::ivec2(3, 4); c[0] %= math::ivec2(2, 3); "
                   "try { c[0] /= math::ivec2(1, 0); } catch (e) { m += e + \"|\"; } return m + a.join(\" \") + c.join(\" \") + to_string(v); } f()", "whole element stores lower to component stores");
             {
-                auto ve = jai::engine::make();
+                auto ve = jai::foundry::make_default_engine();
                 ve->set_backend(jai::backend_type::vm);
                 ve->execution_budget(0);
                 std::string listing;
@@ -727,7 +727,7 @@ public:
 
     static std::shared_ptr<jai::engine> host(bool use_vm) {
         using namespace adapter_hosts;
-        auto e = jai::engine::make();
+        auto e = jai::foundry::make_default_engine();
         e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
         e->execution_budget(0);
         jai::stdlib::register_all(e);

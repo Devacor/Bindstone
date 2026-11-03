@@ -46,14 +46,14 @@ public:
 		});
 
 		test("interpreter_default_bounds_non_tail_recursion", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::interpreter);
 			eng->execution_budget(0);
 			depth_error(*eng, "int descend(int n) { if (n == 0) { return 0; } return descend(n - 1) + 1; } descend(512);");
 		});
 
 		test("vm_default_preserves_deep_non_tail_recursion", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			check_eq(script_int(5000), eng->execute(
@@ -81,10 +81,9 @@ public:
 				{"range-for per level", "int d(int n) { if (n == 0) { return 0; } int s = 0; for (auto x : [1]) { s = d(n - 1) + x; } return s; } d(50000);"},
 			};
 			for (const auto& [shape, source] : shapes) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				jai::stdlib::register_reflection_functions(eng);
 				eng->set_backend(backend_type::vm);
-				eng->execution_budget(30.0);
 				std::string outcome;
 				try { outcome = std::to_string(eng->execute(source).as_int()); }
 				catch (const std::exception& error) { outcome = error.what(); }
@@ -95,7 +94,7 @@ public:
 
 		// The cap is a backstop: memory and time bound a runaway recursion first (frames are charged every 10000 levels)
 		test("vm_runaway_recursion_trips_the_memory_cap", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
@@ -109,7 +108,7 @@ public:
 		});
 
 		test("vm_runaway_recursion_trips_the_budget", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0.25);
 			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
@@ -121,7 +120,7 @@ public:
 		});
 
 		test("vm_cap_bounds_deep_recursion_and_unwinds", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			configure(*eng, backend_type::vm, 60000);
@@ -133,7 +132,7 @@ public:
 		});
 
 		test("vm_throw_unwinds_deep_frames", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			check_eq(script_int(7), eng->execute(R"(
@@ -155,7 +154,7 @@ public:
 		// A recursion through a host callback re-enters run() natively per level: the native-stack headroom check raises
 		// its own catchable text at the re-entry (the cap is out of reach), and the engine stays usable
 		test("vm_host_reentry_recursion_fails_cleanly", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
@@ -174,7 +173,7 @@ public:
 		});
 
 		test("vm_default_argument_recursion_fails_cleanly", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			configure(*eng, backend_type::vm, size_t(std::numeric_limits<int>::max()));
@@ -202,8 +201,8 @@ public:
 		});
 
 		test("engine_configuration_is_independent_and_survives_backend_selection", [this]() {
-			auto first = engine::make();
-			auto second = engine::make();
+			auto first = jai::foundry::make_default_engine();
+			auto second = jai::foundry::make_default_engine();
 			configure(*first, backend_type::interpreter, 12);
 			configure(*first, backend_type::vm, 48);
 			first->set_backend(backend_type::interpreter);
@@ -226,7 +225,7 @@ public:
 		test("cap_error_text_is_identical_with_distinct_caps", [this]() {
 			std::string messages[2];
 			for (int i = 0; i < 2; ++i) {
-				auto eng = engine::make();
+				auto eng = jai::foundry::make_default_engine();
 				eng->set_backend(i == 0 ? backend_type::interpreter : backend_type::vm);
 				configure(*eng, eng->get_backend_type(), i == 0 ? 8 : 16);
 				messages[i] = depth_error(*eng, "int forever() { return forever() + 1; } forever();");
@@ -293,7 +292,7 @@ public:
 
 
 		test("vm_tail_calls_do_not_consume_additional_depth", [this]() {
-			auto eng = engine::make();
+			auto eng = jai::foundry::make_default_engine();
 			eng->set_backend(backend_type::vm);
 			eng->execution_budget(0);
 			configure(*eng, backend_type::vm, 4);

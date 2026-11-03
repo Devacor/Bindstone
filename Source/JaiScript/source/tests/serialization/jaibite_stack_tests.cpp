@@ -75,7 +75,7 @@ public:
 				auto probe = [](void* raw) -> DWORD {
 					auto& state = *static_cast<probe_state*>(raw);
 					try {
-						auto eng = engine::make();
+						auto eng = jai::foundry::make_default_engine();
 						eng->set_backend(state.backend);
 						try {
 							auto loaded = eng->jaibite_load_bytes(state.bytes);

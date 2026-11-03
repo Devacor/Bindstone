@@ -18,7 +18,7 @@ public:
 	construction_scope_tests() : suite("Construction Scope") {}
 
 	static std::string run(bool vm, const std::string& program, bool warn_region = false) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 		stdlib::register_all(*e);
 		try { return e->execute(warn_region ? "[[warn_mode]]; " + program : program).to_string(); } catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }

@@ -215,7 +215,7 @@ public:
                 to_string(c.cents) + "|" + to_string(chained.cents) + "|" + to_string(a < b);
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("75|175|true"), e->execute(src).as<std::string>(),
@@ -243,7 +243,7 @@ public:
                 to_string(s1) + "|" + to_string(s2);
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 stdlib::register_all(*e);
                 check_eq(std::string("7|7"), e->execute(src).as<std::string>(),
@@ -420,7 +420,7 @@ public:
                 g[5].payload;
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_eq((int64_t)15, e->execute(src).as_int(),
                          use_vm ? "vm operator[] class return" : "interp operator[] class return");

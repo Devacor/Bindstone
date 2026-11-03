@@ -50,7 +50,7 @@ public:
         double ms[2] = {0, 0};
         int64_t hash[2] = {0, 0};
         for (bool use_vm : {false, true}) {
-            auto e = jai::engine::make();
+            auto e = jai::foundry::make_default_engine();
             e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
             jai::stdlib::register_all(e);
             e->execution_budget(0);

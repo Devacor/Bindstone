@@ -381,7 +381,7 @@ public:
 		test("required_results_are_checked_before_execution", [this]() {
 			for (bool vm : {false, true}) {
 				for (bool proofs : {false, true}) {
-					auto e = engine::make();
+					auto e = jai::foundry::make_default_engine();
 					e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					check_true(e->check("int bad() {}").has_errors());
@@ -411,7 +411,7 @@ public:
 			)JAI";
 			for (bool vm : {false, true}) {
 				for (bool proofs : {false, true}) {
-					auto e = engine::make();
+					auto e = jai::foundry::make_default_engine();
 					e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 					e->type_proofs(proofs);
 					check_true(e->check(source).has_errors());
@@ -2005,7 +2005,7 @@ public:
             )JAI";
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
-                    auto e = engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->type_proofs(proofs);
                     check_eq(std::string("ALICE!|  alice  |ALICE!|BOB!|CARA!|CACHED!|CACHED!"), e->execute(source).as_string());
@@ -2035,7 +2035,7 @@ public:
             )JAI";
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
-                    auto e = engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->type_proofs(proofs);
                     check_eq(std::string("named!|named!|literal!|ctor?|METHOD|static.|overload+|5"), e->execute(source).as_string());
@@ -2058,7 +2058,7 @@ public:
             )JAI";
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
-                    auto e = engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->type_proofs(proofs);
                     check_eq(std::string("a!?|b!?|a!??|held!"), e->execute(source).as_string());
@@ -2069,7 +2069,7 @@ public:
         test("string_reference_temporaries_detach_bound_values_and_accept_host_calls", [this]() {
             for (bool vm : {false, true}) {
                 std::string native_string{"native"};
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                 e->add_global_ref("native_string", native_string);
                 e->add_function("bound_text", [engine_ptr = e.get()]() { return engine_ptr->get_variable("native_string"); });
@@ -2100,7 +2100,7 @@ public:
             )JAI";
             for (bool vm : {false, true}) {
                 for (size_t workers : {1u, 2u, 4u}) {
-                    auto e = engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
                     e->parallel_thread_count(workers);
                     check_eq(int64_t{512}, e->execute(source).as_int());

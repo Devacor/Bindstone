@@ -591,7 +591,7 @@ public:
 			// (an acceptance case; the unfused call's argument zone does the same)
 			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e);

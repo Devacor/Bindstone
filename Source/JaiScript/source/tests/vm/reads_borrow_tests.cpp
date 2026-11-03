@@ -20,7 +20,7 @@ public:
 	enum class backend { interpreter, vm, vm_reference };
 
 	static std::string run(backend which, const std::vector<std::string>& steps, size_t workers = 1) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(which == backend::interpreter ? backend_type::interpreter : backend_type::vm);
 		if (which == backend::vm_reference) { e->vm_reference_mode(true); }
 		stdlib::register_all(*e);

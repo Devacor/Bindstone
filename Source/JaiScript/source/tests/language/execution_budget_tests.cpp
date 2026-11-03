@@ -15,8 +15,7 @@ public:
 
 	void forge_tests() override {
 		test("default_budget_is_five_seconds", [this]() {
-			auto e = make_engine();
-			check_near(5.0, e->execution_budget(), 1e-9);
+			check_near(5.0, jai::engine::make()->execution_budget(), 1e-9);
 		});
 
 		test("budget_stops_infinite_while", [this]() {
@@ -61,7 +60,7 @@ public:
 			// budget current at the call (not the last execute's), the entry's latch resets, and the clock sample is written
 			for (bool use_vm : {false, true}) {
 				const std::string be = use_vm ? " (vm)" : " (interpreter)";
-				auto e = engine::make();
+				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
 				e->add_function("nap", []() { std::this_thread::sleep_for(std::chrono::milliseconds(3)); });
 				e->execution_budget(1000.0);
@@ -184,9 +183,8 @@ public:
 			auto e = make_engine();
 			e->execution_budget(0.05);
 			check_throws([&]() { e->execute("while (true) { }"); });
-			// A fresh execute gets a fresh deadline (not the already-expired one).
-			// Generous budget: the loop is trivial but CI machines stall under load.
-			e->execution_budget(5.0);
+			// A fresh execute gets a fresh deadline (not the already-expired one)
+			e->execution_budget(jai::foundry::k_test_budget_seconds);
 			auto r = e->execute("var x = 0; while (x < 10000) { x += 1; } x;");
 			check_eq((int64_t)10000, r.as_int());
 		});
@@ -204,7 +202,6 @@ public:
 
 		test("memory_cap_zero_is_unlimited", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(0);
 			auto r = e->execute(R"(
 				var a = [];
@@ -220,7 +217,6 @@ public:
 		// free its caches and keep working).
 		test("memory_cap_first_raise_is_catchable_and_denies", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(256 * 1024);
 			auto r = e->execute(R"(
 				var a = [];
@@ -235,7 +231,6 @@ public:
 
 		test("memory_cap_error_text_names_the_cap", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(65536);
 			auto r = e->execute(R"(
 				var a = [];
@@ -251,7 +246,6 @@ public:
 		// execute is TERMINAL (Part-1 machinery - every catch skipped, execute fails).
 		test("memory_cap_second_raise_is_terminal", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(256 * 1024);
 			bool threw = false;
 			std::string msg;
@@ -277,7 +271,6 @@ public:
 		// counts; the raise fires at the loop back-edge.
 		test("memory_cap_map_growth_bomb_trips", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(128 * 1024);
 			auto r = e->execute(R"(
 				var m = {};
@@ -293,7 +286,6 @@ public:
 		// toward the allowance too (env size is counted deliberately).
 		test("memory_cap_env_growth_bomb_trips", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(128 * 1024);
 			auto r = e->execute(R"(
 				var caught = 0;
@@ -307,7 +299,6 @@ public:
 
 		test("memory_cap_resets_per_execute", [this]() {
 			auto e = make_engine();
-			e->execution_budget(5.0);
 			e->memory_cap(256 * 1024);
 			check_throws([&]() {
 				e->execute(R"(
@@ -356,7 +347,6 @@ public:
 			for (const char* growth : growths) {
 				auto e = make_engine();
 				stdlib::register_all(*e);
-				e->execution_budget(30.0);
 				e->memory_cap(1024 * 1024);
 				std::string caught;
 				try {
@@ -374,7 +364,6 @@ public:
 		// the cap, so a script cannot park unbounded coroutines under it
 		test("memory_cap_counts_suspended_coroutines", [this]() {
 			auto e = make_engine();
-			e->execution_budget(30.0);
 			e->memory_cap(1024 * 1024);
 			auto r = e->execute(R"(
 				coroutine int ticker() { int i = 0; while (true) { yield i; i += 1; } return 0; }
@@ -392,28 +381,22 @@ public:
 		test("an_overflowing_repeat_reports_at_once", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);
-			e->execution_budget(10.0);
-			const auto start = std::chrono::steady_clock::now();
 			for (const char* source : {"string s = \"abcd\"; s.repeat(4611686018427387905);", "string s = string::repeat(\"abcd\", 4611686018427387905);"}) {
 				check_throws([&]() { e->execute(source); }, source);
 			}
-			check_true(std::chrono::steady_clock::now() - start < std::chrono::seconds(5), "no step appends the wrapped size");
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 
-		// replace builds its result in one pass (replacing in place shifted the tail at every hit: two million hits ran
-		// for minutes, out of the budget's reach inside one builtin)
+		// replace builds its result in one pass (replacing in place shifted the tail at every hit: four million hits would run
+		// for hours, out of the budget's reach inside one builtin, which the watchdog reads as a hang)
 		test("replace_is_linear_in_the_hits", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);
-			e->execution_budget(60.0);
-			const auto start = std::chrono::steady_clock::now();
-			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); s.replace(\"x\", \"yy\"); s.size()").as_int());
-			check_eq((int64_t)4000000, e->execute("string s = \"x\".repeat(2000000); string::replace(s, \"x\", \"yy\").size()").as_int());
+			check_eq((int64_t)8000000, e->execute("string s = \"x\".repeat(4000000); s.replace(\"x\", \"yy\"); s.size()").as_int());
+			check_eq((int64_t)8000000, e->execute("string s = \"x\".repeat(4000000); string::replace(s, \"x\", \"yy\").size()").as_int());
 			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace(\", \", \"-\")").as<std::string>());
 			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace(\"x\", \"xx\")").as<std::string>());
 			check_eq(std::string("q"), e->execute("string s = \"aaaa\"; s.replace(\"aa\", \"\"); s + \"q\"").as<std::string>());
-			check_true(std::chrono::steady_clock::now() - start < std::chrono::seconds(10), "two million hits finish at once");
 		});
 	}
 };

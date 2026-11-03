@@ -294,7 +294,7 @@ public:
         // container slots and the implicit-this move path can never reach C++.
         test("pin_ref_compound_on_stored_bound_never_reaches_cpp", [this]() {
             for (bool use_vm : {false, true}) {
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int c14 = 10;
                 eng->add_global_ref("c14", c14);
@@ -312,7 +312,7 @@ public:
 
         test("pin_implicit_this_member_store_detaches", [this]() {
             for (bool use_vm : {false, true}) {
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 int c11 = 10;
                 eng->add_global_ref("c11", c11);
@@ -368,7 +368,7 @@ public:
         test("pin_truthiness_both_backends", [this]() {
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bz = 0;
                 script_int bn = 3;
@@ -423,7 +423,7 @@ public:
         test("t2_compound_writethrough_matrix", [this]() {
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
 
                 int8_t   mi8 = 0;  uint8_t  mu8 = 0;  int16_t mi16 = 0; int32_t mi32 = 0;
@@ -503,7 +503,7 @@ public:
         test("t2_bound_string_live_semantics", [this]() {
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 std::string bstr = "content";
                 std::string bemp = "";
@@ -544,7 +544,7 @@ public:
         test("t2_writethrough_through_refs", [this]() {
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bg2 = 100;
                 eng->add_global_ref("bg2", bg2);
@@ -661,7 +661,7 @@ public:
         test("t2_bound_zero_rhs_divmod_error_surface", [this]() {
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bz2 = 0;
                 eng->add_global_ref("bz2", bz2);
@@ -681,7 +681,7 @@ public:
             // + text via what()) as the plain twin in the same expression shape, per backend.
             auto runMatrix = [this](bool useVm) {
                 const std::string tag = useVm ? "vm: " : "interp: ";
-                auto eng = jai::engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(useVm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 script_int bi = 10, bz = 0;
                 script_float bf = 1.5, bfz = 0.0;

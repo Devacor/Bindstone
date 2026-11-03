@@ -1245,7 +1245,7 @@ public:
                     + "|" + to_string(viaExpr(new P(41)));
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 check_eq(std::string("99|99|5|41"), e->execute(src).as<std::string>(),
@@ -1269,7 +1269,7 @@ public:
                     + "|" + to_string(b.x) + "|" + to_string(braced.x);
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 check_eq(std::string("same|10|20|1"), e->execute(src).as<std::string>(),
@@ -1288,7 +1288,7 @@ public:
                 b.v;
             )";
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 check_eq((int64_t)42, e->execute(src).as_int(),
                          use_vm ? "vm upcast" : "interp upcast");
@@ -1299,7 +1299,7 @@ public:
             // new works for registered C++ classes exactly like shared_ptr<T>(...)
             struct counter_probe { int n = 0; };
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 dynamic_binder<counter_probe>(*e, "CounterProbe")
                     .constructor<>()
@@ -1318,7 +1318,7 @@ public:
 
         test("new_keyword_statement_and_error_shapes", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 // statement position: constructs and discards without error
                 const char* stmt_src = R"(
@@ -1330,7 +1330,7 @@ public:
                          use_vm ? "vm stmt new" : "interp stmt new");
                 // `new P;` without an argument list is a parse error (rejected either
                 // as a throw or a null result depending on recovery)
-                auto e2 = engine::make();
+                auto e2 = jai::foundry::make_default_engine();
                 e2->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bool rejected = false;
                 try {
@@ -1389,7 +1389,7 @@ public:
                 "|cw:Cannot access private member 'prot' of class 'C'";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
@@ -1424,7 +1424,7 @@ public:
             const std::string expected = "24|1|11";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 outputs[use_vm ? 1 : 0] = e->execute(src).as<std::string>();
             }
@@ -1456,7 +1456,7 @@ public:
                 "|ref:Cannot access private member 'f' of class 'S'";
             std::string outputs[2];
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 outputs[use_vm ? 1 : 0] = e->execute(std::string("[[warn_mode]]; ") + src).as<std::string>();   // the runtime raise (strict rejects S::counter at load)
             }
@@ -1531,7 +1531,7 @@ public:
 
         test("shared_ptr_construction_distinguishes_classes", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1554,7 +1554,7 @@ public:
 
         test("shared_ptr_construction_same_arity_args_and_interleaved", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 0; Foo(int v) { x = v; } }
@@ -1575,7 +1575,7 @@ public:
             // The stale-pointee variant: shared_ptr<Bar> declarations must enforce
             // against BAR even when shared_ptr<Foo> was interned first.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1610,7 +1610,7 @@ public:
             // spelling - construct-and-share, handle sharing, upcast-on-reassign,
             // wrong-class errors, and null-after-establishment all mirror shared_ptr<T>.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1653,7 +1653,7 @@ public:
             // nothing-to-infer error text: byte-identical across backends, and points
             // at the escape hatches (var, or an explicit shared_ptr<T>)
             auto run_catch = [](bool use_vm, const char* src) -> std::string {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 try { e->execute(src); } catch (const std::exception& ex) { return ex.what(); }
                 return "<no throw>";
@@ -1676,7 +1676,7 @@ public:
                 for (const char* src : { "class Foo { int x = 1; } shared_ptr<var> p = Foo();",
                                          "shared_ptr<var> n = null;",
                                          "function f(shared_ptr<var> a) { return a; }" }) {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     bool rejected = false;
                     std::string msg;
@@ -1696,7 +1696,7 @@ public:
                     check_eq((int64_t)7, e->execute("3 + 4").as_int());
                 }
                 // and plain var really does hold + rebind any class's handle (the why)
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1720,7 +1720,7 @@ public:
             // an INCOMPATIBLE value or a primitive where typed would refuse. Typed
             // spellings (shared_ptr<T>, shared_ptr<auto>, plain auto copies) keep enforcing.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1788,7 +1788,7 @@ public:
             // class method wins on shared_ptr<T> instances, the builtin stays reachable where NO class method shadows it, and
             // a shadow emits ONE warning per colliding method per class definition.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 std::vector<std::string> warnings;
                 e->set_script_warning_handler([&](const std::string& m) { warnings.push_back(m); });
@@ -1897,7 +1897,7 @@ public:
 
         test("shared_ptr_construction_across_hot_reload", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class Foo { int x = 1; }
@@ -1918,7 +1918,7 @@ public:
             // method_epoch: a hot call site crossing a class redefinition must
             // dispatch the NEW body immediately, on both backends.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class C { int f() { return 1; } }
@@ -1936,7 +1936,7 @@ public:
             // Epoch propagation through derived_classes_: redefining the BASE must
             // invalidate a hot site whose cached receiver class is the DERIVED.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class B { int f() { return 1; } }
@@ -1956,7 +1956,7 @@ public:
             // by argument type at the same hot site, with backend-identical outcomes.
             std::array<std::string, 2> outcomes;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class T { int f(int x) { return x + 1; } }
@@ -1974,7 +1974,7 @@ public:
             // Untyped (var) params make resolution arg-independent (mic_static): the
             // hot site must accept a different arg type on every call, no lock-in.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class U { int n = 0; void f(var v) { n += 1; } }
@@ -1993,7 +1993,7 @@ public:
             // One call site alternating receiver classes: the monomorphic cache must
             // miss-and-refill without ever dispatching the wrong class's method.
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class A { int f() { return 1; } }
@@ -2012,7 +2012,7 @@ public:
             // shadow must take effect at an already-hot site, backend-identically.
             std::array<std::string, 2> outcomes;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class S { int f() { return 1; } }
@@ -2039,7 +2039,7 @@ public:
             // errors — identically on both backends.
             std::array<std::string, 2> removed;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class P { int x = 3; }
@@ -2088,7 +2088,7 @@ public:
                  "int f6() { var a = [1]; a[0] += r2.x; return 0; } var m = \"\"; try { var t = f6(); m = \"ran\"; } catch (er) { m = \"V:\" + er; } m"},
             };
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute("class R2 { int y = 1; } var r2 = R2();");
                 for (const auto& [label, src] : shapes) {
@@ -2105,7 +2105,7 @@ public:
             // backend-identical, and the synthesized setter never blocks the slot path.
             std::array<std::string, 2> badstore;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class W { int x = 0; int log = 0; }
@@ -2146,7 +2146,7 @@ public:
             // as a stored first-class value, and typed-arg decline error text.
             std::array<std::string, 2> err;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execute(R"(
                     class S {
@@ -2175,7 +2175,7 @@ public:
         // C++ spells a reference-returning method with the reference on the leading type, in a class body too
         test("leading_reference_return_type_on_methods", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 const std::string tag = use_vm ? " (vm)" : " (interpreter)";
@@ -2194,7 +2194,7 @@ public:
             // at access time — instances keep working, new accesses follow new labels.
             // Host C++ get_field stays unrestricted by design.
             for (bool use_vm : {false, true}) {
-                auto e = engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("class R { public: int v = 4; } var r = R();");

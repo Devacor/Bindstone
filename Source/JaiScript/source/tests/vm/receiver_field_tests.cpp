@@ -19,7 +19,7 @@ public:
 	enum class which { interp, vm, vm_reference };
 
 	static std::shared_ptr<engine> make_for(which w) {
-		auto e = engine::make();
+		auto e = jai::foundry::make_default_engine();
 		e->set_backend(w == which::interp ? backend_type::interpreter : backend_type::vm);
 		if (w == which::vm_reference) { e->vm_reference_mode(true); }
 		stdlib::register_all(*e);

@@ -249,7 +249,7 @@ public:
 
         test("audit_instantiations_register_and_dispatch_distinctly", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (a) registration/lookup: distinct definitions by name AND type_index
@@ -270,7 +270,7 @@ public:
 
         test("audit_shared_ptr_paths_key_per_instantiation", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (c) the composite intern path (the fixed one: new/shared_ptr<T>() nodes)
@@ -294,7 +294,7 @@ public:
 
         test("audit_container_elements_and_upcast_keep_identity", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (d) container elements: each array's elements keep their own class
@@ -331,7 +331,7 @@ public:
             // (g) unregistered instantiations passed through the host are opaque
             // tokens: non-null, pointer identity, no cross-instantiation equality
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 audit_opaque<double> od1; audit_opaque<double> od2; audit_opaque<int> oi;

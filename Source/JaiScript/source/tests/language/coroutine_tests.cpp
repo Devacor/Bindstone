@@ -564,7 +564,7 @@ public:
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -585,7 +585,7 @@ public:
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -699,7 +699,7 @@ public:
 
         test("static_coroutine_survives_reload", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 e->execute("class S { static int n = 5; coroutine static int f() { yield n; yield n + 1; return 0; } }\nvar h = S::f();\nvar a = h.next();");
@@ -711,7 +711,7 @@ public:
 
         test("coroutine_field_rejected", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 bool threw = false;
                 try { e->execute("class K { coroutine int x = 5; }"); }
@@ -777,7 +777,7 @@ public:
         // every spelling and both backends
         test("coroutine_return_type_enforced_identically_across_spellings", [this]() {
             auto run = [](bool use_vm, const std::string& src) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 jai::stdlib::register_all(e);
                 std::string out;
@@ -990,7 +990,7 @@ public:
             // a SUSPENDED handle sits in a field of its own receiver (the strong cycle).
             for (bool use_vm : {false, true}) {
                 {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     e->execution_budget(0);
                     auto r = e->execute(R"(
@@ -1207,7 +1207,7 @@ public:
         // finishes over the migrated instance (guide 07/08), fresh calls mint the new body.
         test("hot_reload_mid_iteration_keeps_suspended_body", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -1231,7 +1231,7 @@ public:
             std::string out[2];
             int idx = 0;
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0.05);
                 try {
@@ -1251,7 +1251,7 @@ public:
                 std::string out[2];
                 int idx = 0;
                 for (bool use_vm : {false, true}) {
-                    auto e = jai::engine::make();
+                    auto e = jai::foundry::make_default_engine();
                     e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                     try { e->execute(src); out[idx] = "OK"; }
                     catch (const std::exception& ex) { out[idx] = std::string(ex.what()) + "\n" + e->format_stack_trace(); }
@@ -1584,7 +1584,7 @@ public:
 
         test("hot_reload_mid_expression_keeps_suspended_body", [this]() {
             for (bool use_vm : {false, true}) {
-                auto e = jai::engine::make();
+                auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 e->execution_budget(0);
                 jai::stdlib::register_all(e);
@@ -1873,18 +1873,15 @@ public:
                        "Division by zero", "a later step's run-time error is what next(n) raises");
             for (bool use_vm : {false, true}) {
                 const std::string be = use_vm ? " (vm)" : " (interpreter)";
-                auto eng = engine::make();
+                auto eng = jai::foundry::make_default_engine();
                 eng->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
                 eng->execute("coroutine int forever() { while (true) { yield 1; } return 0; } var h = forever();");
                 auto handle = std::static_pointer_cast<coroutine_handle>(eng->execute("h").get_object_holder()->host_object());
                 eng->execution_budget(0.05);
-                const auto start = std::chrono::steady_clock::now();
                 auto steps = handle->next(eng.get(), static_cast<script_int>(4000000000LL));
-                const double seconds = std::chrono::duration<double>(std::chrono::steady_clock::now() - start).count();
                 check_true(!steps.has_value() && std::string(steps.message()).find("Script execution budget exceeded") != std::string::npos,
                            "one host next(n) is one budgeted entry" + be);
-                check_true(seconds < 5.0, "it stops at the budget" + be);
-                eng->execution_budget(5.0);
+                eng->execution_budget(jai::foundry::k_test_budget_seconds);
                 eng->execute("var h2 = forever();");
                 auto fresh = std::static_pointer_cast<coroutine_handle>(eng->execute("h2").get_object_holder()->host_object());
                 auto again = fresh->next(eng.get(), 3);

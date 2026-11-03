@@ -167,7 +167,7 @@ public:
 	parse_key_bench() : suite("Parse Key Bench") {}
 
 	static std::shared_ptr<jai::engine> engine_for(backend_type type) {
-		auto eng = jai::engine::make();
+		auto eng = jai::foundry::make_default_engine();
 		if (type != backend_type::interpreter) {
 			eng->set_backend(type);
 		}

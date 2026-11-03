@@ -59,7 +59,7 @@ namespace jaibite_test_detail {
     using engine_setup = std::function<void(engine&)>;
 
     inline std::shared_ptr<engine> fresh_engine(bool use_vm, const engine_setup& setup) {
-        auto e = engine::make();
+        auto e = jai::foundry::make_default_engine();
         jai::stdlib::register_all(e);
         if (setup) setup(*e);
         e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);

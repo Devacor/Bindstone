@@ -45,7 +45,7 @@ public:
     void pre_test() override { bench_eng_.reset(); }
 
     static std::shared_ptr<jai::engine> make_backend_engine(jai::backend_type type) {
-        auto eng = jai::engine::make();
+        auto eng = jai::foundry::make_default_engine();
         eng->set_backend(type);
         return eng;
     }

@@ -3046,7 +3046,7 @@ public:
 
 		test("conversions_reach_every_class_a_body_can_hold", [this, parallel_matches_serial, parallel_error]() {
 			// a body converts an instance it reaches by any road: a captured object, a captured var holding one, a captured
-			// subclass instance, a field of a field of the element, a value an admitted function returns and an element of a var
+			// subclass instance, a field of a field of the element (a condition too), a value an admitted function returns and an element of a var
 			// array mixing classes; each converts as the serial loop does. A captured container of instances and an element whose
 			// var field holds one are refused before any element runs
 			const std::string classes = R"(
@@ -3059,7 +3059,8 @@ public:
 					string to_string() { return "n" + v; }
 				}
 				class Sub : Num { Sub() { v = 9; } }
-				class Inner { Num n = Num(4); }
+				class Tip { int t = 1; bool to_bool() { return t > 0; } }
+				class Inner { Num n = Num(4); Tip tip; }
 				class Outer { Inner in; }
 				Num make(int a) { Num r(a); return r; }
 				Num capnum = Num(8);
@@ -3075,7 +3076,7 @@ public:
 					int a = capnum; int b = capvar; int c = capsub; int d = make(x); bool e = make(x); string f = capvar;
 					x = a + b + c + d + (e ? 1 : 0) + f.size();
 				}
-				parallel_for (auto& w : outers) { int k = w.in.n; bool t = w.in.n; w.in.n.v = k + (t ? 1 : 0); }
+				parallel_for (auto& w : outers) { int k = w.in.n; bool t = w.in.n; if (w.in.tip) { k = k + 2; } w.in.n.v = k + (t ? 1 : 0); }
 				parallel_for (auto& m : mixed) { int k = m; string s = m; m.v = k + s.size(); }
 				int total = 0;
 				for (int v : xs) { total += v; }

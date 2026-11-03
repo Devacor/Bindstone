@@ -1579,6 +1579,7 @@ namespace {
 		// A method the barrier resolves writes a loop variable through a reference parameter: the body's own walk could not see it
 		const parallel_admission* region_body = nullptr;
 		std::vector<const class_definition*> captured_classes;   // the classes of the instances the region's captured objects hold
+		std::vector<const class_definition*> object_classes;   // every class an object a chunk reaches can be (the operator pass's)
 		std::string_view counted_variable;   // the counted form's variable (parallel_for_stmt::counted), empty otherwise
 		bool admit_loop_variable_write(size_t position, const ast_node* site) {
 			if (!region_body) { return true; }
@@ -5003,6 +5004,7 @@ struct region_plan {
 				}
 			}
 		}
+		method_adm.object_classes = method_adm.operator_classes(element_classes, host_calls);
 	}
 
 // One owner for activation, the thread table, join obligations and borrowed storage.
@@ -6062,6 +6064,7 @@ struct region_run {
 		for (const class_definition* cd : builder.destructor_levels) { made.push_back(const_cast<class_definition*>(cd)); }
 		for (const class_definition* cd : proof.element_classes) { made.push_back(const_cast<class_definition*>(cd)); }
 		for (const class_definition* cd : captured_classes) { made.push_back(const_cast<class_definition*>(cd)); }
+		for (const class_definition* cd : builder.object_classes) { made.push_back(const_cast<class_definition*>(cd)); }
 		// a C++ call can hand a chunk an object of any bound class (a result, a method's receiver)
 		if (!adm->host_functions.empty() || !builder.adm.host_functions.empty() || !builder.host_pins.empty() ||
 		    !adm->static_calls.empty() || !builder.adm.static_calls.empty()) {

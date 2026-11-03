@@ -600,6 +600,7 @@ inline bool class_definition::script_chain_defines_method(uint64_t id) const {
 
 inline bool class_definition::may_define_to_bool() const {
     if (to_bool_memo_epoch_ != method_epoch_) {
+        assert(!(engine_ && engine_->parallel_region_active()) && "a parallel worker writes the class's to_bool memo (prime it at region start)");
         uint64_t id = 0;
         if (auto eng = engine_) { id = eng->symbolize("to_bool"); }
         may_define_to_bool_ = id == 0 || defines_method(id);

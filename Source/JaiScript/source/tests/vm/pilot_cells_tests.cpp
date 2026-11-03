@@ -6783,9 +6783,11 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("raw_frames_raise_the_general_texts", [this]() {
 			// an overflow deep in a raw chain, a division by zero, the depth limit, a raw callee reaching a general function: every raise happens on the
-			// general form after the frame leaves its cells, so the texts and the catching frame are the interpreter's
+			// general form after the frame leaves its cells, so the texts and the catching frame are the interpreter's; a frame the raise unwinds
+			// leaves its record with no block, so a loop-free body catching in that record later runs its handler
 			const std::string src =
 				"int big(int n) { if (n == 0) { return 9223372036854775807; } return big(n - 1) + 1; }\n"
+				"string handled() { string s = \"\"; try { throw \"x\"; } catch (e) { s = \"D:\" + e + \" \"; } return s; }\n"
 				"int divz(int n, int d) { if (n == 0) { return 10 / d; } return divz(n - 1, d) + 1; }\n"
 				"int deep(int n) { if (n == 0) { return 0; } return deep(n - 1) + 1; }\n"
 				"var LOG = [];\n"
@@ -6795,12 +6797,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"try { out += to_string(big(5)); } catch (e) { out += \"A:\" + e + \" \"; }\n"
 				"try { out += to_string(divz(4, 0)); } catch (e) { out += \"B:\" + e + \" \"; }\n"
 				"try { out += to_string(deep(100000000)); } catch (e) { out += \"C:\" + e + \" \"; }\n"
+				"out += handled();\n"
 				"out += to_string(walk(6)) + \" \" + to_string(LOG.size()) + \" \" + to_string(deep(50));\n"
 				"out;";
 			both(src, "", "raises in raw chains");
 			both(src, "", "raises in raw chains, proofs off", false);
 			const std::string vm = run_on(true, src);
-			check_true(vm.find("A:") != std::string::npos && vm.find("B:") != std::string::npos && vm.find("C:") != std::string::npos && vm.find(" 7 7 50") != std::string::npos, "each raise caught, the walk ran whole: " + vm);
+			check_true(vm.find("A:") != std::string::npos && vm.find("B:") != std::string::npos && vm.find("C:") != std::string::npos && vm.find("D:x 7 7 50") != std::string::npos, "each raise caught, the walk ran whole: " + vm);
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every : { 1u, 2u, 3u, 5u }) {

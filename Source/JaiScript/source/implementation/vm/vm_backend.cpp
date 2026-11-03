@@ -6834,6 +6834,15 @@ void vm_backend::cfor_state_push(frame& f, const counted_for_proto& p) {
 	cfor_states_.push_back(st);
 }
 
+// the block closes at ip (a miss, or a boundary statement whose block does not resume) and the general form goes on there: the states of
+// the inner counted loops holding ip, outermost first
+void vm_backend::cells_push_inner_states(frame& f, const chunk::cell_loop& loop, size_t ip) {
+	for (const uint32_t pi : loop.inner_counted) {
+		const counted_for_proto& p = f.code->counted_for_protos[pi];
+		if (ip >= p.body_ip && ip < p.exit_ip) { cfor_state_push(f, p); }
+	}
+}
+
 // a container site refused the entry: the binding will not change within this call, so the loop is not tried again
 void vm_backend::refuse_container_site(frame& f, const chunk::cell_loop& loop) {
 	const size_t index = static_cast<size_t>(&loop - f.code->cell_loops.data());
@@ -6890,21 +6899,29 @@ void vm_backend::cells_writeback(frame& f, const chunk::cell_loop& loop) {
 
 // the end of a boundary statement (f.ip): the block parked for it resumes when no entry of another block in this frame came between, the
 // debugger and the numeric operators are as they were, and every slot cell and landing check holds again (cells_resync); f.ip is then the
-// resume copy ip. Otherwise the block stays closed (its cells were clean at the park) and the general form continues at f.ip
+// resume copy ip. Otherwise the block stays closed (its cells were clean at the park) and the general form continues at f.ip, inside the
+// inner counted loops the block ran with their states in place
 const chunk::cell_loop* vm_backend::cells_unpark(frame& f) {
 	JAI_CELL_COST(9)
 	cell_state& cs = *f.cells;
 	const uint32_t li = cs.park_loop;
 	cs.park_at = k_invalid_u32;
-	if (cs.park_serial != cs.entry_serial || li >= f.code->cell_loops.size() || debug_hook_ || has_custom_numeric_ops_) return nullptr;
+	if (li >= f.code->cell_loops.size()) return nullptr;
 	const chunk::cell_loop& loop = f.code->cell_loops[li];
 	const size_t at = f.ip;
-	cs.loop = li;
-	cs.dirty.reset(loop.cells.size());
-	f.ip = loop.boundaries[cs.park_boundary].resume;
-	if (!cells_resync(f, loop)) { cs.reset(loop.cells.size()); f.ip = at; return nullptr; }
-	++cells_counters_.resumes;
-	return &loop;
+	if (cs.park_serial == cs.entry_serial && !debug_hook_ && !has_custom_numeric_ops_) {
+		cs.loop = li;
+		cs.dirty.reset(loop.cells.size());
+		f.ip = loop.boundaries[cs.park_boundary].resume;
+		if (cells_resync(f, loop)) {
+			++cells_counters_.resumes;
+			return &loop;
+		}
+		cs.reset(loop.cells.size());
+		f.ip = at;
+	}
+	cells_push_inner_states(f, loop, at);
+	return nullptr;
 }
 
 // after a statement on the general form: each slot cell takes its slot again by the entry's guard (the statement may have written it, or a
@@ -7062,10 +7079,7 @@ void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t ori
 		}
 	}
 	if (const vm_instruction& oi = f.code->code[original_ip]; oi.op == opcode::op_math_temp && oi.c > 0xFF && (oi.c & 0x80)) { typed_land_float(f, oi.b | (k_typed_dst_temp << k_typed_dst_shift), 0.0); }
-	for (const uint32_t pi : loop.inner_counted) {   // outermost first: the general form resumes inside these loops with their states in place
-		const counted_for_proto& p = f.code->counted_for_protos[pi];
-		if (original_ip >= p.body_ip && original_ip < p.exit_ip) { cfor_state_push(f, p); }
-	}
+	cells_push_inner_states(f, loop, original_ip);
 	f.ip = loop.trampoline != k_invalid_u32 && original_ip == loop.head ? loop.trampoline : original_ip;   // a region's first instruction is the trampoline's
 }
 // the frame's ip written for the flush's liveness row and a miss's resume point, read back after a miss (the block loop's ip is a register)

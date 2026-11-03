@@ -7402,16 +7402,18 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("boundary_operations_hand_the_general_form_what_it_changed", [this]() {
 			// the statement changes a cell's kind (a var taking a string): the block does not resume and the rest runs general; a statement that raises
-			// leaves the block closed for the handler, and the loop runs again afterwards; a boundary inside an inner loop; a range-for with an alias
+			// leaves the block closed for the handler, and the loop runs again afterwards; a boundary inside an inner loop, and one there whose block does
+			// not resume (the general form takes the inner loop with its state); a range-for with an alias
 			const std::string src =
 				"map<int, var> m = {};\n"
 				"function kind_change() -> string { var v = 0; int n = 0; for (int i = 0; i < 20; ++i) { v = v + 1; n = n + 1; if (i == 9) { m[0] = 1; v = to_string(v) + \"!\"; } } return to_string(v) + \" \" + to_string(n); }\n"
+				"function kind_change_inner() -> string { var v = 1.5; int n = 0; for (int i = 0; i < 3; ++i) { for (int j = 0; j < 3; ++j) { auto w = v; v = [i]; var k = 7; n = n + k; } } return to_string(v) + \" \" + to_string(n); }\n"
 				"function raises(int at) -> int { int s = 0; for (int i = 0; i < 20; ++i) { s = s + i; m[i & 3] = 100 / (i - at); s = s + 1; } return s; }\n"
 				"function nested() -> int { int t = 0; for (int j = 0; j < 5; ++j) { int s = 0; for (int i = 0; i < 10; ++i) { s = s + i * j; m[i & 1] = s; } t = t + s; } return t; }\n"
 				"class P { int x = 0; }\n"
 				"array<P> ps = [P(), P(), P()];\n"
 				"function aliases() -> int { int s = 0; for (int r = 0; r < 4; ++r) { for (auto& p : ps) { p.x = p.x + r; m[p.x & 3] = p.x; s = s + p.x; } } return s; }\n"
-				"string out = kind_change();\n"
+				"string out = kind_change() + \" \" + kind_change_inner();\n"
 				"try { out += \" \" + to_string(raises(7)); } catch (e) { out += \" caught:\" + e; }\n"
 				"out += \" \" + to_string(raises(100)) + \" \" + to_string(nested()) + \" \" + to_string(aliases()) + \" \" + to_string(m[1]);\n"
 				"out;";

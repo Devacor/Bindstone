@@ -371,10 +371,10 @@ get:</p>
 .../rules.jai:1:38: error: use of undeclared identifier 'G'
     int damage(int hits) { return hits * G.power; }
                                          ^</code></pre></div>
-<p>If you try this in the runner after running the full program, delete <code>.cache/rules.jai.jaibite</code> first: the
-automatic disk cache keeps a per-file checked-clean stamp, so a leaf that checked clean inside one program is
-not re-checked when another program reaches it (see <a href="04-jaibite.html#the-stamp-is-per-file">jaibite,
-&quot;The stamp is per file&quot;</a>).</p>
+<p>The automatic disk cache gives the same answer: a leaf&#x27;s checked-clean stamp holds only where the names it resolved
+outside itself mean what they meant when it was checked, so the program without <code>state.jai</code> checks
+<code>rules.jai</code> again even after the full program cached it (see <a href="04-jaibite.html#the-stamp-holds-its-context">jaibite,
+&quot;The stamp holds for the context the file was checked in&quot;</a>).</p>
 <p>In the report <code>eng-&gt;check()</code> and <code>last_check_diagnostics()</code> return, closure diagnostics follow
 the root's with line and column 0 and the path-qualified location leading the message (the snippet belongs to
 another source, so none is printed).</p>

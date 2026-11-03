@@ -107,6 +107,8 @@ namespace jai {
     namespace detail {
 
         inline constexpr size_t k_check_diagnostic_cap = 100;
+        // the outside name a walk records when it reads the program's constant texts (never an identifier)
+        inline constexpr std::string_view k_outside_constants = "#constants";
 
         // Program closure classes (engine.cpp, internal/static_checking.md "Programs"): every
         // top-level class of every closure unit by name, the declaring node kept alive here so
@@ -128,6 +130,16 @@ namespace jai {
         // map<string,int> cell; a read of one of its values runs no user code (member_expr::enum_constant)
         using program_enum_map = std::unordered_map<std::string, std::unordered_map<std::string, std::shared_ptr<const enum_decl>>>;
 
+    // What a bite's parse and its checked-clean stamp rest on beyond its own text, so a load asks the loading engine the same
+    // questions: the namespace classes the parse asked about (parser::namespace_queries) under the key of their answers, and
+    // the names the check resolved outside the unit (check_options::outside) under the key of what they resolved to.
+    struct jaibite_context {
+        std::vector<std::string> namespace_queries;
+        uint64_t namespace_key = 0;
+        std::vector<std::string> outside;
+        uint64_t outside_key = 0;
+        bool empty() const { return namespace_queries.empty() && outside.empty(); }
+    };
         // One checker walk does two independent jobs: diagnostics (off -> the report stays
         // empty) and the proof pass (stamp = derive and write proofs onto the AST, clear =
         // reset every proof field, leave = never touch them, e.g. the per-call instance-
@@ -149,6 +161,9 @@ namespace jai {
             const program_global_map* program_globals = nullptr;
             const program_enum_map* program_enums = nullptr;
             std::vector<std::string>* deferred_classes = nullptr;   // out: the program-table classes the walk met before the engine defined them
+            // out, sorted: every name the walk asked the engine or the program tables about, the outside declarations its verdict
+            // rests on (engine.cpp keys a checked-clean stamp by what they resolve to)
+            std::vector<std::string>* outside = nullptr;
             check_observer* observer = nullptr;
         };
 

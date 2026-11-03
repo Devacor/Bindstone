@@ -793,6 +793,33 @@ public:
             // the load of a bad bite throws at load, before anything runs
             auto bad_bytes = unstamped_bite_bytes(*e3, "int bad = \"s\";");
             check_throws([&]() { e3->jaibite_load_bytes(bad_bytes); });
+
+            // the stamp vouches for the names the bite resolved where it was checked: an engine where they mean something else
+            // checks the saved bite again, with the verdict a fresh bite of the same source gets there
+            const std::string reader = "int stamp_read() { return stamp_seen; }\nint stamp_count(StampBox b) { return b.n; }";
+            auto host = make_engine();
+            host->execute("int stamp_seen = 4; class StampBox { int n = 1; }");
+            const auto resolved = host->jaibite(reader).save_bytes();
+            const auto verdicts = [&](const std::string& setup) {
+                auto eng = make_engine();
+                eng->execute(setup);
+                const auto verdict = [](const auto& load) {   // a loaded bite's listing has no source to quote: its diagnostic lines
+                    std::string result = "clean";
+                    try { load(); } catch (const static_check_error& ex) {
+                        result.clear();
+                        std::istringstream lines(ex.what());
+                        for (std::string line; std::getline(lines, line);) { if (line.find("error:") != std::string::npos) { result += line + "\n"; } }
+                    }
+                    return result;
+                };
+                return std::make_pair(verdict([&] { eng->jaibite(reader); }), verdict([&] { eng->jaibite_load_bytes(resolved); }));
+            };
+            check_true(verdicts("0;").first != "clean", "a fresh bite is refused where stamp_seen is undeclared");
+            for (const std::string setup : {"0;", "int stamp_seen = 1;", "class StampBox { string n = \"s\"; } int stamp_seen = 9;"}) {
+                const auto [fresh, loaded] = verdicts(setup);
+                check_eq(fresh, loaded, setup);
+            }
+            check_eq(std::string("clean"), verdicts("int stamp_seen = 9; class StampBox { int n = 2; }").second, "the same declarations keep the stamp");
         });
 
         test("jaibite_stamp_from_another_checker_revision_rechecks", [this]() {

@@ -10,6 +10,7 @@
 #include <vector>
 #include <memory>
 #include <optional>
+#include <set>
 #include <unordered_set>
 #include <algorithm>
 
@@ -32,6 +33,9 @@ namespace jai {
         void source_text(std::string_view source) { source_ = source; }
         // the files spliced into function bodies by this parse (resolved paths), for the parse cache's stamps
         const std::vector<std::string>& spliced_files() const { return spliced_files_; }
+        // the namespace classes this parse asked the engine about, sorted: "space::Name" (space declares class Name) or a bare
+        // "Name" (some namespace does); the parse holds wherever the engine answers them alike (engine.cpp namespace_answers)
+        std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
 
@@ -40,6 +44,7 @@ namespace jai {
         const std::vector<token>* stream_;   // the token stream being parsed: the program's, or a spliced include's while its declarations are read
         std::vector<token> namespace_stream_;   // the program's stream with its namespaces' bare class names qualified
         std::vector<token> using_stream_;    // the program's stream after its using declarations rewrote it
+        std::set<std::string> namespace_queries_;
         // Inside a namespace's blocks a class that namespace declares (here or in a unit the engine ran) reads by its bare name
         // as ns::Name, its one name (C++); false when the stream opens no namespace that names one
         bool qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out);

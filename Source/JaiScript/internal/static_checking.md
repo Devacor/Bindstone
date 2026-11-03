@@ -634,10 +634,16 @@ interpreter-vs-vm differential green in both proof states.
 
 A bite is checked at creation (an error throws there);
 `bite.checked_clean()` / `bite.check_diagnostics()` expose the result. `save()` stamps a
-checked-clean bit in the header's existing flags u32 (no format version bump; old loaders
-ignore it). On load the stamp is trusted ONLY when the registration fingerprint matches
-the saving engine's; otherwise the bite loads unchecked and is re-checked at load against
-THIS engine's surface (an error throws). A bite is
+checked-clean bit in the header's flags u32 beside the bite's context section (`detail::jaibite_context`): every
+name the clean check asked the engine or the program pools about (`check_options::outside`, recorded by the checker's
+`outside_engine`) and a key over what each resolves to (`outside_signature`: the program's declaring units by
+`unit_key`, the cell's kind and type, registrations, the script class, namespace and namespace member by the unit that
+ran them). On load the stamp is trusted ONLY when the registration fingerprint matches the saving engine's AND those
+names key alike here; otherwise the bite is re-checked at load against THIS engine's surface (an error throws). The
+disk cache holds a stamp the same way, judged at the check it stands in for (check_entry, after the program's names
+are gathered), and rewrites the cache when a re-check replaced it. The same section carries the parse's namespace-class
+lookups (`parser::namespace_queries`); a cache whose lookups answer otherwise reparses, and an in-memory parse asks them
+again whenever the engine's namespace class count moved (`parse_moved`). A bite is
 checked once — registrations after that don't re-trigger; re-create the bite to re-check.
 Proofs are independent of that: they stamp at creation/load/execute and
 re-stamp whenever the surface epoch or the proof switch moved, while the diagnostics stay
@@ -649,7 +655,7 @@ One AST walk per unique source per surface epoch, cached beside the parse (the p
 rides it). Re-run only
 when the registration surface epoch moves (`add_function`/`add_global`/`add_class`/
 `register_template_type`, script-class first definition and non-identical redefinition) or
-the proof switch flips. A `.jaibite` stamped checked-clean under a matching fingerprint skips
+the proof switch flips. A `.jaibite` stamped checked-clean under a matching fingerprint and context skips
 the diagnostics walk. Executes with host instance variables check fresh per call (the name
 set is per-call; that per-call walk never touches the cached stamps). Walk cost is
 parse-order (same tree, no allocation-heavy state).

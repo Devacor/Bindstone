@@ -1055,6 +1055,15 @@ struct engine::implementation {
         std::filesystem::path cache_write_failed;   // the cache file this source text could not write: never retried on every hit
         bool identity_known = false;
         detail::jaibite_source_identity identity;
+        // what the parse and a clean check rest on beyond the text: the parse holds while the namespace classes it asked about
+        // answer alike (namespace_classes: the engine's count when they last did), a checked-clean stamp while the names the
+        // check resolved outside the unit resolve to what context.outside_key records (outside_keyed: they describe this check)
+        detail::jaibite_context context;
+        size_t namespace_classes = 0;
+        bool outside_keyed = false;
+        bool context_recorded = false;   // the first check ran: its context is the one the cache keeps
+        bool stamp_loaded = false;   // the loaded cache's stamp, held against the context at the check it stands in for
+        bool restamp = false;        // that stamp did not hold: the cache is written again under this context
         std::string closure_listing;                   // erroring units' listings, each against its own source + path
         std::vector<check_diagnostic> closure_diags;   // every unit diagnostic, path-qualified in the message
         std::string closure_parse_failures;            // units that failed to parse: the program stops there, before any check
@@ -1126,6 +1135,18 @@ struct engine::implementation {
     detail::program_enum_map program_enums_;   // the closure units' top-level enums (an enum value read is no user code: member_expr::enum_constant)
     detail::program_function_map program_functions_;   // the closure units' free functions (internal/static_checking.md "Programs"; the inliner's cross-unit leaves)
     detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (internal/static_checking.md "Proofs")
+    std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> program_name_units_;   // name -> unit path -> unit_key of the unit declaring it
+    // A unit's declarations into the program pools, each name under the unit that declares it
+    void pool_unit(const std::vector<declaration_ptr>& decls, const std::string& path, uint64_t key) {
+        std::unordered_set<std::string> names;
+        detail::collect_unit_names(decls, names);
+        for (const auto& n : names) { program_name_units_[n][path] = key; }
+        program_names_.insert(names.begin(), names.end());
+        detail::collect_unit_classes(decls, program_classes_);
+        detail::collect_unit_enums(decls, path, program_enums_);
+        detail::collect_unit_functions(decls, path, program_functions_);
+        detail::collect_unit_globals(decls, path, program_globals_);
+    }
     struct closure_unit {
         std::string path;   // resolved spelling: the key the unit later executes under
         std::string source;
@@ -1236,6 +1257,7 @@ struct engine::implementation {
             cached = store_cached_script(sourcePath, content, std::move(decls));
             adopt_reload_hook(*cached, std::move(hook));
             stamp_spliced(*cached, prs.spliced_files());
+            note_parse_context(*cached, prs);
             if (identity) { cached->identity = *identity; cached->identity_known = true; }
         }
         if (debugger_) { debugger_->note_source(sourcePath, &cached->declarations); }
@@ -1278,11 +1300,7 @@ struct engine::implementation {
             }
             std::vector<std::string> nested;
             literal_unit_paths(unit.entry->declarations, nested);
-            detail::collect_unit_names(unit.entry->declarations, program_names_);
-            detail::collect_unit_classes(unit.entry->declarations, program_classes_);
-            detail::collect_unit_enums(unit.entry->declarations, unit.path, program_enums_);
-            detail::collect_unit_functions(unit.entry->declarations, unit.path, program_functions_);
-            detail::collect_unit_globals(unit.entry->declarations, unit.path, program_globals_);
+            pool_unit(unit.entry->declarations, unit.path, unit_key(*unit.entry, unit.source));
             std::string unit_path = unit.path;
             out.push_back(std::move(unit));
             collect_closure_units(self, nested, visited, out, stamps, unit_path, parse_failures);
@@ -1353,11 +1371,28 @@ struct engine::implementation {
         const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
         const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed ||
                                  (lowering_on() && !entry.lowering.built) || entry.lowering.lowered_view != lowering_on();
-        if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
+        if (need_check && entry.stamp_loaded && outside_key(self, entry.context.outside) == entry.context.outside_key) {
+            entry.check_result = {};   // the loaded stamp's names resolve here as where it was checked
+            entry.outside_keyed = true;
+        } else if (need_check) {   // the diagnostics walk leaves the proofs alone: the proof pass follows, and it alone reads the program's globals
             detail::set_aggregate_view(entry.lowering, false);   // diagnostics read the parsed bodies
             detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
             o.diagnostics = true;
+            // the entry's first check keys its stamp: the next run's first check of the file meets that context again
+            const bool first = jaibite_cache_enabled && entry.source_path != "<script>" && !entry.context_recorded;
+            std::vector<std::string> outside;
+            if (first) { o.outside = &outside; }
             entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
+            if (first) {
+                entry.restamp = entry.stamp_loaded;
+                entry.outside_keyed = !entry.check_result.has_errors();
+                entry.context.outside = entry.outside_keyed ? std::move(outside) : std::vector<std::string>{};
+                entry.context.outside_key = entry.outside_keyed ? outside_key(self, entry.context.outside) : 0;
+            }
+        }
+        if (need_check) {
+            entry.context_recorded = true;
+            entry.stamp_loaded = false;
             entry.checked = true;
             entry.checked_epoch = check_surface_epoch_;
         }
@@ -1377,7 +1412,7 @@ struct engine::implementation {
     // parse error is the whole report (the names it would have declared are unknown, so
     // any check would only cascade). The findings live on the root entry and are
     // republished on every call, gathered or not.
-    const check_report& checked_report(engine& self, script_cache_entry& entry) {
+    const check_report& checked_report(engine& self, script_cache_entry& entry, std::string_view source) {
         if (closure_due(entry)) {
             std::vector<std::string> roots;
             literal_unit_paths(entry.declarations, roots);
@@ -1388,11 +1423,7 @@ struct engine::implementation {
             entry.closure_parse_failures.clear();
             std::vector<closure_unit> closure;
             if (entry.closure_root) {
-                detail::collect_unit_names(entry.declarations, program_names_);
-                detail::collect_unit_classes(entry.declarations, program_classes_);
-                detail::collect_unit_enums(entry.declarations, entry.source_path, program_enums_);
-                detail::collect_unit_functions(entry.declarations, entry.source_path, program_functions_);
-                detail::collect_unit_globals(entry.declarations, entry.source_path, program_globals_);
+                pool_unit(entry.declarations, entry.source_path, unit_key(entry, source));
                 std::unordered_set<std::string> visited;
                 collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path, entry.closure_parse_failures);
                 entry.checked = false;
@@ -1509,7 +1540,7 @@ struct engine::implementation {
         has_executed_ = true;
         self.backend()->prepare_for_execution();
         entry.last_used = ++script_cache_clock;
-        const check_report& rep = checked_report(self, entry);
+        const check_report& rep = checked_report(self, entry, source);
         if (instanceVars.empty()) {
             gate_checked(rep, source);
         } else {
@@ -1592,10 +1623,12 @@ struct engine::implementation {
         detail::program_enum_map enums;
         detail::program_function_map functions;
         detail::program_global_map globals;
+        std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> name_units;
     };
-    program_pools save_program_pools() const { return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_}; }
+    program_pools save_program_pools() const { return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_}; }
     void restore_program_pools(program_pools&& saved) {
         program_names_ = std::move(saved.names);
+        program_name_units_ = std::move(saved.name_units);
         program_classes_ = std::move(saved.classes);
         program_enums_ = std::move(saved.enums);
         program_functions_ = std::move(saved.functions);
@@ -1697,7 +1730,7 @@ struct engine::implementation {
                 std::memcmp(node.source.data(), source.data(), source.size()) != 0) {
                 continue;   // discriminator collision: memcmp is the arbiter, keep scanning
             }
-            if (node.entry->epoch != script_cache_epoch || spliced_changed(*node.entry)) {
+            if (node.entry->epoch != script_cache_epoch || parse_moved(*node.entry)) {
                 script_cache[i] = std::move(script_cache.back());
                 script_cache.pop_back();
                 return nullptr;
@@ -1713,9 +1746,131 @@ struct engine::implementation {
         entry.spliced_stamps.clear();
         for (const auto& f : files) { closure_stamp s{f, 0, 0}; (void)stat_mtime_size(f, s.mtime, s.size); entry.spliced_stamps.push_back(std::move(s)); }
     }
-    bool spliced_changed(const script_cache_entry& entry) {
+    // A cached parse no longer stands for its text: an include it spliced changed, or a namespace class it asked about is answered otherwise
+    bool parse_moved(script_cache_entry& entry) {
         for (const auto& s : entry.spliced_stamps) { uint64_t mtime = 0, size = 0; if (!stat_mtime_size(s.path, mtime, size) || mtime != s.mtime || size != s.size) return true; }
+        if (entry.context.namespace_queries.empty()) { return false; }
+        const size_t classes = namespace_class_count();
+        if (classes == entry.namespace_classes) { return false; }
+        if (namespace_answers(entry.context.namespace_queries) != entry.context.namespace_key) { return true; }
+        entry.namespace_classes = classes;
         return false;
+    }
+    // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, as one key (0: none asked)
+    uint64_t namespace_answers(const std::vector<std::string>& queries) const {
+        uint64_t result = queries.size();
+        for (const auto& q : queries) { result = mix_key(result, namespace_class_known(q) ? 1 : 2); }
+        return result;
+    }
+    bool namespace_class_known(std::string_view query) const {
+        const size_t cut = query.rfind("::");
+        const auto name = string_symbolizer_.find(cut == std::string_view::npos ? query : query.substr(cut + 2));
+        if (!name) { return false; }
+        const auto declares = [&](const std::shared_ptr<script_namespace_data>& space) { return space && space->classes.count(*name) != 0; };
+        if (cut == std::string_view::npos) {
+            return std::any_of(script_namespaces_.begin(), script_namespaces_.end(), [&](const auto& entry) { return declares(entry.second); });
+        }
+        const auto space = string_symbolizer_.find(query.substr(0, cut));
+        if (!space) { return false; }
+        const auto it = script_namespaces_.find(*space);
+        return it != script_namespaces_.end() && declares(it->second);
+    }
+    // classes are only ever added to a namespace, so an unchanged count answers every question as before
+    size_t namespace_class_count() const {
+        size_t result = 0;
+        for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size(); } }
+        return result;
+    }
+    void note_parse_context(script_cache_entry& entry, const parser& prs) {
+        entry.context.namespace_queries = prs.namespace_queries();
+        entry.context.namespace_key = namespace_answers(entry.context.namespace_queries);
+        entry.namespace_classes = namespace_class_count();
+    }
+    static uint64_t mix_key(uint64_t h, uint64_t x) {
+        h ^= x + 0x9E3779B97F4A7C15ull + (h << 6) + (h >> 2);
+        h *= 0xBF58476D1CE4E5B9ull;
+        return h ^ (h >> 31);
+    }
+    // A unit as the program pools hold it: its text and the namespace answers its parse rests on
+    uint64_t unit_key(script_cache_entry& entry, std::string_view source) {
+        const auto& id = identity_of(entry, source);
+        return mix_key(mix_key(id.size, id.hash), entry.context.namespace_key);
+    }
+    // The unit that ran a declaration the engine holds, by its key; 0 when no unit that ran is it (the host's)
+    uint64_t ran_unit_key(uint32_t unit) {
+        auto it = loaded_units_.find(unit);
+        return it == loaded_units_.end() || !it->second.entry ? 0 : unit_key(*it->second.entry, it->second.source);
+    }
+    // A value the engine holds under a name as the checker reads it: its slot's kind and type, a script callable by the unit
+    // that declared it
+    uint64_t value_signature(const script_value& value) {
+        const type_info* ti = value.get_type_info();
+        const script_value& held = value.deref();
+        uint64_t result = mix_key(uint64_t(value.is_cpp_bound()) | uint64_t(value.is_reference()) << 1 | uint64_t(ti && ti->dynamic_slot) << 2 |
+                                  uint64_t(held.is_function()) << 3, ti ? detail::jaibite_identity_of(ti->spelling()).hash : 0);
+        if (!held.is_function()) { return result; }
+        const auto* thunk = held.as_function().target<script_callable_thunk>();
+        if (!thunk) { return mix_key(result, 1); }
+        const script_callable& p = thunk->payload;
+        result = mix_key(result, uint64_t(p.kind));
+        switch (p.kind) {
+            case script_callable::kind_type::function: return p.fn ? mix_key(result, ran_unit_key(p.fn->unit.id)) : result;
+            case script_callable::kind_type::method:
+            case script_callable::kind_type::static_method: return p.ast() ? mix_key(result, ran_unit_key(p.ast()->unit.id)) : result;
+            case script_callable::kind_type::constructor: return p.cls() ? mix_key(result, ran_unit_key(p.cls()->unit().id)) : result;
+            default: return result;
+        }
+    }
+    // What a check can learn about a name outside the unit asking (check_options::outside): the program's declarations of it by
+    // their units, the engine's cell, registrations, script class and namespace of that name, the namespace member a qualified
+    // name spells, each script declaration by the unit that ran it. Equal signatures answer every question alike.
+    uint64_t outside_signature(engine& self, const std::string& name) {
+        uint64_t result = detail::jaibite_identity_of(name).hash;
+        const auto fold = [&result](uint64_t x) { result = mix_key(result, x); };
+        fold(program_names_.count(name));
+        if (auto it = program_name_units_.find(name); it != program_name_units_.end()) {
+            uint64_t units = 0;
+            for (const auto& [path, key] : it->second) { units += mix_key(key, 0); }
+            fold(units);
+        }
+        fold(uint64_t(overloadedFunctions.count(name)) | uint64_t(functionArities.count(name)) << 1 | uint64_t(classes.count(name)) << 2 |
+             uint64_t(registeredTemplateTypes.count(name)) << 3 | uint64_t(self.is_const_global(name)) << 4);
+        if (const auto id = string_symbolizer_.find(name)) {
+            if (const script_value* cell = global_environment_->get_value_ptr(*id)) { fold(value_signature(*cell)); }
+            if (auto it = script_namespaces_.find(*id); it != script_namespaces_.end() && it->second) { fold(0x51); }
+        }
+        if (auto c = class_registry_.find_script_class(name)) { fold(mix_key(0xC1, ran_unit_key(c->unit().id))); }
+        if (const size_t cut = name.rfind("::"); cut != std::string::npos) {
+            const auto space = string_symbolizer_.find(std::string_view(name).substr(0, cut));
+            const auto member = string_symbolizer_.find(std::string_view(name).substr(cut + 2));
+            const auto it = space ? script_namespaces_.find(*space) : script_namespaces_.end();
+            if (member && it != script_namespaces_.end() && it->second) {
+                const script_namespace_data& ns = *it->second;
+                if (auto f = ns.functions.find(*member); f != ns.functions.end()) {
+                    for (const auto& decl : f->second) { fold(mix_key(0xF1, decl ? ran_unit_key(decl->unit.id) : 0)); }
+                }
+                if (auto v = ns.variables.find(*member); v != ns.variables.end()) { fold(mix_key(0xB1, value_signature(v->second))); }
+                if (auto c = ns.classes.find(*member); c != ns.classes.end() && c->second) { fold(mix_key(0xC2, ran_unit_key(c->second->unit().id))); }
+                fold(ns.signatures.count(*member));
+            }
+        }
+        for (const auto& [index, refusal] : self.constant_argument_indexes(name)) { fold(mix_key(0xA1, index)); }
+        if (name == detail::k_outside_constants) {
+            std::vector<const std::pair<const std::string, std::vector<std::string>>*> texts;
+            for (const auto& entry : self.constant_texts_by_name()) { texts.push_back(&entry); }
+            std::sort(texts.begin(), texts.end(), [](const auto* a, const auto* b) { return a->first < b->first; });
+            for (const auto* entry : texts) {
+                fold(detail::jaibite_identity_of(entry->first).hash);
+                for (const auto& text : entry->second) { fold(detail::jaibite_identity_of(text).hash); }
+            }
+        }
+        return result;
+    }
+    // The key of a clean check's context: what each name it resolved outside the unit resolves to now
+    uint64_t outside_key(engine& self, const std::vector<std::string>& names) {
+        uint64_t result = names.size();
+        for (const auto& n : names) { result = mix_key(result, outside_signature(self, n)); }
+        return result;
     }
     std::shared_ptr<script_cache_entry> store_cached_script(const std::string& sourcePath, const std::string& source, std::vector<declaration_ptr> decls) {
         if (script_cache.size() >= script_cache_max) {
@@ -1947,7 +2102,7 @@ struct engine::implementation {
     static bool stat_cache_file(const std::filesystem::path& cacheFile, uint64_t& mtime, uint64_t& size) {
         return stat_file(cacheFile.string(), mtime, size);
     }
-    const detail::jaibite_source_identity& identity_of(script_cache_entry& entry, const std::string& source) {
+    const detail::jaibite_source_identity& identity_of(script_cache_entry& entry, std::string_view source) {
         if (!entry.identity_known) { entry.identity = detail::jaibite_identity_of(source); entry.identity_known = true; }
         return entry.identity;
     }
@@ -2000,7 +2155,11 @@ struct engine::implementation {
                 return nullptr;
             }
             uint32_t flags = 0;
-            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath);
+            detail::jaibite_context context;
+            auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath, &context);
+            if (namespace_answers(context.namespace_queries) != context.namespace_key) {
+                return nullptr;   // a namespace class the parse asked about is answered otherwise here: the text parses otherwise
+            }
             // jaibite carries structure, not the parser-pass flags (ref-escape,
             // value-decl naming, transient reads) — re-derive
             // them exactly like the parse tail does
@@ -2014,12 +2173,9 @@ struct engine::implementation {
             entry->cache_mtime = cacheMtime;
             entry->cache_size = cacheSize;
             entry->cache_stamped = true;
-            if (detail::jaibite_stamped_clean(flags)) {
-                // Trusted stamp (fingerprint matched): skip the re-check exactly like a
-                // loaded bite does — check_result stays default (no diagnostics).
-                entry->checked = true;
-                entry->checked_epoch = check_surface_epoch_;
-            }
+            entry->context = std::move(context);
+            entry->namespace_classes = namespace_class_count();
+            entry->stamp_loaded = detail::jaibite_stamped_clean(flags);   // it stands in for the first check while its names resolve alike
             return entry;
         } catch (...) {
             return nullptr;
@@ -2038,14 +2194,18 @@ struct engine::implementation {
         std::filesystem::path temporary;
         try {
             uint32_t flags = 0;
-            if (entry.checked && entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors()) {
+            detail::jaibite_context context = entry.context;
+            if (entry.checked && entry.checked_epoch == check_surface_epoch_ && !entry.check_result.has_errors() && entry.outside_keyed) {
                 flags |= detail::jaibite_checked_clean_flags();
+            } else {
+                context.outside.clear();
+                context.outside_key = 0;
             }
             std::vector<uint8_t> bytes;
             {
                 detail::aggregate_source_view view(&entry.lowering);   // a cache holds the parsed program
                 bytes = detail::serialize_jaibite(checked_declarations(entry), string_symbolizer_, self.registration_fingerprint(), flags, sourcePath,
-                                                  identity_of(entry, source));
+                                                  identity_of(entry, source), &context);
             }
 #ifdef _WIN32
             const uint64_t process = GetCurrentProcessId();
@@ -2071,6 +2231,7 @@ struct engine::implementation {
                 if (!ec) {
                     entry.cache_file = cacheFile;
                     entry.cache_stamped = stat_cache_file(cacheFile, entry.cache_mtime, entry.cache_size);
+                    entry.restamp = false;
                     return;
                 }
             }
@@ -3178,7 +3339,7 @@ script_value engine::execute_unheld(script_source source) {
     if (source.literal()) {
         auto it = impl->literal_script_cache.find({source.data(), source.size()});
         if (it != impl->literal_script_cache.end()) {
-            if (it->second->epoch == impl->script_cache_epoch && !impl->spliced_changed(*it->second)) {   // a spliced include's change re-parses on this tier too
+            if (it->second->epoch == impl->script_cache_epoch && !impl->parse_moved(*it->second)) {   // a spliced include's change re-parses on this tier too
                 auto entry = it->second;
                 return impl->execute_cache_hit(*this, entry, instance_variables{},
                                                std::string_view(source.data(), source.size()));
@@ -3222,7 +3383,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
 
         // Static-check hook: one place, at the parse-cache entry — covers execute(),
         // hot-reload re-parses (new source = new entry) and registration-epoch changes.
-        const check_report& rep = impl->checked_report(*this, *cached);
+        const check_report& rep = impl->checked_report(*this, *cached, scriptContent);
         // a unit from a file (the root file, an include, an import) lists under its path
         const std::string_view listing_name = sourcePath.empty() ? std::string_view("<script>") : std::string_view(sourcePath);
         if (instanceVars.empty()) {
@@ -3237,7 +3398,7 @@ script_value engine::execute_source(const std::string& scriptContent, const inst
         // Rewrite a missing/stale/rejected cache AFTER the check hook so a clean check
         // stamps checked_clean, and BEFORE execution on purpose: a runtime error doesn't
         // invalidate a good parse.
-        if (!cacheFile.empty() && !cacheFresh && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
+        if (!cacheFile.empty() && (!cacheFresh || cached->restamp) && cached->spliced_stamps.empty()) {   // a unit with spliced includes keeps no cache: its freshness knows only its own file
             impl->write_jaibite_cache(*this, cacheFile, *cached, sourcePath, scriptContent);
         }
 
@@ -3328,6 +3489,10 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
 // whenever the switch or the surface epoch moved. Source is only available at creation time (loaded
 // bites format their listing without snippets).
 void engine::check_bite(jai::jaibite& bite, const std::string* source) {
+    if (bite.stamp_loaded_ && impl->outside_key(*this, bite.context_.outside) == bite.context_.outside_key) {
+        bite.check_state_ = jaibite::check_state::clean;   // the names the stamp resolved resolve here as where it was checked
+    }
+    bite.stamp_loaded_ = false;
     if (!bite.lowering_) { bite.lowering_ = std::make_shared<detail::aggregate_lowering_state>(); }
     auto& lowering = *std::static_pointer_cast<detail::aggregate_lowering_state>(bite.lowering_);
     const uint64_t want_proof_epoch = impl->type_proofs_ ? impl->check_surface_epoch_ : UINT64_MAX;
@@ -3347,12 +3512,21 @@ void engine::check_bite(jai::jaibite& bite, const std::string* source) {
         o.program_globals = &impl->program_globals_;
         if (!need_check) { impl->lowering_view(*this, bite.declarations_, lowering); }   // this walk is the proof pass
         impl->gather_constant_texts(bite.declarations_);
+        std::vector<std::string> outside;
+        const bool record = need_check && !bite.context_recorded_;
+        if (record) { o.outside = &outside; }
         check_report r = detail::run_static_check(*this, bite.declarations_, nullptr, o);
         if (need_check) {
             bite.check_report_ = std::move(r);
             bite.check_state_ = bite.check_report_.has_errors()
                 ? jaibite::check_state::flagged : jaibite::check_state::clean;
+            if (record && bite.check_state_ == jaibite::check_state::clean) {
+                bite.context_.outside_key = impl->outside_key(*this, outside);
+                bite.context_.outside = std::move(outside);
+                bite.context_recorded_ = true;
+            }
             detail::check_options p = o;   // the proof pass alone reads the program's globals and types the auto slots
+            p.outside = nullptr;
             p.diagnostics = false;
             p.proofs = impl->type_proofs_ ? detail::check_options::proofs_t::stamp : detail::check_options::proofs_t::clear;
             impl->lowering_view(*this, bite.declarations_, lowering);
@@ -3393,10 +3567,10 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     }
     uint32_t flags = (check_state_ == check_state::clean) ? detail::jaibite_checked_clean_flags() : 0;
     detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
-    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags); }
+    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags, {}, {}, &context_); }
     std::vector<declaration_ptr> with_hook = declarations_;
     with_hook.push_back(reload_hook_);
-    return detail::serialize_jaibite(with_hook, *owner->get_symbolizer(), owner->registration_fingerprint(), flags);
+    return detail::serialize_jaibite(with_hook, *owner->get_symbolizer(), owner->registration_fingerprint(), flags, {}, {}, &context_);
 }
 
 void jaibite::save(const std::string& path) const {
@@ -3429,7 +3603,8 @@ jai::jaibite engine::jaibite_load(const std::string& path) {
 jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const std::string& own_path) {
     uint64_t saved_fingerprint = 0;
     uint32_t flags = 0;
-    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, nullptr, own_path);
+    detail::jaibite_context context;
+    auto declarations = detail::deserialize_jaibite(data, size, this, saved_fingerprint, &flags, nullptr, own_path, &context);
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
     if (detail::run_ast_marking_passes(declarations, get_symbolizer())) { note_execute_elapsed_use(); }
@@ -3437,12 +3612,11 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.reload_hook_ = std::move(hook);
     bite.registration_mismatch_ = (saved_fingerprint != registration_fingerprint());
-    // Trust the checked-clean stamp only when the registration surface matches the
-    // saving engine's; otherwise the bite loads unchecked and is re-checked here
-    // (relocated AST, this engine's surface).
-    if (detail::jaibite_stamped_clean(flags) && !bite.registration_mismatch_) {
-        bite.check_state_ = jaibite::check_state::clean;
-    }
+    // The checked-clean stamp stands in for the check under the saving engine's registration surface while the names it resolved
+    // resolve alike (check_bite); otherwise the bite is checked here (relocated AST, this engine's surface).
+    bite.stamp_loaded_ = detail::jaibite_stamped_clean(flags) && !bite.registration_mismatch_;
+    bite.context_recorded_ = detail::jaibite_stamped_clean(flags);
+    bite.context_ = std::move(context);
     check_bite(bite, nullptr);
     return bite;
 }
@@ -3631,8 +3805,9 @@ check_report engine::check(const std::string& scriptContent) {
         }
         cached = impl->store_cached_script("<script>", scriptContent, std::move(parse_result.value()));
         impl->stamp_spliced(*cached, parser.spliced_files());
+        impl->note_parse_context(*cached, parser);
     }
-    return impl->program_report(impl->checked_report(*this, *cached));
+    return impl->program_report(impl->checked_report(*this, *cached, scriptContent));
 }
 
 bool engine::host_function_signatures(const std::string& name, std::vector<host_overload_signature>& out) const {
@@ -3723,7 +3898,7 @@ script_value engine::execute_file_unheld(const std::string& scriptPath, const in
             bool stampValid = node.entry && node.entry->epoch == impl->script_cache_epoch &&
                               node.attributed_path == attributed &&
                               node.size == size && mtime == node.mtime &&
-                              !impl->spliced_changed(*node.entry);   // the spliced includes' stamps, as find_cached_script checks them: a changed dependency is a miss on every tier
+                              !impl->parse_moved(*node.entry);   // the spliced includes' stamps, as find_cached_script checks them: a changed dependency is a miss on every tier
             if (stampValid && !node.verified) {
                 // One-shot equal-stamp verify: an edit in the same filesystem tick as
                 // the original read is invisible to the stat, so compare bytes once.
@@ -6081,12 +6256,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             }
         }
         for (size_t k = 0; k < group.size(); ++k) {
-            if (!entries[k]) { continue; }
-            detail::collect_unit_names(entries[k]->declarations, I.program_names_);
-            detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
-            detail::collect_unit_enums(entries[k]->declarations, group[k].resolved, I.program_enums_);
-            detail::collect_unit_functions(entries[k]->declarations, group[k].resolved, I.program_functions_);
-            detail::collect_unit_globals(entries[k]->declarations, group[k].resolved, I.program_globals_);
+            if (entries[k]) { I.pool_unit(entries[k]->declarations, group[k].resolved, I.unit_key(*entries[k], contents[k])); }
         }
         for (size_t k = 0; k < group.size(); ++k) {
             if (!entries[k]) { continue; }
@@ -6094,7 +6264,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             I.importing_.insert(path);
             if (originals < group.size()) { entries[k]->checked = false; }   // a cached verdict never knew the pending modules' text
             try {
-                I.gate_checked(I.checked_report(*this, *entries[k]), contents[k], path);
+                I.gate_checked(I.checked_report(*this, *entries[k], contents[k]), contents[k], path);
             } catch (const std::exception& e) {
                 fail(k, e);
             }
@@ -6121,13 +6291,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
             for (const auto& e : entries) { if (e) { v.involved.insert(v.involved.end(), e->spliced_stamps.begin(), e->spliced_stamps.end()); } }
         } else if (originals < group.size()) {
             I.restore_program_pools(std::move(pools));
-            for (size_t k = 0; k < originals; ++k) {
-                detail::collect_unit_names(entries[k]->declarations, I.program_names_);
-                detail::collect_unit_classes(entries[k]->declarations, I.program_classes_);
-                detail::collect_unit_enums(entries[k]->declarations, group[k].resolved, I.program_enums_);
-                detail::collect_unit_functions(entries[k]->declarations, group[k].resolved, I.program_functions_);
-                detail::collect_unit_globals(entries[k]->declarations, group[k].resolved, I.program_globals_);
-            }
+            for (size_t k = 0; k < originals; ++k) { I.pool_unit(entries[k]->declarations, group[k].resolved, I.unit_key(*entries[k], contents[k])); }
         }
         return v;
     };

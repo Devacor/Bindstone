@@ -51,8 +51,8 @@ namespace jai {
         // Static-check state (internal/static_checking.md). A created or executed bite
         // carries its diagnostics; checked_clean() means it was checked and has no
         // error-severity diagnostics. save() stamps that flag beside the registration
-        // fingerprint; jaibite_load trusts the stamp only when the fingerprint matches,
-        // otherwise the bite loads unchecked and is re-checked on first use (a bite is
+        // fingerprint and the names the check resolved outside the bite; jaibite_load trusts the stamp only when the fingerprint
+        // matches and those names resolve alike in the loading engine, otherwise the bite is checked at load (a bite is
         // checked ONCE — later registrations don't re-trigger; re-create the bite to re-check).
         bool checked_clean() const { return check_state_ == check_state::clean; }
         const check_report& check_diagnostics() const { return check_report_; }
@@ -70,6 +70,9 @@ namespace jai {
         bool registration_mismatch_ = false;
         check_state check_state_ = check_state::unchecked;
         check_report check_report_;
+        detail::jaibite_context context_;   // a clean check's outside names and their key, saved with the stamp
+        bool stamp_loaded_ = false;         // a loaded stamp, held against the loading engine at its first check
+        bool context_recorded_ = false;     // context_ is the one a clean check keyed: a later check keeps it (a load never rewrites)
         uint64_t proof_epoch_ = UINT64_MAX;   // UINT64_MAX = nodes carry no proofs
         bool autos_typed_ = false;   // the first proof pass types the auto slots
         uint32_t unit_ = 0;   // shadowing unit, numbered at the first execute

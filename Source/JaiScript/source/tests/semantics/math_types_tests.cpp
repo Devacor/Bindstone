@@ -788,6 +788,9 @@ public:
             check_eq(std::string("(1.0, 2.0, 3.0)"), v.to_string(), "make_value of a host value is a math value");
             auto back = e->execute("math::vec3(7, 8, 9)").as<adapter_hosts::point3>();
             check(back.x == 7 && back.y == 8 && back.z == 9, "as<Host>() reads a math value");
+            std::string refused;
+            try { (void)e->execute("\"x\"").as<adapter_hosts::point3>(); } catch (const std::exception& ex) { refused = ex.what(); }
+            check_eq(std::string("Cannot convert string to math::vec3"), refused, "as<Host>() names what the value holds");
         });
 
         test("bound_members", [expect]() {

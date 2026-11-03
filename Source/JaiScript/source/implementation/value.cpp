@@ -57,7 +57,8 @@ extern const uint64_t k_process_hash_seed = draw_process_hash_seed();
 
 namespace {
     constexpr std::string_view k_conversion_targets[] = {
-        "int", "float", "bool", "char", "string", "array", "map", "object", "script class instance", "weak_ptr", "function"};
+        "int", "float", "bool", "char", "string", "array", "map", "object", "script class instance", "weak_ptr", "function",
+        "math::vec2", "math::vec3", "math::vec4", "math::color", "math::ivec2", "math::ivec3"};
     constexpr size_t k_conversion_sources = static_cast<size_t>(script_value_type::jai_color_type) + 1;
     struct conversion_text {
         char bytes[64]{};
@@ -232,17 +233,6 @@ bool script_value::math_words_as(script_value_type kind, uint32_t* words) const 
     if (!converted) { return false; }
     std::memcpy(words, converted.value().unchecked_vec_node().words, sizeof(script_vec_node::words));
     return true;
-}
-
-const char* script_value::math_conversion_text(script_value_type kind) noexcept {
-    switch (kind) {
-        case script_value_type::jai_vec2_type: return "Cannot convert {0} to math::vec2";
-        case script_value_type::jai_vec3_type: return "Cannot convert {0} to math::vec3";
-        case script_value_type::jai_vec4_type: return "Cannot convert {0} to math::vec4";
-        case script_value_type::jai_ivec2_type: return "Cannot convert {0} to math::ivec2";
-        case script_value_type::jai_ivec3_type: return "Cannot convert {0} to math::ivec3";
-        default: return "Cannot convert {0} to math::color";
-    }
 }
 
 namespace {

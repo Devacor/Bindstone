@@ -323,7 +323,6 @@ namespace detail {
         // This value as a math value of `kind`'s component words: the kind itself, the other precision of the same
         // dimensions (the typed-slot conversion), a decoded bound value; false for anything else (value.cpp)
         bool math_words_as(script_value_type kind, uint32_t* words) const;
-        static const char* math_conversion_text(script_value_type kind) noexcept;
         
         // Template constructors for all numeric types - ALL require engine references
         // NOTE: Implementations are in value_impl.hpp (include after engine.hpp)
@@ -1376,7 +1375,7 @@ namespace detail {
                 static_assert(sizeof(native) <= 16 && std::is_trivially_copyable_v<decltype(native)>);
                 uint32_t words[4] = {0, 0, 0, 0};
                 if (!math_words_as(adapter::kind, words)) {
-                    return checked_result<T>(make_error_code(runtime_error_code::type_mismatch), math_conversion_text(adapter::kind), deref().type_id());
+                    return detail::conversion_error(deref(), math_type_name(adapter::kind));
                 }
                 std::memcpy(&native, words, sizeof(native));
                 return checked_result<T>(adapter::from_native(native));

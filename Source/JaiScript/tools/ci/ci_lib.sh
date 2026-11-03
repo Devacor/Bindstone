@@ -122,12 +122,12 @@ jai_watched() {
 }
 
 # jai_gates <debug|release> <gate>...: tools/ci/gates.sh against that build under the watchdog, its output in a log; prints
-# one line per gate (JAI_GATE_LOG_TAG names a side-by-side run's log apart, so a rerun alone never overwrites the red one)
+# one line per gate
 jai_gates() {
 	local cfg="$1" log
 	shift
 	jai_watchdog
-	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}${JAI_GATE_LOG_TAG:-}.log"
+	log="$JAI_CI_LOG_DIR/gates_${cfg}_$(echo "$*" | tr ' ' '_')${JAI_TEST_SHARD:+_shard${JAI_TEST_SHARD%%/*}}.log"
 	if BIN="$(jai_dir_of "$cfg")/bin" jai_watched "$BASH" "$JAI_ROOT/tools/ci/gates.sh" "$@" > "$log" 2>&1; then
 		echo "green: $* ($cfg)"
 		return 0
@@ -140,8 +140,8 @@ jai_gates() {
 # jai_timing_gate <gate>: gates that measure time run alone, after everything else
 jai_timing_gate() { case "$1" in lsp-latency) return 0 ;; *) return 1 ;; esac; }
 
-# jai_gates_side_by_side <cfg> <gate>...: the gates at once, each with its own temp directory; a red gate reruns alone so
-# load from its neighbours never decides a verdict; prints one line per gate, returns the red ones in JAI_RED
+# jai_gates_side_by_side <cfg> <gate>...: the gates at once, each with its own temp directory; the gates are deterministic, so
+# a red side by side is the verdict; prints one line per gate, returns the red ones in JAI_RED
 jai_gates_side_by_side() {
 	local cfg="$1" gate pids=() tmp
 	shift
@@ -149,24 +149,19 @@ jai_gates_side_by_side() {
 	for gate in "$@"; do
 		tmp="$JAI_CI_LOG_DIR/tmp_${cfg}_$gate"
 		mkdir -p "$tmp"
-		TEMP="$tmp" TMP="$tmp" TMPDIR="$tmp" JAI_GATE_LOG_TAG=_side jai_gates "$cfg" "$gate" > "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" 2>&1 &
+		TEMP="$tmp" TMP="$tmp" TMPDIR="$tmp" jai_gates "$cfg" "$gate" > "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" 2>&1 &
 		pids+=($!)
 	done
 	for gate in "${pids[@]}"; do wait "$gate" || true; done
 	for gate in "$@"; do
-		if grep -q "^green" "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"; then
-			cat "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
-		else
-			echo "rerunning $gate alone (the side-by-side run was red)"
-			sed 's/^/  side by side: /' "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
-			jai_gates "$cfg" "$gate" || JAI_RED="$JAI_RED $gate"
-		fi
+		cat "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line"
+		grep -q "^green" "$JAI_CI_LOG_DIR/gate_${cfg}_$gate.line" || JAI_RED="$JAI_RED $gate"
 	done
 }
 
 # jai_debug_suites [backend...]: the Debug suites on the named backends (interp, vm, vm-reference; default all three), side by
 # side, each backend split into JAI_DEBUG_SHARDS processes (jaiscript_tests --shard; default from the core count), each
-# shard with its own temp directory; one line per backend, and a red shard reruns alone
+# shard with its own temp directory; one line per green backend, and each red shard's lines
 jai_debug_shards() {
 	local cores
 	[ -n "${JAI_DEBUG_SHARDS:-}" ] && { echo "$JAI_DEBUG_SHARDS"; return; }
@@ -186,7 +181,7 @@ jai_debug_suites() {
 		for ((shard = 0; shard < shards; shard++)); do
 			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
 			mkdir -p "$dir"
-			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" JAI_GATE_LOG_TAG=_side jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" &
+			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" > "$JAI_CI_LOG_DIR/suite_${be}_$shard.line" &
 			pids+=($!)
 		done
 	done
@@ -201,11 +196,9 @@ jai_debug_suites() {
 			continue
 		fi
 		for shard in $red; do
-			echo "rerunning the $be suites' shard $shard/$shards alone (the side-by-side run was red)"
-			sed 's/^/  side by side: /' "$JAI_CI_LOG_DIR/suite_${be}_$shard.line"
-			dir="$JAI_CI_LOG_DIR/tmp_${be}_$shard"
-			TEMP="$dir" TMP="$dir" TMPDIR="$dir" JAI_TEST_SHARD="$shard/$shards" jai_gates debug "tests-$be" || rc=1
+			cat "$JAI_CI_LOG_DIR/suite_${be}_$shard.line"
 		done
+		rc=1
 	done
 	return $rc
 }

@@ -4488,10 +4488,16 @@ script_value engine::marked_shared_handle(script_value object) {
     type_info* handle_type = def ? def->handle_type() : nullptr;
     if (!handle_type) {
         handle_type = get_type_info_shared_ptr(get_type_info_object(holder ? holder->type_id() : def->get_type_id()));
-        if (def) { def->set_handle_type(handle_type); }
+        if (def && !parallel_region_active_) { def->set_handle_type(handle_type); }   // a worker reads the memo, never fills it
     }
     object.set_type_info(type_info_ptr{handle_type});
     return object;
+}
+
+void engine::prewarm_handle_type(const class_definition& def) {
+    type_info* object = get_type_info_object(def.get_type_id());
+    (void)get_type_info_shared_ptr(object);
+    (void)get_type_info_shared_ptr_dynamic(object);   // a var holding the handle
 }
 
 type_info* engine::get_type_info_shared_ptr(type_info* pointee_type) {

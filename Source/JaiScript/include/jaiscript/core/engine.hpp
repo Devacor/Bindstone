@@ -713,6 +713,8 @@ namespace jai {
         template<typename T>
         script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_value_object(std::move(data))); }
         script_value marked_shared_handle(script_value object);
+        // Interns the handle type of def's objects, ahead of a parallel region whose chunks a host call can hand one
+        void prewarm_handle_type(const class_definition& def);
 
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)

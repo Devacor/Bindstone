@@ -4876,7 +4876,9 @@ public:
 				std::vector<std::thread>& threads;
 				~join_burners() { stop.store(true); for (auto& t : threads) { t.join(); } }
 			} joiner{ stop, burners };
-			const unsigned burner_count = std::max(2u, std::thread::hardware_concurrency()) - 1;
+			// a few burners make the contention; one per core starved the test itself for many minutes on a loaded machine, where
+			// shards running side by side each start their own
+			const unsigned burner_count = std::min(3u, std::max(2u, std::thread::hardware_concurrency()) - 1);
 			for (unsigned i = 0; i < burner_count; ++i) {
 				burners.emplace_back([&stop] { volatile uint64_t spin = 0; while (!stop.load(std::memory_order_relaxed)) { spin = spin + 1; } });
 			}

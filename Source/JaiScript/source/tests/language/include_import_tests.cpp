@@ -1118,8 +1118,10 @@ public:
             put_file(dir / "ctx_points.jai", points);
             put_file(dir / "ctx_probe.jai", probe);
             check_eq(std::string("VALUE 2"), outcome_of(*make_engine(), dir / "ctx_probe.jai"), "the cache is written where geo::Point does not exist");
+            bool proving = true;
             auto run_after_points = [&](proof_stats& stats) {
                 auto eng = make_engine();
+                proving = eng->type_proofs();   // the VM reference runs unproven
                 eng->execute_file((dir / "ctx_points.jai").string());
                 const std::string result = outcome_of(*eng, dir / "ctx_probe.jai");
                 stats = eng->last_proof_stats();
@@ -1129,7 +1131,7 @@ public:
             const std::string warm = run_after_points(warm_stats);
             std::filesystem::remove_all(dir / ".cache");
             const std::string cold = run_after_points(cold_stats);
-            check_true(cold_stats.stores > 0, "reseat's bare Point is geo::Point: the store of a geo::Point is proven");
+            check_eq(proving, cold_stats.stores > 0, "reseat's bare Point is geo::Point: the store of a geo::Point is proven");
             check_eq(cold_stats.stores, warm_stats.stores, "the loaded program carries the store proof the parsed one does");
             check_eq(std::string("VALUE 1"), cold);
             check_eq(cold, warm, "the probe reads geo::Point's field");

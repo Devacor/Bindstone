@@ -290,7 +290,7 @@ namespace jai::detail {
 	}
 
 	// == with a parallel worker's borrow of a shared object: two handles are one object when they are one wrap, as on the serial
-	// path; a value compares as the worker's own copy of it, whose class's == runs through its pins
+	// path; a value compares as the worker's own copy of it (parallel_by_value), whose class's == runs through its pins
 	template <class Host>
 	checked_result<script_value> shared_object_equal(Host& h, const script_value& left, const script_value& right, equality_walk* walk) {
 		const script_value& l = left.deref();
@@ -303,8 +303,8 @@ namespace jai::detail {
 			}
 			return h.make_bool(lb && rb && lb == rb);
 		}
-		const script_value lc = lb ? parallel_object_copy(l, *lb) : l;
-		const script_value rc = rb ? parallel_object_copy(r, *rb) : r;
+		const script_value lc = lb ? parallel_by_value(l) : l;
+		const script_value rc = rb ? parallel_by_value(r) : r;
 		return equal_operands(h, lc, rc, walk);
 	}
 

@@ -4664,10 +4664,7 @@ script_value parallel_by_value(const script_value& value) {
 	engine& eng = *record->eng;
 	class_definition* cd = record->source->get_class_definition();
 	if (!cd) { throw runtime_error("a shared object in a parallel body has no class to copy it by"); }
-	if (cd->value_tree_runs_destructor()) {   // the copy's death would run a destructor the serial loop never runs
-		throw runtime_error("a shared object whose class runs a destructor cannot be read by value in a parallel body (a conversion, a condition or its text)");
-	}
-	auto copy = class_instance::make(cd->interned_name_id(), &eng);
+	auto copy = class_instance::make(cd->interned_name_id(), &eng);   // inert: its death runs no destructor the serial loop does not run
 	copy->set_class_definition(cd);
 	record->source->for_each_field([&](uint64_t id, const script_value& field) { copy->set_field(id, parallel_shared_value(field, eng)); });
 	if (const auto* view = record->view.peek_object_holder(); view && view->is_instance()) {

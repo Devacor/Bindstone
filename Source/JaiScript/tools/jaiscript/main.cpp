@@ -1880,15 +1880,18 @@ int run_selftest(const console_state& con) {
 
 	{   // sound: format by header, then by extension; the play state a script reads (played only where an output device exists)
 		auto le = [](uint32_t v, int bytes) { std::string out; for (int i = 0; i < bytes; ++i) { out += static_cast<char>((v >> (8 * i)) & 0xFF); } return out; };
-		const std::string samples(80, static_cast<char>(128));   // 10 ms of 8-bit silence
-		const std::string wav = "RIFF" + le(36 + 80, 4) + "WAVEfmt " + le(16, 4) + le(1, 2) + le(1, 2) + le(8000, 4) + le(8000, 4) + le(1, 2) + le(8, 2) +
-			"data" + le(80, 4) + samples;
+		auto silence = [&](uint32_t samples) {   // 8-bit mono at 8 kHz
+			return "RIFF" + le(36 + samples, 4) + "WAVEfmt " + le(16, 4) + le(1, 2) + le(1, 2) + le(8000, 4) + le(8000, 4) + le(1, 2) + le(8, 2) +
+				"data" + le(samples, 4) + std::string(samples, static_cast<char>(128));
+		};
+		const std::string wav = silence(80);   // 10 ms
 		const std::string track = std::string("\x00\x90\x3C\x64\x60\x80\x3C\x00\x00\xFF\x2F\x00", 12);
 		const std::string midi = std::string("MThd\x00\x00\x00\x06\x00\x00\x00\x01\x01\xE0", 14) + "MTrk" + std::string("\x00\x00\x00", 3) + static_cast<char>(track.size()) + track;
 		const fs::path sounds = dir / "sounds";
 		std::error_code ec;
 		fs::create_directories(sounds, ec);
 		spill_file((sounds / "tone.wav").string(), wav);
+		spill_file((sounds / "long.wav").string(), silence(8000 * 600));   // ten minutes: still playing whatever the machine's load
 		spill_file((sounds / "tone.bin").string(), wav);
 		spill_file((sounds / "song.mid").string(), midi);
 		spill_file((sounds / "tagged.dat").string(), std::string("ID3\x04\x00", 5));
@@ -1916,10 +1919,10 @@ int run_selftest(const console_state& con) {
 			expect(run("load_sound(snd + \"/missing.wav\") == null && load_sound(snd + \"/notes.txt\") == null && play_sound(snd + \"/notes.txt\") == null;") == "true",
 				name("a missing file or an unknown format is no sound").c_str());
 			if (output_device) {
-				expect(run("var s = load_sound(snd + \"/tone.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
+				expect(run("var s = load_sound(snd + \"/long.wav\"); var seen = to_string(s.playing()) + \" \" + to_string(s.play()) + \" \" + to_string(s.playing()); "
 					"s.stop(); seen += \" \" + to_string(s.playing()); s.play(true); seen += \" \" + to_string(s.playing()); stop_sounds(); seen + \" \" + to_string(s.playing());") ==
 					"false true true false true false", name("play, stop, a loop and stop_sounds set the play state").c_str());
-				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 3000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
+				expect(run("var s = play_sound(snd + \"/tone.wav\"); int waited = 0; while (s.playing() && waited < 60000) { sleep(0.01); waited += 10; } !s.playing();") == "true",
 					name("a sound played once stops playing when it ends").c_str());
 			}
 		}

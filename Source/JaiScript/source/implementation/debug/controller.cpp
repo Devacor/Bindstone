@@ -20,7 +20,8 @@ namespace {
 // Match the canonical filename stamped by execute_file/import: the canonical path, else the weakly canonical one, else the
 // path as given. Runs only where the engine grants filesystem access; a denied path stays an exact virtual label.
 std::string normalize_bp_path(const std::string& path) {
-    if (path.empty()) { return path; }
+    // "<script>" is execute()'s label, never a file: libc++'s weakly_canonical would prefix it with the working directory
+    if (path.empty() || path == "<script>") { return path; }
     std::error_code ec;
     auto canon = std::filesystem::canonical(std::filesystem::path(path), ec);
     if (!ec) { return canon.string(); }

@@ -766,16 +766,27 @@ bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<
 }
 
 namespace {
-    // The block a token sits in: a namespace's (its qualified name), a class body's (its bare name) or any other
-    struct name_scope { enum kind_t { other, space, klass } kind; std::string name; };
+    // The block a token sits in: a namespace's (its own path and the index of the namespace around it), a class body's (its bare
+    // name) or any other. A qualified name is built only when a lookup needs it, so nesting costs no more than its depth.
+    struct name_scope { enum kind_t { other, space, klass } kind; std::string name; size_t outer = SIZE_MAX; };
 
     struct name_scope_walk {
         std::vector<name_scope> scopes;
         name_scope pending{name_scope::other, {}};
 
-        std::string enclosing_namespace() const {
-            for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) { if (it->kind == name_scope::space) { return it->name; } }
-            return {};
+        size_t innermost_namespace() const {
+            for (size_t k = scopes.size(); k-- > 0;) { if (scopes[k].kind == name_scope::space) { return k; } }
+            return SIZE_MAX;
+        }
+        std::string qualified(size_t k) const {
+            std::vector<const std::string*> parts;
+            for (; k != SIZE_MAX; k = scopes[k].outer) { parts.push_back(&scopes[k].name); }
+            std::string result;
+            for (auto it = parts.rbegin(); it != parts.rend(); ++it) {
+                if (!result.empty()) { result += "::"; }
+                result += **it;
+            }
+            return result;
         }
         // the parser's namespace-name rule: any token but these
         static bool namespace_name_token(token_type k) {
@@ -793,8 +804,7 @@ namespace {
                         if (j + 1 < in.size() && in[j + 1].type == token_type::colon_colon) { path += "::"; j += 2; } else { ++j; break; }
                     }
                     if (j < in.size() && in[j].type == token_type::left_brace && !path.empty()) {
-                        const std::string outer = enclosing_namespace();
-                        pending = {name_scope::space, outer.empty() ? path : outer + "::" + path};
+                        pending = {name_scope::space, std::move(path), innermost_namespace()};
                     }
                     break;
                 }
@@ -821,12 +831,14 @@ namespace {
 bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector<token>& out) {
     if (std::none_of(in.begin(), in.end(), [](const token& t) { return t.type == token_type::namespace_keyword; })) return false;
     std::unordered_map<std::string, std::unordered_set<std::string_view>> declared;   // namespace -> the classes this stream declares in it
+    std::unordered_set<std::string_view> declared_anywhere;
     {
         name_scope_walk walk;
         for (size_t i = 0; i < in.size(); ++i) {
             if (in[i].type == token_type::class_keyword && i + 1 < in.size() && in[i + 1].type == token_type::identifier &&
                 !walk.scopes.empty() && walk.scopes.back().kind == name_scope::space) {
-                declared[walk.scopes.back().name].insert(in[i + 1].lexeme);
+                declared[walk.qualified(walk.scopes.size() - 1)].insert(in[i + 1].lexeme);
+                declared_anywhere.insert(in[i + 1].lexeme);
             }
             walk.step(in, i);
         }
@@ -840,16 +852,22 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
         auto ns = spaces.find(*space_id);
         return ns != spaces.end() && ns->second && ns->second->classes.count(*name_id) != 0;
     };
+    // a name no namespace declares as a class needs no qualified name built
+    auto some_namespace_class = [&](std::string_view name) {
+        if (declared_anywhere.count(name)) { return true; }
+        const auto name_id = symbolizer_->find(name);
+        if (!name_id) { return false; }
+        return std::any_of(spaces.begin(), spaces.end(), [&](const auto& ns) { return ns.second && ns.second->classes.count(*name_id) != 0; });
+    };
     // the innermost namespace that declares the name, its enclosing ones after it (C++ lookup); empty when none does
     auto qualifier_for = [&](const name_scope_walk& walk, std::string_view name) -> std::string {
-        for (auto it = walk.scopes.rbegin(); it != walk.scopes.rend(); ++it) {
-            if (it->kind != name_scope::space) { continue; }
-            for (std::string space = it->name;;) {
-                if (names_class(space, name)) { return space; }
-                const size_t cut = space.rfind("::");
-                if (cut == std::string::npos) { break; }
-                space.resize(cut);
-            }
+        const size_t innermost = walk.innermost_namespace();
+        if (innermost == SIZE_MAX || !some_namespace_class(name)) { return {}; }
+        for (std::string space = walk.qualified(innermost);;) {   // every enclosing namespace's name is a prefix of the innermost's
+            if (names_class(space, name)) { return space; }
+            const size_t cut = space.rfind("::");
+            if (cut == std::string::npos) { break; }
+            space.resize(cut);
         }
         return {};
     };

@@ -291,7 +291,7 @@ void bind_schema_math_property(engine& a_engine, class_definition& class_def, se
 	auto setter = [prop_name, bridge, access](void* self, const script_value& arg) {
 		uint32_t words[4] = {0, 0, 0, 0};
 		if (!arg.math_words_as(bridge.kind, words)) {
-			throw_numeric_error(script_value::math_conversion_text(bridge.kind), arg.deref().type_id(), 0);
+			detail::throw_conversion_error(arg, math_type_name(bridge.kind));
 		}
 		if (jai::property_base* prop = access.find(self, prop_name)) {
 			bridge.assign(*prop, words);

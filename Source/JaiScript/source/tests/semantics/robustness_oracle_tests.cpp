@@ -269,7 +269,7 @@ private:
 				function keyed() { map<Key, int> m; m[Key(5)] = 1; m[Key(3)] = 2; m[Key(9)] = 3; log += ":"; map<int, Token> t; t[2] = Token("q"); t[1] = Token("p"); log += ":"; }
 				log += "|"; keyed();
 				log;
-			)", "cyxba|ba!|ba,ca|ba|ba|H21|ji.ba|::pqk3k5k9");
+			)", "cyxba|ba!|ba,ca|ba|ba|H21|ji.ba|::qpk9k5k3");
 		});
 	}
 

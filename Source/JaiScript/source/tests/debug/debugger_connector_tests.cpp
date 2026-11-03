@@ -32,6 +32,8 @@
 #include <chrono>
 #include <filesystem>
 #include <fstream>
+#include <future>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -40,6 +42,9 @@ using namespace jai::foundry;
 namespace jai::foundry::tests {
 
 namespace {
+
+// A wait for what must happen fails only past this guard against a hang: it never bounds speed
+constexpr int kHangGuardMs = 10 * 60 * 1000;
 
 #ifdef _WIN32
     using sock_t = SOCKET;
@@ -94,20 +99,45 @@ void send_dap(sock_t s, const std::string& json) {
     }
 }
 
-// Recv into an accumulating buffer until it contains `needle` or the deadline passes.
-bool wait_for(sock_t s, std::string& buf, const std::string& needle, int timeout_ms = 5000) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+bool recv_timed_out() {
+#ifdef _WIN32
+    return ::WSAGetLastError() == WSAETIMEDOUT;
+#else
+    return errno == EAGAIN || errno == EWOULDBLOCK;
+#endif
+}
+
+// Recv into an accumulating buffer until it contains `needle`; false once the peer closes
+bool wait_for(sock_t s, std::string& buf, const std::string& needle) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
     if (buf.find(needle) != std::string::npos) return true;
     char tmp[4096];
     while (std::chrono::steady_clock::now() < deadline) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
+        if (n == 0 || (n < 0 && !recv_timed_out())) return false;
         if (n > 0) {
             buf.append(tmp, tmp + n);
             if (buf.find(needle) != std::string::npos) return true;
         }
-        // n <= 0 is a timeout (SO_RCVTIMEO) or EOF; loop until the deadline either way.
     }
     return false;
+}
+
+// Like wait_for, ending early once `done` holds: true when the needle came first
+bool wait_for_unless(sock_t s, std::string& buf, const std::string& needle, const std::atomic<bool>& done) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
+    char tmp[4096];
+    while (buf.find(needle) == std::string::npos && std::chrono::steady_clock::now() < deadline) {
+        const bool finished = done.load();
+        int n = ::recv(s, tmp, sizeof(tmp), 0);
+        if (n == 0 || (n < 0 && !recv_timed_out())) return false;
+        if (n > 0) {
+            buf.append(tmp, tmp + n);
+        } else if (finished) {
+            return false;
+        }
+    }
+    return buf.find(needle) != std::string::npos;
 }
 
 std::string dap_frame(const std::string& json) {
@@ -136,17 +166,9 @@ void set_send_timeout(sock_t s, int timeout_ms) {
 #endif
 }
 
-bool recv_timed_out() {
-#ifdef _WIN32
-    return ::WSAGetLastError() == WSAETIMEDOUT;
-#else
-    return errno == EAGAIN || errno == EWOULDBLOCK;
-#endif
-}
-
 // True once the peer closes or resets the connection (pending replies are read and dropped)
-bool closed_by_peer(sock_t s, int timeout_ms) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+bool closed_by_peer(sock_t s) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
     char tmp[4096];
     while (std::chrono::steady_clock::now() < deadline) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
@@ -157,14 +179,15 @@ bool closed_by_peer(sock_t s, int timeout_ms) {
 }
 
 // Like wait_for, keeping only enough of the stream to match the needle (replies may run to many MB)
-bool wait_for_streaming(sock_t s, const std::string& needle, int timeout_ms) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+bool wait_for_streaming(sock_t s, const std::string& needle, size_t* bytes_read = nullptr) {
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
     std::string window;
     char tmp[65536];
     while (std::chrono::steady_clock::now() < deadline) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
         if (n == 0 || (n < 0 && !recv_timed_out())) return false;
         if (n > 0) {
+            if (bytes_read) *bytes_read += static_cast<size_t>(n);
             window.append(tmp, tmp + n);
             if (window.find(needle) != std::string::npos) return true;
             if (window.size() > needle.size()) window.erase(0, window.size() - needle.size());
@@ -264,6 +287,7 @@ public:
         if (revoke_after_ack) set_filesystem_grant(*eng, false);
 
         std::string script_error;
+        std::atomic<bool> script_done{false};
         std::thread script([&]() {
             try {
                 eng->execute_file_source(filesystem_enabled ? normalized_path : requested_path,
@@ -271,6 +295,7 @@ public:
             } catch (const std::exception& error) {
                 script_error = error.what();
             }
+            script_done = true;
         });
         struct script_guard {
             jai::debug::controller& debugger;
@@ -281,7 +306,8 @@ public:
             }
         } join{eng->debugger(), script};
 
-        const bool stopped = wait_for(cli, buf, "\"event\":\"stopped\"", 1500);
+        // a script that ran to its end never parked: no stop is coming
+        const bool stopped = wait_for_unless(cli, buf, "\"event\":\"stopped\"", script_done);
         int stopped_line = -1;
         if (stopped) {
             std::string frames_buf;
@@ -306,7 +332,7 @@ public:
         }
         check_eq(int64_t(42), eng->get_variable("breakpoint_value").as_int());
         if (alias_update == 0) {
-            check_true(wait_for(cli, buf, "\"event\":\"breakpoint\"", 1000), "loading the unit verifies the breakpoint");
+            check_true(wait_for(cli, buf, "\"event\":\"breakpoint\""), "loading the unit verifies the breakpoint");
             check_true(buf.find("\"verified\":true") != std::string::npos);
         }
     }
@@ -433,7 +459,7 @@ public:
             check_eq(static_cast<int64_t>(3), eng->get_variable("z").as_int());
 
             send_dap(cli, R"({"seq":13,"type":"request","command":"disconnect"})");
-            check_true(wait_for(cli, cont_buf, "\"command\":\"disconnect\"", 1000), "the disconnect is answered before the close");
+            check_true(wait_for(cli, cont_buf, "\"command\":\"disconnect\""), "the disconnect is answered before the close");
             close_client(cli);
             // eng's destructor stops the connector (joins its thread, detaches the controller).
         });
@@ -456,19 +482,32 @@ public:
             send_dap(cli, R"({"seq":1,"type":"request","command":"initialize"})");
             check_true(wait_for(cli, buf, "\"event\":\"initialized\""));
 
+            // the loop runs until quit, however long the attach takes; the host ends it only when the test gives up
+            std::atomic<bool> keep_looping{true};
+            std::promise<void> looping;
+            std::once_flag first_iteration;
+            eng->add_function("keep_looping", [&] {
+                std::call_once(first_iteration, [&] { looping.set_value(); });
+                return keep_looping.load();
+            });
             std::string script_error;
             std::thread script([&] {
                 try {
-                    eng->execute("int frames = 0;\nbool quit = false;\nwhile (!quit && frames < 400) {\n"
+                    eng->execute("int frames = 0;\nbool quit = false;\nwhile (!quit && keep_looping()) {\n"
                                  "    sleep(0.02);\n    frames = frames + 1;\n}\n");
                 } catch (const std::exception& e) { script_error = e.what(); }
             });
             struct script_guard {
                 jai::debug::controller& debugger;
                 std::thread& thread;
-                ~script_guard() { debugger.set_enabled(false); if (thread.joinable()) thread.join(); }
-            } join{eng->debugger(), script};
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+                std::atomic<bool>& keep_looping;
+                ~script_guard() {
+                    keep_looping = false;
+                    debugger.set_enabled(false);
+                    if (thread.joinable()) thread.join();
+                }
+            } join{eng->debugger(), script, keep_looping};
+            check_true(looping.get_future().wait_for(std::chrono::milliseconds(kHangGuardMs)) == std::future_status::ready);
 
             send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
             check_true(wait_for(cli, buf, "\"command\":\"attach\""));
@@ -494,7 +533,7 @@ public:
             check_true(wait_for(cli, end_buf, "\"request_seq\":8"));
             script.join();
             check_eq(std::string(), script_error);
-            check_true(eng->get_variable("frames").as_int() < 400, "the paused loop was released through quit");
+            check_true(eng->get_variable("quit").as<bool>(), "the paused loop was released through quit");
         });
 
         // Stopped two calls deep: every frame lists innermost first, each frame's scopes answer its own locals, and the
@@ -601,7 +640,10 @@ public:
             check_true(buf.find("\"verified\":false") != std::string::npos);
             check_true(buf.find("\"verified\":true") == std::string::npos);
             eng->execute_file_source("./__jai_dap_elsewhere__/other.jai", "int other_value = 1;\n");
-            check_false(wait_for(cli, buf, "\"event\":\"breakpoint\"", 300), "another unit loading verifies nothing");
+            // replies leave in order: a breakpoint event the load raised precedes the reply to a request sent after it
+            send_dap(cli, R"({"seq":4,"type":"request","command":"threads"})");
+            check_true(wait_for(cli, buf, "\"request_seq\":4"));
+            check_true(buf.find("\"event\":\"breakpoint\"") == std::string::npos, "another unit loading verifies nothing");
             eng->debugger().set_enabled(false);
         });
 
@@ -617,7 +659,7 @@ public:
             if (web == kBad) return;
             const std::string body = R"({"seq":1,"type":"request","command":"attach"})";
             send_raw(web, "POST / HTTP/1.1\r\nHost: 127.0.0.1\r\nContent-Type: text/plain\r\nContent-Length: " + std::to_string(body.size()) + "\r\n\r\n" + body);
-            check_true(closed_by_peer(web, 3000), "an HTTP request is no DAP client");
+            check_true(closed_by_peer(web), "an HTTP request is no DAP client");
             close_client(web);
 
             sock_t cli = connect_client(conn->port());
@@ -636,8 +678,9 @@ public:
             send_dap(cli, R"({"seq":4,"type":"request","command":"attach"})");
             check_true(wait_for(cli, buf, "\"command\":\"attach\""));
             eng->execute("var a = 1;\nvar b = 2;\n");
-            check_false(buf.find("\"event\":\"stopped\"") != std::string::npos || wait_for(cli, buf, "\"event\":\"stopped\"", 300),
-                        "the pause from before the session is gone");
+            send_dap(cli, R"({"seq":5,"type":"request","command":"threads"})");
+            check_true(wait_for(cli, buf, "\"request_seq\":5"));
+            check_false(buf.find("\"event\":\"stopped\"") != std::string::npos, "the pause from before the session is gone");
             eng->debugger().set_enabled(false);
         });
 
@@ -723,7 +766,7 @@ public:
             dbg.set_breakpoints("<script>", {1});
             dbg.set_enabled(true);
             std::thread script([&] { second_engine->execute("var q = 1;\n"); });
-            for (int i = 0; i < 500 && !dbg.is_paused(); ++i) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+            for (auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs); !dbg.is_paused() && std::chrono::steady_clock::now() < deadline;) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
             check_true(dbg.is_paused());
             dbg.set_enabled(false);
             script.join();
@@ -768,18 +811,7 @@ public:
                     if (n <= 0) { break; }
                     sent += static_cast<size_t>(n);
                 }
-                char tmp[256];
-                bool closed = false;
-                for (int attempt = 0; attempt < 50 && !closed; ++attempt) {
-                    const int n = ::recv(cli, tmp, sizeof(tmp), 0);
-                    closed = n == 0 || (n < 0 &&
-#ifdef _WIN32
-                        ::WSAGetLastError() != WSAETIMEDOUT
-#else
-                        errno != EAGAIN && errno != EWOULDBLOCK
-#endif
-                    );
-                }
+                const bool closed = closed_by_peer(cli);
                 close_client(cli);
                 return closed;
             };
@@ -804,7 +836,7 @@ public:
             check_true(cli != kBad);
             if (cli == kBad) return;
             send_raw(cli, "Content-Length: 1099511627776\r\n\r\n{");
-            check_true(closed_by_peer(cli, 3000), "a body past the limit drops the client instead of buffering it");
+            check_true(closed_by_peer(cli), "a body past the limit drops the client instead of buffering it");
             close_client(cli);
             check_true(answers_initialize(conn->port()), "the listener takes the next client");
         });
@@ -818,7 +850,7 @@ public:
             check_true(cli != kBad);
             if (cli == kBad) return;
             send_raw(cli, "Content-Length: 18446744073709551620\r\n\r\n{}");
-            check_true(closed_by_peer(cli, 3000), "a length that wraps size_t is not read as a small one");
+            check_true(closed_by_peer(cli), "a length that wraps size_t is not read as a small one");
             close_client(cli);
         });
 
@@ -831,13 +863,13 @@ public:
             check_true(cli != kBad);
             if (cli == kBad) return;
             send_raw(cli, std::string(256 * 1024, 'H'));
-            check_true(closed_by_peer(cli, 3000), "header bytes with no blank line are not buffered without bound");
+            check_true(closed_by_peer(cli), "header bytes with no blank line are not buffered without bound");
             close_client(cli);
             check_true(answers_initialize(conn->port()), "the listener takes the next client");
         });
 
-        test("dap_pipelined_requests_are_answered_in_linear_time", [this]() {
-            // 200k requests in one burst took 90+ s when each message re-copied the rest of the buffer
+        test("dap_pipelined_requests_and_a_large_one_are_framed_in_linear_work", [this]() {
+            // re-copying the rest of the buffer per message, or moving a large body's whole buffer per chunk, is quadratic
             wsa_up();
             auto eng = jai::foundry::make_engine();
             auto conn = std::make_shared<jai::debug::debug_connector>(0);
@@ -850,12 +882,18 @@ public:
             const std::string one = dap_frame(R"({"seq":1,"type":"request","command":"threads"})");
             burst.reserve(one.size() * requests + 64);
             for (int i = 0; i < requests; ++i) burst += one;
+            burst += dap_frame(R"({"seq":2,"type":"request","command":"threads","arguments":{"padding":")" + std::string(8 << 20, 'x') + "\"}}");
             burst += dap_frame(R"({"seq":424242,"type":"request","command":"threads"})");
             std::thread sender([&] { send_raw(cli, burst); });
-            const bool last = wait_for_streaming(cli, "\"request_seq\":424242", 30000);
+            size_t replies = 0;
+            const bool last = wait_for_streaming(cli, "\"request_seq\":424242", &replies);
+            const uint64_t moved = conn->buffered_bytes_moved();
             close_client(cli);
             sender.join();
-            check_true(last, "the burst's last request is answered within 30 s");
+            check_true(last, "the burst's last request is answered");
+            // input moves at most the partial message behind each framed one; output moves less than it sent before each move
+            check_true(moved <= burst.size() + 2 * replies, "buffers moved " + std::to_string(moved) + " bytes for "
+                + std::to_string(burst.size()) + " received and " + std::to_string(replies) + " sent");
         });
 
         test("dap_a_client_that_stops_reading_stalls_its_requests_not_the_heap", [this]() {
@@ -884,7 +922,7 @@ public:
             check_true(sent < ceiling, "the connector stops reading while its replies are unread");
             set_send_timeout(cli, 0);
             std::thread sender([&] { send_raw(cli, unsent + dap_frame(R"({"seq":424242,"type":"request","command":"threads"})")); });
-            const bool resumed = wait_for_streaming(cli, "\"request_seq\":424242", 60000);
+            const bool resumed = wait_for_streaming(cli, "\"request_seq\":424242");
             close_client(cli);
             sender.join();
             check_true(resumed, "reading the replies resumes the connector");

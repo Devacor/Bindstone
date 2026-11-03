@@ -236,6 +236,49 @@ sum;
 			}
 		});
 
+		test("a_shared_layer_converts_as_the_serial_loop_does", [this, bind_shared]() {
+			// a by-value use of the shared object converts the worker's own copy of it through its class: a typed slot (to_int,
+			// to_float, to_bool, to_string), a condition and its text; a class without to_string shows its fields, and one that runs a
+			// destructor is refused (the copy would die)
+			const std::string body = R"JAI(
+CLASS
+var held = probe();
+extend(held, Num);
+var warm = probe();
+array<int> xs = []; array<int> out = [];
+for (int i = 0; i < 512; ++i) { xs.push(i); out.push(0); }
+string caught = "";
+try { LOOP } catch (e) { caught = e; }
+int sum = 0;
+for (int v : out) { sum = sum + v; }
+caught + "|" + to_string(sum);
+)JAI";
+			const std::string converting = "class Num : Probe { int extra = 2; Num() : super() {} int to_int() { return extra + 40; } float to_float() { return extra * 0.5; } "
+			                               "bool to_bool() { return extra > 5; } string to_string() { return \"num\"; } }";
+			const std::string plain = "class Num : Probe { int extra = 2; Num() : super() {} }";
+			const std::string convert = "{ var q = probe(); int k = q; float f = q; bool b = q; string s = q; "
+			                            "o = k + cast<int>(f) + (b ? 1 : 0) + (q ? 10 : 0) + s.size() + to_string(q).size() + (\"\" + q).size() + x; }";
+			const std::string show = "{ var q = probe(); string s = q; o = s.size() + to_string(q).size() + (\"\" + q).size() + (q ? 1 : 0) + x; }";
+			auto with = [&](const std::string& cls, const std::string& loop) {
+				std::string p = body;
+				p.replace(p.find("CLASS"), 5, cls);
+				p.replace(p.find("LOOP"), 4, loop);
+				return p;
+			};
+			const std::string expected = run(with(converting, "for (int x = 0; x < 512; ++x) { auto& o = out[x]; " + convert + " }"), 1, bind_shared);
+			check_eq(std::string("|157440"), expected, "the serial loop converts through the class");
+			const std::string shown = run(with(plain, "for (int x = 0; x < 512; ++x) { auto& o = out[x]; " + show + " }"), 1, bind_shared);
+			check(shown.rfind("|", 0) == 0, "the serial loop shows the fields: " + shown);
+			for (size_t workers : { size_t(1), size_t(8) }) {
+				check_eq(expected, run(with(converting, "parallel_for (int x, auto& o : xs, out) " + convert), workers, bind_shared), "converted borrows on " + std::to_string(workers) + " workers");
+				check_eq(shown, run(with(plain, "parallel_for (int x, auto& o : xs, out) " + show), workers, bind_shared), "shown borrows on " + std::to_string(workers) + " workers");
+				const std::string dying = "class Num : Probe { int extra = 2; Num() : super() {} ~Num() {} int to_int() { return extra; } }";
+				const std::string refused = run(with(dying, "parallel_for (int x, auto& o : xs, out) { var q = probe(); int k = q; o = k; }"), workers, bind_shared);
+				check(refused.rfind("a shared object whose class runs a destructor cannot be read by value in a parallel body (a conversion, a condition or its text)", 0) == 0,
+				      "a copy that would run a destructor is refused on " + std::to_string(workers) + " workers: " + refused);
+			}
+		});
+
 		test("a_store_into_a_shared_layer_is_an_error", [this, bind_shared, shared_defs]() {
 			const std::string program = shared_defs + R"JAI(
 string caught = "";

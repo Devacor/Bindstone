@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_map.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <algorithm>
 #include <charconv>
@@ -188,6 +189,13 @@ namespace value_text_walk {
 				}
 				case script_value::TYPEID_FUNCTION:
 					out_ += "<function>";
+					return {};
+				case script_value::TYPEID_PARALLEL_BORROW:
+					if (v.parallel_object_borrow()) {   // a shared object shows as the worker's own copy of it
+						script_value copy = parallel_by_value(v);
+						return enter_object(copy, &copy, nested);
+					}
+					append_scalar(out_, v, nested);
 					return {};
 				default:
 					append_scalar(out_, v, nested);

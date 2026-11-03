@@ -25,11 +25,12 @@ namespace jai::detail {
 		bool pin = false;
 	};
 
-	// True when v's display text is its scalar text (no walk, no script): everything but containers, objects, handles and functions
+	// True when v's display text is its scalar text (no walk, no script): everything but containers, objects (a shared one too), handles and functions
 	inline bool plain_text_value(const script_value& v) {
 		constexpr uint32_t walked = (1u << script_value::TYPEID_ARRAY) | (1u << script_value::TYPEID_MAP) |
 		                            (1u << script_value::TYPEID_OBJECT) | (1u << script_value::TYPEID_FUNCTION) |
-		                            (1u << script_value::TYPEID_WEAK_PTR) | (1u << script_value::TYPEID_REFERENCE);
+		                            (1u << script_value::TYPEID_WEAK_PTR) | (1u << script_value::TYPEID_REFERENCE) |
+		                            (1u << script_value::TYPEID_PARALLEL_BORROW);
 		const size_t index = v.raw_storage_index();
 		if (index >= 32 || !((walked >> index) & 1u)) { return true; }
 		return index == script_value::TYPEID_REFERENCE && plain_text_value(v.deref());

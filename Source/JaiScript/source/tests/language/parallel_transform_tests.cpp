@@ -2979,7 +2979,8 @@ public:
 			// Name n(args), Name n;, Name(args), new Name(args), a class without a constructor whose field initializers read
 			// captured globals, a delegating constructor, a base constructed with arguments and one default-constructed, a
 			// method on the new object, a construction nested in another constructor, and the implicit conversions into typed
-			// slots: a converting constructor (a declaration, an argument, a return) and to_int, to_float, to_char and to_bool
+			// slots: a converting constructor (a declaration, an argument, a return), to_int, to_float, to_char, to_bool and to_string, and
+			// an object's text after a string literal
 			parallel_matches_serial(R"(
 				float SCALE = 3.0;
 				string LABEL = "cell";
@@ -3010,6 +3011,7 @@ public:
 					float to_float() { return v * 0.5; }
 					char to_char() { return 'a'; }
 					bool to_bool() { return v % 2 == 0; }
+					string to_string() { return "n" + v; }
 				}
 				array<int> xs;
 				for (int i = 0; i < 200; ++i) { xs.push(i); }
@@ -3030,14 +3032,72 @@ public:
 					float nf = nm;
 					char nc = nm;
 					bool nb = nm;
+					string ns = nm;
+					string label = "#" + nm;
 					out[x] = o.in.score() + o.tally + p.p + p.list.size() + p.s.size() + q.score() + h->score() + Inner(1.0).score() +
-					         bx.n + unbox(x) + rb.n + ni + nf + (nc == 'a' ? 1 : 0) + (nb ? 1 : 0);
+					         bx.n + unbox(x) + rb.n + ni + nf + (nc == 'a' ? 1 : 0) + (nb ? 1 : 0) + ns.size() + label.size();
 				}
 				float total = 0.0;
 				for (float v : out) { total += v; }
 				for (auto& h : handles) { total += h->score(); }
 				to_string(total);
 			)", "construction forms");
+		});
+
+		test("conversions_reach_every_class_a_body_can_hold", [this, parallel_matches_serial, parallel_error]() {
+			// a body converts an instance it reaches by any road: a captured object, a captured var holding one, a captured
+			// subclass instance, a field of a field of the element, a value an admitted function returns and an element of a var
+			// array mixing classes; each converts as the serial loop does. A captured container of instances and an element whose
+			// var field holds one are refused before any element runs
+			const std::string classes = R"(
+				class Num {
+					int v = 3;
+					Num() {}
+					Num(int a) { v = a; }
+					int to_int() { return v + 100; }
+					bool to_bool() { return v > 4; }
+					string to_string() { return "n" + v; }
+				}
+				class Sub : Num { Sub() { v = 9; } }
+				class Inner { Num n = Num(4); }
+				class Outer { Inner in; }
+				Num make(int a) { Num r(a); return r; }
+				Num capnum = Num(8);
+				var capvar = Num(2);
+				Sub capsub;
+				array<int> xs; for (int i = 0; i < 200; ++i) { xs.push(i); }
+				array<int> out; for (int i = 0; i < 200; ++i) { out.push(0); }
+				array<Outer> outers; for (int i = 0; i < 200; ++i) { outers.push(Outer()); }
+				var mixed = []; for (int i = 0; i < 200; ++i) { if (i % 2 == 0) { mixed.push(Num(i)); } else { mixed.push(Sub()); } }
+			)";
+			parallel_matches_serial(classes + R"(
+				parallel_for (auto& x : xs) {
+					int a = capnum; int b = capvar; int c = capsub; int d = make(x); bool e = make(x); string f = capvar;
+					x = a + b + c + d + (e ? 1 : 0) + f.size();
+				}
+				parallel_for (auto& w : outers) { int k = w.in.n; bool t = w.in.n; w.in.n.v = k + (t ? 1 : 0); }
+				parallel_for (auto& m : mixed) { int k = m; string s = m; m.v = k + s.size(); }
+				int total = 0;
+				for (int v : xs) { total += v; }
+				for (auto& w : outers) { total += w.in.n.v; }
+				for (auto& m : mixed) { total += m.v; }
+				to_string(total);
+			)", "conversion roads");
+			struct refusal { const char* name; const char* source; const char* text; };
+			const refusal refusals[] = {
+				{ "captured array", "array<Num> caps = [Num(5)]; parallel_for (int x, auto& o : xs, out) { int k = caps[0]; o = k; }",
+				  "parallel_for: captured name 'caps': value is not value-semantic (object)" },
+				{ "captured map", "map<string, Num> caps = {\"a\": Num(7)}; parallel_for (int x, auto& o : xs, out) { int k = caps[\"a\"]; o = k; }",
+				  "parallel_for: captured name 'caps': value is not value-semantic (object)" },
+				{ "var field", "class Holder { var f = 0; } array<Holder> hs; for (int i = 0; i < 8; ++i) { Holder h; h.f = Num(i); hs.push(h); } parallel_for (auto& h : hs) { int k = h.f; h.f = k; }",
+				  "parallel_for: element 0 cannot be proven exclusive" },
+			};
+			for (const refusal& r : refusals) {
+				for (bool vm : {false, true}) {
+					const std::string got = parallel_error(classes + r.source, vm);
+					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
+				}
+			}
 		});
 
 		test("reduce_accumulators_are_constructed_objects", [parallel_matches_serial]() {

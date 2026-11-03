@@ -15,6 +15,7 @@
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/container_enforce.hpp>
+#include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/return_conv.hpp>
 #include <jaiscript/detail/value_text.hpp>
 #include <string>
@@ -34,6 +35,17 @@ namespace jai::detail {
                                                                                            : script_value::make_utf8(std::move(text.value()), eng));
     }
 
+    // v's conversion method name (to_bool, to_int, ...), nullopt when its class binds none. A parallel chunk runs it through the
+    // region's pin (an unpinned one raises what the region refused), never through the class's shared method value
+    inline std::optional<checked_result<script_value>> call_conversion_method(const script_value& v, const class_definition* def, const char* name,
+                                                                              engine* eng) {
+        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const script_value* method = def ? def->method_ptr(id) : nullptr;
+        if (!method || !method->is_function()) { return std::nullopt; }
+        if (auto pinned = eng->parallel_operator_call(v, id, {})) { return pinned; }
+        return make_bound_method(v, *method).as_function()(std::vector<script_value>{});
+    }
+
     // consumable: a prvalue source the caller gives up (it may alias value_in): a converting constructor takes it as its parameter
     inline checked_result<slot_conversion> convert_typed_slot_script_rows_impl(slot_conversion pending, const script_value& value_in,
                                                                                 const type_info_ptr& target_type, engine* eng,
@@ -43,21 +55,15 @@ namespace jai::detail {
         const auto target = target_type->base_type;
         switch (pending.v) {
             case verdict::needs_to_bool: {
-                // KEEP BYTE-PARALLEL with the backends' object_to_bool_via_method (class to_bool memo)
+                // KEEP BYTE-PARALLEL with the backends' object_to_bool_via_method
                 auto view = resolve_slot_class(v, eng);
                 bool truthy = true;
-                if (view.def && view.def->may_define_to_bool()) {
-                    script_value method = view.def->get_method(eng->get_symbolizer()->intern("to_bool"), false);
-                    if (!method.is_null() && !method.is_invalid() && method.is_function()) {
-                        script_value bound = make_bound_method(v, method);
-                        std::vector<script_value> no_args;
-                        auto result = bound.as_function()(no_args);
-                        if (!result) {
-                            return result.error_value();   // to_bool()'s runtime error is the conversion's, like to_int()'s below
-                        }
-                        if (result.value().is_bool()) {
-                            truthy = result.value().unchecked_as_bool();
-                        }
+                if (auto result = call_conversion_method(v, view.def, "to_bool", eng)) {
+                    if (!*result) {
+                        return result->error_value();   // to_bool()'s runtime error is the conversion's, like to_int()'s below
+                    }
+                    if (result->value().is_bool()) {
+                        truthy = result->value().unchecked_as_bool();
                     }
                 }
                 return slot_conversion::converted_to(script_value(truthy, eng));
@@ -67,21 +73,18 @@ namespace jai::detail {
                                  : target == script_value_type::jai_float_type ? "to_float"
                                  : target == script_value_type::jai_char_type ? "to_char" : "to_string";
                 auto view = resolve_slot_class(v, eng);
-                script_value method = view.def ? view.def->get_method(eng->get_symbolizer()->intern(name), false)
-                                               : script_value::make_invalid(eng);
-                if (method.is_invalid() || method.is_null() || !method.is_function()) {
+                auto called = call_conversion_method(v, view.def, name, eng);
+                if (!called) {
                     if (target == script_value_type::jai_string_type || target == script_value_type::jai_utf8_string_type) {
                         return converted_to_display_text(v, target, eng);
                     }
                     return slot_conversion::of(verdict::reject);
                 }
-                script_value bound = make_bound_method(v, method);
-                std::vector<script_value> no_args;
-                auto result = bound.as_function()(no_args);
+                checked_result<script_value>& result = *called;
                 if (!result) {
                     return result.error_value();
                 }
-                if (auto* backend = eng->get_execution_backend(); backend && backend->is_unwinding()) {
+                if (auto* backend = eng->calling_backend(); backend && backend->is_unwinding()) {
                     // the method threw: the in-flight exception wins, the payload is never inspected
                     return slot_conversion::converted_to(std::move(result.value()));
                 }
@@ -147,13 +150,23 @@ namespace jai::detail {
                         return slot_conversion::of(no);
                     }
                 }
-                auto global = eng ? eng->get_global_environment() : nullptr;
-                if (!global) {
+                if (!eng) {
                     return slot_conversion::of(no);
                 }
-                auto ctor_result = global->get(target_class_name);
-                if (!ctor_result || !ctor_result.value().is_function()) {
-                    return slot_conversion::of(no);
+                const uint64_t class_name_id = eng->symbolize(target_class_name);
+                script_value ctor(std::monostate{}, eng);
+                if (auto chunk_ctor = parallel_chunk_binding(*eng, class_name_id)) {   // a chunk constructs with its own constructor
+                    if (!chunk_ctor->is_function()) {
+                        return parallel_conversion_not_admitted(class_name_id).error_value();
+                    }
+                    ctor = std::move(*chunk_ctor);
+                } else {
+                    auto global = eng->get_global_environment();
+                    auto ctor_result = global ? global->get(class_name_id) : checked_result<script_value>(script_value(std::monostate{}, eng));
+                    if (!ctor_result || !ctor_result.value().is_function()) {
+                        return slot_conversion::of(no);
+                    }
+                    ctor = std::move(ctor_result.value());
                 }
                 std::vector<script_value> ctor_args;
                 execution_backend* owner = consumable && !consumable->is_reference() ? eng->calling_backend() : nullptr;
@@ -167,7 +180,7 @@ namespace jai::detail {
                     std::vector<script_value>* previous;
                     ~owned_arguments_scope() { if (backend) { backend->exchange_owned_arguments(previous); } }
                 } owned{owner, owner ? owner->exchange_owned_arguments(&ctor_args) : nullptr};
-                auto result = ctor_result.value().as_function()(ctor_args);
+                auto result = ctor.as_function()(ctor_args);
                 if (!result) {
                     if (result.error() == make_error_code(runtime_error_code::no_constructor_found)) {
                         if (owner) { *consumable = std::move(ctor_args[0]); }

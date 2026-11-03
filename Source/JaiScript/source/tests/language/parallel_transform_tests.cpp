@@ -2686,6 +2686,18 @@ public:
 			)");
 			auto msg = r.as<std::string>();
 			check_true(msg.rfind("body writes enclosing state 'calls' in operator '==' of 'Vec' at 3:", 0) == 0, msg);
+			// an implicit conversion into a typed slot is the class's to_int(), refused alike
+			auto conversion = make_engine();
+			auto c = conversion->execute(R"(
+				int calls = 0;
+				class Num { int v = 0; int to_int() { calls = calls + 1; return v; } }
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Num()); }
+				try { parallel_for (auto& n : a) { int k = n; n.v = k + 1; } } catch (err) { return err; }
+				return "no-error";
+			)");
+			auto conversion_msg = c.as<std::string>();
+			check_true(conversion_msg.rfind("body writes enclosing state 'calls' in operator 'to_int' of 'Num' at 3:", 0) == 0, conversion_msg);
 		});
 
 		test("custom_arithmetic_comparison_and_unary_operators_run_through_their_pins", [this]() {
@@ -2966,7 +2978,8 @@ public:
 		test("every_construction_form_runs_in_a_body", [parallel_matches_serial]() {
 			// Name n(args), Name n;, Name(args), new Name(args), a class without a constructor whose field initializers read
 			// captured globals, a delegating constructor, a base constructed with arguments and one default-constructed, a
-			// method on the new object, and a construction nested in another constructor
+			// method on the new object, a construction nested in another constructor, and the implicit conversions into typed
+			// slots: a converting constructor (a declaration, an argument, a return) and to_int, to_float, to_char and to_bool
 			parallel_matches_serial(R"(
 				float SCALE = 3.0;
 				string LABEL = "cell";
@@ -2987,6 +3000,17 @@ public:
 					int tally = 0;
 					Outer(int k) { in = Inner(cast<float>(k), 1.0); tally = k + in.base_v; }
 				}
+				class Box { int n = 0; Box(int a) { n = a * 2; } }
+				int unbox(Box b) { return b.n; }
+				Box boxed(int a) { return a + 1; }
+				class Num {
+					int v = 0;
+					Num(int a) { v = a; }
+					int to_int() { return v + 100; }
+					float to_float() { return v * 0.5; }
+					char to_char() { return 'a'; }
+					bool to_bool() { return v % 2 == 0; }
+				}
 				array<int> xs;
 				for (int i = 0; i < 200; ++i) { xs.push(i); }
 				array<float> out;
@@ -2999,7 +3023,15 @@ public:
 					Inner q;
 					shared_ptr<Inner> h = new Inner(cast<float>(x));
 					handles[x] = new Inner(cast<float>(x), 2.0);
-					out[x] = o.in.score() + o.tally + p.p + p.list.size() + p.s.size() + q.score() + h->score() + Inner(1.0).score();
+					Box bx = x;
+					Box rb = boxed(x);
+					Num nm = Num(x);
+					int ni = nm;
+					float nf = nm;
+					char nc = nm;
+					bool nb = nm;
+					out[x] = o.in.score() + o.tally + p.p + p.list.size() + p.s.size() + q.score() + h->score() + Inner(1.0).score() +
+					         bx.n + unbox(x) + rb.n + ni + nf + (nc == 'a' ? 1 : 0) + (nb ? 1 : 0);
 				}
 				float total = 0.0;
 				for (float v : out) { total += v; }
@@ -3088,6 +3120,8 @@ public:
 				  "parallel_for: body writes enclosing state 'next' in a field initializer of 'T' at 1:" },
 				{ "base constructor", "int made = 0; class Base { int b = 0; Base() { made = made + 1; } } class D : Base { int d = 2; D(int a) : super() { d = a; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { D t(x); x = t.d; }",
 				  "parallel_for: body writes enclosing state 'made' in the constructor of 'Base' at 1:" },
+				{ "converting constructor", "int made = 0; class Box { int n = 0; Box(int a) { made++; n = a; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { Box b = x; x = b.n; }",
+				  "parallel_for: body writes enclosing state 'made' in the constructor of 'Box' at 1:" },
 				{ "destructor", "int deaths = 0; class H { int v = 0; ~H() { deaths++; } } array<int> xs = [1, 2]; parallel_for (auto& x : xs) { H h; x = h.v; }",
 				  "parallel_for: body writes enclosing state 'deaths' in the destructor of 'H' at 1:" },
 				{ "written array destructor", "int deaths = 0; class Res { int v = 0; ~Res() { deaths++; } } array<int> xs = [0, 1]; var loose = [Res(), Res()]; parallel_for (int x : xs) { loose[x] = 5; }",

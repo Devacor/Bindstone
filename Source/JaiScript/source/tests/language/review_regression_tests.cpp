@@ -4650,16 +4650,18 @@ public:
             // an overflow names the compound or the step, whatever the storage
             if (!e->throw_on_overflow()) { return; }
             check_eq(std::string("Integer overflow in '+=';Integer overflow in '++';Integer overflow in '*=';Integer overflow in '--';"
-                                 "Integer overflow in '+=';Integer overflow in '++'"), e->execute(R"(
+                                 "Integer overflow in '+=';Integer overflow in '++';Integer overflow in '++';Integer overflow in '--'"), e->execute(R"(
                 class H { int x = 9223372036854775807; int y = -9223372036854775807 - 1; }
-                H h; array<int> a = [9223372036854775807]; map<string, int> m; m["k"] = 9223372036854775807;
+                H h; array<int> a = [9223372036854775807]; map<string, int> m; m["k"] = 9223372036854775807; var d = [-9223372036854775807 - 1];
                 string out = "";
                 try { h.x += 1; } catch (err) { out += err.message + ";"; }
                 try { h.x++; } catch (err) { out += err.message + ";"; }
                 try { a[0] *= 2; } catch (err) { out += err.message + ";"; }
                 try { h.y--; } catch (err) { out += err.message + ";"; }
                 try { m["k"] += 1; } catch (err) { out += err.message + ";"; }
-                try { a[0]++; } catch (err) { out += err.message; }
+                try { a[0]++; } catch (err) { out += err.message + ";"; }
+                try { ++a[0]; } catch (err) { out += err.message + ";"; }
+                try { --d[0]; } catch (err) { out += err.message; }
                 out
             )").as_string());
         });

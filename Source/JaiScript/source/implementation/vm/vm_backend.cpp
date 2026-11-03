@@ -11241,7 +11241,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				}
 				const script_value current = storage->get(static_cast<size_t>(index), engine_);
 				script_value resultValue = make_null();
-				VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(current, op, rhs, detail::compound_index(op)));
+				VM_TRY_ASSIGN(resultValue, (ins.a & compound_flag_incdec) ? detail::incdec_step(current, op == token_type::plus, engine_) : evaluate_arithmetic(current, op, rhs, detail::compound_index(op)));
 				if (storage->kind() == script_array::kind_t::i64 && resultValue.raw_storage_index() == script_value::TYPEID_FLOAT &&
 				    !detail::float_fits_script_int(resultValue.unchecked_as_float())) {
 					return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), detail::float_to_integer_error);
@@ -11267,7 +11267,7 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 						return raise_(make_error_code(runtime_error_code::modulo_by_zero), "Modulo by zero");
 					}
 					script_value resultValue = make_null();
-					VM_TRY_ASSIGN(resultValue, evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
+					VM_TRY_ASSIGN(resultValue, (ins.a & compound_flag_incdec) ? detail::incdec_step(*target_ptr, op == token_type::plus, engine_) : evaluate_arithmetic(*target_ptr, op, rhs, detail::compound_index(op)));
 					auto container_type_info = container.get_type_info();
 					type_info_ptr element_type = container_type_info ? container_type_info->element_type() : nullptr;
 					// a class element keeps its object: the copy assignment

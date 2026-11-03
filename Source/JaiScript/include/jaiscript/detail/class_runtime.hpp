@@ -12,6 +12,7 @@
 #include <jaiscript/detail/slot_site.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/host_member.hpp>
+#include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/uniquely_held.hpp>
 #include <jaiscript/detail/truthiness.hpp>
 
@@ -2356,6 +2357,9 @@ inline std::string slot_source_type_name(const script_value& value_in, engine* e
             if (auto holder = v.get_object_holder(); holder && !holder->type_name().empty()) return std::string(holder->type_name());
             return "object";
         }
+        case script_value::TYPEID_PARALLEL_BORROW:
+            if (const object_borrow_record* record = v.parallel_object_borrow()) return std::string(record->source->get_class_name());
+            return container_base_type_name(v.current_type());
         default:
             return container_base_type_name(v.current_type());
     }

@@ -4657,6 +4657,26 @@ script_value parallel_object_copy(const script_value& borrow, const object_borro
 	return result;
 }
 
+script_value parallel_by_value(const script_value& value) {
+	const object_borrow_record* record = value.parallel_object_borrow();
+	if (!record) { return value; }
+	engine& eng = *record->eng;
+	class_definition* cd = record->source->get_class_definition();
+	if (!cd) { throw runtime_error("a shared object in a parallel body has no class to copy it by"); }
+	if (cd->value_tree_runs_destructor()) {   // the copy's death would run a destructor the serial loop never runs
+		throw runtime_error("a shared object whose class runs a destructor cannot be read by value in a parallel body (a conversion, a condition or its text)");
+	}
+	auto copy = class_instance::make(cd->interned_name_id(), &eng);
+	copy->set_class_definition(cd);
+	record->source->for_each_field([&](uint64_t id, const script_value& field) { copy->set_field(id, parallel_shared_value(field, eng)); });
+	if (const auto* view = record->view.peek_object_holder(); view && view->is_instance()) {
+		if (const script_value* native = view->unchecked_instance()->native()) { copy->set_native_view(*native); }   // the one C++ object, read only
+	}
+	script_value result = script_value::make_class_object(*cd, std::move(copy), &eng);
+	result.set_type_info(value.get_type_info());
+	return result;
+}
+
 std::optional<checked_result<script_value>> parallel_borrow_field(const script_value& borrow, uint64_t member_id) {
 	const object_borrow_record* record = borrow.parallel_object_borrow();
 	const script_value* field = parallel_script_field(const_cast<class_instance&>(*record->source), member_id);
@@ -5624,8 +5644,13 @@ struct region_run {
 		if (admitted_before && !record->ok) {
 			return raise(record->code, record->message);
 		}
+		// a host call that can return an object hands the body a shared one, whose conversions and operators need their pins
+		const bool host_objects = !adm->static_calls.empty() || std::any_of(adm->host_functions.begin(), adm->host_functions.end(), [&](const auto& f) {
+			script_value_type scalar;
+			return !eng.host_function_result(f.second, scalar);
+		});
 		if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
-		    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty()) {
+		    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty() || host_objects) {
 			if (!admitted_before) {
 				admission_builder& builder = method_adm();
 				builder.adm.element_method_calls = adm->element_method_calls;

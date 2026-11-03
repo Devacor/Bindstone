@@ -195,9 +195,18 @@ namespace jai::detail {
         }
     }
 
+    inline bool primitive_slot_type(script_value_type t) noexcept {
+        return t == script_value_type::jai_int_type || t == script_value_type::jai_float_type || t == script_value_type::jai_char_type ||
+               t == script_value_type::jai_bool_type || t == script_value_type::jai_string_type || t == script_value_type::jai_utf8_string_type;
+    }
+
     // The full table: the script-free core, then the script rows where the core asked.
     inline checked_result<slot_conversion> convert_for_typed_slot(const script_value& value, const type_info_ptr& target_type, engine* eng,
                                                                   script_value* consumable = nullptr) {
+        if (value.deref().raw_storage_index() == script_value::TYPEID_PARALLEL_BORROW && target_type && primitive_slot_type(target_type->base_type) &&
+            value.deref().parallel_object_borrow()) {
+            return convert_for_typed_slot(parallel_by_value(value.deref()), target_type, eng);   // a shared object converts as the worker's copy
+        }
         if (target_type && (target_type->base_type == script_value_type::jai_string_type || target_type->base_type == script_value_type::jai_utf8_string_type)) {
             const script_value& v = value.deref();
             if (!plain_text_value(v) && v.raw_storage_index() != script_value::TYPEID_OBJECT) {   // an object asks its class first

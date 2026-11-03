@@ -4828,11 +4828,11 @@ op_status vm_backend::binary_fused_general_rows(const fused_binary_proto& p, tok
 	const script_value* lv = lp;
 	const script_value* rv = rp;
 	if (!p.left.is_subscript()) {
-		left_snap.emplace(*lp);
+		left_snap.emplace(p.left.const_index != k_invalid_u32 ? materialize_constant(*lp) : *lp);   // a literal never touches the shared node's count
 		lv = &*left_snap;
 	}
 	if (!p.right.is_subscript()) {
-		right_snap.emplace(*rp);
+		right_snap.emplace(p.right.const_index != k_invalid_u32 ? materialize_constant(*rp) : *rp);
 		rv = &*right_snap;
 	}
 	auto result = binary_general(op, lv->deref(), rv->deref());

@@ -5,6 +5,8 @@
 
 namespace jai::detail {
 
+	script_value parallel_by_value(const script_value& value);   // detail/object_borrow.hpp
+
 	template<class ObjectTruthy>
 	inline bool truthy_of(const script_value& a_value, ObjectTruthy&& a_objectTruthy) {
 		switch (a_value.raw_storage_index()) {
@@ -32,6 +34,8 @@ namespace jai::detail {
 				if (a_value.is_string()) { return !a_value.unchecked_as_string().empty(); }
 				if (a_value.is_char()) { return true; }
 				return a_value.get_cpp_bound_ptr() != nullptr;
+			case script_value::TYPEID_PARALLEL_BORROW:   // a shared object answers as the worker's own copy of it
+				return a_value.parallel_object_borrow() ? a_objectTruthy(parallel_by_value(a_value)) : true;
 			case script_value::TYPEID_REFERENCE:
 				// element reads reach conditions as reference wrappers
 				return truthy_of(a_value.deref(), a_objectTruthy);

@@ -1035,6 +1035,7 @@ struct engine::implementation {
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
         bool autos_typed = false;            // the first proof pass types the auto slots
         bool proofs_deferred = false;        // the proof pass met a class the engine had not defined yet: re-stamp after an import defines one
+        bool proofs_moved = false;           // a reload replaced declarations of the program its proofs read: re-stamp after the import
         std::vector<std::string> deferred_classes;   // those classes' names
         // Program closure (checked_report): gathered once per surface epoch, and again
         // whenever a unit's (mtime, size) stamp moves or the program is failing.
@@ -1341,10 +1342,20 @@ struct engine::implementation {
         for (const auto& n : names) { if (self.get_class_definition(n) || self.get_class_registry().find_script_class(n)) { return true; } }
         return false;
     }
+    bool proofs_moved_ = false;   // some loaded unit's proofs wait for a reload's modules to run (script_cache_entry::proofs_moved)
     void restamp_deferred(engine& self) {
         if (!type_proofs_) { return; }
         for (auto& node : script_cache) { if (node.entry && node.entry->proofs_deferred && class_defined_now(self, node.entry->deferred_classes)) { stamp_proofs(self, *node.entry); } }
         for (auto& [key, entry] : literal_script_cache) { if (entry && entry->proofs_deferred && class_defined_now(self, entry->deferred_classes)) { stamp_proofs(self, *entry); } }
+        if (!proofs_moved_) { return; }
+        proofs_moved_ = false;
+        for (auto& [unit, loaded] : loaded_units_) {
+            if (loaded.entry && loaded.entry->proofs_moved) {
+                loaded.entry->proofs_moved = false;
+                lowering_view(self, checked_declarations(*loaded.entry), loaded.entry->lowering);
+                stamp_proofs(self, *loaded.entry);
+            }
+        }
     }
 
     // One entry's check: diagnostics when wanted (and stale), proofs whenever the entry's
@@ -6371,6 +6382,10 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
                 for (size_t k = 0; k < originals; ++k) { record_failure(group[k]); }
                 v.failures = "static check failed:\n" + listing;
                 v.failed = 2;
+            } else {
+                // the reload moves declarations the other units' proofs were stamped by (a program function's result, the inliner's decl)
+                for (auto& [unit, loaded] : I.loaded_units_) { if (!rerunning.count(unit) && loaded.entry) { loaded.entry->proofs_moved = true; } }
+                I.proofs_moved_ = true;
             }
         }
         parse_frame.open = false;

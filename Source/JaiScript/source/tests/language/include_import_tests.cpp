@@ -2299,6 +2299,45 @@ public:
             for (const char* f : {"dp_x.jai", "dp_y.jai", "dp_x.jaibite", "dp_y.jaibite"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("a_reload_of_a_sibling_leaves_its_dependents_checked_and_proven_as_a_fresh_program_would", [=, this]() {
+            // dr_lvl.jai's function is typed by its declaration in dr_use.jai's proofs: after a reload changes that declaration the
+            // dependent runs, and is proven, exactly as in an engine that met the new text first
+            const auto dir = context_dir("reload");
+            int tick = 1400;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::string use = "int dr_twice() { int n = 0; n = dr_level(); return n * 2; }\nvar dr_read() { var v = dr_level(); return v; }\n";
+            const std::string root = "import(\"dr_use.jai\");\nimport(\"dr_lvl.jai\");\n";
+            const auto probe = [&](engine& eng) {
+                std::string manifests;
+                eng.disassembly_sink([&](const std::string&, const std::string& manifest) { manifests += manifest; });
+                const std::string value = eng.execute("to_string(dr_twice()) + \"|\" + to_string(dr_read());").to_string();
+                eng.disassembly_sink({});
+                return value + "\n" + manifests;
+            };
+            const auto engine_in = [&]() {
+                auto eng = make_engine();
+                jai::stdlib::register_all(*eng);
+                eng->add_include_path(dir.string());
+                eng->jaibite_cache(false);
+                return eng;
+            };
+            write_module("dr_use.jai", use);
+            write_module("dr_lvl.jai", "int dr_level() { return 3; }\n");
+            auto reloaded = engine_in();
+            reloaded->execute(root);
+            write_module("dr_lvl.jai", "float dr_level() { return 3.5; }\n");
+            reloaded->execute(root);
+            auto fresh = engine_in();
+            fresh->execute(root);
+            check_eq(probe(*fresh), probe(*reloaded), "the dependent runs and compiles as in a fresh engine");
+            std::filesystem::remove_all(dir);
+        });
+
         test("a_reload_whose_class_definition_would_fail_applies_nothing", [=, this]() {
             // the errors a class or namespace definition raises (a base nothing knows, override with nothing to override, a method
             // redefining a base method without override, a namespace reopening that redefines a function) are the check's: a group

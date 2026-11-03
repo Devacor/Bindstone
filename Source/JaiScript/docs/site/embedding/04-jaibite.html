@@ -197,7 +197,13 @@ by their C++ signatures (the registration fingerprint holds only their names). A
 a leaf that checked clean inside one program (<a href="06-static-checking.html#programs">its names declared by a
 sibling unit</a>) is checked again when a <em>different</em> program reaches it, or when the sibling&#x27;s declaration
 changes, and gets exactly the verdict a fresh parse would. A re-check that comes out clean writes the cache again under
-the new context.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" rel="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
+the new context.</li>
+<li>A parse that read a bare class name inside a namespace (<code>Point</code> inside <code>namespace geo</code> is
+<code>geo::Point</code> where the engine holds one) holds only where the loading engine holds the same namespace classes.
+The disk cache parses such a file again; a saved bite has no text to parse, so <code>jaibite_load*</code> refuses it with
+a <code>jai::static_check_error</code> naming each class (<code>the bite was parsed where no namespace declared class
+'Point'; here one does: save it again from source</code>). Load it where the namespaces it was saved under have
+run.</li></ul><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/03-backends.html"><span>&larr; previous</span>Backends: Interpreter vs VM</a><a class="next" rel="next" href="../embedding/05-safety-rails.html"><span>next &rarr;</span>Safety Rails</a></nav></article>
 </main>
 </div>
 <footer class="site-footer">

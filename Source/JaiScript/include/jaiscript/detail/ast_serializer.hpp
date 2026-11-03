@@ -12,8 +12,8 @@
 //
 // Format: "JBIT" magic, u32 version, u32 flags, u64 registration fingerprint, u64 source
 // size + 1 and u64 source hash (0, 0 = no source), string table (count + length-prefixed strings), the context section when
-// flag bit 1 says so (jaibite_context: namespace query count + table indices, u64 key, outside name count + table indices, u64
-// key), declaration count, node tree.
+// flag bit 1 says so (jaibite_context: namespace query count + each query's table index and u8 answer, outside name count +
+// table indices, u64 key), declaration count, node tree.
 // Node encoding: u8 node_type tag (0xFF = null pointer), source_location, fields.
 // Runtime AST patches (identifier slot_index -> SIZE_MAX, outer_slot_plan, cached
 // getter_id) are serialized faithfully: patched state is self-consistent in memory on
@@ -34,7 +34,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 50;
+    inline constexpr uint32_t k_jaibite_version = 51;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -145,8 +145,10 @@ namespace jai::detail {
             }
             if (flags & k_jaibite_flag_context) {
                 append_varint(out, namespace_queries.size());
-                for (uint64_t i : namespace_queries) { append_varint(out, i); }
-                fixed_u64(out, context->namespace_key);
+                for (size_t i = 0; i < namespace_queries.size(); ++i) {
+                    append_varint(out, namespace_queries[i]);
+                    out.push_back(i < context->namespace_answers.size() && context->namespace_answers[i] == '1' ? 1 : 0);
+                }
                 append_varint(out, outside.size());
                 for (uint64_t i : outside) { append_varint(out, i); }
                 fixed_u64(out, context->outside_key);
@@ -695,18 +697,21 @@ namespace jai::detail {
             interned_.assign(table_.size(), { UINT64_MAX, std::string_view{} });
             if (flags & k_jaibite_flag_context) {
                 jaibite_context context;
-                const auto names = [this](std::vector<std::string>& out) {
+                const auto names = [this](std::vector<std::string>& out, std::string* answers) {
                     const uint64_t count = varint();
                     check_count(count);
                     for (uint64_t i = 0; i < count; ++i) {
                         const uint64_t index = varint();
                         if (index >= table_.size()) jaibite_fail("context name out of range");
                         out.emplace_back(table_[size_t(index)]);
+                        if (!answers) { continue; }
+                        const uint8_t answer = u8();
+                        if (answer > 1) jaibite_fail("corrupt namespace answer");
+                        answers->push_back(answer ? '1' : '0');
                     }
                 };
-                names(context.namespace_queries);
-                context.namespace_key = fixed_u64();
-                names(context.outside);
+                names(context.namespace_queries, &context.namespace_answers);
+                names(context.outside, nullptr);
                 context.outside_key = fixed_u64();
                 if (context_out) *context_out = std::move(context);
             }

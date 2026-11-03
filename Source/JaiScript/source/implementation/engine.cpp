@@ -1752,14 +1752,15 @@ struct engine::implementation {
         if (entry.context.namespace_queries.empty()) { return false; }
         const size_t classes = namespace_class_count();
         if (classes == entry.namespace_classes) { return false; }
-        if (namespace_answers(entry.context.namespace_queries) != entry.context.namespace_key) { return true; }
+        if (namespace_answers(entry.context.namespace_queries) != entry.context.namespace_answers) { return true; }
         entry.namespace_classes = classes;
         return false;
     }
-    // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, as one key (0: none asked)
-    uint64_t namespace_answers(const std::vector<std::string>& queries) const {
-        uint64_t result = queries.size();
-        for (const auto& q : queries) { result = mix_key(result, namespace_class_known(q) ? 1 : 2); }
+    // A parse's namespace-class questions (parser::namespace_queries) as the engine answers them now, '1' where the class exists
+    std::string namespace_answers(const std::vector<std::string>& queries) const {
+        std::string result;
+        result.reserve(queries.size());
+        for (const auto& q : queries) { result.push_back(namespace_class_known(q) ? '1' : '0'); }
         return result;
     }
     bool namespace_class_known(std::string_view query) const {
@@ -1781,9 +1782,27 @@ struct engine::implementation {
         for (const auto& [id, space] : script_namespaces_) { if (space) { result += space->classes.size(); } }
         return result;
     }
+    // A bite's parse read a bare class name inside a namespace by namespace classes this engine answers otherwise: its text
+    // would parse otherwise here, and the bite carries no text to parse again
+    [[noreturn]] void refuse_namespace_answers(const detail::jaibite_context& context, const std::string& answers) {
+        check_report report;
+        for (size_t i = 0; i < context.namespace_queries.size() && i < answers.size(); ++i) {
+            if (i < context.namespace_answers.size() && context.namespace_answers[i] == answers[i]) { continue; }
+            const std::string& query = context.namespace_queries[i];
+            const bool saved = i < context.namespace_answers.size() && context.namespace_answers[i] == '1';
+            const size_t cut = query.rfind("::");
+            const std::string what = cut == std::string::npos
+                ? std::string(saved ? "a namespace declared class '" : "no namespace declared class '") + query + "'; here " + (saved ? "none does" : "one does")
+                : "'" + query + "' " + (saved ? "was" : "was not") + " a class (a bare '" + query.substr(cut + 2) + "' inside namespace '" + query.substr(0, cut) +
+                  "' names it); here it " + (saved ? "is not" : "is");
+            report.diagnostics.push_back({check_diagnostic::level::error, 0, 0, "the bite was parsed where " + what + ": save it again from source"});
+        }
+        last_check_ = report;
+        throw static_check_error("static check failed:\n" + report.format());
+    }
     void note_parse_context(script_cache_entry& entry, const parser& prs) {
         entry.context.namespace_queries = prs.namespace_queries();
-        entry.context.namespace_key = namespace_answers(entry.context.namespace_queries);
+        entry.context.namespace_answers = namespace_answers(entry.context.namespace_queries);
         entry.namespace_classes = namespace_class_count();
     }
     static uint64_t mix_key(uint64_t h, uint64_t x) {
@@ -1794,7 +1813,7 @@ struct engine::implementation {
     // A unit as the program pools hold it: its text and the namespace answers its parse rests on
     uint64_t unit_key(script_cache_entry& entry, std::string_view source) {
         const auto& id = identity_of(entry, source);
-        return mix_key(mix_key(id.size, id.hash), entry.context.namespace_key);
+        return mix_key(mix_key(id.size, id.hash), detail::jaibite_identity_of(entry.context.namespace_answers).hash);
     }
     // The unit that ran a declaration the engine holds, by its key; 0 when no unit that ran is it (the host's)
     uint64_t ran_unit_key(uint32_t unit) {
@@ -2226,7 +2245,7 @@ struct engine::implementation {
             uint32_t flags = 0;
             detail::jaibite_context context;
             auto declarations = detail::deserialize_jaibite(bytes.data(), bytes.size(), &self, savedFingerprint, &flags, nullptr, sourcePath, &context);
-            if (namespace_answers(context.namespace_queries) != context.namespace_key) {
+            if (namespace_answers(context.namespace_queries) != context.namespace_answers) {
                 return nullptr;   // a namespace class the parse asked about is answered otherwise here: the text parses otherwise
             }
             // jaibite carries structure, not the parser-pass flags (ref-escape,
@@ -3550,6 +3569,8 @@ jai::jaibite engine::jaibite(const std::string& scriptContent) {
     auto hook = impl->take_reload_hook(declarations);
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.reload_hook_ = std::move(hook);
+    bite.context_.namespace_queries = parser.namespace_queries();
+    bite.context_.namespace_answers = impl->namespace_answers(bite.context_.namespace_queries);
     check_bite(bite, &scriptContent);
     return bite;
 }
@@ -3677,6 +3698,9 @@ jai::jaibite engine::jaibite_load_bytes(const uint8_t* data, size_t size, const 
     // jaibite carries structure, not the parser-pass flags — re-derive them (see
     // try_load_jaibite_entry's twin)
     if (detail::run_ast_marking_passes(declarations, get_symbolizer())) { note_execute_elapsed_use(); }
+    if (const std::string answers = impl->namespace_answers(context.namespace_queries); answers != context.namespace_answers) {
+        impl->refuse_namespace_answers(context, answers);
+    }
     auto hook = impl->take_reload_hook(declarations);
     jai::jaibite bite(weak_from_this(), std::move(declarations));
     bite.reload_hook_ = std::move(hook);

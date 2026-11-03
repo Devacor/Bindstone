@@ -233,7 +233,7 @@ def main():
     ap.add_argument("--out", default=None, help="scratch dir for extracted samples")
     ap.add_argument("--keep", action="store_true", help="keep the extracted files")
     ap.add_argument("--page", default=None, help="only pages whose path contains this")
-    ap.add_argument("--timeout", type=float, default=30.0)
+    ap.add_argument("--timeout", type=float, default=600.0, help="seconds a sample may run before it counts as hung (a hang rail, never a speed bound)")
     ap.add_argument("--quiet-expected", action="store_true", help="skip the expected-output comparison")
     ap.add_argument("--allow-drift", action="store_true", help="report expected-output drift without failing")
     ap.add_argument("--show-errors", action="store_true",

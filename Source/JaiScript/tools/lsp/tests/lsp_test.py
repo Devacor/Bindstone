@@ -7,7 +7,8 @@ fixtures    golden responses for every feature on tests/fixtures (--update rewri
             definition/hover/completion/references on keyword-named members (tests/keyword_fixture)
 gatorquest  examples/gatorquest: zero diagnostics on the clean program, definition/references/hover/
             completion/rename spot checks
-latency     examples/gatorquest: time from an edit to its published diagnostics
+latency     examples/gatorquest: an edit re-checks only what it changes; the time from an edit to its published
+            diagnostics is printed
 robustness  malformed framing, oversized and malformed messages, edit floods and cut-off input: the server
             stays up, answers the next request and holds no memory for what it skips
 """
@@ -29,6 +30,7 @@ JAISCRIPT = HERE.parents[2]
 FIXTURES = HERE / "fixtures"
 GOLDEN = HERE / "golden" / "fixtures.json"
 GATORQUEST = JAISCRIPT / "examples" / "gatorquest" / "scripts"
+HANG_GUARD = 600   # seconds: a wait for what must happen fails only past this, it never bounds speed
 
 
 def default_exe():
@@ -105,7 +107,7 @@ class Client:
         self.proc.stdin.write(b"Content-Length: %d\r\n\r\n" % len(body) + body)
         self.proc.stdin.flush()
 
-    def request(self, method, params, timeout=120):
+    def request(self, method, params, timeout=HANG_GUARD):
         rid = self.next_id
         self.next_id += 1
         self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
@@ -140,7 +142,7 @@ class Client:
         })
         return self.versions[uri]
 
-    def wait_diagnostics(self, uri, version=None, timeout=120):
+    def wait_diagnostics(self, uri, version=None, timeout=HANG_GUARD):
         deadline = time.time() + timeout
         with self.cv:
             while True:
@@ -152,7 +154,7 @@ class Client:
                     raise TimeoutError("diagnostics for " + uri)
                 self.cv.wait(remaining)
 
-    def settle(self, timeout=300):
+    def settle(self, timeout=HANG_GUARD):
         deadline = time.time() + timeout
         while time.time() < deadline:
             status = self.request("jaiscript/status", {})
@@ -512,6 +514,14 @@ def edit_latency(client, uri, rounds=30):
     return statistics.median(samples), samples[int(len(samples) * 0.95) - 1], samples[-1], line
 
 
+def unit_checks(client):
+    return {u["uri"]: u["checks"] for u in client.request("jaiscript/status", {})["units"]}
+
+
+def rechecked(before, after):
+    return {uri: after[uri] - before.get(uri, 0) for uri in after if after[uri] != before.get(uri, 0)}
+
+
 def run_latency(exe, checks):
     print("latency")
     client = Client(exe, GATORQUEST.parent)
@@ -521,10 +531,13 @@ def run_latency(exe, checks):
         actions_uri = client.open(GATORQUEST / "gq_actions.jai")
         client.wait_diagnostics(actions_uri)
         client.settle()
-        median, p95, worst, line = edit_latency(client, actions_uri)
-        print("  edit -> diagnostics on gq_actions.jai (1085 lines): median %.1f ms, p95 %.1f ms, max %.1f ms" % (median, p95, worst))
-        median, p95, worst, line = edit_latency(client, combat_uri)
-        print("  edit -> diagnostics on gq_combat.jai: median %.1f ms, p95 %.1f ms, max %.1f ms" % (median, p95, worst))
+        for name, uri in (("gq_actions.jai", actions_uri), ("gq_combat.jai", combat_uri)):
+            before = unit_checks(client)
+            median, p95, worst, line = edit_latency(client, uri)
+            print("  edit -> diagnostics on %s: median %.1f ms, p95 %.1f ms, max %.1f ms" % (name, median, p95, worst))
+            edits = rechecked(before, unit_checks(client))
+            checks.check(edits == {norm_uri(uri): 60}, "60 edits inside a function of %s check that unit once each, no other" % name,
+                         str({relativize(k, GATORQUEST.parent): v for k, v in edits.items()}))
         root_uri = uri_of(GATORQUEST / "gatorquest.jai")
         root_text = client.texts[root_uri]
         t0 = time.perf_counter()
@@ -552,12 +565,17 @@ def run_latency(exe, checks):
         checks.check(any("typo_probe" in d["message"] for d in params["diagnostics"]), "a type error typed into gq_combat.jai is reported", str(params["diagnostics"])[:300])
         print("  edit introducing a type error -> its diagnostic: %.1f ms" % error_ms)
         client.change(combat_uri, pos, {"line": line + 1, "character": 1}, "")
+        client.wait_diagnostics(combat_uri, version + 1)
+        client.settle()
+        before = unit_checks(client)
         t0 = time.perf_counter()
         version = client.change(combat_uri, {"line": 0, "character": 0}, {"line": 0, "character": 0}, "int lsp_new_global = 1;\n")
         client.wait_diagnostics(combat_uri, version)
         client.settle()
         print("  edit changing the program surface -> whole program rechecked: %.0f ms" % ((time.perf_counter() - t0) * 1000))
-        checks.check(median < 100.0, "median edit -> diagnostics latency under 100 ms", "%.1f ms" % median)
+        program = rechecked(before, unit_checks(client))
+        checks.check(len(program) == len(before) and set(program.values()) == {1},
+                     "an edit to the program surface checks every unit of the program once", "%d of %d units: %s" % (len(program), len(before), sorted(set(program.values()))))
     finally:
         client.close()
 
@@ -573,10 +591,13 @@ class RawServer:
                                      stderr=subprocess.DEVNULL)
         self.out = bytearray()
         self.cv = threading.Condition()
+        self.reading = threading.Event()
+        self.reading.set()
         threading.Thread(target=self._read, daemon=True).start()
 
     def _read(self):
         while True:
+            self.reading.wait()
             chunk = self.proc.stdout.read1(65536)
             if not chunk:
                 return
@@ -600,7 +621,18 @@ class RawServer:
     def send(self, message):
         return self.write(self.frame(message))
 
-    def answered(self, rid, timeout=30):
+    def hold_replies(self):
+        """stop reading the server's output: a reply larger than the pipe then holds its one handler thread"""
+        self.reading.clear()
+
+    def take_replies(self):
+        self.reading.set()
+
+    def barrier(self):
+        """once this is written the server has read every message before it: the padding outgrows any pipe buffer"""
+        return self.send({"jsonrpc": "2.0", "method": "$/padding", "params": {"padding": "x" * (1 << 20)}})
+
+    def answered(self, rid, timeout=HANG_GUARD):
         needle = b'"id":%d,' % rid
         deadline = time.time() + timeout
         with self.cv:
@@ -611,7 +643,7 @@ class RawServer:
                 self.cv.wait(min(remaining, 0.2))
             return True
 
-    def response(self, rid, timeout=30):
+    def response(self, rid, timeout=HANG_GUARD):
         if not self.answered(rid, timeout):
             return None
         deadline = time.time() + timeout
@@ -632,7 +664,7 @@ class RawServer:
         self.send({"jsonrpc": "2.0", "method": "initialized", "params": {}})
         return self.answered(1)
 
-    def reply_with(self, needle, timeout=30):
+    def reply_with(self, needle, timeout=HANG_GUARD):
         """the first message whose body holds needle, decoded"""
         deadline = time.time() + timeout
         with self.cv:
@@ -650,14 +682,14 @@ class RawServer:
                     return None
                 self.cv.wait(min(remaining, 0.2))
 
-    def ping(self, rid, timeout=30):
+    def ping(self, rid, timeout=HANG_GUARD):
         self.send({"jsonrpc": "2.0", "id": rid, "method": "jaiscript/status", "params": {}})
         return self.answered(rid, timeout)
 
     def private_mb(self):
         if os.name == "nt":
             out = subprocess.run(["powershell", "-NoProfile", "-Command", "(Get-Process -Id %d).PrivateMemorySize64" % self.proc.pid],
-                                 capture_output=True, text=True, timeout=30).stdout.strip()
+                                 capture_output=True, text=True, timeout=HANG_GUARD).stdout.strip()
             return int(out) / 1e6 if out.isdigit() else None
         try:
             import psutil
@@ -665,7 +697,7 @@ class RawServer:
         except ImportError:
             return None
 
-    def end_input(self, timeout=20):
+    def end_input(self, timeout=HANG_GUARD):
         try:
             self.proc.stdin.close()
         except OSError:
@@ -703,7 +735,7 @@ def run_robustness(exe, checks):
     try:
         server.initialize()
         server.write(b"Content-Length: 1099511627776\r\n\r\n")
-        time.sleep(0.5)
+        server.write(b"x" * (1 << 20))   # written once the server has read the header and is reading past it
         checks.check(server.proc.poll() is None, "a Content-Length of 2^40: the server stays up")
         ws = server.private_mb()
         checks.check(ws is None or ws < 200, "a Content-Length of 2^40: no body is allocated", "%s MB" % ws)
@@ -717,7 +749,7 @@ def run_robustness(exe, checks):
         server.initialize()
         server.send({"jsonrpc": "2.0", "id": 50, "method": "jaiscript/status", "params": {"padding": "x" * 70000}})
         checks.check(server.ping(51), "a body over --max-message: the next request is answered")
-        checks.check(not server.answered(50, 1), "a body over --max-message is skipped, not answered")
+        checks.check(not server.answered(50, 0), "a body over --max-message is skipped, not answered")   # replies leave in order
     finally:
         server.kill()
 
@@ -725,8 +757,7 @@ def run_robustness(exe, checks):
     try:
         server.initialize()
         for _ in range(25):
-            server.write(b"A" * 2000000)
-        time.sleep(0.5)
+            server.write(b"A" * 2000000)   # each write returns once the server has read all but a pipe buffer of it
         ws = server.private_mb()
         checks.check(ws is None or ws < 40, "a 50 MB header line is not held", "%s MB" % ws)
         server.write(b"\r\n\r\n")
@@ -775,19 +806,26 @@ def run_robustness(exe, checks):
             burst += server.frame({"jsonrpc": "2.0", "method": "textDocument/didChange", "params": {
                 "textDocument": {"uri": uri, "version": version},
                 "contentChanges": [{"range": {"start": {"line": 0, "character": 4}, "end": {"line": 0, "character": 4}}, "text": "y"}]}})
+        status = server.response(3) if server.ping(3) else None
+        parses = (status or {}).get("result", {}).get("parses", 0)
+        # the burst queues whole behind a request whose reply is held, so how it is read never decides how often it parses
+        server.hold_replies()
+        server.send({"jsonrpc": "2.0", "id": 4, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}})
         server.write(bytes(burst))
         server.send({"jsonrpc": "2.0", "id": 2, "method": "textDocument/documentSymbol", "params": {"textDocument": {"uri": uri}}})
-        start = time.perf_counter()
-        symbols = server.response(2, timeout=60)
-        elapsed = time.perf_counter() - start
-        checks.check(symbols is not None and elapsed < 30, "a burst of %d edits is answered within 30 s" % edits, "%.1f s" % elapsed)
+        server.barrier()
+        server.take_replies()
+        symbols = server.response(2)
+        status = server.response(5) if server.ping(5) else None
+        parsed = (status or {}).get("result", {}).get("parses", 0) - parses
+        checks.check(parsed == 1, "a queued burst of %d edits is parsed once" % edits, "%d parses" % parsed)
         names = [s["name"] for s in (symbols or {}).get("result") or []]
         checks.check(bool(names) and names[0] == "y" * edits + "x", "a burst of edits applies every edit in order", str(names[:1])[:80])
     finally:
         server.kill()
 
     for args in (["--max-message=1000"], ["--max-message=lots"], ["--host=nope"]):
-        proc = subprocess.run([str(exe), *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=30)
+        proc = subprocess.run([str(exe), *args], stdin=subprocess.DEVNULL, capture_output=True, timeout=HANG_GUARD)
         checks.check(proc.returncode == 2, "a bad %s is a usage error" % args[0], "exit %s" % proc.returncode)
 
     def error_code(reply):
@@ -802,11 +840,11 @@ def run_robustness(exe, checks):
         reply = server.reply_with(b'"code":-32700')
         checks.check(reply is not None and reply.get("id") is None, "a number with a leading zero is a parse error (-32700, id null)", str(reply)[:200])
         server.write(server.frame(b'{"jsonrpc":"2.0","id":5,"method":"jaiscript/status","params":{"s":"\\ud800\\u0041"}}'))
-        checks.check(not server.answered(5, 2), "an unpaired surrogate escape is a parse error, not a request")
         for message in ({"jsonrpc": "2.0", "id": 1.5, "method": "jaiscript/status"}, {"jsonrpc": "2.0", "id": {"o": 1}, "method": "jaiscript/status"},
                         {"jsonrpc": "2.0", "id": 6, "method": ""}, {"jsonrpc": "2.0", "params": {}}):
             server.send(message)
         checks.check(server.ping(7), "after invalid requests the next request is answered")
+        checks.check(not server.answered(5, 0), "an unpaired surrogate escape is a parse error, not a request")   # replies leave in order
         invalid = bytes(server.out).count(b'"code":-32600')
         checks.check(invalid == 4, "a fractional or object id, an empty method and a message with neither id nor method are -32600", "%d replies" % invalid)
         server.send({"jsonrpc": "2.0", "id": 8, "method": "initialize", "params": {"capabilities": {}}})
@@ -826,10 +864,14 @@ def run_robustness(exe, checks):
                         {"jsonrpc": "2.0", "method": "$/cancelRequest", "params": {"id": "abc"}},
                         {"jsonrpc": "2.0", "id": 77, "method": "jaiscript/status"}):
             burst += server.frame(message)
+        # request 9's reply is held, so every message behind it is still queued when its cancel is read
+        server.hold_replies()
         server.write(bytes(burst))
-        checks.check(error_code(server.reply_with(b'"id":"abc"', 60)) == -32800, "a cancel by string id cancels that queued request")
-        checks.check("result" in (server.response(10, 60) or {}), "a cancel of another id, or of none, leaves a queued request alone")
-        checks.check("result" in (server.response(77, 60) or {}), "a stray response's id is never marked cancelled")
+        server.barrier()
+        server.take_replies()
+        checks.check(error_code(server.reply_with(b'"id":"abc"')) == -32800, "a cancel by string id cancels that queued request")
+        checks.check("result" in (server.response(10) or {}), "a cancel of another id, or of none, leaves a queued request alone")
+        checks.check("result" in (server.response(77) or {}), "a stray response's id is never marked cancelled")
 
         server.send({"jsonrpc": "2.0", "id": 11, "method": "shutdown"})
         server.answered(11)

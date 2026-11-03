@@ -123,6 +123,7 @@ struct unit {
 	uint64_t model_epoch = UINT64_MAX;
 	uint64_t model_program = 0;
 	double last_check_ms = 0.0;
+	uint64_t checks = 0;                          // checker runs over this unit
 };
 
 struct program {
@@ -212,6 +213,7 @@ public:
 	jai::engine& engine() { return *engine_; }
 	const std::vector<std::string>& folders() const { return folders_; }
 	std::vector<const unit*> loaded_units() const;
+	uint64_t parses() const { return epoch_clock_; }
 
 private:
 	std::shared_ptr<jai::engine> engine_;

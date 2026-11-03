@@ -780,7 +780,7 @@ namespace jai::detail {
 		if (v.type() != script_value_type::jai_object_type && v.type() != script_value_type::jai_shared_ptr_type) { return h.make_null(); }
 		const uint64_t id = h.ids().call;
 		if (h.parallel_worker()) [[unlikely]] {
-			// a worker calls the region's pin of operator() on this backend (a bound method would run on the engine's)
+			// a worker calls the region's pin of operator() on this backend (the class's own method value is shared by every worker)
 			const parallel_method_pin* pin = h.worker_operator_pin(v, id);
 			if (!pin) { return h.make_null(); }
 			return script_value::make_function(script_function([backend = &h.backend(), pin, receiver = v, id, eng = h.engine()](const std::vector<script_value>& args) {

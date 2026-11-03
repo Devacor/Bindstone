@@ -341,6 +341,8 @@ namespace jai::detail {
     script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng);
     // An instance's script field a worker reads and stores in place (a C++ property goes through its pinned accessor)
     script_value* parallel_script_field(class_instance& inst, uint64_t member_id);
+    // A worker's call of a method no region pin admits, on any receiver shape
+    checked_result<void> parallel_method_not_admitted(uint64_t name_id);
 
     // Member access through an object borrow (detail/object_borrow.hpp), the one rule both backends' member reads, calls and
     // stores take: a script field of the shared instance reads as a worker-local copy (nullopt: no such script field), a host

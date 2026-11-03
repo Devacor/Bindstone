@@ -1198,6 +1198,16 @@ public:
                 oob, "bare-field subscript in a method");
             expect_both(fn("array<int> v6 = []; int g7 = " + big + "; auto l = [=]() -> int { return v6[1] - (g7 + 3); }; return l();"),
                 oob, "captured subscript in a lambda");
+            // fuzz seeds 4200550 / 5202391: a name user code can reach (an environment name, a captured local, `::name`) left of a
+            // lifted right subtree reads before that subtree runs, so the first error and a value its operator writes are the interpreter's
+            expect_both("[[warn_mode]]; " + fn("int g7 = " + big + "; auto v = v8 - (g7 + 3); return 1;"),
+                "Undefined variable 'v8'", "undefined name left of an overflowing rhs");
+            expect_both("[[warn_mode]]; if (g8 == (3 + v7)) { bool v16 = false; }", "Undefined variable 'g8'", "two undefined names in a top-level condition");
+            const std::string writer = "var G = 1.0; var hook = null; class K { float operator*(float x) { G = 100.0; hook(); return x; } } var k = K();\n";
+            expect_both(writer + "function t() { hook = []() {}; return G - (k * 2.5); } t();", "-1.5", "global left of an operator that writes it");
+            expect_both(writer + "function t() { hook = []() {}; return ::G - (k * 2.5); } t();", "-1.5", "::name left of an operator that writes it");
+            expect_both(writer + "function t() { float a = 1.0; hook = [&]() { a = 100.0; }; return a - (k * 2.5); } t();", "-1.5",
+                "captured local left of an operator that writes it");
             // a sound left read still lets the rhs raise, and materialized operands compute as before
             expect_both(fn("array<int> a = [7]; int g7 = " + big + "; auto v = a[0] - (g7 + 3); return 1;"),
                 "Integer overflow in '+'", "sound left read then rhs overflow");

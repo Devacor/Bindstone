@@ -96,6 +96,7 @@ public:
 				try {
 					auto eng = make_engine();
 					jai::stdlib::register_all(eng);
+					eng->parallel_thread_count(2);   // eight engines with a pool per core each oversubscribed the machine many times over
 					eng->add_include_path(dir.string());
 					script_int result = 0;
 					for (int round = 0; round < 4; ++round) {
@@ -126,7 +127,7 @@ public:
 				for (int t = 0; t < k_threads; ++t) {
 					threads.emplace_back([&, t]() {
 						++ready;
-						while (ready.load() < k_threads) {}
+						while (ready.load() < k_threads) { std::this_thread::yield(); }   // a bare spin starves the threads still starting on a loaded machine
 						results[t] = run_one(errors[t]);
 					});
 				}
@@ -194,7 +195,7 @@ public:
 					try {
 						auto eng = make_engine();
 						++ready;
-						while (ready.load() < k_threads) {}
+						while (ready.load() < k_threads) { std::this_thread::yield(); }
 						if (t % 2 == 0) {
 							bind_edge_types(*eng, std::make_integer_sequence<int, k_edge_types>{});
 						} else {

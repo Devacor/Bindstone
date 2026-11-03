@@ -324,7 +324,7 @@ public:
                 pool.wait_idle();
                 if (!done.load()) {
                     ++early;
-                    while (!done.load()) {}
+                    while (!done.load()) { std::this_thread::yield(); }
                     pool.wait_idle();
                 }
             }

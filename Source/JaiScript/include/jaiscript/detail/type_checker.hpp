@@ -131,11 +131,12 @@ namespace jai {
         using program_enum_map = std::unordered_map<std::string, std::unordered_map<std::string, std::shared_ptr<const enum_decl>>>;
 
     // What a bite's parse and its checked-clean stamp rest on beyond its own text, so a load asks the loading engine the same
-    // questions: the namespace classes the parse asked about (parser::namespace_queries) under the key of their answers, and
-    // the names the check resolved outside the unit (check_options::outside) under the key of what they resolved to.
+    // questions: the namespace classes the parse asked about (parser::namespace_queries) with the engine's answer to each ('1':
+    // the class exists), and the names the check resolved outside the unit (check_options::outside) under the key of what
+    // they resolved to.
     struct jaibite_context {
         std::vector<std::string> namespace_queries;
-        uint64_t namespace_key = 0;
+        std::string namespace_answers;
         std::vector<std::string> outside;
         uint64_t outside_key = 0;
         bool empty() const { return namespace_queries.empty() && outside.empty(); }

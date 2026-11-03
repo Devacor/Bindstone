@@ -405,6 +405,33 @@ public:
             )");
         });
 
+        test("a_bite_parsed_under_other_namespace_classes_is_refused_at_load", [this]() {
+            // a bare Point inside namespace geo is geo::Point where one exists: the saved parse holds only where the loading
+            // engine answers that question alike, and a load anywhere else is refused with the class it read otherwise
+            const std::string points = "namespace geo { class Point { int x = 1; } }";
+            const std::string probe = "class Point { var x = 2; }\nnamespace geo { int probe() { Point p = Point(); return p.x; } }\ngeo::probe();";
+            const auto saved_after_points = [&](bool points_ran) {
+                auto eng = make_engine();
+                if (points_ran) { eng->execute(points); }
+                return eng->jaibite(probe).save_bytes();
+            };
+            const auto load = [&](const std::vector<uint8_t>& bytes, bool points_ran) {
+                auto eng = make_engine();
+                if (points_ran) { eng->execute(points); }
+                try {
+                    return "VALUE " + eng->jaibite_load_bytes(bytes).execute().to_string();
+                } catch (const std::exception& e) {
+                    return std::string("ERROR ") + e.what();
+                }
+            };
+            for (bool saved : {false, true}) {
+                const auto bytes = saved_after_points(saved);
+                check_eq(std::string(saved ? "VALUE 1" : "VALUE 2"), load(bytes, saved), "the same namespace classes load the bite");
+                const std::string refused = load(bytes, !saved);
+                check_true(refused.find("static check failed") != std::string::npos && refused.find("class 'Point'") != std::string::npos, refused);
+            }
+        });
+
         test("roundtrip_extern_and_check_mode_attributes", [this, check_roundtrip]() {
             check_roundtrip(R"([[warn_mode]];
                 extern function host_fn;
@@ -433,7 +460,7 @@ public:
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)50, (int)bytes[4], "jaibite format version");
+            check_eq((int)51, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

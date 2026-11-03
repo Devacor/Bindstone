@@ -1047,5 +1047,3 @@ class engine;
     }
     
 } // namespace jai
-
-#endif // __JAISCRIPT_CORE_FUNCTION_BINDER_HPP__

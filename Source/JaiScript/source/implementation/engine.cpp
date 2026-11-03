@@ -1821,9 +1821,72 @@ struct engine::implementation {
             default: return result;
         }
     }
+    uint64_t param_signature(engine& self, const param_type_info& param) {
+        uint64_t result = uint64_t(param.base_type) + 1;
+        if (param.cpp_type != std::type_index(typeid(void))) {
+            const auto def = self.get_class_definition_by_type(param.cpp_type);
+            result = mix_key(result, detail::jaibite_identity_of(def ? std::string_view(def->get_name()) : std::string_view(param.cpp_type.name())).hash);
+        }
+        return result;
+    }
+    uint64_t overload_signature(engine& self, size_t arity, const std::vector<param_type_info>& params, const param_type_info& result_type) {
+        uint64_t result = mix_key(arity, param_signature(self, result_type));
+        for (const auto& p : params) { result = mix_key(result, param_signature(self, p)); }
+        return result;
+    }
+    // A host class's bound tables as the checker reads them: methods by overload, static methods by arity, fields and
+    // properties, its bases'; sums keep it independent of table order
+    uint64_t host_class_signature(engine& self, const class_definition& cls, int depth) {
+        const auto name_hash = [this](uint64_t id) { return detail::jaibite_identity_of(string_symbolizer_.get_string(id)).hash; };
+        uint64_t methods = 0;
+        for (const auto& [id, by_arity] : cls.cpp_method_overload_table()) {
+            for (const auto& [arity, entries] : by_arity) {
+                for (const auto& e : entries) { methods += mix_key(name_hash(id), overload_signature(self, arity, e.param_types, e.result)); }
+            }
+        }
+        for (const auto& [id, value] : cls.method_values()) { methods += mix_key(name_hash(id), 3); }
+        for (const auto& [id, value] : cls.static_method_values()) { methods += mix_key(name_hash(id), mix_key(5, cls.static_method_arity(id))); }
+        uint64_t fields = 0;
+        for (const auto& [id, value] : cls.get_all_field_defaults()) { fields += mix_key(name_hash(id), cls.is_read_only_property(id) ? 7 : 9); }
+        for (const auto& name : cls.get_property_names(false)) { fields += mix_key(detail::jaibite_identity_of(name).hash, 11); }
+        for (const auto name : cls.get_static_field_names()) { fields += mix_key(detail::jaibite_identity_of(name).hash, 13); }
+        uint64_t result = mix_key(mix_key(uint64_t(cls.strict_signatures()), methods), fields);
+        if (depth < 32) {
+            for (const auto& parent : cls.get_parent_classes()) {
+                if (parent) { result = mix_key(result, mix_key(detail::jaibite_identity_of(parent->get_name()).hash, host_class_signature(self, *parent, depth + 1))); }
+            }
+        }
+        return result;
+    }
+    // A name's host registrations as the checker reads them (host_function_signatures, host_function_result, a host class's
+    // tables), kept per name while the registration surface and the class's own tables stand
+    struct host_signature_entry {
+        uint64_t surface = UINT64_MAX;
+        const class_definition* cls = nullptr;
+        uint64_t methods = 0, fields = 0, digest = 0;
+    };
+    std::unordered_map<std::string, host_signature_entry> host_signatures_;
+    uint64_t host_signature(engine& self, const std::string& name) {
+        const auto found = classes.find(name);
+        const class_definition* cls = found != classes.end() && found->second && found->second->is_cpp_class() ? found->second.get() : nullptr;
+        host_signature_entry& entry = host_signatures_[name];
+        if (entry.surface == check_surface_epoch_ && entry.cls == cls &&
+            (!cls || (entry.methods == cls->method_epoch() && entry.fields == cls->field_shape_epoch()))) {
+            return entry.digest;
+        }
+        uint64_t result = 0;
+        std::vector<engine::host_overload_signature> overloads;
+        if (self.host_function_signatures(name, overloads)) {
+            for (const auto& o : overloads) { result += overload_signature(self, o.arity, o.param_types, {}); }
+        }
+        if (script_value_type kind; self.host_function_result(name, kind)) { result = mix_key(result, uint64_t(kind) + 1); }
+        if (cls) { result = mix_key(result, host_class_signature(self, *cls, 0)); }
+        entry = {check_surface_epoch_, cls, cls ? cls->method_epoch() : 0, cls ? cls->field_shape_epoch() : 0, result};
+        return result;
+    }
     // What a check can learn about a name outside the unit asking (check_options::outside): the program's declarations of it by
-    // their units, the engine's cell, registrations, script class and namespace of that name, the namespace member a qualified
-    // name spells, each script declaration by the unit that ran it. Equal signatures answer every question alike.
+    // their units, the engine's cell, registrations by their signatures, script class and namespace of that name, the namespace
+    // member a qualified name spells, each script declaration by the unit that ran it. Equal signatures answer every question alike.
     uint64_t outside_signature(engine& self, const std::string& name) {
         uint64_t result = detail::jaibite_identity_of(name).hash;
         const auto fold = [&result](uint64_t x) { result = mix_key(result, x); };
@@ -1835,6 +1898,7 @@ struct engine::implementation {
         }
         fold(uint64_t(overloadedFunctions.count(name)) | uint64_t(functionArities.count(name)) << 1 | uint64_t(classes.count(name)) << 2 |
              uint64_t(registeredTemplateTypes.count(name)) << 3 | uint64_t(self.is_const_global(name)) << 4);
+        fold(host_signature(self, name));
         if (const auto id = string_symbolizer_.find(name)) {
             if (const script_value* cell = global_environment_->get_value_ptr(*id)) { fold(value_signature(*cell)); }
             if (auto it = script_namespaces_.find(*id); it != script_namespaces_.end() && it->second) { fold(0x51); }
@@ -1851,7 +1915,12 @@ struct engine::implementation {
                 }
                 if (auto v = ns.variables.find(*member); v != ns.variables.end()) { fold(mix_key(0xB1, value_signature(v->second))); }
                 if (auto c = ns.classes.find(*member); c != ns.classes.end() && c->second) { fold(mix_key(0xC2, ran_unit_key(c->second->unit().id))); }
-                fold(ns.signatures.count(*member));
+                if (auto h = ns.signatures.find(*member); h != ns.signatures.end()) {
+                    const host_entry_signature& sig = h->second;
+                    fold(mix_key(uint64_t(sig.min_args) | uint64_t(sig.max_args) << 8 | uint64_t(sig.result_follows_first) << 16, uint64_t(sig.result)));
+                    for (const auto p : sig.params) { fold(uint64_t(p) + 1); }
+                    fold(detail::jaibite_identity_of(sig.result_class).hash);
+                }
             }
         }
         for (const auto& [index, refusal] : self.constant_argument_indexes(name)) { fold(mix_key(0xA1, index)); }

@@ -38,6 +38,7 @@ public:
 
     int port() const;                   // the bound port (useful when constructed with 0); 0 when not listening
     bool listening() const;             // started and serving
+    uint64_t buffered_bytes_moved() const;   // bytes moved within the input and output buffers: linear in the bytes exchanged
     const std::string& error() const;   // why not: "debugger cannot listen on 127.0.0.1:52472: bind failed (...)"
 
 private:

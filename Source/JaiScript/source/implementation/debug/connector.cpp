@@ -340,6 +340,7 @@ struct debug_connector::impl {
     std::string in_buf_;
     std::string send_buf_;
     size_t send_off_ = 0;   // bytes of send_buf_ already sent
+    std::atomic<uint64_t> buffered_bytes_moved_{0};   // written by the connector thread only
     std::atomic<std::thread::id> connector_thread_{};
 
     // Breakpoints answered unverified because no loaded unit carries their path yet; a
@@ -629,6 +630,7 @@ struct debug_connector::impl {
             send_buf_.clear();
             send_off_ = 0;
         } else if (send_off_ >= kMaxPendingOutput) {
+            count_moved(pending_output());
             send_buf_.erase(0, send_off_);
             send_off_ = 0;
         }
@@ -669,7 +671,15 @@ struct debug_connector::impl {
             if (parse_json(in_buf_.substr(body_start, cl), msg)) dispatch(msg);
             at = body_start + cl;
         }
-        in_buf_.erase(0, at);
+        // an erase of nothing still moves the whole buffer, once per chunk of a large body
+        if (at > 0) {
+            count_moved(in_buf_.size() - at);
+            in_buf_.erase(0, at);
+        }
+    }
+
+    void count_moved(size_t bytes) {
+        buffered_bytes_moved_.store(buffered_bytes_moved_.load(std::memory_order_relaxed) + bytes, std::memory_order_relaxed);
     }
 
     // ---- DAP request routing ----
@@ -885,6 +895,10 @@ void debug_connector::stop() {
 
 int debug_connector::port() const {
     return impl_->bound_port_;
+}
+
+uint64_t debug_connector::buffered_bytes_moved() const {
+    return impl_->buffered_bytes_moved_.load(std::memory_order_relaxed);
 }
 
 bool debug_connector::listening() const {

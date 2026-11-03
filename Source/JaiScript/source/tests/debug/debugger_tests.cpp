@@ -19,6 +19,9 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
+// A wait for what must happen fails only past this guard against a hang: it never bounds speed
+constexpr auto kHangGuard = std::chrono::minutes(10);
+
 // The old connector performed this normalization before its native setter. Keep
 // that baseline spelling available while the new source-path entry point is added.
 template<typename Controller>
@@ -69,7 +72,7 @@ public:
 
         auto wait_for_stop = [&]() -> bool {
             std::unique_lock<std::mutex> lk(m);
-            bool got = cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped; });
+            bool got = cv.wait_for(lk, kHangGuard, [&] { return stopped; });
             stopped = false;   // re-arm for the next stop
             return got;
         };
@@ -149,7 +152,7 @@ public:
         int hits = 0;
         for (;;) {
             std::unique_lock<std::mutex> lk(m);
-            if (!cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped || finished; })) break;
+            if (!cv.wait_for(lk, kHangGuard, [&] { return stopped || finished; })) break;
             if (finished) break;
             stopped = false;
             ++hits;
@@ -248,7 +251,7 @@ public:
         bool got_stop = false;
         {
             std::unique_lock<std::mutex> lk(m);
-            got_stop = cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped; });
+            got_stop = cv.wait_for(lk, kHangGuard, [&] { return stopped; });
         }
 
         // Gather while parked, then ALWAYS release the script thread before asserting —
@@ -259,7 +262,7 @@ public:
             std::promise<std::vector<jai::debug::variable_info>> pv;
             auto fut = pv.get_future();
             dbg.post_command([&] { pv.set_value(dbg.list_locals()); });
-            got_locals = fut.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            got_locals = fut.wait_for(kHangGuard) == std::future_status::ready;
             if (got_locals) locals = fut.get();
             dbg.resume();
         }
@@ -313,7 +316,7 @@ public:
         bool got_stop = false;
         {
             std::unique_lock<std::mutex> lk(m);
-            got_stop = cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped; });
+            got_stop = cv.wait_for(lk, kHangGuard, [&] { return stopped; });
         }
 
         std::vector<jai::debug::variable_info> locals;
@@ -322,7 +325,7 @@ public:
             std::promise<std::vector<jai::debug::variable_info>> pv;
             auto fut = pv.get_future();
             dbg.post_command([&] { pv.set_value(dbg.list_locals()); });
-            got_locals = fut.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            got_locals = fut.wait_for(kHangGuard) == std::future_status::ready;
             if (got_locals) locals = fut.get();
             dbg.resume();
         }
@@ -358,10 +361,10 @@ public:
             });
         }
 
-        // The stop, or nothing when none came within the timeout
-        std::optional<jai::debug::stop_info> wait(std::chrono::milliseconds timeout = std::chrono::seconds(5)) {
+        // The stop, or nothing when none came before the hang guard
+        std::optional<jai::debug::stop_info> wait() {
             std::unique_lock<std::mutex> lk(m);
-            if (!cv.wait_for(lk, timeout, [&] { return stopped; })) return std::nullopt;
+            if (!cv.wait_for(lk, kHangGuard, [&] { return stopped; })) return std::nullopt;
             stopped = false;
             return last;
         }
@@ -373,7 +376,7 @@ public:
         auto answer = std::make_shared<std::promise<decltype(read())>>();
         auto fut = answer->get_future();
         dbg.post_command([answer, read] { answer->set_value(read()); });
-        if (fut.wait_for(std::chrono::seconds(5)) != std::future_status::ready) return std::nullopt;
+        if (fut.wait_for(kHangGuard) != std::future_status::ready) return std::nullopt;
         return fut.get();
     }
 
@@ -382,19 +385,73 @@ public:
         return "<missing>";
     }
 
-    // A frame loop paced by sleeps runs a few statements between them, far fewer than the 1024 back edges and calls
-    // the budget clock samples at: an attach with a breakpoint, and then a pause, made while it runs stop it at once
+    // The loop head of a sleep-paced frame loop: the driver holds the script there to act between two known iterations, and
+    // learns whether a stop or the next iteration came first
+    struct paced_loop_gate {
+        std::mutex m;
+        std::condition_variable cv;
+        int64_t ticks = 0;
+        bool holding = false;
+        bool step = true;          // hold at every tick until released
+        bool released = false;
+        bool keep_going = true;
+        int64_t stops = 0;
+        jai::debug::stop_info last;
+
+        bool tick() {
+            std::unique_lock<std::mutex> lk(m);
+            ++ticks;
+            holding = true;
+            cv.notify_all();
+            cv.wait(lk, [&] { return released || !step; });
+            released = false;
+            holding = false;
+            return keep_going;
+        }
+        // The tick the script is held at, once it is
+        int64_t held() {
+            std::unique_lock<std::mutex> lk(m);
+            cv.wait_for(lk, kHangGuard, [&] { return holding && !released; });
+            return ticks;
+        }
+        // Lets the held script run on; true when it stopped before reaching its next tick
+        bool release_until_stop_or_next_tick() {
+            std::unique_lock<std::mutex> lk(m);
+            const int64_t at = ticks;
+            const int64_t stops_before = stops;
+            released = true;
+            cv.notify_all();
+            cv.wait_for(lk, kHangGuard, [&] { return stops > stops_before || ticks > at; });
+            return stops > stops_before;
+        }
+        void finish() {
+            std::lock_guard<std::mutex> lk(m);
+            step = false;
+            keep_going = false;
+            cv.notify_all();
+        }
+    };
+
+    // A frame loop paced by sleeps runs a few statements between them, far fewer than the 1024 back edges and calls the
+    // budget clock samples at: an attach with a breakpoint, and then a pause, made while it runs stop it within the iteration
     void sleep_paced_loop_stops_promptly(jai::backend_type type) {
         auto eng = make_backend_engine(type);
         eng->execution_budget(0);
         jai::stdlib::register_all(eng);
         auto& dbg = eng->debugger();
-        stop_waiter stops(dbg);
+        paced_loop_gate gate;
+        dbg.set_on_stopped([&gate](const jai::debug::stop_info& si) {
+            std::lock_guard<std::mutex> lk(gate.m);
+            gate.last = si;
+            ++gate.stops;
+            gate.cv.notify_all();
+        });
+        eng->add_function("tick", [&gate] { return gate.tick(); });
 
         const std::string src =
             "int frames = 0;\n"                         // line 1
             "bool quit = false;\n"                      // line 2
-            "while (!quit && frames < 400) {\n"         // line 3
+            "while (!quit && tick()) {\n"               // line 3
             "    sleep(0.02);\n"                        // line 4
             "    frames = frames + 1;\n"                // line 5
             "}\n";
@@ -402,46 +459,65 @@ public:
         std::thread script([&] {
             try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
         });
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));   // running, no session armed
 
+        const int64_t armed_at = gate.held();   // running, no session armed
         dbg.set_breakpoints("<script>", {5});
         dbg.set_enabled(true);
-        const auto hit = stops.wait();
+        const bool hit = gate.release_until_stop_or_next_tick();
+        jai::debug::stop_info hit_info;
         std::optional<int64_t> frames_at_hit;
         if (hit) {
+            hit_info = gate.last;
             frames_at_hit = parked_read(dbg, [&] { return eng->get_variable("frames").as_int(); });
             dbg.clear_breakpoints();
             dbg.resume();
         }
 
+        const int64_t paused_at = gate.held();
         dbg.request_pause();
-        const auto pause = stops.wait();
+        const bool pause = gate.release_until_stop_or_next_tick();
+        jai::debug::stop_info pause_info;
         std::optional<int64_t> frames_at_pause;
         if (pause) {
+            pause_info = gate.last;
             frames_at_pause = parked_read(dbg, [&] {
                 dbg.set_variable("quit", eng->make_value(true));
                 return eng->get_variable("frames").as_int();
             });
         }
+        gate.finish();
         dbg.detach();
         script.join();
 
         check_eq(std::string(), script_error);
-        check_true(hit.has_value(),"a breakpoint set while a sleep-paced loop runs must stop it");
+        check_true(hit, "a breakpoint set while a sleep-paced loop runs stops it before the loop comes round again");
         if (hit) {
-            check_eq(std::string("breakpoint"), hit->reason);
-            check_eq(5, hit->line);
+            check_eq(std::string("breakpoint"), hit_info.reason);
+            check_eq(5, hit_info.line);
         }
-        check_true(frames_at_hit.has_value() && *frames_at_hit < 100, "the stop comes within a few sleeps of the attach");
-        check_true(pause.has_value(), "a pause while a sleep-paced loop runs must stop it");
-        if (pause) check_eq(std::string("pause"), pause->reason);
-        check_true(frames_at_pause.has_value() && *frames_at_pause < 200, "the pause comes within a few sleeps of the request");
-        check_true(eng->get_variable("frames").as_int() < 400, "the paused loop was released through quit");
+        check_true(frames_at_hit.has_value() && *frames_at_hit == armed_at - 1, "the stop comes at the sleep after the attach");
+        check_true(pause, "a pause while a sleep-paced loop runs stops it before the loop comes round again");
+        if (pause) check_eq(std::string("pause"), pause_info.reason);
+        check_true(frames_at_pause.has_value() && *frames_at_pause == paused_at - 1, "the pause comes at the sleep after the request");
+        check_true(pause && eng->get_variable("quit").as<bool>(), "the paused loop was released through quit");
     }
 
     // A pause while the script sleeps parks it inside the sleep, at the statement that sleeps; the rest of the sleep runs
     // after the resume
     void pause_wakes_a_sleeping_script(jai::backend_type type) {
+        using clock = std::chrono::steady_clock;
+        const auto give_up = clock::now() + kHangGuard;
+        for (;;) {
+            if (pause_wakes_a_sleeping_script_attempt(type)) { return; }
+            if (clock::now() > give_up) {
+                check_true(false, "no attempt requested its pause before the sleep could end");
+                return;
+            }
+        }
+    }
+
+    // False when the pause was requested too late to prove anything (a starved driver thread): the sleep may have ended
+    bool pause_wakes_a_sleeping_script_attempt(jai::backend_type type) {
         auto eng = make_backend_engine(type);
         eng->execution_budget(0);
         jai::stdlib::register_all(eng);
@@ -449,8 +525,8 @@ public:
         stop_waiter stops(dbg);
         dbg.set_enabled(true);
         // a fixed delay before the pause let a loaded machine pause before line 1 declared done
-        std::promise<void> declared;
-        eng->add_function("declared", [&declared] { declared.set_value(); });
+        std::promise<std::chrono::steady_clock::time_point> declared;
+        eng->add_function("declared", [&declared] { declared.set_value(std::chrono::steady_clock::now()); });
 
         const std::string src =
             "int done = 0; declared();\n"               // line 1
@@ -460,9 +536,14 @@ public:
         std::thread script([&] {
             try { eng->execute(src); } catch (const std::exception& e) { script_error = e.what(); }
         });
-        declared.get_future().wait();
+        const auto sleep_starts_after = declared.get_future().get();
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         dbg.request_pause();
+        if (std::chrono::steady_clock::now() - sleep_starts_after > std::chrono::seconds(1)) {
+            dbg.detach();
+            script.join();
+            return false;
+        }
         const auto pause = stops.wait();
         std::optional<int64_t> done_at_pause;
         if (pause) {
@@ -480,6 +561,7 @@ public:
         }
         check_true(done_at_pause.has_value() && *done_at_pause == 0, "parked inside the sleep, before the next statement");
         check_eq(int64_t(1), eng->get_variable("done").as_int());
+        return true;
     }
 
     // sleep(0) waits for nothing and is the sync point a loop calls: a session armed mid-run takes its breakpoint at the
@@ -856,7 +938,7 @@ public:
         int hits = 0;
         for (;;) {
             std::unique_lock<std::mutex> lk(m);
-            if (!cv.wait_for(lk, std::chrono::seconds(10), [&] { return stopped || finished; })) break;
+            if (!cv.wait_for(lk, kHangGuard, [&] { return stopped || finished; })) break;
             if (finished) break;
             stopped = false;
             ++hits;
@@ -1205,7 +1287,7 @@ public:
 
             {
                 std::unique_lock<std::mutex> lk(m);
-                check_true(cv.wait_for(lk, std::chrono::seconds(5), [&] { return stopped; }));
+                check_true(cv.wait_for(lk, kHangGuard, [&] { return stopped; }));
             }
             check_true(dbg.is_paused());
 
@@ -1230,14 +1312,14 @@ public:
                 std::unique_lock<std::mutex> lk(m);
                 between = true;
                 cv.notify_all();
-                cv.wait_for(lk, std::chrono::seconds(5), [&] { return posted; });
+                cv.wait_for(lk, kHangGuard, [&] { return posted; });
             });
             dbg.set_breakpoints("<script>", {1, 3});
             dbg.set_enabled(true);
             std::thread script([&] { eng->execute("var a = 1;\nbetween_stops();\nvar c = 3;\n"); });
             const auto wait_stops = [&](int n) {
                 std::unique_lock<std::mutex> lk(m);
-                return cv.wait_for(lk, std::chrono::seconds(5), [&] { return stops >= n && dbg.is_paused(); });
+                return cv.wait_for(lk, kHangGuard, [&] { return stops >= n && dbg.is_paused(); });
             };
             check_true(wait_stops(1));
             int ran = 0;
@@ -1246,7 +1328,7 @@ public:
             bool left_park = false;
             {
                 std::unique_lock<std::mutex> lk(m);
-                left_park = cv.wait_for(lk, std::chrono::seconds(5), [&] { return between; });
+                left_park = cv.wait_for(lk, kHangGuard, [&] { return between; });
             }
             const bool stale = dbg.post_command_while_paused([&] { ran += 100; });
             {
@@ -1275,19 +1357,16 @@ public:
             std::thread script([&] { eng->execute("while (keep_going()) { sleep(0.00001); }"); });
             size_t stranded = 0;
             std::mt19937 rng(7);
-            // three seconds, longer on a loaded machine until the script has stopped a few hundred times
-            const auto started = std::chrono::steady_clock::now();
-            const auto running = [&]() {
-                const auto elapsed = std::chrono::steady_clock::now() - started;
-                return elapsed < std::chrono::seconds(3) || (stops.load() < 300 && elapsed < std::chrono::seconds(20));
-            };
-            for (int round = 0; round < 200000 && running(); ++round) {
+            // a count of stops, not a span of time: a loaded machine takes longer to race the same number of them
+            const size_t races = 1000;
+            const auto give_up = std::chrono::steady_clock::now() + kHangGuard;
+            while (stops.load() < races && std::chrono::steady_clock::now() < give_up) {
                 dbg.set_enabled(true);
                 dbg.request_pause();
                 const int spins = static_cast<int>(rng() % 200000);
                 for (volatile int spin = 0; spin < spins; ++spin) {}
                 dbg.set_enabled(false);
-                // stranded: paused for three seconds after the session ended (a park already under way when it ended shows
+                // stranded: still paused at the hang guard after the session ended (a park already under way when it ended shows
                 // briefly and is woken by the detach); settled: unpaused for a millisecond
                 using clock = std::chrono::steady_clock;
                 std::optional<clock::time_point> paused_since;
@@ -1296,7 +1375,7 @@ public:
                     const auto now = clock::now();
                     if (dbg.is_paused()) {
                         if (!paused_since) { paused_since = now; }
-                        if (now - *paused_since > std::chrono::seconds(3)) {
+                        if (now - *paused_since > kHangGuard) {
                             ++stranded;
                             dbg.resume();
                             break;
@@ -1313,7 +1392,7 @@ public:
             dbg.detach();
             script.join();
             check_eq(size_t(0), stranded, "a parked thread outlived the session that stopped it");
-            check_true(stops.load() > 0, "the script stopped " + std::to_string(stops.load()) + " times");
+            check_true(stops.load() >= races, "the script stopped " + std::to_string(stops.load()) + " times");
         });
 
         // ---- cost-model benchmarks (verbose runs only; non-asserting) ----

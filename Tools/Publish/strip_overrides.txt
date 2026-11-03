@@ -34,11 +34,11 @@ file: include/jaiscript/detail/ast.hpp
 
 file: source/implementation/vm/vm_backend.cpp
 <<<
-// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md
-// Stage 3, N-level): array levels step a pointer IN PLACE - zero copies, no op_index
+// Fused subscript-read operand `base[i][j]...[k]` (internal/element_read_overhead_design.md):
+// array levels step a pointer IN PLACE - zero copies, no op_index
 ===
-// Fused subscript-read operand `base[i][j]...[k]` (N levels): array levels step a pointer
-// IN PLACE - zero copies, no op_index
+// Fused subscript-read operand `base[i][j]...[k]`: array levels step a pointer IN PLACE - zero copies,
+// no op_index
 >>>
 
 file: include/jaiscript/core/value.hpp
@@ -60,13 +60,6 @@ file: include/jaiscript/detail/parser.hpp
         // const T x = e; / const x = e; (internal/const.md): the declaration, then finish_const marks it and enforces the initializer
 ===
         // const T x = e; / const x = e; is the declaration, then finish_const marks it and enforces the initializer
->>>
-
-file: source/implementation/parser.cpp
-<<<
-    // postfix on a literal (internal/grammar.md's own splice example was unparseable)
-===
-    // postfix on a literal (the grammar's own splice example was unparseable)
 >>>
 
 file: source/implementation/vm/vm_backend.cpp

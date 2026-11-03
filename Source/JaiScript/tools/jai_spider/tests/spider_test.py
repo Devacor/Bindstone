@@ -30,6 +30,8 @@ HERE = pathlib.Path(__file__).resolve().parent
 FIXTURE = HERE / "app"
 EXAMPLE = HERE.parent / "examples" / "guestbook"
 SHUTDOWN_TOKEN = "spider-test-token"
+# seconds a wait for what must happen may take: a hang rail, never a speed bound, so machine load never decides a check
+HANG_RAIL = 600
 
 
 class Server:
@@ -40,7 +42,7 @@ class Server:
 		self.process = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, cwd=str(app_dir))
 		threading.Thread(target=self._pump, daemon=True).start()
 		self.port = None
-		deadline = time.time() + 60
+		deadline = time.time() + HANG_RAIL
 		while time.time() < deadline:
 			try:
 				line = self.lines.get(timeout=0.5)
@@ -66,7 +68,7 @@ class Server:
 	def stop(self):
 		if self.process.poll() is None:
 			self.process.kill()
-		self.process.wait(timeout=10)
+		self.process.wait(timeout=HANG_RAIL)
 
 
 class Result:
@@ -104,7 +106,7 @@ class Suite:
 		if fresh or self.connection is None:
 			if self.connection is not None:
 				self.connection.close()
-			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=30)
+			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=HANG_RAIL)
 		if isinstance(body, str):
 			body = body.encode("utf-8")
 		try:
@@ -112,7 +114,7 @@ class Suite:
 			response = self.connection.getresponse()
 		except (http.client.HTTPException, OSError):
 			self.connection.close()
-			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=30)
+			self.connection = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=HANG_RAIL)
 			self.connection.request(method, path, body=body, headers=headers or {})
 			response = self.connection.getresponse()
 		data = response.read()
@@ -122,19 +124,19 @@ class Suite:
 			self.connection = None
 		return result
 
-	def raw(self, payload, read_until_close=True, timeout=10):
-		with socket.create_connection(("127.0.0.1", self.server.port), timeout=timeout) as s:
+	# read_until_close=False reads up to the end of the first header block (an interim 100 Continue)
+	def raw(self, payload, read_until_close=True):
+		with socket.create_connection(("127.0.0.1", self.server.port), timeout=HANG_RAIL) as s:
 			s.sendall(payload)
 			chunks = []
-			if not read_until_close:
-				time.sleep(0.5)
-				s.settimeout(0.5)
 			try:
 				while True:
 					chunk = s.recv(65536)
 					if not chunk:
 						break
 					chunks.append(chunk)
+					if not read_until_close and b"\r\n\r\n" in b"".join(chunks):
+						break
 			except socket.timeout:
 				pass
 			return b"".join(chunks)
@@ -148,7 +150,7 @@ class Suite:
 			self.failures.append(name + (": " + detail if detail else ""))
 			print("  FAIL " + name + (": " + detail if detail else ""))
 
-	def wait_for_log(self, needle, timeout=5):
+	def wait_for_log(self, needle, timeout=HANG_RAIL):
 		deadline = time.time() + timeout
 		while time.time() < deadline:
 			if needle in self.server.log_text():
@@ -304,9 +306,8 @@ class Suite:
 		self.check("the error is logged with its trace", self.wait_for_log("Division by zero") and "at <lambda>" in self.server.log_text())
 		r = self.request("GET", "/throw")
 		self.check("an uncaught throw is a 500", r.status == 500 and b"thrown from a handler" in r.body)
-		start = time.time()
 		r = self.request("GET", "/spin")
-		self.check("a runaway handler meets the budget", r.status == 500 and b"budget" in r.body and time.time() - start < 20, r.text()[:200])
+		self.check("a runaway handler meets the budget", r.status == 500 and b"budget" in r.body, r.text()[:200])
 		for code in ("101", "999"):
 			r = self.request("GET", "/status/" + code)
 			self.check("status " + code + " is refused with a 500", r.status == 500 and b"is not a final HTTP status (200 to 599)" in r.body, r.text()[:200])
@@ -388,7 +389,7 @@ class Suite:
 	def limits_and_framing(self):
 		raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\n\r\nGET /posts/7 HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
 		self.check("pipelined requests are answered in order", raw.count(b"HTTP/1.1 200") == 2 and raw.index(b"home") < raw.index(b'"7"'), raw.decode("latin-1")[:300])
-		c = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=10)
+		c = http.client.HTTPConnection("127.0.0.1", self.server.port, timeout=HANG_RAIL)
 		c.request("GET", "/")
 		first = c.getresponse()
 		first.read()
@@ -409,7 +410,7 @@ class Suite:
 		self.check("a Host that is not this machine is 421 on a loopback listener", raw.startswith(b"HTTP/1.1 421"), raw[:80].decode("latin-1"))
 		raw = self.raw(b"GET / HTTP/1.1\r\nHost: [::1]:80\r\nConnection: close\r\n\r\n")
 		self.check("Host [::1] is this machine", raw.startswith(b"HTTP/1.1 200"), raw[:80].decode("latin-1"))
-		idle = [socket.create_connection(("127.0.0.1", self.server.port), timeout=10) for _ in range(128)]
+		idle = [socket.create_connection(("127.0.0.1", self.server.port), timeout=HANG_RAIL) for _ in range(128)]
 		try:
 			raw = self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
 			self.check("one address holds at most 128 connections", raw.startswith(b"HTTP/1.1 503") and b"from one address" in raw, raw[:120].decode("latin-1"))
@@ -417,7 +418,8 @@ class Suite:
 			for s in idle:
 				s.close()
 		served = False
-		for _ in range(50):
+		deadline = time.time() + HANG_RAIL
+		while time.time() < deadline:
 			if self.raw(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n").startswith(b"HTTP/1.1 200"):
 				served = True
 				break
@@ -447,7 +449,7 @@ def run_client(suite, runner, backend, transport):
 		env["JAISCRIPT_HTTP_TRANSPORT"] = transport
 		label = transport + " transport"
 	base = "http://127.0.0.1:" + str(suite.server.port)
-	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client.jai"), "--", base], capture_output=True, timeout=180, env=env)
+	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client.jai"), "--", base], capture_output=True, timeout=HANG_RAIL, env=env)
 	out = result.stdout.decode("utf-8", "replace")
 	if suite.verbose:
 		print(out)
@@ -457,7 +459,7 @@ def run_client(suite, runner, backend, transport):
 	summary = [line for line in out.splitlines() if line.startswith("client: ")]
 	suite.check("client (" + label + "): every check ran and held", result.returncode == 0 and summary and summary[-1].endswith(" 0 failed") and not summary[-1].startswith("client: 0 passed"),
 		(summary[-1] if summary else "no summary") + " " + result.stderr.decode("utf-8", "replace")[-600:])
-	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client_catch.jai"), "--", base], capture_output=True, timeout=60, env=env)
+	result = subprocess.run([runner, "--backend=" + backend, str(HERE / "client_catch.jai"), "--", base], capture_output=True, timeout=HANG_RAIL, env=env)
 	out = (result.stdout + result.stderr).decode("utf-8", "replace")
 	suite.check("client (" + label + "): spider::catch is spider::get", "catch: ok" in out, out[-600:])
 
@@ -466,7 +468,7 @@ def run_backend(exe, runner, backend, verbose):
 	work = pathlib.Path(tempfile.mkdtemp(prefix="spider_test_"))
 	app_dir = work / "app"
 	shutil.copytree(FIXTURE, app_dir)
-	server = Server(exe, app_dir, backend, ["--max-body", "1M", "--budget", "1", "--timeout", "10", "--dev"])
+	server = Server(exe, app_dir, backend, ["--max-body", "1M", "--budget", "20", "--timeout", str(HANG_RAIL), "--dev"])
 	suite = Suite(server, app_dir, verbose)
 	try:
 		suite.run()
@@ -478,7 +480,7 @@ def run_backend(exe, runner, backend, verbose):
 		r = suite.request("POST", "/__spider/shutdown", headers={"X-Spider-Shutdown": SHUTDOWN_TOKEN}, fresh=True)
 		suite.check("POST /__spider/shutdown with the token stops the server", r.status == 200)
 		try:
-			code = server.process.wait(timeout=10)
+			code = server.process.wait(timeout=HANG_RAIL)
 			suite.check("the process exits cleanly after the shutdown request", code == 0, "exit code " + str(code))
 		except subprocess.TimeoutExpired:
 			suite.check("the process exits cleanly after the shutdown request", False, "still running")

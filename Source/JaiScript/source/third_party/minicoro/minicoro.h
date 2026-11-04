@@ -301,6 +301,9 @@ struct mco_coro {
   size_t bytes_stored;
   size_t storage_size;
   void* asan_prev_stack; /* Used by address sanitizer. */
+  void* asan_co_stack; /* Used by address sanitizer: the coroutine's fake stack while it is suspended. */
+  const void* asan_back_bottom; /* Used by address sanitizer: the stack that resumed the coroutine. */
+  size_t asan_back_size;
   void* tsan_prev_fiber; /* Used by thread sanitizer. */
   void* tsan_fiber; /* Used by thread sanitizer. */
   size_t magic_number; /* Used to check stack overflow. */
@@ -575,12 +578,8 @@ static MCO_FORCE_INLINE void _mco_prepare_jumpin(mco_coro* co) {
   }
   mco_current_co = co;
 #ifdef _MCO_USE_ASAN
-  if(prev_co) {
-    void* bottom_old = NULL;
-    size_t size_old = 0;
-    __sanitizer_finish_switch_fiber(prev_co->asan_prev_stack, (const void**)&bottom_old, &size_old);
-    prev_co->asan_prev_stack = NULL;
-  }
+  /* Every switch is a start before it and a finish on the stack it lands on, both ways: ASan otherwise keeps the
+     coroutine's stack as the thread's after the switch back, and ignores the stack unpoisoning a later throw asks for. */
   __sanitizer_start_switch_fiber(&co->asan_prev_stack, co->stack_base, co->stack_size);
 #endif
 #ifdef _MCO_USE_TSAN
@@ -600,13 +599,7 @@ static MCO_FORCE_INLINE void _mco_prepare_jumpout(mco_coro* co) {
   }
   mco_current_co = prev_co;
 #ifdef _MCO_USE_ASAN
-  void* bottom_old = NULL;
-  size_t size_old = 0;
-  __sanitizer_finish_switch_fiber(co->asan_prev_stack, (const void**)&bottom_old, &size_old);
-  co->asan_prev_stack = NULL;
-  if(prev_co) {
-    __sanitizer_start_switch_fiber(&prev_co->asan_prev_stack, bottom_old, size_old);
-  }
+  __sanitizer_start_switch_fiber(co->state == MCO_DEAD ? NULL : &co->asan_co_stack, co->asan_back_bottom, co->asan_back_size);
 #endif
 #ifdef _MCO_USE_TSAN
   void* tsan_prev_fiber = co->tsan_prev_fiber;
@@ -615,10 +608,29 @@ static MCO_FORCE_INLINE void _mco_prepare_jumpout(mco_coro* co) {
 #endif
 }
 
+/* Landed on the coroutine's stack from the one that resumed it. */
+static MCO_FORCE_INLINE void _mco_landed_in(mco_coro* co) {
+#ifdef _MCO_USE_ASAN
+  __sanitizer_finish_switch_fiber(co->asan_co_stack, &co->asan_back_bottom, &co->asan_back_size);
+#else
+  _MCO_UNUSED(co);
+#endif
+}
+
+/* Landed back on the stack that resumed the coroutine. */
+static MCO_FORCE_INLINE void _mco_landed_back(mco_coro* co) {
+#ifdef _MCO_USE_ASAN
+  __sanitizer_finish_switch_fiber(co->asan_prev_stack, NULL, NULL);
+#else
+  _MCO_UNUSED(co);
+#endif
+}
+
 static void _mco_jumpin(mco_coro* co);
 static void _mco_jumpout(mco_coro* co);
 
 static MCO_NO_INLINE void _mco_main(mco_coro* co) {
+  _mco_landed_in(co);
   co->func(co); /* Run the coroutine function. */
   co->state = MCO_DEAD; /* Coroutine finished successfully, set state to dead. */
   _mco_jumpout(co); /* Jump back to the old context .*/
@@ -1317,12 +1329,14 @@ static void _mco_jumpin(mco_coro* co) {
   _mco_context* context = (_mco_context*)co->context;
   _mco_prepare_jumpin(co);
   _mco_switch(&context->back_ctx, &context->ctx); /* Do the context switch. */
+  _mco_landed_back(co);
 }
 
 static void _mco_jumpout(mco_coro* co) {
   _mco_context* context = (_mco_context*)co->context;
   _mco_prepare_jumpout(co);
   _mco_switch(&context->ctx, &context->back_ctx); /* Do the context switch. */
+  _mco_landed_in(co);
 }
 
 static mco_result _mco_create_context(mco_coro* co, mco_desc* desc) {
@@ -1398,6 +1412,7 @@ static void _mco_jumpin(mco_coro* co) {
   context->back_fib = cur_fib;
   _mco_prepare_jumpin(co);
   SwitchToFiber(context->fib);
+  _mco_landed_back(co);
 }
 
 static void CALLBACK _mco_wrap_main(void* co) {
@@ -1411,6 +1426,7 @@ static void _mco_jumpout(mco_coro* co) {
   context->back_fib = NULL;
   _mco_prepare_jumpout(co);
   SwitchToFiber(back_fib);
+  _mco_landed_in(co);
 }
 
 /* Reverse engineered Fiber struct, used to get stack base. */
@@ -1499,6 +1515,7 @@ static void _mco_jumpin(mco_coro* co) {
   context->back_fib = back_fib;
   _mco_prepare_jumpin(co);
   emscripten_fiber_swap(back_fib, &context->fib); /* Do the context switch. */
+  _mco_landed_back(co);
 }
 
 static void _mco_jumpout(mco_coro* co) {
@@ -1506,6 +1523,7 @@ static void _mco_jumpout(mco_coro* co) {
   running_fib = context->back_fib;
   _mco_prepare_jumpout(co);
   emscripten_fiber_swap(&context->fib, context->back_fib); /* Do the context switch. */
+  _mco_landed_in(co);
 }
 
 static mco_result _mco_create_context(mco_coro* co, mco_desc* desc) {

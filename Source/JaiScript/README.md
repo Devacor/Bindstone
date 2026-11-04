@@ -178,8 +178,8 @@ Release pass.
 pulls it in with `add_subdirectory`; [`docs/BUILD.md`](docs/BUILD.md) has every option and both
 consumption routes (`add_subdirectory` and `find_package(JaiScript)`).
 
-Two third-party sources ship, unmodified: [minicoro](source/third_party/minicoro) (public domain or
-MIT-0), which the library compiles, and the [SQLite amalgamation](tools/jai_spider/third_party/sqlite)
+Two third-party sources ship: [minicoro](source/third_party/minicoro) (public domain or
+MIT-0), which the library compiles, with its AddressSanitizer fiber-switch annotations corrected, and the [SQLite amalgamation](tools/jai_spider/third_party/sqlite)
 (public domain), which only `jai_spider` compiles. The cross-language comparison benchmarks are a
 separate harness, not part of this repository. Integer
 arithmetic raises a catchable error on overflow by default; define `JAISCRIPT_WRAP_ON_OVERFLOW`

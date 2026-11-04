@@ -52,6 +52,7 @@ inline double median_of(std::vector<double> values) {
 
 // Times reference and measured in alternating order for `rounds` rounds after one untimed warm-up of each, so load and
 // drift fall on both sides alike, and prints the report. A side returns the seconds of the part it measures (setup stays out).
+// Give both sides about the same duration: a side that runs ten times longer catches ten times the bursts of load.
 inline speed_ratio compare_speed(const std::string& what, const std::function<double()>& reference, const std::function<double()>& measured,
                                  int rounds = 7) {
     reference();

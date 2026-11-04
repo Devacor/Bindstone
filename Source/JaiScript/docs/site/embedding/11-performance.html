@@ -335,7 +335,7 @@ the interpreter and ~4–7% behind on the VM. The moral for code review: choose 
 to maintain; the per-pixel hot stages are held to the flat shape by the parallel-admission rules either
 way, and that is where the time goes.</p>
 <h2 id="measuring-yourself">Measuring yourself<a class="hlink" href="#measuring-yourself" aria-label="link">&#8203;</a></h2>
-<p>Build the test executable with the performance suites enabled (<code>-DJAISCRIPT_ENABLE_BENCHMARKS=ON</code> at configure time, Release; see <a href="https://github.com/Devacor/JaiScript/blob/master/docs/BUILD.md"><code>docs/BUILD.md</code></a>, &quot;Comparison benchmarks&quot;) and then:</p>
+<p>Build the test executable with the performance suites enabled (<code>-DJAISCRIPT_ENABLE_BENCHMARKS=ON</code> at configure time, Release; see <a href="https://github.com/Devacor/jaiscript/blob/master/docs/BUILD.md"><code>docs/BUILD.md</code></a>, &quot;Comparison benchmarks&quot;) and then:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">jaiscript_tests &quot;Performance Benchmarks&quot; --verbose [--backend=vm]</code></pre></div>
 <p>These suites time JaiScript alone. The head-to-head numbers against Lua, Squirrel and ChaiScript come from the
 separate comparison harness, which is not part of this package.</p>
@@ -350,7 +350,7 @@ next to the parity hashes (each example&#x27;s README has the flags).</p><nav cl
 </main>
 </div>
 <footer class="site-footer">
-<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/JaiScript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/JaiScript">source</a> &middot; <a href="https://github.com/Devacor/JaiScript/issues">report a docs bug</a></p>
+<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/jaiscript/blob/master/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/jaiscript">source</a> &middot; <a href="https://github.com/Devacor/jaiscript/issues">report a docs bug</a></p>
 <p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>
 </footer>
 <script src="../assets/search-index.js"></script>

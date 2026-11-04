@@ -13,15 +13,15 @@ You need a C++20 compiler, CMake 3.25+ and Ninja (on Windows, a Visual Studio de
 has all three). Clone, build the runner with one command, and play Gator Quest on it:
 
 ```bash
-git clone https://github.com/Devacor/JaiScript.git
-cd JaiScript
+git clone https://github.com/Devacor/jaiscript.git
+cd jaiscript
 cmake --workflow --preset runner
 build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
 ```
 
 The documentation — an 18-chapter language guide, a 19-chapter embedding guide, language bridges
-and code migrations, the examples and a reference — is a static site in [`docs/site/`](docs/site/). Open
-`docs/site/index.html` in a browser; a clone is all you need.
+and code migrations, the examples and a reference — is a static site in [`docs/site/`](docs/site/), published at
+[jaiscript.com](https://jaiscript.com). Open `docs/site/index.html` in a browser; a clone is all you need.
 
 ## A taste
 
@@ -243,7 +243,7 @@ It is a fan project, not affiliated with or endorsed by id Software.
 
 ## Documentation
 
-- [`docs/site/index.html`](docs/site/index.html) — the documentation site: language guide,
+- [jaiscript.com](https://jaiscript.com) ([`docs/site/index.html`](docs/site/index.html)) — the documentation site: language guide,
   embedding guide, examples, reference.
 - [`docs/site/guide/index.html`](docs/site/guide/index.html) — the language guide, from the
   first script to modules, reflection and strict checking.
@@ -259,7 +259,7 @@ It is a fan project, not affiliated with or endorsed by id Software.
   client for VS Code.
 - [`CONTRIBUTING.md`](CONTRIBUTING.md) — how to build, test, and land a change.
 
-Bugs and questions: [github.com/Devacor/JaiScript/issues](https://github.com/Devacor/JaiScript/issues).
+Bugs and questions: [github.com/Devacor/jaiscript/issues](https://github.com/Devacor/jaiscript/issues).
 
 ## Status
 

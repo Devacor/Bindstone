@@ -76,7 +76,9 @@ public:
 							auto loaded = eng->jaibite_load_bytes(bytes);
 							check_eq(bytes, loaded.save_bytes());
 						} catch (const jai::runtime_error& error) {
-							check_eq(nesting, std::string(error.what()));
+							// the reader, or the check a load runs over what it read
+							const std::string text = error.what();
+							check_true(text == nesting || text == "Nesting too deep for the host thread's stack", text);
 						}
 					}
 					check_eq(script_int(42), eng->execute("40 + 2;").as_int());

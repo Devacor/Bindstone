@@ -345,6 +345,9 @@ gate_asan() {
 		run cp -f "$dll" "$build/bin/"
 	fi
 	BIN="$build/bin"
+	# ASan clears the stack an exception unwinds only on a stack of at most 64 MiB (__asan_handle_no_return); past that the
+	# unwound frames stay poisoned and a later test reads them as a stack-use-after-scope
+	ulimit -s 61440 2>/dev/null || true
 	run "$BIN/jaiscript_tests" --progress --backend=interpreter
 	run "$BIN/jaiscript_tests" --progress --backend=vm
 	FUZZ_ITERATIONS="${FUZZ_ITERATIONS:-100}"

@@ -3837,6 +3837,25 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
 	const bool isIncrement = (ins.c & incdec_flag_increment) != 0;
 
+	if (!(ins.c & incdec_flag_global_only)) {
+		// a plain int or float steps in place whoever owns it (a local or a field of this): the step keeps its kind, so no declared
+		// type converts it, and the name's resolution has already applied any access rule
+		script_value* cell = resolve_local_or_env(f, ins.b, sym, f.ip * 3 + 2);
+		if (cell && cell->raw_storage_index() == script_value::TYPEID_INT) {
+			VM_TRY_ASSIGN(script_value stepped, detail::incdec_step(*cell, isIncrement, engine_));
+			const script_int old = cell->unchecked_as_int();
+			cell->unchecked_as_int_ref() = stepped.unchecked_as_int();   // before the push, which may move a slot's cell
+			stack_.push_back(postfix ? script_value(old, engine_) : std::move(stepped));
+			return {};
+		}
+		if (cell && cell->raw_storage_index() == script_value::TYPEID_FLOAT) {
+			const script_float old = cell->unchecked_as_float();
+			const script_float stepped = old + (isIncrement ? 1.0 : -1.0);
+			cell->unchecked_as_float_ref() = stepped;
+			stack_.push_back(script_value(postfix ? old : stepped, engine_));
+			return {};
+		}
+	}
 	script_value* varPtr = (ins.c & incdec_flag_global_only)
 		? engine_->get_global_environment()->get_value_ptr(sym)
 		: variable_cell(f, ins.b, sym, f.ip * 3 + 2);

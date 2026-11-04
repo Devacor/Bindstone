@@ -353,6 +353,36 @@ namespace jai::vm {
         void drop_debug_span(const ast_node* node);
         void compile_block(block_stmt* block);
         void compile_expression(const expression_ptr& expr, bool as_statement = false);
+        // each construct of compile_expression and compile_statement_code compiles in its own frame: a level of nesting holds only the
+        // frames of the constructs it nests through
+        void compile_ternary(const ternary_expr* t);
+        void compile_array_literal(const expression_ptr& expr);
+        void compile_map_literal(const expression_ptr& expr);
+        void compile_include_expression(const include_expr* inc);
+        void compile_import_expression(const expression_ptr& expr);
+        void compile_throw(const expression_ptr& expr);
+        void compile_yield(const yield_expr* ye);
+        void compile_return(const statement_ptr& stmt);
+        void compile_destructuring(const destructuring_decl* dd);
+        void compile_include_declaration(const include_decl* inc);
+        void compile_import_declaration(const declaration_ptr& decl);
+        closure_proto closure_proto_of(const std::shared_ptr<lambda_expr>& expr);
+        std::shared_ptr<chunk> open_callable(std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
+        void close_callable(chunk& result, const block_stmt& body);
+        std::shared_ptr<chunk> recompile_open_loops(std::shared_ptr<chunk> first, std::string_view name, const std::vector<parameter>& parameters, const std::shared_ptr<block_stmt>& body, size_t local_count);
+        std::shared_ptr<chunk> nesting_exhausted_chunk(std::string_view name, size_t local_count, bool function_body, const source_location& at);
+        // A call site whose arguments are still compiling lives here, not in a frame of the walk (a call_site is several hundred bytes)
+        std::vector<call_site> pending_sites_;
+        struct site_lease {
+            std::vector<call_site>& sites;
+            size_t at;
+            explicit site_lease(std::vector<call_site>& a_sites) : sites(a_sites), at(a_sites.size()) { sites.emplace_back(); }
+            ~site_lease() { sites.resize(at); }
+            site_lease(const site_lease&) = delete;
+            site_lease& operator=(const site_lease&) = delete;
+            call_site& operator*() const { return sites[at]; }
+            call_site* operator->() const { return &sites[at]; }
+        };
         // Statement-position stores/incdecs whose result is discarded compile to a
         // no-result form (no push, no op_pop). Returns false if the shape doesn't apply.
         bool compile_no_result_expression(const expression_ptr& expr);

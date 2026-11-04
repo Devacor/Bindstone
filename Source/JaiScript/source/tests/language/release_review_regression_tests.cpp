@@ -197,7 +197,7 @@ public:
 		test("deep_if_nesting_no_crash", [this]() {
 			auto e = make_engine();
 			std::string src;
-			for (int i = 0; i < 200000; ++i) { src += "if (true) "; }
+			for (int i = 0; i < 500000; ++i) { src += "if (true) "; }
 			src += "1;";
 			std::string failure;
 			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
@@ -212,20 +212,32 @@ public:
 		});
 		test("deep_paren_nesting_no_crash", [this]() {
 			auto e = make_engine();
-			std::string src(200000, '(');
+			std::string src(500000, '(');
 			src += "1";
-			src += std::string(200000, ')');
+			src += std::string(500000, ')');
 			std::string failure;
 			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
 			check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
-		test("modest_paren_nesting_still_works", [this]() {
+		// depths past what a 1 MB stack held before each nesting level kept a small frame in every pass
+		test("nesting_hundreds_deep_still_works", [this]() {
+			auto repeat = [](std::string_view piece, int n) {
+				std::string result;
+				for (int i = 0; i < n; ++i) { result += piece; }
+				return result;
+			};
 			auto e = make_engine();
-			std::string src(20, '(');
-			src += "1 + 2";
-			src += std::string(20, ')');
-			check_eq((int64_t)3, e->execute(src).as_int());
+			check_eq((int64_t)3, e->execute(repeat("(", 150) + "1 + 2" + repeat(")", 150)).as_int());
+			check_eq((int64_t)7, e->execute("var deep = " + repeat("[", 150) + "7" + repeat("]", 150) + ";\n"
+				"var at = deep; for (int i = 0; i < 150; ++i) { at = at[0]; } at").as_int());
+			check_true(e->execute(repeat("{\"k\": ", 150) + "7" + repeat("}", 150)).is_map(), "a data file's map, nested");
+			check_eq((int64_t)7, e->execute("var deep = " + repeat("{\"k\": ", 150) + "7" + repeat("}", 150) + ";\n"
+				"var at = deep; for (int i = 0; i < 150; ++i) { at = at[\"k\"]; } at").as_int());
+			check_eq((int64_t)7, e->execute("int f(int a) { return a; }\n" + repeat("f(", 120) + "7" + repeat(")", 120)).as_int());
+			check_eq((int64_t)7, e->execute("var f = " + repeat("[]() { return ", 80) + "7" + repeat("; }", 80) + ";\n"
+				"var at = f; for (int i = 0; i < 80; ++i) { at = at(); } at").as_int());
+			check_eq((int64_t)7, e->execute("int g() { " + repeat("if (true) { ", 200) + "return 7;" + repeat(" }", 200) + " return 0; }\ng()").as_int());
 		});
 
 		// ---- scripted-entity glue: hook properties + signal connect + getVar/setVar ----

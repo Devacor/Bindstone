@@ -722,31 +722,35 @@ std::shared_ptr<chunk> vm_compiler::within_native_stack(std::string_view name, s
 		return result;
 	} catch (const detail::nesting_exhausted& e) {
 		if (--compile_entries_ > 0) { throw; }
-		vm_compiler fresh(symbolizer_, builtins_);
-		fresh.engine_ = engine_;
-		fresh.member_class_ = member_class_;
-		fresh.prologue_ = prologue_;
-		fresh.typed_lowering_ = typed_lowering_;
-		fresh.ir_listing_ = ir_listing_;
-		fresh.ir_passes_ = ir_passes_;
-		fresh.reference_ = reference_;
-		fresh.inlining_off_ = inlining_off_;
-		*this = std::move(fresh);
-		auto result = std::make_shared<chunk>();
-		result->function_name = std::string(name);
-		result->local_count = local_count;
-		result->first_temp_slot = function_body ? local_count : SIZE_MAX;
-		result->is_function_body = function_body;
-		auto at = std::make_shared<block_stmt>(e.location(), std::vector<declaration_ptr>{});
-		chunk_ = result.get();
-		current_stmt_ = at.get();
-		chunk_->nodes.push_back(std::move(at));
-		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::max_recursion_depth), add_message(detail::k_nesting_too_deep), k_invalid_u32);
-		emit(opcode::op_halt);
-		chunk_ = nullptr;
-		current_stmt_ = nullptr;
-		return result;
+		return nesting_exhausted_chunk(name, local_count, function_body, e.location());
 	}
+}
+
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::nesting_exhausted_chunk(std::string_view name, size_t local_count, bool function_body, const source_location& at_location) {
+	vm_compiler fresh(symbolizer_, builtins_);
+	fresh.engine_ = engine_;
+	fresh.member_class_ = member_class_;
+	fresh.prologue_ = prologue_;
+	fresh.typed_lowering_ = typed_lowering_;
+	fresh.ir_listing_ = ir_listing_;
+	fresh.ir_passes_ = ir_passes_;
+	fresh.reference_ = reference_;
+	fresh.inlining_off_ = inlining_off_;
+	*this = std::move(fresh);
+	auto result = std::make_shared<chunk>();
+	result->function_name = std::string(name);
+	result->local_count = local_count;
+	result->first_temp_slot = function_body ? local_count : SIZE_MAX;
+	result->is_function_body = function_body;
+	auto at = std::make_shared<block_stmt>(at_location, std::vector<declaration_ptr>{});
+	chunk_ = result.get();
+	current_stmt_ = at.get();
+	chunk_->nodes.push_back(std::move(at));
+	emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::max_recursion_depth), add_message(detail::k_nesting_too_deep), k_invalid_u32);
+	emit(opcode::op_halt);
+	chunk_ = nullptr;
+	current_stmt_ = nullptr;
+	return result;
 }
 
 // a construct the parser, the jaibite reader or the compiler's own admission rules out
@@ -856,7 +860,7 @@ std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaratio
 	return within_native_stack({}, 0, false, [&] { return compile_program_code(declarations, program_frame); });
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_program_code(const std::vector<declaration_ptr>& declarations, bool program_frame) {
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_program_code(const std::vector<declaration_ptr>& declarations, bool program_frame) {
 	JAI_CENSUS_F(compile_chunk, 1);
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
@@ -938,6 +942,14 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_code(std::string_view name,
 	loop_marks_.clear();
 	auto first = compile_callable_once(name, parameters, body, local_count);
 	if (!first || first->inline_refusals.empty() || !ir_passes_ || !typed_lowering_) return first;
+	return recompile_open_loops(std::move(first), name, parameters, body, local_count);
+}
+
+// A loop an inline refusal kept open compiles again with it marked open; the second form wins only when it keeps every loop
+// the first closed
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::recompile_open_loops(std::shared_ptr<chunk> first, std::string_view name,
+                                                                      const std::vector<parameter>& parameters,
+                                                                      const std::shared_ptr<block_stmt>& body, size_t local_count) {
 	auto lines_hold = [&](const chunk& c, uint32_t head, uint32_t back, uint32_t line) {
 		const ast_node* h = head < c.stmt_nodes.size() ? c.stmt_nodes[head] : nullptr;
 		const ast_node* b = back < c.stmt_nodes.size() ? c.stmt_nodes[back] : nullptr;
@@ -979,10 +991,21 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_code(std::string_view name,
 	return any_open || calls_of(*second) < calls_of(*first) ? second : first;
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
                                                           const std::vector<parameter>& parameters,
                                                           const std::shared_ptr<block_stmt>& body,
                                                           size_t local_count) {
+	auto result = open_callable(name, parameters, body, local_count);
+	for (const auto& decl : body->declarations) {
+		compile_declaration(decl, false);
+	}
+	close_callable(*result, *body);
+	return result;
+}
+
+// the chunk a callable compiles into, its frame's bookkeeping and the parameters' prologue
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::open_callable(std::string_view name, const std::vector<parameter>& parameters,
+                                                               const std::shared_ptr<block_stmt>& body, size_t local_count) {
 	auto result = std::make_shared<chunk>();
 	chunk_ = result.get();
 	chunk_->function_name = std::string(name);
@@ -1063,33 +1086,32 @@ std::shared_ptr<chunk> vm_compiler::compile_callable_once(std::string_view name,
 	}
 	if (capture_count > 0) { emit(opcode::op_bind_captures, static_cast<uint32_t>(capture_first), static_cast<uint32_t>(capture_count)); }
 	if (prologue_) { compile_constructor_prologue(*prologue_); }
+	return result;
+}
 
-	for (const auto& decl : body->declarations) {
-		compile_declaration(decl, false);
-	}
+JAI_NOINLINE void vm_compiler::close_callable(chunk& result, const block_stmt& body) {
 	emit(opcode::op_halt);
 	close_debug_locals(0);
-	result->needs_frame_env = reference_ || body_needs_frame_env(*result);   // the reference mode keeps the eager per-call env
-	result->shares_cells = body->shares_cells;
-	if (result->shares_cells) { result->needs_frame_env = true; }
+	result.needs_frame_env = reference_ || body_needs_frame_env(result);   // the reference mode keeps the eager per-call env
+	result.shares_cells = body.shares_cells;
+	if (result.shares_cells) { result.needs_frame_env = true; }
 	// The lazy safe list is a strict subset of the sticky list, so env-free bodies qualify
-	result->method_env_reusable = !reference_ && (!result->needs_frame_env || method_body_env_reusable(*result));
+	result.method_env_reusable = !reference_ && (!result.needs_frame_env || method_body_env_reusable(result));
 	// Register-file temps live above local_count: raise it to the watermark so the
 	// window null-fill (and fiber set_local growth) covers every temp slot
-	if (temp_high_ > result->local_count) {
-		result->local_count = temp_high_;
+	if (temp_high_ > result.local_count) {
+		result.local_count = temp_high_;
 	}
 	if (!reference_) {
-		lower_typed_ops(*result);
-		lower_dynamic_ops(*result);
-		fold_member_temps(*result);
-		fuse_kill_jumps(*result);
+		lower_typed_ops(result);
+		lower_dynamic_ops(result);
+		fold_member_temps(result);
+		fuse_kill_jumps(result);
 	}
 	frame_param_kinds_.clear();
 	frame_eligible_ = false;
 	temps_active_ = false;
 	chunk_ = nullptr;
-	return result;
 }
 
 // a body the first form of a frame program covers: no loop anywhere (a switch, a try or a nested declaration counts as one: the region refuses them)
@@ -1182,7 +1204,7 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_expression(const expressi
 	return within_native_stack({}, 0, false, [&] { return compile_standalone_expression_code(expr); });
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_standalone_expression_code(const expression_ptr& expr) {
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_standalone_expression_code(const expression_ptr& expr) {
 	JAI_CENSUS_F(compile_chunk, 3);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
@@ -1220,7 +1242,7 @@ std::shared_ptr<chunk> vm_compiler::compile_level_initializers(std::string_view 
 	return within_native_stack(name, 0, true, [&] { return compile_level_initializers_code(name, initializers); });
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_level_initializers_code(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_level_initializers_code(std::string_view name, const std::vector<std::pair<uint64_t, expression_ptr>>& initializers) {
 	JAI_CENSUS_F(compile_chunk, 2);
 	open_loops_.clear();
 	loop_marks_.clear();
@@ -1263,7 +1285,7 @@ std::shared_ptr<chunk> vm_compiler::compile_level_initializers_code(std::string_
 
 // Each step's arguments evaluate in the constructor's frame, taken as a call's are, and its op constructs the class (a base's
 // constructor frame answering as the base); the level's own fields follow, each value stored into this's field
-void vm_compiler::compile_constructor_prologue(const constructor_prologue& prologue) {
+JAI_NOINLINE void vm_compiler::compile_constructor_prologue(const constructor_prologue& prologue) {
 	name_slots_ = &prologue.name_slots;
 	if (prologue.evaluates) { emit(opcode::op_ctor_scope, static_cast<uint32_t>(prologue.name_slots.size())); }
 	const uint32_t first_step = static_cast<uint32_t>(chunk_->ctor_steps.size());
@@ -1280,18 +1302,18 @@ void vm_compiler::compile_constructor_prologue(const constructor_prologue& prolo
 		if (init && !init->arguments.empty()) {
 			std::vector<uint8_t> captures;
 			detail::transient_read_marker::stamp_arg_captures(init->arguments, captures);
-			call_site site;
+			site_lease site(pending_sites_);
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 			for (size_t k = 0; k < init->arguments.size(); ++k) {
 				const auto& arg = init->arguments[k];
 				current_stmt_ = arg.get();
 				chunk_->nodes.push_back(arg);
-				record_argument_source(site, arg, init->arguments.size());
+				record_argument_source(*site, arg, init->arguments.size());
 				compile_expression(arg);
 				emit_arg_capture(captures, k, arg, step, capture_form_ctor);
 			}
 			chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
-			chunk_->call_sites.push_back(std::move(site));
+			chunk_->call_sites.push_back(std::move(*site));
 			site_index = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 		}
 		emit(prologue.delegation ? opcode::op_ctor_delegate : opcode::op_ctor_base, step, argc, site_index);
@@ -1325,7 +1347,7 @@ std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration(const declara
 	return within_native_stack({}, 0, false, [&] { return compile_standalone_declaration_code(decl); });
 }
 
-std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration_code(const declaration_ptr& decl) {
+JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::compile_standalone_declaration_code(const declaration_ptr& decl) {
 	JAI_CENSUS_F(compile_chunk, 4);
 	auto saved_chunk = chunk_;
 	auto saved_stmt = current_stmt_;
@@ -1428,21 +1450,9 @@ void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top
 	case node_type::statement_decl:
 		compile_statement(static_cast<statement_decl*>(decl.get())->statement);
 		return;
-	case node_type::destructuring_decl: {
-		auto* dd = static_cast<destructuring_decl*>(decl.get());
-		compile_expression(dd->initializer);
-		destructure_proto proto;
-		for (size_t i = 0; i < dd->names.size(); ++i) {
-			size_t slot = i < dd->slot_indices.size() ? dd->slot_indices[i] : SIZE_MAX;
-			if (slot != SIZE_MAX && symbol_is_env_only(dd->names[i].second)) {
-				slot = SIZE_MAX;
-			}
-			proto.names.emplace_back(dd->names[i].second, slot);
-		}
-		chunk_->destructure_protos.push_back(std::move(proto));
-		emit(opcode::op_destructure, static_cast<uint32_t>(chunk_->destructure_protos.size() - 1));
+	case node_type::destructuring_decl:
+		compile_destructuring(static_cast<destructuring_decl*>(decl.get()));
 		return;
-	}
 	case node_type::class_decl:
 		emit(opcode::op_class_decl, add_node(decl));
 		return;
@@ -1455,34 +1465,53 @@ void vm_compiler::compile_declaration_code(const declaration_ptr& decl, bool top
 	case node_type::extern_decl:
 		emit(opcode::op_extern_decl, add_node(decl));
 		return;
-	case node_type::include_decl: {
-		auto* inc = static_cast<include_decl*>(decl.get());
-		uint32_t path_msg = k_invalid_u32;
-		uint32_t is_expr = 0;
-		if (inc->path_expr) {
-			compile_expression(inc->path_expr);
-			is_expr = 1;
-		} else {
-			path_msg = add_message(inc->path);
-		}
-		emit(opcode::op_include, path_msg, is_expr);
-		emit(opcode::op_pop);
+	case node_type::include_decl:
+		compile_include_declaration(static_cast<include_decl*>(decl.get()));
 		return;
-	}
-	case node_type::import_decl: {
-		auto* imp = static_cast<import_decl*>(decl.get());
-		uint32_t exprs = 0;
-		if (imp->path_expr) {
-			compile_expression(imp->path_expr);
-			exprs = 1;
-		}
-		emit(opcode::op_import, add_node(decl), exprs, 0);   // a statement: pushes nothing
+	case node_type::import_decl:
+		compile_import_declaration(decl);
 		return;
-	}
 	default:
 		compile_statement(std::static_pointer_cast<statement>(decl));
 		return;
 	}
+}
+
+JAI_NOINLINE void vm_compiler::compile_destructuring(const destructuring_decl* dd) {
+	compile_expression(dd->initializer);
+	destructure_proto proto;
+	for (size_t i = 0; i < dd->names.size(); ++i) {
+		size_t slot = i < dd->slot_indices.size() ? dd->slot_indices[i] : SIZE_MAX;
+		if (slot != SIZE_MAX && symbol_is_env_only(dd->names[i].second)) {
+			slot = SIZE_MAX;
+		}
+		proto.names.emplace_back(dd->names[i].second, slot);
+	}
+	chunk_->destructure_protos.push_back(std::move(proto));
+	emit(opcode::op_destructure, static_cast<uint32_t>(chunk_->destructure_protos.size() - 1));
+}
+
+JAI_NOINLINE void vm_compiler::compile_include_declaration(const include_decl* inc) {
+	uint32_t path_msg = k_invalid_u32;
+	uint32_t is_expr = 0;
+	if (inc->path_expr) {
+		compile_expression(inc->path_expr);
+		is_expr = 1;
+	} else {
+		path_msg = add_message(inc->path);
+	}
+	emit(opcode::op_include, path_msg, is_expr);
+	emit(opcode::op_pop);
+}
+
+JAI_NOINLINE void vm_compiler::compile_import_declaration(const declaration_ptr& decl) {
+	auto* imp = static_cast<import_decl*>(decl.get());
+	uint32_t exprs = 0;
+	if (imp->path_expr) {
+		compile_expression(imp->path_expr);
+		exprs = 1;
+	}
+	emit(opcode::op_import, add_node(decl), exprs, 0);   // a statement: pushes nothing
 }
 
 void vm_compiler::compile_statement(const statement_ptr& stmt) {
@@ -1526,95 +1555,9 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 	case node_type::for_stmt:
 		compile_for(static_cast<for_stmt*>(stmt.get()));
 		return;
-	case node_type::return_stmt: {
-		if (static_cast<return_stmt*>(stmt.get())->inline_exit) { compile_graft_exit(); return; }
-		if (try_inline_return(stmt)) return;
-		auto* rs = static_cast<return_stmt*>(stmt.get());
-		// Return-site fusion is legal only when the region exits emit NOTHING for a
-		// return (try/catch regions emit op_try_pop/op_catch_end between value and
-		// return; loops/switches emit nothing on the return path)
-		bool clean_exit = true;
-		for (const auto& region : loops_) {
-			if (region.kind == region_kind::try_block || region.kind == region_kind::catch_block) {
-				clean_exit = false;
-				break;
-			}
-		}
-		const bool fuse_return = clean_exit && !reference_;   // the reference mode returns through the general op_return
-		if (rs->value) {
-			if (rs->binds_reference && compile_storage_reference(rs->value)) {
-			} else if (fuse_return && rs->value->get_type() == node_type::identifier_expr) {
-				// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
-				// returns): whole-node gate, resolution mirrors op_load exactly at runtime
-				auto* ident = static_cast<identifier_expr*>(rs->value.get());
-				if (ident->symbol_id == UINT64_MAX) {
-					ident->symbol_id = symbolizer_->intern(ident->name);
-				}
-				uint32_t flags = 0;
-				if (ident->global_qualified) flags |= load_flag_global_only;
-				if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
-				    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
-					flags |= load_flag_type_ctor;
-				}
-				const uint32_t symbol = add_symbol(ident->symbol_id);
-				const uint32_t own = identifier_slot_operand(ident);
-				if (own != k_invalid_u32 && callable_.parameter_slots.count(own)) { rs->return_operand_class = detail::return_operand_parameter; }
-				const size_t ret_ip = emit(opcode::op_return_ident, own, symbol, flags);
-				note_ident_node(ret_ip, rs->value);
-				note_this_field(ret_ip, ident);
-				if ((flags & (load_flag_global_only | load_flag_type_ctor)) == 0 && this_global_of(ident)) {
-					auto& table = chunk_->this_global_ips;
-					if (table.size() <= ret_ip) { table.resize(ret_ip + 1, 0); }
-					table[ret_ip] = symbol + 1;
-				}
-				return;
-			} else {
-				// Calls that already yield a reference pass through; anything else
-				// rejects in the ref-return conversion (return site / completion door)
-				if (fuse_return && rs->value->get_type() == node_type::call_expr &&
-				    static_cast<call_expr*>(rs->value.get())->callee->get_type() == node_type::identifier_expr) {
-					pending_tail_call_ = true;
-				}
-				compile_expression(rs->value);
-				// BINARY+RETURN fusion: the value node's own shape and the tail opcode must both agree (a logical
-				// && / || root ends in an arm's op, never rewritten; any other binary root emits its op_binary last)
-				if (fuse_return && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
-					const auto* bin = static_cast<const binary_expr*>(rs->value.get());
-					const token_type bop = bin->op.type;
-					const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
-					if (!logical && chunk_->code.back().op == opcode::op_binary) {
-						chunk_->code.back().op = opcode::op_return_binary;
-						return;
-					}
-				}
-			}
-		} else {
-			emit(opcode::op_null);
-		}
-		// By-value materialization operand (detail/return_conv.hpp): ref returns and a
-		// bare `return;` carry nothing; an identifier names its own-frame slot for the move
-		uint32_t operand_class = detail::return_operand_unclassified;
-		uint32_t own_slot = k_invalid_u32;
-		if (rs->value && !rs->binds_reference) {
-			operand_class = detail::classify_source(rs->value.get(), [this](const call_expr& call) {
-				return engine_ && detail::call_returns_class_value(call, const_cast<engine&>(*engine_));
-			});
-			if (operand_class == detail::return_operand_ident) {
-				own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
-				if (own_slot != k_invalid_u32 && callable_.parameter_slots.count(own_slot)) { rs->return_operand_class = detail::return_operand_parameter; }
-			}
-		}
-		if (!fuse_return) {   // the reference mode takes the site conversion everywhere: it alone carries the returned local's own slot
-			// The typed-return conversion runs at the site, inside this frame's try
-			// records (a catch around the return sees it); the op_return after the
-			// exits lands the converted value without converting or materializing again
-			emit(opcode::op_return_convert, 0, operand_class, own_slot);
-			operand_class = detail::return_operand_unclassified;
-		}
-		emit_region_exits(SIZE_MAX);
-		emit(opcode::op_return, 1, fuse_return ? 0 : return_mode_converted, operand_class);
+	case node_type::return_stmt:
+		compile_return(stmt);
 		return;
-	}
 	case node_type::break_stmt:
 		compile_break();
 		return;
@@ -1658,7 +1601,96 @@ void vm_compiler::compile_statement_code(const statement_ptr& stmt) {
 	}
 }
 
-void vm_compiler::compile_block(block_stmt* block) {
+JAI_NOINLINE void vm_compiler::compile_return(const statement_ptr& stmt) {
+	if (static_cast<return_stmt*>(stmt.get())->inline_exit) { compile_graft_exit(); return; }
+	if (try_inline_return(stmt)) return;
+	auto* rs = static_cast<return_stmt*>(stmt.get());
+	// Return-site fusion is legal only when the region exits emit NOTHING for a
+	// return (try/catch regions emit op_try_pop/op_catch_end between value and
+	// return; loops/switches emit nothing on the return path)
+	bool clean_exit = true;
+	for (const auto& region : loops_) {
+		if (region.kind == region_kind::try_block || region.kind == region_kind::catch_block) {
+			clean_exit = false;
+			break;
+		}
+	}
+	const bool fuse_return = clean_exit && !reference_;   // the reference mode returns through the general op_return
+	if (rs->value) {
+		if (rs->binds_reference && compile_storage_reference(rs->value)) {
+		} else if (fuse_return && rs->value->get_type() == node_type::identifier_expr) {
+			// Structural LOAD+RETURN fusion (`return n;` - half of fib's dynamic
+			// returns): whole-node gate, resolution mirrors op_load exactly at runtime
+			auto* ident = static_cast<identifier_expr*>(rs->value.get());
+			if (ident->symbol_id == UINT64_MAX) {
+				ident->symbol_id = symbolizer_->intern(ident->name);
+			}
+			uint32_t flags = 0;
+			if (ident->global_qualified) flags |= load_flag_global_only;
+			if (!ident->name.empty() && (ident->name.front() == 'w' || ident->name.front() == 's') &&
+			    (ident->name.find("weak_ptr<") == 0 || ident->name.find("shared_ptr<") == 0)) {
+				flags |= load_flag_type_ctor;
+			}
+			const uint32_t symbol = add_symbol(ident->symbol_id);
+			const uint32_t own = identifier_slot_operand(ident);
+			if (own != k_invalid_u32 && callable_.parameter_slots.count(own)) { rs->return_operand_class = detail::return_operand_parameter; }
+			const size_t ret_ip = emit(opcode::op_return_ident, own, symbol, flags);
+			note_ident_node(ret_ip, rs->value);
+			note_this_field(ret_ip, ident);
+			if ((flags & (load_flag_global_only | load_flag_type_ctor)) == 0 && this_global_of(ident)) {
+				auto& table = chunk_->this_global_ips;
+				if (table.size() <= ret_ip) { table.resize(ret_ip + 1, 0); }
+				table[ret_ip] = symbol + 1;
+			}
+			return;
+		} else {
+			// Calls that already yield a reference pass through; anything else
+			// rejects in the ref-return conversion (return site / completion door)
+			if (fuse_return && rs->value->get_type() == node_type::call_expr &&
+			    static_cast<call_expr*>(rs->value.get())->callee->get_type() == node_type::identifier_expr) {
+				pending_tail_call_ = true;
+			}
+			compile_expression(rs->value);
+			// BINARY+RETURN fusion: the value node's own shape and the tail opcode must both agree (a logical
+			// && / || root ends in an arm's op, never rewritten; any other binary root emits its op_binary last)
+			if (fuse_return && rs->value->get_type() == node_type::binary_expr && !chunk_->code.empty()) {
+				const auto* bin = static_cast<const binary_expr*>(rs->value.get());
+				const token_type bop = bin->op.type;
+				const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
+				if (!logical && chunk_->code.back().op == opcode::op_binary) {
+					chunk_->code.back().op = opcode::op_return_binary;
+					return;
+				}
+			}
+		}
+	} else {
+		emit(opcode::op_null);
+	}
+	// By-value materialization operand (detail/return_conv.hpp): ref returns and a
+	// bare `return;` carry nothing; an identifier names its own-frame slot for the move
+	uint32_t operand_class = detail::return_operand_unclassified;
+	uint32_t own_slot = k_invalid_u32;
+	if (rs->value && !rs->binds_reference) {
+		operand_class = detail::classify_source(rs->value.get(), [this](const call_expr& call) {
+			return engine_ && detail::call_returns_class_value(call, const_cast<engine&>(*engine_));
+		});
+		if (operand_class == detail::return_operand_ident) {
+			own_slot = identifier_slot_operand(static_cast<identifier_expr*>(rs->value.get()));
+			if (own_slot != k_invalid_u32 && callable_.parameter_slots.count(own_slot)) { rs->return_operand_class = detail::return_operand_parameter; }
+		}
+	}
+	if (!fuse_return) {   // the reference mode takes the site conversion everywhere: it alone carries the returned local's own slot
+		// The typed-return conversion runs at the site, inside this frame's try
+		// records (a catch around the return sees it); the op_return after the
+		// exits lands the converted value without converting or materializing again
+		emit(opcode::op_return_convert, 0, operand_class, own_slot);
+		operand_class = detail::return_operand_unclassified;
+	}
+	emit_region_exits(SIZE_MAX);
+	emit(opcode::op_return, 1, fuse_return ? 0 : return_mode_converted, operand_class);
+}
+
+JAI_NOINLINE void vm_compiler::compile_block(block_stmt* block) {
 	bool needs_scope = false;
 	for (const auto& decl : block->declarations) {
 		if (declares_in_current_scope(decl.get(), callable_.active)) {
@@ -1734,7 +1766,7 @@ void vm_compiler::emit_kills_to(size_t depth, size_t from) {
 // the true sense, and the operands run in source order with C++ short-circuit (the interpreter's visit_binary is the
 // oracle). false_jumps collect the edges taken when the condition is false; the true sense collects the edges taken
 // when it is true and falls through when it is false.
-void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps) {
+JAI_NOINLINE void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vector<size_t>& false_jumps) {
 	if (cond->get_type() == node_type::unary_expr) {
 		auto* u = static_cast<unary_expr*>(cond.get());
 		if (u->op.type == token_type::bang) { compile_branch_condition_true(u->operand, false_jumps); return; }
@@ -1757,7 +1789,7 @@ void vm_compiler::compile_branch_condition(const expression_ptr& cond, std::vect
 	compile_condition_leaf(cond, false_jumps, false);
 }
 
-void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std::vector<size_t>& true_jumps) {
+JAI_NOINLINE void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std::vector<size_t>& true_jumps) {
 	if (cond->get_type() == node_type::unary_expr) {
 		auto* u = static_cast<unary_expr*>(cond.get());
 		if (u->op.type == token_type::bang) { compile_branch_condition(u->operand, true_jumps); return; }
@@ -1782,7 +1814,7 @@ void vm_compiler::compile_branch_condition_true(const expression_ptr& cond, std:
 
 // A leaf: its value and one jump into `jumps` (taken when the leaf is false, or true in the true sense). A compare gives up the temps it
 // reads itself; any other temp of the leaf dies on both edges after the jump, so a compare and its jump stay one instruction
-void vm_compiler::compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense) {
+JAI_NOINLINE void vm_compiler::compile_condition_leaf(const expression_ptr& cond, std::vector<size_t>& jumps, bool true_sense) {
 	const bool grafts = leaf_grafts_;
 	leaf_grafts_ = false;
 	const size_t start = chunk_->code.size();
@@ -1831,7 +1863,7 @@ void vm_compiler::kill_on_both_edges(const std::vector<uint32_t>& owned, std::ve
 	patch_jump(past, chunk_->code.size());
 }
 
-void vm_compiler::compile_if(if_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_if(if_stmt* stmt) {
 	std::vector<size_t> false_jumps;
 	const size_t start = chunk_->code.size();
 	const size_t cond_mark = temp_next_;
@@ -1856,7 +1888,7 @@ void vm_compiler::compile_if(if_stmt* stmt) {
 	}
 }
 
-void vm_compiler::compile_while(while_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_while(while_stmt* stmt) {
 	const size_t top = chunk_->code.size();
 	std::vector<size_t> exit_jumps;
 	const size_t cond_mark = temp_next_;
@@ -1883,7 +1915,7 @@ void vm_compiler::compile_while(while_stmt* stmt) {
 	loops_.pop_back();
 }
 
-void vm_compiler::compile_for(for_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_for(for_stmt* stmt) {
 	if (compile_counted_for(stmt)) {
 		return;
 	}
@@ -1945,7 +1977,7 @@ void vm_compiler::compile_for(for_stmt* stmt) {
 //   for (var/auto/int i = <int literal>; i cmp <int literal|ident>; i ++/--/+=/-= <int literal|ident>)
 // Fast iterations run through op_cfor_prep/op_cfor_back with cached int pointers; when
 // runtime types don't cooperate the SAME loop runs its generic cond/update bytecode.
-bool vm_compiler::compile_counted_for(for_stmt* stmt) {
+JAI_NOINLINE bool vm_compiler::compile_counted_for(for_stmt* stmt) {
 	if (reference_) return false;
 	if (!stmt->initializer || !stmt->condition || !stmt->update) return false;
 	if (detail::const_site_of(stmt->update.get()) || detail::const_site_of(stmt->initializer.get())) return false;
@@ -2173,7 +2205,7 @@ void vm_compiler::compile_continue() {
 	}
 }
 
-void vm_compiler::compile_range_for(range_for_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_range_for(range_for_stmt* stmt) {
 	compile_expression(stmt->container);
 
 	iter_proto proto;
@@ -2243,7 +2275,7 @@ bool vm_compiler::compile_entry_half(const expression_ptr& init) {
 	return true;
 }
 
-void vm_compiler::compile_try(try_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_try(try_stmt* stmt) {
 	const uint32_t catch_sym = add_symbol(symbolizer_->intern(stmt->catch_var));
 	// The catch variable is a frame-slot local of the catch body (compile_range_for's
 	// slot test); a top-level catch binds it in a scope env pushed at handler entry
@@ -2329,7 +2361,7 @@ bool inert_case_value(const expression* e) {
 // else the condition's value in a compiler temp), each jumping to its body; the bodies follow in order. A fallthrough only as a body's
 // last statement makes the body run into the next one, through that case's value when its evaluation can be observed. Anything else
 // (a fallthrough a later statement follows, a temp the frame cannot hold, the reference mode) keeps the stack form.
-bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
+JAI_NOINLINE bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 	if (reference_) return false;   // the reference mode keeps the stack form: the VM's oracle for this lowering
 	auto tail_fallthrough_only = [](const std::vector<statement_ptr>& body) {
 		for (size_t k = 0; k < body.size(); ++k) {
@@ -2472,7 +2504,7 @@ bool vm_compiler::compile_switch_branches(switch_stmt* stmt) {
 }
 
 // a case or default body: its own scope when it declares into one, its declarations killed at its end; a trailing fallthrough is only its debugger stop
-void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
+JAI_NOINLINE void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 	bool case_scope = false;
 	for (const auto& body_stmt : body) {
 		if (declares_in_current_scope(body_stmt.get(), callable_.active)) { case_scope = true; break; }
@@ -2503,7 +2535,7 @@ void vm_compiler::compile_case_body(const std::vector<statement_ptr>& body) {
 	}
 }
 
-void vm_compiler::compile_switch(switch_stmt* stmt) {
+JAI_NOINLINE void vm_compiler::compile_switch(switch_stmt* stmt) {
 	if (compile_switch_branches(stmt)) { return; }
 	compile_expression(stmt->condition);
 
@@ -2622,7 +2654,7 @@ void vm_compiler::compile_switch(switch_stmt* stmt) {
 // The arms of `x = c ? a : b;` onto a slot, each a store of its own: a nested ternary recurses, a value takes the move row when it is
 // an identifier or a literal, the fused-binary store when it is a fused binary, else the general store; the proofs of the whole
 // assignment (a provable typed store, the same-type proof) are not claimed for an arm, so the store enforces the declared type
-void vm_compiler::compile_ternary_store(identifier_expr* ident, assignment_expr* assign, const std::shared_ptr<ternary_expr>& t) {
+JAI_NOINLINE void vm_compiler::compile_ternary_store(identifier_expr* ident, assignment_expr* assign, const std::shared_ptr<ternary_expr>& t) {
 	std::vector<size_t> false_jumps;
 	compile_branch_condition(t->condition, false_jumps);
 	compile_store_arm(ident, assign, t->then_expression);
@@ -2632,7 +2664,7 @@ void vm_compiler::compile_ternary_store(identifier_expr* ident, assignment_expr*
 	patch_jump(jump_end, chunk_->code.size());
 }
 
-void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* assign, const expression_ptr& value) {
+JAI_NOINLINE void vm_compiler::compile_store_arm(identifier_expr* ident, assignment_expr* assign, const expression_ptr& value) {
 	if (value->get_type() == node_type::ternary_expr) { compile_ternary_store(ident, assign, std::static_pointer_cast<ternary_expr>(value)); return; }
 	if (value_temp_operand(value.get())) {
 		// `x = c ? -e : y;`: a unary, math, element or member arm lands in a compiler temp and the move row stores it, as the
@@ -2695,7 +2727,7 @@ const expression* vm_compiler::text_builder_chain(assignment_expr* assign, std::
 }
 
 // the chain's head (its target's read, the snapshot), then each operand and its pending step
-void vm_compiler::emit_text_builder_chain(const std::vector<const binary_expr*>& chain) {
+JAI_NOINLINE void vm_compiler::emit_text_builder_chain(const std::vector<const binary_expr*>& chain) {
 	compile_expression(chain.back()->left);
 	for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
 		compile_expression((*it)->right);
@@ -2736,7 +2768,7 @@ bool vm_compiler::try_emit_text_builder_store(identifier_expr* ident, assignment
 
 // `recv.f = recv.f + ...;` (recv a name or `this`): the builder over the field, the receiver evaluated for the store after the value
 // as the plain store has it
-bool vm_compiler::try_emit_text_builder_member(const std::shared_ptr<member_expr>& member, assignment_expr* assign) {
+JAI_NOINLINE bool vm_compiler::try_emit_text_builder_member(const std::shared_ptr<member_expr>& member, assignment_expr* assign) {
 	std::vector<const binary_expr*> chain;
 	const expression* e = text_builder_chain(assign, chain);
 	if (!e || e->get_type() != node_type::member_expr || member->is_static || !member->object) return false;
@@ -2752,7 +2784,7 @@ bool vm_compiler::try_emit_text_builder_member(const std::shared_ptr<member_expr
 
 // `a[i] = a[i] + ...;` (a a name, i a name or a literal): the builder over the element, the container and index evaluated for the
 // store after the value as the plain store has them
-bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, assignment_expr* assign, uint32_t string_site) {
+JAI_NOINLINE bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, assignment_expr* assign, uint32_t string_site) {
 	std::vector<const binary_expr*> chain;
 	const expression* e = text_builder_chain(assign, chain);
 	if (!e || e->get_type() != node_type::binary_expr) return false;
@@ -2779,7 +2811,7 @@ bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, assignment_expr*
 	return true;
 }
 
-bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
+JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	if (reference_ || detail::const_site_of(expr.get())) return false;   // the reference mode: the value form and its pop   // compile_expression emits its guard first
 	if (expr->get_type() == node_type::assignment_expr) {
 		auto* assign = static_cast<assignment_expr*>(expr.get());
@@ -3038,7 +3070,7 @@ bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 
 // a node the checker stamped with a const verdict (internal/const.md): it raises its text, or the run time walks its path, before any
 // of it runs (KEEP BYTE-PARALLEL with interpreter::const_guard_at)
-void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
+JAI_NOINLINE void vm_compiler::emit_const_guard(const std::shared_ptr<ast_node>& node) {
 	const const_site* site = detail::const_site_of(node.get());
 	if (!site) return;
 	if (site->verdict == const_raises) {
@@ -3082,49 +3114,15 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	case node_type::lambda_expr:
 		compile_lambda(std::static_pointer_cast<lambda_expr>(expr));
 		return;
-	case node_type::ternary_expr: {
-		auto* t = static_cast<ternary_expr*>(expr.get());
-		std::vector<size_t> false_jumps;
-		compile_branch_condition(t->condition, false_jumps);
-		compile_expression(t->then_expression);
-		size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
-		for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
-		compile_expression(t->else_expression);
-		patch_jump(jump_end, chunk_->code.size());
+	case node_type::ternary_expr:
+		compile_ternary(static_cast<ternary_expr*>(expr.get()));
 		return;
-	}
-	case node_type::array_literal_expr: {
-		auto* arr = static_cast<array_literal_expr*>(expr.get());
-		std::vector<bool> taken(arr->elements.size(), false);
-		for (size_t k = 0; k < arr->elements.size(); ++k) {
-			compile_expression(arr->elements[k]);
-			for (size_t n = k + 1; n < arr->elements.size(); ++n) {
-				if (!detail::transient_read_marker::callout_free(arr->elements[n].get())) { taken[k] = copy_ahead_of(arr->elements[k].get(), arr->elements[n].get()); break; }
-			}
-		}
-		emit(opcode::op_array, static_cast<uint32_t>(arr->elements.size()), add_node(expr), literal_taken_operands(taken));
+	case node_type::array_literal_expr:
+		compile_array_literal(expr);
 		return;
-	}
-	case node_type::map_literal_expr: {
-		auto* m = static_cast<map_literal_expr*>(expr.get());
-		auto later_callout = [&](size_t entry, bool from_value) -> const expression* {
-			if (!from_value && !detail::transient_read_marker::callout_free(m->entries[entry].second.get())) return m->entries[entry].second.get();
-			for (size_t n = entry + 1; n < m->entries.size(); ++n) {
-				if (!detail::transient_read_marker::callout_free(m->entries[n].first.get())) return m->entries[n].first.get();
-				if (!detail::transient_read_marker::callout_free(m->entries[n].second.get())) return m->entries[n].second.get();
-			}
-			return nullptr;
-		};
-		std::vector<bool> taken(m->entries.size() * 2, false);
-		for (size_t k = 0; k < m->entries.size(); ++k) {
-			compile_expression(m->entries[k].first);
-			if (const expression* later = later_callout(k, false)) { taken[k * 2] = copy_ahead_of(m->entries[k].first.get(), later); }
-			compile_expression(m->entries[k].second);
-			if (const expression* later = later_callout(k, true)) { taken[k * 2 + 1] = copy_ahead_of(m->entries[k].second.get(), later); }
-		}
-		emit(opcode::op_map, static_cast<uint32_t>(m->entries.size()), add_node(expr), literal_taken_operands(taken));
+	case node_type::map_literal_expr:
+		compile_map_literal(expr);
 		return;
-	}
 	case node_type::member_expr:
 		compile_member(std::static_pointer_cast<member_expr>(expr));
 		return;
@@ -3134,56 +3132,108 @@ void vm_compiler::compile_expression(const expression_ptr& expr, bool as_stateme
 	case node_type::cast_expr:
 		compile_cast(std::static_pointer_cast<cast_expr>(expr));
 		return;
-	case node_type::include_expr: {
-		// Expression-position include: same op_include as the statement form, minus the
-		// trailing op_pop — the included file's result IS the expression value
-		auto* inc = static_cast<include_expr*>(expr.get());
-		uint32_t path_msg = k_invalid_u32;
-		uint32_t is_expr = 0;
-		if (inc->path_expr) {
-			compile_expression(inc->path_expr);
-			is_expr = 1;
-		} else {
-			path_msg = add_message(inc->path);
-		}
-		emit(opcode::op_include, path_msg, is_expr);
+	case node_type::include_expr:
+		compile_include_expression(static_cast<include_expr*>(expr.get()));
 		return;
-	}
-	case node_type::import_expr: {
-		auto* call = static_cast<import_expr*>(expr.get());
-		for (const auto& arg : call->path_exprs) { compile_expression(arg); }
-		emit(opcode::op_import, add_node(expr), static_cast<uint32_t>(call->path_exprs.size()), 1);   // pushes whether a module (re)ran
+	case node_type::import_expr:
+		compile_import_expression(expr);
 		return;
-	}
 	case node_type::this_expr:
 		emit(opcode::op_this);
 		return;
 	case node_type::super_expr:
 		emit(opcode::op_super);
 		return;
-	case node_type::throw_expr: {
-		auto* te = static_cast<throw_expr*>(expr.get());
-		uint32_t has_value = 0;
-		if (te->value) {
-			compile_expression(te->value);
-			has_value = 1;
-		}
-		emit(opcode::op_throw, has_value, add_node(expr));
+	case node_type::throw_expr:
+		compile_throw(expr);
 		return;
-	}
-	case node_type::yield_expr: {
-		auto* ye = static_cast<yield_expr*>(expr.get());
-		uint32_t has_value = 0;
-		if (ye->value) {
-			compile_expression(ye->value);
-			has_value = 1;
-		}
-		emit(opcode::op_yield, has_value, ye->value && detail::yield_operand_is_lvalue(ye->value.get()) ? 1u : 0u);
+	case node_type::yield_expr:
+		compile_yield(static_cast<yield_expr*>(expr.get()));
 		return;
-	}
 	default:
 		unreachable_construct("this expression");
 	}
+}
+
+JAI_NOINLINE void vm_compiler::compile_ternary(const ternary_expr* t) {
+	std::vector<size_t> false_jumps;
+	compile_branch_condition(t->condition, false_jumps);
+	compile_expression(t->then_expression);
+	size_t jump_end = emit(opcode::op_jump, k_invalid_u32);
+	for (size_t at : false_jumps) { patch_jump(at, chunk_->code.size()); }
+	compile_expression(t->else_expression);
+	patch_jump(jump_end, chunk_->code.size());
+}
+
+JAI_NOINLINE void vm_compiler::compile_array_literal(const expression_ptr& expr) {
+	auto* arr = static_cast<array_literal_expr*>(expr.get());
+	std::vector<bool> taken(arr->elements.size(), false);
+	for (size_t k = 0; k < arr->elements.size(); ++k) {
+		compile_expression(arr->elements[k]);
+		for (size_t n = k + 1; n < arr->elements.size(); ++n) {
+			if (!detail::transient_read_marker::callout_free(arr->elements[n].get())) { taken[k] = copy_ahead_of(arr->elements[k].get(), arr->elements[n].get()); break; }
+		}
+	}
+	emit(opcode::op_array, static_cast<uint32_t>(arr->elements.size()), add_node(expr), literal_taken_operands(taken));
+}
+
+JAI_NOINLINE void vm_compiler::compile_map_literal(const expression_ptr& expr) {
+	auto* m = static_cast<map_literal_expr*>(expr.get());
+	auto later_callout = [&](size_t entry, bool from_value) -> const expression* {
+		if (!from_value && !detail::transient_read_marker::callout_free(m->entries[entry].second.get())) return m->entries[entry].second.get();
+		for (size_t n = entry + 1; n < m->entries.size(); ++n) {
+			if (!detail::transient_read_marker::callout_free(m->entries[n].first.get())) return m->entries[n].first.get();
+			if (!detail::transient_read_marker::callout_free(m->entries[n].second.get())) return m->entries[n].second.get();
+		}
+		return nullptr;
+	};
+	std::vector<bool> taken(m->entries.size() * 2, false);
+	for (size_t k = 0; k < m->entries.size(); ++k) {
+		compile_expression(m->entries[k].first);
+		if (const expression* later = later_callout(k, false)) { taken[k * 2] = copy_ahead_of(m->entries[k].first.get(), later); }
+		compile_expression(m->entries[k].second);
+		if (const expression* later = later_callout(k, true)) { taken[k * 2 + 1] = copy_ahead_of(m->entries[k].second.get(), later); }
+	}
+	emit(opcode::op_map, static_cast<uint32_t>(m->entries.size()), add_node(expr), literal_taken_operands(taken));
+}
+
+// Expression-position include: same op_include as the statement form, minus the trailing op_pop - the included file's
+// result IS the expression value
+JAI_NOINLINE void vm_compiler::compile_include_expression(const include_expr* inc) {
+	uint32_t path_msg = k_invalid_u32;
+	uint32_t is_expr = 0;
+	if (inc->path_expr) {
+		compile_expression(inc->path_expr);
+		is_expr = 1;
+	} else {
+		path_msg = add_message(inc->path);
+	}
+	emit(opcode::op_include, path_msg, is_expr);
+}
+
+JAI_NOINLINE void vm_compiler::compile_import_expression(const expression_ptr& expr) {
+	auto* call = static_cast<import_expr*>(expr.get());
+	for (const auto& arg : call->path_exprs) { compile_expression(arg); }
+	emit(opcode::op_import, add_node(expr), static_cast<uint32_t>(call->path_exprs.size()), 1);   // pushes whether a module (re)ran
+}
+
+JAI_NOINLINE void vm_compiler::compile_throw(const expression_ptr& expr) {
+	auto* te = static_cast<throw_expr*>(expr.get());
+	uint32_t has_value = 0;
+	if (te->value) {
+		compile_expression(te->value);
+		has_value = 1;
+	}
+	emit(opcode::op_throw, has_value, add_node(expr));
+}
+
+JAI_NOINLINE void vm_compiler::compile_yield(const yield_expr* ye) {
+	uint32_t has_value = 0;
+	if (ye->value) {
+		compile_expression(ye->value);
+		has_value = 1;
+	}
+	emit(opcode::op_yield, has_value, ye->value && detail::yield_operand_is_lvalue(ye->value.get()) ? 1u : 0u);
 }
 
 // slot + 1 of the plain field a bare name of a method body names in the body's declaring class, 0 when the name is a local, a global
@@ -3225,7 +3275,7 @@ bool vm_compiler::handle_field_of_member_class(const identifier_expr* ident) con
 	return declared && declared->base_type == script_value_type::jai_shared_ptr_type;
 }
 
-void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
+JAI_NOINLINE void vm_compiler::compile_identifier_load(const expression_ptr& expr) {
 	auto* ident = static_cast<identifier_expr*>(expr.get());
 	uint32_t flags = 0;
 	if (ident->global_qualified) {
@@ -6509,7 +6559,7 @@ bool vm_compiler::value_temp_operand(const expression* e) {
 	return fusable_index_expr(e) || math_temp_operand(e) != detail::math_fn::none || unary_temp_operand(e) || member_temp_operand(e);
 }
 
-bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
+JAI_NOINLINE bool vm_compiler::compile_value_into_temp(const expression_ptr& e, uint8_t expect, fused_operand& out) {
 	stack_.guard(e->location);
 	if (member_temp_operand(e.get())) { compile_member_into_temp(e, out); return true; }
 	if (math_temp_operand(e.get()) != detail::math_fn::none) { compile_math_into_temp(e, out); return true; }
@@ -6565,7 +6615,7 @@ detail::math_fn vm_compiler::math_pair_operand(const call_expr* call) {
 	return fn;
 }
 
-void vm_compiler::compile_math_argument(const expression_ptr& arg, fused_operand& out) {
+JAI_NOINLINE void vm_compiler::compile_math_argument(const expression_ptr& arg, fused_operand& out) {
 	if (arg->get_type() == node_type::identifier_expr || arg->get_type() == node_type::literal_expr) { out = make_fused_operand(arg); return; }
 	if (compile_value_into_temp(arg, 0xFF, out)) return;
 	compile_expression(arg);
@@ -6645,7 +6695,7 @@ void vm_compiler::compile_ternary_into_temp(const expression_ptr& e, fused_opera
 	out.direct = true;
 }
 
-void vm_compiler::land_ternary_in_temp(const ternary_expr* t, uint32_t dst) {
+JAI_NOINLINE void vm_compiler::land_ternary_in_temp(const ternary_expr* t, uint32_t dst) {
 	std::vector<size_t> false_jumps;
 	const size_t mark = temp_next_;
 	compile_branch_condition(t->condition, false_jumps);
@@ -6657,7 +6707,7 @@ void vm_compiler::land_ternary_in_temp(const ternary_expr* t, uint32_t dst) {
 	patch_jump(jump_end, chunk_->code.size());
 }
 
-void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint32_t dst) {
+JAI_NOINLINE void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint32_t dst) {
 	if (arm->get_type() == node_type::ternary_expr) { land_ternary_in_temp(static_cast<const ternary_expr*>(arm.get()), dst); return; }
 	const size_t mark = temp_next_;
 	fused_binary_proto p;
@@ -6685,7 +6735,7 @@ void vm_compiler::land_arm_in_temp(const expression_ptr& arm, uint32_t dst) {
 	free_temps(mark);
 }
 
-void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand& out) {
+JAI_NOINLINE void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand& out) {
 	auto* u = static_cast<unary_expr*>(e.get());
 	const expression_ptr& arg = u->operand;
 	fused_binary_proto p;
@@ -6733,7 +6783,7 @@ void vm_compiler::compile_unary_into_temp(const expression_ptr& e, fused_operand
 	out.direct = true;
 }
 
-void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand& out) {
+JAI_NOINLINE void vm_compiler::compile_math_into_temp(const expression_ptr& e, fused_operand& out) {
 	auto* call = static_cast<call_expr*>(e.get());
 	const detail::math_fn fn = math_temp_operand(e.get());
 	if (call->arguments.size() == 2) {   // a scalar pair row: each argument an operand, in source order
@@ -7269,7 +7319,7 @@ bool vm_compiler::size_temp_operand(const expression* e) const {
 }
 // The member read lands in a fresh compiler temp (op_member_temp: op_get_member's kernel, the value into the temp); `out`
 // becomes the direct temp operand. The read keeps its place: it is emitted where the operand is evaluated.
-void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
+JAI_NOINLINE void vm_compiler::compile_member_into_temp(const expression_ptr& e, fused_operand& out) {
 	if (enum_temp_operand(e.get()) && !member_this_base(e.get())) {
 		compile_expression(e);   // the enum's load and the member read, the value on the stack
 		const uint32_t t = static_cast<uint32_t>(temp_next_++);
@@ -7402,7 +7452,7 @@ bool vm_compiler::raw_call_operand(const expression* e) const {
 	const auto decl = call->proven_callee_decl.lock();
 	return decl && raw_signature(decl.get()) && call->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_);
 }
-void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
+JAI_NOINLINE void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
 	compile_call(std::static_pointer_cast<call_expr>(e));
 	const uint32_t t = static_cast<uint32_t>(temp_next_);
 	++temp_next_;
@@ -7469,7 +7519,7 @@ bool vm_compiler::try_emit_fused_index(binary_expr* expr, uint32_t flags) {
 	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = expr->subscript_receiver; }
 	return emitted;
 }
-bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) {
+JAI_NOINLINE bool vm_compiler::try_emit_fused_index_shape(binary_expr* expr, uint32_t flags) {
 	// a graft statement's guard took the container ahead of the graft (vm_inline.cpp): every shape below reads its temp, in the always form
 	const std::shared_ptr<identifier_expr> held = expr->left->get_type() == node_type::identifier_expr ? take_subscript_guard(expr) : nullptr;
 	auto take_held = [&](fused_operand& container, uint32_t& guard) { container = make_fused_operand(expr->left); guard = static_cast<uint32_t>(held->slot_index); };
@@ -7722,7 +7772,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 // The storage a T& producer (a `-> T&` return, a reference parameter's default) binds when its operand names it: a variable shares
 // its cell (boxing on demand), an lvalue chain mints an owner-pinned reference, C::s / ns::x reads first and its storage replaces the
 // read. false: the operand names no storage and nothing was emitted
-bool vm_compiler::compile_storage_reference(const expression_ptr& value) {
+JAI_NOINLINE bool vm_compiler::compile_storage_reference(const expression_ptr& value) {
 	if (value->get_type() == node_type::identifier_expr) {
 		auto* ident = static_cast<identifier_expr*>(value.get());
 		if (ident->symbol_id == UINT64_MAX) {
@@ -7798,7 +7848,7 @@ size_t vm_compiler::emit_arg_capture(const std::vector<uint8_t>& captures, size_
 
 // A binary: its shapes (compile_binary_shaped), else the stack form, its left operand first. A left operand that takes the stack form
 // too is walked here rather than recursed into, so a long left-leaning chain (y + y + ... + y) compiles at any length
-void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	std::vector<std::shared_ptr<binary_expr>> spine;
 	std::shared_ptr<binary_expr> at = expr;
 	while (!compile_binary_shaped(at)) {
@@ -7822,7 +7872,7 @@ void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>& expr) {
 	}
 }
 
-bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binary_expr>& expr) {
+JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binary_expr>& expr) {
 	if (expr->op.type == token_type::question_question) {
 		// the left value stays when it is not null; a null is replaced by the right operand, which runs only then
 		compile_expression(expr->left);
@@ -8153,7 +8203,7 @@ fused_operand vm_compiler::make_fused_operand(const expression* e) {
 	return out;
 }
 
-void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_unary(const std::shared_ptr<unary_expr>& expr) {
 	if (expr->op.type == token_type::plus_plus || expr->op.type == token_type::minus_minus) {
 		if (expr->operand->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(expr->operand.get());
@@ -8194,7 +8244,7 @@ bool vm_compiler::try_emit_fused_index_store(binary_expr* sub, const expression_
 	if (emitted && chunk_->fused_index_protos.size() > protos) { chunk_->fused_index_protos.back().receiver = sub->subscript_receiver; }
 	return emitted;
 }
-bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound_kind) {
+JAI_NOINLINE bool vm_compiler::try_emit_fused_index_store_shape(binary_expr* sub, const expression_ptr& value, bool no_result, uint32_t string_site, uint32_t compound_kind) {
 	const bool compound = compound_kind != k_invalid_u32;
 	const uint32_t shape = is_lvalue_shaped(sub->left.get()) ? index_flag_lvalue_shape : 0;
 	const bool operand_index = sub->right->get_type() == node_type::identifier_expr ||
@@ -8330,7 +8380,7 @@ bool vm_compiler::compound_rhs_inert(const expression* e) {
 	return e->get_type() == node_type::literal_expr;
 }
 
-void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement) {
+JAI_NOINLINE void vm_compiler::compile_assignment(const std::shared_ptr<assignment_expr>& expr, bool as_statement) {
 	const bool compound = expr->op.type != token_type::equal;
 	if (expr->target->get_type() == node_type::identifier_expr) {
 		auto* ident = static_cast<identifier_expr*>(expr->target.get());
@@ -8492,7 +8542,7 @@ bool vm_compiler::names_slot(const expression* e, uint32_t slot) {
 // push takes the temp. The receiver is a private local the checker proved an array and e never names it, so nothing e runs can rebind
 // or observe it, and an array always has push: reading it after e is what the general order (receiver, member probe, argument, call)
 // yields. The push's element conversion stays the push's own.
-bool vm_compiler::push_value_temp(const std::shared_ptr<call_expr>& expr, identifier_expr* recv, const expression_ptr& arg, fused_operand& out) {
+JAI_NOINLINE bool vm_compiler::push_value_temp(const std::shared_ptr<call_expr>& expr, identifier_expr* recv, const expression_ptr& arg, fused_operand& out) {
 	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body || expr->builtin_receiver != 2 || recv->global_qualified) return false;
 	const uint32_t rslot = identifier_slot_operand(recv);
 	if (rslot == k_invalid_u32 || rslot >= k_typed_slot_mask || !private_local(recv) || names_slot(arg.get(), rslot)) return false;
@@ -8525,7 +8575,7 @@ bool vm_compiler::push_value_temp(const std::shared_ptr<call_expr>& expr, identi
 // identifier, value a slotted identifier or a literal, so no probe is owed (call_args_need_probe's exact admission) and the receiver
 // resolves before the value exactly as the unfused pair reads them. The call site is built
 // as compile_call builds it: the exec replays through it on any guard miss.
-bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
+JAI_NOINLINE bool vm_compiler::try_emit_fused_push(const std::shared_ptr<call_expr>& expr) {
 	if (expr->callee->get_type() != node_type::member_expr || expr->arguments.size() != 1) return false;
 	auto member = std::static_pointer_cast<member_expr>(expr->callee);
 	if (member->is_static || member->null_safe || member->member != "push") return false;
@@ -8632,7 +8682,7 @@ void vm_compiler::record_argument_source(call_site& site, const expression_ptr& 
 	}
 }
 
-void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	// Consumed HERE so nested arg calls never inherit the return-position hint
 	const bool tail_site = pending_tail_call_;
 	pending_tail_call_ = false;
@@ -8662,11 +8712,11 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			return;
 		}
 		if (expr->regex_constant && !callee_probes_.count(expr.get())) {
-			call_site site;
-			site.call_node = add_node(expr);
-			site.callee = make_fused_operand(expr->callee);
-			for (const auto& arg : expr->arguments) { record_argument_source(site, arg, expr->arguments.size()); }
-			chunk_->call_sites.push_back(std::move(site));
+			site_lease site(pending_sites_);
+			site->call_node = add_node(expr);
+			site->callee = make_fused_operand(expr->callee);
+			for (const auto& arg : expr->arguments) { record_argument_source(*site, arg, expr->arguments.size()); }
+			chunk_->call_sites.push_back(std::move(*site));
 			chunk_->regex_constants.push_back(chunk::regex_constant{expr->regex_constant, static_cast<uint32_t>(expr->arguments.size())});
 			emit(opcode::op_regex_constant, static_cast<uint32_t>(chunk_->call_sites.size() - 1),
 			     static_cast<uint32_t>(chunk_->regex_constants.size() - 1), static_cast<uint32_t>(expr->arguments.size()));
@@ -8714,45 +8764,45 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			if (call_args_need_probe(*expr)) {
 				probe_ip = emit(opcode::op_probe_member, 0, 0);
 			}
-			call_site site;
-			site.member_node = add_node(member);
-			site.call_node = add_node(expr);
+			site_lease site(pending_sites_);
+			site->member_node = add_node(member);
+			site->call_node = add_node(expr);
 			if (member->object->get_type() == node_type::identifier_expr) {
 				auto* recv_ident = static_cast<identifier_expr*>(member->object.get());
-				site.receiver_symbol = recv_ident->symbol_id;
-				site.receiver_slot = identifier_slot_operand(recv_ident);   // the receiver's own op_load slot
+				site->receiver_symbol = recv_ident->symbol_id;
+				site->receiver_slot = identifier_slot_operand(recv_ident);   // the receiver's own op_load slot
 			} else if (const expression* root = detail::string_mutator_chain_root(member->object.get());
 			           root && root->get_type() == node_type::identifier_expr) {
 				auto* root_ident = static_cast<identifier_expr*>(const_cast<expression*>(root));
-				site.chain_root_symbol = root_ident->symbol_id;
-				site.chain_root_slot = identifier_slot_operand(root_ident);
+				site->chain_root_symbol = root_ident->symbol_id;
+				site->chain_root_slot = identifier_slot_operand(root_ident);
 			}
 			if (builtins_ && !reference_) {
 				auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {
 					auto it = index.find(member->member_id);
 					return it != index.end() ? it->second : builtin_method_registries::k_no_builtin;
 				};
-				site.bi_array = builtin_index_for(builtins_->array_index);
-				site.bi_map = builtin_index_for(builtins_->map_index);
-				site.bi_string = builtin_index_for(builtins_->string_index);
+				site->bi_array = builtin_index_for(builtins_->array_index);
+				site->bi_map = builtin_index_for(builtins_->map_index);
+				site->bi_string = builtin_index_for(builtins_->string_index);
 				chunk_->builtin_indexed = true;
 			}
-			site.arg_symbols.reserve(expr->arguments.size());
-			site.arg_slots.reserve(expr->arguments.size());
+			site->arg_symbols.reserve(expr->arguments.size());
+			site->arg_slots.reserve(expr->arguments.size());
 			std::vector<uint8_t> captures;
 			detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 			std::vector<size_t> capture_ips;
 			const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 			for (size_t k = 0; k < expr->arguments.size(); ++k) {
 				const auto& arg = expr->arguments[k];
-				record_argument_source(site, arg, expr->arguments.size());
+				record_argument_source(*site, arg, expr->arguments.size());
 				compile_expression(arg);
 				if (const size_t ip = emit_arg_capture(captures, k, arg, 0, capture_form_method); ip != SIZE_MAX) { capture_ips.push_back(ip); }
 			}
 			if (!expr->arguments.empty()) {
 				chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 			}
-			chunk_->call_sites.push_back(std::move(site));
+			chunk_->call_sites.push_back(std::move(*site));
 			if (probe_ip != SIZE_MAX) {
 				chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 			}
@@ -8845,19 +8895,19 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 			emit(opcode::op_probe_member, k_invalid_u32, 1);
 		}
 	}
-	call_site site;
-	site.call_node = add_node(expr);
+	site_lease site(pending_sites_);
+	site->call_node = add_node(expr);
 	if (probe_callee) {
-		site.callee = make_fused_operand(expr->callee);
+		site->callee = make_fused_operand(expr->callee);
 	}
-	site.arg_symbols.reserve(expr->arguments.size());
-	site.arg_slots.reserve(expr->arguments.size());
+	site->arg_symbols.reserve(expr->arguments.size());
+	site->arg_slots.reserve(expr->arguments.size());
 	std::vector<uint8_t> captures;
 	detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 	const uint32_t args_begin = static_cast<uint32_t>(chunk_->code.size());
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
 		const auto& arg = expr->arguments[k];
-		record_argument_source(site, arg, expr->arguments.size());
+		record_argument_source(*site, arg, expr->arguments.size());
 		if (k < staged_args) { emit(opcode::op_take_temp, staged_slots[k]); continue; }
 		if (const uint32_t base = probe_callee ? place_argument_base(arg.get()) : k_invalid_u32; base != k_invalid_u32) {
 			emit(opcode::op_place_arg, add_node(arg), base + 1, static_cast<uint32_t>(k));
@@ -8870,8 +8920,8 @@ void vm_compiler::compile_call(const std::shared_ptr<call_expr>& expr) {
 	if (!expr->arguments.empty()) {
 		chunk_->call_arg_zones.emplace_back(args_begin, static_cast<uint32_t>(chunk_->code.size()));
 	}
-	site.staged_argument_slots = std::move(staged_slots);
-	chunk_->call_sites.push_back(std::move(site));
+	site->staged_argument_slots = std::move(staged_slots);
+	chunk_->call_sites.push_back(std::move(*site));
 	if (probe_callee) {
 		chunk_->code[probe_ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1);
 		if (auto captures_at = capture_sites_.find(probe_ip); captures_at != capture_sites_.end()) {
@@ -8929,7 +8979,7 @@ void vm_compiler::member_tail_into_temp(const expression* e) {
 	code[n - 1] = vm_instruction{opcode::op_load, t, temp_symbol_index(), 0};
 }
 
-void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 	if (expr->is_static) {
 		emit(opcode::op_get_static, add_node(expr));
 		return;
@@ -8951,7 +9001,7 @@ void vm_compiler::compile_member(const std::shared_ptr<member_expr>& expr) {
 	compile_member_read(expr);
 }
 
-void vm_compiler::compile_member_read(const std::shared_ptr<member_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_member_read(const std::shared_ptr<member_expr>& expr) {
 	if (velem_operand(expr.get()) && !expr->place_read) {
 		fused_operand t;
 		compile_member_into_temp(expr, t);
@@ -9078,7 +9128,7 @@ const expression* vm_compiler::member_path(const expression* e, member_path_prot
 	return out.links.size() >= 2 ? e : nullptr;
 }
 
-void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 	const auto base = expr->type ? expr->type->base_type : script_value_type::jai_invalid_type;
 	const bool container = base == script_value_type::jai_array_type || base == script_value_type::jai_map_type;
 	if ((container && !expr->arguments.empty()) ||
@@ -9091,24 +9141,24 @@ void vm_compiler::compile_new(const std::shared_ptr<new_expr>& expr) {
 	std::vector<uint8_t> captures;
 	detail::transient_read_marker::stamp_arg_captures(expr->arguments, captures);
 	const uint32_t node = add_node(expr);
-	call_site site;
+	site_lease site(pending_sites_);
 	for (size_t k = 0; k < expr->arguments.size(); ++k) {
-		record_argument_source(site, expr->arguments[k], expr->arguments.size());
+		record_argument_source(*site, expr->arguments[k], expr->arguments.size());
 		compile_expression(expr->arguments[k]);
 		emit_arg_capture(captures, k, expr->arguments[k], node, capture_form_new);
 	}
 	if (expr->type && (base == script_value_type::jai_shared_ptr_type || base == script_value_type::jai_object_type)) {
 		const type_info* cls = base == script_value_type::jai_shared_ptr_type ? expr->type->element_type().get() : expr->type.get();
-		if (cls) { site.new_symbol = symbolizer_->intern(cls->type_name); }
+		if (cls) { site->new_symbol = symbolizer_->intern(cls->type_name); }
 	}
-	chunk_->call_sites.push_back(std::move(site));
+	chunk_->call_sites.push_back(std::move(*site));
 	emit(opcode::op_new, node, static_cast<uint32_t>(expr->arguments.size()), static_cast<uint32_t>(chunk_->call_sites.size()));
 }
 
 // Operand shape decided by the shared kernel (the interpreter takes the same branch at
 // visit time): value forms evaluate the operand onto the stack, the reference arms hand
 // exec_cast the node and resolve storage there.
-void vm_compiler::compile_cast(const std::shared_ptr<cast_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_cast(const std::shared_ptr<cast_expr>& expr) {
 	const auto mode = detail::cast_operand_mode_of(expr.get());
 	uint32_t sym = k_invalid_u32;
 	if (mode == detail::cast_operand_mode::identifier) {
@@ -9123,7 +9173,23 @@ void vm_compiler::compile_cast(const std::shared_ptr<cast_expr>& expr) {
 	emit(opcode::op_cast, add_node(expr), static_cast<uint32_t>(mode), sym);
 }
 
-void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
+JAI_NOINLINE void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
+	closure_proto proto = closure_proto_of(expr);
+	{
+		auto body_compiler = std::make_unique<vm_compiler>(symbolizer_, builtins_);   // a compiler is kilobytes: never a frame of the walk
+		body_compiler->reference(reference_);
+		body_compiler->typed_lowering(typed_lowering_);
+		body_compiler->ir_listing(ir_listing_);
+		body_compiler->ir_passes(ir_passes_);
+		proto.body_chunk = body_compiler->compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
+	}
+
+	chunk_->closure_protos.push_back(std::move(proto));
+	emit(opcode::op_closure, static_cast<uint32_t>(chunk_->closure_protos.size() - 1));
+}
+
+// the closure's captures (their initializers compile here, in the enclosing scope) and the names its body reads from outside
+JAI_NOINLINE closure_proto vm_compiler::closure_proto_of(const std::shared_ptr<lambda_expr>& expr) {
 	closure_proto proto;
 	proto.lambda = expr;
 	proto.body = as_block(expr->body, expr->location);
@@ -9202,23 +9268,12 @@ void vm_compiler::compile_lambda(const std::shared_ptr<lambda_expr>& expr) {
 			if (!param_ids.count(sym) && seen.insert(sym).second) proto.used_variables.push_back(sym);
 		}
 	}
-
-	{
-		vm_compiler body_compiler(symbolizer_, builtins_);
-		body_compiler.reference(reference_);
-		body_compiler.typed_lowering(typed_lowering_);
-		body_compiler.ir_listing(ir_listing_);
-		body_compiler.ir_passes(ir_passes_);
-		proto.body_chunk = body_compiler.compile_callable("<lambda>", expr->parameters, proto.body, expr->local_count);
-	}
-
-	chunk_->closure_protos.push_back(std::move(proto));
-	emit(opcode::op_closure, static_cast<uint32_t>(chunk_->closure_protos.size() - 1));
+	return proto;
 }
 
 // A program-scope declaration written without an initializer: a same-unit re-run keeps the variable, so the default is not
 // evaluated at all (the interpreter asks the same question before its evaluation)
-void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& decl) {
+JAI_NOINLINE void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& decl) {
 	if (decl->is_inline) {
 		const uint32_t node = add_node(decl);
 		emit(opcode::op_decl_keep, node);
@@ -9238,7 +9293,7 @@ void vm_compiler::compile_variable_decl(const std::shared_ptr<variable_decl>& de
 	compile_variable_decl_value(decl);
 }
 
-void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_decl>& decl) {
+JAI_NOINLINE void vm_compiler::compile_variable_decl_value(const std::shared_ptr<variable_decl>& decl) {
 	const bool is_reference = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
 	if (decl->ref_escaping && decl->slot_index != SIZE_MAX) { callable_.escaping.insert(static_cast<uint32_t>(decl->slot_index)); }   // a reference or a capture reaches it
 	if (!is_reference && decl->slot_index != SIZE_MAX && primitive_declared_type(decl->type.get())) { callable_.primitive_slots.insert(static_cast<uint32_t>(decl->slot_index)); }   // a typed scalar slot holds that kind at every point
@@ -9302,7 +9357,7 @@ uint32_t vm_compiler::declared_ref_at_bind(const variable_decl* decl) const {
 // binary or subscript read landing straight in the slot, else the general declaration over the pushed value. A ternary
 // initializer of a slot declaration lands each arm this way under the condition's jumps, so no value crosses a jump on
 // the operand stack (the block form admits the arms as moves); the interpreter evaluates the same arm and converts once.
-void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init) {
+JAI_NOINLINE void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl, const expression_ptr& init) {
 	if (!reference_ && init->get_type() == node_type::ternary_expr && callable_.active &&
 	    (decl->decl_fast_flags & variable_decl::decl_fast_slot_store) == variable_decl::decl_fast_slot_store && !decl->ref_escaping &&
 	    decl->slot_index != SIZE_MAX && decl->slot_index < k_typed_slot_mask) {
@@ -9399,7 +9454,7 @@ void vm_compiler::compile_decl_value(const std::shared_ptr<variable_decl>& decl,
 	emit(opcode::op_decl_var, add_node(decl), 1, lvalue_init);
 }
 
-void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& decl) {
+JAI_NOINLINE void vm_compiler::compile_function_decl(const std::shared_ptr<function_decl>& decl) {
 	function_proto proto;
 	proto.decl = decl;
 	proto.is_coroutine = decl->is_coroutine;

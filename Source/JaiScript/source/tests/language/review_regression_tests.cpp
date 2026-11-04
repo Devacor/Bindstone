@@ -221,7 +221,7 @@ public:
         });
         test("deep_unary_chain_guard_no_crash", [this]() {
             auto e = make_engine();
-            std::string src(200000, '!');
+            std::string src(1000000, '!');
             src += "true";
             // past the host thread's stack: one parse error, and the engine stays usable
             std::string failure;

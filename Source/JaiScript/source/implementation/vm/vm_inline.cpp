@@ -1842,7 +1842,7 @@ void vm_compiler::compile_graft_exit() {
 }
 
 // an expression statement: `f(...);`, `v = f(...);`, `s = s + f(...);`, `a.push(f(...));`
-bool vm_compiler::try_inline_expression(const expression_ptr& e) {
+JAI_NOINLINE bool vm_compiler::try_inline_expression(const expression_ptr& e) {
 	if (inlining_off_ || !e) return false;
 	const size_t mark = temp_next_;
 	bool changed = false;
@@ -1872,7 +1872,7 @@ bool vm_compiler::try_inline_variable_decl(const std::shared_ptr<variable_decl>&
 }
 
 // a return whose value calls a leaf: `return f(...);`, `return a + f(...);`
-bool vm_compiler::try_inline_return(const statement_ptr& stmt) {
+JAI_NOINLINE bool vm_compiler::try_inline_return(const statement_ptr& stmt) {
 	if (inlining_off_) return false;
 	auto* rs = static_cast<return_stmt*>(stmt.get());
 	if (!rs->value || rs->binds_reference) return false;

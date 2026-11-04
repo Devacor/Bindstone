@@ -1268,23 +1268,61 @@ bool parser::match(std::initializer_list<token_type> types) {
     return false;
 }
 
-checked_result<token> parser::consume(token_type type, const std::string& message) {
+checked_result<token> parser::consume(token_type type, std::string_view message) {
     if (check(type)) return advance();
-
-    report_error(message, peek());
-
-    // Return error as checked_result<token>
-    // Intern the message so we can pass it as a symbol ID
-    uint64_t msg_id = symbolizer_->intern(message);
-    return checked_result<token>(
-        make_error_code(parse_error_code::syntax_error),
-        "expected token: {0}",
-        msg_id
-    );
+    return expected_token(message);
 }
 
-// Primary expressions
+checked_result<void> parser::expect(token_type type, std::string_view message) {
+    if (!check(type)) [[unlikely]] { return expected_token(message); }
+    advance();
+    return {};
+}
+
+JAI_NOINLINE error_propagator parser::expected_token(std::string_view message) {
+    report_error(std::string(message), peek());
+    return {make_error_code(parse_error_code::syntax_error), "expected token: {0}", symbolizer_->intern(message)};
+}
+
+// Primary expressions: the productions that nest first, each in its own frame, so a level of nesting holds none of the others' locals
 checked_result<expression_ptr> parser::primary() {
+    const bool namespace_name = current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::colon_colon;
+    switch (peek().type) {
+        case token_type::left_brace:
+            if (looks_like_map_literal()) { return parse_map_literal(); }
+            break;
+        case token_type::left_paren:
+            if (arrow_function_ahead()) { return arrow_function_expression(); }
+            if (!namespace_name) {
+                advance();
+                return parenthesized();
+            }
+            break;
+        case token_type::left_bracket:
+            if (!namespace_name) {
+                advance();
+                return bracket_expression();
+            }
+            break;
+        case token_type::cast_keyword:
+            advance();
+            return cast_expression();
+        case token_type::identifier:
+            if (arrow_function_ahead()) { return arrow_function_expression(); }
+            break;
+        case token_type::function_keyword:
+            if (current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::left_paren) {
+                advance();
+                return anonymous_function_expression();
+            }
+            break;
+        default:
+            break;
+    }
+    return primary_rest();
+}
+
+JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
     // Lexer errors travel as error tokens carrying the message in the lexeme
     // (e.g. template-string format specs rejected at lex time). Surface that
     // message instead of a generic "expected expression".
@@ -1294,10 +1332,6 @@ checked_result<expression_ptr> parser::primary() {
         return make_error_code(parse_error_code::syntax_error);
     }
 
-    // Map literals parse as a primary so postfix applies ({"k":1}["k"], {..}.size())
-    if (check(token_type::left_brace) && looks_like_map_literal()) {
-        return parse_map_literal();
-    }
     if (check(token_type::left_brace) && current_ + 2 < stream_->size() && (*stream_)[current_ + 1].type == token_type::string_literal) {
         const token& after_key = (*stream_)[current_ + 2];
         if (after_key.type != token_type::comma && after_key.type != token_type::right_brace) {
@@ -1403,7 +1437,7 @@ checked_result<expression_ptr> parser::primary() {
         token includeToken = previous();
         if (match(token_type::left_paren)) {
             JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
-            JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after include expression"));
+            JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after include expression"));
             return std::make_shared<include_expr>(includeToken.location, path_expr);
         }
         JAISCRIPT_TRY_ASSIGN(std::string path, include_literal_path());
@@ -1424,65 +1458,7 @@ checked_result<expression_ptr> parser::primary() {
     // make_shared<T>(args) is the same expression as new T(args); bare make_shared stays an ordinary name
     const bool make_shared_spelling = check(token_type::identifier) && peek().lexeme == "make_shared" &&
         current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::less;
-    if (make_shared_spelling || match(token_type::new_keyword)) {
-        token newToken = make_shared_spelling ? advance() : previous();
-        if (make_shared_spelling) { advance(); }
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
-        if (make_shared_spelling) {
-            consume_greater_in_generic("expected '>' after make_shared type");
-            if (!check(token_type::left_paren)) {
-                report_error("expected '(' after make_shared<T>", peek());
-                return make_error_code(parse_error_code::syntax_error);
-            }
-        }
-
-        type_info_ptr type = pointee_type;
-        if (!pointee_type || pointee_type->base_type != script_value_type::jai_shared_ptr_type) {
-            type_info info(script_value_type::jai_shared_ptr_type);
-            info.type_params.push_back(pointee_type);
-            if (pointee_type) {
-                info.type_name = pointee_type->type_name;
-            } else {
-                info.type_name = "shared_ptr";
-            }
-            info.id = symbolizer_->intern(info.canonical_name());
-            type = store_type_info(std::move(info));
-        }
-
-        if (!check(token_type::left_paren) && !check(token_type::left_brace)) {
-            report_foreign(check(token_type::left_bracket) ? detail::foreign_word::new_array : detail::foreign_word::new_without_arguments, newToken);
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        const bool is_brace = check(token_type::left_brace);
-        advance(); // consume '(' or '{'
-        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
-        return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
-    }
-
-    // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): the explicit typed-boundary
-    // spelling (detail/cast_kernel.hpp); the type is anything a declaration accepts
-    if (match(token_type::cast_keyword)) {
-        token castToken = previous();
-        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'cast'"));
-        if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
-            check(token_type::void_keyword) || check(token_type::function_keyword)) {
-            report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", peek());
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
-        if (!target || target->base_type == script_value_type::jai_any_type ||
-            (target->base_type == script_value_type::jai_shared_ptr_type && !target->element_type())) {
-            report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", castToken);
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        const bool by_reference = match(token_type::ampersand);
-        consume_greater_in_generic("expected '>' after cast type");
-        JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after cast type"));
-        JAISCRIPT_TRY_ASSIGN(auto operand, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after cast operand"));
-        if (by_reference) { operand = bound_conditional(std::move(operand)); }
-        return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
-    }
+    if (make_shared_spelling || match(token_type::new_keyword)) { return new_expression(make_shared_spelling); }
 
     // A math type (one fused token, lexer.cpp) in expression position is the static member math::K the math::
     // intrinsics resolve, so math::vec3(1, 2, 3) calls the constructor intrinsic
@@ -1523,199 +1499,14 @@ checked_result<expression_ptr> parser::primary() {
     }
 
     // Identifiers (including potential template constructors)
-    if (match(token_type::identifier)) {
-        token identToken = previous();
-        
-        // A host template's name followed by '<' may be a construction (Point<int>(1, 2)); a failed type parse is a comparison
-        if (check(token_type::less) && is_registered_template_type(std::string(identToken.lexeme))) {
-            size_t savedPos = current_ - 1; // Save position including the identifier
-            current_--; // Back up to re-parse as type
-            const size_t errors_before = errors_.size();
-            const std::optional<token> pushed_before = pushed_back_token_;
+    if (match(token_type::identifier)) { return identifier_expression(); }
 
-            auto type_result = parse_type();
-            if (type_result && errors_.size() == errors_before) {
-                type_info_ptr type = std::move(type_result.value());
-                if (type && check(token_type::left_brace)) {
-                    // This is a brace-initialized constructor like array<int>{}
-                    advance(); // consume '{'
-                    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
-                    return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
-                } else if (type && check(token_type::left_paren)) {
-                    // Parentheses constructor for user-defined template types
-                    advance(); // consume '('
-                    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(false));
-                    return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
-                }
-            }
-            current_ = savedPos + 1;
-            errors_.resize(errors_before);
-            pushed_back_token_ = pushed_before;
-        }
-
-        auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
-        id_expr->slot_index = lookup_slot(id_expr->symbol_id);
-        return id_expr;
-    }
-
-    if (match(token_type::left_paren)) {
-        JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after expression"));
-        return expr;
-    }
-
-    // Array literal with [] or Lambda expression
-    if (match(token_type::left_bracket)) {
-        auto startLoc = previous().location;
-
-        // A bracket group followed by '(' is a capture list (an array literal is never called): the lambda, read as one
-        if (!pushed_back_token_) {
-            size_t depth = 0;
-            for (size_t i = current_ - 1; i < stream_->size(); ++i) {
-                const token_type t = (*stream_)[i].type;
-                if (t == token_type::left_bracket || t == token_type::left_paren || t == token_type::left_brace) {
-                    ++depth;
-                } else if (t == token_type::right_bracket || t == token_type::right_paren || t == token_type::right_brace) {
-                    if (--depth == 0) {
-                        if (t == token_type::right_bracket && i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::left_paren) {
-                            current_ -= 1;
-                            return lambda_expression();
-                        }
-                        break;
-                    }
-                } else if (t == token_type::eof || (t == token_type::semicolon && depth == 1)) {
-                    break;
-                }
-            }
-        }
-
-        // Check for empty array OR empty capture list for lambda
-        if (check(token_type::right_bracket)) {
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']'"));
-
-            // Check if this is followed by '(' which would make it a lambda
-            if (check(token_type::left_paren)) {
-                // Put back the brackets so lambda_expression can parse them
-                current_ -= 2; // Back up to before '['
-                return lambda_expression();
-            }
-
-            return std::make_shared<array_literal_expr>(startLoc, std::vector<expression_ptr>());
-        }
-        
-        // Save position for potential backtrack to lambda
-        size_t savedPos = current_;
-        
-        // Try to parse as array literal first
-        std::vector<expression_ptr> elements;
-        bool is_array = true;
-        
-        // Check if this might be a lambda with default capture [= or [&
-        // or explicit capture [this, [x, [&x
-        if (check(token_type::equal) || check(token_type::ampersand)) {
-            // This is definitely a lambda, not an array
-            current_ = savedPos - 1;
-            return lambda_expression();
-        }
-
-        // Check for [this]() or [identifier]() pattern which is definitely a lambda
-        // We need to look ahead further to distinguish from single-element arrays like [x]
-        if (check(token_type::this_keyword) || check(token_type::identifier)) {
-            // Look ahead to see if this is followed by ] and then (
-            size_t lookAhead = current_ + 1;
-            if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::right_bracket) {
-                // Check if there's a ( after the ]
-                size_t lookAhead2 = lookAhead + 1;
-                if (lookAhead2 < stream_->size() && (*stream_)[lookAhead2].type == token_type::left_paren) {
-                    // Pattern is [this]() or [x]() - definitely a lambda
-                    current_ = savedPos - 1;
-                    return lambda_expression();
-                }
-            }
-            // NOTE: We intentionally do NOT check for [identifier, here anymore
-            // because [x, y, z] could be either an array literal OR a lambda capture list.
-            // We'll distinguish them later by checking if there's a ( after the closing ].
-        }
-        
-        // Parse first element/expression
-        JAISCRIPT_TRY_ASSIGN(auto first_elem, expression());
-        elements.push_back(std::move(first_elem));
-
-        // If we see a comma, it's definitely an array
-        if (match(token_type::comma)) {
-            // Continue parsing array elements
-            do {
-                JAISCRIPT_TRY_ASSIGN(auto elem, expression());
-                elements.push_back(std::move(elem));
-            } while (match(token_type::comma));
-
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after array elements"));
-            // Check if this is followed by '(' which would make it a lambda
-            if (check(token_type::left_paren)) {
-                // Restore position and parse as lambda
-                current_ = savedPos - 1;
-                return lambda_expression();
-            }
-            return std::make_shared<array_literal_expr>(startLoc, std::move(elements));
-        }
-        // If we see ], it might be a single-element array or lambda capture
-        else if (match(token_type::right_bracket)) {
-            // Check if this is followed by '(' which would make it a lambda
-            if (check(token_type::left_paren)) {
-                // Restore position and parse as lambda
-                current_ = savedPos - 1;
-                return lambda_expression();
-            }
-            return std::make_shared<array_literal_expr>(startLoc, std::move(elements));
-        }
-        // Otherwise, it might be a lambda capture list
-        else {
-            // Restore position and parse as lambda
-            current_ = savedPos - 1;
-            return lambda_expression();
-        }
-    }
-    
-    
     // Check for type constructors (array<int>(), map<string, int>(), etc.)
     if (check(token_type::array_keyword) || check(token_type::map_keyword) ||
         check(token_type::weak_ptr_keyword) || check(token_type::shared_ptr_keyword) ||
         check(token_type::int_keyword) || check(token_type::float_keyword) ||
         check(token_type::string_keyword) || check(token_type::bool_keyword) || check(token_type::char_keyword)) {
-        size_t savedPos = current_;
-        auto type_result = parse_type();
-        if (type_result) {
-            type_info_ptr type = std::move(type_result.value());
-            if (type) {
-                // This is a type constructor - convert it to an identifier expression
-                // that will be handled by postfix() for () or {} initialization
-                current_ = savedPos;
-                token typeToken = advance();
-                std::string type_name(typeToken.lexeme);
-
-                // For template types, we need to parse the full type
-                if (check(token_type::less)) {
-                    // This is a template type, parse the full type
-                    current_ = savedPos;
-                    JAISCRIPT_TRY_ASSIGN(type, parse_type());
-
-                    // Check if this is followed by {} or () for constructor syntax
-                    if (check(token_type::left_brace) || check(token_type::left_paren)) {
-                        const bool is_brace = check(token_type::left_brace);
-                        advance(); // consume '{' or '('
-                        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
-                        return std::make_shared<new_expr>(typeToken.location, type, std::move(arguments));
-                    }
-
-                    // Otherwise return identifier with type name
-                    type_name = type->type_name;
-                }
-
-                auto [sym_id, stable_view] = symbolizer_->intern_with_view(type_name);
-                return std::make_shared<identifier_expr>(typeToken.location, stable_view, sym_id);
-            }
-        }
-        current_ = savedPos;
+        if (auto constructed = type_constructor_expression()) { return std::move(*constructed); }
     }
     
     // Super keyword
@@ -1735,9 +1526,267 @@ checked_result<expression_ptr> parser::primary() {
     return make_error_code(parse_error_code::syntax_error);
 }
 
+JAI_NOINLINE checked_result<expression_ptr> parser::new_expression(bool make_shared_spelling) {
+    const token& newToken = make_shared_spelling ? advance() : previous();
+    if (make_shared_spelling) { advance(); }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
+    if (make_shared_spelling) {
+        consume_greater_in_generic("expected '>' after make_shared type");
+        if (!check(token_type::left_paren)) {
+            report_error("expected '(' after make_shared<T>", peek());
+            return make_error_code(parse_error_code::syntax_error);
+        }
+    }
+
+    type_info_ptr type = pointee_type;
+    if (!pointee_type || pointee_type->base_type != script_value_type::jai_shared_ptr_type) { type = shared_ptr_type_of(pointee_type); }
+
+    if (!check(token_type::left_paren) && !check(token_type::left_brace)) {
+        report_foreign(check(token_type::left_bracket) ? detail::foreign_word::new_array : detail::foreign_word::new_without_arguments, newToken);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    const bool is_brace = check(token_type::left_brace);
+    advance(); // consume '(' or '{'
+    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
+    return std::make_shared<new_expr>(newToken.location, type, std::move(arguments));
+}
+
+JAI_NOINLINE checked_result<expression_ptr> parser::identifier_expression() {
+    token identToken = previous();
+    
+    // A host template's name followed by '<' may be a construction (Point<int>(1, 2)); a failed type parse is a comparison
+    if (check(token_type::less) && is_registered_template_type(std::string(identToken.lexeme))) {
+        size_t savedPos = current_ - 1; // Save position including the identifier
+        current_--; // Back up to re-parse as type
+        const size_t errors_before = errors_.size();
+        const std::optional<token> pushed_before = pushed_back_token_;
+
+        auto type_result = parse_type();
+        if (type_result && errors_.size() == errors_before) {
+            type_info_ptr type = std::move(type_result.value());
+            if (type && check(token_type::left_brace)) {
+                // This is a brace-initialized constructor like array<int>{}
+                advance(); // consume '{'
+                JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
+                return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
+            } else if (type && check(token_type::left_paren)) {
+                // Parentheses constructor for user-defined template types
+                advance(); // consume '('
+                JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(false));
+                return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
+            }
+        }
+        current_ = savedPos + 1;
+        errors_.resize(errors_before);
+        pushed_back_token_ = pushed_before;
+    }
+
+    auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
+    id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+    return id_expr;
+}
+
+JAI_NOINLINE std::optional<checked_result<expression_ptr>> parser::type_constructor_expression() {
+    size_t savedPos = current_;
+    auto type_result = parse_type();
+    if (type_result) {
+        type_info_ptr type = std::move(type_result.value());
+        if (type) {
+            // This is a type constructor - convert it to an identifier expression
+            // that will be handled by postfix() for () or {} initialization
+            current_ = savedPos;
+            token typeToken = advance();
+            std::string type_name(typeToken.lexeme);
+
+            // For template types, we need to parse the full type
+            if (check(token_type::less)) {
+                // This is a template type, parse the full type
+                current_ = savedPos;
+                JAISCRIPT_TRY_ASSIGN(type, parse_type());
+
+                // Check if this is followed by {} or () for constructor syntax
+                if (check(token_type::left_brace) || check(token_type::left_paren)) {
+                    const bool is_brace = check(token_type::left_brace);
+                    advance(); // consume '{' or '('
+                    JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
+                    return std::make_shared<new_expr>(typeToken.location, type, std::move(arguments));
+                }
+
+                // Otherwise return identifier with type name
+                type_name = type->type_name;
+            }
+
+            auto [sym_id, stable_view] = symbolizer_->intern_with_view(type_name);
+            return std::make_shared<identifier_expr>(typeToken.location, stable_view, sym_id);
+        }
+    }
+    current_ = savedPos;
+    return std::nullopt;
+}
+
+
+JAI_NOINLINE checked_result<expression_ptr> parser::parenthesized() {
+    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after expression"));
+    return expr;
+}
+
+// Array literal with [] or Lambda expression
+JAI_NOINLINE checked_result<expression_ptr> parser::bracket_expression() {
+    const source_location& startLoc = previous().location;
+
+    // A bracket group followed by '(' is a capture list (an array literal is never called): the lambda, read as one
+    if (!pushed_back_token_) {
+        size_t depth = 0;
+        for (size_t i = current_ - 1; i < stream_->size(); ++i) {
+            const token_type t = (*stream_)[i].type;
+            if (t == token_type::left_bracket || t == token_type::left_paren || t == token_type::left_brace) {
+                ++depth;
+            } else if (t == token_type::right_bracket || t == token_type::right_paren || t == token_type::right_brace) {
+                if (--depth == 0) {
+                    if (t == token_type::right_bracket && i + 1 < stream_->size() && (*stream_)[i + 1].type == token_type::left_paren) {
+                        current_ -= 1;
+                        return lambda_expression();
+                    }
+                    break;
+                }
+            } else if (t == token_type::eof || (t == token_type::semicolon && depth == 1)) {
+                break;
+            }
+        }
+    }
+
+    // Check for empty array OR empty capture list for lambda
+    if (check(token_type::right_bracket)) {
+        JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']'"));
+
+        // Check if this is followed by '(' which would make it a lambda
+        if (check(token_type::left_paren)) {
+            // Put back the brackets so lambda_expression can parse them
+            current_ -= 2; // Back up to before '['
+            return lambda_expression();
+        }
+
+        return std::make_shared<array_literal_expr>(startLoc, std::vector<expression_ptr>());
+    }
+
+    // Save position for potential backtrack to lambda
+    size_t savedPos = current_;
+
+    // Try to parse as array literal first
+    std::vector<expression_ptr> elements;
+
+    // Check if this might be a lambda with default capture [= or [&
+    // or explicit capture [this, [x, [&x
+    if (check(token_type::equal) || check(token_type::ampersand)) {
+        // This is definitely a lambda, not an array
+        current_ = savedPos - 1;
+        return lambda_expression();
+    }
+
+    // Check for [this]() or [identifier]() pattern which is definitely a lambda
+    // We need to look ahead further to distinguish from single-element arrays like [x]
+    if (check(token_type::this_keyword) || check(token_type::identifier)) {
+        // Look ahead to see if this is followed by ] and then (
+        size_t lookAhead = current_ + 1;
+        if (lookAhead < stream_->size() && (*stream_)[lookAhead].type == token_type::right_bracket) {
+            // Check if there's a ( after the ]
+            size_t lookAhead2 = lookAhead + 1;
+            if (lookAhead2 < stream_->size() && (*stream_)[lookAhead2].type == token_type::left_paren) {
+                // Pattern is [this]() or [x]() - definitely a lambda
+                current_ = savedPos - 1;
+                return lambda_expression();
+            }
+        }
+        // NOTE: We intentionally do NOT check for [identifier, here anymore
+        // because [x, y, z] could be either an array literal OR a lambda capture list.
+        // We'll distinguish them later by checking if there's a ( after the closing ].
+    }
+
+    // the elements; a comma makes it definitely an array
+    bool listed = false;
+    while (true) {
+        JAISCRIPT_TRY_ASSIGN(auto elem, expression());
+        elements.push_back(std::move(elem));
+        if (!match(token_type::comma)) { break; }
+        listed = true;
+    }
+
+    if (listed) {
+        JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after array elements"));
+        // Check if this is followed by '(' which would make it a lambda
+        if (check(token_type::left_paren)) {
+            // Restore position and parse as lambda
+            current_ = savedPos - 1;
+            return lambda_expression();
+        }
+        return std::make_shared<array_literal_expr>(startLoc, std::move(elements));
+    }
+    // If we see ], it might be a single-element array or lambda capture
+    else if (match(token_type::right_bracket)) {
+        // Check if this is followed by '(' which would make it a lambda
+        if (check(token_type::left_paren)) {
+            // Restore position and parse as lambda
+            current_ = savedPos - 1;
+            return lambda_expression();
+        }
+        return std::make_shared<array_literal_expr>(startLoc, std::move(elements));
+    }
+    // Otherwise, it might be a lambda capture list
+    else {
+        // Restore position and parse as lambda
+        current_ = savedPos - 1;
+        return lambda_expression();
+    }
+}
+
+// cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e): the explicit typed-boundary
+// spelling (detail/cast_kernel.hpp); the type is anything a declaration accepts
+JAI_NOINLINE checked_result<expression_ptr> parser::cast_expression() {
+    const token& castToken = previous();
+    JAISCRIPT_TRY(expect(token_type::less, "expected '<' after 'cast'"));
+    if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
+        check(token_type::void_keyword) || check(token_type::function_keyword)) {
+        report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr target, parse_type());
+    if (!target || target->base_type == script_value_type::jai_any_type ||
+        (target->base_type == script_value_type::jai_shared_ptr_type && !target->element_type())) {
+        report_error("cast needs a concrete type: cast<T>(e), cast<T&>(e) or cast<shared_ptr<T>>(e)", castToken);
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    const bool by_reference = match(token_type::ampersand);
+    consume_greater_in_generic("expected '>' after cast type");
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after cast type"));
+    JAISCRIPT_TRY_ASSIGN(auto operand, expression());
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after cast operand"));
+    if (by_reference) { operand = bound_conditional(std::move(operand)); }
+    return std::make_shared<cast_expr>(castToken.location, target, by_reference, std::move(operand));
+}
+
 // Type parsing
 checked_result<type_info_ptr> parser::parse_type() {
     stack_.guard(peek().location);
+    switch (peek().type) {
+        case token_type::array_keyword:
+            advance();
+            return array_type();
+        case token_type::map_keyword:
+            advance();
+            return map_type();
+        case token_type::weak_ptr_keyword:
+            advance();
+            return weak_ptr_type();
+        case token_type::shared_ptr_keyword:
+            advance();
+            return shared_ptr_type();
+        default:
+            return named_type();
+    }
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::named_type() {
     if (check(token_type::const_keyword)) {   // array<const int>, cast<const T&>: const qualifies a declaration (internal/const.md)
         report_foreign(detail::foreign_word::const_type_argument, peek());
         return make_error_code(parse_error_code::syntax_error);
@@ -1775,71 +1824,6 @@ checked_result<type_info_ptr> parser::parse_type() {
     }
     if (match(token_type::void_keyword)) {
         return store_type_info(type_info::make_void(*symbolizer_));
-    }
-
-    // Generic types
-    if (match(token_type::array_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less,
-            "expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
-            "if this was meant as a variable, rename it"));
-        type_info_ptr element_type;
-        if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
-            element_type = store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
-        } else {
-            JAISCRIPT_TRY_ASSIGN(element_type, parse_type());
-        }
-        consume_greater_in_generic("expected '>' after array element type");
-        return store_type_info(type_info::make_array(*symbolizer_, element_type));
-    }
-
-    if (match(token_type::map_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less,
-            "expected '<' after 'map' - 'map' is the built-in map type keyword (map<K, V>); "
-            "if this was meant as a variable, rename it"));
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr keyType, parse_type());
-        JAISCRIPT_TRY(consume(token_type::comma, "expected ',' after map key type"));
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr valueType, parse_type());
-        consume_greater_in_generic("expected '>' after map value type");
-        return store_type_info(type_info::make_map(*symbolizer_, keyType, valueType));
-    }
-
-    if (match(token_type::weak_ptr_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'weak_ptr'"));
-        if (check(token_type::const_keyword)) {
-            report_foreign(detail::foreign_word::pointer_to_const, peek());
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
-        consume_greater_in_generic("expected '>' after weak_ptr type");
-        return store_type_info(type_info::make_weak_ptr(*symbolizer_, pointee_type));
-    }
-
-    if (match(token_type::shared_ptr_keyword)) {
-        JAISCRIPT_TRY(consume(token_type::less, "expected '<' after 'shared_ptr'"));
-        if (check(token_type::const_keyword)) {
-            report_foreign(detail::foreign_word::pointer_to_const, peek());
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        // A dynamic pointee adds nothing over plain var (which
-        // already holds and rebinds any shared_ptr) - reject with the teaching pair
-        if (check(token_type::var_keyword)) {
-            report_error("shared_ptr<var> is not supported: use var (holds and rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)", peek());
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
-        consume_greater_in_generic("expected '>' after shared_ptr type");
-        // Create a shared_ptr type that wraps the pointee type
-        // This ensures reference semantics (no clone on assign)
-        type_info info(script_value_type::jai_shared_ptr_type);
-        info.type_params.push_back(pointee_type);
-        // For shared_ptr<T>, the type_name should be T since it's just reference semantics
-        if (pointee_type) {
-            info.type_name = pointee_type->type_name;
-        } else {
-            info.type_name = "shared_ptr";
-        }
-        info.id = symbolizer_->intern(info.canonical_name());
-        return store_type_info(std::move(info));
     }
 
     if (check(token_type::identifier) && peek().lexeme == "utf8_string") {
@@ -1911,12 +1895,126 @@ checked_result<type_info_ptr> parser::parse_type() {
     return make_error_code(parse_error_code::syntax_error);
 }
 
-checked_result<expression_ptr> parser::expression() {
-    stack_.guard(peek().location);
-    return assignment();
+JAI_NOINLINE checked_result<type_info_ptr> parser::array_type() {
+    JAISCRIPT_TRY(expect(token_type::less,
+        "expected '<' after 'array' - 'array' is the built-in array type keyword (array<T>); "
+        "if this was meant as a variable, rename it"));
+    type_info_ptr element_type;
+    if (check(token_type::identifier) && (peek().lexeme == "uint8" || peek().lexeme == "int8")) {
+        element_type = byte_element_type();
+    } else {
+        JAISCRIPT_TRY_ASSIGN(element_type, parse_type());
+    }
+    consume_greater_in_generic("expected '>' after array element type");
+    return array_type_of(element_type);
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::map_type() {
+    JAISCRIPT_TRY(expect(token_type::less,
+        "expected '<' after 'map' - 'map' is the built-in map type keyword (map<K, V>); "
+        "if this was meant as a variable, rename it"));
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr keyType, parse_type());
+    JAISCRIPT_TRY(expect(token_type::comma, "expected ',' after map key type"));
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr valueType, parse_type());
+    consume_greater_in_generic("expected '>' after map value type");
+    return map_type_of(keyType, valueType);
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::weak_ptr_type() {
+    JAISCRIPT_TRY(expect(token_type::less, "expected '<' after 'weak_ptr'"));
+    if (check(token_type::const_keyword)) {
+        report_foreign(detail::foreign_word::pointer_to_const, peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
+    consume_greater_in_generic("expected '>' after weak_ptr type");
+    return weak_ptr_type_of(pointee_type);
+}
+
+JAI_NOINLINE checked_result<type_info_ptr> parser::shared_ptr_type() {
+    JAISCRIPT_TRY(expect(token_type::less, "expected '<' after 'shared_ptr'"));
+    if (check(token_type::const_keyword)) {
+        report_foreign(detail::foreign_word::pointer_to_const, peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    // A dynamic pointee adds nothing over plain var (which
+    // already holds and rebinds any shared_ptr) - reject with the teaching pair
+    if (check(token_type::var_keyword)) {
+        report_error("shared_ptr<var> is not supported: use var (holds and rebinds any shared_ptr) or shared_ptr<auto> (infers then enforces the pointee)", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(type_info_ptr pointee_type, parse_type());
+    consume_greater_in_generic("expected '>' after shared_ptr type");
+    return shared_ptr_type_of(pointee_type);
+}
+
+JAI_NOINLINE type_info_ptr parser::byte_element_type() {
+    return store_type_info(advance().lexeme == "uint8" ? type_info::make_uint8(*symbolizer_) : type_info::make_int8(*symbolizer_));
+}
+
+JAI_NOINLINE type_info_ptr parser::array_type_of(const type_info_ptr& element) {
+    return store_type_info(type_info::make_array(*symbolizer_, element));
+}
+
+JAI_NOINLINE type_info_ptr parser::map_type_of(const type_info_ptr& key, const type_info_ptr& value) {
+    return store_type_info(type_info::make_map(*symbolizer_, key, value));
+}
+
+JAI_NOINLINE type_info_ptr parser::weak_ptr_type_of(const type_info_ptr& pointee) {
+    return store_type_info(type_info::make_weak_ptr(*symbolizer_, pointee));
+}
+
+// shared_ptr<T> has reference semantics (no clone on assign); its type_name is T's
+JAI_NOINLINE type_info_ptr parser::shared_ptr_type_of(const type_info_ptr& pointee_type) {
+    type_info info(script_value_type::jai_shared_ptr_type);
+    info.type_params.push_back(pointee_type);
+    if (pointee_type) {
+        info.type_name = pointee_type->type_name;
+    } else {
+        info.type_name = "shared_ptr";
+    }
+    info.id = symbolizer_->intern(info.canonical_name());
+    return store_type_info(std::move(info));
 }
 
 namespace {
+    constexpr int k_no_operator = -1;
+    constexpr int k_assignment_precedence = 0;   // right-associative: its value is a whole expression
+    constexpr int k_ternary_precedence = 1;      // right-associative: the else arm is another conditional
+    constexpr int k_coalesce_precedence = 2;     // right-associative, below || and above the conditional, as C#'s
+    constexpr int k_equality_precedence = 8;
+    constexpr int k_shift_precedence = 10;
+    constexpr int k_additive_precedence = 11;    // + - * / % fold their literal operands
+
+    // The binding strength of the operator a token spells after an operand; || (3) through * / % (12) are left-associative
+    int operator_precedence(token_type t) {
+        switch (t) {
+            case token_type::question_question_equal: case token_type::equal: case token_type::plus_equal: case token_type::minus_equal:
+            case token_type::star_equal: case token_type::slash_equal: case token_type::percent_equal: case token_type::ampersand_equal:
+            case token_type::pipe_equal: case token_type::caret_equal: case token_type::left_shift_equal: case token_type::right_shift_equal:
+                return k_assignment_precedence;
+            case token_type::question: return k_ternary_precedence;
+            case token_type::question_question: return k_coalesce_precedence;
+            case token_type::pipe_pipe: return 3;
+            case token_type::ampersand_ampersand: return 4;
+            case token_type::pipe: return 5;
+            case token_type::caret: return 6;
+            case token_type::ampersand: return 7;
+            case token_type::equal_equal: case token_type::bang_equal: return k_equality_precedence;
+            case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
+            case token_type::spaceship: return 9;
+            case token_type::left_shift: case token_type::right_shift: return k_shift_precedence;
+            case token_type::plus: case token_type::minus: return k_additive_precedence;
+            case token_type::star: case token_type::slash: case token_type::percent: return 12;
+            default: return k_no_operator;
+        }
+    }
+
+    JAI_NOINLINE expression_ptr subscript_node(expression_ptr object, expression_ptr index, const source_location& at) {
+        token op(token_type::left_bracket, "[", at);
+        return std::make_shared<binary_expr>(op.location, std::move(object), op, std::move(index));
+    }
+
     // A target `??=` reads and then may store: evaluating it twice must do what evaluating it once does, so it names storage
     // through names, members and elements whose indices run no code
     bool coalesce_target_pure(const expression* e) {
@@ -1950,46 +2048,78 @@ namespace {
     }
 }
 
-checked_result<expression_ptr> parser::assignment() {
-    stack_.guard(peek().location);   // a = b = c recurses here
-    const size_t target_start = current_;
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, ternary());
+checked_result<expression_ptr> parser::expression() {
+    return operator_expression(k_assignment_precedence);
+}
 
-    // a ??= b is a ?? (a = b): the target read once to test it, stored only when it held null
-    if (match(token_type::question_question_equal)) {
-        token op = previous();
-        const node_type shape = expr->get_type();
-        const bool storage = shape == node_type::identifier_expr || shape == node_type::member_expr ||
-                             (shape == node_type::binary_expr && static_cast<const binary_expr*>(expr.get())->op.type == token_type::left_bracket);
-        if (!storage || !coalesce_target_pure(expr.get())) {
-            report_error("'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first", op);
+// One frame per operand on the way down: what follows the operand climbs in operator_rest
+checked_result<expression_ptr> parser::operator_expression(int min_precedence) {
+    stack_.guard(peek().location);
+    const size_t operand_start = current_;
+    auto left = unary();
+    if (!left || operator_precedence(peek().type) < min_precedence) { return left; }
+    return operator_rest(std::move(left.value()), min_precedence, operand_start);
+}
+
+JAI_NOINLINE checked_result<expression_ptr> parser::operator_rest(expression_ptr left, int min_precedence, size_t operand_start) {
+    for (int precedence = operator_precedence(peek().type); precedence >= min_precedence; precedence = operator_precedence(peek().type)) {
+        if (precedence == k_assignment_precedence) { return assignment_rest(std::move(left), operand_start); }
+        if (precedence == k_ternary_precedence) {
+            JAISCRIPT_TRY_ASSIGN(left, ternary_rest(std::move(left)));
+            continue;
+        }
+        if (precedence == k_coalesce_precedence) {
+            JAISCRIPT_TRY_ASSIGN(left, coalesce_rest(std::move(left)));
+            continue;
+        }
+        advance();
+        const token& op = previous();
+        if (precedence == k_equality_precedence && check(token_type::equal)) {
+            report_foreign(op.type == token_type::equal_equal ? detail::foreign_word::strict_equal : detail::foreign_word::strict_not_equal, op);
             return make_error_code(parse_error_code::syntax_error);
         }
-        const size_t resume = current_;
-        const std::optional<token> pushed = pushed_back_token_;
-        current_ = target_start;
-        pushed_back_token_.reset();
-        auto store_target = ternary();
-        current_ = resume;
-        pushed_back_token_ = pushed;
-        if (!store_target) { return store_target.error_value(); }
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, assignment());
-        token assign(token_type::equal, "=", op.location);
-        auto store = std::make_shared<assignment_expr>(op.location, lvalue_target(store_target.value()), assign, right);
-        token coalesce_op(token_type::question_question, "??", op.location);
-        return std::make_shared<binary_expr>(op.location, expr, coalesce_op, store);
+        JAISCRIPT_TRY_ASSIGN(expression_ptr right, operator_expression(precedence + 1));
+        if (precedence >= k_additive_precedence) {
+            left = try_constant_fold(std::move(left), op, std::move(right));
+        } else {
+            left = std::make_shared<binary_expr>(op.location, std::move(left), op, std::move(right));
+        }
     }
+    return left;
+}
 
-    if (match({token_type::equal, token_type::plus_equal, token_type::minus_equal,
-               token_type::star_equal, token_type::slash_equal, token_type::percent_equal,
-               token_type::ampersand_equal, token_type::pipe_equal, token_type::caret_equal,
-               token_type::left_shift_equal, token_type::right_shift_equal})) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, assignment());
-        return std::make_shared<assignment_expr>(op.location, lvalue_target(expr), op, right);
+JAI_NOINLINE checked_result<expression_ptr> parser::assignment_rest(expression_ptr expr, size_t target_start) {
+    if (check(token_type::question_question_equal)) { return coalesce_assignment(std::move(expr), target_start); }
+    advance();
+    const token& op = previous();
+    JAISCRIPT_TRY_ASSIGN(expression_ptr right, expression());
+    return std::make_shared<assignment_expr>(op.location, lvalue_target(expr), op, right);
+}
+
+// a ??= b is a ?? (a = b): the target read once to test it, stored only when it held null
+JAI_NOINLINE checked_result<expression_ptr> parser::coalesce_assignment(expression_ptr expr, size_t target_start) {
+    advance();
+    token op = previous();
+    const node_type shape = expr->get_type();
+    const bool storage = shape == node_type::identifier_expr || shape == node_type::member_expr ||
+                         (shape == node_type::binary_expr && static_cast<const binary_expr*>(expr.get())->op.type == token_type::left_bracket);
+    if (!storage || !coalesce_target_pure(expr.get())) {
+        report_error("'??=' needs a variable, a member or an element whose index runs no code; store anything else in a local first", op);
+        return make_error_code(parse_error_code::syntax_error);
     }
-
-    return expr;
+    const size_t resume = current_;
+    const std::optional<token> pushed = pushed_back_token_;
+    current_ = target_start;
+    pushed_back_token_.reset();
+    auto store_target = operator_expression(k_ternary_precedence);
+    current_ = resume;
+    pushed_back_token_ = pushed;
+    if (!store_target) { return store_target.error_value(); }
+    JAISCRIPT_TRY_ASSIGN(expression_ptr right, expression());
+    token assign(token_type::equal, "=", op.location);
+    auto store = std::make_shared<assignment_expr>(op.location, lvalue_target(store_target.value()), assign, right);
+    token coalesce_op(token_type::question_question, "??", op.location);
+    return std::make_shared<binary_expr>(op.location, expr, coalesce_op, store);
 }
 
 // `{ key:` from the token `offset` past the current one: a map literal's head, which no block begins with
@@ -2055,12 +2185,12 @@ bool parser::looks_like_map_literal() {
 
 checked_result<expression_ptr> parser::parse_map_literal() {
     stack_.guard(peek().location);   // {{...}} recurses here without passing through expression()
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{'"));
-    auto startLoc = previous().location;
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{'"));
+    const source_location& startLoc = previous().location;
 
     // Empty map
     if (check(token_type::right_brace)) {
-        JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}'"));
+        JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}'"));
         return std::make_shared<map_literal_expr>(startLoc, std::vector<std::pair<expression_ptr, expression_ptr>>());
     }
 
@@ -2089,172 +2219,62 @@ checked_result<expression_ptr> parser::parse_map_literal() {
         do {
             expression_ptr key;
 
-            // Check if key is a bare identifier (convert to string literal)
+            // a bare identifier key is its name as a string: {x: 10} is {"x": 10}
             if (check(token_type::identifier)) {
-                token keyToken = advance();
-                // Convert bare identifier to string literal for JSON-style syntax
-                // e.g., {x: 10} becomes {"x": 10}
-                script_string keyStr(keyToken.lexeme);
-                script_value keyValue(script_value::ast_literal_tag{}, keyStr);
-                key = std::make_shared<literal_expr>(keyToken.location, keyValue);
+                key = identifier_map_key();
             } else {
                 // Parse as expression (for quoted strings or computed keys)
                 JAISCRIPT_TRY_ASSIGN(key, expression());
             }
 
-            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after key in JSON-style map"));
+            JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after key in JSON-style map"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr value, expression());
             entries.emplace_back(std::move(key), std::move(value));
         } while (match(token_type::comma));
     } else {
         // Parse C++ style: {{"key", value}, {"key2", value2}}
         do {
-            JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' for map entry"));
+            JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' for map entry"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr key, expression());
-            JAISCRIPT_TRY(consume(token_type::comma, "expected ',' between key and value in map entry"));
+            JAISCRIPT_TRY(expect(token_type::comma, "expected ',' between key and value in map entry"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr value, expression());
-            JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after map entry"));
+            JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after map entry"));
 
             entries.emplace_back(std::move(key), std::move(value));
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after map entries"));
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after map entries"));
     return std::make_shared<map_literal_expr>(startLoc, std::move(entries));
 }
 
-checked_result<expression_ptr> parser::ternary() {
-    stack_.guard(peek().location);
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, coalesce());
-
-    if (match(token_type::question)) {
-        token questionLoc = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr then_expression, expression());
-        JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after then expression in ternary"));
-        JAISCRIPT_TRY_ASSIGN(expression_ptr else_expression, ternary());
-        return std::make_shared<ternary_expr>(questionLoc.location, expr, then_expression, else_expression);
-    }
-
-    return expr;
+JAI_NOINLINE expression_ptr parser::identifier_map_key() {
+    token keyToken = advance();
+    script_string keyStr(keyToken.lexeme);
+    script_value keyValue(script_value::ast_literal_tag{}, keyStr);
+    return std::make_shared<literal_expr>(keyToken.location, keyValue);
 }
 
-// a ?? b: a when it is not null, else b (b runs only then); right-associative, below || and above the conditional, as C#'s
-checked_result<expression_ptr> parser::coalesce() {
-    stack_.guard(peek().location);
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, logical_or());
-    if (match(token_type::question_question)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, coalesce());
-        return std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-    return expr;
+JAI_NOINLINE checked_result<expression_ptr> parser::ternary_rest(expression_ptr condition) {
+    advance();
+    const token& question = previous();
+    JAISCRIPT_TRY_ASSIGN(expression_ptr then_expression, expression());
+    JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after then expression in ternary"));
+    JAISCRIPT_TRY_ASSIGN(expression_ptr else_expression, operator_expression(k_ternary_precedence));
+    return std::make_shared<ternary_expr>(question.location, condition, then_expression, else_expression);
 }
 
-// expression precedence chain implementations
-checked_result<expression_ptr> parser::logical_or() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, logical_and());
-
-    while (match(token_type::pipe_pipe)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, logical_and());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::logical_and() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, bitwise_or());
-
-    while (match(token_type::ampersand_ampersand)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, bitwise_or());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::bitwise_or() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, bitwise_xor());
-
-    while (match(token_type::pipe)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, bitwise_xor());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::bitwise_xor() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, bitwise_and());
-
-    while (match(token_type::caret)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, bitwise_and());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::bitwise_and() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, equality());
-
-    while (match(token_type::ampersand)) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, equality());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::equality() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, relational());
-
-    while (match({token_type::equal_equal, token_type::bang_equal})) {
-        token op = previous();
-        if (check(token_type::equal)) {
-            report_foreign(op.type == token_type::equal_equal ? detail::foreign_word::strict_equal : detail::foreign_word::strict_not_equal, op);
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, relational());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::relational() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, shift());
-
-    while (match({token_type::less, token_type::less_equal,
-                   token_type::greater, token_type::greater_equal, token_type::spaceship})) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, shift());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::shift() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, additive());
-
-    while (match({token_type::left_shift, token_type::right_shift})) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, additive());
-        expr = std::make_shared<binary_expr>(op.location, expr, op, right);
-    }
-
-    return expr;
+// a ?? b: a when it is not null, else b (b runs only then)
+JAI_NOINLINE checked_result<expression_ptr> parser::coalesce_rest(expression_ptr left) {
+    advance();
+    const token& op = previous();
+    JAISCRIPT_TRY_ASSIGN(expression_ptr right, operator_expression(k_coalesce_precedence));
+    return std::make_shared<binary_expr>(op.location, left, op, right);
 }
 
 // Constant folding optimization: evaluates literal operations at parse time
 // If both operands are literals, compute the result now instead of at runtime
-expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, expression_ptr right) {
+JAI_NOINLINE expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, expression_ptr right) {
     if (left->get_type() != node_type::literal_expr || right->get_type() != node_type::literal_expr) {
         // Not both literals, return binary_expr
         return std::make_shared<binary_expr>(op.location, left, op, right);
@@ -2360,33 +2380,19 @@ expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, e
     return std::make_shared<binary_expr>(op.location, left, op, right);
 }
 
-checked_result<expression_ptr> parser::additive() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, multiplicative());
-
-    while (match({token_type::plus, token_type::minus})) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, multiplicative());
-        expr = try_constant_fold(expr, op, right);  // Try constant folding
-    }
-
-    return expr;
-}
-
-checked_result<expression_ptr> parser::multiplicative() {
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, unary());
-
-    while (match({token_type::star, token_type::slash, token_type::percent})) {
-        token op = previous();
-        JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
-        expr = try_constant_fold(expr, op, right);  // Try constant folding
-    }
-
-    return expr;
-}
-
 checked_result<expression_ptr> parser::unary() {
     stack_.guard(peek().location);   // !!!x recurses here without passing through expression()
+    switch (peek().type) {
+        case token_type::ampersand: case token_type::dot: case token_type::bang: case token_type::minus: case token_type::plus:
+        case token_type::plus_plus: case token_type::minus_minus: case token_type::tilde: case token_type::throw_keyword:
+        case token_type::yield_keyword:
+            return unary_operator();
+        default:
+            return postfix();
+    }
+}
 
+JAI_NOINLINE checked_result<expression_ptr> parser::unary_operator() {
     if (check(token_type::ampersand)) {
         report_foreign(detail::foreign_word::address_of, peek());
         return make_error_code(parse_error_code::syntax_error);
@@ -2398,7 +2404,7 @@ checked_result<expression_ptr> parser::unary() {
     }
     if (match({token_type::bang, token_type::minus, token_type::plus, token_type::plus_plus,
                token_type::minus_minus, token_type::tilde})) {
-        token op = previous();
+        const token& op = previous();
         JAISCRIPT_TRY_ASSIGN(expression_ptr right, unary());
         if ((op.type == token_type::plus_plus || op.type == token_type::minus_minus) &&
             right->get_type() != node_type::identifier_expr) {
@@ -2426,7 +2432,7 @@ checked_result<expression_ptr> parser::unary() {
     }
 
     if (match(token_type::throw_keyword)) {
-        token throw_token = previous();
+        const token& throw_token = previous();
         expression_ptr value = nullptr;
 
         // Check if there's an expression after throw (not a semicolon or end of statement)
@@ -2438,7 +2444,7 @@ checked_result<expression_ptr> parser::unary() {
     }
 
     if (match(token_type::yield_keyword)) {
-        token yield_token = previous();
+        const token& yield_token = previous();
         if (!in_coroutine_) {
             report_error("yield can only be used inside a coroutine function", yield_token);
             return checked_result<expression_ptr>(
@@ -2460,71 +2466,84 @@ checked_result<expression_ptr> parser::unary() {
 checked_result<expression_ptr> parser::postfix() {
     const size_t chain_start = current_;
     const bool chain_starts_clean = !pushed_back_token_.has_value();
-    std::vector<size_t> null_links;   // the ?. tokens of this chain
-    JAISCRIPT_TRY_ASSIGN(expression_ptr expr, primary());
+    auto operand = primary();
+    if (!operand || !postfix_operator_ahead()) { return operand; }
+    return postfix_rest(std::move(operand.value()), chain_start, chain_starts_clean);
+}
 
-    while (true) {
-        if (match(token_type::left_paren)) {
-            JAISCRIPT_TRY_ASSIGN(expr, finish_call(expr));
-        } else if (match(token_type::left_brace)) {
-            // Brace initialization: Type{args...}
-            // This should only be valid if expr is an identifier (type name)
-            if (expr->get_type() == node_type::identifier_expr) {
-                auto* identExpr = static_cast<identifier_expr*>(expr.get());
-                JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
-
-                // Create a new_expr for object construction
-                // The type name is in the identifier
-                auto type_info = store_type_info(type_info::make_object(*symbolizer_, identExpr->name));
-                expr = std::make_shared<new_expr>(identExpr->location, type_info, std::move(arguments));
-            } else {
-                report_error("expected ';' after expression", previous());   // `i++ {`: only a type name takes a brace initializer
-    return make_error_code(parse_error_code::syntax_error);
-            }
-        } else if (match(token_type::dot) || match(token_type::question_dot)) {
-            bool is_null_safe = (previous().type == token_type::question_dot);
-            if (is_null_safe && !pushed_back_token_) { null_links.push_back(current_ - 1); }
-            JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(expr, false));
-            if (is_null_safe) {
-                static_cast<member_expr*>(expr.get())->null_safe = true;
-            }
-        } else if (match(token_type::arrow)) {
-            JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(expr, true));
-        } else if (match(token_type::colon_colon)) {
-            // Static member access or namespace member access
-            // Allow keywords as member names (for accessing namespace members)
-            token name = peek();
-            if (name.type == token_type::identifier ||
-                (name.type != token_type::eof && name.type != token_type::left_paren &&
-                 name.type != token_type::right_paren && name.type != token_type::semicolon)) {
-                advance();
-                uint64_t member_id = get_symbol_id(name);
-                expr = std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
-            } else {
-                report_error("expected member name after '::'", name);
-    return make_error_code(parse_error_code::syntax_error);
-            }
-        } else if (match(token_type::left_bracket)) {
-            // Array subscript
-            JAISCRIPT_TRY_ASSIGN(expression_ptr index, expression());
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after array index"));
-            token op(token_type::left_bracket, "[", previous().location);
-            expr = std::make_shared<binary_expr>(op.location, expr, op, index);
-        } else if (match({token_type::plus_plus, token_type::minus_minus})) {
-            // Postfix increment/decrement
-            token op = previous();
-            if (expr->get_type() != node_type::identifier_expr) {
-                expr = desugar_incdec(op, expr, true);
-            } else {
-                expr = std::make_shared<unary_expr>(op.location, op, expr, true);  // true = postfix
-            }
-        } else {
-            break;
-        }
+bool parser::postfix_operator_ahead() const {
+    switch (peek().type) {
+        case token_type::left_paren: case token_type::left_brace: case token_type::dot: case token_type::question_dot:
+        case token_type::arrow: case token_type::colon_colon: case token_type::left_bracket: case token_type::plus_plus:
+        case token_type::minus_minus:
+            return true;
+        default:
+            return false;
     }
+}
 
+JAI_NOINLINE checked_result<expression_ptr> parser::postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean) {
+    std::vector<size_t> null_links;   // the ?. tokens of this chain
+    while (postfix_operator_ahead()) {
+        JAISCRIPT_TRY_ASSIGN(expr, postfix_operator(std::move(expr), null_links));
+    }
     if (!null_links.empty() && chain_starts_clean && !pushed_back_token_) { return null_chain_rest(chain_start, null_links, expr); }
     return expr;
+}
+
+JAI_NOINLINE checked_result<expression_ptr> parser::postfix_operator(expression_ptr expr, std::vector<size_t>& null_links) {
+    if (match(token_type::left_paren)) { return finish_call(std::move(expr)); }
+    if (match(token_type::left_brace)) { return brace_construction(std::move(expr)); }
+    if (match(token_type::dot) || match(token_type::question_dot)) {
+        bool is_null_safe = (previous().type == token_type::question_dot);
+        if (is_null_safe && !pushed_back_token_) { null_links.push_back(current_ - 1); }
+        JAISCRIPT_TRY_ASSIGN(expr, finish_member_access(std::move(expr), false));
+        if (is_null_safe) {
+            static_cast<member_expr*>(expr.get())->null_safe = true;
+        }
+        return expr;
+    }
+    if (match(token_type::arrow)) { return finish_member_access(std::move(expr), true); }
+    if (match(token_type::colon_colon)) { return static_member_access(std::move(expr)); }
+    if (match(token_type::left_bracket)) { return subscript(std::move(expr)); }
+    advance();
+    const token& op = previous();   // postfix increment/decrement
+    if (expr->get_type() != node_type::identifier_expr) {
+        return desugar_incdec(op, expr, true);
+    }
+    return std::make_shared<unary_expr>(op.location, op, expr, true);  // true = postfix
+}
+
+// Brace initialization: Type{args...}, only after a type name
+JAI_NOINLINE checked_result<expression_ptr> parser::brace_construction(expression_ptr expr) {
+    if (expr->get_type() == node_type::identifier_expr) {
+        auto* identExpr = static_cast<identifier_expr*>(expr.get());
+        JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
+        auto type_info = store_type_info(type_info::make_object(*symbolizer_, identExpr->name));
+        return std::make_shared<new_expr>(identExpr->location, type_info, std::move(arguments));
+    }
+    report_error("expected ';' after expression", previous());   // `i++ {`: only a type name takes a brace initializer
+    return make_error_code(parse_error_code::syntax_error);
+}
+
+// Static member access or namespace member access; keywords are member names too (namespace members)
+JAI_NOINLINE checked_result<expression_ptr> parser::static_member_access(expression_ptr expr) {
+    token name = peek();
+    if (name.type == token_type::identifier ||
+        (name.type != token_type::eof && name.type != token_type::left_paren &&
+         name.type != token_type::right_paren && name.type != token_type::semicolon)) {
+        advance();
+        uint64_t member_id = get_symbol_id(name);
+        return std::make_shared<member_expr>(name.location, expr, name.lexeme, member_id, false, true);
+    }
+    report_error("expected member name after '::'", name);
+    return make_error_code(parse_error_code::syntax_error);
+}
+
+JAI_NOINLINE checked_result<expression_ptr> parser::subscript(expression_ptr expr) {
+    JAISCRIPT_TRY_ASSIGN(expression_ptr index, expression());
+    JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after array index"));
+    return subscript_node(std::move(expr), std::move(index), previous().location);
 }
 
 // a?.b.c: a null before the ?. skips the rest of the chain, which then yields null (JavaScript's and C#'s optional chaining). The
@@ -2715,8 +2734,12 @@ expression_ptr parser::bound_conditional(expression_ptr value) {
 }
 
 checked_result<declaration_ptr> parser::declaration() {
+    if (!check_mode_attribute_ahead()) { return declaration_body(); }
+    return attributed_declaration();
+}
+
+JAI_NOINLINE checked_result<declaration_ptr> parser::attributed_declaration() {
     JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
-    if (mode == check_mode_attr_none) { return declaration_body(); }
     if (is_at_end() || check(token_type::right_brace)) {
         // nothing follows: the attribute covers an empty block
         auto empty = std::make_shared<block_stmt>(previous().location, std::vector<declaration_ptr>{});
@@ -2731,7 +2754,26 @@ checked_result<declaration_ptr> parser::declaration() {
 
 checked_result<declaration_ptr> parser::declaration_body() {
     stack_.guard(peek().location);
+    switch (peek().type) {   // the statements, which nest, and which no other declaration form below begins with
+        case token_type::left_brace:
+            if (nesting_depth_ != 0 || !json_map_ahead()) { return statement_declaration(); }
+            break;
+        case token_type::if_keyword: case token_type::while_keyword: case token_type::for_keyword: case token_type::parallel_for_keyword:
+        case token_type::return_keyword: case token_type::break_keyword: case token_type::continue_keyword: case token_type::try_keyword:
+        case token_type::switch_keyword: case token_type::fallthrough_keyword:
+            return statement_declaration();
+        default:
+            break;
+    }
+    return declaration_rest();
+}
 
+JAI_NOINLINE checked_result<declaration_ptr> parser::statement_declaration() {
+    JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
+    return std::make_shared<statement_decl>(stmt->location, stmt);
+}
+
+JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
     if (do_while_ahead()) {
         JAISCRIPT_TRY_ASSIGN(auto stmt, statement());
         return std::make_shared<statement_decl>(stmt->location, stmt);
@@ -2741,7 +2783,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     if (match(token_type::nocopy_keyword)) {
         const token at = previous();
-        JAISCRIPT_TRY(consume(token_type::class_keyword, "expected 'class' after 'nocopy'"));
+        JAISCRIPT_TRY(expect(token_type::class_keyword, "expected 'class' after 'nocopy'"));
         reject_class_in_function_body(at);
         JAISCRIPT_TRY_ASSIGN(auto result, class_declaration(true));
         match(token_type::semicolon);
@@ -2781,7 +2823,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
         if (check(token_type::identifier) && reject_using_name(peek(), "enum")) { return make_error_code(parse_error_code::syntax_error); }
         JAISCRIPT_TRY_ASSIGN(token name_tok, consume(token_type::identifier, "expected enum name"));
         auto [name_id, name_view] = symbolizer_->intern_with_view(name_tok.lexeme);
-        JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after enum name"));
+        JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after enum name"));
 
         auto decl = std::make_shared<enum_decl>(name_tok.location, name_view, name_id);
 
@@ -2801,7 +2843,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
             } while (match(token_type::comma));
         }
 
-        JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after enum values"));
+        JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after enum values"));
         return decl;
     }
 
@@ -2873,11 +2915,11 @@ checked_result<declaration_ptr> parser::declaration_body() {
                 }
             } while (match(token_type::comma));
 
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after destructuring names"));
-            JAISCRIPT_TRY(consume(token_type::equal, "expected '=' after destructuring pattern"));
+            JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after destructuring names"));
+            JAISCRIPT_TRY(expect(token_type::equal, "expected '=' after destructuring pattern"));
 
             JAISCRIPT_TRY_ASSIGN(decl->initializer, expression());
-            JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after destructuring declaration"));
+            JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after destructuring declaration"));
 
             return decl;
         }
@@ -3019,7 +3061,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
         if (nesting_depth_ == 0 && json_map_ahead()) {
             JAISCRIPT_TRY_ASSIGN(auto expr, expression());
             if (!is_at_end()) {
-                JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
+                JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after expression"));
             }
             return std::make_shared<expression_decl>(expr->location, expr);
         }
@@ -3043,7 +3085,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 
     // Allow semicolon to be optional at end of file for single expressions
     if (!is_at_end()) {
-        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
+        JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after expression"));
     }
 
     // Create an expression_decl for top-level expressions
@@ -3051,7 +3093,7 @@ checked_result<declaration_ptr> parser::declaration_body() {
 }
 
 // Helper method implementations
-checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
+JAI_NOINLINE checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
     std::vector<expression_ptr> arguments;
 
     if (!check(token_type::right_paren)) {
@@ -3063,12 +3105,11 @@ checked_result<expression_ptr> parser::finish_call(expression_ptr callee) {
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY_ASSIGN(token paren, consume(token_type::right_paren, "expected ')' after arguments"));
-
-    return std::make_shared<call_expr>(paren.location, callee, std::move(arguments));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after arguments"));
+    return std::make_shared<call_expr>(previous().location, callee, std::move(arguments));
 }
 
-checked_result<expression_ptr> parser::finish_member_access(expression_ptr object, bool is_arrow) {
+JAI_NOINLINE checked_result<expression_ptr> parser::finish_member_access(expression_ptr object, bool is_arrow) {
     if (is_keyword_word(peek().type)) {
         token name = advance();
         return std::make_shared<member_expr>(name.location, object, name.lexeme, get_symbol_id(name), is_arrow);
@@ -3171,19 +3212,20 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
 // Lambda expression parsing
 checked_result<expression_ptr> parser::lambda_expression() {
     auto lambda = std::make_shared<lambda_expr>(peek().location);
+    JAISCRIPT_TRY(lambda_captures(*lambda));
+    return finish_lambda_after_captures(std::move(lambda));
+}
 
-    // Parse capture list
-    JAISCRIPT_TRY(consume(token_type::left_bracket, "expected '[' for lambda"));
+JAI_NOINLINE checked_result<void> parser::lambda_captures(lambda_expr& lambda) {
+    JAISCRIPT_TRY(expect(token_type::left_bracket, "expected '[' for lambda"));
     JAISCRIPT_TRY_ASSIGN(auto capture_result, parse_capture_list());
-    lambda->captures = std::move(capture_result.first);
-    lambda->default_capture = capture_result.second;
-    for (auto& cap : lambda->captures) {
+    lambda.captures = std::move(capture_result.first);
+    lambda.default_capture = capture_result.second;
+    for (auto& cap : lambda.captures) {
         if (cap.symbol_id == UINT64_MAX && symbolizer_) cap.symbol_id = symbolizer_->intern(cap.name);
         if (cap.symbol_id != UINT64_MAX && !cap.initializer) cap.outer_slot = lookup_capture_slot(cap.symbol_id);   // an init-capture names no outer variable
     }
-    JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after capture list"));
-
-    return finish_lambda_after_captures(std::move(lambda));
+    return expect(token_type::right_bracket, "expected ']' after capture list");
 }
 
 // Anonymous function expression: `function (params) {...}` closes over its scope as JavaScript does, by reference -
@@ -3197,24 +3239,27 @@ checked_result<expression_ptr> parser::anonymous_function_expression() {
 // Shared tail for [] lambdas and anonymous function expressions: parameters,
 // optional trailing return, scope/slot bookkeeping, body
 checked_result<expression_ptr> parser::finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda) {
-    // Parse parameters
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' for lambda parameters"));
-    JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parameters"));
+    JAISCRIPT_TRY(lambda_signature(*lambda));
+    return finish_lambda_body(std::move(lambda), false);
+}
+
+// The parameters and the optional trailing return type
+JAI_NOINLINE checked_result<void> parser::lambda_signature(lambda_expr& lambda) {
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' for lambda parameters"));
+    JAISCRIPT_TRY_ASSIGN(lambda.parameters, parse_parameter_list());
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after parameters"));
     if (const_method_suffix()) { return make_error_code(parse_error_code::syntax_error); }
 
-    // Parse return type if specified
     if (match(token_type::arrow)) {
-        // Check if return type is specified or if we go directly to {
+        // -> { means auto return type (nullptr)
         if (check(token_type::left_brace)) {
-            // -> { means auto return type
-            lambda->return_type = nullptr; // nullptr means auto
+            lambda.return_type = nullptr;
         } else {
-            JAISCRIPT_TRY_ASSIGN(lambda->return_type, parse_type());
-            lambda->return_type = wrap_reference_return_type(lambda->return_type);
+            JAISCRIPT_TRY_ASSIGN(lambda.return_type, parse_type());
+            lambda.return_type = wrap_reference_return_type(lambda.return_type);
         }
     }
-    return finish_lambda_body(std::move(lambda), false);
+    return {};
 }
 
 bool parser::arrow_function_ahead() const {
@@ -3249,11 +3294,11 @@ checked_result<expression_ptr> parser::arrow_function_expression() {
         param.symbol_id = get_symbol_id(name);
         lambda->parameters.push_back(std::move(param));
     } else {
-        JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' for arrow function parameters"));
+        JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' for arrow function parameters"));
         JAISCRIPT_TRY_ASSIGN(lambda->parameters, parse_parameter_list());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after arrow function parameters"));
+        JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after arrow function parameters"));
     }
-    JAISCRIPT_TRY(consume(token_type::fat_arrow, "expected '=>' after arrow function parameters"));
+    JAISCRIPT_TRY(expect(token_type::fat_arrow, "expected '=>' after arrow function parameters"));
     return finish_lambda_body(std::move(lambda), true);
 }
 
@@ -3284,20 +3329,7 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
     in_constructor_ = false;
     coroutine_scope ref_return_scope{returns_reference_, returns_reference_};
     returns_reference_ = lambda->return_type && lambda->return_type->base_type == script_value_type::jai_reference_type;
-    if (expression_body && !check(token_type::left_brace)) {
-        const source_location at = peek().location;
-        auto value = expression();
-        if (!value) {
-            exit_function_scope();
-            return value.error_value();
-        }
-        std::vector<declaration_ptr> body;
-        auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? bound_conditional(value.value()) : value.value());
-        body.push_back(std::make_shared<statement_decl>(at, ret));
-        lambda->body = std::make_shared<block_stmt>(at, std::move(body));
-        lambda->local_count = exit_function_scope();
-        return lambda;
-    }
+    if (expression_body && !check(token_type::left_brace)) { return lambda_expression_body(std::move(lambda)); }
     if (check(token_type::identifier) && peek().lexeme == "mutable") {
         report_foreign(detail::foreign_word::mutable_lambda, peek());
         advance();   // the body still parses, so the one error is this one
@@ -3317,6 +3349,22 @@ checked_result<expression_ptr> parser::finish_lambda_body(std::shared_ptr<lambda
     // Exit function scope and record total slot count
     lambda->local_count = exit_function_scope();
 
+    return lambda;
+}
+
+// An arrow function's one expression, its value returned; finish_lambda_body has entered the function scope
+JAI_NOINLINE checked_result<expression_ptr> parser::lambda_expression_body(std::shared_ptr<lambda_expr> lambda) {
+    const source_location at = peek().location;
+    auto value = expression();
+    if (!value) {
+        exit_function_scope();
+        return value.error_value();
+    }
+    std::vector<declaration_ptr> body;
+    auto ret = std::make_shared<return_stmt>(at, returns_reference_ ? bound_conditional(value.value()) : value.value());
+    body.push_back(std::make_shared<statement_decl>(at, ret));
+    lambda->body = std::make_shared<block_stmt>(at, std::move(body));
+    lambda->local_count = exit_function_scope();
     return lambda;
 }
 
@@ -3416,8 +3464,12 @@ checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture
 
 // statement parsing implementations
 checked_result<statement_ptr> parser::statement() {
+    if (!check_mode_attribute_ahead()) { return statement_body(); }
+    return attributed_statement();
+}
+
+JAI_NOINLINE checked_result<statement_ptr> parser::attributed_statement() {
     JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
-    if (mode == check_mode_attr_none) { return statement_body(); }
     if (is_at_end() || check(token_type::right_brace)) {
         auto empty = std::make_shared<block_stmt>(previous().location, std::vector<declaration_ptr>{});
         empty->check_mode_attr = mode;
@@ -3430,52 +3482,61 @@ checked_result<statement_ptr> parser::statement() {
 
 checked_result<statement_ptr> parser::statement_body() {
     stack_.guard(peek().location);   // if (...) if (...) recurses here without passing through declaration()
-
-    if (match(token_type::left_brace)) {
-        if (json_map_ahead(0)) {
-            report_error("a statement that starts with '{' is a block: write a map literal there in parentheses, ({...})", previous());
-            return make_error_code(parse_error_code::syntax_error);
-        }
-        return block_statement();
+    switch (peek().type) {
+        case token_type::left_brace:
+            advance();
+            if (json_map_ahead(0)) { return block_map_error(); }
+            return block_statement();
+        case token_type::identifier:
+            if (do_while_ahead()) {
+                advance();
+                return do_while_statement();
+            }
+            if (foreign_word_at_statement()) { return make_error_code(parse_error_code::syntax_error); }
+            break;
+        case token_type::if_keyword: advance(); return if_statement();
+        case token_type::while_keyword: advance(); return while_statement();
+        case token_type::for_keyword: advance(); return for_statement();
+        case token_type::parallel_for_keyword: advance(); return parallel_for_statement();
+        case token_type::return_keyword: advance(); return return_statement();
+        case token_type::break_keyword: advance(); return break_statement();
+        case token_type::continue_keyword: advance(); return continue_statement();
+        case token_type::try_keyword: advance(); return try_statement();
+        case token_type::switch_keyword: advance(); return switch_statement();
+        case token_type::import_keyword: advance(); return import_statement();
+        case token_type::fallthrough_keyword: advance(); return fallthrough_statement();
+        default:
+            break;
     }
-    if (do_while_ahead()) {
-        advance();
-        return do_while_statement();
-    }
-    if (foreign_word_at_statement()) { return make_error_code(parse_error_code::syntax_error); }
-    if (match(token_type::if_keyword)) return if_statement();
-    if (match(token_type::while_keyword)) return while_statement();
-    if (match(token_type::for_keyword)) return for_statement();
-    if (match(token_type::parallel_for_keyword)) return parallel_for_statement();
-    if (match(token_type::return_keyword)) return return_statement();
-    if (match(token_type::break_keyword)) return break_statement();
-    if (match(token_type::continue_keyword)) return continue_statement();
-    if (match(token_type::try_keyword)) return try_statement();
-    if (match(token_type::switch_keyword)) return switch_statement();
-    if (match(token_type::import_keyword)) {   // `if (changed) import "m.jai";`: the declaration as a one-statement block
-        const source_location at = previous().location;
-        JAISCRIPT_TRY_ASSIGN(declaration_ptr imported, import_declaration());
-        match(token_type::semicolon);
-        return statement_ptr(std::make_shared<block_stmt>(at, std::vector<declaration_ptr>{std::move(imported)}));
-    }
-
-    // Check for fallthrough keyword
-    if (match(token_type::fallthrough_keyword)) {
-        if (!in_switch_case_) {
-            report_error("'fallthrough' can only be used inside a switch case", previous());
-    return make_error_code(parse_error_code::syntax_error);
-        }
-        auto fallthrough = std::make_shared<fallthrough_stmt>(previous().location);
-        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'fallthrough'"));
-        return fallthrough;
-    }
-
     return expression_statement();
+}
+
+JAI_NOINLINE checked_result<statement_ptr> parser::block_map_error() {
+    report_error("a statement that starts with '{' is a block: write a map literal there in parentheses, ({...})", previous());
+    return make_error_code(parse_error_code::syntax_error);
+}
+
+// `if (changed) import "m.jai";`: the declaration as a one-statement block
+JAI_NOINLINE checked_result<statement_ptr> parser::import_statement() {
+    const source_location at = previous().location;
+    JAISCRIPT_TRY_ASSIGN(declaration_ptr imported, import_declaration());
+    match(token_type::semicolon);
+    return statement_ptr(std::make_shared<block_stmt>(at, std::vector<declaration_ptr>{std::move(imported)}));
+}
+
+JAI_NOINLINE checked_result<statement_ptr> parser::fallthrough_statement() {
+    if (!in_switch_case_) {
+        report_error("'fallthrough' can only be used inside a switch case", previous());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    auto fallthrough = std::make_shared<fallthrough_stmt>(previous().location);
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after 'fallthrough'"));
+    return fallthrough;
 }
 
 checked_result<statement_ptr> parser::block_statement() {
     stack_.guard(peek().location);
-    token leftBrace = previous();
+    const token& leftBrace = previous();
     std::vector<declaration_ptr> declarations;
 
     // Locals declared in this block stop resolving by name once it closes
@@ -3487,7 +3548,7 @@ checked_result<statement_ptr> parser::block_statement() {
         if (!splice_include(decl, declarations)) { declarations.push_back(std::move(decl)); }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after block"));
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after block"));
 
     return std::make_shared<block_stmt>(leftBrace.location, std::move(declarations));
 }
@@ -3558,16 +3619,16 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
 
 checked_result<statement_ptr> parser::expression_statement() {
     JAISCRIPT_TRY_ASSIGN(expression_ptr expr, expression());
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after expression"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after expression"));
     return std::make_shared<expression_stmt>(expr->location, expr);
 }
 
 checked_result<statement_ptr> parser::if_statement() {
-    token ifToken = previous();
+    const token& ifToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'if'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'if'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after if condition"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after if condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr then_statement, statement());
     statement_ptr else_statement = nullptr;
@@ -3580,12 +3641,12 @@ checked_result<statement_ptr> parser::if_statement() {
 }
 
 checked_result<statement_ptr> parser::while_statement() {
-    token whileToken = previous();
+    const token& whileToken = previous();
     jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'while'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'while'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after while condition"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after while condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
@@ -3603,7 +3664,7 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
     jump_scope loop(jumps_, {0, 1, true});
     token forToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'parallel_for'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'parallel_for'"));
 
     bool is_const = match(token_type::const_keyword);
     JAISCRIPT_TRY_ASSIGN(type_info_ptr element_type, parse_type());
@@ -3635,7 +3696,7 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
             extra.symbol_id = get_symbol_id(extraName);
             extra_params.push_back(std::move(extra));
         }
-        JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after parallel_for loop variable"));
+        JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after parallel_for loop variable"));
 
         // The containers evaluate in the ENCLOSING scope on the calling thread
         JAISCRIPT_TRY_ASSIGN(container, expression());
@@ -3649,7 +3710,7 @@ checked_result<statement_ptr> parser::parallel_for_statement() {
             return make_error_code(parse_error_code::syntax_error);
         }
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parallel_for range"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after parallel_for range"));
 
     parameter loop_param(element_type, std::string(varName.lexeme), is_reference, is_const);
     loop_param.symbol_id = get_symbol_id(varName);
@@ -3734,7 +3795,7 @@ checked_result<expression_ptr> parser::counted_parallel_range(const type_info_pt
     else if (match(token_type::greater)) { comparison = 2; }
     else if (match(token_type::greater_equal)) { comparison = 3; }
     else { return refuse(compares); }
-    JAISCRIPT_TRY_ASSIGN(expression_ptr bound, shift());
+    JAISCRIPT_TRY_ASSIGN(expression_ptr bound, operator_expression(k_shift_precedence));
     if (!match(token_type::semicolon)) { return refuse(compares); }
     const char* steps = "parallel_for: a counted loop must step its variable by a fixed amount toward a bound (write i++, i--, i += k or i -= k)";
     script_int step_kind = 0;   // 1 ++, -1 --, 2 +=, -2 -=
@@ -3798,7 +3859,7 @@ checked_result<statement_ptr> parser::for_statement() {
     jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
     token forToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'for'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'for'"));
 
     // Save position for potential backtracking
     size_t savedPosition = current_;
@@ -3839,14 +3900,14 @@ checked_result<statement_ptr> parser::for_statement() {
                 JAISCRIPT_TRY_ASSIGN(token name, consume_name("expected a name in the structured binding", "variable"));
                 names.push_back(name);
             } while (match(token_type::comma));
-            JAISCRIPT_TRY(consume(token_type::right_bracket, "expected ']' after the structured binding's names"));
+            JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after the structured binding's names"));
             if (names.size() != 2) {
                 report_error("a map entry binds two names, the key and the value: for (auto [k, v] : m)", bracket);
                 return make_error_code(parse_error_code::syntax_error);
             }
-            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after the structured binding"));
+            JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after the structured binding"));
             JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
-            JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after range expression"));
+            JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after range expression"));
 
             block_scope_guard loop_var_scope(*this);
             const auto [pair_id, pair_name] = hidden_name("entry");
@@ -3890,7 +3951,7 @@ checked_result<statement_ptr> parser::for_statement() {
                 // Parse the container in the OUTER scope (it must not see the
                 // loop variable's slot).
                 JAISCRIPT_TRY_ASSIGN(expression_ptr container, expression());
-                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after range expression"));
+                JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after range expression"));
 
                 // Allocate the loop variable's slot BEFORE parsing the body so
                 // that references to it inside the body resolve to this slot.
@@ -3989,7 +4050,7 @@ traditional_for:
 
     // Consume semicolon after init
     if (init) {
-        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after for loop initializer"));
+        JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after for loop initializer"));
     }
 
     // Condition
@@ -3997,14 +4058,14 @@ traditional_for:
     if (!check(token_type::semicolon)) {
         JAISCRIPT_TRY_ASSIGN(condition, expression());
     }
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after for loop condition"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after for loop condition"));
 
     // Update
     expression_ptr update = nullptr;
     if (!check(token_type::right_paren)) {
         JAISCRIPT_TRY_ASSIGN(update, expression());
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after for loop clauses"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after for loop clauses"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
 
@@ -4012,7 +4073,7 @@ traditional_for:
 }
 
 checked_result<statement_ptr> parser::return_statement() {
-    token returnToken = previous();
+    const token& returnToken = previous();
 
     expression_ptr value = nullptr;
     if (!check(token_type::semicolon)) {
@@ -4024,7 +4085,7 @@ checked_result<statement_ptr> parser::return_statement() {
         if (returns_reference_ && !in_coroutine_) { value = bound_conditional(std::move(value)); }
     }
 
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after return value"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after return value"));
 
     return std::make_shared<return_stmt>(returnToken.location, value);
 }
@@ -4035,7 +4096,7 @@ checked_result<statement_ptr> parser::break_statement() {
         report_error(jumps_.parallel_body ? "'break' is not allowed in a parallel_for body: iterations are independent; use 'continue' for the next element"
                                           : "'break' outside a loop or switch", breakToken);
     }
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'break'"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after 'break'"));
     return std::make_shared<break_stmt>(breakToken.location);
 }
 
@@ -4044,7 +4105,7 @@ checked_result<statement_ptr> parser::continue_statement() {
     if (jumps_.continuable == 0) {
         report_error("'continue' outside a loop", continueToken);
     }
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after 'continue'"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after 'continue'"));
     return std::make_shared<continue_stmt>(continueToken.location);
 }
 
@@ -4052,11 +4113,11 @@ checked_result<statement_ptr> parser::try_statement() {
     token tryToken = previous();
 
     // Parse try block
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after 'try'"));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after 'try'"));
     JAISCRIPT_TRY_ASSIGN(statement_ptr try_block, block_statement());
 
     // Must have catch block
-    JAISCRIPT_TRY(consume(token_type::catch_keyword, "expected 'catch' after try block"));
+    JAISCRIPT_TRY(expect(token_type::catch_keyword, "expected 'catch' after try block"));
 
     // Optional catch variable: a block-scoped local of the catch body (slot in a
     // function frame, scope env at top level), exactly the range-for variable's shape
@@ -4075,7 +4136,7 @@ checked_result<statement_ptr> parser::try_statement() {
         }
         JAISCRIPT_TRY_ASSIGN(token var_name, consume(token_type::identifier, "expected variable name in catch"));
         catch_var = var_name.lexeme;
-        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after catch variable"));
+        JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after catch variable"));
         catch_var_id = get_symbol_id(var_name);
         if (in_function_scope() && catch_var_id != UINT64_MAX) {
             catch_slot = allocate_slot(catch_var_id);
@@ -4083,7 +4144,7 @@ checked_result<statement_ptr> parser::try_statement() {
     }
 
     // Parse catch block
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after 'catch'"));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after 'catch'"));
     JAISCRIPT_TRY_ASSIGN(statement_ptr catch_block, block_statement());
 
     auto result = std::make_shared<try_stmt>(tryToken.location, try_block, catch_block, catch_var);
@@ -4121,7 +4182,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
         } while (match(token_type::comma));
     }
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' before class body"));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' before class body"));
     const size_t class_open_index = current_ - 1;
 
     // a class a namespace declares is named ns::Name (C++); its constructors and destructor carry that name
@@ -4557,7 +4618,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
     }
 
     in_coroutine_ = class_entry_in_coroutine;
-    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after class body"));
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after class body"));
 
     return classDecl;
 }
@@ -4599,7 +4660,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         namespace_path.emplace_back(next_name.lexeme);
     }
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' before namespace body"));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' before namespace body"));
 
     // Build the full namespace name by prepending the current namespace context
     // For nested namespaces: namespace outer { namespace inner {} }
@@ -4645,7 +4706,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         const bool const_member = match(token_type::const_keyword);
         bool nested_nocopy = !const_member && match(token_type::nocopy_keyword);
         if (nested_nocopy || match(token_type::class_keyword)) {
-            if (nested_nocopy) { JAISCRIPT_TRY(consume(token_type::class_keyword, "expected 'class' after 'nocopy'")); }
+            if (nested_nocopy) { JAISCRIPT_TRY(expect(token_type::class_keyword, "expected 'class' after 'nocopy'")); }
             auto class_result = class_declaration(nested_nocopy, full_namespace_name);
             if (!class_result) {
                 synchronize();
@@ -4827,7 +4888,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
         }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after namespace body"));
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after namespace body"));
 
     // Pop the namespace context (restore to parent namespace or global scope)
     for (size_t i = 0; i < namespace_path.size(); ++i) {
@@ -4889,7 +4950,7 @@ checked_result<declaration_ptr> parser::include_declaration() {
     if (match(token_type::left_paren)) {
         // Parse the expression inside parentheses
         JAISCRIPT_TRY_ASSIGN(expression_ptr path_expr, expression());
-        JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after include expression"));
+        JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after include expression"));
         return std::make_shared<include_decl>(previous().location, path_expr);
     }
 
@@ -4908,7 +4969,7 @@ checked_result<std::string> parser::include_literal_path() {
             result += peek().lexeme;
             advance();
         }
-        JAISCRIPT_TRY(consume(token_type::greater, "expected '>' after include path"));
+        JAISCRIPT_TRY(expect(token_type::greater, "expected '>' after include path"));
         return result;
     }
     report_error("expected string literal, '<', or '(' after include", peek());
@@ -4926,7 +4987,7 @@ checked_result<std::vector<expression_ptr>> parser::construction_arguments(bool 
             result.push_back(bound_conditional(std::move(arg)));
         } while (match(token_type::comma));
     }
-    JAISCRIPT_TRY(consume(close, a_closeError ? a_closeError : a_brace ? "expected '}' after constructor arguments" : "expected ')' after constructor arguments"));
+    JAISCRIPT_TRY(expect(close, a_closeError ? a_closeError : a_brace ? "expected '}' after constructor arguments" : "expected ')' after constructor arguments"));
     return result;
 }
 
@@ -4956,7 +5017,7 @@ checked_result<expression_ptr> parser::import_call(const source_location& at) {
             args.push_back(std::move(arg));
         } while (match(token_type::comma));
     }
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after import paths"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after import paths"));
     if (args.empty()) {
         report_error("import(...) needs at least one path", previous());
         return make_error_code(parse_error_code::syntax_error);
@@ -4998,7 +5059,7 @@ checked_result<declaration_ptr> parser::import_declaration() {
             path_buffer += peek().lexeme;
             advance();
         }
-        JAISCRIPT_TRY(consume(token_type::greater, "expected '>' after import path"));
+        JAISCRIPT_TRY(expect(token_type::greater, "expected '>' after import path"));
         path = path_buffer;
     } else {
         report_error("expected string literal, '<', or '(' after import", peek());
@@ -5021,7 +5082,7 @@ checked_result<declaration_ptr> parser::extern_declaration() {
         JAISCRIPT_TRY_ASSIGN(type, parse_type());
     }
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "expected name after 'extern'"));
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after extern declaration"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after extern declaration"));
     auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
     auto decl = std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
     decl->is_const = is_const;
@@ -5053,7 +5114,7 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
         token name = advance();
         expression_ptr init;
         if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
-        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
+        JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after variable declaration"));
         decl = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
         decl->default_initialized = !init;
     } else {
@@ -5081,7 +5142,7 @@ checked_result<declaration_ptr> parser::const_declaration() {
         token name = advance();
         expression_ptr init;
         if (match(token_type::equal)) { JAISCRIPT_TRY_ASSIGN(init, expression()); }
-        JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
+        JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after variable declaration"));
         auto var = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
         var->default_initialized = !init;
         if (in_function_scope() && var->name_id != UINT64_MAX) { var->slot_index = allocate_slot(var->name_id); }
@@ -5132,12 +5193,16 @@ bool parser::const_method_suffix() {
 
 // [[warn_mode]] / [[strict_mode]] at a statement position, optional trailing ';'. none when
 // the position holds no attribute (a '[[' there opens a nested array literal as before).
+bool parser::check_mode_attribute_ahead() const {
+    return current_ + 4 < stream_->size() && check(token_type::left_bracket) &&
+           (*stream_)[current_ + 1].type == token_type::left_bracket &&
+           (*stream_)[current_ + 2].type == token_type::identifier &&
+           (*stream_)[current_ + 3].type == token_type::right_bracket &&
+           (*stream_)[current_ + 4].type == token_type::right_bracket;
+}
+
 checked_result<uint8_t> parser::check_mode_attribute() {
-    if (!(current_ + 4 < stream_->size() && check(token_type::left_bracket) &&
-          (*stream_)[current_ + 1].type == token_type::left_bracket &&
-          (*stream_)[current_ + 2].type == token_type::identifier &&
-          (*stream_)[current_ + 3].type == token_type::right_bracket &&
-          (*stream_)[current_ + 4].type == token_type::right_bracket)) {
+    if (!check_mode_attribute_ahead()) {
         return check_mode_attr_none;
     }
     const token name = (*stream_)[current_ + 2];
@@ -5215,9 +5280,9 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
     coroutine_scope ctor_scope{in_constructor_, in_constructor_};
     in_constructor_ = allow_ctor_initializers;
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after function name"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after function name"));
     JAISCRIPT_TRY_ASSIGN(func->parameters, parse_parameter_list());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after parameters"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after parameters"));
     if (const_method_suffix()) { return make_error_code(parse_error_code::syntax_error); }
 
     // Handle trailing return type
@@ -5253,7 +5318,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
             // Parse initializer target (super or this)
             if (match(token_type::super_keyword)) {
                 // Parse super(args)
-                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'super'"));
+                JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'super'"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5261,11 +5326,11 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after super arguments"));
+                JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after super arguments"));
                 func->initializers.emplace_back("super", std::move(args));
             } else if (match(token_type::this_keyword)) {
                 // Parse this(args)
-                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'this'"));
+                JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'this'"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5273,12 +5338,12 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after this arguments"));
+                JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after this arguments"));
                 func->initializers.emplace_back("this", std::move(args));
             } else if (check(token_type::identifier)) {
                 // Parse Base(args): the base it names constructs with them (C++ [class.base.init])
                 std::string base_name(advance().lexeme);
-                JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after base class name"));
+                JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after base class name"));
                 std::vector<expression_ptr> args;
                 if (!check(token_type::right_paren)) {
                     do {
@@ -5286,7 +5351,7 @@ checked_result<declaration_ptr> parser::parse_function_body(std::string_view nam
                         args.push_back(bound_conditional(std::move(arg)));
                     } while (match(token_type::comma));
                 }
-                JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after base constructor arguments"));
+                JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after base constructor arguments"));
                 func->initializers.emplace_back(std::move(base_name), std::move(args));
             } else {
                 report_error("expected 'super', 'this' or a base class name in constructor initializer list", peek());
@@ -5429,7 +5494,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         initializer = default_initializer(type, name.location);   // T x;: the type's default (a class default-constructs)
     }
 
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after variable declaration"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after variable declaration"));
 
     auto decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), initializer);
     decl->function_spelling = function_spelling;
@@ -5443,7 +5508,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
     return decl;
 }
 
-void parser::consume_greater_in_generic(const std::string& message) {
+void parser::consume_greater_in_generic(std::string_view message) {
     // Handle the case where >> is tokenized as RightShift when we need >
     if (check(token_type::right_shift)) {
         // We have >>, but we only want to consume one >
@@ -5470,11 +5535,11 @@ checked_result<statement_ptr> parser::switch_statement() {
     jump_scope cases(jumps_, {jumps_.breakable + 1, jumps_.continuable, jumps_.parallel_body});
     token switchToken = previous();
 
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'switch'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'switch'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after switch condition"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after switch condition"));
 
-    JAISCRIPT_TRY(consume(token_type::left_brace, "expected '{' after switch condition"));
+    JAISCRIPT_TRY(expect(token_type::left_brace, "expected '{' after switch condition"));
 
     auto switchStmt = std::make_shared<switch_stmt>(switchToken.location, condition);
 
@@ -5483,7 +5548,7 @@ checked_result<statement_ptr> parser::switch_statement() {
         if (match(token_type::case_keyword)) {
             // Parse case
             JAISCRIPT_TRY_ASSIGN(expression_ptr caseValue, expression());
-            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after case value"));
+            JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after case value"));
 
             auto caseStmt = std::make_shared<case_stmt>(previous().location, caseValue);
 
@@ -5542,7 +5607,7 @@ checked_result<statement_ptr> parser::switch_statement() {
     return make_error_code(parse_error_code::syntax_error);
             }
 
-            JAISCRIPT_TRY(consume(token_type::colon, "expected ':' after 'default'"));
+            JAISCRIPT_TRY(expect(token_type::colon, "expected ':' after 'default'"));
 
             auto defaultStmt = std::make_shared<default_stmt>(previous().location);
 
@@ -5584,7 +5649,7 @@ checked_result<statement_ptr> parser::switch_statement() {
         }
     }
 
-    JAISCRIPT_TRY(consume(token_type::right_brace, "expected '}' after switch body"));
+    JAISCRIPT_TRY(expect(token_type::right_brace, "expected '}' after switch body"));
 
     return switchStmt;
 }
@@ -5618,10 +5683,10 @@ checked_result<statement_ptr> parser::do_while_statement() {
     jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
     JAISCRIPT_TRY_ASSIGN(token while_token, consume(token_type::while_keyword, "expected 'while' after the body of 'do'"));
-    JAISCRIPT_TRY(consume(token_type::left_paren, "expected '(' after 'while'"));
+    JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'while'"));
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
-    JAISCRIPT_TRY(consume(token_type::right_paren, "expected ')' after while condition"));
-    JAISCRIPT_TRY(consume(token_type::semicolon, "expected ';' after do-while condition"));
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after while condition"));
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after do-while condition"));
 
     token or_op(token_type::pipe_pipe, "||", while_token.location);
     auto test = std::make_shared<binary_expr>(while_token.location, hidden_identifier(flag_id, flag_name, while_token.location), or_op, condition);

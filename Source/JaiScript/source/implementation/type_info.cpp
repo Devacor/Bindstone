@@ -17,11 +17,11 @@ uint64_t type_name_id(string_symbolizer& symbolizer, const std::string& name) {
     }
     return symbolizer.intern(name);
 }
-}
 
-std::string type_info::canonical_name() const {
-    switch (base_type) {
-        case script_value_type::jai_int_type: return is_byte_element() ? type_name : "int";
+// a type without type parameters
+std::string leaf_canonical_name(const type_info& t) {
+    switch (t.base_type) {
+        case script_value_type::jai_int_type: return t.is_byte_element() ? t.type_name : "int";
         case script_value_type::jai_float_type: return "float";
         case script_value_type::jai_string_type: return "string";
         case script_value_type::jai_utf8_string_type: return "utf8_string";
@@ -35,43 +35,97 @@ std::string type_info::canonical_name() const {
         case script_value_type::jai_char_type: return "char";
         case script_value_type::jai_null_type: return "void";
         case script_value_type::jai_any_type: return "any";
-        case script_value_type::jai_array_type: {
-            std::string elem = element_type() ? element_type()->canonical_name() : "";
-            return "array<" + elem + ">";
-        }
-        case script_value_type::jai_map_type: {
-            std::string k = key_type() ? key_type()->canonical_name() : "";
-            std::string v = value_type() ? value_type()->canonical_name() : "";
-            return "map<" + k + "," + v + ">";
-        }
         case script_value_type::jai_object_type:
-            return type_name;  // Use registered class name
-        case script_value_type::jai_shared_ptr_type: {
-            // spelled in full: the id is this name interned, and a handle type must not
-            // share the pointee class's id (array<shared_ptr<Foo>> is not array<Foo>)
-            if (element_type()) { return "shared_ptr<" + element_type()->canonical_name() + ">"; }
-            return type_name == "shared_ptr" ? type_name : "shared_ptr<" + type_name + ">";
-        }
-        case script_value_type::jai_weak_ptr_type: {
-            std::string elem = element_type() ? element_type()->canonical_name() : "";
-            return "weak_ptr<" + elem + ">";
-        }
-        case script_value_type::jai_function_type: {
-            if (type_params.empty()) { return "function"; }   // the `function` spelling: any callable or null
-            std::string ret = return_type() ? return_type()->canonical_name() : "void";
-            std::string args_str = "(";
-            auto args = arg_types();
-            for (size_t i = 0; i < args.size(); ++i) {
-                if (i > 0) args_str += ",";
-                args_str += args[i] ? args[i]->canonical_name() : "";
-            }
-            args_str += ")";
-            return "function<" + ret + args_str + ">";
-        }
+            return t.type_name;  // Use registered class name
         default:
-            return type_name.empty() ? "unknown" : type_name;
+            return t.type_name.empty() ? "unknown" : t.type_name;
     }
 }
+}
+
+// A composite type names its parameters on an explicit work list: the parser names each level of a nested type while the
+// levels around it are still on the stack, so the name never recurses
+std::string type_info::canonical_name() const {
+    switch (base_type) {
+        case script_value_type::jai_array_type: case script_value_type::jai_map_type: case script_value_type::jai_shared_ptr_type:
+        case script_value_type::jai_weak_ptr_type: case script_value_type::jai_function_type:
+            break;
+        default:
+            return leaf_canonical_name(*this);
+    }
+    struct piece { const type_info* type; const char* text; };   // a type still to name, else text to append
+    std::vector<piece> pending;
+    pending.reserve(8);
+    pending.push_back({this, nullptr});
+    auto text = [&](const char* t) { pending.push_back({nullptr, t}); };
+    auto part = [&](const type_info_ptr& t, const char* absent) {
+        if (t) { pending.push_back({t.ptr, nullptr}); } else { text(absent); }
+    };
+    std::string result;
+    while (!pending.empty()) {
+        const piece next = pending.back();
+        pending.pop_back();
+        if (!next.type) {
+            result += next.text;
+            continue;
+        }
+        const type_info& t = *next.type;
+        switch (t.base_type) {
+            case script_value_type::jai_array_type:
+                text(">");
+                part(t.element_type(), "");
+                text("array<");
+                break;
+            case script_value_type::jai_map_type:
+                text(">");
+                part(t.value_type(), "");
+                text(",");
+                part(t.key_type(), "");
+                text("map<");
+                break;
+            case script_value_type::jai_shared_ptr_type:
+                // spelled in full: the id is this name interned, and a handle type must not
+                // share the pointee class's id (array<shared_ptr<Foo>> is not array<Foo>)
+                if (t.element_type()) {
+                    text(">");
+                    part(t.element_type(), "");
+                    text("shared_ptr<");
+                } else if (t.type_name == "shared_ptr") {
+                    result += t.type_name;
+                } else {
+                    result += "shared_ptr<";
+                    result += t.type_name;
+                    result += ">";
+                }
+                break;
+            case script_value_type::jai_weak_ptr_type:
+                text(">");
+                part(t.element_type(), "");
+                text("weak_ptr<");
+                break;
+            case script_value_type::jai_function_type:
+                if (t.type_params.empty()) {   // the `function` spelling: any callable or null
+                    result += "function";
+                    break;
+                }
+                text(">");
+                text(")");
+                for (size_t i = t.type_params.size(); i-- > 1;) {
+                    part(t.type_params[i], "");
+                    if (i > 1) { text(","); }
+                }
+                text("(");
+                part(t.return_type(), "void");
+                text("function<");
+                break;
+            default:
+                result += leaf_canonical_name(t);
+                break;
+        }
+    }
+    return result;
+}
+
 
 std::string type_info::spelling() const {
     auto element = [](const type_info_ptr& t) { return t ? t->spelling() : std::string("var"); };

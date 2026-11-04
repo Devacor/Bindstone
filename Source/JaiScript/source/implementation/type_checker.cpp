@@ -3752,7 +3752,7 @@ private:
 
     // -------------------------------------------------------------- expressions
 
-    ctype infer(expression* e) {
+    JAI_NOINLINE ctype infer(expression* e) {
         if (e) { stack_.guard(e->location); }
         ctype result = infer_impl(e);
         result.origin = e;
@@ -3760,7 +3760,7 @@ private:
         return result;
     }
 
-    void observe(const expression* e, const ctype& t) {
+    JAI_NOINLINE void observe(const expression* e, const ctype& t) {
         static_assert(static_cast<uint8_t>(check_expression_type::kind_t::utf8_k) == ctype::utf8_k);
         check_expression_type view;
         view.kind = static_cast<check_expression_type::kind_t>(t.kind);
@@ -3771,7 +3771,7 @@ private:
         observer_->expression_type(e, view);
     }
 
-    ctype infer_impl(expression* e) {
+    JAI_NOINLINE ctype infer_impl(expression* e) {
         if (!e) { return {}; }
         switch (e->get_type()) {
             case node_type::literal_expr: {
@@ -3788,145 +3788,36 @@ private:
             }
             case node_type::identifier_expr:
                 return infer_identifier(static_cast<identifier_expr*>(e));
-            case node_type::binary_expr: {
-                auto* b = static_cast<binary_expr*>(e);
-                ctype l = infer(b->left.get());
-                ctype r = infer(b->right.get());
-                if (b->op.type == token_type::left_bracket) {
-                    // the proven element kind rides the node's class (int_int / float_float) for the compiler's temps
-                    const ctype cont = declared_container_receiver(b->left.get(), l);
-                    const ctype el = container_value_type(cont);
-                    const bool object_elements = el.kind == ctype::object_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
-                    const bool vec_elements = el.kind == ctype::math_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
-                    const uint8_t cls = object_elements ? operand_class_object_element
-                                      : vec_elements ? operand_class_vec_element
-                                      : !el.element_proof ? operand_class_unknown
-                                      : el.kind == ctype::int_k ? operand_class_int_int
-                                      : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
-                    stamp(b->static_operand_class, cls, operand_class_unknown);
-                    if (cont.kind == ctype::map_k && !cont.tentative && r.kind == ctype::object_k && !r.tentative && !r.cls.empty()) { warn_identity_map_key(b, r.cls); }
-                    const uint8_t receiver = cont.tentative ? 0 : cont.kind == ctype::string_k ? 1 : cont.kind == ctype::array_k ? 2 : cont.kind == ctype::map_k ? 3 : 0;
-                    stamp(b->subscript_receiver, receiver, uint8_t(0));
-                    return el;
-                }
-                if (b->op.type == token_type::question_question) {
-                    // the left value unless it is null, else the right: one type when both sides have it, the right's when the left is null
-                    if (l.kind == ctype::null_k) { return r; }
-                    if (l.kind == r.kind && l.cls == r.cls && !l.is_unknown()) {
-                        if (l.ti != r.ti) { l.ti = nullptr; }
-                        l.tentative = l.tentative || r.tentative;
-                        return l;
-                    }
-                    return {};
-                }
-                stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
-                check_comparison(b, l, r);
-                if (l.kind == ctype::object_k) {
-                    if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
-                }
-                if (r.kind == ctype::object_k) { warn_missing_reflected(b, l, r); }
-                return binary_result(l, b->op.type, r);
-            }
-            case node_type::unary_expr: {
-                auto* u = static_cast<unary_expr*>(e);
-                ctype operand = infer(u->operand.get());
-                if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
-                                                        u->op.type == token_type::tilde)) {
-                    if (auto user = class_unary_operator(operand.cls, u->op.type)) { return *user; }
-                }
-                switch (u->op.type) {
-                    case token_type::bang: return ctype::make(ctype::bool_k);
-                    case token_type::minus:
-                    case token_type::plus:
-                        return is_numeric(operand.kind) ? operand : ctype{};
-                    case token_type::plus_plus:
-                    case token_type::minus_minus:
-                        check_incdec_target(u);
-                        return is_numeric(operand.kind) ? operand : ctype{};
-                    case token_type::tilde:
-                        return operand.kind == ctype::int_k ? operand : ctype{};
-                    default: return {};
-                }
-            }
+            case node_type::binary_expr:
+                return infer_binary(static_cast<binary_expr*>(e));
+            case node_type::unary_expr:
+                return infer_unary(static_cast<unary_expr*>(e));
             case node_type::assignment_expr:
                 return infer_assignment(static_cast<assignment_expr*>(e));
             case node_type::call_expr:
                 return infer_call(static_cast<call_expr*>(e));
-            case node_type::member_expr: {
-                auto* m = static_cast<member_expr*>(e);
-                ctype t = infer_member(m, /*writing=*/false);
-                if (!map_key_operand(m).empty()) { t.const_key = true; }
-                return t;
-            }
+            case node_type::member_expr:
+                return infer_member_expression(static_cast<member_expr*>(e));
             case node_type::lambda_expr:
                 walk_lambda(static_cast<lambda_expr*>(e));
                 return ctype::make(ctype::function_k);
-            case node_type::new_expr: {
-                auto* n = static_cast<new_expr*>(e);
-                std::vector<ctype> args;
-                for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
-                ctype t = ctype_from_type_info(n->type.get());
-                if (t.kind == ctype::object_k) {
-                    if (const sclass* c = find_sclass(t.cls)) {
-                        check_ctor_call(t.cls, *c, args, n->location);
-                    } else {
-                        check_strict_host_constructor(std::string(t.cls), args, n->location);
-                    }
-                }
-                return t;
-            }
+            case node_type::new_expr:
+                return infer_new(static_cast<new_expr*>(e));
             case node_type::include_expr: {
                 auto* inc = static_cast<include_expr*>(e);
                 if (inc->path_expr) { infer(inc->path_expr.get()); }
                 return ctype::make(ctype::unknown);   // include's value is the file's result
             }
-            case node_type::import_expr: {
-                for (const auto& a : static_cast<import_expr*>(e)->path_exprs) {
-                    const ctype t = infer(a.get());
-                    if (!t.is_unknown() && t.kind != ctype::string_k && t.kind != ctype::utf8_k && t.kind != ctype::array_k) {
-                        diag(diag_level::error, a->location, "an import path is a string or an array of strings, got '" + ctype_name(t) + "'");
-                    }
-                }
-                return ctype::make(ctype::bool_k);   // true when a module (re)ran
-            }
-            case node_type::ternary_expr: {
-                auto* t = static_cast<ternary_expr*>(e);
-                infer(t->condition.get());
-                ctype a = infer(t->then_expression.get());
-                ctype b = infer(t->else_expression.get());
-                if (a.kind == b.kind && a.cls == b.cls) {
-                    if (a.ti != b.ti) { a.ti = nullptr; }   // two spellings (value vs handle) are not one certain type
-                    a.tentative = a.tentative || b.tentative;
-                    a.const_key = a.const_key || b.const_key;
-                    return a;
-                }
-                if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
-                    last_mixed_ternary_ = {e, a, b};
-                    mixed_ternaries_[e] = last_mixed_ternary_;
-                }
-                ctype mixed{};
-                mixed.const_key = a.const_key || b.const_key;
-                return mixed;
-            }
-            case node_type::array_literal_expr: {
-                auto* a = static_cast<array_literal_expr*>(e);
-                for (auto& el : a->elements) { literal_element_types_[el.get()] = infer(el.get()); }
-                return ctype::make(ctype::array_k);
-            }
-            case node_type::map_literal_expr: {
-                auto* m = static_cast<map_literal_expr*>(e);
-                for (auto& [k, v] : m->entries) {
-                    literal_element_types_[k.get()] = infer(k.get());
-                    literal_element_types_[v.get()] = infer(v.get());
-                }
-                return ctype::make(ctype::map_k);
-            }
+            case node_type::import_expr:
+                return infer_import(static_cast<import_expr*>(e));
+            case node_type::ternary_expr:
+                return infer_ternary(static_cast<ternary_expr*>(e));
+            case node_type::array_literal_expr:
+                return infer_array_literal(static_cast<array_literal_expr*>(e));
+            case node_type::map_literal_expr:
+                return infer_map_literal(static_cast<map_literal_expr*>(e));
             case node_type::this_expr:
-                if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
-                    capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
-                    diag(diag_level::error, e->location, "lambda capture list does not capture 'this'; use [this], [=] or [&]");
-                }
-                return class_ctx_ ? ctype::object(class_ctx_name_) : ctype{};
+                return infer_this(e);
             case node_type::super_expr:
                 if (class_ctx_ && !class_ctx_->decl->base_classes.empty()) {
                     return ctype::object(class_ctx_->decl->base_classes[0]);
@@ -3937,33 +3828,8 @@ private:
                 if (t->value) { infer(t->value.get()); }
                 return {};
             }
-            case node_type::cast_expr: {
-                // cast<T>(e): certain T (proofs flow); cast<T&>(e): T for member lookup, never a
-                // store proof (tentative, like every reference); cast<shared_ptr<T>>(e): the handle
-                // spelling. The operand is the explicit typed boundary - never checked against T.
-                auto* c = static_cast<cast_expr*>(e);
-                if (c->implicit_ref) {   // a piece of an assignment target read as a reference: its operand's type
-                    ctype operand_t = infer(c->operand.get());
-                    operand_t.tentative = true;
-                    return operand_t;
-                }
-                ctype operand_t = infer(c->operand.get());
-                if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
-                check_const_cast(c);
-                ctype t = ctype_from_type_info(c->target.get());
-                if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
-                    diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
-                    return {};
-                }
-                if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
-                    warn_cast_copy(c, operand_t);
-                }
-                if (operand_t.const_key && (c->by_reference || handle_type(c->target.get()))) {
-                    map_key_alias(c->location, c->operand.get());
-                }
-                if (c->by_reference) { t.tentative = true; }
-                return t;
-            }
+            case node_type::cast_expr:
+                return infer_cast(static_cast<cast_expr*>(e));
             case node_type::yield_expr: {
                 auto* y = static_cast<yield_expr*>(e);
                 if (y->value) { infer(y->value.get()); }
@@ -3972,6 +3838,166 @@ private:
             default:
                 return {};
         }
+    }
+
+    JAI_NOINLINE ctype infer_binary(binary_expr* b) {
+        ctype l = infer(b->left.get());
+        ctype r = infer(b->right.get());
+        return binary_type(b, l, r);
+    }
+
+    JAI_NOINLINE ctype binary_type(binary_expr* b, ctype& l, ctype& r) {
+        if (b->op.type == token_type::left_bracket) {
+            // the proven element kind rides the node's class (int_int / float_float) for the compiler's temps
+            const ctype cont = declared_container_receiver(b->left.get(), l);
+            const ctype el = container_value_type(cont);
+            const bool object_elements = el.kind == ctype::object_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
+            const bool vec_elements = el.kind == ctype::math_k && cont.kind == ctype::array_k && (!cont.tentative || cont.alias_proof);
+            const uint8_t cls = object_elements ? operand_class_object_element
+                              : vec_elements ? operand_class_vec_element
+                              : !el.element_proof ? operand_class_unknown
+                              : el.kind == ctype::int_k ? operand_class_int_int
+                              : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
+            stamp(b->static_operand_class, cls, operand_class_unknown);
+            if (cont.kind == ctype::map_k && !cont.tentative && r.kind == ctype::object_k && !r.tentative && !r.cls.empty()) { warn_identity_map_key(b, r.cls); }
+            const uint8_t receiver = cont.tentative ? 0 : cont.kind == ctype::string_k ? 1 : cont.kind == ctype::array_k ? 2 : cont.kind == ctype::map_k ? 3 : 0;
+            stamp(b->subscript_receiver, receiver, uint8_t(0));
+            return el;
+        }
+        if (b->op.type == token_type::question_question) {
+            // the left value unless it is null, else the right: one type when both sides have it, the right's when the left is null
+            if (l.kind == ctype::null_k) { return r; }
+            if (l.kind == r.kind && l.cls == r.cls && !l.is_unknown()) {
+                if (l.ti != r.ti) { l.ti = nullptr; }
+                l.tentative = l.tentative || r.tentative;
+                return l;
+            }
+            return {};
+        }
+        stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
+        check_comparison(b, l, r);
+        if (l.kind == ctype::object_k) {
+            if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
+        }
+        if (r.kind == ctype::object_k) { warn_missing_reflected(b, l, r); }
+        return binary_result(l, b->op.type, r);
+    }
+
+    JAI_NOINLINE ctype infer_unary(unary_expr* u) {
+        ctype operand = infer(u->operand.get());
+        if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
+                                                u->op.type == token_type::tilde)) {
+            if (auto user = class_unary_operator(operand.cls, u->op.type)) { return *user; }
+        }
+        switch (u->op.type) {
+            case token_type::bang: return ctype::make(ctype::bool_k);
+            case token_type::minus:
+            case token_type::plus:
+                return is_numeric(operand.kind) ? operand : ctype{};
+            case token_type::plus_plus:
+            case token_type::minus_minus:
+                check_incdec_target(u);
+                return is_numeric(operand.kind) ? operand : ctype{};
+            case token_type::tilde:
+                return operand.kind == ctype::int_k ? operand : ctype{};
+            default: return {};
+        }
+    }
+
+    JAI_NOINLINE ctype infer_member_expression(member_expr* m) {
+        ctype t = infer_member(m, /*writing=*/false);
+        if (!map_key_operand(m).empty()) { t.const_key = true; }
+        return t;
+    }
+
+    JAI_NOINLINE ctype infer_new(new_expr* n) {
+        std::vector<ctype> args;
+        for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
+        ctype t = ctype_from_type_info(n->type.get());
+        if (t.kind == ctype::object_k) {
+            if (const sclass* c = find_sclass(t.cls)) {
+                check_ctor_call(t.cls, *c, args, n->location);
+            } else {
+                check_strict_host_constructor(std::string(t.cls), args, n->location);
+            }
+        }
+        return t;
+    }
+
+    JAI_NOINLINE ctype infer_import(import_expr* e) {
+        for (const auto& a : static_cast<import_expr*>(e)->path_exprs) {
+            const ctype t = infer(a.get());
+            if (!t.is_unknown() && t.kind != ctype::string_k && t.kind != ctype::utf8_k && t.kind != ctype::array_k) {
+                diag(diag_level::error, a->location, "an import path is a string or an array of strings, got '" + ctype_name(t) + "'");
+            }
+        }
+        return ctype::make(ctype::bool_k);   // true when a module (re)ran
+    }
+
+    JAI_NOINLINE ctype infer_ternary(ternary_expr* t) {
+        infer(t->condition.get());
+        ctype a = infer(t->then_expression.get());
+        ctype b = infer(t->else_expression.get());
+        if (a.kind == b.kind && a.cls == b.cls) {
+            if (a.ti != b.ti) { a.ti = nullptr; }   // two spellings (value vs handle) are not one certain type
+            a.tentative = a.tentative || b.tentative;
+            a.const_key = a.const_key || b.const_key;
+            return a;
+        }
+        if (!a.is_unknown() && !b.is_unknown() && a.kind != ctype::null_k && b.kind != ctype::null_k) {   // a T-or-null arm pair is a nullable value, never a type mix
+            last_mixed_ternary_ = {t, a, b};
+            mixed_ternaries_[t] = last_mixed_ternary_;
+        }
+        ctype mixed{};
+        mixed.const_key = a.const_key || b.const_key;
+        return mixed;
+    }
+
+    JAI_NOINLINE ctype infer_array_literal(array_literal_expr* a) {
+        for (auto& el : a->elements) { literal_element_types_[el.get()] = infer(el.get()); }
+        return ctype::make(ctype::array_k);
+    }
+
+    JAI_NOINLINE ctype infer_map_literal(map_literal_expr* m) {
+        for (auto& [k, v] : m->entries) {
+            literal_element_types_[k.get()] = infer(k.get());
+            literal_element_types_[v.get()] = infer(v.get());
+        }
+        return ctype::make(ctype::map_k);
+    }
+
+    JAI_NOINLINE ctype infer_this(expression* e) {
+        if (!capture_stack_.empty() && !fn_stack_.back().sees_fields &&
+            capture_stack_.back().lambda->default_capture == lambda_expr::capture_default::none) {
+            diag(diag_level::error, e->location, "lambda capture list does not capture 'this'; use [this], [=] or [&]");
+        }
+        return class_ctx_ ? ctype::object(class_ctx_name_) : ctype{};
+    }
+
+    // cast<T>(e): certain T (proofs flow); cast<T&>(e): T for member lookup, never a store proof (tentative, like every reference);
+    // cast<shared_ptr<T>>(e): the handle spelling. The operand is the explicit typed boundary - never checked against T.
+    JAI_NOINLINE ctype infer_cast(cast_expr* c) {
+        if (c->implicit_ref) {   // a piece of an assignment target read as a reference: its operand's type
+            ctype operand_t = infer(c->operand.get());
+            operand_t.tentative = true;
+            return operand_t;
+        }
+        ctype operand_t = infer(c->operand.get());
+        if (c->by_reference) { report_mixed_reference_conditional(c->operand.get()); }
+        check_const_cast(c);
+        ctype t = ctype_from_type_info(c->target.get());
+        if (t.kind == ctype::object_k && !known_class(t.cls) && !extra_global(std::string(t.cls))) {
+            diag(diag_level::error, c->location, "unknown type in cast: '" + std::string(t.cls) + "'");
+            return {};
+        }
+        if (collect_diagnostics_ && !c->by_reference && c->target->base_type == script_value_type::jai_object_type) {
+            warn_cast_copy(c, operand_t);
+        }
+        if (operand_t.const_key && (c->by_reference || handle_type(c->target.get()))) {
+            map_key_alias(c->location, c->operand.get());
+        }
+        if (c->by_reference) { t.tentative = true; }
+        return t;
     }
 
     bool bare_this_field_ = false;
@@ -3983,7 +4009,7 @@ private:
         const member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
         return !hit.found && !hit.unresolved && hit.certain;
     }
-    ctype infer_identifier(identifier_expr* id) {
+    JAI_NOINLINE ctype infer_identifier(identifier_expr* id) {
         bare_this_field_ = false;
         ctype t = infer_identifier_impl(id);
         stamp(id->this_field, bare_this_field_, false);
@@ -4235,7 +4261,7 @@ private:
         }
     }
 
-    ctype infer_call(call_expr* c) {
+    JAI_NOINLINE ctype infer_call(call_expr* c) {
         std::vector<ctype> args;
         args.reserve(c->arguments.size());
         const std::string_view callee_name = c->callee && c->callee->get_type() == node_type::identifier_expr
@@ -4252,6 +4278,10 @@ private:
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
         ctype t = infer_call_impl(c, args, ov);
+        return check_call(c, args, ov, std::move(t));
+    }
+
+    JAI_NOINLINE ctype check_call(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>* ov, ctype t) {
         const std::string_view ov_class = ov ? ov_class_ : std::string_view{};
         bool free_callee = false;   // resolved through the program's free functions (a method by its bare name, a constructor: never inlined)
         if (ov && c->callee && c->callee->get_type() == node_type::identifier_expr) {
@@ -5125,7 +5155,7 @@ private:
 
     // -------------------------------------------------------------- statements
 
-    void walk_stmt(statement* s) {
+    JAI_NOINLINE void walk_stmt(statement* s) {
         if (!s) { return; }
         stack_.guard(s->location);
         mode_guard region(mode_stack_, s->check_mode_attr, /*scoped=*/false);
@@ -5154,170 +5184,24 @@ private:
                 walk_stmt(w->body.get());
                 break;
             }
-            case node_type::for_stmt: {
-                auto* f = static_cast<for_stmt*>(s);
-                scopes_.emplace_back();
-                if (f->initializer) { walk_decl(f->initializer.get()); }
-                if (f->condition) { infer(f->condition.get()); }
-                if (f->update) { infer(f->update.get()); }
-                walk_stmt(f->body.get());
-                scopes_.pop_back();
+            case node_type::for_stmt:
+                walk_for(static_cast<for_stmt*>(s));
                 break;
-            }
-            case node_type::range_for_stmt: {
-                auto* f = static_cast<range_for_stmt*>(s);
-                const ctype container = infer(f->container.get());
-                if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
-                    diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
-                         ctype_name(container) + "' to " + detail::map_entry_binding_spelling(*f));
-                }
-                // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
-                // else has none
-                ctype elem{};
-                if (container.kind == ctype::array_k && container.ti && container.ti->element_type() &&
-                    container.ti->element_type()->base_type != script_value_type::jai_any_type) {
-                    elem = ctype_from_type_info(container.ti->element_type());
-                } else if (container.kind == ctype::string_k) {
-                    elem = ctype::make(ctype::char_k);
-                }
-                if (!f->element_type) { f->auto_spelled = true; }
-                if (f->auto_spelled && !f->auto_typed && semantic_walk() && container.kind != ctype::map_k) {
-                    f->auto_typed = true;   // an auto over elements without a static type is a var, decided once
-                    if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
-                }
-                const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
-                stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
-                if (declared && f->is_reference && !elem.is_unknown() && !reference_type_compatible(elem, ctype_from_type_info(f->element_type.get()))) {
-                    diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +
-                         "' declared '" + f->element_type->canonical_name() + "&'");
-                }
-                // over the elements of a const: auto& binds const references (C++ deduction), T& / var& are errors
-                bool loop_const = f->is_const;
-                {
-                    const const_hit h = f->is_reference && !f->is_const ? const_path(f->container.get(), /*value_too=*/true) : const_hit{};
-                    const bool typed_ref = f->is_reference && !f->auto_spelled && f->element_type && f->variable_name != "entry#";
-                    if (h.verdict && !typed_ref) { loop_const = loop_const || h.verdict == const_raises; }
-                    const uint8_t verdict = typed_ref ? h.verdict : uint8_t(const_none);
-                    const std::string declared = f->element_type ? f->element_type->canonical_name() + "&" : std::string("var&");
-                    stamp_const(f->const_check, verdict, [&] { return detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true); });
-                    if (verdict == const_raises) {
-                        diag(diag_level::error, f->location, detail::const_lowercase(detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true)), h.line, h.column);
-                    }
-                }
-                scopes_.emplace_back();
-                var_entry entry;
-                entry.is_const = loop_const;
-                entry.type = ctype_from_type_info(f->element_type.get());
-                entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
-                                f->is_reference;
-                entry.is_reference = f->is_reference;
-                if (entry.dynamic) {   // T& over elements, or auto (by value or reference) over class elements
-                    ctype held = elem;
-                    if (held.is_unknown() && container.is_unknown() && f->auto_spelled) {
-                        const ctype through = referent_receiver(f->container.get());
-                        if (through.kind == ctype::array_k && through.ti && through.ti->element_type()) { held = ctype_from_type_info(through.ti->element_type().get()); }
-                    }
-                    entry.referent = referent_type(f->auto_spelled ? held : entry.type);
-                }
-                entry.map_pair = container.kind == ctype::map_k;
-                if (f->is_reference && container.kind != ctype::map_k) {
-                    // an alias of a typed buffer's element holds the element's kind (the buffer converts every store): the builtin receiver
-                    // proof reads it (the call checks the receiver's kind at run time)
-                    const ctype held = container.is_unknown() ? declared_container_receiver(f->container.get(), container) : container;
-                    if (held.kind == ctype::array_k && (!held.tentative || held.alias_proof) && held.ti && held.ti->element_type()) {
-                        entry.builtin_alias = ctype_from_type_info(held.ti->element_type().get()).kind;
-                    }
-                }
-                entry.is_handle = f->element_type && f->element_type->base_type == script_value_type::jai_shared_ptr_type;
-                entry.declared = f->element_type.get();
-                entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
-                entry.line = f->location.line;
-                entry.column = f->location.column;
-                warn_shadow("range-for variable", f->variable_name, f->location);
-                scopes_.back().emplace(f->variable_name, std::move(entry));
-                walk_stmt(f->body.get());
-                scopes_.pop_back();
+            case node_type::range_for_stmt:
+                walk_range_for(static_cast<range_for_stmt*>(s));
                 break;
-            }
-            case node_type::parallel_for_stmt: {
-                auto* f = static_cast<parallel_for_stmt*>(s);
-                if (f->counted()) {
-                    static const char* const roles[] = { "start", "bound", "step" };
-                    const auto& args = static_cast<const call_expr*>(f->container.get())->arguments;
-                    for (size_t k = 0; k < 3 && k < args.size(); ++k) {
-                        const ctype t = infer(args[k].get());
-                        if (!t.is_unknown() && !t.tentative && t.kind != ctype::int_k) {
-                            diag(diag_level::error, args[k]->location, std::string("parallel_for: a counted loop's ") + roles[k] + " is " + ctype_name(t) + ", not int");
-                        }
-                    }
-                }
-                infer(f->container.get());
-                scopes_.emplace_back();
-                var_entry entry;
-                entry.is_const = f->loop_param.is_const;
-                entry.type = ctype_from_type_info(f->loop_param.type.get());
-                entry.dynamic = true;   // by-ref element: dynamic like ref range-for
-                entry.is_reference = f->loop_param.is_reference;
-                entry.declared = f->loop_param.type.get();
-                entry.display = f->loop_param.type ? f->loop_param.type->canonical_name() : "auto";
-                entry.line = f->location.line;
-                entry.column = f->location.column;
-                warn_shadow("parallel_for variable", f->loop_param.name, f->location);
-                scopes_.back().emplace(std::string_view(f->loop_param.name), std::move(entry));
-                for (const auto& extra : f->extra_params) {
-                    var_entry more;
-                    more.is_const = extra.is_const;
-                    more.type = ctype_from_type_info(extra.type.get());
-                    more.dynamic = !extra.type || extra.type->base_type == script_value_type::jai_any_type || extra.is_reference;
-                    more.is_reference = extra.is_reference;
-                    more.declared = extra.type.get();
-                    more.display = extra.type ? extra.type->canonical_name() : "auto";
-                    more.line = f->location.line;
-                    more.column = f->location.column;
-                    warn_shadow("parallel_for variable", extra.name, f->location);
-                    scopes_.back().emplace(std::string_view(extra.name), std::move(more));
-                }
-                for (const auto& c : f->extra_containers) { infer(c.get()); }
-                ++parallel_body_depth_;
-                walk_stmt(f->body.get());
-                --parallel_body_depth_;
-                scopes_.pop_back();
+            case node_type::parallel_for_stmt:
+                walk_parallel_for(static_cast<parallel_for_stmt*>(s));
                 break;
-            }
             case node_type::return_stmt:
                 check_return(static_cast<return_stmt*>(s));
                 break;
-            case node_type::try_stmt: {
-                auto* t = static_cast<try_stmt*>(s);
-                walk_stmt(t->try_block.get());
-                scopes_.emplace_back();
-                if (!t->catch_var.empty()) {
-                    var_entry entry;
-                    entry.dynamic = true;
-                    warn_shadow("catch variable", t->catch_var, t->location);
-                    scopes_.back().emplace(std::string_view(t->catch_var), std::move(entry));
-                }
-                walk_stmt(t->catch_block.get());
-                scopes_.pop_back();
+            case node_type::try_stmt:
+                walk_try(static_cast<try_stmt*>(s));
                 break;
-            }
-            case node_type::switch_stmt: {
-                auto* sw = static_cast<switch_stmt*>(s);
-                const ctype condition = infer(sw->condition.get());
-                for (auto& cs : sw->cases) {
-                    const ctype value = infer(cs->value.get());
-                    stamp(cs->static_operand_class, operand_class_of(condition, value), operand_class_unknown);
-                    scopes_.emplace_back();
-                    for (auto& st : cs->body) { walk_stmt(st.get()); }
-                    scopes_.pop_back();
-                }
-                if (sw->default_case) {
-                    scopes_.emplace_back();
-                    for (auto& st : sw->default_case->body) { walk_stmt(st.get()); }
-                    scopes_.pop_back();
-                }
+            case node_type::switch_stmt:
+                walk_switch(static_cast<switch_stmt*>(s));
                 break;
-            }
             case node_type::break_stmt:
             case node_type::continue_stmt:
             case node_type::fallthrough_stmt:
@@ -5330,7 +5214,163 @@ private:
         }
     }
 
-    void check_return(return_stmt* r) {
+    JAI_NOINLINE void walk_for(for_stmt* f) {
+        scopes_.emplace_back();
+        if (f->initializer) { walk_decl(f->initializer.get()); }
+        if (f->condition) { infer(f->condition.get()); }
+        if (f->update) { infer(f->update.get()); }
+        walk_stmt(f->body.get());
+        scopes_.pop_back();
+    }
+
+    JAI_NOINLINE void walk_range_for(range_for_stmt* f) {
+        const ctype container = infer(f->container.get());
+        if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
+            diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
+                 ctype_name(container) + "' to " + detail::map_entry_binding_spelling(*f));
+        }
+        // the elements' static type: an array's element type, a string's char; a var container, an array<var> or anything
+        // else has none
+        ctype elem{};
+        if (container.kind == ctype::array_k && container.ti && container.ti->element_type() &&
+            container.ti->element_type()->base_type != script_value_type::jai_any_type) {
+            elem = ctype_from_type_info(container.ti->element_type());
+        } else if (container.kind == ctype::string_k) {
+            elem = ctype::make(ctype::char_k);
+        }
+        if (!f->element_type) { f->auto_spelled = true; }
+        if (f->auto_spelled && !f->auto_typed && semantic_walk() && container.kind != ctype::map_k) {
+            f->auto_typed = true;   // an auto over elements without a static type is a var, decided once
+            if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
+        }
+        const bool declared = f->element_type && f->element_type->base_type != script_value_type::jai_any_type && !f->auto_spelled;
+        stamp(f->element_conversion_free, !declared || (!elem.is_unknown() && same_type(ctype_from_type_info(f->element_type.get()), elem)), false);
+        if (declared && f->is_reference && !elem.is_unknown() && !reference_type_compatible(elem, ctype_from_type_info(f->element_type.get()))) {
+            diag(diag_level::error, f->location, "cannot bind '" + ctype_name(elem) + "' to '" + std::string(f->variable_name) +
+                 "' declared '" + f->element_type->canonical_name() + "&'");
+        }
+        // over the elements of a const: auto& binds const references (C++ deduction), T& / var& are errors
+        bool loop_const = f->is_const;
+        {
+            const const_hit h = f->is_reference && !f->is_const ? const_path(f->container.get(), /*value_too=*/true) : const_hit{};
+            const bool typed_ref = f->is_reference && !f->auto_spelled && f->element_type && f->variable_name != "entry#";
+            if (h.verdict && !typed_ref) { loop_const = loop_const || h.verdict == const_raises; }
+            const uint8_t verdict = typed_ref ? h.verdict : uint8_t(const_none);
+            const std::string declared = f->element_type ? f->element_type->canonical_name() + "&" : std::string("var&");
+            stamp_const(f->const_check, verdict, [&] { return detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true); });
+            if (verdict == const_raises) {
+                diag(diag_level::error, f->location, detail::const_lowercase(detail::const_bind_text(f->variable_name, declared, f->container.get(), h.root, true)), h.line, h.column);
+            }
+        }
+        scopes_.emplace_back();
+        var_entry entry;
+        entry.is_const = loop_const;
+        entry.type = ctype_from_type_info(f->element_type.get());
+        entry.dynamic = !f->element_type || f->element_type->base_type == script_value_type::jai_any_type ||
+                        f->is_reference;
+        entry.is_reference = f->is_reference;
+        if (entry.dynamic) {   // T& over elements, or auto (by value or reference) over class elements
+            ctype held = elem;
+            if (held.is_unknown() && container.is_unknown() && f->auto_spelled) {
+                const ctype through = referent_receiver(f->container.get());
+                if (through.kind == ctype::array_k && through.ti && through.ti->element_type()) { held = ctype_from_type_info(through.ti->element_type().get()); }
+            }
+            entry.referent = referent_type(f->auto_spelled ? held : entry.type);
+        }
+        entry.map_pair = container.kind == ctype::map_k;
+        if (f->is_reference && container.kind != ctype::map_k) {
+            // an alias of a typed buffer's element holds the element's kind (the buffer converts every store): the builtin receiver
+            // proof reads it (the call checks the receiver's kind at run time)
+            const ctype held = container.is_unknown() ? declared_container_receiver(f->container.get(), container) : container;
+            if (held.kind == ctype::array_k && (!held.tentative || held.alias_proof) && held.ti && held.ti->element_type()) {
+                entry.builtin_alias = ctype_from_type_info(held.ti->element_type().get()).kind;
+            }
+        }
+        entry.is_handle = f->element_type && f->element_type->base_type == script_value_type::jai_shared_ptr_type;
+        entry.declared = f->element_type.get();
+        entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
+        entry.line = f->location.line;
+        entry.column = f->location.column;
+        warn_shadow("range-for variable", f->variable_name, f->location);
+        scopes_.back().emplace(f->variable_name, std::move(entry));
+        walk_stmt(f->body.get());
+        scopes_.pop_back();
+    }
+
+    JAI_NOINLINE void walk_parallel_for(parallel_for_stmt* f) {
+        if (f->counted()) {
+            static const char* const roles[] = { "start", "bound", "step" };
+            const auto& args = static_cast<const call_expr*>(f->container.get())->arguments;
+            for (size_t k = 0; k < 3 && k < args.size(); ++k) {
+                const ctype t = infer(args[k].get());
+                if (!t.is_unknown() && !t.tentative && t.kind != ctype::int_k) {
+                    diag(diag_level::error, args[k]->location, std::string("parallel_for: a counted loop's ") + roles[k] + " is " + ctype_name(t) + ", not int");
+                }
+            }
+        }
+        infer(f->container.get());
+        scopes_.emplace_back();
+        var_entry entry;
+        entry.is_const = f->loop_param.is_const;
+        entry.type = ctype_from_type_info(f->loop_param.type.get());
+        entry.dynamic = true;   // by-ref element: dynamic like ref range-for
+        entry.is_reference = f->loop_param.is_reference;
+        entry.declared = f->loop_param.type.get();
+        entry.display = f->loop_param.type ? f->loop_param.type->canonical_name() : "auto";
+        entry.line = f->location.line;
+        entry.column = f->location.column;
+        warn_shadow("parallel_for variable", f->loop_param.name, f->location);
+        scopes_.back().emplace(std::string_view(f->loop_param.name), std::move(entry));
+        for (const auto& extra : f->extra_params) {
+            var_entry more;
+            more.is_const = extra.is_const;
+            more.type = ctype_from_type_info(extra.type.get());
+            more.dynamic = !extra.type || extra.type->base_type == script_value_type::jai_any_type || extra.is_reference;
+            more.is_reference = extra.is_reference;
+            more.declared = extra.type.get();
+            more.display = extra.type ? extra.type->canonical_name() : "auto";
+            more.line = f->location.line;
+            more.column = f->location.column;
+            warn_shadow("parallel_for variable", extra.name, f->location);
+            scopes_.back().emplace(std::string_view(extra.name), std::move(more));
+        }
+        for (const auto& c : f->extra_containers) { infer(c.get()); }
+        ++parallel_body_depth_;
+        walk_stmt(f->body.get());
+        --parallel_body_depth_;
+        scopes_.pop_back();
+    }
+
+    JAI_NOINLINE void walk_try(try_stmt* t) {
+        walk_stmt(t->try_block.get());
+        scopes_.emplace_back();
+        if (!t->catch_var.empty()) {
+            var_entry entry;
+            entry.dynamic = true;
+            warn_shadow("catch variable", t->catch_var, t->location);
+            scopes_.back().emplace(std::string_view(t->catch_var), std::move(entry));
+        }
+        walk_stmt(t->catch_block.get());
+        scopes_.pop_back();
+    }
+
+    JAI_NOINLINE void walk_switch(switch_stmt* sw) {
+        const ctype condition = infer(sw->condition.get());
+        for (auto& cs : sw->cases) {
+            const ctype value = infer(cs->value.get());
+            stamp(cs->static_operand_class, operand_class_of(condition, value), operand_class_unknown);
+            scopes_.emplace_back();
+            for (auto& st : cs->body) { walk_stmt(st.get()); }
+            scopes_.pop_back();
+        }
+        if (sw->default_case) {
+            scopes_.emplace_back();
+            for (auto& st : sw->default_case->body) { walk_stmt(st.get()); }
+            scopes_.pop_back();
+        }
+    }
+
+    JAI_NOINLINE void check_return(return_stmt* r) {
         uint8_t proof = proof_none;
         check_return_impl(r, proof);
         check_const_return(r);
@@ -5338,8 +5378,12 @@ private:
         if (proof != proof_none && stamping()) { ++counts_.returns; }
     }
 
-    void check_return_impl(return_stmt* r, uint8_t& proof) {
-        ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
+    JAI_NOINLINE void check_return_impl(return_stmt* r, uint8_t& proof) {
+        const ctype value = r->value ? infer(r->value.get()) : ctype::make(ctype::null_k);
+        check_return_value(r, value, proof);
+    }
+
+    JAI_NOINLINE void check_return_value(return_stmt* r, ctype value, uint8_t& proof) {
         if (r->binds_reference) { report_mixed_reference_conditional(r->value.get()); }
         if (fn_stack_.empty()) { return; }
         const fn_ctx& fn = fn_stack_.back();
@@ -5392,7 +5436,50 @@ private:
 
     // -------------------------------------------------------------- declarations
 
-    void walk_decl(declaration* d) {
+    JAI_NOINLINE void walk_function_declaration(function_decl* fn) {
+        if (scopes_.size() > 1) {
+            warn_spliced_function(fn);
+            // nested function: visible from here on (top-level ones were pre-collected)
+            var_entry entry;
+            entry.type = ctype::make(ctype::function_k);
+            entry.dynamic = true;
+            scopes_.back().emplace(fn->name, std::move(entry));
+        }
+        walk_function(fn);
+    }
+
+    JAI_NOINLINE void walk_destructuring(destructuring_decl* dd) {
+        infer(dd->initializer.get());
+        for (const auto& [name, _] : dd->names) {
+            var_entry entry;
+            entry.dynamic = true;
+            entry.is_const = dd->is_const;
+            entry.line = dd->location.line; entry.column = dd->location.column;
+            warn_shadow("local", name, dd->location);
+            declare_local(name, std::move(entry), dd->location);
+        }
+    }
+
+    JAI_NOINLINE void walk_extern(extern_decl* x) {
+        var_entry entry;
+        entry.line = x->location.line;
+        entry.column = x->location.column;
+        entry.is_const = x->is_const;
+        if (x->is_function) {
+            entry.type = ctype::make(ctype::function_k);
+            entry.dynamic = true;
+        } else if (x->type) {
+            entry.declared = x->type.get();
+            entry.display = x->type->canonical_name();
+            entry.type = ctype_from_type_info(x->type.get());
+            entry.dynamic = entry.type.is_unknown();
+        } else {
+            entry.dynamic = true;
+        }
+        scopes_.back().emplace(x->name, std::move(entry));
+    }
+
+    JAI_NOINLINE void walk_decl(declaration* d) {
         if (!d) { return; }
         stack_.guard(d->location);
         mode_guard region(mode_stack_, d->check_mode_attr, /*scoped=*/false);
@@ -5400,19 +5487,9 @@ private:
             case node_type::variable_decl:
                 walk_variable_decl(static_cast<variable_decl*>(d));
                 break;
-            case node_type::function_decl: {
-                auto* fn = static_cast<function_decl*>(d);
-                if (scopes_.size() > 1) {
-                    warn_spliced_function(fn);
-                    // nested function: visible from here on (top-level ones were pre-collected)
-                    var_entry entry;
-                    entry.type = ctype::make(ctype::function_k);
-                    entry.dynamic = true;
-                    scopes_.back().emplace(fn->name, std::move(entry));
-                }
-                walk_function(fn);
+            case node_type::function_decl:
+                walk_function_declaration(static_cast<function_decl*>(d));
                 break;
-            }
             case node_type::class_decl: {
                 auto* cd = static_cast<class_decl*>(d);
                 if (!classes_.count(cd->name)) { collect_class(cd); }
@@ -5434,39 +5511,12 @@ private:
             case node_type::statement_decl:
                 walk_stmt(static_cast<statement_decl*>(d)->statement.get());
                 break;
-            case node_type::destructuring_decl: {
-                auto* dd = static_cast<destructuring_decl*>(d);
-                infer(dd->initializer.get());
-                for (const auto& [name, _] : dd->names) {
-                    var_entry entry;
-                    entry.dynamic = true;
-                    entry.is_const = dd->is_const;
-                    entry.line = dd->location.line; entry.column = dd->location.column;
-                    warn_shadow("local", name, dd->location);
-                    declare_local(name, std::move(entry), dd->location);
-                }
+            case node_type::destructuring_decl:
+                walk_destructuring(static_cast<destructuring_decl*>(d));
                 break;
-            }
-            case node_type::extern_decl: {
-                auto* x = static_cast<extern_decl*>(d);
-                var_entry entry;
-                entry.line = x->location.line;
-                entry.column = x->location.column;
-                entry.is_const = x->is_const;
-                if (x->is_function) {
-                    entry.type = ctype::make(ctype::function_k);
-                    entry.dynamic = true;
-                } else if (x->type) {
-                    entry.declared = x->type.get();
-                    entry.display = x->type->canonical_name();
-                    entry.type = ctype_from_type_info(x->type.get());
-                    entry.dynamic = entry.type.is_unknown();
-                } else {
-                    entry.dynamic = true;
-                }
-                scopes_.back().emplace(x->name, std::move(entry));
+            case node_type::extern_decl:
+                walk_extern(static_cast<extern_decl*>(d));
                 break;
-            }
             case node_type::include_decl:
             case node_type::import_decl: {
                 // path expressions still get identifier checks
@@ -5479,21 +5529,23 @@ private:
                 }
                 break;
             }
-            case node_type::enum_decl: {
-                auto* e = static_cast<enum_decl*>(d);
-                if (scopes_.size() > 1 && (namespace_scopes_.empty() || namespace_scopes_.back() != scopes_.size() - 1)) {
-                    warn_scoped_enum(e);
-                    var_entry entry;
-                    entry.type = ctype{ctype::enum_ref_k, e->name};
-                    entry.enum_def = e;
-                    entry.line = e->location.line;
-                    entry.column = e->location.column;
-                    scopes_.back().insert_or_assign(e->name, std::move(entry));
-                }
+            case node_type::enum_decl:
+                walk_enum(static_cast<enum_decl*>(d));
                 break;
-            }
             default:
                 break;
+        }
+    }
+
+    JAI_NOINLINE void walk_enum(enum_decl* e) {
+        if (scopes_.size() > 1 && (namespace_scopes_.empty() || namespace_scopes_.back() != scopes_.size() - 1)) {
+            warn_scoped_enum(e);
+            var_entry entry;
+            entry.type = ctype{ctype::enum_ref_k, e->name};
+            entry.enum_def = e;
+            entry.line = e->location.line;
+            entry.column = e->location.column;
+            scopes_.back().insert_or_assign(e->name, std::move(entry));
         }
     }
 
@@ -5544,15 +5596,18 @@ private:
         return false;
     }
 
-    void walk_variable_decl(variable_decl* decl) {
+    JAI_NOINLINE void walk_variable_decl(variable_decl* decl) {
         if (!decl->type && !decl->function_spelling) { decl->auto_spelled = true; }
         check_inline_redefinition(decl);
-        ctype init{};
+        const ctype init = decl->initializer ? infer(decl->initializer.get()) : ctype{};
+        declare_variable(decl, init);
+    }
+
+    JAI_NOINLINE void declare_variable(variable_decl* decl, ctype init) {
         bool has_init = decl->initializer != nullptr;
         bool is_reference_decl = decl->type && decl->type->base_type == script_value_type::jai_reference_type;
         bool is_handle_decl = handle_type(decl->type.get());
         if (has_init) {
-            init = infer(decl->initializer.get());
             if (is_reference_decl && !decl->is_const) { report_mixed_reference_conditional(decl->initializer.get()); }
             if (init.const_key && (is_reference_decl || is_handle_decl)) {
                 map_key_alias(decl->location, decl->initializer.get());
@@ -5670,7 +5725,7 @@ private:
         declare_local(decl->name, std::move(entry), decl->location);
     }
 
-    void walk_function(const function_decl* fn) {
+    JAI_NOINLINE void walk_function(const function_decl* fn) {
         // Named functions capture nothing: lambda capture contexts must not leak in.
         std::vector<capture_ctx> saved_captures;
         saved_captures.swap(capture_stack_);
@@ -5888,7 +5943,20 @@ private:
         return false;
     }
 
-    void walk_lambda(lambda_expr* l) {
+    JAI_NOINLINE void walk_lambda(lambda_expr* l) {
+        check_lambda_captures(l);
+        capture_stack_.push_back(capture_ctx{scopes_.size(), l});
+        // the body may run after the constructor or destructor that creates the lambda has returned
+        const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, cdtor_ctx::none);
+        struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
+        open_lambda_scope(l);
+        mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
+        define_lambda_names(l);
+        walk_stmt(l->body.get());
+        close_lambda_scope(l);
+    }
+
+    JAI_NOINLINE void check_lambda_captures(lambda_expr* l) {
         for (const auto& cap : l->captures) {
             if (cap.initializer) { infer(cap.initializer.get()); continue; }   // an init-capture: its expression, in the enclosing scope
             if (cap.name == "this") { continue; }   // capture-list entries are not identifier uses
@@ -5903,11 +5971,9 @@ private:
             if (extra_global(name) || engine_knows_name(name)) { continue; }
             undeclared(l->location, cap.name);
         }
-        capture_stack_.push_back(capture_ctx{scopes_.size(), l});
-        // the body may run after the constructor or destructor that creates the lambda has returned
-        const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, cdtor_ctx::none);
-        struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
+    }
 
+    JAI_NOINLINE void open_lambda_scope(lambda_expr* l) {
         scopes_.emplace_back();
         fn_ctx ctx{l->return_type.get(), /*is_coroutine=*/false, "lambda",
                    l->location.line, l->location.column};
@@ -5917,7 +5983,9 @@ private:
             if (cap.name == "this") { ctx.sees_fields = class_ctx_ != nullptr; break; }
         }
         fn_stack_.push_back(std::move(ctx));
-        mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
+    }
+
+    JAI_NOINLINE void define_lambda_names(lambda_expr* l) {
         define_params(l->parameters, l->location);
         for (const auto& cap : l->captures) {
             if (!cap.initializer) {   // a named capture is the lambda's own copy of the variable, typed as it
@@ -5929,7 +5997,9 @@ private:
             entry.line = l->location.line; entry.column = l->location.column;
             scopes_.back().emplace(cap.name, std::move(entry));
         }
-        walk_stmt(l->body.get());
+    }
+
+    JAI_NOINLINE void close_lambda_scope(lambda_expr* l) {
         check_falls_off_end(l->return_type.get(), l->body.get(), l->location, "lambda");
         {
             const fn_ctx& done = fn_stack_.back();

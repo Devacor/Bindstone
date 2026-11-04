@@ -69,8 +69,7 @@ std::uintptr_t lowest_of(std::uintptr_t high, std::uintptr_t size) noexcept {
 // Per-thread OS query, no static state: the lowest usable address of the stack the caller runs on (0: unknown). An engine::start run
 // runs on its fiber's own stack; Windows keeps the thread's stack fields on it while it runs, elsewhere the fiber says.
 std::uintptr_t native_stack_floor() noexcept {
-    char probe;
-    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
+    const std::uintptr_t here = native_stack_here();
 #if defined(_WIN32)
     ULONG_PTR low = 0, high = 0;
     GetCurrentThreadStackLimits(&low, &high);
@@ -110,8 +109,7 @@ std::uintptr_t native_stack_floor() noexcept {
 // the bytes below this frame, SIZE_MAX where the stack cannot be asked
 std::uintptr_t native_stack_left() noexcept {
     const std::uintptr_t floor = native_stack_floor();
-    char probe;
-    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
+    const std::uintptr_t here = native_stack_here();
     return floor == 0 ? SIZE_MAX : here > floor ? here - floor : 0;
 }
 }
@@ -131,8 +129,7 @@ void native_stack_mark::arm() noexcept {
     limit_ = 0;   // low() asks the thread's bounds at each check, whatever thread runs the walk
 #else
     const std::uintptr_t floor = native_stack_floor();
-    char probe;
-    const auto here = reinterpret_cast<std::uintptr_t>(&probe);
+    const std::uintptr_t here = native_stack_here();
     if (floor != 0) {
         limit_ = floor + k_native_nesting_margin;
     } else {

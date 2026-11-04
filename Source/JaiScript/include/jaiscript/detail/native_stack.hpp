@@ -22,6 +22,17 @@ namespace jai::detail {
 	// [low, high) of the engine::start fiber running on this thread, false when none runs (script_run.cpp)
 	bool running_fiber_stack(std::uintptr_t& a_low, std::uintptr_t& a_high) noexcept;
 
+	// Where the caller's frame sits on the stack it runs on: not a local's address, which ASan's use-after-return detection
+	// moves to a heap-allocated fake frame
+	inline std::uintptr_t native_stack_here() noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+		return reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0));
+#else
+		char probe;
+		return reinterpret_cast<std::uintptr_t>(&probe);
+#endif
+	}
+
 	inline constexpr std::string_view k_nesting_too_deep_listing = "nesting too deep for the host thread's stack";
 	inline constexpr std::string_view k_nesting_too_deep = "Nesting too deep for the host thread's stack";
 
@@ -44,8 +55,7 @@ namespace jai::detail {
 #if defined(_WIN32)
 			return native_stack_nesting_low();
 #else
-			char probe;
-			return reinterpret_cast<std::uintptr_t>(&probe) < limit_;
+			return native_stack_here() < limit_;
 #endif
 		}
 		void guard(const source_location& at) const {

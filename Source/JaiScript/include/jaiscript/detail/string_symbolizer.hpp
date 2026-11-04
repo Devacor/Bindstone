@@ -14,6 +14,7 @@
 #include <jaiscript/detail/copy_census.hpp>
 #include <limits>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace jai {
@@ -115,6 +116,15 @@ namespace jai {
 			slot.text.assign(text.data(), text.size());
 			return k_parked_bit | seq;
 		}
+		// A text whose views must outlive what made it (a compiled chunk's error text: the error travels past the chunk), kept
+		// once per distinct text for the engine's life and never in the id table. Written only by compiles, which a parallel
+		// region serializes on the engine's compile mutex
+		[[nodiscard]] std::string_view keep_text(std::string_view text) const {
+			auto found = kept_texts_.find(text);
+			if (found == kept_texts_.end()) { found = kept_texts_.emplace(text).first; }
+			return *found;
+		}
+
 		// The interned table's size (parked texts never count)
 		[[nodiscard]] std::size_t size() const noexcept { return ids_.size(); }
 
@@ -213,6 +223,7 @@ namespace jai {
 		// Mutable to allow const intern() - interning doesn't change observable state
 		// Owning storage with stable addresses (push_back/push_front do not invalidate references)
 		mutable std::deque<std::string> storage_;
+		mutable std::set<std::string, std::less<>> kept_texts_;
 
 		// Map from string_view (into storage_) to ID (no second copy)
 		mutable std::unordered_map<std::string_view, id_type, sv_hash, sv_equal> index_;

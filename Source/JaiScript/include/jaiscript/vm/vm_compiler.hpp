@@ -337,7 +337,7 @@ namespace jai::vm {
         void patch_jump(size_t at, size_t target);
         uint32_t add_constant(const script_value& v);
         uint32_t add_symbol(uint64_t id);
-        uint32_t add_message(std::string msg);
+        uint32_t add_message(std::string_view msg);
         uint32_t add_node(std::shared_ptr<ast_node> node);
         void emit_const_guard(const std::shared_ptr<ast_node>& node);
         [[noreturn]] void unreachable_construct(const char* construct);

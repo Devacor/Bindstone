@@ -96,7 +96,7 @@ namespace {
 			out << pre << "symbols " << ch.symbols.size() << "\n";
 			for (size_t i = 0; i < ch.symbols.size(); ++i) { out << pre << " " << i << " " << id(ch.symbols[i]) << "\n"; }
 			out << pre << "messages " << ch.messages.size() << "\n";
-			for (size_t i = 0; i < ch.messages.size(); ++i) { out << pre << " " << i << " " << esc(ch.messages[i]) << "\n"; }
+			for (size_t i = 0; i < ch.messages.size(); ++i) { out << pre << " " << i << " " << esc(std::string(ch.messages[i])) << "\n"; }
 			out << pre << "nodes " << ch.nodes.size() << "\n";
 			for (size_t i = 0; i < ch.nodes.size(); ++i) { out << pre << " " << i << " " << node(ch.nodes[i].get()) << "\n"; }
 			out << pre << "call_arg_zones";

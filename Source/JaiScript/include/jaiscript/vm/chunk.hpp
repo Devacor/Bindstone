@@ -494,7 +494,7 @@ namespace jai::vm {
         std::vector<std::pair<uint32_t, uint32_t>> call_arg_zones;
         std::vector<uint32_t> reference_slots;   // slots declared as references (a by-reference parameter, a local bound to something other than a value this unit declares): their load dereferences, possibly through a getter
         std::vector<uint64_t> symbols;
-        std::deque<std::string> messages;                  // stable storage: checked_result keeps string_views
+        std::vector<std::string_view> messages;            // kept by the symbolizer: a checked_result raised from them outlives the chunk
         std::vector<std::shared_ptr<ast_node>> nodes;      // pins referenced AST nodes alive
         std::vector<std::pair<uint64_t, const expression*>> field_inits;   // a field-init store's field and initializer (pinned in nodes)
         // A constructor's prologue steps (vm_compiler::constructor_prologue): what each op_ctor_* constructs. The chunk is rebuilt

@@ -3124,11 +3124,12 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// older boundary gap on both backends: the native exception is not the script's to catch through an element read)
 			struct source_t { engine* eng = nullptr; int mode = 0; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int mode, const char* body) -> std::string {
+				source_t source{ nullptr, mode };   // declared first and disarmed before the engine dies: its teardown reads r once more
 				auto e = jai::foundry::make_default_engine();
+				source.eng = e.get();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e); register_host_math_fixture(*e);
-				source_t source{ e.get(), mode };
 				dynamic_binder<source_t>(*e, "Source").property("number", [](source_t& s) -> script_int {
 					if (!s.armed) { return 1; }
 					++s.calls;
@@ -3147,7 +3148,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				std::string out;
 				try { out = e->execute(body).to_string(); }
 				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
-				return out + "|calls=" + std::to_string(source.calls) + "|G=" + e->get_variable("G").to_string();
+				std::string result = out + "|calls=" + std::to_string(source.calls) + "|G=" + e->get_variable("G").to_string();
+				source.armed = false;
+				return result;
 			};
 			const char* sum_body = "int probe() { array<int> dst = []; int sum = 0; int i = 0; while (i < 4) { dst.push(SRC[0]); sum = sum + G; i++; } return sum; } probe();";
 			const char* rewrite_body = "string probe() { array<int> dst = []; int i = 0; while (i < 4) { dst.push(SRC[0]); i++; } return to_string(dst[0]) + \",\" + to_string(dst[1]) + \",\" + to_string(dst[2]) + \",\" + to_string(dst[3]); } probe();";

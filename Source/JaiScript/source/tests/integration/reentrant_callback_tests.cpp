@@ -591,11 +591,12 @@ public:
 			// (an acceptance case; the unfused call's argument zone does the same)
 			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
+				source_t source{ nullptr, throw_at };   // declared first and disarmed before the engine dies: its teardown reads r once more
 				auto e = jai::foundry::make_default_engine();
+				source.eng = e.get();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				if (!proofs) { e->type_proofs(false); }
 				stdlib::register_all(*e);
-				source_t source{ e.get(), throw_at };
 				dynamic_binder<source_t>(*e, "Source").property("number", [](source_t& s) -> script_int {
 					if (s.armed && ++s.calls == s.throw_at) { throw std::runtime_error("boom"); }
 					return 1;
@@ -610,7 +611,9 @@ public:
 				std::string out;
 				try { out = e->execute("string probe() { array<int> dst = []; int i = 0; try { while (i < 4) { dst.push(SRC[0]); i++; } } catch (err) { return \"caught:\" + err + \"|\" + to_string(i) + \"|\" + to_string(dst.size()); } return \"ok:\" + to_string(dst.size()); } probe();").to_string(); }
 				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
-				return out + "|calls=" + std::to_string(source.calls);
+				std::string result = out + "|calls=" + std::to_string(source.calls);
+				source.armed = false;
+				return result;
 			};
 			for (bool proofs : { true, false }) {
 				for (int at : { 3, 1 }) {

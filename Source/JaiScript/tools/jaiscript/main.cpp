@@ -99,7 +99,8 @@ struct console_state {
 		SetConsoleCtrlHandler(ctrl_handler, TRUE);
 		timeBeginPeriod(1);   // 1ms Sleep granularity for sleep-paced game loops
 #else
-		out_tty = in_tty = vt = true;
+		out_tty = vt = isatty(STDOUT_FILENO) != 0;
+		in_tty = isatty(STDIN_FILENO) != 0;
 #endif
 	}
 
@@ -1668,6 +1669,7 @@ int run_repl_mode(const options& opt, const console_state& con) {
 // --------------------------------------------------------------- selftest ---
 
 int run_selftest(const console_state& con) {
+	const console_state captured;   // the sessions below write into strings: no console, so no colors
 	int passed = 0, failed = 0;
 	auto expect = [&](bool ok, const char* name) {
 		if (ok) { ++passed; std::printf("  ok    %s\n", name); }
@@ -1787,7 +1789,7 @@ int run_selftest(const console_state& con) {
 			":quit\n");
 		repl_session session;
 		session.opt = opt;
-		session.con = &con;
+		session.con = &captured;
 		session.engine_out = &out;
 		expect(session.run(in, out, false) == 1, "repl: a piped session with an error exits 1");
 		std::string text = out.str();
@@ -1821,7 +1823,7 @@ int run_selftest(const console_state& con) {
 			":quit\n");
 		repl_session session;
 		session.opt = opt;
-		session.con = &con;
+		session.con = &captured;
 		session.engine_out = &out;
 		session.run(in, out, false);
 		const std::string text = out.str();
@@ -1835,7 +1837,7 @@ int run_selftest(const console_state& con) {
 		std::istringstream in("1 + 1\n:quit\n");
 		repl_session session;
 		session.opt = opt;
-		session.con = &con;
+		session.con = &captured;
 		session.engine_out = &out;
 		expect(session.run(in, out, true) == 0, "repl: an interactive session exits 0");
 		std::string text = out.str();

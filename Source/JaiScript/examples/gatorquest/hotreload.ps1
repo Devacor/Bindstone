@@ -11,7 +11,7 @@ New-Item -ItemType Directory -Force $scripts | Out-Null
 New-Item -ItemType Directory -Force (Join-Path $tmp "saves") | Out-Null
 Get-ChildItem (Join-Path $here "scripts") -Filter *.jai | Copy-Item -Destination $scripts
 Set-Content -Path (Join-Path $scripts "HOTRELOAD_SCRATCH") -Value "a scratch copy: the hot-reload test edits these files" -Encoding ASCII
-& $Exe --no-debug --no-pause "--backend=$Backend" (Join-Path $scripts "gatorquest.jai") -- hotreload
+& $Exe --no-pause "--backend=$Backend" (Join-Path $scripts "gatorquest.jai") -- hotreload
 $code = $LASTEXITCODE
 Remove-Item -Recurse -Force $tmp
 exit $code

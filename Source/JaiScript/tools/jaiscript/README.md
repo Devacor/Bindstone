@@ -55,7 +55,6 @@ A persistent engine: globals, functions and classes accumulate across lines.
 
 ```
 JaiScript 0.5.0-beta - vm backend, stdlib loaded, budget off. :help for commands.
-debugger: DAP listening on 127.0.0.1:52477 (VS Code: Attach to JaiScript)
 jai> int hp = 100
 jai> hp - 58
 42
@@ -135,9 +134,8 @@ a catchable error at the import, and the program keeps its old code
 --no-local-alias      copy every by-value local declaration (the read-only local elision off)
 --no-proofs           run without type proofs and the typed instructions they enable (the
                       general form)
---no-debug            don't stand up the DAP debug listener
---debug               name the listener's port on stderr (a file run is otherwise silent about it)
---debug-port=N        first port the listener tries (default 52477, probing +10)
+--debug               stand up the DAP debug listener and name its port on stderr
+--debug-port=N        --debug, with N the first port the listener tries (default 52477, probing +10)
 --pause / --no-pause  force / suppress the exit hold after a file run
 --selftest            built-in smoke tests (balancer, file mode, scripted REPL session)
 --version / --help
@@ -217,8 +215,10 @@ The strings after `--` are the global `ARGS`.
 
 ## Debugging
 
-A DAP listener is on by default (localhost only, costs nothing until a session attaches) in
+`--debug` stands up a DAP listener (localhost only, costs nothing until a session attaches) in
 file and REPL modes — you can attach VS Code to a *running REPL session* and set breakpoints
 in files you `:load`. Install `tools/vscode-jaiscript`, F5 → "Attach to JaiScript" with the
-port: 52477, or the next free one in steps of 10, which `--debug` (and the REPL's banner) names. Opt out
-with `--no-debug`.
+port: 52477, or the next free one in steps of 10, which the runner names (on stderr in a
+file run, in the REPL's banner): `debugger: DAP listening on 127.0.0.1:52477`. Without
+`--debug` or `--debug-port=N` nothing listens: the listener takes no password, so any local
+process could attach.

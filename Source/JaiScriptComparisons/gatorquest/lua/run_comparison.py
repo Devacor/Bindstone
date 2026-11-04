@@ -60,7 +60,7 @@ def main():
 	if (out / "runs.json").exists():
 		p.error("Use a fresh evidence directory.")
 	jai = pathlib.Path(a.jai).resolve()
-	configs = [{"key": "jai-vm", "runtime": "JaiScript VM", "cmd": [str(jai), "--no-debug", "--no-pause", "--backend=vm", "scripts/gatorquest.jai", "--", "smoke"], "extra": ["noroundtrip"]}]
+	configs = [{"key": "jai-vm", "runtime": "JaiScript VM", "cmd": [str(jai), "--no-pause", "--backend=vm", "scripts/gatorquest.jai", "--", "smoke"], "extra": ["noroundtrip"]}]
 	if a.lua54:
 		configs.append({"key": "lua-5.4.8", "runtime": "Lua 5.4.8", "cmd": [str(pathlib.Path(a.lua54).resolve()), str(HERE / "gatorquest.lua"), "smoke"], "extra": []})
 	if a.lua55:
@@ -74,7 +74,7 @@ def main():
 		configs.append({"key": "luau-O1", "runtime": "Luau interpreter (-O1)", "cmd": [u, bundle, "-a", "smoke"], "extra": []})
 		configs.append({"key": "luau-O2", "runtime": "Luau interpreter (-O2)", "cmd": [u, "-O2", bundle, "-a", "smoke"], "extra": []})
 		configs.append({"key": "luau-codegen", "runtime": "Luau native (-O2 --codegen)", "cmd": [u, "-O2", "--codegen", bundle, "-a", "smoke"], "extra": []})
-	interp = {"key": "jai-interp", "runtime": "JaiScript interpreter (reference)", "cmd": [str(jai), "--no-debug", "--no-pause", "--backend=interp", "scripts/gatorquest.jai", "--", "smoke"], "extra": ["noroundtrip"]}
+	interp = {"key": "jai-interp", "runtime": "JaiScript interpreter (reference)", "cmd": [str(jai), "--no-pause", "--backend=interp", "scripts/gatorquest.jai", "--", "smoke"], "extra": ["noroundtrip"]}
 	machine = COMMON.WindowsMachine()
 	binaries = {c["cmd"][0]: COMMON.file_hash(pathlib.Path(c["cmd"][0])) for c in configs}
 	inputs = {str(f): COMMON.file_hash(f) for f in list(GAME.glob("scripts/*.jai")) + list(HERE.glob("*.lua")) + list(HERE.glob("luajit/*.lua")) + list(HERE.glob("luau/*.lua*"))}

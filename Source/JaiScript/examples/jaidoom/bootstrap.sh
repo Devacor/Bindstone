@@ -6,7 +6,7 @@
 cd "$(dirname "$0")/scripts" || exit 1
 for cand in "${JAI_RUNNER:-}" ../jaiscript ../jaiscript.exe "$(command -v jaiscript 2>/dev/null)" \
             ../../../build/bin/jaiscript.exe ../../../build/bin/jaiscript; do
-	if [ -n "$cand" ] && [ -x "$cand" ]; then exec "$cand" --no-debug --no-pause jaidoom.jai -- bootstrap "$@"; fi
+	if [ -n "$cand" ] && [ -x "$cand" ]; then exec "$cand" --no-pause jaidoom.jai -- bootstrap "$@"; fi
 done
 echo "jaiscript runner not found: set JAI_RUNNER, put jaiscript next to this script, or build it (docs/BUILD.md)" >&2
 exit 1

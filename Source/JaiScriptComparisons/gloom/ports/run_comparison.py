@@ -445,7 +445,7 @@ def main():
 				"--game-root",str(jai_workload_root/"examples/jaidoom"),"--repeat","0" if cold else "1","--",
 				str(jai_workload_root/"examples/jaidoom/demo.json"),"120x78"]
 		else:
-			command=[str(exe),"--no-debug","--no-pause","--backend="+config["backend"]]
+			command=[str(exe),"--no-pause","--backend="+config["backend"]]
 			if not cold:command+=["--benchmark-main=1"]
 			command += [str(jai_workload_root/"examples/jaidoom/scripts/p10_timedemo.jai"),"--",
 				str(jai_workload_root/"examples/jaidoom/demo.json"),"120x78"]

@@ -129,12 +129,11 @@ struct options {
 	bool watch = false;
 	bool warnings = false;                 // --warnings: list a clean load's warnings on stderr before it runs
 	bool time_runs = false;
-	bool debug = true;                     // DAP listener on by default (localhost, free until attach)
-	bool announce_debug = false;           // --debug: a file run names the listener's port on stderr
+	bool debug = false;                    // --debug: the DAP listener takes no password, so it is opt-in
 	bool param_alias = true;               // engine::parameter_alias (--no-param-alias: every by-value parameter clones)
 	bool local_alias = true;               // engine::local_alias (--no-local-alias: every by-value local declaration clones)
 	bool type_proofs = true;               // engine::type_proofs (--no-proofs: no proofs, typed ops or cell blocks; the general form)
-	int debug_port = 0;                    // 0 = default base (see attach_debugger)
+	int debug_port = 0;                    // --debug-port=N, which implies --debug; 0 = default base (see attach_debugger)
 	int pause_mode = -1;                   // -1 auto (solo console), 0 never, 1 always
 	bool selftest = false;
 	std::string disasm;                    // --disasm=<file>: every chunk the VM compiles, disassembled with its regions' IR, in compile order
@@ -227,14 +226,13 @@ void print_usage() {
 		"  --warnings            list the static checker's warnings on stderr before a script runs (errors\n"
 		"                        always fail the load and print)\n"
 		"  --benchmark-main=N    execute file as warm-up, then call its repeatable main() N times\n"
-		"  --no-debug            do not stand up the DAP debug listener (it listens on 127.0.0.1 with no\n"
-		"                        password: any local process can attach, pause the script and read its\n"
-		"                        variables)\n"
-		"  --debug               name the DAP listener's port on stderr (a file run is otherwise silent about it)\n"
+		"  --debug               stand up the DAP debug listener and name its port on stderr (it listens on\n"
+		"                        127.0.0.1 with no password: any local process can attach, pause the script\n"
+		"                        and read its variables)\n"
 		"  --no-param-alias      bind every by-value parameter with a clone (the read-only elision off)\n"
 		"  --no-local-alias      copy every by-value local declaration (the read-only local elision off)\n"
 		"  --no-proofs           run without type proofs and the typed instructions they enable (the general form)\n"
-		"  --debug-port=N        first port the DAP listener tries (default 52477, probing +10)\n"
+		"  --debug-port=N        --debug, with N the first port the listener tries (default 52477, probing +10)\n"
 		"  --pause / --no-pause  force / suppress the \"press Enter to close\" hold after a file\n"
 		"                        run (auto: pauses only when the console window is exclusively\n"
 		"                        ours, i.e. drag-drop or double-click launch)\n"
@@ -277,10 +275,10 @@ void print_usage() {
 		"  Args after `--` are the global ARGS (array of strings). include/import resolve\n"
 		"  relative to the script's folder.\n"
 		"\n"
-		"debugging: a DAP listener is on by default (localhost only, costs nothing until a session\n"
-		"  attaches). Attach from VS Code with the jaiscript extension (\"Attach to JaiScript\") on\n"
-		"  the logged port. Works in file and REPL modes; --watch uses a fresh engine per run, so\n"
-		"  the listener is off there.\n");
+		"debugging: --debug stands up a DAP listener (localhost only, costs nothing until a session\n"
+		"  attaches); nothing listens without it. Attach from VS Code with the jaiscript extension\n"
+		"  (\"Attach to JaiScript\") on the logged port. Works in file and REPL modes; --watch uses a\n"
+		"  fresh engine per run, so the listener is off there.\n");
 }
 
 // A number flag's value, whole and inside [low, high]; nullopt for anything else (the caller reports a usage error)
@@ -343,8 +341,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 		else if (a == "--watch") { opt.watch = true; }
 		else if (a == "--time") { opt.time_runs = true; }
 		else if (a == "--warnings") { opt.warnings = true; }
-		else if (a == "--no-debug") { opt.debug = false; }
-		else if (a == "--debug") { opt.debug = true; opt.announce_debug = true; }
+		else if (a == "--debug") { opt.debug = true; }
 		else if (a == "--no-param-alias") { opt.param_alias = false; }
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--no-proofs") { opt.type_proofs = false; }
@@ -375,6 +372,7 @@ int parse_args(int argc, char** argv, options& opt, const console_state& con) {
 			auto n = number_of("--debug-port", 1, 65535, "a port from 1 to 65535");
 			if (!n) { return 2; }
 			opt.debug_port = *n;
+			opt.debug = true;
 		}
 		else if (is_flag("--backend")) { if (!text_of("--backend", opt.backend)) { return 2; } }
 		else if (is_flag("--disasm")) { if (!text_of("--disasm", opt.disasm)) { return 2; } }
@@ -1159,7 +1157,6 @@ int wire_debugger(const options& opt, jai::engine& eng, const console_state& con
 	if (!opt.debug) { return 0; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 	int port = attach_debugger(eng, opt.debug_port);
-	if (!opt.announce_debug) { return port; }
 	if (port != 0) {
 		out << con.dim("debugger: DAP listening on 127.0.0.1:" + std::to_string(port)
 			+ " (VS Code: Attach to JaiScript)") << "\n";
@@ -1704,7 +1701,6 @@ int run_selftest(const console_state& con) {
 	std::error_code ec;
 	fs::create_directories(dir, ec);
 	options opt;
-	opt.debug = false;
 
 	{ // file mode: result int -> exit code, script dir import resolution
 		fs::path lib = dir / "answer lib.jai";
@@ -1735,7 +1731,7 @@ int run_selftest(const console_state& con) {
 		int parse_exit = parse_args(static_cast<int>(std::size(argv)), const_cast<char**>(argv), parsed, con);
 		expect(parse_exit == -1 && parsed.sources.size() == 2 && parsed.script.empty(), "-e: each flag adds a source, no script file");
 		expect(parsed.backend == "interp" && parsed.workers == 2, "-e: combines with --backend and --workers");
-		parsed.debug = false;
+		expect(!parsed.debug, "debug: nothing listens unless asked");
 		auto eng = make_runner_engine(parsed, nullptr);
 		std::ostringstream captured;
 		eng->set_output_stream(std::shared_ptr<std::ostream>(&captured, [](std::ostream*) {}));
@@ -1748,11 +1744,14 @@ int run_selftest(const console_state& con) {
 	}
 
 	{ // a value flag is the flag alone or flag=value, a malformed number is a usage error, and an int result keeps its low byte
+		options parsed;
 		auto parse = [&](std::vector<const char*> args) {
 			args.insert(args.begin(), "jaiscript");
-			options parsed;
+			parsed = options{};
 			return parse_args(static_cast<int>(args.size()), const_cast<char**>(args.data()), parsed, con);
 		};
+		expect(parse({"--debug", "a.jai"}) == -1 && parsed.debug && parsed.debug_port == 0, "debug: --debug stands up the listener");
+		expect(parse({"--debug-port=52490", "a.jai"}) == -1 && parsed.debug && parsed.debug_port == 52490, "debug: --debug-port=N implies --debug");
 		expect(parse({"--disasmfoo", "a.jai"}) == 2 && parse({"--backendvm"}) == 2, "flags: a misspelled value flag is unknown, never a prefix");
 		expect(parse({"--workers=abc"}) == 2 && parse({"--workers=-1"}) == 2 && parse({"--debug-port=70000"}) == 2 &&
 			parse({"--budget=nan"}) == 2 && parse({"--benchmark-main=1x"}) == 2 && parse({"--workers"}) == 2, "flags: a malformed or missing number exits 2");
@@ -2064,9 +2063,7 @@ int run_selftest(const console_state& con) {
 #ifdef JAISCRIPT_RUNNER_HOST_ONLY
 // The language server (tools/lsp) checks scripts against the runner's exact host surface.
 std::shared_ptr<jai::engine> jaiscript_runner_host_engine() {
-	options opt;
-	opt.debug = false;
-	return make_runner_engine(opt, nullptr);
+	return make_runner_engine(options{}, nullptr);
 }
 #else
 int main(int argc, char** argv) {

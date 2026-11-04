@@ -53,8 +53,9 @@ checkout's `build/bin/` and `build-debug/bin/` (the CMake presets), the Visual S
 
 ## Attach debugging
 
-The standalone runner listens by default: `jaiscript game.jai` logs
-`debugger: DAP listening on 127.0.0.1:52477`. A host of your own listens with
+Run the standalone runner with `--debug`: `jaiscript --debug game.jai` logs
+`debugger: DAP listening on 127.0.0.1:52477`; without `--debug` it opens no socket. A host of
+your own listens with
 
 ```cpp
 auto conn = jai::debug::listen(*eng);   // port jai::debug::default_port, 52472

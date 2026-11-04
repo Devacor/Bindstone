@@ -1660,21 +1660,30 @@ public:
 				for (var i = 0; i < 64; i++) { a.push(i); }
 				return parallel_transform(a, f, w);
 			)";
+			// adaptive fan-out is a performance hint the measured cost drives: without it the worker count is the engine's, and the
+			// hint's bounds are the cumulative-weight split of the weights alone
+			const auto without_measured_cost = [&] {
+				auto& state = e->parallel_state();
+				state.worker_overhead_ns = 0.0;
+				for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
+			};
+			without_measured_cost();
 			auto flat = e->execute(flat_src);
-			auto flat_bounds = e->last_parallel_chunk_bounds();   // what each thread took: follows timing
+			auto flat_bounds = e->last_parallel_chunk_bounds();   // what each thread took: follows timing, so only its shape is asserted
+			without_measured_cost();
 			auto weighted = e->execute(weighted_src);
 			auto weighted_bounds = e->last_parallel_chunk_bounds();
-			check_true(arrays_equal(flat, weighted));       // observable output identical
+			check_true(arrays_equal(flat, weighted), "observable output identical");
 			check_eq((size_t)5, flat_bounds.size());
+			check_eq((size_t)0, flat_bounds.front());
 			check_eq((size_t)64, flat_bounds.back());
-			check_eq((size_t)5, weighted_bounds.size());
-			check_eq((size_t)64, weighted_bounds.back());
-			// Cumulative-weight split: the first boundary lands inside the heavy prefix, left of an even split's n / W
-			check_lt(weighted_bounds[1], (size_t)16);
-			check_true(weighted_bounds[1] <= 8);
-			// the hint fixes the chunks: the same region chooses the same bounds again
+			check_true(std::is_sorted(flat_bounds.begin(), flat_bounds.end()), "each thread's count is non-negative");
+			// weights 1000 x 8 then 1 x 56 (total 8056): each boundary is the first element whose prefix reaches k / 4 of the total,
+			// all inside the heavy prefix where an even split would put the first at 16
+			check_true(weighted_bounds == std::vector<size_t>{0, 3, 5, 7, 64}, "the weighted split is the weights' cumulative split");
+			without_measured_cost();
 			e->execute(weighted_src);
-			check_true(weighted_bounds == e->last_parallel_chunk_bounds());
+			check_true(weighted_bounds == e->last_parallel_chunk_bounds(), "the same region chooses the same bounds again");
 		});
 
 		// A worker remembers which function each of its call sites validated (vm_backend::worker_callee_memo_): rows hold raw node

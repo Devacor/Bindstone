@@ -430,7 +430,7 @@ namespace jai {
             template <bool> friend class basic_iterator;
             using map_ptr = std::conditional_t<Const, const script_map*, script_map*>;
             map_ptr m_ = nullptr;
-            mutable value_type* node_ = nullptr;   // null = end
+            mutable script_map::value_type* node_ = nullptr;   // null = end
             mutable size_t index_ = npos;          // the node's place in the order view it was read from (npos: a find() result)
             mutable uint64_t gen_ = 0;             // the map generation that view belongs to
             mutable std::optional<script_value> key_;   // an iteration iterator's key (the resync point after a change)
@@ -444,7 +444,7 @@ namespace jai {
                 }
             }
 
-            basic_iterator(map_ptr m, value_type* n, size_t i, uint64_t g, bool keep_key) : m_(m), node_(n), index_(i), gen_(g) {
+            basic_iterator(map_ptr m, script_map::value_type* n, size_t i, uint64_t g, bool keep_key) : m_(m), node_(n), index_(i), gen_(g) {
                 if (keep_key && n) key_.emplace(n->first);
             }
             void seat(size_t i) const {

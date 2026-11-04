@@ -2,12 +2,7 @@
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
 
-#if defined(_WIN32)
-#ifndef NOMINMAX
-#define NOMINMAX
-#endif
-#include <windows.h>
-#endif
+#include "foundry/small_stack.hpp"
 
 namespace jai::foundry::tests {
 
@@ -44,71 +39,50 @@ public:
 	};
 
 	void forge_tests() override {
+		// past the depth a level count once stopped at: the walks measure the stack, and 16 MB holds the tree on every build
 		test("valid_deep_tree_keeps_its_bytes_on_large_stack", [this]() {
-			auto eng = make_engine();
-			nested_tree tree(800);
-			// stamped checked-clean: the load is the structural reader and the proof pass, and the bite saves back the same stamp
-			const auto bytes = detail::serialize_jaibite(tree.declarations,
-				*detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint(), detail::jaibite_checked_clean_flags());
-			{
-				auto loaded = eng->jaibite_load_bytes(bytes);
-				check_eq(bytes, loaded.save_bytes());
-			}
-			check_eq(script_int(42), eng->execute("40 + 2;").as_int());
+			on_small_stack([this]() {
+				auto eng = make_engine();
+				nested_tree tree(1500);
+				// stamped checked-clean: the load is the structural reader and the proof pass, and the bite saves back the same stamp
+				const auto bytes = detail::serialize_jaibite(tree.declarations,
+					*detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint(), detail::jaibite_checked_clean_flags());
+				{
+					auto loaded = eng->jaibite_load_bytes(bytes);
+					check_eq(bytes, loaded.save_bytes());
+				}
+				check_eq(script_int(42), eng->execute("40 + 2;").as_int());
+			}, size_t(16) << 20);
 		});
 
-#if defined(_WIN32)
 		test("reader_and_writer_recover_on_one_megabyte_stack", [this]() {
-			auto author = make_engine();
-			for (size_t depth : {size_t(250), size_t(800)}) {
+			for (size_t depth : {size_t(250), size_t(800), size_t(100000)}) {
 				nested_tree tree(depth);
-				const auto bytes = detail::serialize_jaibite(tree.declarations,
-					*detail::engine_access::get_symbolizer(*author), author->registration_fingerprint(), detail::jaibite_checked_clean_flags());
-				struct probe_state {
-					backend_type backend;
-					engine& author;
-					const nested_tree& tree;
-					const std::vector<uint8_t>& bytes;
-					std::string failure;
-					bool completed = false;
-				} state{author->get_backend_type(), *author, tree, bytes};
-				auto probe = [](void* raw) -> DWORD {
-					auto& state = *static_cast<probe_state*>(raw);
+				on_small_stack([&]() {
+					const std::string nesting = "jaibite: AST nesting too deep";
+					auto eng = make_engine();
+					bool saved = false;
+					std::vector<uint8_t> bytes;
 					try {
-						auto eng = jai::foundry::make_default_engine();
-						eng->set_backend(state.backend);
-						try {
-							auto loaded = eng->jaibite_load_bytes(state.bytes);
-							check_eq(state.bytes, loaded.save_bytes());
-						} catch (const jai::runtime_error& error) {
-							check_eq(std::string("jaibite: AST nesting too deep"), std::string(error.what()));
-						}
-						check_eq(script_int(42), eng->execute("40 + 2;").as_int());
-						try {
-							check_eq(state.bytes, detail::serialize_jaibite(state.tree.declarations,
-								*detail::engine_access::get_symbolizer(state.author), state.author.registration_fingerprint(), detail::jaibite_checked_clean_flags()));
-						} catch (const jai::runtime_error& error) {
-							check_eq(std::string("jaibite: AST nesting too deep"), std::string(error.what()));
-						}
-						check_eq(script_int(42), eng->execute("40 + 2;").as_int());
-						state.completed = true;
-					} catch (const std::exception& error) {
-						state.failure = error.what();
-					} catch (...) {
-						state.failure = "non-standard exception in small-stack probe";
+						bytes = detail::serialize_jaibite(tree.declarations, *detail::engine_access::get_symbolizer(*eng),
+							eng->registration_fingerprint(), detail::jaibite_checked_clean_flags());
+						saved = true;
+					} catch (const jai::runtime_error& error) {
+						check_eq(nesting, std::string(error.what()));
 					}
-					return 0;
-				};
-				HANDLE thread = CreateThread(nullptr, 1024 * 1024, probe, &state,
-					STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
-				check_true(thread != nullptr, "could not create small-stack probe thread");
-				const DWORD wait = WaitForSingleObject(thread, INFINITE);
-				CloseHandle(thread);
-				check_eq(DWORD(WAIT_OBJECT_0), wait);
-				check_true(state.completed, state.failure);
+					check_true(!saved || depth <= 800, "100,000 levels pass a 1 MB stack");
+					if (saved) {
+						try {
+							auto loaded = eng->jaibite_load_bytes(bytes);
+							check_eq(bytes, loaded.save_bytes());
+						} catch (const jai::runtime_error& error) {
+							check_eq(nesting, std::string(error.what()));
+						}
+					}
+					check_eq(script_int(42), eng->execute("40 + 2;").as_int());
+				});
 			}
 		});
-#endif
 	}
 };
 

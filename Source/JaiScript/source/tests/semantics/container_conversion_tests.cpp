@@ -17,14 +17,14 @@ class container_conversion_tests : public suite {
 public:
     container_conversion_tests() : suite("Container Conversion Tests") {}
 
-    // one timed round: twenty calls of the precompiled bite
-    static std::function<double()> timed_calls(jai::jaibite& call) {
-        return [&call] { return time_seconds([&call] { for (int i = 0; i < 20; ++i) { call.execute(); } }); };
+    // one timed round: `calls` calls of the precompiled bite
+    static std::function<double()> timed_calls(jai::jaibite& call, int calls = 20) {
+        return [&call, calls] { return time_seconds([&call, calls] { for (int i = 0; i < calls; ++i) { call.execute(); } }); };
     }
-    
+
     void forge_tests() override {
         test("large_vector_performance", [this]() {
-            // converting ten times the elements costs about ten times as much; a quadratic conversion would cost a hundred
+            // ten 10k-element conversions cost about what a hundred 1k ones do; a quadratic conversion would cost ten times as much
             auto engine = make_engine();
             engine->execution_budget(0.0);   // a measurement, not a wall-clock gate
 
@@ -39,7 +39,7 @@ public:
 
             auto small_call = engine->jaibite("sum_large(small_array);");
             auto large_call = engine->jaibite("sum_large(large_array);");
-            check_speed_ratio(compare_speed("a 10k-element vector<int> conversion against a 1k one", timed_calls(small_call), timed_calls(large_call)), 30.0);
+            check_speed_ratio(compare_speed("10 10k-element vector<int> conversions against 100 1k ones", timed_calls(small_call, 100), timed_calls(large_call, 10), 15), 4.0);
         });
         
         test("vector_int_basic", [this]() {

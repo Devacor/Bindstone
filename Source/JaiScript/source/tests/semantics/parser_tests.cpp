@@ -20,7 +20,7 @@ public:
             // level, in a body and as a field; the flag rides the jaibite so a re-check of a loaded bite
             // sees it; `auto` and `var` declarations do not carry it
             auto eng = make_engine();
-            auto* symbolizer = eng->get_symbolizer();
+            auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
             const std::string code =
                 "function f = 42; auto g = 42; var h = 42; function later;"
                 " void body() { function k = null; int n = 0; }"
@@ -72,7 +72,7 @@ public:
             check_parse_fails("class A {} A& r;");
             check_parse_succeeds("class Box { int v = 0; } Box b = Box(); Box& get() { return b; }");
             auto eng = make_engine();
-            auto* symbolizer = eng->get_symbolizer();
+            auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
             lexer lex("class A { int x = 1; } class B : A {} B b = B(); A& a = b;", symbolizer, "test.jai");
             auto tokens = lex.tokenize();
             std::unordered_set<std::string> empty_types;
@@ -305,7 +305,7 @@ public:
 private:
     std::vector<std::string> collect_parse_errors(const std::string& code) {
         auto eng = make_engine();
-        auto* symbolizer = eng->get_symbolizer();
+        auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
         lexer lex(code, symbolizer, "test.jai");
         auto tokens = lex.tokenize();
         std::unordered_set<std::string> empty_types;
@@ -320,7 +320,7 @@ private:
 
     void check_parse_succeeds(const std::string& code) {
         auto eng = make_engine();
-        auto* symbolizer = eng->get_symbolizer();
+        auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
         lexer lex(code, symbolizer, "test.jai");
         auto tokens = lex.tokenize();
         std::unordered_set<std::string> empty_types;
@@ -331,7 +331,7 @@ private:
 
     void check_parse_fails(const std::string& code) {
         auto eng = make_engine();
-        auto* symbolizer = eng->get_symbolizer();
+        auto* symbolizer = detail::engine_access::get_symbolizer(*eng);
         lexer lex(code, symbolizer, "test.jai");
         auto tokens = lex.tokenize();
         std::unordered_set<std::string> empty_types;

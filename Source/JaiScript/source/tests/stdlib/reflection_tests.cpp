@@ -81,9 +81,9 @@ public:
         test("reserved_namespace_preserves_host_values", [this]() {
             for (const std::string name : {"jai", "jai::sub", "reflect", "reflect::sub"}) {
                 auto eng = jai::foundry::make_engine();
-                auto& ns = eng->script_namespaces()[eng->symbolize(name)];
+                auto& ns = detail::engine_access::script_namespaces(*eng)[detail::engine_access::symbolize(*eng, name)];
                 ns = std::make_shared<script_namespace_data>();
-                ns->variables[eng->symbolize("host_value")] = script_value(script_int{42}, eng.get());
+                ns->variables[detail::engine_access::symbolize(*eng, "host_value")] = script_value(script_int{42}, eng.get());
                 int calls = 0;
                 eng->add_function("touch", [&calls]() -> script_int { ++calls; return 7; });
                 check_eq(eng->execute(name + "::host_value").as_int(), script_int{42});

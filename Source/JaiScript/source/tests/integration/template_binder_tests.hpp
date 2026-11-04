@@ -253,13 +253,13 @@ public:
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
                 register_audit_points(*e);
                 // (a) registration/lookup: distinct definitions by name AND type_index
-                auto def_i = e->get_class_definition("PointI");
-                auto def_f = e->get_class_definition("PointF");
+                auto def_i = detail::engine_access::get_class_definition(*e, "PointI");
+                auto def_f = detail::engine_access::get_class_definition(*e, "PointF");
                 check_not_null(def_i.get());
                 check_not_null(def_f.get());
                 check(def_i.get() != def_f.get(), "PointI/PointF share a class_definition");
-                check(e->get_class_definition_by_type(std::type_index(typeid(audit_pt<int>))).get() == def_i.get(), "type_index->PointI");
-                check(e->get_class_definition_by_type(std::type_index(typeid(audit_pt<float>))).get() == def_f.get(), "type_index->PointF");
+                check(detail::engine_access::get_class_definition_by_type(*e, std::type_index(typeid(audit_pt<int>))).get() == def_i.get(), "type_index->PointI");
+                check(detail::engine_access::get_class_definition_by_type(*e, std::type_index(typeid(audit_pt<float>))).get() == def_f.get(), "type_index->PointF");
                 // (b) construction + method dispatch: same names, distinct behavior
                 check_eq((int64_t)1, e->execute("auto i = PointI(21); i.kind()").as_int());
                 check_eq((int64_t)2, e->execute("auto f = PointF(1.5); f.kind()").as_int());
@@ -284,10 +284,10 @@ public:
                 // wrong-pointee decl errors (typed sp enforcement ruling)
                 check_throws([&]() { e->execute("shared_ptr<PointF> w = PointI();"); });
                 // host-side: the factory returns distinct type_infos
-                auto* ti_i = e->get_type_info_object(e->symbolize("PointI"));
-                auto* ti_f = e->get_type_info_object(e->symbolize("PointF"));
+                auto* ti_i = detail::engine_access::get_type_info_object(*e, detail::engine_access::symbolize(*e, "PointI"));
+                auto* ti_f = detail::engine_access::get_type_info_object(*e, detail::engine_access::symbolize(*e, "PointF"));
                 check(ti_i != nullptr && ti_f != nullptr && ti_i != ti_f, "object type_infos distinct");
-                check(e->get_type_info_shared_ptr(ti_i) != e->get_type_info_shared_ptr(ti_f),
+                check(detail::engine_access::get_type_info_shared_ptr(*e, ti_i) != detail::engine_access::get_type_info_shared_ptr(*e, ti_f),
                       "shared_ptr type_infos collapsed across instantiations");
             }
         });
@@ -314,7 +314,7 @@ public:
             // converters for every class it registers (a REGISTERED sibling reporting
             // has_conversion()==true is the binder working, not key cross-talk).
             auto e = jai::foundry::make_engine();
-            auto reg = e->get_conversion_registry();
+            auto reg = detail::engine_access::get_conversion_registry(*e);
             check_not_null(reg.get());
             check_false(reg->has_conversion<audit_opaque<int>>());
             check_false(reg->has_conversion<audit_opaque<float>>());

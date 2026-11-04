@@ -66,7 +66,7 @@ namespace jai::detail {
     JAI_NOINLINE inline error_propagator map_entry_binding_rejection(const script_value& element, uint64_t binding_text, engine* eng) {
         return {make_error_code(runtime_error_code::type_mismatch),
                 "Cannot bind {0} to {1}: a structured binding takes a map entry or a value with first and second",
-                eng->get_symbolizer()->intern(slot_source_type_name(element.deref(), eng)), binding_text};
+                engine_access::get_symbolizer(*eng)->intern(slot_source_type_name(element.deref(), eng)), binding_text};
     }
 
     // The structured loop variable over a map holds the iteration's entry as a map-entry reference carrying the map's value

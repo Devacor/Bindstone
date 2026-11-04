@@ -117,7 +117,7 @@ namespace dynamic_binder_detail {
         }
 
         // Get class definition
-        auto class_def = eng->get_class_definition(class_name);
+        auto class_def = detail::engine_access::get_class_definition(*eng, class_name);
         if (!class_def) {
             throw serialization_error("Class definition not found: " + class_name);
         }

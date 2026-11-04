@@ -838,7 +838,7 @@ namespace crypto_detail {
 		return function_result(make_error_code(runtime_error_code::invalid_operation), a_text);
 	}
 	JAI_NOINLINE function_result unreadable_file_error(engine* a_engine, const std::string& a_path, const char* a_reason) {
-		return function_result(make_error_code(runtime_error_code::file_not_found), "{0}", a_engine->park_error_text("Cannot read file '" + a_path + "': " + a_reason));
+		return function_result(make_error_code(runtime_error_code::file_not_found), "{0}", detail::engine_access::park_error_text(*a_engine, "Cannot read file '" + a_path + "': " + a_reason));
 	}
 
 	// n random bytes from the operating system for random_bytes and random_hex
@@ -868,9 +868,9 @@ namespace crypto_detail {
 
 	void register_crypto_functions(engine& eng_ref) {
 		using namespace crypto_detail;
-		engine::library_registration library(eng_ref);
+		detail::engine_access::library_registration library(eng_ref);
 		engine* eng = &eng_ref;
-		auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("crypto")];
+		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "crypto")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		using svt = script_value_type;
 		auto define = [&](const char* a_name, uint8_t a_min, uint8_t a_max, std::vector<svt> a_params, svt a_result, script_function a_function) {
@@ -879,7 +879,7 @@ namespace crypto_detail {
 			signature.max_args = a_max;
 			signature.params = std::move(a_params);
 			signature.result = a_result;
-			const uint64_t id = eng_ref.symbolize(a_name);
+			const uint64_t id = detail::engine_access::symbolize(eng_ref, a_name);
 			ns->variables[id] = script_value::make_function(std::move(a_function), &eng_ref);
 			ns->signatures[id] = std::move(signature);
 		};
@@ -935,7 +935,7 @@ namespace crypto_detail {
 		});
 
 		static constexpr entry_texts k_sha256_file {"sha256_file", "crypto::sha256_file expects 1 argument (path)", "crypto::sha256_file expects a string path"};
-		define("sha256_file", 1, 1, {svt::jai_string_type}, svt::jai_string_type, eng_ref.guard_function([eng](const std::vector<script_value>& a_raw) -> function_result {
+		define("sha256_file", 1, 1, {svt::jai_string_type}, svt::jai_string_type, detail::engine_access::guard_function(eng_ref, [eng](const std::vector<script_value>& a_raw) -> function_result {
 			if (a_raw.size() != 1) { return count_error(k_sha256_file); }
 			const std::string* path = a_raw[0].deref().text_bytes();
 			if (!path) { return type_error(k_sha256_file); }

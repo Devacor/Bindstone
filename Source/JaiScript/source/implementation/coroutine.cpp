@@ -68,10 +68,10 @@ JAI_NOINLINE checked_result<script_value> result_unfinished_error() {
 checked_result<script_value> coroutine_handle::next(engine* eng, script_int a_count) {
     if (a_count < 1) { return next_count_range_error(); }
     if (a_count == 1) { return resume_once(eng); }
-    execution_backend* backend = eng->get_execution_backend();
+    execution_backend* backend = detail::engine_access::get_execution_backend(*eng);
     if (backend->is_executing() || backend->is_unwinding()) { return resume_steps(*backend, a_count); }
     struct step_request { coroutine_handle* self; script_int count; } request{this, a_count};
-    return eng->checked_host_entry([](execution_backend& a_backend, void* a_request) {
+    return detail::engine_access::checked_host_entry(*eng, [](execution_backend& a_backend, void* a_request) {
         auto* steps = static_cast<step_request*>(a_request);
         return steps->self->resume_steps(a_backend, steps->count);
     }, &request);
@@ -106,7 +106,7 @@ checked_result<script_value> coroutine_handle::advance_from_script(engine* eng, 
     if (!out.target.is_reference() && !out.slot.frame) { return advance_non_lvalue_error(); }
     if (done()) { return script_value(false, eng); }
     checked_result<script_value> resumed = resume_once(eng);
-    if (!resumed || eng->get_execution_backend()->is_unwinding()) { return resumed; }
+    if (!resumed || detail::engine_access::get_execution_backend(*eng)->is_unwinding()) { return resumed; }
     if (status_ != status::suspended) { return script_value(false, eng); }
     if (auto stored = detail::host_reference_store(eng, out.slot, out.target, std::move(resumed.value())); !stored) {
         return stored.error_value();
@@ -139,9 +139,9 @@ checked_result<script_value> coroutine_handle::resume_refusal() const {
 checked_result<script_value> coroutine_handle::resume_once(engine* eng) {
     if (done() || status_ == status::running) { return resume_refusal(); }
 
-    execution_backend* backend = eng->get_execution_backend();
+    execution_backend* backend = detail::engine_access::get_execution_backend(*eng);
     if (backend->is_executing() || backend->is_unwinding()) { return backend->resume_coroutine(*this); }
-    return eng->checked_host_entry([](execution_backend& be, void* self) { return be.resume_coroutine(*static_cast<coroutine_handle*>(self)); }, this);
+    return detail::engine_access::checked_host_entry(*eng, [](execution_backend& be, void* self) { return be.resume_coroutine(*static_cast<coroutine_handle*>(self)); }, this);
 }
 
 } // namespace jai

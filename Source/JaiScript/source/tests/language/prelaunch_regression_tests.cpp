@@ -330,8 +330,8 @@ public:
 			auto literal = std::make_shared<literal_expr>(loc, script_value(script_int{1}, eng.get()));
 			auto array = std::make_shared<array_literal_expr>(loc, std::vector<expression_ptr>{literal});
 			auto decl = std::make_shared<destructuring_decl>(loc, array);
-			decl->names.emplace_back("item", eng->symbolize("item"));
-			auto bytes = detail::serialize_jaibite({decl}, *eng->get_symbolizer(), 0);
+			decl->names.emplace_back("item", detail::engine_access::symbolize(*eng, "item"));
+			auto bytes = detail::serialize_jaibite({decl}, *detail::engine_access::get_symbolizer(*eng), 0);
 			check_throws([&]() { eng->jaibite_load_bytes(bytes); });
 			check_eq(script_int{42}, eng->execute("40 + 2;").as_int());
 		});
@@ -370,9 +370,9 @@ public:
 			auto eng = make_engine();
 			stdlib::register_all(*eng);
 			auto result = eng->execute(R"(from_json("{\"nested\": {\"answer\": 42}}");)");
-			check(result.get_type_info()->key_type() == type_info_ptr(eng->get_type_info_string()));
+			check(result.get_type_info()->key_type() == type_info_ptr(detail::engine_access::get_type_info_string(*eng)));
 			const auto& nested = result.as_map().at(script_value("nested", eng.get()));
-			check(nested.get_type_info()->key_type() == type_info_ptr(eng->get_type_info_string()));
+			check(nested.get_type_info()->key_type() == type_info_ptr(detail::engine_access::get_type_info_string(*eng)));
 			eng->add_global("decoded", result);
 			check_throws([&]() { eng->execute("decoded[1] = 5;"); });
 			check_throws([&]() { eng->execute("decoded[\"nested\"][1] = 5;"); });
@@ -417,7 +417,7 @@ public:
 			auto eng = make_engine();
 			bind_native(*eng);
 			native_child child;
-			eng->add_global("borrowed", script_value::make_cpp_reference("NativeChild", eng->symbolize("NativeChild"), &child, {}, eng.get()));
+			eng->add_global("borrowed", script_value::make_cpp_reference("NativeChild", detail::engine_access::symbolize(*eng, "NativeChild"), &child, {}, eng.get()));
 			eng->add_function("copy_second", [](second_base copy) { copy.second += 3; return copy.second; });
 			eng->add_function("read_second", [](const second_base& base) { return base.second; });
 			check_eq(script_int{25}, eng->execute("copy_second(borrowed);").as_int());
@@ -506,7 +506,7 @@ public:
 			auto eng = make_engine();
 			bind_native(*eng);
 			auto child = std::make_shared<native_child>();
-			auto value = script_value::make_cpp_reference("NativeChild", eng->symbolize("NativeChild"), child.get(), child, eng.get());
+			auto value = script_value::make_cpp_reference("NativeChild", detail::engine_access::symbolize(*eng, "NativeChild"), child.get(), child, eng.get());
 			check(&value.as<second_base&>() == static_cast<second_base*>(child.get()));
 			auto shared = value.as<std::shared_ptr<second_base>>();
 			check(shared.get() == static_cast<second_base*>(child.get()));

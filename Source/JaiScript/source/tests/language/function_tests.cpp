@@ -475,7 +475,7 @@ public:
             check_near(50.0 * (8.0 + 7 + 15 + 2 + 4.0), v[0].as<double>(), 1e-9);
             check_near(2.0, v[1].as<double>(), 1e-12);
             check_eq((int64_t)3, v[2].as_int());
-            check_eq((int64_t)250, (int64_t)eng->parameter_alias_binds());   // five proven binds per iteration
+            check_eq((int64_t)250, (int64_t)detail::engine_access::parameter_alias_binds(*eng));   // five proven binds per iteration
         });
 
         test("readonly_parameter_alias_refused_shapes_keep_the_copy", [this]() {
@@ -519,7 +519,7 @@ public:
             check_eq((int64_t)2, v[11].as_int());
             check_eq((int64_t)11, v[12].as_int());
             check_eq((int64_t)1, v[13].as_int());
-            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds());
+            check_eq((int64_t)0, (int64_t)detail::engine_access::parameter_alias_binds(*eng));
         });
 
         test("readonly_parameter_alias_revoked_by_redefinition", [this]() {
@@ -535,12 +535,12 @@ public:
                 int reads(P p) { int h = helper(); return p.a + h; }
             )");
             check_eq((int64_t)2, eng->execute("reads(g);").as_int());
-            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds());
+            check_eq((int64_t)1, (int64_t)detail::engine_access::parameter_alias_binds(*eng));
             eng->execute("int helper() { g.a = 50; return 1; }");
             // copy semantics: the helper's write lands on g, the parameter still holds the pre-call value
             check_eq((int64_t)2, eng->execute("g.a = 1; reads(g);").as_int());
             check_eq((int64_t)50, eng->execute("g.a;").as_int());
-            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds());
+            check_eq((int64_t)1, (int64_t)detail::engine_access::parameter_alias_binds(*eng));
         });
 
         test("readonly_parameter_alias_skips_nocopy_and_host_objects", [this]() {
@@ -554,7 +554,7 @@ public:
             std::string message;
             try { eng->execute("peek(ledger);"); } catch (const std::exception& e) { message = e.what(); }
             check(message.find("nocopy class 'Ledger'") != std::string::npos, "a nocopy by-value pass still raises: " + message);
-            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds());
+            check_eq((int64_t)0, (int64_t)detail::engine_access::parameter_alias_binds(*eng));
         });
 
         // Read-only by-value local elision: `T x = lvalue;` binds the source's object when nothing in x's block after it can
@@ -595,7 +595,7 @@ public:
             check_eq((int64_t)2, v[1].as_int());
             check_eq((int64_t)7, v[2].as_int());
             check_eq((int64_t)3, v[3].as_int());
-            check_eq((int64_t)140, (int64_t)eng->local_alias_binds());   // fourteen proven declarations per iteration
+            check_eq((int64_t)140, (int64_t)detail::engine_access::local_alias_binds(*eng));   // fourteen proven declarations per iteration
         });
 
         test("readonly_local_alias_refused_shapes_keep_the_copy", [this]() {
@@ -651,7 +651,7 @@ public:
             check_eq((int64_t)3, v[15].as_int());
             check_eq((int64_t)3, v[16].as_int());
             check_eq((int64_t)1, v[17].as_int());
-            check_eq((int64_t)0, (int64_t)eng->local_alias_binds());
+            check_eq((int64_t)0, (int64_t)detail::engine_access::local_alias_binds(*eng));
         });
 
         test("readonly_local_alias_revoked_by_redefinition_and_switch", [this]() {
@@ -665,15 +665,15 @@ public:
                 int reads() { P p = g; int h = helper(); return p.a + h; }
             )");
             check_eq((int64_t)2, eng->execute("reads();").as_int());
-            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());
+            check_eq((int64_t)1, (int64_t)detail::engine_access::local_alias_binds(*eng));
             eng->execute("int helper() { g.a = 50; return 1; }");
             check_eq((int64_t)2, eng->execute("g.a = 1; reads();").as_int());   // the copy keeps the pre-call value
             check_eq((int64_t)50, eng->execute("g.a;").as_int());
-            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());
+            check_eq((int64_t)1, (int64_t)detail::engine_access::local_alias_binds(*eng));
             eng->local_alias(false);
             eng->execute("int helper() { return 1; }");
             check_eq((int64_t)2, eng->execute("g.a = 1; reads();").as_int());
-            check_eq((int64_t)1, (int64_t)eng->local_alias_binds());   // the kill switch keeps every copy
+            check_eq((int64_t)1, (int64_t)detail::engine_access::local_alias_binds(*eng));   // the kill switch keeps every copy
         });
 
         test("a_method_redefined_while_it_runs_finishes_its_old_body", [this]() {
@@ -754,8 +754,8 @@ public:
             )");
             check_eq((int64_t)6, r.as_array()[0].as_int());
             check_eq((int64_t)3, r.as_array()[1].as_int());   // every copy's destructor runs
-            check_eq((int64_t)0, (int64_t)d->local_alias_binds());
-            check_eq((int64_t)0, (int64_t)eng->local_alias_binds());
+            check_eq((int64_t)0, (int64_t)detail::engine_access::local_alias_binds(*d));
+            check_eq((int64_t)0, (int64_t)detail::engine_access::local_alias_binds(*eng));
         });
 
         // The parameter proof's write channels: a callee's other reference parameter, a writing reference argument rooted at
@@ -791,7 +791,7 @@ public:
             check_eq((int64_t)1, v[4].as_int(), "through_handle: the parameter is a copy");
             check_eq((int64_t)2, v[5].as_int());
             check_eq((int64_t)1, v[6].as_int(), "the copy's destructor runs");
-            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "no write-channel parameter is elided");
+            check_eq((int64_t)0, (int64_t)detail::engine_access::parameter_alias_binds(*eng), "no write-channel parameter is elided");
         });
 
         // A class declaration in the callee takes its value from a chain of declared steps (a typed global's element, a local's
@@ -827,7 +827,7 @@ public:
             check_eq((int64_t)1, v[2].as_int());
             check_eq((int64_t)2, v[3].as_int());
             check_eq((int64_t)3, v[4].as_int());
-            check_eq((int64_t)15, (int64_t)eng->parameter_alias_binds(), "three proven parameters per call, called directly and from a loop");
+            check_eq((int64_t)15, (int64_t)detail::engine_access::parameter_alias_binds(*eng), "three proven parameters per call, called directly and from a loop");
         });
 
         test("readonly_parameter_alias_declared_chains_refuse_open_types", [this]() {
@@ -860,7 +860,7 @@ public:
             check_eq((int64_t)101, v[1].as_int(), "the converting constructor's write never reaches the copied parameter");
             check_eq((int64_t)99, v[2].as_int());
             check_eq((int64_t)101, v[3].as_int());
-            check_eq((int64_t)0, (int64_t)eng->parameter_alias_binds(), "an open source type refuses the proof");
+            check_eq((int64_t)0, (int64_t)detail::engine_access::parameter_alias_binds(*eng), "an open source type refuses the proof");
         });
 
         test("graft_parameter_binds_take_the_calls_elisions", [this]() {
@@ -882,7 +882,7 @@ public:
             check_eq((int64_t)((102 + 112 + 122) + 3 * 112 + (0 + 1 + 2) + 3 * 1), v[0].as_int());
             check_eq((int64_t)1, v[1].as_int());
             check_eq((int64_t)1, v[2].as_int());
-            check_eq((int64_t)6, (int64_t)eng->parameter_alias_binds(), "peek's two parameters per iteration");
+            check_eq((int64_t)6, (int64_t)detail::engine_access::parameter_alias_binds(*eng), "peek's two parameters per iteration");
         });
 
         // The destructor gate is per type: an elision is refused when the elided value's tree can hold an instance whose chain
@@ -920,8 +920,8 @@ public:
             check_eq((int64_t)1, v[2].as_int());
             check_eq((int64_t)1, v[3].as_int(), "the copied Holder's Tracked field runs its destructor");
             check_eq((int64_t)3, v[4].as_int(), "the copy keeps its value when a destructor in the range writes the source");
-            check_eq((int64_t)1, (int64_t)eng->local_alias_binds(), "an unrelated local still elides");
-            check_eq((int64_t)1, (int64_t)eng->parameter_alias_binds(), "an unrelated parameter still elides");
+            check_eq((int64_t)1, (int64_t)detail::engine_access::local_alias_binds(*eng), "an unrelated local still elides");
+            check_eq((int64_t)1, (int64_t)detail::engine_access::parameter_alias_binds(*eng), "an unrelated parameter still elides");
         });
 
         test("destructuring_basic", [this]() {
@@ -1483,7 +1483,7 @@ public:
             auto engine = make_engine();
             const std::string err = error_of([&] { engine->execute("int ran = 0; void g(int a, float b) { } void g(float a, int b) { } ran = 1; g(1, 1);"); });
             check_true(err.find("mbiguous") != std::string::npos, err);
-            check_true(!engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern("ran")), "nothing ran");
+            check_true(!detail::engine_access::get_global_environment(*engine)->get_value_ptr(detail::engine_access::get_symbolizer(*engine)->intern("ran")), "nothing ran");
         });
 
         // ---- overloads that differ only by reference: the second definition is an error naming both ----
@@ -1585,7 +1585,7 @@ public:
             // only an overloaded name leaves the call sites' direct path (the VM's inline cache keys on a plain function value)
             auto engine = make_engine();
             auto kind_of = [&](const char* name) {
-                const script_value* v = engine->get_global_environment()->get_value_ptr(engine->get_symbolizer()->intern(name));
+                const script_value* v = detail::engine_access::get_global_environment(*engine)->get_value_ptr(detail::engine_access::get_symbolizer(*engine)->intern(name));
                 const auto* thunk = v && v->is_function() ? v->as_function().target<script_callable_thunk>() : nullptr;
                 return thunk ? static_cast<int>(thunk->payload.kind) : -1;
             };

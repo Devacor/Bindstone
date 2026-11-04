@@ -432,10 +432,10 @@ namespace {
 
 	// A host function a script namespace holds (time::now, web::url_encode), or null for anything else under that name
 	const script_value* namespace_host_entry(engine& eng, std::string_view space, std::string_view member) {
-		auto& spaces = eng.script_namespaces();
-		const auto found = spaces.find(eng.symbolize(space));
+		auto& spaces = engine_access::script_namespaces(eng);
+		const auto found = spaces.find(engine_access::symbolize(eng, space));
 		if (found == spaces.end() || !found->second) { return nullptr; }
-		const uint64_t member_id = eng.symbolize(member);
+		const uint64_t member_id = engine_access::symbolize(eng, member);
 		if (found->second->functions.count(member_id)) { return nullptr; }
 		const auto value = found->second->variables.find(member_id);
 		return value != found->second->variables.end() && value->second.is_function() ? &value->second : nullptr;
@@ -504,7 +504,7 @@ namespace {
 
 	// Class::K as a constant: the class the name means and a const static of a primitive value it holds
 	std::optional<script_value> class_constant_value(engine& eng, uint64_t class_name_id, uint64_t member_id) {
-		const auto cls = eng.get_class_definition(std::string(eng.get_symbolizer()->get_string(class_name_id)));
+		const auto cls = engine_access::get_class_definition(eng, std::string(engine_access::get_symbolizer(eng)->get_string(class_name_id)));
 		if (!cls || !cls->is_const_static(member_id) || !cls->static_method_in_chain(member_id).is_null()) { return std::nullopt; }
 		const script_value* value = cls->find_static_field_in_chain(member_id);
 		if (!value) { return std::nullopt; }
@@ -594,7 +594,7 @@ namespace {
 			case script_value_type::jai_map_type: return type_runs_destructor(t->key_type()) || type_runs_destructor(t->value_type());
 			case script_value_type::jai_object_type: {
 				if (t->type_name.empty()) { return true; }
-				auto cls = eng->get_class_registry().find_script_class(std::string(t->type_name));
+				auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(t->type_name));
 				return cls && cls->value_tree_copies_observably();   // a copy that runs a copy constructor is as observable as a death
 			}
 			default:
@@ -617,7 +617,7 @@ namespace {
 			note_death(proof_chain_type(target));
 		}
 
-		admission_builder(engine& e) : eng(&e), sym(e.get_symbolizer()) { adm.admitted = false; }
+		admission_builder(engine& e) : eng(&e), sym(engine_access::get_symbolizer(e)) { adm.admitted = false; }
 
 		static bool primitive_or_string(const type_info_ptr& t) {
 			if (!t) { return false; }
@@ -640,9 +640,9 @@ namespace {
 			       !t->dynamic_slot && t->type_name != "auto";
 		}
 		bool class_has_subclass(const std::string& name) {
-			auto cls = eng->get_class_registry().find_script_class(name);
+			auto cls = engine_access::get_class_registry(*eng).find_script_class(name);
 			if (!cls) { return true; }
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				const class_definition* other = entry.second.get();
 				if (other && other != cls.get() && other->derives_from(cls.get())) { return true; }
 			}
@@ -665,7 +665,7 @@ namespace {
 					}
 					if (self_field(n->symbol_id)) { return nullptr; }
 				}
-				auto global = eng->get_global_environment()->get(n->symbol_id);
+				auto global = engine_access::get_global_environment(*eng)->get(n->symbol_id);
 				if (!global) { return nullptr; }
 				type_info_ptr t = global.value().get_type_info();
 				if (!t || t->base_type == script_value_type::jai_any_type || t->dynamic_slot) { return nullptr; }   // a var global holds anything next
@@ -676,7 +676,7 @@ namespace {
 				auto* m = const_cast<member_expr*>(static_cast<const member_expr*>(e));
 				type_info_ptr base = proof_chain_type(m->object.get(), declared);
 				if (!base || base->base_type != script_value_type::jai_object_type || base->type_name.empty()) { return nullptr; }
-				auto cls = eng->get_class_registry().find_script_class(std::string(base->type_name));
+				auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(base->type_name));
 				if (!cls) { return nullptr; }
 				if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 				if (read_runs_accessor(cls.get(), m->member_id)) { return nullptr; }
@@ -721,7 +721,7 @@ namespace {
 		// declares one (the instance may be a subclass)
 		bool accessor_in_hierarchy(const class_definition* cls, uint64_t accessor_id) {
 			if (cls->user_accessor(accessor_id) != nullptr) { return true; }
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				const class_definition* other = entry.second.get();
 				if (other && other != cls && other->derives_from(cls) && other->user_accessor(accessor_id) != nullptr) { return true; }
 			}
@@ -735,7 +735,7 @@ namespace {
 		bool member_store_may_run_code(member_expr* m, const expression_ptr& value, bool reads) {
 			type_info_ptr base = proof_chain_type(m->object.get());
 			if (!class_type(base)) { return true; }
-			auto cls = eng->get_class_registry().find_script_class(std::string(base->type_name));
+			auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(base->type_name));
 			if (!cls) { return true; }
 			if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 			if (reads && read_runs_accessor(cls.get(), m->member_id)) { return true; }
@@ -806,7 +806,7 @@ namespace {
 					if (const local_info* l = local(n->symbol_id)) { return !l->primitive; }
 					if (self_field(n->symbol_id)) { return true; }
 				}
-				auto global = eng->get_global_environment()->get(n->symbol_id);
+				auto global = engine_access::get_global_environment(*eng)->get(n->symbol_id);
 				return !(global && primitive_or_string(global.value().get_type_info()));
 			}
 			case node_type::member_expr:
@@ -842,7 +842,7 @@ namespace {
 				if (call->callee && call->callee->get_type() == node_type::identifier_expr) {
 					auto* callee = static_cast<const identifier_expr*>(call->callee.get());
 					if (primitive_ctor_name(callee->name)) { return false; }
-					auto global = eng->get_global_environment()->get(callee->symbol_id);
+					auto global = engine_access::get_global_environment(*eng)->get(callee->symbol_id);
 					if (global && global.value().is_function()) {
 						if (const script_callable* payload = payload_from_function_value(global.value())) {
 							return !(payload->fn && primitive_or_string(payload->fn->return_type));
@@ -901,7 +901,7 @@ namespace {
 			if (!target || target->get_type() != node_type::member_expr) { return; }
 			auto* m = static_cast<member_expr*>(target);
 			if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				if (entry.second && entry.second->find_field_declaring_class(m->member_id) == entry.second.get()) {
 					note_converting_construction(entry.second->get_field_declared_type(m->member_id), value, site);
 				}
@@ -920,13 +920,13 @@ namespace {
 		const class_definition* receiver_class(const expression* receiver) {
 			if (receiver && receiver->get_type() == node_type::this_expr) { return method_class; }
 			const type_info_ptr t = proof_chain_type(receiver);
-			return class_type(t) ? eng->get_class_registry().find_script_class(std::string(t->type_name)).get() : nullptr;
+			return class_type(t) ? engine_access::get_class_registry(*eng).find_script_class(std::string(t->type_name)).get() : nullptr;
 		}
 		// A method call on a receiver declared cls reaches the overloads of the name its chain and its subclasses declare; on a
 		// receiver the walk cannot type (an element: its class is the barrier's), those of every class
 		void note_method_argument_conversions(const class_definition* cls, uint64_t name_id, const call_expr* call) {
 			if (proof_mode || call->arguments.empty()) { return; }
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				const class_definition* level = entry.second.get();
 				if (!level || (cls && level != cls && !level->derives_from(cls) && !cls->derives_from(level))) { continue; }
 				const auto& table = level->script_method_overloads();
@@ -1030,8 +1030,8 @@ namespace {
 			if (a.get() == b.get()) { return true; }
 			if (class_type(a) && class_type(b)) {
 				if (a->type_name == b->type_name) { return true; }
-				auto ca = eng->get_class_registry().find_script_class(std::string(a->type_name));
-				auto cb = eng->get_class_registry().find_script_class(std::string(b->type_name));
+				auto ca = engine_access::get_class_registry(*eng).find_script_class(std::string(a->type_name));
+				auto cb = engine_access::get_class_registry(*eng).find_script_class(std::string(b->type_name));
 				return !ca || !cb || ca->derives_from(cb.get()) || cb->derives_from(ca.get());
 			}
 			return a->canonical_name() == b->canonical_name();
@@ -1044,7 +1044,7 @@ namespace {
 			case script_value_type::jai_map_type: return type_may_hold(tree->key_type(), t, seen) || type_may_hold(tree->value_type(), t, seen);
 			case script_value_type::jai_object_type: {
 				if (tree->type_name.empty()) { return true; }
-				auto cls = eng->get_class_registry().find_script_class(std::string(tree->type_name));
+				auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(tree->type_name));
 				if (!cls) { return true; }
 				auto fields_hold = [&](const class_definition* c) {
 					if (std::find(seen.begin(), seen.end(), c) != seen.end()) { return false; }
@@ -1056,7 +1056,7 @@ namespace {
 					return false;
 				};
 				if (fields_hold(cls.get())) { return true; }
-				for (const auto& entry : eng->get_class_registry().script_classes_) {   // a by-value slot may hold a subclass
+				for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {   // a by-value slot may hold a subclass
 					const class_definition* other = entry.second.get();
 					if (other && other != cls.get() && other->derives_from(cls.get()) && fields_hold(other)) { return true; }
 				}
@@ -1634,8 +1634,8 @@ namespace {
 		void for_each_registered_class(Each&& each) {
 			if (!host_chain_classes_listed) {
 				host_chain_classes_listed = true;
-				for (const auto& entry : eng->get_class_registry().cpp_classes_) { if (entry.second) { host_chain_classes.push_back(entry.second.get()); } }
-				for (const auto& entry : eng->get_class_registry().script_classes_) {
+				for (const auto& entry : engine_access::get_class_registry(*eng).cpp_classes_) { if (entry.second) { host_chain_classes.push_back(entry.second.get()); } }
+				for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 					if (entry.second && entry.second->find_cpp_base_class()) { host_chain_classes.push_back(entry.second.get()); }
 				}
 			}
@@ -1707,12 +1707,12 @@ namespace {
 
 		// The class a name constructs: a script class's constructor value in the program's scope, or a host class's constructor
 		std::shared_ptr<class_definition> constructor_class(uint64_t name_id) {
-			auto global = eng->get_global_environment()->get(name_id);
+			auto global = engine_access::get_global_environment(*eng)->get(name_id);
 			if (!global || !global.value().is_function()) { return nullptr; }
 			if (const script_callable* payload = payload_from_function_value(global.value())) {
 				return payload->kind == script_callable::kind_type::constructor ? payload->cls() : nullptr;
 			}
-			const auto& host_classes = eng->get_class_registry().cpp_classes_;
+			const auto& host_classes = engine_access::get_class_registry(*eng).cpp_classes_;
 			const auto found = host_classes.find(std::string(sym->get_string(name_id)));
 			return found != host_classes.end() ? found->second : nullptr;
 		}
@@ -1857,7 +1857,7 @@ namespace {
 					if (!admit_destructors_of_type(level->get_field_declared_type(level->slot_field(slot)))) { return false; }
 				}
 			}
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				const class_definition* other = entry.second.get();
 				if (other && other != cls && other->derives_from(cls) && !admit_destructors(other)) { return false; }
 			}
@@ -1865,7 +1865,7 @@ namespace {
 		}
 		bool admit_destructors_of_type(const type_info_ptr& t) {
 			if (!t || t->base_type == script_value_type::jai_any_type) {
-				for (const auto& entry : eng->get_class_registry().script_classes_) {
+				for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 					if (!admit_destructors(entry.second.get())) { return false; }
 				}
 				return true;
@@ -1879,7 +1879,7 @@ namespace {
 				return admit_destructors_of_type(t->key_type()) && admit_destructors_of_type(t->value_type());
 			case script_value_type::jai_object_type: {
 				if (t->type_name.empty()) { return admit_destructors_of_type(nullptr); }
-				auto cls = eng->get_class_registry().find_script_class(std::string(t->type_name));
+				auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(t->type_name));
 				return !cls || admit_destructors(cls.get());
 			}
 			default:
@@ -1944,8 +1944,8 @@ namespace {
 			                        "to_string", "to_bool", "to_int", "to_float", "to_char" }) {
 				const uint64_t id = sym->intern(op);
 				ids.push_back(id);
-				if (const uint64_t compound = eng->compound_operator_id(id)) { ids.push_back(compound); }
-				if (const uint64_t reflected = eng->reflected_operator_id(id)) { ids.push_back(reflected); }
+				if (const uint64_t compound = engine_access::compound_operator_id(*eng, id)) { ids.push_back(compound); }
+				if (const uint64_t reflected = engine_access::reflected_operator_id(*eng, id)) { ids.push_back(reflected); }
 			}
 			return ids;
 		}
@@ -1970,8 +1970,8 @@ namespace {
 					return;
 				case script_value_type::jai_object_type: {
 					if (t->type_name.empty()) { every_script_class = true; return; }
-					if (auto cls = eng->get_class_registry().find_script_class(std::string(t->type_name))) { work.push_back(cls.get()); return; }
-					const auto& host_classes = eng->get_class_registry().cpp_classes_;
+					if (auto cls = engine_access::get_class_registry(*eng).find_script_class(std::string(t->type_name))) { work.push_back(cls.get()); return; }
+					const auto& host_classes = engine_access::get_class_registry(*eng).cpp_classes_;
 					if (auto found = host_classes.find(std::string(t->type_name)); found != host_classes.end() && found->second) { work.push_back(found->second.get()); }
 					return;
 				}
@@ -1989,12 +1989,12 @@ namespace {
 					const uint32_t slots = level->field_slot_count();
 					for (uint32_t slot = 0; slot < slots; ++slot) { note_type(level->get_field_declared_type(level->slot_field(slot)), note_type); }
 				}
-				for (const auto& entry : eng->get_class_registry().script_classes_) {
+				for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 					if (entry.second && entry.second.get() != cls && entry.second->derives_from(cls)) { work.push_back(entry.second.get()); }
 				}
 				if (every_script_class) {
 					every_script_class = false;
-					for (const auto& entry : eng->get_class_registry().script_classes_) { if (entry.second) { work.push_back(entry.second.get()); } }
+					for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) { if (entry.second) { work.push_back(entry.second.get()); } }
 				}
 			}
 			return out;
@@ -2031,7 +2031,7 @@ namespace {
 		}
 
 		bool any_program_destructor() {
-			for (const auto& entry : eng->get_class_registry().script_classes_) {
+			for (const auto& entry : engine_access::get_class_registry(*eng).script_classes_) {
 				const class_definition* cls = entry.second.get();
 				if (cls && cls->has_method(cls->destructor_id(*eng))) { return true; }
 			}
@@ -2271,7 +2271,7 @@ namespace {
 				if (m->is_static && m->object && m->object->get_type() == node_type::identifier_expr) {
 					// an enum's value (E::v): a constant the body reads through the enum's map, provisioned per worker as a captured read
 					auto* root = static_cast<identifier_expr*>(m->object.get());
-					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id) && eng->is_enum_name(root->symbol_id)) {
+					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id) && engine_access::is_enum_name(*eng, root->symbol_id)) {
 						if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 						(void)sym->get_class_var_id_with_view(root->symbol_id);   // the static read asks for a class of the name first
 						touch_capture(root, false);
@@ -2449,7 +2449,7 @@ namespace {
 					if (!proof_mode && m->object && m->object->get_type() == node_type::identifier_expr) {
 						// A host class's static method runs on any thread unless it is marked serial
 						auto* class_name = static_cast<identifier_expr*>(m->object.get());
-						const auto& host_classes = eng->get_class_registry().cpp_classes_;
+						const auto& host_classes = engine_access::get_class_registry(*eng).cpp_classes_;
 						const auto host = host_classes.find(std::string(class_name->name));
 						if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 						if (host != host_classes.end() && host->second->static_method_in_chain(m->member_id).is_function()) {
@@ -2590,7 +2590,7 @@ namespace {
 				callee_ok = true;   // int(x)/float(x)/... conversions - backend-resolved, pure
 				converts_like_host = true;
 			} else {
-				auto global = eng->get_global_environment()->get(callee->symbol_id);
+				auto global = engine_access::get_global_environment(*eng)->get(callee->symbol_id);
 				if (!global || !global.value().is_function()) {
 					return fail(callee, "call target '" + callee_name + "' is not a function known at admission time");
 				}
@@ -2644,10 +2644,10 @@ namespace {
 						}
 					}
 					callee_ok = true;
-				} else if (proof_mode ? parallel_host_whitelisted(callee->name) : eng->host_function_registered(callee_name) && !eng->host_function_serial(callee_name)) {
+				} else if (proof_mode ? parallel_host_whitelisted(callee->name) : engine_access::host_function_registered(*eng, callee_name) && !engine_access::host_function_serial(*eng, callee_name)) {
 					// A host function runs on any thread unless it is marked serial; a non-const T& parameter writes
 					// back into its argument, which enclosing state cannot take
-					const uint64_t writeback = eng->host_function_writeback(callee_name);
+					const uint64_t writeback = engine_access::host_function_writeback(*eng, callee_name);
 					for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 						if (!((writeback >> i) & 1)) { continue; }
 						note_loop_variable_reference_argument(call->arguments[i]);
@@ -2661,7 +2661,7 @@ namespace {
 					}
 					callee_ok = true;
 					converts_like_host = true;
-				} else if (proof_mode || !eng->host_function_registered(callee_name)) {
+				} else if (proof_mode || !engine_access::host_function_registered(*eng, callee_name)) {
 					return fail(callee, "host function '" + callee_name + "' is not callable in a parallel body");
 				} else {
 					return fail(callee, "host function '" + callee_name + "' is marked serial_function() and cannot be called in a parallel body");
@@ -2710,7 +2710,7 @@ namespace {
 		using local_info = admission_builder::local_info;
 		std::vector<std::unordered_map<uint64_t, local_info>> scopes;
 
-		local_alias_prover(engine& e, const local_alias_home& h) : eng(e), home(h), sym(*e.get_symbolizer()) {}
+		local_alias_prover(engine& e, const local_alias_home& h) : eng(e), home(h), sym(*engine_access::get_symbolizer(e)) {}
 
 		void declare(uint64_t id, local_info info) { scopes.back()[id] = std::move(info); }
 		void declare_decl(variable_decl& d) {
@@ -2886,7 +2886,7 @@ namespace {
 	bool admission_graph_current(engine& eng, const parallel_admission& adm) {
 		for (const auto& [id, sfn] : adm.script_functions) {
 			if (id == UINT64_MAX) { continue; }   // the root fn - caller-supplied, always current
-			auto cur = eng.get_global_environment()->get(id);
+			auto cur = engine_access::get_global_environment(eng)->get(id);
 			if (!cur || !cur.value().is_function()) { return false; }
 			const script_callable* p = payload_from_function_value(cur.value());
 			if (!p || p->kind != script_callable::kind_type::function || !p->fn || p->fn->body != sfn->body) {
@@ -2913,7 +2913,7 @@ namespace {
 
 	// Re-slice the worker's memory allowance from the CURRENT outer accounting
 	void slice_worker_limits(engine& eng, parallel_worker_slot& slot) {
-		const auto& outer = eng.execution_limits();
+		const auto& outer = engine_access::execution_limits(eng);
 		slot.limits.interpreter_call_depth_limit = outer.interpreter_call_depth_limit;
 		slot.limits.vm_call_depth_limit = outer.vm_call_depth_limit;
 		slot.limits.vm_depth_gate = 0;
@@ -2963,11 +2963,11 @@ namespace {
 
 	// Main thread: the slot's copy of a host function, minted when the program scope's binding of the name changed since the last one
 	script_value parallel_host_copy(engine& eng, parallel_worker_slot& slot, uint64_t name_id, const std::string& name) {
-		const script_value* bound = eng.get_global_environment()->get_value_ptr(name_id);
+		const script_value* bound = engine_access::get_global_environment(eng)->get_value_ptr(name_id);
 		const void* identity = bound && bound->raw_storage_index() == script_value::TYPEID_FUNCTION ? static_cast<const void*>(&bound->unchecked_as_function()) : nullptr;
 		parallel_worker_slot::host_copy& cached = slot.host_copies[name_id];
 		if (identity && cached.identity == identity && !cached.copy.is_null()) { return cached.copy; }
-		script_value copy = eng.make_parallel_host_function_copy(name);
+		script_value copy = engine_access::make_parallel_host_function_copy(eng, name);
 		cached.identity = identity;
 		cached.source = identity ? *bound : script_value(std::monostate{}, &eng);
 		cached.copy = copy;
@@ -3029,10 +3029,10 @@ namespace {
 		"function __jai_parallel_tchunk(var& __c0, var& __c1, int __n) { for (int __k = 0; __k < __n; __k = __jai_parallel_advance(__k)) { __c1 = __jai_parallel_fn(__c0); } }";
 
 	std::shared_ptr<function_decl> parse_chunk_skeleton(engine& eng, const char* source) {
-		const auto templates = eng.get_registered_template_types();
-		lexer lex(source, eng.get_symbolizer());
+		const auto templates = engine_access::get_registered_template_types(eng);
+		lexer lex(source, engine_access::get_symbolizer(eng));
 		auto tokens = lex.tokenize();
-		parser parse(tokens, eng.get_symbolizer(), &eng, templates, "<parallel_for>");
+		parser parse(tokens, engine_access::get_symbolizer(eng), &eng, templates, "<parallel_for>");
 		auto decls = parse.parse();
 		if (!decls || decls.value().empty() || decls.value().front()->get_type() != node_type::function_decl) {
 			throw runtime_error("parallel_for: chunk wrapper failed to parse (internal)");
@@ -3103,9 +3103,9 @@ namespace {
 		for (size_t j = 0; j < arity; ++j) {
 			parameter lp = loop_params[j];
 			lp.slot_index = j;
-			if (lp.symbol_id == UINT64_MAX) { lp.symbol_id = eng.symbolize(lp.name); }
+			if (lp.symbol_id == UINT64_MAX) { lp.symbol_id = engine_access::symbolize(eng, lp.name); }
 			if (inline_mode) { lp.is_reference = !(counted && j == 0) && (lp.is_reference || reads_only); }
-			names.params.emplace_back(eng.get_symbolizer()->get_string(lp.symbol_id), lp.symbol_id);
+			names.params.emplace_back(engine_access::get_symbolizer(eng)->get_string(lp.symbol_id), lp.symbol_id);
 			if (inline_mode) { decl->parameters[j] = lp; }
 		}
 		if (inline_mode) {
@@ -3149,7 +3149,7 @@ namespace {
 	statement_ptr clone_statement(engine& eng, const statement_ptr& stmt, const script_defined_function& fn) {
 		std::vector<declaration_ptr> decls;
 		decls.push_back(std::make_shared<statement_decl>(stmt->location, stmt));
-		const std::vector<uint8_t> bytes = ast_writer(*eng.get_symbolizer()).in_body().serialize(decls, 0);
+		const std::vector<uint8_t> bytes = ast_writer(*engine_access::get_symbolizer(eng)).in_body().serialize(decls, 0);
 		uint64_t fingerprint = 0;
 		const ast_frame_context context{fn.local_count, fn.parameters()};
 		auto back = deserialize_jaibite(bytes.data(), bytes.size(), &eng, fingerprint, nullptr, &context);
@@ -3302,11 +3302,11 @@ namespace {
 		parameter in_param = fn->parameters()[0];
 		in_param.slot_index = 0;
 		in_param.is_reference = true;   // in place: the proof above makes the copy unobservable
-		if (in_param.symbol_id == UINT64_MAX) { in_param.symbol_id = eng.symbolize(in_param.name); }
+		if (in_param.symbol_id == UINT64_MAX) { in_param.symbol_id = engine_access::symbolize(eng, in_param.name); }
 		chunk_names names;
-		names.params.emplace_back(eng.get_symbolizer()->get_string(in_param.symbol_id), in_param.symbol_id);
-		const uint64_t out_symbol = eng.symbolize("__c1");
-		names.params.emplace_back(eng.get_symbolizer()->get_string(out_symbol), out_symbol);
+		names.params.emplace_back(engine_access::get_symbolizer(eng)->get_string(in_param.symbol_id), in_param.symbol_id);
+		const uint64_t out_symbol = engine_access::symbolize(eng, "__c1");
+		names.params.emplace_back(engine_access::get_symbolizer(eng)->get_string(out_symbol), out_symbol);
 		names.param_slots = { 0, n_locals };
 		names.n_slot = n_locals + 1; names.k_slot = n_locals + 2;
 		decl->parameters[0] = in_param;
@@ -3362,11 +3362,11 @@ namespace {
 		slice_worker_limits(eng, *ctx);
 
 		if (use_vm) {
-			auto backend = std::make_unique<vm::vm_backend>(eng.get_symbolizer(), ctx->root_env);
+			auto backend = std::make_unique<vm::vm_backend>(engine_access::get_symbolizer(eng), ctx->root_env);
 			ctx->vm = backend.get();
 			ctx->backend = std::move(backend);
 		} else {
-			ctx->backend = detail::make_interpreter_backend(eng.get_symbolizer(), ctx->root_env);
+			ctx->backend = detail::make_interpreter_backend(engine_access::get_symbolizer(eng), ctx->root_env);
 		}
 		ctx->backend->set_engine_reference(&eng);
 		ctx->backend->configure_parallel_worker(ctx->root_env, ctx->env_epoch_sink.get(), &ctx->limits, budget);
@@ -3427,11 +3427,11 @@ namespace {
 		}
 		if (chunk_wrapper && *chunk_wrapper) {
 			const std::shared_ptr<function_decl>& wrapper = *chunk_wrapper;
-			ctx->root_env->define(eng.symbolize(adm.inplace_root ? "__jai_parallel_body" : "__jai_parallel_fn"),
+			ctx->root_env->define(engine_access::symbolize(eng, adm.inplace_root ? "__jai_parallel_body" : "__jai_parallel_fn"),
 				script_value::make_function(script_callable_thunk{ &eng, ctx->fn_payload }, &eng));
 			parallel_worker_slot* slot = ctx.get();   // slots live in the pool's unique_ptrs: stable
 			// The interpreter calls these natives; the vm compiles the names to opcodes
-			ctx->root_env->define(eng.symbolize("__jai_parallel_advance"),
+			ctx->root_env->define(engine_access::symbolize(eng, "__jai_parallel_advance"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
 					if (slot->sched.schedule) {
 						if (!slot->sched.advance()) { return script_value(static_cast<script_int>(slot->sched.schedule->n), eng_ptr); }
@@ -3442,13 +3442,13 @@ namespace {
 					const script_int k = args.empty() ? 0 : args[0].deref().as_int();
 					return script_value(k + 1, eng_ptr);
 				}, &eng));
-			ctx->root_env->define(eng.symbolize("__jai_parallel_element"),
+			ctx->root_env->define(engine_access::symbolize(eng, "__jai_parallel_element"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>& args) -> checked_result<script_value> {
 					const size_t which = args.empty() ? 0 : static_cast<size_t>(args[0].deref().as_int());
 					if (which >= slot->cursors.size()) { return script_value(std::monostate{}, eng_ptr); }
 					return slot->cursors[which];
 				}, &eng));
-			ctx->root_env->define(eng.symbolize("__jai_parallel_counted"),
+			ctx->root_env->define(engine_access::symbolize(eng, "__jai_parallel_counted"),
 				script_value::make_function([slot, eng_ptr = &eng](const std::vector<script_value>&) -> checked_result<script_value> {
 					if (!slot->counted || slot->cursors.empty()) { return script_value(std::monostate{}, eng_ptr); }
 					return script_value(static_cast<script_int>(slot->counted->at(slot->cursors.front().element_cursor_index())), eng_ptr);
@@ -3499,7 +3499,7 @@ namespace {
 						ctx.limits.terminal_error, {} };
 				} else if (!r) {
 					ctx.error = parallel_worker_error{ failing(), r.error(),
-						format_error(r, *eng.get_symbolizer()), ctx.limits.terminal_error, {} };
+						format_error(r, *engine_access::get_symbolizer(eng)), ctx.limits.terminal_error, {} };
 				}
 			} catch (const std::exception& e) {
 				ctx.error = parallel_worker_error{ failing(), make_error_code(runtime_error_code::cpp_exception),
@@ -3567,19 +3567,19 @@ namespace {
 	// reached only through a typed container warms exactly like the element's own. Memoized
 	// per fork; deny_type_intern_in_region is the backstop for a shape this misses.
 	void prewarm_region_types(engine& eng, const std::vector<type_info*>& seed) {
-		auto& sym = *eng.get_symbolizer();
+		auto& sym = *engine_access::get_symbolizer(eng);
 		(void)sym.intern("pair");   // map range-for pair name (hit for stdlib engines)
-		auto& registry = eng.get_class_registry();
+		auto& registry = engine_access::get_class_registry(eng);
 		std::vector<type_info*> pending(seed);
-		pending.push_back(eng.get_type_info_int());
-		pending.push_back(eng.get_type_info_float());
-		pending.push_back(eng.get_type_info_string());
-		pending.push_back(eng.get_type_info_bool());
-		pending.push_back(eng.get_type_info_char());
-		pending.push_back(eng.get_type_info_void());
-		pending.push_back(eng.get_type_info_array(nullptr));
-		pending.push_back(eng.get_type_info_map(nullptr, nullptr));
-		eng.get_type_info_reference(nullptr);
+		pending.push_back(engine_access::get_type_info_int(eng));
+		pending.push_back(engine_access::get_type_info_float(eng));
+		pending.push_back(engine_access::get_type_info_string(eng));
+		pending.push_back(engine_access::get_type_info_bool(eng));
+		pending.push_back(engine_access::get_type_info_char(eng));
+		pending.push_back(engine_access::get_type_info_void(eng));
+		pending.push_back(engine_access::get_type_info_array(eng, nullptr));
+		pending.push_back(engine_access::get_type_info_map(eng, nullptr, nullptr));
+		engine_access::get_type_info_reference(eng, nullptr);
 		std::unordered_set<type_info*> seen;
 		std::vector<const class_definition*> classes;
 		std::vector<const class_definition*> pending_classes;
@@ -3606,18 +3606,18 @@ namespace {
 			type_info* t = pending.back();
 			pending.pop_back();
 			if (!t || !seen.insert(t).second) { continue; }
-			eng.get_type_info_reference(t);
+			engine_access::get_type_info_reference(eng, t);
 			// a var declaration takes a handle's rebindable twin and a typed container's dynamic twin; auto and typed
 			// declarations take the plain spelling back
 			if (t->base_type == script_value_type::jai_shared_ptr_type && t->element_type()) {
 				type_info* pointee = t->element_type().get();
-				pending.push_back(t->dynamic_pointee ? eng.get_type_info_shared_ptr(pointee) : eng.get_type_info_shared_ptr_dynamic(pointee));
+				pending.push_back(t->dynamic_pointee ? engine_access::get_type_info_shared_ptr(eng, pointee) : engine_access::get_type_info_shared_ptr_dynamic(eng, pointee));
 			} else if (t->base_type == script_value_type::jai_weak_ptr_type && t->element_type()) {
-				pending.push_back(eng.get_type_info_shared_ptr(t->element_type().get()));   // lock()
+				pending.push_back(engine_access::get_type_info_shared_ptr(eng, t->element_type().get()));   // lock()
 			} else if (t->base_type == script_value_type::jai_array_type) {
-				pending.push_back(t->dynamic_slot ? eng.get_type_info_array(t->element_type().get()) : eng.get_type_info_array_dynamic(t));
+				pending.push_back(t->dynamic_slot ? engine_access::get_type_info_array(eng, t->element_type().get()) : engine_access::get_type_info_array_dynamic(eng, t));
 			} else if (t->base_type == script_value_type::jai_map_type) {
-				pending.push_back(t->dynamic_slot ? eng.get_type_info_map(t->key_type().get(), t->value_type().get()) : eng.get_type_info_map_dynamic(t));
+				pending.push_back(t->dynamic_slot ? engine_access::get_type_info_map(eng, t->key_type().get(), t->value_type().get()) : engine_access::get_type_info_map_dynamic(eng, t));
 			}
 			pending.push_back(t->element_type().get());
 			pending.push_back(t->key_type().get());
@@ -3633,7 +3633,7 @@ namespace {
 	// element-rooted chain seeds the prewarm (over-approximate, warming is free).
 	void seed_classes_by_member(engine& eng, const std::vector<uint64_t>& members, std::vector<type_info*>& seed) {
 		if (members.empty()) { return; }
-		for (const auto& [name, def] : eng.get_class_registry().script_classes_) {
+		for (const auto& [name, def] : engine_access::get_class_registry(eng).script_classes_) {
 			(void)name;
 			if (!def) { continue; }
 			for (uint64_t id : members) {
@@ -3690,7 +3690,7 @@ namespace {
 		for (auto& handle : node.strs()) {
 			if (!handle) { handle = make_strong<script_string>(); continue; }
 			if (handle.use_count() > 1) {
-				eng.execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+				engine_access::execution_limits(eng).memory_charge_deferred(handle->size() + sizeof(script_string));
 				handle = make_strong<script_string>(*handle);
 			}
 		}
@@ -3753,7 +3753,7 @@ namespace {
 			if (reach.whole_read(id)) { return true; }
 			const type_info_ptr t = cd->get_field_declared_type(id);
 			if (!t || t->base_type != script_value_type::jai_object_type || t->type_name.empty()) { return true; }
-			auto nested = eng.get_class_registry().find_script_class(std::string(t->type_name));
+			auto nested = engine_access::get_class_registry(eng).find_script_class(std::string(t->type_name));
 			if (!nested || class_reach_touches_string(nested.get(), reach, eng, depth + 1)) { return true; }
 		}
 		return false;
@@ -3780,7 +3780,7 @@ namespace {
 				if (holds_string && reach.whole_read(id)) { return false; }
 				const type_info_ptr t = k->get_field_declared_type(id);
 				if (t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty()) {
-					auto nested = eng.get_class_registry().find_script_class(std::string(t->type_name));
+					auto nested = engine_access::get_class_registry(eng).find_script_class(std::string(t->type_name));
 					if (!nested || !declared_class_exclusive(nested.get(), reach.below(id), eng, true, visited, depth + 1)) { return false; }
 					continue;
 				}
@@ -3790,7 +3790,7 @@ namespace {
 		};
 		if (!exclusive(cd)) { return false; }
 		if (with_subclasses) {
-			for (const auto& [name, def] : eng.get_class_registry().script_classes_) {
+			for (const auto& [name, def] : engine_access::get_class_registry(eng).script_classes_) {
 				(void)name;
 				if (def && def.get() != cd && def->is_subtype_of(cd->get_name()) && !exclusive(def.get())) { return false; }
 			}
@@ -3837,7 +3837,7 @@ namespace {
 
 	// The slots of an instance whose declared type can reach a refcount, and its runtime-added fields
 	bool normalize_instance_fields(class_instance* inst, const class_definition* cd, engine& eng, const reach_filter& reach, bool unreferenced_array, std::vector<type_info*>* types) {
-		uint64_t& walking_field = eng.parallel_state().element_host_field;
+		uint64_t& walking_field = engine_access::parallel_state(eng).element_host_field;
 		const uint64_t enclosing_field = walking_field;
 		for (const uint32_t slot : cd->handle_bearing_slots()) {
 			const uint64_t id = cd->slot_field(slot);
@@ -3874,7 +3874,7 @@ namespace {
 		case script_value::TYPEID_STRING: {
 			auto& handle = v.unchecked_get_string_storage();
 			if (handle && handle.use_count() > 1) {
-				eng.execution_limits().memory_charge_deferred(handle->size() + sizeof(script_string));
+				engine_access::execution_limits(eng).memory_charge_deferred(handle->size() + sizeof(script_string));
 				handle = make_strong<script_string>(*handle);
 			}
 			return true;
@@ -3921,7 +3921,7 @@ namespace {
 				if (ki == script_value::TYPEID_STRING &&
 				    const_cast<script_value&>(it->first).unchecked_get_string_storage().use_count() > 1) {
 					auto& key_handle = handle->equal_key_storage(it).unchecked_get_string_storage();
-					eng.execution_limits().memory_charge_deferred(key_handle->size() + sizeof(script_string));
+					engine_access::execution_limits(eng).memory_charge_deferred(key_handle->size() + sizeof(script_string));
 					key_handle = make_strong<script_string>(*key_handle);
 				}
 				++it;
@@ -3945,12 +3945,12 @@ namespace {
 			const class_definition* cd = inst->get_class_definition();
 			if (cd && shared_key && host_backed_element(*inst, *cd)) {
 				*shared_key = element_object_key(*inst);
-				inst->region_tag(eng.parallel_state().region_serial);
+				inst->region_tag(engine_access::parallel_state(eng).region_serial);
 				return normalize_instance_fields(inst, cd, eng, reach, false, types);
 			}
 			if (cd && !shared_key && cd->is_cpp_class() && !v.is_shared_ptr_type() && inst->native()) {
 				// a bound C++ value an element holds: its chunk's own once the barrier finds no other element holding the object
-				auto& pstate = eng.parallel_state();
+				auto& pstate = engine_access::parallel_state(eng);
 				pstate.element_host_values.push_back({ element_object_key(*inst), pstate.element_host_field, cd, SIZE_MAX });
 				inst->region_tag(pstate.region_serial);
 				return true;
@@ -4002,7 +4002,7 @@ namespace {
 			const class_definition* cd = inst->get_class_definition();
 			if (cd && host_backed_element(*inst, *cd)) {
 				*shared_key = element_object_key(*inst);
-				inst->region_tag(eng.parallel_state().region_serial);
+				inst->region_tag(engine_access::parallel_state(eng).region_serial);
 				return normalize_instance_fields(inst, cd, eng, reach, false, types);
 			}
 			if (!cd || !cd->flat_value_semantics()) { return false; }
@@ -4103,7 +4103,7 @@ namespace {
 			std::vector<const class_definition*> visited;
 			for (type_info* tag : proof.tags) {
 				const class_definition* cd = (tag && tag->base_type == script_value_type::jai_object_type)
-					? eng.get_class_registry().find_script_class(std::string(tag->type_name)).get() : nullptr;
+					? engine_access::get_class_registry(eng).find_script_class(std::string(tag->type_name)).get() : nullptr;
 				if (!cd) { declared_exclusive = false; continue; }   // shared_ptr-tagged or host slots: the walk decides
 				if (std::find(proof.element_classes.begin(), proof.element_classes.end(), cd) == proof.element_classes.end()) { proof.element_classes.push_back(cd); }
 				if (!declared_class_exclusive(cd, reach, eng, /*with_subclasses*/ false, visited)) { declared_exclusive = false; }
@@ -4123,7 +4123,7 @@ namespace {
 			slot_box(obj_slot& s, engine* e) : slot(s), v(std::move(s.handle), s.tag, e) {}
 			~slot_box() { slot.handle = std::move(v.unchecked_get_object_storage()); slot.tag = v.get_type_info(); }
 		};
-		auto& host_values = eng.parallel_state().element_host_values;
+		auto& host_values = engine_access::parallel_state(eng).element_host_values;
 		for (size_t i = 0; i < n; ++i) {
 			bool ok = false;
 			const void* object = nullptr;
@@ -4166,7 +4166,7 @@ namespace {
 	JAI_NOINLINE std::string shared_element_host_value_text(engine& eng, const parallel_engine_state::element_host_value& first, const parallel_engine_state::element_host_value& second) {
 		std::string result = "elements " + std::to_string(first.element) + " and " + std::to_string(second.element) + " share one '" + first.cls->get_name() + "'";
 		if (first.field != UINT64_MAX) {
-			result += " in field '" + std::string(eng.get_symbolizer()->get_string(first.field)) + "'";
+			result += " in field '" + std::string(engine_access::get_symbolizer(eng)->get_string(first.field)) + "'";
 		}
 		return result + " (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)";
 	}
@@ -4560,7 +4560,7 @@ JAI_NOINLINE checked_result<void> parallel_method_not_admitted(uint64_t name_id)
 }
 
 std::optional<script_value> parallel_chunk_binding(engine& eng, uint64_t name_id) {
-	const parallel_region_table* region = eng.parallel_region_active() ? eng.parallel_state().active_region : nullptr;
+	const parallel_region_table* region = engine_access::parallel_region_active(eng) ? engine_access::parallel_state(eng).active_region : nullptr;
 	const parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
 	if (!chunk || !chunk->definition_env || !*chunk->definition_env) { return std::nullopt; }
 	auto bound = (*chunk->definition_env)->get(name_id);
@@ -4576,8 +4576,8 @@ JAI_NOINLINE checked_result<void> parallel_conversion_not_admitted(uint64_t clas
 // === Shared objects: what a worker reaches through a host call is read through a borrow, never through its handle ===
 
 script_value parallel_object_borrow(const class_instance& source, type_info_ptr tag, engine& eng) {
-	parallel_engine_state& state = eng.parallel_state();
-	if (source.region_tag() != 0 && source.region_tag() == eng.parallel_region_serial()) {
+	parallel_engine_state& state = engine_access::parallel_state(eng);
+	if (source.region_tag() != 0 && source.region_tag() == engine_access::parallel_region_serial(eng)) {
 		throw runtime_error("a host call in a parallel body returned an object one of its iterations owns (an element, or an object a chunk made)");
 	}
 	const parallel_region_table::entry* entry = state.active_region ? state.active_region->find_entry(std::this_thread::get_id()) : nullptr;
@@ -4650,7 +4650,7 @@ script_value parallel_object_copy(const script_value& borrow, const object_borro
 		auto copied = cd->copy_object(native_holder->host_object().get());
 		if (!copied) { throw runtime_error("Failed to copy C++ object of type '" + std::string(source.get_class_name()) + "'. The registered copy function returned null."); }
 		copy->set_native(script_value::make_cpp_object(source.get_class_name(), cd->get_type_id(), copied, &eng));
-		copy->region_tag(eng.parallel_region_serial());
+		copy->region_tag(engine_access::parallel_region_serial(eng));
 	}
 	cd->register_live_instance(copy.get());
 	script_value result = script_value::make_class_object(*cd, std::move(copy), &eng);
@@ -4808,7 +4808,7 @@ checked_result<script_value> call_parallel_host_pin(const parallel_method_pin& p
 		return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 			"C++ method '{0}' of '{1}' is marked serial_method() and cannot be called in a parallel body", name_id, type_id);
 	}
-	if ((pin.mutating_arities & arity_bit) && !(inst && inst->region_tag() != 0 && inst->region_tag() == eng->parallel_region_serial())) {
+	if ((pin.mutating_arities & arity_bit) && !(inst && inst->region_tag() != 0 && inst->region_tag() == engine_access::parallel_region_serial(*eng))) {
 		if (property) {
 			return checked_result<script_value>(make_error_code(runtime_error_code::unsupported_operation),
 				"C++ property '{0}' of '{1}' is stored on an object this parallel body did not make (only an object it made takes stores)", name_id, type_id);
@@ -5021,7 +5021,7 @@ struct region_guard_t {
 	region_guard_t(engine& e, parallel_engine_state& s,
 	               std::vector<std::unique_ptr<parallel_worker_slot>>& workers, size_t n)
 		: eng(e), state(s), slots(workers), count(n),
-		  previous_region(s.active_region), previous_frozen(e.get_symbolizer()->frozen()) {}
+		  previous_region(s.active_region), previous_frozen(engine_access::get_symbolizer(e)->frozen()) {}
 	region_guard_t(const region_guard_t&) = delete;
 	region_guard_t& operator=(const region_guard_t&) = delete;
 
@@ -5029,9 +5029,9 @@ struct region_guard_t {
 		// Accepted work can create live copies even if a later submit throws.
 		// Only a complete post-join drain clears this obligation.
 		state.pending_registration_retry = true;
-		eng.get_symbolizer()->set_frozen(true);
+		engine_access::get_symbolizer(eng)->set_frozen(true);
 		state.active_region = &table;
-		eng.note_parallel_region(true);
+		engine_access::note_parallel_region(eng, true);
 		active = true;
 	}
 	void join() {
@@ -5043,8 +5043,8 @@ struct region_guard_t {
 	void restore() noexcept {
 		if (active) {
 			state.active_region = previous_region;
-			eng.note_parallel_region(previous_region != nullptr);
-			eng.get_symbolizer()->set_frozen(previous_frozen);
+			engine_access::note_parallel_region(eng, previous_region != nullptr);
+			engine_access::get_symbolizer(eng)->set_frozen(previous_frozen);
 			active = false;
 		}
 	}
@@ -5132,7 +5132,7 @@ struct region_run {
 	region_run(engine& a_engine, region_plan& a_plan) :
 		eng(a_engine),
 		plan(a_plan),
-		state(a_engine.parallel_state()),
+		state(engine_access::parallel_state(a_engine)),
 		containers(*a_plan.containers),
 		adm(a_plan.adm),
 		array_value(containers.front().is_reference() ? containers.front().deref() : containers.front()),
@@ -5192,7 +5192,7 @@ struct region_run {
 		}
 		auto global = frame_local ? checked_result<script_value>(*frame_local)
 		            : (plan.capture_env && !method_scope) ? plan.capture_env->get(entry.name_id)
-		                                                   : eng.get_global_environment()->get(entry.name_id);
+		                                                   : engine_access::get_global_environment(eng)->get(entry.name_id);
 		if (!global) {
 			return usage("captured name '" + std::string(entry.name) + "' is not defined at the region barrier");
 		}
@@ -5482,8 +5482,8 @@ struct region_run {
 			if (repeated || !index_node || !target) { continue; }
 			const size_t slot_count = target->source->unchecked_array_node()->size();
 			auto intern_out_of_range = [&](script_int index) {   // the serial loop's out-of-bounds text names the index and the size: a worker raises it with these
-				(void)eng.get_symbolizer()->intern(std::to_string(index));
-				(void)eng.get_symbolizer()->intern(std::to_string(slot_count));
+				(void)engine_access::get_symbolizer(eng)->intern(std::to_string(index));
+				(void)engine_access::get_symbolizer(eng)->intern(std::to_string(slot_count));
 			};
 			if (plan.counted && iw.index_param == 0) {
 				// a monotonic sequence leaves the slots at its start, its end or both: the first texts in element order, jumping the run inside
@@ -5547,7 +5547,7 @@ struct region_run {
 					if (admission_builder::host_method_owner(cd, call.name_id)) { method_of_object = true; continue; }
 					if (!script_method_in_chain(cd, call.name_id)) { continue; }
 					method_of_object = true;
-					detail::receiver_write_analysis analysis(detail::runtime_receiver_view(&eng, eng.get_symbolizer()));
+					detail::receiver_write_analysis analysis(detail::runtime_receiver_view(&eng, engine_access::get_symbolizer(eng)));
 					if (analysis.analyze_methods(cd->get_name(), call.name).writes) {
 						return usage("method '" + std::string(call.name) + "' of '" + cd->get_name() + "' writes its object, and captured '" +
 						             std::string(cap->entry->name) + "' is read-only (write a local copy, or the element)" + at());
@@ -5565,8 +5565,8 @@ struct region_run {
 	checked_result<void> admit_methods() {
 		JAI_REGION_PHASE(methods);
 		const std::vector<const class_definition*>& element_classes = proof.element_classes;
-		auto& registry = eng.get_class_registry();
-		const uint64_t registry_key = eng.class_definition_epoch() * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
+		auto& registry = engine_access::get_class_registry(eng);
+		const uint64_t registry_key = engine_access::class_definition_epoch(eng) * 1000003u + registry.cpp_classes_.size() * 131u + registry.script_classes_.size();
 		if (state.host_method_names_key != registry_key) {
 			admission_builder lister(eng);
 			state.host_method_names.clear();
@@ -5627,7 +5627,7 @@ struct region_run {
 			record_classes.insert(record_classes.end(), captured_classes.begin(), captured_classes.end());
 		}
 		record = admissions->find(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace,
-		                          registry_key, eng.definition_epoch());
+		                          registry_key, engine_access::definition_epoch(eng));
 		if (record && !admission_graph_current(eng, record->builder->adm)) {
 			method_admission_record* stale = record;
 			admissions->records.erase(std::find_if(admissions->records.begin(), admissions->records.end(), [stale](const auto& r) { return r.get() == stale; }));
@@ -5635,7 +5635,7 @@ struct region_run {
 		}
 		const bool admitted_before = record != nullptr;
 		if (!record) {
-			record = &admissions->make(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, eng.definition_epoch(), eng);
+			record = &admissions->make(adm->generation, plan.prefix, record_classes, written_raw, element_methods, program_destructors, plan.inplace, registry_key, engine_access::definition_epoch(eng), eng);
 			record->builder->inplace_root = true;
 			record->builder->prefix = plan.prefix;
 			record->builder->host_names = &state.host_method_names;
@@ -5646,7 +5646,7 @@ struct region_run {
 		// a host call that can return an object hands the body a shared one, whose conversions and operators need their pins
 		const bool host_objects = !adm->static_calls.empty() || std::any_of(adm->host_functions.begin(), adm->host_functions.end(), [&](const auto& f) {
 			script_value_type scalar;
-			return !eng.host_function_result(f.second, scalar);
+			return !engine_access::host_function_result(eng, f.second, scalar);
 		});
 		if (element_methods || !adm->constructions.empty() || !element_classes.empty() || !written_types.empty() ||
 		    !adm->element_method_calls.empty() || !adm->element_reached_members.empty() || !captured_classes.empty() || host_objects) {
@@ -5805,7 +5805,7 @@ struct region_run {
 			if (!shared_method.is_function()) { continue; }
 			detail::parallel_method_pin pin;
 			pin.method_value = script_value::make_function(script_function(shared_method.as_function()), &eng);
-			const std::string_view name = eng.get_symbolizer()->get_string(host.name_id);
+			const std::string_view name = engine_access::get_symbolizer(eng)->get_string(host.name_id);
 			if (const auto* overloads = host.owner->host_overloads(host.name_id)) {
 				for (const auto& overload : *overloads) {
 					if (!overload.is_const) { pin.mutating_arities |= uint64_t(1) << std::min<size_t>(overload.arity, 63); }
@@ -5821,10 +5821,10 @@ struct region_run {
 		slot.method_pins.statics.clear();
 		for (const parallel_admission* source : std::initializer_list<const parallel_admission*>{ adm, &builder.adm }) {
 			for (const auto& call : source->static_calls) {
-				const auto& host_classes = eng.get_class_registry().cpp_classes_;
-				const auto host = host_classes.find(std::string(eng.get_symbolizer()->get_string(call.class_name_id)));
+				const auto& host_classes = engine_access::get_class_registry(eng).cpp_classes_;
+				const auto host = host_classes.find(std::string(engine_access::get_symbolizer(eng)->get_string(call.class_name_id)));
 				const script_value* entry = host == host_classes.end()
-					? namespace_host_entry(eng, eng.get_symbolizer()->get_string(call.class_name_id), eng.get_symbolizer()->get_string(call.name_id)) : nullptr;
+					? namespace_host_entry(eng, engine_access::get_symbolizer(eng)->get_string(call.class_name_id), engine_access::get_symbolizer(eng)->get_string(call.name_id)) : nullptr;
 				if (host == host_classes.end() && !entry) { continue; }
 				const script_value shared_method = entry ? *entry : host->second->static_method_in_chain(call.name_id);
 				if (!shared_method.is_function() || slot.method_pins.find_static(call.class_name_id, call.name_id)) { continue; }
@@ -5835,7 +5835,7 @@ struct region_run {
 				if (slot.method_pins.find_static(read.class_name_id, read.name_id)) { continue; }
 				std::optional<script_value> constant = class_constant_value(eng, read.class_name_id, read.name_id);
 				if (!constant) {
-					return usage("'" + std::string(eng.get_symbolizer()->get_string(read.class_name_id)) + "::" + std::string(eng.get_symbolizer()->get_string(read.name_id)) +
+					return usage("'" + std::string(engine_access::get_symbolizer(eng)->get_string(read.class_name_id)) + "::" + std::string(engine_access::get_symbolizer(eng)->get_string(read.name_id)) +
 					             "' is no longer a constant (a parallel body reads only const statics of a primitive value)");
 				}
 				slot.method_pins.statics.push_back({ read.class_name_id, read.name_id, std::move(*constant) });
@@ -5846,7 +5846,7 @@ struct region_run {
 		for (const auto& made : builder.constructed_classes) {
 			state.faults.checkpoint("region.constructor_pin", k);
 			if (!made.cls->is_script_class()) {   // a host class's constructor (a hybrid's base, or the class itself): a worker copy
-				script_value host_ctor = eng.make_parallel_host_function_copy(made.cls->get_name());
+				script_value host_ctor = engine_access::make_parallel_host_function_copy(eng, made.cls->get_name());
 				slot.pinned_name_ids.push_back(made.name_id);
 				slot.root_env->define(made.name_id, host_ctor);
 				slot.method_env->define(made.name_id, std::move(host_ctor));
@@ -5884,7 +5884,7 @@ struct region_run {
 		if (slot.vm) {
 			for (const auto& body : builder.admitted_bodies) { slot.vm->precompile_parallel_method(*body); }
 			for (const auto& expr : builder.admitted_expressions) { slot.vm->precompile_parallel_expression(expr); }
-			slot.vm->prefold_parallel_reads(eng.fold_epoch());
+			slot.vm->prefold_parallel_reads(engine_access::fold_epoch(eng));
 		}
 		slot.pins_serial = record->serial;
 		return {};
@@ -6029,7 +6029,7 @@ struct region_run {
 					for (const auto& [name_id, name] : builder.adm.host_functions) {
 						if (const script_value* copy = slot->method_env->get_own_value_ptr(name_id)) { slot->vm->adopt_math_alias(name_id, *copy); }
 					}
-					slot->vm->prefold_parallel_reads(eng.fold_epoch());
+					slot->vm->prefold_parallel_reads(engine_access::fold_epoch(eng));
 				}
 			} else if (auto pinned = pin_methods(*slot, k); !pinned) {
 				return pinned;
@@ -6069,19 +6069,19 @@ struct region_run {
 		}
 		for (class_definition* cd : made) {
 			prime_construction_memos(*cd);
-			eng.prewarm_handle_type(*cd);   // a host call hands a chunk the object as a handle of its class
+			engine_access::prewarm_handle_type(eng, *cd);   // a host call hands a chunk the object as a handle of its class
 			seed.push_back(cd->get_type_info().get());
 		}
 		seed_classes_by_member(eng, adm->element_reached_members, seed);
 		seed_classes_by_member(eng, builder.adm.element_reached_members, seed);
 		// the same seed over the same interner, symbols and classes interns nothing new: the last region's prewarm stands
-		const size_t types = eng.interned_type_count(), symbols = eng.get_symbolizer()->size(), classes = eng.get_class_registry().script_classes_.size();
+		const size_t types = engine_access::interned_type_count(eng), symbols = engine_access::get_symbolizer(eng)->size(), classes = engine_access::get_class_registry(eng).script_classes_.size();
 		if (seed != pool->prewarm_seed || types != pool->prewarm_types || symbols != pool->prewarm_symbols || classes != pool->prewarm_classes) {
 			prewarm_region_types(eng, seed);
 			pool->prewarm_seed = std::move(seed);
-			pool->prewarm_types = eng.interned_type_count();
-			pool->prewarm_symbols = eng.get_symbolizer()->size();
-			pool->prewarm_classes = eng.get_class_registry().script_classes_.size();
+			pool->prewarm_types = engine_access::interned_type_count(eng);
+			pool->prewarm_symbols = engine_access::get_symbolizer(eng)->size();
+			pool->prewarm_classes = engine_access::get_class_registry(eng).script_classes_.size();
 		}
 		for (resolved_capture& cap : captures) {
 			if (cap.kind != parallel_capture_kind::stream) { continue; }
@@ -6166,7 +6166,7 @@ struct region_run {
 		}
 		for (auto* ctx : contexts) {
 			for (const auto& [object, owner] : ctx->pending_script_layers) {
-				if (!owner.expired()) { eng.note_script_layer(object, owner); }
+				if (!owner.expired()) { engine_access::note_script_layer(eng, object, owner); }
 			}
 			ctx->pending_script_layers.clear();
 			const cell_counters now = ctx->backend->cells_counters();
@@ -6183,7 +6183,7 @@ struct region_run {
 			std::vector<size_t> at(reports.size(), 0);
 			for (size_t i = next_in_element_order(reports, at); i != SIZE_MAX; i = next_in_element_order(reports, at)) {
 				const deferred_report& r = (*reports[i])[at[i]++];
-				eng.report_script_error(r.message, r.code);
+				engine_access::report_script_error(eng, r.message, r.code);
 			}
 			for (auto* list : reports) { list->clear(); }
 		}
@@ -6193,7 +6193,7 @@ struct region_run {
 			rolled_up += ctx->limits.memory_used;
 		}
 		if (rolled_up) {
-			eng.execution_limits().memory_charge_deferred(rolled_up);
+			engine_access::execution_limits(eng).memory_charge_deferred(rolled_up);
 		}
 		for (const auto& ctx : contexts) {
 			if (ctx->error && (!winner || ctx->error->iteration < winner->iteration)) {
@@ -6217,7 +6217,7 @@ struct region_run {
 				std::rethrow_exception(escaped);
 			}
 			if (winner->terminal) {
-				eng.execution_limits().terminal_error = true;
+				engine_access::execution_limits(eng).terminal_error = true;
 			}
 			std::error_code code = winner->code ? winner->code
 				: make_error_code(runtime_error_code::unsupported_operation);
@@ -6270,7 +6270,7 @@ checked_result<void> run_region(engine& eng, region_plan& plan) {
 // temporary that moves into the output slot (the return-site rule guarantees it aliases
 // nothing fn could name), and nothing else runs per element.
 checked_result<script_value> run_parallel_transform(engine& eng, const std::vector<script_value>& args) {
-	parallel_engine_state& state = eng.parallel_state();
+	parallel_engine_state& state = engine_access::parallel_state(eng);
 	auto [raise, usage] = region_error_doors<checked_result<script_value>>(state);
 	if (state.region_running) {
 		return usage("parallel_transform: nested parallel regions are not supported");
@@ -6324,7 +6324,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 	region_plan plan;
 	if (weight_payload) {
 		std::vector<double> weights(n, 0.0);
-		execution_backend* backend = eng.get_execution_backend();
+		execution_backend* backend = engine_access::get_execution_backend(eng);
 		engine::external_call_guard call_guard(&eng);
 		std::vector<script_value> weight_args;
 		weight_args.emplace_back(std::monostate{}, &eng);
@@ -6333,7 +6333,7 @@ checked_result<script_value> run_parallel_transform(engine& eng, const std::vect
 			auto r = backend->execute_callable(*weight_payload, weight_args);
 			if (!r) {
 				return raise(r.error(), "parallel_transform: weight_fn failed for element " +
-					std::to_string(i) + ": " + format_error(r, *eng.get_symbolizer()));
+					std::to_string(i) + ": " + format_error(r, *engine_access::get_symbolizer(eng)));
 			}
 			if (backend->is_unwinding()) {
 				return r;   // the weight's own throw, which the backend carries on
@@ -6502,8 +6502,8 @@ namespace {
 		}
 		parameter acc = params[0];
 		parameter element = params[1];
-		if (acc.symbol_id == UINT64_MAX) { acc.symbol_id = eng.symbolize(acc.name); }
-		if (element.symbol_id == UINT64_MAX) { element.symbol_id = eng.symbolize(element.name); }
+		if (acc.symbol_id == UINT64_MAX) { acc.symbol_id = engine_access::symbolize(eng, acc.name); }
+		if (element.symbol_id == UINT64_MAX) { element.symbol_id = engine_access::symbolize(eng, element.name); }
 		reduce_slot_map map;
 		map.base = step->local_count;   // step's frame: its two parameters and its locals
 		map.in_place = in_place;
@@ -6525,7 +6525,7 @@ namespace {
 			rctx.discard_value = true;   // the accumulator is already written: a return only ends the element
 		} else {
 			rctx.out_name = std::string_view("__c0");
-			rctx.out_symbol = eng.symbolize("__c0");
+			rctx.out_symbol = engine_access::symbolize(eng, "__c0");
 			rctx.out_slot = map.base;
 			const return_conv conv = classify_return_conv(step->return_type.get());
 			if (conv != return_conv::none && conv != return_conv::ref) { rctx.cast_to = step->return_type; rctx.cast_owner = step->name; }
@@ -6558,7 +6558,7 @@ namespace {
 }
 
 checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<script_value>& args) {
-	parallel_engine_state& state = eng.parallel_state();
+	parallel_engine_state& state = engine_access::parallel_state(eng);
 	auto [raise, usage] = region_error_doors<checked_result<script_value>>(state);
 	if (state.region_running) {
 		return usage("parallel_reduce: nested parallel regions are not supported");
@@ -6587,9 +6587,9 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 	if (step->parameters()[1].is_reference) {
 		return usage("parallel_reduce: step takes its element by value (the elements are the input's, never written)");
 	}
-	execution_backend* backend = eng.get_execution_backend();
+	execution_backend* backend = engine_access::get_execution_backend(eng);
 	const size_t n = xs.unchecked_array_node()->size();
-	const uint64_t xs_id = eng.symbolize("__jai_reduce_xs"), s_id = eng.symbolize("__jai_reduce_s"), n_id = eng.symbolize("__jai_reduce_n");
+	const uint64_t xs_id = engine_access::symbolize(eng, "__jai_reduce_xs"), s_id = engine_access::symbolize(eng, "__jai_reduce_s"), n_id = engine_access::symbolize(eng, "__jai_reduce_n");
 	const parallel_admission* adm = nullptr;
 	std::shared_ptr<function_decl> wrapper;
 	{
@@ -6605,14 +6605,14 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 			}
 			cached.adm = *step_adm;
 			// the chunk loop's own reads ride the captures: the input (a borrow when it holds primitives), the chunk size and the count
-			auto* sym = eng.get_symbolizer();
+			auto* sym = engine_access::get_symbolizer(eng);
 			cached.adm.captures.push_back({ xs_id, sym->get_string(xs_id), true });
 			cached.adm.captures.push_back({ s_id, sym->get_string(s_id), true });
 			cached.adm.captures.push_back({ n_id, sym->get_string(n_id), true });
 			// the graft declares step's parameters and stores its results in the chunk loop: their shapes warm with the region's
 			for (const auto& p : step->parameters()) {
 				if (p.type) { cached.adm.referenced_types.push_back(p.type.get()); }
-				if (const type_info* declared = parameter_declared_ref(p)) { eng.get_type_info_declared_reference(const_cast<type_info*>(declared)); }   // an escaping T& parameter's bind marks its reference with it
+				if (const type_info* declared = parameter_declared_ref(p)) { engine_access::get_type_info_declared_reference(eng, const_cast<type_info*>(declared)); }   // an escaping T& parameter's bind marks its reference with it
 			}
 			if (step->return_type) { cached.adm.referenced_types.push_back(step->return_type.get()); }
 			cached.generation = step_adm->generation;
@@ -6638,7 +6638,7 @@ checked_result<script_value> run_parallel_reduce(engine& eng, const std::vector<
 		}
 	}
 	// the chunk loop's reads resolve beside step's closure, so a lambda's captures provision as parallel_for's do
-	auto capture_env = std::make_shared<environment>(step->closure_env ? step->closure_env : eng.get_global_environment(), eng.get_symbolizer());
+	auto capture_env = std::make_shared<environment>(step->closure_env ? step->closure_env : engine_access::get_global_environment(eng), engine_access::get_symbolizer(eng));
 	capture_env->define(xs_id, xs);
 	capture_env->define(s_id, script_value(static_cast<script_int>(chunk), &eng));
 	capture_env->define(n_id, script_value(static_cast<script_int>(n), &eng));
@@ -6687,7 +6687,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
                                       std::vector<script_value>& containers,
                                       const std::shared_ptr<environment>& capture_env,
                                       const std::function<const script_value*(size_t)>& frame_slot) {
-	parallel_engine_state& state = eng.parallel_state();
+	parallel_engine_state& state = engine_access::parallel_state(eng);
 	auto [raise, usage] = region_error_doors<checked_result<void>>(state);
 	if (state.region_running) {
 		return usage("parallel_for: nested parallel regions are not supported");
@@ -6714,7 +6714,7 @@ checked_result<void> run_parallel_for(engine& eng, parallel_for_stmt* stmt,
 		stmt->body_fn_cache = std::make_shared<script_defined_function>(
 			std::string_view("<parallel_for>"), std::move(loop_params),
 			type_info_ptr(nullptr), std::move(body_block), nullptr, stmt->local_count);
-		stmt->body_fn_cache->unit = eng.current_unit();
+		stmt->body_fn_cache->unit = engine_access::current_unit(eng);
 	}
 	const std::shared_ptr<script_defined_function>& body_fn = stmt->body_fn_cache;
 
@@ -6819,8 +6819,8 @@ void stamp_local_alias_homes(const script_defined_function& fn) {
 
 bool resolve_global_ref_write_callee(engine& eng, const identifier_expr& id, std::vector<ref_write_callee>& out) {
 	uint64_t symbol = id.symbol_id;
-	if (symbol == UINT64_MAX) { symbol = eng.get_symbolizer()->intern(std::string(id.name)); }
-	const script_value* value = eng.get_global_environment()->get_value_ptr(symbol);
+	if (symbol == UINT64_MAX) { symbol = engine_access::get_symbolizer(eng)->intern(std::string(id.name)); }
+	const script_value* value = engine_access::get_global_environment(eng)->get_value_ptr(symbol);
 	if (!value || !value->deref().is_function()) { return false; }
 	const script_callable* payload = payload_from_function_value(value->deref());
 	if (!payload || payload->kind != script_callable::kind_type::function || !payload->fn || payload->fn->name == "<lambda>") { return false; }
@@ -6833,7 +6833,7 @@ bool ref_parameter_takes_temporary(engine& eng, const std::vector<parameter>& pa
 	if (i < params.size() && params[i].is_reference && params[i].is_const) { return true; }   // const T& (internal/const.md)
 	if (i >= params.size() || !params[i].is_reference || !body) { return false; }
 	const parameter& p = params[i];
-	const uint64_t epoch = eng.definition_epoch();
+	const uint64_t epoch = engine_access::definition_epoch(eng);
 	if (p.temporary_epoch != epoch) {
 		if (!may_prove) { return false; }
 		ref_write_analysis analysis([&eng](const identifier_expr& id, std::vector<ref_write_callee>& out) {
@@ -6861,7 +6861,7 @@ const script_string* parallel_borrow_string_source(const script_value& borrow, c
 }
 
 checked_result<script_value> parallel_counted_range(engine& eng, const std::vector<script_value>& args) {
-	parallel_engine_state& state = eng.parallel_state();
+	parallel_engine_state& state = engine_access::parallel_state(eng);
 	auto refuse = [&state](std::error_code code, std::string text) {
 		state.error_text = std::move(text);
 		return checked_result<script_value>(code, std::string_view(state.error_text));
@@ -6880,7 +6880,7 @@ checked_result<script_value> parallel_counted_range(engine& eng, const std::vect
 	const script_int a = v[0], b = v[1], k = v[2];
 	const script_int comparison = args[3].deref().as_int();
 	const script_int step_op = args[4].deref().as_int();   // 1 ++, -1 --, 2 +=, -2 -=
-	script_value result = script_value::make_array(type_info_ptr(eng.get_type_info_int()), &eng);
+	script_value result = script_value::make_array(type_info_ptr(engine_access::get_type_info_int(eng)), &eng);
 	auto& described = result.unchecked_get_array_storage()->ints();
 	described.assign(4, 0);   // [start, up, size, n]: zero elements until the bound holds
 	described[0] = a;

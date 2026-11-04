@@ -68,9 +68,9 @@ public:
 				           "function idle() -> int { return 1; }");
 				const auto run = e->get_variable("run").as_function();
 				const std::vector<script_value> n{ script_value(static_cast<script_int>(20000), e.get()) };
-				const uint64_t samples = e->clock_sample_count();
+				const uint64_t samples = detail::engine_access::clock_sample_count(*e);
 				check_true(e->get_variable("idle").as_function()({}).has_value(), "the idle call runs" + be);
-				check_true(e->clock_sample_count() > samples, "a direct call's entry writes the clock sample" + be);
+				check_true(detail::engine_access::clock_sample_count(*e) > samples, "a direct call's entry writes the clock sample" + be);
 				e->execution_budget(0.0005);
 				auto tripped = run(n);
 				check_true(!tripped.has_value() && std::string(tripped.message()).find("Script execution budget exceeded") != std::string::npos,

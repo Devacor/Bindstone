@@ -21,7 +21,7 @@ inline constexpr std::string_view utf8_range_for_by_ref_text =
 inline error_propagator not_iterable(const script_value& v, engine* eng) {
     return {make_error_code(runtime_error_code::type_mismatch),
             "Cannot iterate {0}: not an array, map, string or coroutine",
-            eng->get_symbolizer()->intern(slot_source_type_name(v, eng)), 0};
+            engine_access::get_symbolizer(*eng)->intern(slot_source_type_name(v, eng)), 0};
 }
 
 } // namespace jai::detail

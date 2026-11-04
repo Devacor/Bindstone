@@ -276,12 +276,12 @@ protected:
         while (index < names.size()) {
             const std::string& prop_name = names[index++];
             if (instance) {
-                if (const script_value* stored = instance->find_script_field_value(eng->symbolize(prop_name))) {
+                if (const script_value* stored = instance->find_script_field_value(detail::engine_access::symbolize(*eng, prop_name))) {
                     out = stored->deref();
                     return true;
                 }
             }
-            uint64_t getter_id = eng->symbolize("_get_" + prop_name);
+            uint64_t getter_id = detail::engine_access::symbolize(*eng, "_get_" + prop_name);
             auto getter = class_def->get_method(getter_id);
             if (getter.type() != script_value_type::jai_function_type) { continue; }
             std::vector<script_value> args = {value};
@@ -293,7 +293,7 @@ protected:
                 }
                 continue;
             }
-            if (eng->backend_unwinding()) {
+            if (detail::engine_access::backend_unwinding(*eng)) {
                 aborted = true;
                 return false;
             }
@@ -738,10 +738,10 @@ private:
                 if constexpr (std::is_base_of_v<script_extensible, elem_type>) {
                     layer = value->jai_script_slot().script_layer();
                 } else {
-                    layer = engine_ref_->script_layer_of(complete);
+                    layer = detail::engine_access::script_layer_of(*engine_ref_, complete);
                 }
             }
-            if (layer && engine_ref_->script_layer_save(layer, hybrid_type, hybrid_fields)) {
+            if (layer && detail::engine_access::script_layer_save(*engine_ref_, layer, hybrid_type, hybrid_fields)) {
                 // A script class deriving elem_type owns this object: $type carries the
                 // script class name, $script its script-level fields, $val the C++ payload
                 // through the dynamic C++ type's registered save (base bytes unchanged).
@@ -883,7 +883,7 @@ protected:
 
     struct read_scope {
         archive_reader_impl* reader;
-        std::optional<engine::load_session> session;
+        std::optional<detail::engine_access::load_session> session;
         explicit read_scope(archive_reader_impl* a_reader) : reader(a_reader) {
             if (reader->read_depth_++ == 0 && reader->engine_ref_) { session.emplace(reader->engine_ref_); }
         }
@@ -1326,7 +1326,7 @@ private:
                 if (!entry && engine_ref_) {
                     // A $type naming a script class deriving a bound C++ base: load through
                     // the base's registry entry, then re-attach the script layer below.
-                    std::string base_name = engine_ref_->script_layer_base_name(poly_type);
+                    std::string base_name = detail::engine_access::script_layer_base_name(*engine_ref_, poly_type);
                     if (!base_name.empty()) {
                         entry = polymorphic_registry::instance().find(base_name);
                         if (entry) {
@@ -1352,7 +1352,7 @@ private:
                     // fields, then post_load. The layer owns the object it constructed, so the pointer aliases the layer.
                     refuse_unrelated();
                     std::shared_ptr<void> constructed_object;
-                    auto constructed = engine_ref_->construct_script_layer_for_load(hybrid_class, constructed_object);
+                    auto constructed = detail::engine_access::construct_script_layer_for_load(*engine_ref_, hybrid_class, constructed_object);
                     if (constructed) {
                         std::string hybrid_fields;
                         if (self()->has_property("$script")) {
@@ -1368,7 +1368,7 @@ private:
                         any_archive_reader wrapper(*self());
                         entry->load_into_fn(wrapper, constructed_object.get());
                         self()->end_object();
-                        auto hydrated = engine_ref_->hydrate_script_layer(constructed, hybrid_fields);
+                        auto hydrated = detail::engine_access::hydrate_script_layer(*engine_ref_, constructed, hybrid_fields);
                         if (!hydrated) {
                             throw serialization_error(engine_ref_->format_error(hydrated));
                         }
@@ -1398,11 +1398,11 @@ private:
                         // Re-attach the script layer. An object with a script_extensible slot owns
                         // it; otherwise the layer owns the object and the returned pointer aliases
                         // the layer, so the layer lives exactly as long as the loaded object.
-                        auto instance = engine_ref_->extend_loaded(hybrid_class, void_ptr, hybrid_fields);
+                        auto instance = detail::engine_access::extend_loaded(*engine_ref_, hybrid_class, void_ptr, hybrid_fields);
                         if (!instance) {
                             throw serialization_error("Failed to reconstruct hybrid script class '" + hybrid_class + "'");
                         }
-                        if (!engine_ref_->script_layer_object_owned(instance)) {
+                        if (!detail::engine_access::script_layer_object_owned(*engine_ref_, instance)) {
                             result = std::shared_ptr<elem_type>(detail::shared_owner_of(instance), static_cast<elem_type*>(adjusted));
                         }
                     }

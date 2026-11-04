@@ -882,11 +882,11 @@ namespace web_text_detail {
 			text = "web::build_query: the value of '" + *a_key + "' is " + (a_value.is_map() ? "a map"
 				: a_value.is_array() ? "an array holding more than text, numbers and bools" : "not text, a number, a bool or an array of them");
 		}
-		return function_result(make_error_code(runtime_error_code::type_mismatch), "{0}", a_engine->park_error_text(text));
+		return function_result(make_error_code(runtime_error_code::type_mismatch), "{0}", detail::engine_access::park_error_text(*a_engine, text));
 	}
 
 	JAI_NOINLINE function_result parse_url_refusal(engine* a_engine, const std::string& a_url) {
-		return function_result(make_error_code(runtime_error_code::invalid_operation), "{0}", a_engine->park_error_text("web::parse_url: '" + a_url + "' has a malformed host or port"));
+		return function_result(make_error_code(runtime_error_code::invalid_operation), "{0}", detail::engine_access::park_error_text(*a_engine, "web::parse_url: '" + a_url + "' has a malformed host or port"));
 	}
 
 } // namespace web_text_detail
@@ -909,10 +909,10 @@ namespace web_text_detail {
 			.method("to_string", &url_record::to_string)
 			.build();
 
-		auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("web")];
+		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "web")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		auto def = [&](const char* name, const char* count_refusal, svt param, svt result, bool follows_first, auto fn, const char* result_class = "") {
-			const uint64_t id = eng_ref.symbolize(name);
+			const uint64_t id = detail::engine_access::symbolize(eng_ref, name);
 			ns->variables[id] = script_value::make_function([fn, count_refusal](const std::vector<script_value>& a_args) -> function_result {
 				if (a_args.size() != 1) { return function_result(make_error_code(runtime_error_code::argument_count_mismatch), count_refusal); }
 				return fn(a_args[0].deref());
@@ -973,7 +973,7 @@ namespace web_text_detail {
 		def("parse_query", "web::parse_query expects 1 argument", svt::jai_string_type, svt::jai_map_type, false, [eng, text_error](const script_value& a_text) -> function_result {
 			if (!a_text.is_text()) { return text_error("web::parse_query expects a string"); }
 			if (!detail::builtin_memory_charge(eng, a_text.unchecked_text().size())) [[unlikely]] { return detail::builtin_memory_cap(eng); }
-			script_value fields = script_value::make_map(eng->get_type_info_string(), eng->get_type_info_string(), eng);
+			script_value fields = script_value::make_map(detail::engine_access::get_type_info_string(*eng), detail::engine_access::get_type_info_string(*eng), eng);
 			auto& out = fields.as_map();
 			for_each_query_pair(a_text.unchecked_text(), [&](std::string&& a_key, std::string&& a_value) {
 				out[script_value(std::move(a_key), eng)] = script_value(std::move(a_value), eng);
@@ -986,7 +986,7 @@ namespace web_text_detail {
 			if (!detail::builtin_memory_charge(eng, a_text.unchecked_text().size() * 2)) [[unlikely]] { return detail::builtin_memory_cap(eng); }
 			std::map<std::string, std::vector<std::string>> grouped;
 			for_each_query_pair(a_text.unchecked_text(), [&](std::string&& a_key, std::string&& a_value) { grouped[std::move(a_key)].push_back(std::move(a_value)); });
-			script_value fields = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+			script_value fields = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
 			auto& out = fields.as_map();
 			for (auto& [key, values] : grouped) { out[script_value(key, eng)] = eng->make_value(std::move(values)); }
 			return fields;

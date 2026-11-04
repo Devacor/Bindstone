@@ -40,7 +40,7 @@ public:
             auto engine = make_engine();
             
             // Register standard conversions
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             // Test function that takes bound_array<int>
             engine->add_function("sum_ints", [](const bound_array<int>& nums) -> int {
@@ -98,7 +98,7 @@ public:
             auto engine = make_engine();
             
             // Register standard conversions
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             // Test function that takes bound_map<string, int>
             engine->add_function("sum_map_values", [](const bound_map<std::string, int>& map) -> int {
@@ -156,7 +156,7 @@ public:
             auto engine = make_engine();
             
             // Register standard conversions first
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             dynamic_binder<Point>(*engine, "Point")
                 .constructor<double, double>()
@@ -220,9 +220,9 @@ public:
             auto engine = make_engine();
             
             // Register only specific conversions we need
-            engine->add_bound_array_conversion<int>();
-            engine->add_bound_array_conversion<std::string>();
-            engine->add_bound_map_conversion<std::string, int>();
+            detail::engine_access::add_bound_array_conversion<int>(*engine);
+            detail::engine_access::add_bound_array_conversion<std::string>(*engine);
+            detail::engine_access::add_bound_map_conversion<std::string, int>(*engine);
             
             // Test function that takes the registered types
             engine->add_function("process_data", [](
@@ -267,7 +267,7 @@ public:
             auto engine = make_engine();
             
             // Register standard conversions with bounds checking
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             // Test function that takes bound_array<int> (should bounds check)
             engine->add_function("sum_ints", [](const bound_array<int>& nums) -> int {
@@ -298,7 +298,7 @@ public:
             auto engine = make_engine();
             
             // Register conversions
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             // Test function that takes bound_array<double> (should accept int/float mix)
             engine->add_function("avg_doubles", [](const bound_array<double>& nums) -> double {

@@ -43,7 +43,7 @@ template <class Engine>
 inline std::string_view class_named_by_dot_receiver(const expression* receiver, const script_value& value, Engine* eng) {
     if (!eng || !receiver || receiver->get_type() != node_type::identifier_expr || !value.is_function()) { return {}; }
     const auto* id = static_cast<const identifier_expr*>(receiver);
-    return eng->get_class_definition(std::string(id->name)) ? id->name : std::string_view{};
+    return detail::engine_access::get_class_definition(*eng, std::string(id->name)) ? id->name : std::string_view{};
 }
 
 inline std::string class_dot_member_text(std::string_view cls, std::string_view member) {

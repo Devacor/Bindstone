@@ -338,10 +338,10 @@ bool binary_archive_writer::begin_value(const script_value& given, std::vector<v
             // Look up version from serialization metadata
             uint32_t version = 1;  // Default version
             if (auto eng = engine_ref_) {
-                const auto* metadata = eng->get_serialization_registry().get_class_metadata(type_name);
+                const auto* metadata = detail::engine_access::get_serialization_registry(*eng).get_class_metadata(type_name);
                 if (metadata) {
                     version = metadata->current_version;
-                } else if (!eng->get_class_definition(type_name)) {
+                } else if (!detail::engine_access::get_class_definition(*eng, type_name)) {
                     // Runtime validation: script classes resolve through the engine's
                     // class registry (default version 1); anything else is unloadable
                     throw serialization_error(
@@ -823,7 +823,7 @@ bool binary_archive_reader::read_or_open(engine* eng, std::vector<value_frame>& 
             if (size > remaining_bytes()) {
                 throw runtime_error("Binary archive map size exceeds remaining data");
             }
-            script_value map_val = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+            script_value map_val = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
             if (size == 0) {
                 out = std::move(map_val);
                 return true;
@@ -842,7 +842,7 @@ bool binary_archive_reader::read_or_open(engine* eng, std::vector<value_frame>& 
                 out = script_value(std::monostate{}, eng);
                 return true;
             }
-            script_value record = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+            script_value record = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
             const_cast<script_map&>(record.as_map()).insert_or_assign(script_value(std::string(weak ? "$ref" : "$id"), eng),
                                                                       script_value(static_cast<script_int>(id), eng));
             if (!handle_ids_read_.insert(id).second) {
@@ -913,7 +913,7 @@ void binary_archive_reader::take_child(engine* eng, value_frame& f, script_value
 script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
     if (f.shape != frame_shape::object) { return std::move(f.built); }
     const uint32_t property_count = static_cast<uint32_t>(f.names.size());
-    const auto* metadata = eng->get_serialization_registry().get_class_metadata(f.type_name);
+    const auto* metadata = detail::engine_access::get_serialization_registry(*eng).get_class_metadata(f.type_name);
     if (metadata && metadata->custom_construct) {
         any_archive_reader any_ar(*this);
         script_value constructed_obj = metadata->custom_construct(any_ar, f.version);
@@ -928,7 +928,7 @@ script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
                         const auto& prop_name = f.names[i];
                         const auto& prop_value = f.values[i];
 
-                        uint64_t setter_id = class_eng->symbolize("_set_" + prop_name);
+                        uint64_t setter_id = detail::engine_access::symbolize(*class_eng, "_set_" + prop_name);
                         auto setter = class_def->get_method(setter_id);
                         if (setter.type() == script_value_type::jai_function_type) {
                             std::vector<script_value> args = {constructed_obj, prop_value};
@@ -937,13 +937,13 @@ script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
                                             stored.error() == make_error_code(runtime_error_code::cpp_exception))) {
                                 throw runtime_error(class_eng->format_error(stored));
                             }
-                            if (class_eng->backend_unwinding()) {
+                            if (detail::engine_access::backend_unwinding(*class_eng)) {
                                 return constructed_obj;   // the setter threw: the in-flight exception leaves the load
                             }
                         }
                     }
 
-                    uint64_t post_load_id = class_eng->symbolize("post_load");
+                    uint64_t post_load_id = detail::engine_access::symbolize(*class_eng, "post_load");
                     auto post_load = class_def->get_method(post_load_id, false);
                     if (post_load.type() == script_value_type::jai_function_type) {
                         std::vector<script_value> args = {
@@ -963,12 +963,12 @@ script_value binary_archive_reader::finish_frame(engine* eng, value_frame& f) {
     }
 
     // the object in from_json's shape, {"$type": T, "$val": {members}}
-    script_value members = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    script_value members = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& member_map = const_cast<script_map&>(members.as_map());
     for (uint32_t i = 0; i < property_count; ++i) {
         member_map.insert_or_assign(script_value(f.names[i], eng), std::move(f.values[i]));
     }
-    script_value record = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    script_value record = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& record_map = const_cast<script_map&>(record.as_map());
     record_map.insert_or_assign(script_value(std::string("$type"), eng), script_value(f.type_name, eng));
     record_map.insert_or_assign(script_value(std::string("$val"), eng), std::move(members));

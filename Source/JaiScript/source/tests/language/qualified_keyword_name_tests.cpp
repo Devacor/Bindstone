@@ -170,9 +170,9 @@ public:
 				.property("default", &promise::settled)
 				.static_method("new", &promise::make_new)
 				.build();
-			auto& ns = eng->script_namespaces()[eng->symbolize("net")];
+			auto& ns = detail::engine_access::script_namespaces(*eng)[detail::engine_access::symbolize(*eng, "net")];
 			if (!ns) { ns = std::make_shared<script_namespace_data>(); }
-			ns->variables[eng->symbolize("catch")] = script_value(static_cast<script_int>(17), eng.get());
+			ns->variables[detail::engine_access::symbolize(*eng, "catch")] = script_value(static_cast<script_int>(17), eng.get());
 			check_eq(std::string("8|4|k|41|17|true|10"), run(eng, R"(
 				auto p = HostPromise();
 				string out = to_string(p.catch(4)) + "|" + to_string(p.default) + "|" + p.delete("k") + "|" + to_string(HostPromise::new()) + "|" + to_string(net::catch);

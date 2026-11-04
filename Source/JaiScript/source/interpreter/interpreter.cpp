@@ -9570,7 +9570,7 @@ interpreter_coroutine_state::~interpreter_coroutine_state() {
         }
     }
     if (eng) {
-        for (size_t f = saved_call_stack.size(); f-- > 0;) { eng->release_suspended_values(saved_call_stack[f].locals.data(), saved_call_stack[f].locals.size()); }
+        for (size_t f = saved_call_stack.size(); f-- > 0;) { detail::engine_access::release_suspended_values(*eng, saved_call_stack[f].locals.data(), saved_call_stack[f].locals.size()); }
     }
     if (shared.empty()) { return; }
     saved_call_stack.clear();

@@ -49,7 +49,7 @@ public:
 			nested_tree tree(800);
 			// stamped checked-clean: the load is the structural reader and the proof pass, and the bite saves back the same stamp
 			const auto bytes = detail::serialize_jaibite(tree.declarations,
-				*eng->get_symbolizer(), eng->registration_fingerprint(), detail::jaibite_checked_clean_flags());
+				*detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint(), detail::jaibite_checked_clean_flags());
 			{
 				auto loaded = eng->jaibite_load_bytes(bytes);
 				check_eq(bytes, loaded.save_bytes());
@@ -63,7 +63,7 @@ public:
 			for (size_t depth : {size_t(250), size_t(800)}) {
 				nested_tree tree(depth);
 				const auto bytes = detail::serialize_jaibite(tree.declarations,
-					*author->get_symbolizer(), author->registration_fingerprint(), detail::jaibite_checked_clean_flags());
+					*detail::engine_access::get_symbolizer(*author), author->registration_fingerprint(), detail::jaibite_checked_clean_flags());
 				struct probe_state {
 					backend_type backend;
 					engine& author;
@@ -86,7 +86,7 @@ public:
 						check_eq(script_int(42), eng->execute("40 + 2;").as_int());
 						try {
 							check_eq(state.bytes, detail::serialize_jaibite(state.tree.declarations,
-								*state.author.get_symbolizer(), state.author.registration_fingerprint(), detail::jaibite_checked_clean_flags()));
+								*detail::engine_access::get_symbolizer(state.author), state.author.registration_fingerprint(), detail::jaibite_checked_clean_flags()));
 						} catch (const jai::runtime_error& error) {
 							check_eq(std::string("jaibite: AST nesting too deep"), std::string(error.what()));
 						}

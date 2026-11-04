@@ -26,9 +26,9 @@ public:
 		if (workers) { e->parallel_thread_count(workers); }
 		outcome result;
 		try { result.defs = e->execute(defs).to_string(); } catch (const std::exception& ex) { result.defs = std::string("throw:") + ex.what(); }
-		const unsigned long long before = e->cells_counters().entries;
+		const unsigned long long before = detail::engine_access::cells_counters(*e).entries;
 		try { result.run = e->execute(run).to_string(); } catch (const std::exception& ex) { result.run = std::string("throw:") + ex.what(); }
-		result.entries = e->cells_counters().entries - before;
+		result.entries = detail::engine_access::cells_counters(*e).entries - before;
 		return result;
 	}
 
@@ -189,12 +189,12 @@ array<int> xs = []; for (int i = 0; i < 600; ++i) { xs.push(i); }
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
 				stdlib::register_all(*e);
 				e->execute("function dot(int n) -> float { float s = 0.0; for (int i = 0; i < n; ++i) { s = s + i * 0.5; } return s; }");
-				const unsigned long long before = e->cells_counters().entries;
+				const unsigned long long before = detail::engine_access::cells_counters(*e).entries;
 				script_value fn = e->get_variable("dot");
 				double total = 0.0;
 				for (int k = 0; k < 30; ++k) { total += fn.as_function()({ script_value(script_int{100 + k}, e.get()) }).value().as_float(); }
 				check_eq(std::string("98030.000000"), std::to_string(total), std::string(vm ? "vm" : "interpreter") + ": the host's calls");
-				if (vm) { check(e->cells_counters().entries - before >= 30, "each host call enters the loop's block"); }
+				if (vm) { check(detail::engine_access::cells_counters(*e).entries - before >= 30, "each host call enters the loop's block"); }
 			}
 		});
 	}

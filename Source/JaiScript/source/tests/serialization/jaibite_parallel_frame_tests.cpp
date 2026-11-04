@@ -12,10 +12,10 @@ public:
     jaibite_parallel_frame_tests() : suite("Jaibite Parallel Frames") {}
 
     static std::vector<declaration_ptr> parse(engine& eng, const std::string& source) {
-        auto templates = eng.get_registered_template_types();
-        lexer lex(source, eng.get_symbolizer());
+        auto templates = detail::engine_access::get_registered_template_types(eng);
+        lexer lex(source, detail::engine_access::get_symbolizer(eng));
         auto tokens = lex.tokenize();
-        parser parser(tokens, eng.get_symbolizer(), &eng, templates);
+        parser parser(tokens, detail::engine_access::get_symbolizer(eng), &eng, templates);
         auto result = parser.parse();
         check_true(bool(result), "parallel-frame fixture must parse normally");
         return std::move(result.value());
@@ -46,11 +46,11 @@ public:
                     ++changed;
                 }
             },
-            {}, eng->get_symbolizer()
+            {}, detail::engine_access::get_symbolizer(*eng)
         };
         walk.stmt(loop->body);
         check_eq(size_t(1), changed, "one foreign identifier must be corrupted");
-        const auto bytes = detail::serialize_jaibite(declarations, *eng->get_symbolizer(), eng->registration_fingerprint());
+        const auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint());
         bool rejected = false;
         std::string unexpected;
         try { eng->jaibite_load_bytes(bytes); }
@@ -74,7 +74,7 @@ public:
             auto declarations = parse(*eng,
                 "int f(int outer_value) { parallel_for (auto& item : [1]) { item += outer_value; } return 0; } 0;");
             // stamped checked-clean so the load is the structural reader alone, and the bite saves back the same stamp
-            const auto bytes = detail::serialize_jaibite(declarations, *eng->get_symbolizer(), eng->registration_fingerprint(),
+            const auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint(),
                                                          detail::jaibite_checked_clean_flags());
             auto loaded = eng->jaibite_load_bytes(bytes);
             check_eq(bytes, loaded.save_bytes(), "valid SIZE_MAX outer symbol lookup must survive unchanged");
@@ -98,12 +98,12 @@ public:
                         ++captures;
                     }
                 },
-                {}, eng->get_symbolizer()
+                {}, detail::engine_access::get_symbolizer(*eng)
             };
             walk.stmt(lambda->body);
             check_eq(size_t(1), captures);
             // stamped checked-clean so the load is the structural reader alone, and the bite saves back the same stamp
-            const auto bytes = detail::serialize_jaibite(declarations, *eng->get_symbolizer(), eng->registration_fingerprint(),
+            const auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint(),
                                                          detail::jaibite_checked_clean_flags());
             auto loaded = eng->jaibite_load_bytes(bytes);
             check_eq(bytes, loaded.save_bytes(), "parallel boundary must not block an inner lambda's immediate-parent capture");

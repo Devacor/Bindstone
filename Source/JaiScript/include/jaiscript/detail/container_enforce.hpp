@@ -224,7 +224,7 @@ namespace jai::detail {
 
 	// The byte range kernel's verdict (array<uint8> / array<int8> elements), the one text every store path raises
 	inline error_propagator byte_range_error(engine* eng, bool is_signed, script_int v) {
-		auto* sym = eng ? eng->get_symbolizer() : nullptr;
+		auto* sym = eng ? engine_access::get_symbolizer(*eng) : nullptr;
 		const auto code = make_error_code(runtime_error_code::array_element_type_mismatch);
 		if (!sym || sym->frozen()) {
 			return error_propagator{ code, is_signed ? int8_range_text_slotless : uint8_range_text_slotless, 0, 0 };
@@ -243,7 +243,7 @@ namespace jai::detail {
 
 	// The one text for an element that does not belong, interned the way the backends do
 	JAI_NOINLINE inline error_propagator container_mismatch_error(engine* eng, const std::string& offending, const std::string& expected) {
-		auto* sym = eng ? eng->get_symbolizer() : nullptr;
+		auto* sym = eng ? engine_access::get_symbolizer(*eng) : nullptr;
 		return error_propagator{ make_error_code(runtime_error_code::array_element_type_mismatch), container_boundary_mismatch_text,
 		                         sym ? sym->intern(offending) : 0, sym ? sym->intern(expected) : 0 };
 	}
@@ -287,7 +287,7 @@ namespace jai::detail {
 	inline type_info_ptr object_element_value_tag(const script_value& object, engine* eng) {
 		if (type_info_ptr own = object_element_own_tag(object, eng)) { return own; }
 		const auto* holder = object.peek_object_holder();
-		return holder ? type_info_ptr{eng->get_type_info_object(holder->type_id())} : type_info_ptr{};
+		return holder ? type_info_ptr{engine_access::get_type_info_object(*eng, holder->type_id())} : type_info_ptr{};
 	}
 
 	// A handle stored into a class-typed element: the element takes a copy of the object the handle names, as
@@ -465,14 +465,14 @@ namespace jai::detail {
 	}
 	inline type_info* typed_kind_element_type(script_array::kind_t kind, engine* eng) {
 		switch (kind) {
-			case script_array::kind_t::i64: return eng->get_type_info_int();
-			case script_array::kind_t::f64: return eng->get_type_info_float();
-			case script_array::kind_t::b8: return eng->get_type_info_bool();
-			case script_array::kind_t::c8: return eng->get_type_info_char();
-			case script_array::kind_t::u8: return eng->get_type_info_uint8();
-			case script_array::kind_t::i8: return eng->get_type_info_int8();
-			case script_array::kind_t::str: return eng->get_type_info_string();
-			default: return eng->get_type_info_math(script_array::vec_value_type(kind));
+			case script_array::kind_t::i64: return engine_access::get_type_info_int(*eng);
+			case script_array::kind_t::f64: return engine_access::get_type_info_float(*eng);
+			case script_array::kind_t::b8: return engine_access::get_type_info_bool(*eng);
+			case script_array::kind_t::c8: return engine_access::get_type_info_char(*eng);
+			case script_array::kind_t::u8: return engine_access::get_type_info_uint8(*eng);
+			case script_array::kind_t::i8: return engine_access::get_type_info_int8(*eng);
+			case script_array::kind_t::str: return engine_access::get_type_info_string(*eng);
+			default: return engine_access::get_type_info_math(*eng, script_array::vec_value_type(kind));
 		}
 	}
 
@@ -488,7 +488,7 @@ namespace jai::detail {
 		const script_array* node = array_value.unchecked_array_node();
 		if (node->is_typed()) {
 			if (node->kind() == script_array::kind_t::obj) { return array_value.get_type_info(); }   // the tag names the class
-			return type_info_ptr{eng->get_type_info_array(typed_kind_element_type(node->kind(), eng))};
+			return type_info_ptr{engine_access::get_type_info_array(*eng, typed_kind_element_type(node->kind(), eng))};
 		}
 		const auto& elems = node->values();
 		if (elems.empty()) {
@@ -512,13 +512,13 @@ namespace jai::detail {
 		}
 		type_info* element = nullptr;
 		switch (first) {
-			case script_value::TYPEID_INT: element = eng->get_type_info_int(); break;
-			case script_value::TYPEID_FLOAT: element = eng->get_type_info_float(); break;
-			case script_value::TYPEID_STRING: element = eng->get_type_info_string(); break;
-			case script_value::TYPEID_BOOL: element = eng->get_type_info_bool(); break;
-			default: element = eng->get_type_info_char(); break;
+			case script_value::TYPEID_INT: element = engine_access::get_type_info_int(*eng); break;
+			case script_value::TYPEID_FLOAT: element = engine_access::get_type_info_float(*eng); break;
+			case script_value::TYPEID_STRING: element = engine_access::get_type_info_string(*eng); break;
+			case script_value::TYPEID_BOOL: element = engine_access::get_type_info_bool(*eng); break;
+			default: element = engine_access::get_type_info_char(*eng); break;
 		}
-		return type_info_ptr{eng->get_type_info_array(element)};
+		return type_info_ptr{engine_access::get_type_info_array(*eng, element)};
 	}
 
 	// Map twin of the array rule: an `auto` key or value slot
@@ -551,11 +551,11 @@ namespace jai::detail {
 		};
 		auto type_of_kind = [&](size_t kind) -> type_info* {
 			switch (kind) {
-				case script_value::TYPEID_INT: return eng->get_type_info_int();
-				case script_value::TYPEID_FLOAT: return eng->get_type_info_float();
-				case script_value::TYPEID_STRING: return eng->get_type_info_string();
-				case script_value::TYPEID_BOOL: return eng->get_type_info_bool();
-				default: return eng->get_type_info_char();
+				case script_value::TYPEID_INT: return engine_access::get_type_info_int(*eng);
+				case script_value::TYPEID_FLOAT: return engine_access::get_type_info_float(*eng);
+				case script_value::TYPEID_STRING: return engine_access::get_type_info_string(*eng);
+				case script_value::TYPEID_BOOL: return engine_access::get_type_info_bool(*eng);
+				default: return engine_access::get_type_info_char(*eng);
 			}
 		};
 		type_info* key_type = key_auto ? nullptr : declared->key_type().get();
@@ -587,8 +587,8 @@ namespace jai::detail {
 		if (!key_type && !value_type) {
 			return nullptr;   // nothing primitive to infer: stays as declared (dynamic)
 		}
-		return type_info_ptr{eng->get_type_info_map(key_type ? key_type : eng->get_type_info_any(),
-		                                            value_type ? value_type : eng->get_type_info_any())};
+		return type_info_ptr{engine_access::get_type_info_map(*eng, key_type ? key_type : engine_access::get_type_info_any(*eng),
+		                                            value_type ? value_type : engine_access::get_type_info_any(*eng))};
 	}
 
 	// The one message both backends raise at a failed boundary (byte-identical errors).

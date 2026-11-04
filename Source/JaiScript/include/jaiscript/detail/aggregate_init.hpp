@@ -85,7 +85,7 @@ inline aggregate_plan plan_aggregate(const script_class_definition& cls, const s
 // {0} = the class, {1} = the counts; a parallel worker's frozen symbolizer keeps the count-free shape
 inline error_propagator too_many_initializers(uint64_t class_id, size_t field_count, size_t argc, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::argument_count_mismatch);
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (symbols && !symbols->frozen()) {
         const std::string counts = "it has " + std::to_string(field_count) + (field_count == 1 ? " field" : " fields") +
                                    ", got " + std::to_string(argc);

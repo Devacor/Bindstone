@@ -15,7 +15,7 @@
 #include <algorithm>
 
 namespace jai::detail::utf8 {
-    inline bool may_cache(const builtin_method_context& ctx) { engine* e = ctx.get_engine(); return e && !e->parallel_region_active(); }
+    inline bool may_cache(const builtin_method_context& ctx) { engine* e = ctx.get_engine(); return e && !engine_access::parallel_region_active(*e); }
 }
 
 namespace jai::detail {

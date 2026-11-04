@@ -83,7 +83,7 @@ bool class_definition::flat_value_semantics() const {
     if (!engine_) {
         return false;
     }
-    const uint64_t epoch = engine_->class_definition_epoch();
+    const uint64_t epoch = detail::engine_access::class_definition_epoch(*engine_);
     if (flat_value_epoch_ == epoch) {
         return flat_value_cached_;
     }
@@ -97,7 +97,7 @@ bool class_definition::flat_over_host_values() const {
     if (!engine_) {
         return false;
     }
-    const uint64_t epoch = engine_->class_definition_epoch();
+    const uint64_t epoch = detail::engine_access::class_definition_epoch(*engine_);
     if (flat_host_epoch_ != epoch) {
         std::vector<const class_definition*> in_progress;
         flat_host_cached_ = flat_value_semantics_impl(in_progress, true);
@@ -107,7 +107,7 @@ bool class_definition::flat_over_host_values() const {
 }
 
 const std::vector<uint32_t>& class_definition::handle_bearing_slots() const {
-    const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
+    const uint64_t epoch = engine_ ? detail::engine_access::class_definition_epoch(*engine_) : 0;
     if (handle_slots_epoch_ == epoch && engine_) { return handle_slots_cached_; }
     handle_slots_cached_.clear();
     const uint32_t n = field_slot_count();
@@ -137,7 +137,7 @@ bool class_definition::type_can_hold_string(const type_info_ptr& t, std::vector<
     case script_value_type::jai_map_type: return type_can_hold_string(t->key_type(), in_progress) || type_can_hold_string(t->value_type(), in_progress);
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) { return true; }
-        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
+        auto nested = detail::engine_access::get_class_registry(*engine_).find_script_class(std::string(t->type_name));
         if (!nested) { return true; }
         for (const class_definition* visiting : in_progress) { if (visiting == nested.get()) { return false; } }
         in_progress.push_back(nested.get());
@@ -157,7 +157,7 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
     if (!t || t->base_type == script_value_type::jai_any_type) {
         // an untyped slot holds any value: it runs what some script class runs
         if (mode == 0 || !engine_) { return true; }
-        for (const auto& entry : engine_->get_class_registry().script_classes_) {
+        for (const auto& entry : detail::engine_access::get_class_registry(*engine_).script_classes_) {
             const class_definition* cls = entry.second.get();
             if (cls && ((mode == 1 && cls->chain_declares_destructor(*engine_)) || cls->find_copy_constructor_level())) { return true; }
         }
@@ -176,7 +176,7 @@ bool class_definition::type_tree_runs_destructor(const type_info_ptr& t, std::ve
         return mode != 2 && (type_tree_runs_destructor(t->key_type(), in_progress, mode) || type_tree_runs_destructor(t->value_type(), in_progress, mode));
     case script_value_type::jai_object_type: {
         if (!engine_ || t->type_name.empty()) { return true; }
-        auto nested = engine_->get_class_registry().find_script_class(std::string(t->type_name));
+        auto nested = detail::engine_access::get_class_registry(*engine_).find_script_class(std::string(t->type_name));
         return nested && nested->value_tree_runs_destructor_impl(in_progress, mode);   // a host class runs no script destructor
     }
     default: return true;
@@ -192,7 +192,7 @@ bool class_definition::value_tree_runs_destructor_impl(std::vector<const class_d
         runs = type_tree_runs_destructor(get_field_declared_type(slot_field(slot)), in_progress, mode);
     }
     if (!runs && engine_) {
-        for (const auto& entry : engine_->get_class_registry().script_classes_) {
+        for (const auto& entry : detail::engine_access::get_class_registry(*engine_).script_classes_) {
             const class_definition* other = entry.second.get();
             if (other && other != this && other->derives_from(this) && other->value_tree_runs_destructor_impl(in_progress, mode)) { runs = true; break; }
         }
@@ -205,7 +205,7 @@ namespace {
 // A death on a parallel region's chunk: the destructor runs on the chunk's own backend in its method sandbox (the barrier admitted
 // it), and what a failing one reports waits for the join
 bool run_destructor_body_in_region(engine& eng, class_instance* instance, const class_definition* level, const script_value& body) {
-    const detail::parallel_region_table* region = eng.parallel_state().active_region;
+    const detail::parallel_region_table* region = detail::engine_access::parallel_state(eng).active_region;
     const detail::parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
     if (!chunk || !chunk->backend || !chunk->definition_env || !level->is_script_class()) { return false; }
     const auto* shared = body.is_function() ? body.as_function().target<script_method_dispatch>() : nullptr;
@@ -220,7 +220,7 @@ bool run_destructor_body_in_region(engine& eng, class_instance* instance, const 
     const std::vector<script_value> arguments{ script_value::make_class_object(*level, self.handle(), &eng) };
     try {
         auto ran = chunk->backend->execute_method_from(dispatch, ast, arguments[0], arguments, 1);
-        if (!ran && chunk->deferred_reports) { chunk->deferred_reports->push_back(detail::deferred_report{ chunk->element(), ran.error(), format_error(ran, *eng.get_symbolizer()) }); }
+        if (!ran && chunk->deferred_reports) { chunk->deferred_reports->push_back(detail::deferred_report{ chunk->element(), ran.error(), format_error(ran, *detail::engine_access::get_symbolizer(eng)) }); }
     } catch (...) {
     }
     return true;
@@ -228,11 +228,11 @@ bool run_destructor_body_in_region(engine& eng, class_instance* instance, const 
 }
 
 void class_definition::run_destructor_body(class_instance* instance, const class_definition* level, const script_value& body) const {
-    if (engine_->parallel_region_active()) [[unlikely]] {
+    if (detail::engine_access::parallel_region_active(*engine_)) [[unlikely]] {
         if (run_destructor_body_in_region(*engine_, instance, level, body)) { return; }
     }
-    detail::release_machine* m = engine_->release_machine_here();
-    engine::run_pin pin(engine_);   // a destructor runs where a release happens: a sleep in it blocks
+    detail::release_machine* m = detail::engine_access::release_machine_here(*engine_);
+    detail::engine_access::run_pin pin(engine_);   // a destructor runs where a release happens: a sleep in it blocks
     std::vector<script_value> arguments;
     if (m && !m->spare_arguments.empty()) {
         arguments = std::move(m->spare_arguments.back());
@@ -243,7 +243,7 @@ void class_definition::run_destructor_body(class_instance* instance, const class
         arguments.push_back(script_value::make_class_object(*level, self.handle(), engine_));
         auto ran = body.as_function()(arguments);
         arguments.clear();
-        if (!ran) { engine_->report_script_error(format_error(ran, *engine_->get_symbolizer()), ran.error()); }   // reported, never propagated
+        if (!ran) { detail::engine_access::report_script_error(*engine_, format_error(ran, *detail::engine_access::get_symbolizer(*engine_)), ran.error()); }   // reported, never propagated
     } catch (...) {
         arguments.clear();
     }
@@ -286,7 +286,7 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
                                       const class_definition* constructed) const {
     if (!level) { return; }
     detail::release_sync sync(engine_);
-    detail::release_machine* m = engine_ ? engine_->release_machine_here() : nullptr;
+    detail::release_machine* m = engine_ ? detail::engine_access::release_machine_here(*engine_) : nullptr;
     std::vector<detail::release_action> actions;
     if (m && !m->spare_actions.empty()) {
         actions = std::move(m->spare_actions.back());
@@ -307,7 +307,7 @@ void class_definition::destroy_levels(class_instance* instance, const class_defi
 
 void class_instance::defer_serial_native() noexcept {
     if (!class_def_ || !class_def_->serial_only_chain()) { return; }
-    const detail::parallel_region_table* region = owner_->parallel_state().active_region;
+    const detail::parallel_region_table* region = detail::engine_access::parallel_state(*owner_).active_region;
     const detail::parallel_region_table::entry* chunk = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
     if (!chunk || !chunk->deferred_releases) { return; }
     const size_t element = chunk->cursors && !chunk->cursors->empty() ? chunk->cursors->front().element_cursor_index() : SIZE_MAX;
@@ -320,7 +320,7 @@ void class_instance::defer_serial_native() noexcept {
 
 void class_instance::release_fields() noexcept {
     engine* eng = class_def_->get_engine();
-    detail::release_machine* m = eng ? eng->release_machine_here() : nullptr;
+    detail::release_machine* m = eng ? detail::engine_access::release_machine_here(*eng) : nullptr;
     if (!m) { return; }
     if (!m->deferring && m->depth < m->depth_limit) {
         ++m->depth;
@@ -389,7 +389,7 @@ void strong_last_release<class_instance>::run(class_instance* object, control_bl
     // An instance's death runs its destructors, the class's registry and the release machine on the engine: dropping the
     // last handle on another thread while the engine runs is a race (a value belongs to its engine's thread)
     if (const class_definition* def = object->get_class_definition(); def && def->get_engine()) {
-        assert(def->get_engine()->debug_releases_here() && "a script instance died on another thread while its engine runs");
+        assert(engine_access::debug_releases_here(*def->get_engine()) && "a script instance died on another thread while its engine runs");
     }
 #endif
     if (std::shared_ptr<class_definition>* pin = object_block::definition_pin(cb); pin && *pin) {
@@ -402,7 +402,7 @@ void strong_last_release<class_instance>::run(class_instance* object, control_bl
 void instance_deleter::operator()(class_instance* ptr) const noexcept {
     if (!ptr) { return; }
     engine* eng = def->get_engine();
-    release_machine* m = eng ? eng->release_machine_here() : nullptr;
+    release_machine* m = eng ? engine_access::release_machine_here(*eng) : nullptr;
     const class_definition* constructed = ptr->construction_pending() ? ptr->constructed_level() : nullptr;
     const bool run_chain = !ptr->construction_pending() || constructed;
     if (m && (m->deferring || m->depth >= m->depth_limit)) {
@@ -500,7 +500,7 @@ void release_drive(engine& eng, release_machine& m, size_t mark) {
 }
 
 release_sync::release_sync(engine* eng) noexcept {
-    release_machine* m = eng ? &eng->release_machine() : nullptr;
+    release_machine* m = eng ? &engine_access::release_machine(*eng) : nullptr;
     if (!m || !m->deferring) { return; }
     m_ = m;
     const size_t step_mark = m->step_mark;
@@ -518,7 +518,7 @@ release_sync::~release_sync() {
 // A copy fact under the destructor fact's epoch (value_tree_runs_destructor refreshes it and forgets the copy facts): mode 1 and 2
 // walk the value tree, mode 0 asks the chain for a copy constructor
 bool class_definition::copy_fact(uint8_t fact, uint8_t mode) const {
-    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    const uint64_t epoch = engine_ ? detail::engine_access::definition_epoch(*engine_) : 0;
     if (destructor_tree_epoch_ != epoch || !engine_) { value_tree_runs_destructor(); }
     if (!(copy_facts_ & fact)) {
         bool answer;
@@ -616,10 +616,10 @@ bool call_returns_class_value(const call_expr& call, engine& eng) {
     if (decl) { return by_value(decl->return_type.get()); }
     if (call.callee && call.callee->get_type() == node_type::identifier_expr) {
         const auto& name = static_cast<const identifier_expr*>(call.callee.get())->name;
-        if (auto cls = eng.get_class_definition(std::string(name)); cls && cls->is_script_class()) { return true; }   // a construction
+        if (auto cls = engine_access::get_class_definition(eng, std::string(name)); cls && cls->is_script_class()) { return true; }   // a construction
         // a program-scope function the checker left unresolved here: its declared return type
-        if (const auto id = eng.get_symbolizer()->find(name)) {
-            if (const script_value* fn = eng.get_global_environment()->get_value_ptr(*id); fn && fn->is_function()) {
+        if (const auto id = engine_access::get_symbolizer(eng)->find(name)) {
+            if (const script_value* fn = engine_access::get_global_environment(eng)->get_value_ptr(*id); fn && fn->is_function()) {
                 const auto* thunk = fn->unchecked_as_function().target<script_callable_thunk>();
                 if (thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn) { return by_value(thunk->payload.fn->return_type.get()); }
             }
@@ -637,9 +637,9 @@ strong_ptr<class_instance> copy_construct_instance(const class_instance& source,
         made->construction_pending(true);
         return made;
     };
-    execution_backend* backend = eng ? eng->calling_backend() : nullptr;
+    execution_backend* backend = eng ? engine_access::calling_backend(*eng) : nullptr;
     if (!backend || backend->is_unwinding()) { return inert(); }
-    auto constructor = eng->get_global_environment()->get(level->get_name());
+    auto constructor = engine_access::get_global_environment(*eng)->get(level->get_name());
     if (!constructor || !constructor.value().is_function()) { return inert(); }
     // the source binds the constructor's const T& as itself: a reference, never a copy
     std::vector<script_value> args{ script_value::make_cell_reference(script_value::make_class_object(*cls, source.weak_from_this().lock(), eng), eng) };
@@ -664,7 +664,7 @@ strong_ptr<class_instance> copy_construct_instance(const class_instance& source,
 }
 
 bool class_definition::value_tree_runs_destructor() const {
-    const uint64_t epoch = engine_ ? engine_->definition_epoch() : 0;
+    const uint64_t epoch = engine_ ? detail::engine_access::definition_epoch(*engine_) : 0;
     if (destructor_tree_epoch_ == epoch && engine_) { return destructor_tree_cached_; }
     std::vector<const class_definition*> in_progress;
     destructor_tree_cached_ = value_tree_runs_destructor_impl(in_progress);
@@ -674,7 +674,7 @@ bool class_definition::value_tree_runs_destructor() const {
 }
 
 const std::vector<uint32_t>& class_definition::string_reachable_slots() const {
-    const uint64_t epoch = engine_ ? engine_->class_definition_epoch() : 0;
+    const uint64_t epoch = engine_ ? detail::engine_access::class_definition_epoch(*engine_) : 0;
     if (string_slots_epoch_ == epoch && engine_) { return string_slots_cached_; }
     string_slots_cached_.clear();
     std::vector<const class_definition*> in_progress;
@@ -743,9 +743,9 @@ bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const
             return false;
         }
         const std::string name(t->type_name);
-        auto nested = engine_->get_class_registry().find_script_class(name);
+        auto nested = detail::engine_access::get_class_registry(*engine_).find_script_class(name);
         if (!nested && host_values) {
-            const auto& hosts = engine_->get_class_registry().cpp_classes_;
+            const auto& hosts = detail::engine_access::get_class_registry(*engine_).cpp_classes_;
             return hosts.find(name) != hosts.end();   // a bound C++ class held by value: its object is proven by identity
         }
         return nested && nested->flat_value_semantics_impl(in_progress, host_values);
@@ -768,7 +768,7 @@ checked_result<void> class_registry::register_script_class(std::shared_ptr<scrip
     validate_class_hierarchy(class_def->get_name());
 
     if (first_definition) {
-        if (engine* eng = class_def->get_engine()) { eng->note_class_shape_change(); }
+        if (engine* eng = class_def->get_engine()) { detail::engine_access::note_class_shape_change(*eng); }
     }
     return {};
 }
@@ -817,7 +817,7 @@ namespace {
     std::vector<reloaded_object> live_fields_before_reload(engine& eng, const class_definition& cls, const std::vector<uint64_t>& fields) {
         std::vector<reloaded_object> result;
         if (fields.empty()) { return result; }
-        for (const auto& [name, script_class] : eng.get_class_registry().script_classes_) {
+        for (const auto& [name, script_class] : engine_access::get_class_registry(eng).script_classes_) {
             if (!script_class || !script_class->derives_from(&cls)) { continue; }
             for (const auto& weak : script_class->registered_instances()) {
                 auto instance = weak.lock();
@@ -903,7 +903,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
 
     auto [class_var_id, class_var_name_view] = symbols->get_class_var_id_with_view(decl->name_id);
 
-    auto global_env = eng ? eng->get_global_environment() : nullptr;
+    auto global_env = engine_access::get_global_environment(eng);
     if (!global_env) {
         return checked_result<void>(make_error_code(runtime_error_code::engine_destroyed));
     }
@@ -1285,11 +1285,11 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         }
     }
 
-    auto register_result = eng->get_class_registry().register_script_class(class_def);
+    auto register_result = engine_access::get_class_registry(*eng).register_script_class(class_def);
     if (!register_result) {
         return register_result;
     }
-    eng->bump_class_definition_epoch();
+    engine_access::bump_class_definition_epoch(*eng);
     warn_shadowed_handle_builtins(*eng, *class_def);
 
     global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng));
@@ -1307,7 +1307,7 @@ void class_definition::add_method(const std::string& name, script_function func,
         has_property_getters_ = true;
     }
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     // A first user _get_/_set_ (or one replacing the synthesized accessor) changes the field
     // ladder: armed field proofs and member caches must miss
     const bool accessor_set_changes = (name.rfind("_get_", 0) == 0 || name.rfind("_set_", 0) == 0) &&
@@ -1352,7 +1352,7 @@ void class_definition::add_static_method(const std::string& name, script_functio
         has_property_getters_ = true;
     }
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     add_static_method(name_id, std::move(func), arity);
 }
 
@@ -1363,7 +1363,7 @@ void class_definition::add_static_method(const std::string& name, script_functio
 void class_definition::add_static_method(uint64_t name_id, script_function func, size_t arity) {
     const auto* writeback = func.target<host_writeback_function>();
     const uint64_t writeback_mask = writeback ? writeback->mask : 0;
-    std::string qualified = arity == SIZE_MAX ? std::string() : name_ + "::" + std::string(engine_->get_symbolizer()->get_string(name_id));
+    std::string qualified = arity == SIZE_MAX ? std::string() : name_ + "::" + std::string(detail::engine_access::get_symbolizer(*engine_)->get_string(name_id));
     script_function call = [func, eng = engine_, arity, qualified = std::move(qualified)](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
         std::vector<script_value> scratch;
         try {
@@ -1388,7 +1388,7 @@ void class_definition::add_field(std::string_view name, const script_value& defa
     auto eng = engine_;
     if (!eng) return;
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
 
     field_defaults_.insert_or_assign(name_id, default_value);
@@ -1402,7 +1402,7 @@ void class_definition::add_field(const std::string& name) {
     auto eng = engine_;
     if (!eng) return;
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     if (std::find(bound_field_order_.begin(), bound_field_order_.end(), name_id) == bound_field_order_.end()) { bound_field_order_.push_back(name_id); }
     field_defaults_.insert_or_assign(name_id, script_value(std::monostate{}, engine_));
     field_defaults_cache_valid_ = false; ++defaults_version_;
@@ -1515,7 +1515,7 @@ void class_definition::rebuild_field_slots() const {
 }
 
 void class_definition::intern_name() const {
-    const auto [id, view] = engine_->get_symbolizer()->intern_with_view(name_);
+    const auto [id, view] = detail::engine_access::get_symbolizer(*engine_)->intern_with_view(name_);
     interned_name_id_ = id;
     interned_name_ = view;
 }

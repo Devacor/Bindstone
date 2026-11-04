@@ -59,12 +59,12 @@ namespace stdlib {
 		for (const auto& [key,value] : a_right.unchecked_as_map()) { entries.emplace_back(key,value); }
 		for (const auto& [key,value] : entries) {
 			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type && key.type() != keyType->base_type) {
-				return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", engine->symbolize(detail::container_value_type_name(key)), engine->symbolize(detail::type_info_display_name(keyType)));
+				return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(key)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(keyType)));
 			}
 			script_value output = value.clone_element();
 			if (valueType && valueType->base_type != script_value_type::jai_any_type && valueType->base_type != script_value_type::jai_null_type) {
 				if (!detail::container_element_compatible(output, valueType, engine)) {
-					return checked_result<script_value>(make_error_code(runtime_error_code::map_value_type_mismatch), "Cannot store '{0}' in map value of type '{1}'", engine->symbolize(detail::container_value_type_name(output)), engine->symbolize(detail::type_info_display_name(valueType)));
+					return checked_result<script_value>(make_error_code(runtime_error_code::map_value_type_mismatch), "Cannot store '{0}' in map value of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(output)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(valueType)));
 				}
 				auto converted = detail::convert_container_element(engine, output, valueType);
 				if (!converted) { return converted.error_value(); }
@@ -76,7 +76,7 @@ namespace stdlib {
 	}
 
     void register_container_types(engine& eng) {
-        engine::library_registration library(eng);
+        detail::engine_access::library_registration library(eng);
         dynamic_binder<script_pair>(eng, "pair")
             .constructor<>()  // Will automatically use engine-aware constructor
             .constructor<script_value, script_value>()
@@ -91,7 +91,7 @@ namespace stdlib {
                 engine* eng = args.empty() ? nullptr : owner;
                 const auto ec = make_error_code(runtime_error_code::argument_count_mismatch);
                 if (!eng) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got 0"); }
-                auto* symbols = eng->get_symbolizer();
+                auto* symbols = detail::engine_access::get_symbolizer(*eng);
                 if (symbols->frozen()) { return checked_result<script_value>(ec, "merge() expects exactly 2 arguments"); }
                 return checked_result<script_value>(ec, "merge() expects exactly 2 arguments, got {0}", symbols->intern(std::to_string(args.size())));
             }
@@ -109,7 +109,7 @@ namespace jai::detail {
 namespace {
 // A pair a parallel chunk mints or re-aims is the chunk's own: a store through it lands in a map the chunk owns
 void tag_region_pair(class_instance& a_instance, engine* a_engine) {
-    if (a_engine && a_engine->parallel_region_active()) [[unlikely]] { a_instance.region_tag(a_engine->parallel_region_serial()); }
+    if (a_engine && engine_access::parallel_region_active(*a_engine)) [[unlikely]] { a_instance.region_tag(engine_access::parallel_region_serial(*a_engine)); }
 }
 }
 
@@ -139,7 +139,7 @@ script_value mint_map_entry_pair(const std::shared_ptr<class_definition>& pair_c
 }
 
 std::shared_ptr<class_definition> map_entry_pair_class(engine& eng) {
-    return eng.get_class_definition_by_type(std::type_index(typeid(stdlib::script_pair)));
+    return engine_access::get_class_definition_by_type(eng, std::type_index(typeid(stdlib::script_pair)));
 }
 
 } // namespace jai::detail

@@ -157,7 +157,7 @@ public:
 			for (int i = 1; i < 100000; ++i) { acc = std::make_shared<binary_expr>(loc, acc, plus, std::make_shared<literal_expr>(loc, script_value(int64_t(1), e.get()))); }
 			{
 				std::vector<declaration_ptr> program{std::make_shared<expression_decl>(loc, acc)};
-				jai::vm::vm_compiler compiler(e->get_symbolizer());
+				jai::vm::vm_compiler compiler(detail::engine_access::get_symbolizer(*e));
 				const auto compiled = compiler.compile_program(program);
 				size_t adds = 0;
 				for (const auto& ins : compiled->code) { if (ins.op == jai::vm::opcode::op_binary) { ++adds; } }
@@ -487,8 +487,8 @@ public:
 		test("needs_frame_env_trigger_table", [this]() {
 			auto e = vm_engine();
 			auto body_needs_env = [&](const char* script) -> bool {
-				auto* symbolizer = e->get_symbolizer();
-				auto templates = e->get_registered_template_types();
+				auto* symbolizer = detail::engine_access::get_symbolizer(*e);
+				auto templates = detail::engine_access::get_registered_template_types(*e);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -548,8 +548,8 @@ public:
 			// the call disqualifies (fail-closed).
 			auto e = vm_engine();
 			auto body_reusable = [&](const char* script) -> bool {
-				auto* symbolizer = e->get_symbolizer();
-				auto templates = e->get_registered_template_types();
+				auto* symbolizer = detail::engine_access::get_symbolizer(*e);
+				auto templates = detail::engine_access::get_registered_template_types(*e);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -2453,7 +2453,7 @@ public:
 				used = true;
 				return (a + b) * 2;
 			});
-			e->set_has_custom_numeric_operators(true);
+			detail::engine_access::set_has_custom_numeric_operators(*e, true);
 			check_eq((int64_t)16, e->execute("var a = 5; var b = 3; a + b").as_int());
 			check_true(used);
 		});
@@ -2517,9 +2517,9 @@ public:
 
 		test("disassembler_smoke", [this]() {
 			auto e = vm_engine();
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			std::string script = "var x = 1; while (x < 10) { x = x + 1; } x;";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -2541,9 +2541,9 @@ public:
 
 		test("disassembler_return_convert_only_inside_try", [this]() {
 			auto e = vm_engine();
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			auto listing_of = [&](const char* script) {
-				auto templates = e->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*e);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -2926,9 +2926,9 @@ public:
 					"class Box { int v = 0; }\nvar b = Box();\n"
 					"function f(var& x, int d) { if (d < -1) { return; } if (d == 0) { x = x + 1; return; } f(b.v, d - 1); }");
 				std::string run = "b.v = 0; for (int rep = 0; rep < 10; ++rep) { f(b.v, " + std::to_string(depth) + "); } b.v;";
-				const uint64_t before = e->get_symbolizer()->env_hops();
+				const uint64_t before = detail::engine_access::get_symbolizer(*e)->env_hops();
 				auto result = e->execute(run);
-				const uint64_t hops = e->get_symbolizer()->env_hops() - before;
+				const uint64_t hops = detail::engine_access::get_symbolizer(*e)->env_hops() - before;
 				check_eq((int64_t)10, result.as_int(), "descent workload result");
 				return hops;
 			};
@@ -2953,9 +2953,9 @@ public:
 				e->execute(
 					"[[warn_mode]]; function plain(int d) -> int { if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s; } return plain(d - 1); }\n"
 					"function framed(int d) -> int { auto keep = [&]() -> int { return d; }; if (d == 0) { int s = 0; for (int k = 0; k < 10; ++k) { try { s += nope; } catch (e) { s += 1; } } return s + keep() * 0; } return framed(d - 1); }");
-				const uint64_t before = e->get_symbolizer()->env_hops();
+				const uint64_t before = detail::engine_access::get_symbolizer(*e)->env_hops();
 				auto result = e->execute(std::string(fn) + "(" + std::to_string(depth) + ");");
-				const uint64_t hops = e->get_symbolizer()->env_hops() - before;
+				const uint64_t hops = detail::engine_access::get_symbolizer(*e)->env_hops() - before;
 				check_eq((int64_t)10, result.as_int(), std::string(fn) + ": every miss raises and is caught");
 				return hops;
 			};
@@ -4338,7 +4338,7 @@ public:
 					std::string thrown;
 					try { e->execute(std::string("run(6);")); } catch (const std::exception& ex) { thrown = ex.what(); }
 					size_t old_frames = 0;
-					for (const auto& fr : e->get_execution_backend()->last_stack_trace()) { if (fr.function == "work") { ++old_frames; } }
+					for (const auto& fr : detail::engine_access::get_execution_backend(*e)->last_stack_trace()) { if (fr.function == "work") { ++old_frames; } }
 					out[idx] = warm + " " + std::to_string(thrown.find("old3:1002") != std::string::npos) + " " + std::to_string(old_frames) + " " +
 					           e->execute(std::string("to_string(run(3))")).to_string();
 				} catch (const std::exception& ex) { out[idx] = std::string("ERROR: ") + ex.what(); }
@@ -5057,9 +5057,9 @@ public:
 			// global read inside a body - as a plain load AND as a fused operand); slotted
 			// params/locals leave none; call sites pin their call_expr.
 			auto e = vm_engine();
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			std::string script = "var g = 1; int f(int n) { int m = n + g; return h(m, g); } g = g + 1; f(g);";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -5300,9 +5300,9 @@ public:
 			{
 				auto vm = vm_engine();
 				jai::stdlib::register_all(*vm);
-				auto* symbolizer = vm->get_symbolizer();
+				auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 				const char* script = "array<int> G = [1, 2, 3, 4]; var f = function(int w) { int y = 1; int x = 0; int v = G[y * w + x]; int q = G[x]; return v + q; }; var z = 0;";
-				auto templates = vm->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*vm);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -5317,9 +5317,9 @@ public:
 			{
 				auto vm = vm_engine();
 				jai::stdlib::register_all(*vm);
-				auto* symbolizer = vm->get_symbolizer();
+				auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 				const char* script = "var f = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { int t = i * 2; acc = acc + t; int c = 5; int d = c; } return acc; }; var z = 0;";
-				auto templates = vm->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*vm);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -5498,9 +5498,9 @@ public:
 			// appends through the builtin's kernel, everything else replays the unfused call.
 			// The interpreter is the oracle: every case must produce the same text.
 			auto vm = vm_engine();
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			auto listing_of = [&](const char* script) {
-				auto templates = vm->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*vm);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);

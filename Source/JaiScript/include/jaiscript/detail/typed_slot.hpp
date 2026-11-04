@@ -39,10 +39,10 @@ namespace jai::detail {
     // region's pin (an unpinned one raises what the region refused), never through the class's shared method value
     inline std::optional<checked_result<script_value>> call_conversion_method(const script_value& v, const class_definition* def, const char* name,
                                                                               engine* eng) {
-        const uint64_t id = eng->get_symbolizer()->intern(name);
+        const uint64_t id = engine_access::get_symbolizer(*eng)->intern(name);
         const script_value* method = def ? def->method_ptr(id) : nullptr;
         if (!method || !method->is_function()) { return std::nullopt; }
-        if (auto pinned = eng->parallel_operator_call(v, id, {})) { return pinned; }
+        if (auto pinned = engine_access::parallel_operator_call(*eng, v, id, {})) { return pinned; }
         return make_bound_method(v, *method).as_function()(std::vector<script_value>{});
     }
 
@@ -84,7 +84,7 @@ namespace jai::detail {
                 if (!result) {
                     return result.error_value();
                 }
-                if (auto* backend = eng->calling_backend(); backend && backend->is_unwinding()) {
+                if (auto* backend = engine_access::calling_backend(*eng); backend && backend->is_unwinding()) {
                     // the method threw: the in-flight exception wins, the payload is never inspected
                     return slot_conversion::converted_to(std::move(result.value()));
                 }
@@ -108,7 +108,7 @@ namespace jai::detail {
                 const bool object_src = ri == script_value::TYPEID_OBJECT ||
                                         (ri == script_value::TYPEID_CPP_BOUND && src == script_value_type::jai_null_type);
                 const verdict no = object_src ? verdict::reject_class : verdict::reject;
-                auto conv_class_def = eng ? eng->get_class_definition(target_class_name) : nullptr;
+                auto conv_class_def = engine_access::get_class_definition(eng, target_class_name);
                 // Ruling: a defaulted-param ctor is NOT a converting ctor - implicit conversion needs a
                 // TRUE 1-param ctor (a delegating overload opts in); host classes: the dispatcher decides
                 if (conv_class_def && !has_true_single_param_conversion_ctor(conv_class_def)) {
@@ -153,7 +153,7 @@ namespace jai::detail {
                 if (!eng) {
                     return slot_conversion::of(no);
                 }
-                const uint64_t class_name_id = eng->symbolize(target_class_name);
+                const uint64_t class_name_id = engine_access::symbolize(*eng, target_class_name);
                 script_value ctor(std::monostate{}, eng);
                 if (auto chunk_ctor = parallel_chunk_binding(*eng, class_name_id)) {   // a chunk constructs with its own constructor
                     if (!chunk_ctor->is_function()) {
@@ -161,7 +161,7 @@ namespace jai::detail {
                     }
                     ctor = std::move(*chunk_ctor);
                 } else {
-                    auto global = eng->get_global_environment();
+                    auto global = engine_access::get_global_environment(*eng);
                     auto ctor_result = global ? global->get(class_name_id) : checked_result<script_value>(script_value(std::monostate{}, eng));
                     if (!ctor_result || !ctor_result.value().is_function()) {
                         return slot_conversion::of(no);
@@ -169,7 +169,7 @@ namespace jai::detail {
                     ctor = std::move(ctor_result.value());
                 }
                 std::vector<script_value> ctor_args;
-                execution_backend* owner = consumable && !consumable->is_reference() ? eng->calling_backend() : nullptr;
+                execution_backend* owner = consumable && !consumable->is_reference() ? engine_access::calling_backend(*eng) : nullptr;
                 if (owner) {
                     ctor_args.push_back(std::move(*consumable));
                 } else {

@@ -187,7 +187,7 @@ public:
                 return (a + b) * 2;
             });
             // Global numeric operators are opt-in: fast paths stay active until enabled
-            eng->set_has_custom_numeric_operators(true);
+            detail::engine_access::set_has_custom_numeric_operators(*eng, true);
 
             // Literal operands constant-fold at parse time, so use variables
             auto result = eng->execute("var a = 5; var b = 3; a + b");

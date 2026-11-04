@@ -1099,7 +1099,7 @@ public:
             for (uint32_t limit : {1000000u, 0u, 1u, 3u}) {
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
-                eng->release_recursion_limit(limit);
+                detail::engine_access::release_recursion_limit(*eng, limit);
                 check_eq(std::string("d5:3d4:3d3:3d2:3d1:3d0:3|0"), eng->execute("string LOG = \"\";" + program).as_string(),
                          "limit " + std::to_string(limit));
             }
@@ -1162,7 +1162,7 @@ public:
             for (uint32_t limit : {1000000u, 0u, 1u, 2u, 5u}) {
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
-                eng->release_recursion_limit(limit);
+                detail::engine_access::release_recursion_limit(*eng, limit);
                 std::string got;
                 try {
                     got = eng->execute("string LOG = \"\";" + shapes).as_string();

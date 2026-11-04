@@ -3657,7 +3657,7 @@ public:
             auto a = make_engine();
             auto b = make_engine();
             const script_value stamped = a->make_value(script_int{7});
-            check_true(stamped.get_type_info().get() == a->get_type_info_int(), "an engine-made int carries the engine's int type");
+            check_true(stamped.get_type_info().get() == detail::engine_access::get_type_info_int(*a), "an engine-made int carries the engine's int type");
             check_eq((uintptr_t)0, reinterpret_cast<uintptr_t>(stamped.get_type_info().get()) % k_value_tag_alignment, "a stamp is tag-aligned");
             check_true(stamped.raw_storage_index() == script_value::TYPEID_INT && stamped.payload_engine() == nullptr, "a scalar names no engine");
             const script_value null_with_engine(std::monostate{}, a.get());
@@ -3673,10 +3673,10 @@ public:
             check_true(array.value().payload_engine() == a.get() && map.value().payload_engine() == a.get() && fn.value().payload_engine() == a.get(),
                 "a container and a function record their engine");
             check_true(array.get_engine() == a.get(), "a held value keeps its engine");
-            check_true(a->owns_value(stamped) && !b->owns_value(stamped) && !b->owns_value(array.value()), "ownership: the stamp's or the payload's engine");
+            check_true(detail::engine_access::owns_value(*a, stamped) && !detail::engine_access::owns_value(*b, stamped) && !detail::engine_access::owns_value(*b, array.value()), "ownership: the stamp's or the payload's engine");
             b->add_global("n", a->execute("int k = 3; k;"));
             const held_value imported = b->get_variable("n");
-            check_true(imported.get_type_info().get() == b->get_type_info_int(), "an import restamps with the receiving engine's type");
+            check_true(imported.get_type_info().get() == detail::engine_access::get_type_info_int(*b), "an import restamps with the receiving engine's type");
             check_eq((int64_t)3, imported.as_int());
         });
 
@@ -3761,18 +3761,18 @@ public:
             auto e = make_engine();
             const auto on_other_thread = [&]() {
                 bool result = false;
-                std::thread other([&]() { result = e->debug_releases_here(); });
+                std::thread other([&]() { result = detail::engine_access::debug_releases_here(*e); });
                 other.join();
                 return result;
             };
             bool engine_thread = false;
             bool other_thread = true;
             e->add_function("probe", [&]() {
-                engine_thread = e->debug_releases_here();
+                engine_thread = detail::engine_access::debug_releases_here(*e);
                 other_thread = on_other_thread();
             });
             std::atomic<int> refused_on_region_threads{0};
-            e->add_function("probe_region", [&](int64_t) { if (!e->debug_releases_here()) { ++refused_on_region_threads; } });
+            e->add_function("probe_region", [&](int64_t) { if (!detail::engine_access::debug_releases_here(*e)) { ++refused_on_region_threads; } });
             check_true(on_other_thread(), "an idle engine may be used, and its values dropped, on any thread");
             e->execute("probe();");
             check_true(engine_thread, "the executing thread releases");
@@ -4468,7 +4468,7 @@ public:
     flat_value_class_tests() : suite("Flat Value Class") {}
 
     bool flat_of(std::shared_ptr<jai::engine>& e, const char* name) {
-        auto cls = e->get_class_registry().find_script_class(name);
+        auto cls = detail::engine_access::get_class_registry(*e).find_script_class(name);
         check_not_null(cls.get());
         return cls->flat_value_semantics();
     }
@@ -4570,7 +4570,7 @@ public:
             auto r = e->execute("pair(1, 2)");
             auto holder = r.get_object_holder();
             check_not_null(holder.get());
-            auto pair_cls = e->get_class_definition(holder->type_id());
+            auto pair_cls = detail::engine_access::get_class_definition(*e, holder->type_id());
             check_not_null(pair_cls.get());
             check_false(pair_cls->flat_value_semantics());
         });

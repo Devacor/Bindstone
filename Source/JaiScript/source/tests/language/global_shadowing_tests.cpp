@@ -49,7 +49,7 @@ public:
 				e.execute("set(7);");
 				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G) + \" \" + to_string(g())").as_string();
 				e.execute("var G = 9;");
-				auto host = e.get_global_environment()->get("G");
+				auto host = detail::engine_access::get_global_environment(e)->get("G");
 				out += "|host=" + std::to_string(host ? host.value().as_int() : -1);
 				out += "|" + e.execute("to_string(f()) + \" \" + to_string(g()) + \" \" + to_string(h()) + \" \" + to_string(G)").as_string();
 				return out;
@@ -91,7 +91,7 @@ public:
 				e.execute("var G = 1; function f() { return ::G; }");
 				e.execute("int G = 5;");
 				std::string out = e.execute("to_string(f())").as_string();
-				auto host = e.get_global_environment()->get("G");
+				auto host = detail::engine_access::get_global_environment(e)->get("G");
 				out += "|" + std::to_string(host ? host.value().as_int() : -1);
 				e.add_global("G", script_value(static_cast<int64_t>(9), &e));
 				out += "|" + e.execute("to_string(f()) + \" \" + to_string(G)").as_string();
@@ -122,7 +122,7 @@ public:
 				e.add_global("Q", script_value(static_cast<int64_t>(8), &e));
 				out += "|" + e.execute("inline int Q = 1; function q() { return Q; } to_string(Q) + \" \" + to_string(q())").as_string();
 				e.execute("inline int H; H = 7;");
-				auto host = e.get_global_environment()->get("H");
+				auto host = detail::engine_access::get_global_environment(e)->get("H");
 				out += "|" + e.execute("inline int H; to_string(H)").as_string() + " " + std::to_string(host ? host.value().as_int() : -1);
 				out += " " + e.execute("function h() { return H; } h();").to_string();
 				return out;

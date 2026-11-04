@@ -39,7 +39,7 @@ namespace stdlib {
         std::shared_ptr<void> object;
         const auto* entry = serialization::polymorphic_registry::instance().find(base_name);
         if (entry && entry->load_fn) {
-            script_value host_part = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+            script_value host_part = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
             auto& host_map = const_cast<script_map&>(host_part.as_map());
             for (const auto& [key, value] : map) {
                 host_map.emplace(key, value);
@@ -67,7 +67,7 @@ namespace stdlib {
             throw runtime_error("Failed to reconstruct hybrid script class '" + class_def->get_name() + "'");
         }
         layer->set_native(script_value::make_cpp_object(base_name, base.get_type_id(), object, eng));
-        eng->get_execution_backend()->apply_field_initializers(layer, class_def);
+        detail::engine_access::get_execution_backend(*eng)->apply_field_initializers(layer, class_def);
         return script_value::make_class_object(*class_def, layer, eng);
     }
 
@@ -75,13 +75,13 @@ namespace stdlib {
     // are recorded where hot reload records a retype
     inline void record_load_retype(engine* eng, const class_definition& def, uint64_t id, field_migration_outcome outcome,
                                    const script_value& saved, const script_value* result) {
-        eng->record_field_migration(def.get_name(), id, outcome, &saved, result);
+        detail::engine_access::record_field_migration(*eng, def.get_name(), id, outcome, &saved, result);
     }
 
     // One saved member onto a constructed object (the rebuilder and load_saved_fields share it); false when a store threw
     // into the backend
     bool store_saved_member(engine* eng, const script_value& instance, class_instance& inst, class_definition& def,
-                            const engine::load_field& field, script_value&& v) {
+                            const detail::engine_access::load_field& field, script_value&& v) {
         const uint64_t member_id = field.id;
         if (const script_value* stored = inst.find_script_field_value(member_id)) {
             const type_info_ptr declared = def.get_field_declared_type(member_id);
@@ -109,8 +109,8 @@ namespace stdlib {
             // a binding refuses a value of another type by throwing: a saved value its current value's type would not take
             // is a retype (the constructed value stays); a value it would take is the host's own error
             script_value current(std::monostate{}, eng);
-            const std::string prop_name(eng->get_symbolizer()->get_string(member_id));
-            if (script_value getter = inst.get_method(eng->symbolize("_get_" + prop_name), false); getter.is_function()) {
+            const std::string prop_name(detail::engine_access::get_symbolizer(*eng)->get_string(member_id));
+            if (script_value getter = inst.get_method(detail::engine_access::symbolize(*eng, "_get_" + prop_name), false); getter.is_function()) {
                 if (auto read = getter.as_function()({ instance })) { current = read.value().try_unwrap_transparent_wrapper().value_or(read.value()); }
             }
             const type_info_ptr kind = current.is_null() ? nullptr : current.get_type_info();
@@ -120,7 +120,7 @@ namespace stdlib {
             }
             record_load_retype(eng, def, member_id, field_migration_outcome::reset, v, current.is_null() ? nullptr : &current);
         }
-        return !eng->backend_unwinding();
+        return !detail::engine_access::backend_unwinding(*eng);
     }
 
     void load_saved_fields(engine* eng, const script_value& instance, const script_map& saved,
@@ -129,8 +129,8 @@ namespace stdlib {
         class_definition* def = inst ? inst->get_class_definition() : nullptr;
         if (!def) { return; }
         // a load in progress for the whole walk: the field order stays cached while nested objects load
-        engine::load_session session(eng);
-        for (const engine::load_field& field : eng->load_field_order(*def)) {
+        detail::engine_access::load_session session(eng);
+        for (const detail::engine_access::load_field& field : detail::engine_access::load_field_order(*eng, *def)) {
             auto it = saved.find(field.key);
             if (it == saved.end()) { continue; }
             script_value v = transform ? transform(it->second) : it->second.clone();
@@ -145,7 +145,7 @@ namespace stdlib {
 	inline script_value script_handle_of(engine* eng, script_value object) {
 		const auto type = object.get_type_info();
 		if (object.is_object() && type && type->base_type == script_value_type::jai_object_type) {
-			object.set_type_info(eng->get_type_info_shared_ptr(type.get()));
+			object.set_type_info(detail::engine_access::get_type_info_shared_ptr(*eng, type.get()));
 		}
 		return object;
 	}
@@ -183,7 +183,7 @@ namespace stdlib {
 		id = id_value->as_int();
 		has_payload = keys.val != nullptr;
 		if (keys.type) {
-			payload = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+			payload = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
 			auto& object = const_cast<script_map&>(payload.as_map());
 			object.emplace(script_value(std::string("$type"), eng), *keys.type);
 			object.emplace(script_value(std::string("$val"), eng), *keys.val);
@@ -233,7 +233,7 @@ namespace stdlib {
 
 		// The walk is one load: the classes' restore orders stay cached and the post_load hooks wait until it is done
 		script_value rebuild(const script_value& value, script_int handle_id) {
-			engine::load_session session(eng_);
+			detail::engine_access::load_session session(eng_);
 			script_value result = rebuild_walk(value, handle_id);
 			session.complete();
 			return result;
@@ -268,8 +268,8 @@ namespace stdlib {
 			script_int handle_id = 0;      // a handle frame's id, or the id an instance frame's object registered under
 			script_int version = 1;        // an instance frame's saved $version, for its post_load
 			bool weak = false;
-			const std::vector<engine::load_field>* order = nullptr;   // an instance frame's restore order (index walks it)
-			const engine::load_field* field = nullptr;                // the member the child rebuilds for
+			const std::vector<detail::engine_access::load_field>* order = nullptr;   // an instance frame's restore order (index walks it)
+			const detail::engine_access::load_field* field = nullptr;                // the member the child rebuilds for
 		};
 
 		engine* eng_;
@@ -328,7 +328,7 @@ namespace stdlib {
 					return false;
 				}
 			}
-			frame f(shape::map, value, script_value::make_map(json_string_keys_ ? eng_->get_type_info_string() : nullptr, nullptr, eng_), eng_);
+			frame f(shape::map, value, script_value::make_map(json_string_keys_ ? detail::engine_access::get_type_info_string(*eng_) : nullptr, nullptr, eng_), eng_);
 			f.next = map.begin();
 			frames_.push_back(std::move(f));
 			return false;
@@ -374,35 +374,35 @@ namespace stdlib {
 
 		script_value handle_result(script_value target, bool weak) {
 			if (!weak) {
-				if (target.is_null()) { target.set_type_info(eng_->get_type_info_shared_ptr(nullptr)); }
+				if (target.is_null()) { target.set_type_info(detail::engine_access::get_type_info_shared_ptr(*eng_, nullptr)); }
 				return target;
 			}
 			if (target.is_object()) {
 				if (auto observed = script_value::make_weak_ptr(target, eng_)) { return std::move(observed.value()); }
 			}
-			return script_value::make_empty_weak_ptr(eng_->get_type_info_weak_ptr(nullptr), eng_);
+			return script_value::make_empty_weak_ptr(detail::engine_access::get_type_info_weak_ptr(*eng_, nullptr), eng_);
 		}
 
 		// A load constructs: a class with a zero-argument constructor runs it as Name() would whatever its access, its initializer
 		// list included (a hybrid's builds its C++ base), and its error or throw is the load's; a class without one is created
 		// without one, its C++ base through load_hybrid's ladder, then its field initializers. False leaves the map a map
 		bool open_instance(script_value fields, const std::string type_name, script_int version, script_int handle_id) {
-			const std::shared_ptr<class_definition> class_def = eng_->get_class_definition(type_name);
+			const std::shared_ptr<class_definition> class_def = detail::engine_access::get_class_definition(*eng_, type_name);
 			if (!class_def) { return false; }
 			script_value ctor = eng_->get_variable(type_name);
 			if (!ctor.is_function()) { return false; }
 			script_value instance(std::monostate{}, eng_);
 			const std::shared_ptr<class_definition> cpp_base = class_def->is_script_class() ? class_def->find_cpp_base_class() : nullptr;
-			if (eng_->script_class_default_constructible(*class_def)) {
+			if (detail::engine_access::script_class_default_constructible(*eng_, *class_def)) {
 				checked_result<script_value> constructed = [&]() {
-					engine::construction_access_waiver waiver(eng_);
+					detail::engine_access::construction_access_waiver waiver(eng_);
 					return ctor.as_function()({});
 				}();
 				if (!constructed) {
 					throw runtime_error(eng_->format_error(constructed));
 				}
-				if (eng_->backend_unwinding()) {
-					throw runtime_error(eng_->backend_exception_text());
+				if (detail::engine_access::backend_unwinding(*eng_)) {
+					throw runtime_error(detail::engine_access::backend_exception_text(*eng_));
 				}
 				instance = std::move(constructed.value());
 			} else if (cpp_base) {
@@ -411,14 +411,14 @@ namespace stdlib {
 				auto created = class_def->create_instance();
 				if (!created) { return false; }
 				instance = script_value::make_class_object(*class_def, created, eng_);
-				eng_->get_execution_backend()->apply_field_initializers(created, class_def);
+				detail::engine_access::get_execution_backend(*eng_)->apply_field_initializers(created, class_def);
 			}
 			strong_ptr<class_instance> created_instance = instance.is_object() ? instance.get_class_instance() : nullptr;
 			class_definition* def = created_instance ? created_instance->get_class_definition() : nullptr;
 			if (!def) { return false; }
 			if (handle_id != 0) { handles_.loaded.try_emplace(handle_id, script_handle_of(eng_, instance)); }
 			frame f(shape::instance, std::move(fields), std::move(instance), eng_);
-			f.order = &eng_->load_field_order(*def);
+			f.order = &detail::engine_access::load_field_order(*eng_, *def);
 			f.version = version;
 			frames_.push_back(std::move(f));
 			return true;
@@ -454,7 +454,7 @@ namespace stdlib {
 					const auto& map = f.source.as_map();
 					for (;;) {
 						if (f.index >= f.order->size()) { return false; }
-						const engine::load_field& field = (*f.order)[f.index++];
+						const detail::engine_access::load_field& field = (*f.order)[f.index++];
 						auto it = map.find(field.key);
 						if (it == map.end()) { continue; }
 						f.field = &field;
@@ -536,7 +536,7 @@ namespace stdlib {
 		// post_load(self, version), the class's migration hook: queued as the object completes, so the hooks run in completion
 		// order (children before parents) once the outermost load is done
 		void run_post_load(frame& f) {
-			eng_->defer_post_load(f.built, f.version);
+			detail::engine_access::defer_post_load(*eng_, f.built, f.version);
 		}
 	};
 
@@ -554,7 +554,7 @@ namespace stdlib {
 
     // Register JSON and binary serialization functions with an engine
     void register_json_functions(engine& eng_ref) {
-        engine::library_registration library(eng_ref);
+        detail::engine_access::library_registration library(eng_ref);
         engine* eng = &eng_ref;
 
         eng_ref.add_variadic_function("to_json", [eng](const std::vector<script_value>& args) -> script_value {
@@ -574,7 +574,7 @@ namespace stdlib {
         });
         
 		eng_ref.add_function("from_json", [eng](const std::string& json) -> script_value {
-			engine::load_session session(eng);
+			detail::engine_access::load_session session(eng);
 			serialization::json_archive_reader reader(json, eng);
 			script_value parsed = reader.read_value();
 			// a text with no '$' key holds no archive record: the parse is the value the rebuild would copy out
@@ -608,7 +608,7 @@ namespace stdlib {
             script_string binary_data = args[0].as<script_string>();
             std::vector<uint8_t> data(binary_data.begin(), binary_data.end());
 
-            engine::load_session session(eng);
+            detail::engine_access::load_session session(eng);
             serialization::binary_archive_reader reader(data, eng);
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();
@@ -632,7 +632,7 @@ namespace stdlib {
             std::string binary_str = base64_decode(base64_str);
             std::vector<uint8_t> data(binary_str.begin(), binary_str.end());
 
-            engine::load_session session(eng);
+            detail::engine_access::load_session session(eng);
             serialization::binary_archive_reader reader(data, eng);
 			script_value result = load_archive_value(eng, reader.read_value(), false);
 			session.complete();

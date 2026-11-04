@@ -287,44 +287,44 @@ public:
 
     bool has_variable(const std::string& name) const { note(name); return engine_.has_variable(name); }
     bool has_function(const std::string& name) const { note(name); return engine_.has_function(name); }
-    bool is_type_name(const std::string& name) const { note(name); return engine_.is_type_name(name); }
-    bool is_const_global(const std::string& name) const { note(name); return engine_.is_const_global(name); }
+    bool is_type_name(const std::string& name) const { note(name); return engine_access::is_type_name(engine_, name); }
+    bool is_const_global(const std::string& name) const { note(name); return engine_access::is_const_global(engine_, name); }
     held_value get_variable(const std::string& name) const { note(name); return engine_.get_variable(name); }
-    std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_.get_class_definition(name); }
-    std::shared_ptr<script_class_definition> find_script_class(const std::string& name) const { note(name); return engine_.get_class_registry().find_script_class(name); }
+    std::shared_ptr<class_definition> get_class_definition(const std::string& name) const { note(name); return engine_access::get_class_definition(engine_, name); }
+    std::shared_ptr<script_class_definition> find_script_class(const std::string& name) const { note(name); return engine_access::get_class_registry(engine_).find_script_class(name); }
     std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const {
-        auto result = engine_.get_class_definition_by_type(type);
+        auto result = engine_access::get_class_definition_by_type(engine_, type);
         if (result) { note(result->get_name()); }
         return result;
     }
     bool host_function_signatures(const std::string& name, std::vector<engine::host_overload_signature>& out) const { note(name); return engine_.host_function_signatures(name, out); }
-    bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_.host_function_result(name, out); }
-    std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_.constant_argument_indexes(callable); }
-    const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const { note(k_outside_constants); return engine_.constant_texts_by_name(); }
+    bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
+    std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_access::constant_argument_indexes(engine_, callable); }
+    const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const { note(k_outside_constants); return engine_access::constant_texts_by_name(engine_); }
     script_namespace_data* find_namespace(const std::string& path) const {
         note(path);
-        const auto id = engine_.get_symbolizer()->find(path);
+        const auto id = engine_access::get_symbolizer(engine_)->find(path);
         if (!id) { return nullptr; }
-        auto& all = engine_.script_namespaces();
+        auto& all = engine_access::script_namespaces(engine_);
         auto it = all.find(*id);
         return it == all.end() ? nullptr : it->second.get();
     }
 
-    uint64_t symbolize(std::string_view text) const { return engine_.symbolize(text); }
-    string_symbolizer* get_symbolizer() const { return engine_.get_symbolizer(); }
-    std::shared_ptr<environment> get_global_environment() const { return engine_.get_global_environment(); }
-    std::unordered_set<std::string> get_registered_template_types() const { return engine_.get_registered_template_types(); }
-    bool has_constant_arguments() const { return engine_.has_constant_arguments(); }
-    bool sleep_callee(const void* fn) const noexcept { return engine_.sleep_callee(fn); }
-    uint8_t math_alias_fn(uint64_t symbol) const { return engine_.math_alias_fn(symbol); }
-    const std::unordered_set<uint64_t>& builtin_method_ids(int kind) const { return engine_.builtin_method_ids(kind); }
-    type_info* get_type_info_object(const std::string& cls) const { return engine_.get_type_info_object(cls); }
-    type_info* get_type_info_int() const { return engine_.get_type_info_int(); }
-    type_info* get_type_info_float() const { return engine_.get_type_info_float(); }
-    type_info* get_type_info_bool() const { return engine_.get_type_info_bool(); }
-    type_info* get_type_info_any() const { return engine_.get_type_info_any(); }
-    type_info* get_type_info_uint8() const { return engine_.get_type_info_uint8(); }
-    type_info* get_type_info_array(type_info* element) const { return engine_.get_type_info_array(element); }
+    uint64_t symbolize(std::string_view text) const { return engine_access::symbolize(engine_, text); }
+    string_symbolizer* get_symbolizer() const { return engine_access::get_symbolizer(engine_); }
+    std::shared_ptr<environment> get_global_environment() const { return engine_access::get_global_environment(engine_); }
+    std::unordered_set<std::string> get_registered_template_types() const { return engine_access::get_registered_template_types(engine_); }
+    bool has_constant_arguments() const { return engine_access::has_constant_arguments(engine_); }
+    bool sleep_callee(const void* fn) const noexcept { return engine_access::sleep_callee(engine_, fn); }
+    uint8_t math_alias_fn(uint64_t symbol) const { return engine_access::math_alias_fn(engine_, symbol); }
+    const std::unordered_set<uint64_t>& builtin_method_ids(int kind) const { return engine_access::builtin_method_ids(engine_, kind); }
+    type_info* get_type_info_object(const std::string& cls) const { return engine_access::get_type_info_object(engine_, cls); }
+    type_info* get_type_info_int() const { return engine_access::get_type_info_int(engine_); }
+    type_info* get_type_info_float() const { return engine_access::get_type_info_float(engine_); }
+    type_info* get_type_info_bool() const { return engine_access::get_type_info_bool(engine_); }
+    type_info* get_type_info_any() const { return engine_access::get_type_info_any(engine_); }
+    type_info* get_type_info_uint8() const { return engine_access::get_type_info_uint8(engine_); }
+    type_info* get_type_info_array(type_info* element) const { return engine_access::get_type_info_array(engine_, element); }
 
 private:
     engine& engine_;
@@ -4498,7 +4498,7 @@ private:
                 check_host_call(name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
                 // a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
-                if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine::k_math_alias_rows) { return ctype::make(ctype::float_k); }
+                if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine_access::k_math_alias_rows) { return ctype::make(ctype::float_k); }
                 return host_result_type(name);
             }
             if (eng_.has_variable(name)) { note_global_use(id->name); return {}; }
@@ -5000,7 +5000,7 @@ private:
         }
         if (find_sclass(r.cls)) { return; }
         auto def = eng_.get_class_definition(std::string(r.cls));
-        if (!def || def->is_script_class() || def->get_method(eng_.symbolize(engine::reflected_operator_name(op)), false).is_function()) { return; }
+        if (!def || def->is_script_class() || def->get_method(eng_.symbolize(engine_access::reflected_operator_name(op)), false).is_function()) { return; }
         const std::string lt = ctype_name(l);
         diag(diag_level::warning, b->location, "No bound '" + lt + " " + op + " " + std::string(r.cls) + "': bind operator \"" + op + "\" as (" + lt + ", " +
              std::string(r.cls) + ") on " + std::string(r.cls) + ", or convert the operand");
@@ -5036,7 +5036,7 @@ private:
             if (extended_members_.count(name)) { return true; }
             const member_hit hit = lookup_member(cls, name, /*want_static=*/false);
             if (hit.found || !hit.certain) { return true; }
-            const member_hit reflected = lookup_member(cls, engine::reflected_operator_name(name), /*want_static=*/false);
+            const member_hit reflected = lookup_member(cls, engine_access::reflected_operator_name(name), /*want_static=*/false);
             if (reflected.found || !reflected.certain) { return true; }
         }
         return chain_open(cls);

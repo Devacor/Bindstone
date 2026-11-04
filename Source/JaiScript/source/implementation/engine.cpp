@@ -148,7 +148,7 @@ checked_result<script_value> script_callable_thunk::call(const std::vector<scrip
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
     struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};
-    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+    return detail::engine_access::checked_host_entry(*eng, [](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
         return be.execute_callable(cc->payload, cc->args);
     }, &c, host_call);
@@ -2626,8 +2626,8 @@ namespace detail {
 
 host_reference host_reference_argument(engine* eng, const std::vector<script_value>& args, size_t index, size_t offset) {
     host_reference ref{ script_value(std::monostate{}, eng), script_value(std::monostate{}, eng) };
-    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-    if (!backend || eng->get_symbolizer()->frozen()) {
+    execution_backend* backend = eng ? engine_access::get_execution_backend(*eng) : nullptr;
+    if (!backend || engine_access::get_symbolizer(*eng)->frozen()) {
         return ref;   // parallel workers never write through a host reference
     }
     host_slot slot;
@@ -2660,11 +2660,11 @@ host_reference host_reference_argument(engine* eng, const std::vector<script_val
 
 checked_result<void> host_reference_store(engine* eng, const host_slot& slot, script_value& target, script_value&& value) {
     if (slot.frame) {
-        execution_backend* backend = eng->get_execution_backend();
+        execution_backend* backend = engine_access::get_execution_backend(*eng);
         return backend ? backend->host_slot_store(slot, value) : checked_result<void>{};
     }
     try {
-        return ref_store_through(target, value, eng, eng->get_symbolizer());
+        return ref_store_through(target, value, eng, engine_access::get_symbolizer(*eng));
     } catch (const std::exception& e) {
         return host_exception_error(eng, detail::native_exception_text(e));
     }
@@ -2736,7 +2736,8 @@ void engine::defer_post_load(const script_value& self, script_int version) {
 }
 
 std::weak_ptr<const void> engine_lifetime_token(engine* a_engine) {
-    return a_engine ? a_engine->lifetime_token() : std::weak_ptr<const void>();
+    if (a_engine) { return detail::engine_access::lifetime_token(*a_engine); }
+    return std::weak_ptr<const void>();
 }
 
 void engine::note_program_scope_cell(environment* scope, size_t slot) {
@@ -3303,22 +3304,22 @@ type_info* translate_foreign_type(engine& self, const type_info* foreign, size_t
         case script_value_type::jai_bool_type:
         case script_value_type::jai_char_type:
         case script_value_type::jai_string_type: {
-            type_info* result = self.get_type_info_by_name(foreign->type_name);
+            type_info* result = detail::engine_access::get_type_info_by_name(self, foreign->type_name);
             return result && result->base_type == foreign->base_type ? result : nullptr;
         }
         case script_value_type::jai_array_type: {
-            if (!foreign->element_type()) { return self.get_type_info_array(nullptr); }
+            if (!foreign->element_type()) { return detail::engine_access::get_type_info_array(self, nullptr); }
             type_info* element = translate_foreign_type(self, foreign->element_type(), depth + 1);
-            return element ? self.get_type_info_array(element) : nullptr;
+            return element ? detail::engine_access::get_type_info_array(self, element) : nullptr;
         }
         case script_value_type::jai_map_type: {
             type_info* key = foreign->key_type() ? translate_foreign_type(self, foreign->key_type(), depth + 1) : nullptr;
             type_info* value = foreign->value_type() ? translate_foreign_type(self, foreign->value_type(), depth + 1) : nullptr;
             if ((foreign->key_type() && !key) || (foreign->value_type() && !value)) { return nullptr; }
-            return self.get_type_info_map(key, value);
+            return detail::engine_access::get_type_info_map(self, key, value);
         }
         default:
-            if (script_array::vec_kind_of(foreign->base_type) != script_array::kind_t::hetero) { return self.get_type_info_math(foreign->base_type); }
+            if (script_array::vec_kind_of(foreign->base_type) != script_array::kind_t::hetero) { return detail::engine_access::get_type_info_math(self, foreign->base_type); }
             return nullptr;
     }
 }
@@ -3676,10 +3677,10 @@ std::vector<uint8_t> jaibite::save_bytes() const {
     }
     uint32_t flags = (check_state_ == check_state::clean) ? detail::jaibite_checked_clean_flags() : 0;
     detail::aggregate_source_view source(lowering_ ? std::static_pointer_cast<detail::aggregate_lowering_state>(lowering_).get() : nullptr);
-    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *owner->get_symbolizer(), owner->registration_fingerprint(), flags, {}, {}, &context_); }
+    if (!reload_hook_) { return detail::serialize_jaibite(declarations_, *detail::engine_access::get_symbolizer(*owner), owner->registration_fingerprint(), flags, {}, {}, &context_); }
     std::vector<declaration_ptr> with_hook = declarations_;
     with_hook.push_back(reload_hook_);
-    return detail::serialize_jaibite(with_hook, *owner->get_symbolizer(), owner->registration_fingerprint(), flags, {}, {}, &context_);
+    return detail::serialize_jaibite(with_hook, *detail::engine_access::get_symbolizer(*owner), owner->registration_fingerprint(), flags, {}, {}, &context_);
 }
 
 void jaibite::save(const std::string& path) const {
@@ -4979,7 +4980,7 @@ const uint64_t* engine::layout_generation() const noexcept { return &impl->layou
 void engine::bump_layout_generation() noexcept { ++impl->layout_generation_; }
 
 void detail::note_class_layout_change(engine* eng) noexcept {
-    if (eng) { eng->bump_layout_generation(); }
+    if (eng) { detail::engine_access::bump_layout_generation(*eng); }
 }
 
 void engine::bump_class_definition_epoch() {
@@ -5896,7 +5897,7 @@ void class_definition::run_migrate_hook(script_value instance_value, const scrip
     try {
         std::vector<script_value> args{std::move(instance_value)};
         auto ran = hook.as_function()(args);
-        execution_backend* backend = engine_ref ? engine_ref->get_execution_backend() : nullptr;
+        execution_backend* backend = engine_ref ? detail::engine_access::get_execution_backend(*engine_ref) : nullptr;
         if (backend && backend->is_unwinding()) {   // a script throw latches on the running backend: it belongs to this hook alone
             failure = backend->get_current_exception().what();
             if (discard_unwinding) { discard_unwinding(); }
@@ -5904,14 +5905,14 @@ void class_definition::run_migrate_hook(script_value instance_value, const scrip
             return;
         } else {
             code = ran.error();
-            if (engine_ref) { failure = format_error(ran, *engine_ref->get_symbolizer()); }
+            if (engine_ref) { failure = format_error(ran, *detail::engine_access::get_symbolizer(*engine_ref)); }
         }
     } catch (const std::exception& e) {
         failure = e.what();
     } catch (...) {
         failure = "unknown error";
     }
-    if (engine_ref) { engine_ref->report_script_error(name_ + "::hot_reload_migrate failed: " + failure, code); }
+    if (engine_ref) { detail::engine_access::report_script_error(*engine_ref, name_ + "::hot_reload_migrate failed: " + failure, code); }
 }
 
 std::type_index engine_context_type_index() noexcept {
@@ -6563,18 +6564,18 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     fs::path p(path);
     std::string key;
     if (engine_ptr) {
-        key = engine_ptr->resolution_key(path, from_file);
-        if (const std::string* remembered = engine_ptr->remembered_resolution(key)) { return *remembered; }
+        key = detail::engine_access::resolution_key(*engine_ptr, path, from_file);
+        if (const std::string* remembered = detail::engine_access::remembered_resolution(*engine_ptr, key)) { return *remembered; }
     }
     std::vector<std::string> misses;
     bool confined_out = false;   // a rung found the file outside confine_paths: skipped, and the error if no rung finds one inside
     auto rung = [&](const fs::path& candidate) {
         if (found(candidate, out)) {
-            if (engine_ptr && engine_ptr->outside_confined_paths(out)) {
+            if (engine_ptr && detail::engine_access::outside_confined_paths(*engine_ptr, out)) {
                 confined_out = true;
                 return false;
             }
-            if (engine_ptr) { engine_ptr->remember_resolution(key, std::move(misses), candidate.string(), out); }
+            if (engine_ptr) { detail::engine_access::remember_resolution(*engine_ptr, key, std::move(misses), candidate.string(), out); }
             return true;
         }
         misses.push_back(candidate.string());
@@ -6585,7 +6586,7 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     } else {
         if (!from_file.empty() && from_file != "<script>" && rung(fs::path(from_file).parent_path() / p)) return out;
         if (engine_ptr) {
-            for (const auto& include_path : engine_ptr->get_include_paths()) {
+            for (const auto& include_path : detail::engine_access::get_include_paths(*engine_ptr)) {
                 if (rung(fs::path(include_path) / p)) return out;
             }
         }
@@ -6593,16 +6594,16 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     }
     if (confined_out) {
         return checked_result<std::string>(make_error_code(runtime_error_code::insufficient_privilege), "Path outside the confined roots: {0}",
-            engine_ptr->symbolize(path));
+            detail::engine_access::symbolize(*engine_ptr, path));
     }
     return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found),
         for_import ? "Failed to open import file: {0}" : "Failed to open include file: {0}",
-        engine_ptr ? engine_ptr->symbolize(path) : 0);
+        engine_ptr ? detail::engine_access::symbolize(*engine_ptr, path) : 0);
 }
 
 // The statement forms ask from the file whose code is executing
 checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr) {
-    return resolve_include_path(path, engine_ptr, engine_ptr ? engine_ptr->current_source_file() : std::string());
+    return resolve_include_path(path, engine_ptr, engine_ptr ? detail::engine_access::current_source_file(*engine_ptr) : std::string());
 }
 
 const std::string* engine::remembered_resolution(const std::string& key) {
@@ -6722,7 +6723,7 @@ std::ostream& engine::get_output_stream() {
 // Non-member accessor for parameter_storage - breaks circular dependency
 namespace detail {
     parameter_storage* get_engine_parameter_storage(engine* eng) {
-        return eng ? eng->get_current_parameter_storage() : nullptr;
+        return eng ? engine_access::get_current_parameter_storage(*eng) : nullptr;
     }
 }
 
@@ -7075,7 +7076,7 @@ void reclass_in_place(engine& eng, const strong_ptr<class_instance>& instance,
     const bool fresh = old_def && old_def->is_cpp_class();   // a plain wrapper holds no script state
     instance->reclass(script_def);
     // a script class exists, so the backend that defined it does
-    auto* backend = eng.get_execution_backend();
+    auto* backend = detail::engine_access::get_execution_backend(eng);
     if (!(fresh && backend && backend->seed_fresh_layer_fields(instance, script_def))) {
         for (const auto& [id, default_value] : script_def->get_all_field_defaults()) {
             if (!instance->has_field_value(id)) { instance->set_field(id, default_value); }
@@ -7245,8 +7246,8 @@ void detail::retire_script_layer(const weaker_ptr<class_instance>& layer) {
 std::string detail::script_layer_to_json(const strong_ptr<class_instance>& layer) {
     engine* eng = layer ? layer->get_engine() : nullptr;
     std::string class_name, fields;
-    if (!eng || !eng->script_layer_save(layer, class_name, fields)) { return {}; }
-    script_value envelope = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    if (!eng || !detail::engine_access::script_layer_save(*eng, layer, class_name, fields)) { return {}; }
+    script_value envelope = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& map = const_cast<script_map&>(envelope.as_map());
     map.emplace(script_value(std::string("$type"), eng), script_value(class_name, eng));
     serialization::json_archive_reader fields_reader(fields, eng);
@@ -7282,7 +7283,7 @@ bool detail::script_layer_from_json(const strong_ptr<class_instance>& layer, con
     handles.root = &fields;
     for (const auto& [key, value] : fields.as_map()) {
         if (!key.is_string()) { continue; }
-        uint64_t field_id = eng->symbolize(key.as_string());
+        uint64_t field_id = detail::engine_access::symbolize(*eng, key.as_string());
         if (target->has_field(field_id)) {
             target->set_field(field_id, stdlib::reconstruct_archive_value(eng, value, true, handles));
         }
@@ -7302,12 +7303,13 @@ std::shared_ptr<void> engine_lock_instance_cpp_object(engine* eng, const detail:
 }
 
 std::shared_ptr<conversions::conversion_registry> get_engine_conversion_registry(engine* eng) {
-    return eng ? eng->get_conversion_registry() : nullptr;
+    if (eng) { return detail::engine_access::get_conversion_registry(*eng); }
+    return nullptr;
 }
 
 type_info* get_engine_class_type_info_for(engine* eng, const std::type_info& cpp_type) {
     if (!eng) { return nullptr; }
-    auto def = eng->get_class_definition_by_type(std::type_index(cpp_type));
+    auto def = detail::engine_access::get_class_definition_by_type(*eng, std::type_index(cpp_type));
     return def ? def->get_type_info() : nullptr;
 }
 
@@ -7318,7 +7320,7 @@ namespace detail {
 bool class_derives_from(engine* eng, uint64_t derived_id, uint64_t base_id) {
     if (derived_id == base_id) { return true; }
     if (!eng) { return false; }
-    auto def = eng->get_class_definition(derived_id);
+    auto def = engine_access::get_class_definition(*eng, derived_id);
     if (!def) { return false; }
     if (def->get_type_id() == base_id) { return true; }
     std::vector<const class_definition*> stack;
@@ -7359,7 +7361,7 @@ type_info_ptr object_element_own_tag(const script_value& v, engine* eng) {
 
 checked_result<void> store_through_held_reference(script_value& held, const script_value& value, engine* eng) {
     script_value source = value;
-    return ref_store_through_storage(held, source, eng, eng->get_symbolizer());
+    return ref_store_through_storage(held, source, eng, engine_access::get_symbolizer(*eng));
 }
 } // namespace detail
 

@@ -21,7 +21,7 @@ JAI_NOINLINE R retired_layer_error(engine* eng, const class_instance& instance) 
 	const class_definition* def = instance.get_class_definition();
 	const std::string text = "Script layer '" + (def ? def->get_name() : std::string()) +
 		"' was detached (script_layer_detach, or a move to another engine): this handle no longer reaches its object";
-	return R(make_error_code(runtime_error_code::script_layer_retired), "{0}", eng ? eng->park_error_text(text) : 0);
+	return R(make_error_code(runtime_error_code::script_layer_retired), "{0}", eng ? engine_access::park_error_text(*eng, text) : 0);
 }
 
 checked_result<void*> checked_native_pointer(engine* eng, uint64_t source_id, const std::type_info& target,
@@ -34,7 +34,7 @@ checked_result<void*> checked_native_pointer(engine* eng, uint64_t source_id, co
 		return pointer;
 	}
 	if (eng) {
-		auto source = eng->get_class_definition(source_id);
+		auto source = engine_access::get_class_definition(*eng, source_id);
 		if (source) {
 			if (auto* result = source->adjust_cpp_pointer(pointer, target)) {
 				return result;
@@ -138,7 +138,7 @@ checked_result<std::shared_ptr<void>> checked_native_object(engine* eng, const s
 }
 
 [[noreturn]] void throw_native_cast_error(engine* eng, error_propagator error) {
-	throw runtime_error(eng ? format_error(error, *eng->get_symbolizer()) : std::string(error.static_msg));
+	throw runtime_error(eng ? format_error(error, *engine_access::get_symbolizer(*eng)) : std::string(error.static_msg));
 }
 
 } // namespace detail

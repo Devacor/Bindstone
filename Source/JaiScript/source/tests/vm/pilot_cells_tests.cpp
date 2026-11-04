@@ -69,23 +69,23 @@ public:
 		// Exercise the host alias optimization explicitly; stdlib no longer adds globals.
 		a_engine.add_function("host_hypot", [](script_float a_x, script_float a_y) { return std::hypot(a_x,a_y); });
 		a_engine.add_function("host_sqrt", [](script_float a_value) { return std::sqrt(a_value); });
-		a_engine.register_math_alias("host_sqrt", "sqrt");
+		detail::engine_access::register_math_alias(a_engine, "host_sqrt", "sqrt");
 		a_engine.add_function("host_floor", [](script_float a_value) { return std::floor(a_value); });
-		a_engine.register_math_alias("host_floor", "floor");
+		detail::engine_access::register_math_alias(a_engine, "host_floor", "floor");
 		a_engine.add_function("host_ceil", [](script_float a_value) { return std::ceil(a_value); });
-		a_engine.register_math_alias("host_ceil", "ceil");
+		detail::engine_access::register_math_alias(a_engine, "host_ceil", "ceil");
 		a_engine.add_function("host_abs", [](script_float a_value) { return std::abs(a_value); });
-		a_engine.register_math_alias("host_abs", "abs");
+		detail::engine_access::register_math_alias(a_engine, "host_abs", "abs");
 		a_engine.add_function("host_sin", [](script_float a_value) { return std::sin(a_value); });
-		a_engine.register_math_alias("host_sin", "sin");
+		detail::engine_access::register_math_alias(a_engine, "host_sin", "sin");
 		a_engine.add_function("host_cos", [](script_float a_value) { return std::cos(a_value); });
-		a_engine.register_math_alias("host_cos", "cos");
+		detail::engine_access::register_math_alias(a_engine, "host_cos", "cos");
 		a_engine.add_function("host_tan", [](script_float a_value) { return std::tan(a_value); });
-		a_engine.register_math_alias("host_tan", "tan");
+		detail::engine_access::register_math_alias(a_engine, "host_tan", "tan");
 		a_engine.add_function("host_degrees", [](script_float a_value) { return a_value * (180.0 / 3.14159265358979323846); });
-		a_engine.register_math_alias("host_degrees", "radians_to_degrees");
+		detail::engine_access::register_math_alias(a_engine, "host_degrees", "radians_to_degrees");
 		a_engine.add_function("host_radians", [](script_float a_value) { return a_value * (3.14159265358979323846 / 180.0); });
-		a_engine.register_math_alias("host_radians", "degrees_to_radians");
+		detail::engine_access::register_math_alias(a_engine, "host_radians", "degrees_to_radians");
 	}
 
 	std::string run_on(bool vm, const std::string& script, bool proofs = true) {
@@ -103,8 +103,8 @@ public:
 		auto e = jai::foundry::make_default_engine();
 		e->set_backend(backend_type::vm);
 		stdlib::register_all(*e); register_host_math_fixture(*e);
-		auto* symbolizer = e->get_symbolizer();
-		auto templates = e->get_registered_template_types();
+		auto* symbolizer = detail::engine_access::get_symbolizer(*e);
+		auto templates = detail::engine_access::get_registered_template_types(*e);
 		jai::lexer lex(source, symbolizer);
 		auto tokens = lex.tokenize();
 		jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -133,8 +133,8 @@ public:
 		compiled_snippet c; c.eng = jai::foundry::make_default_engine();
 		c.eng->set_backend(backend_type::vm);
 		stdlib::register_all(*c.eng);
-		auto* symbolizer = c.eng->get_symbolizer();
-		auto templates = c.eng->get_registered_template_types();
+		auto* symbolizer = detail::engine_access::get_symbolizer(*c.eng);
+		auto templates = detail::engine_access::get_registered_template_types(*c.eng);
 		jai::lexer lex(source, symbolizer);
 		auto tokens = lex.tokenize();
 		jai::parser p(tokens, symbolizer, c.eng.get(), templates);
@@ -193,8 +193,8 @@ public:
 			const std::string src = "float f = 1.0000001; function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()) + to_string(f));";
 			auto a = compile_snippet(src); auto b = compile_snippet(src);
 			check_true(a.program && b.program && a.function && b.function, "compiled");
-			const std::string ma = jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer()) + jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
-			const std::string mb = jai::vm::chunk_manifest(*b.program, b.eng->get_symbolizer()) + jai::vm::chunk_manifest(*b.function, b.eng->get_symbolizer());
+			const std::string ma = jai::vm::chunk_manifest(*a.program, detail::engine_access::get_symbolizer(*a.eng)) + jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng));
+			const std::string mb = jai::vm::chunk_manifest(*b.program, detail::engine_access::get_symbolizer(*b.eng)) + jai::vm::chunk_manifest(*b.function, detail::engine_access::get_symbolizer(*b.eng));
 			check_eq(ma, mb, "the same program and function manifest the same in two engines");
 			check_true(ma.find("cell_loops 1") != std::string::npos, "the function's loop closed");
 		});
@@ -202,7 +202,7 @@ public:
 			// 1.0000001 and 1.0000002 never list the same; the manifest carries the constant's 64 bits
 			auto a = compile_snippet("float f = 1.0000001; print(to_string(f));");
 			check_true(static_cast<bool>(a.program), "compiled");
-			const std::string before = jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer());
+			const std::string before = jai::vm::chunk_manifest(*a.program, detail::engine_access::get_symbolizer(*a.eng));
 			bool flipped = false;
 			for (auto& c : a.program->constants) {
 				if (c.raw_storage_index() != script_value::TYPEID_FLOAT) continue;
@@ -210,22 +210,22 @@ public:
 				c = script_value(d, static_cast<engine*>(nullptr)); flipped = true; break;
 			}
 			check_true(flipped, "a float constant was found");
-			check_ne(before, jai::vm::chunk_manifest(*a.program, a.eng->get_symbolizer()), "one low bit of a constant changes the manifest");
+			check_ne(before, jai::vm::chunk_manifest(*a.program, detail::engine_access::get_symbolizer(*a.eng)), "one low bit of a constant changes the manifest");
 		});
 		test("manifest_changes_with_a_live_mask_bit_and_an_origin_entry", [this]() {
 			auto a = compile_snippet("function run() { int s = 0; int i = 0; while (i < 10) { s = s + i * 2; i = i + 1; } return s; } print(to_string(run()));");
 			check_true(a.function && !a.function->cell_loops.empty(), "a closed loop in the function's body (a compound with a binary right side is a translation refusal; the plain store closes)");
-			const std::string before = jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
+			const std::string before = jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng));
 			auto& loop = a.function->cell_loops[0];
 			check_true(!loop.live_temps.empty() && !loop.origin.empty(), "live masks and origins exist");
 			loop.live_temps[0].w[0] ^= 1u;
-			const std::string after_mask = jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer());
+			const std::string after_mask = jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng));
 			check_ne(before, after_mask, "one live mask bit changes the manifest");
 			loop.live_temps[0].w[0] ^= 1u;
 			loop.origin[0] += 1;
-			check_ne(before, jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer()), "one origin entry changes the manifest");
+			check_ne(before, jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng)), "one origin entry changes the manifest");
 			loop.origin[0] -= 1;
-			check_eq(before, jai::vm::chunk_manifest(*a.function, a.eng->get_symbolizer()), "restored, the manifest is the same again");
+			check_eq(before, jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng)), "restored, the manifest is the same again");
 		});
 		test("column_loop_lands_the_same_on_both_backends", [this]() {
 			both(std::string(k_prelude) + "run(0, 4, 2048, 1);", "8004:326", "four iterations");
@@ -544,10 +544,10 @@ public:
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* script = "var f = function(int n) { array<int> data = [3, 1, 4, 1, 5, 9, 2, 6]; int acc = 0; int i = 0;"
 			                     " while (i < n) { int idx = i % 8; acc = acc + data[idx]; i = i + 1; } return acc; };";
-			auto templates = vm->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*vm);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -631,14 +631,14 @@ public:
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* scripts[2] = {
 				"array<int> G = [3, 1, 4, 1, 5, 9, 2, 6]; var f = function(int n) { var& g = G; int acc = 0; int i = 0;"
 				" while (i < n) { int idx = i % 8; acc = acc + g[idx]; i = i + 1; } return acc; };",
 				"array<int> G = [3, 1, 4, 1, 5, 9, 2, 6]; var f = function(int n) { int acc = 0; int i = 0;"
 				" while (i < n) { int idx = i % 8; acc = acc + G[idx]; i = i + 1; } return acc; };" };
 			for (const char* script : scripts) {
-			auto templates = vm->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*vm);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -673,9 +673,9 @@ public:
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* script = "var g = function(int v, int dv, int n) { int i = 0; while (i < n) { v = v + dv; i = i + 1; } return v; };";
-			auto templates = vm->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*vm);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -747,14 +747,14 @@ public:
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* scripts[2] = {
 				"array<int> G = [1, 2, 3, 4]; int H = 7; var f = function(int n) { var& g = G; int acc = 0;"
 				" for (int i = 0; i < n; ++i) { acc = acc + g[i % 4] + H; } return acc; };",
 				"array<int> G = [1, 2, 3, 4]; var f = function(int n) { int acc = 0;"
 				" for (int i = 0; i < n; ++i) { auto& e = G[i % 4]; acc = acc + e; } return acc; };" };
 			for (const char* script : scripts) {
-				auto templates = vm->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*vm);
 				jai::lexer lex(script, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -828,12 +828,12 @@ public:
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* script =
 				"array<int> P = [10, 20, 30, 40, 50, 60, 70, 80]; array<int> Q = [1, 2, 3, 0, 1, 2, 3, 0];"
 				" var f = function(int n) { var& p = P; int acc = 0; int i = 0;"
 				" while (i < n) { int k = i % 4; acc = acc + p[k + Q[i % 8]]; i = i + 1; } return acc; };";
-			auto templates = vm->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*vm);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -913,14 +913,14 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* script = "array<int> PIX = [0, 0, 0, 0]; var S = [[1, 2, 3]];"
 			                     " var f = function(var& pix, var& strip, int cy0, int cy1, int vw, int px0, int tstep) {"
 			                     " int gi = cy0 * vw + px0; int tacc = 0; int y = cy0;"
 			                     " while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; ++y; }"
 			                     " int z = cy1; while (z > cy0) { pix[gi] = z; z--; }"
 			                     " return gi; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -955,9 +955,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "var f = function(var& tp, var& pal, int n, int j) { int s = 0; for (int i = 0; i < n; ++i) { int base = i * 2; s = s + pal[base + tp[i + j]]; } return s; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -994,9 +994,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "var f = function(var& flat, int bb, float z, float wx, float wy) { int b = bb + math::itrunc(z * 0.001953125); return b + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -1032,9 +1032,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "var f = function(var& flat, float wx, float wy, int k) { int v = flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]; int w = flat[(k + 1) * 2 - v]; return v + w; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -1081,9 +1081,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			auto listing_of = [&](const char* src) {
-				auto templates = e->get_registered_template_types();
+				auto templates = detail::engine_access::get_registered_template_types(*e);
 				jai::lexer lex(src, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -1120,9 +1120,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "var VW = 4; var f = function(var& pix, var& pal, var& tp, int x, int n) { int y = 0; while (y < n) { int iv = (y * 5) % 8 - 2; if (iv < 0) { iv = iv + 8; } pix[y * VW + x] = pal[tp[iv]]; y = y + 1; } return y; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -1177,13 +1177,13 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "var VW = 4; var CENTERY = 3; var VIEW_X = 0.5; var VIEW_Y = 0.25;"
 			                 " var f = function(var& pix, var& palcm, var& flat, int x, int y0, int y1, float dz, float raydx, float raydy, int bandbase) {"
 			                 " for (int y = y0; y <= y1; ++y) { int dy = y - CENTERY; if (dy == 0) { continue; } float z = dz / dy; float wx = VIEW_X + raydx * z; float wy = VIEW_Y + raydy * z;"
 			                 " int band = bandbase + math::itrunc(z * 0.001953125); if (band < 0) { band = 0; } if (band > 31) { band = 31; }"
 			                 " pix[y * VW + x] = palcm[band * 256 + flat[((math::itrunc(wy) & 63) << 6) + (math::itrunc(wx) & 63)]]; } return y0; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -1252,9 +1252,9 @@ public:
 			auto e = jai::foundry::make_default_engine();
 			e->set_backend(backend_type::vm);
 			stdlib::register_all(*e); register_host_math_fixture(*e);
-			auto* symbolizer = e->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*e);
 			const char* fn = "array<int> PIX = []; var VW = 8; var VH = 8; var f = function(int color) { int n = VW * VH; for (int i = 0; i < n; ++i) { PIX[i] = color; } return n; };";
-			auto templates = e->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*e);
 			jai::lexer lex(fn, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -2055,7 +2055,7 @@ var across = function(int n) { string s = ""; try { s = to_string(looping(n)); }
 				engine* raw = e.get();
 				e->add_function("host_swap_f", [raw]() { raw->execute("f = f2;"); });
 				e->add_function("host_rebind_g", [raw]() { raw->execute("G = G2;"); });
-				e->add_function("host_arm_ops", [raw]() { raw->set_has_custom_numeric_operators(true); });
+				e->add_function("host_arm_ops", [raw]() { detail::engine_access::set_has_custom_numeric_operators(*raw, true); });
 				try { return e->execute(script).as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
 			};
@@ -2131,8 +2131,8 @@ var narrows = function(int n) { int acc = 0; float f = 0.5; for (int i = 0; i < 
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(backend_type::vm);
 				stdlib::register_all(*e); register_host_math_fixture(*e);
-				auto* symbolizer = e->get_symbolizer();
-				auto templates = e->get_registered_template_types();
+				auto* symbolizer = detail::engine_access::get_symbolizer(*e);
+				auto templates = detail::engine_access::get_registered_template_types(*e);
 				jai::lexer lex(defs, symbolizer);
 				auto tokens = lex.tokenize();
 				jai::parser p(tokens, symbolizer, e.get(), templates);
@@ -2233,7 +2233,7 @@ function probe(int n, int at, int how) -> string {
 				outcome result;
 				try { result.value = e->execute_file_source(path, std::string(defs) + " " + call).as_string(); }
 				catch (const std::exception& ex) { result.value = std::string("throw:") + ex.what(); }
-				if (vm) { result.misses = e->cells_counters().misses; }
+				if (vm) { result.misses = detail::engine_access::cells_counters(*e).misses; }
 				return result;
 			};
 			struct probe { int how; const char* expected; bool misses; };
@@ -2288,7 +2288,7 @@ function nwrites(int n) -> string { for (int i = 0; i < n; ++i) { G = G + i; F =
 				std::string out;
 				try { out = e->execute(std::string(defs) + " " + call).as_string(); }
 				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
-				if (entries) { *entries = e->cells_counters().entries; }
+				if (entries) { *entries = detail::engine_access::cells_counters(*e).entries; }
 				return out;
 			};
 			struct probe { const char* call; const char* expected; const char* twin; };
@@ -2341,7 +2341,7 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 				std::string out;
 				try { out = e->execute_file_source("D:/virtual/pilot/graft_calls.jai", std::string(defs) + " " + call).as_string(); }
 				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
-				if (entries) { *entries = e->cells_counters().entries; }
+				if (entries) { *entries = detail::engine_access::cells_counters(*e).entries; }
 				return out;
 			};
 			struct probe { const char* call; size_t cap; bool block; };
@@ -2540,7 +2540,7 @@ var private_stays = function(int n) { array<int> A = [1, 2, 3, 4]; int p = 100; 
 				e->add_function("arm", [&source]() { source.armed = true; });
 				e->add_function("install_plus", [raw]() {
 					raw->add_function("+", [raw](script_int a, script_int b) { raw->execute("P = [90];"); return a + b; });
-					raw->set_has_custom_numeric_operators(true);
+					detail::engine_access::set_has_custom_numeric_operators(*raw, true);
 				});
 				try { return e->execute(script).as_string(); }
 				catch (const std::exception& ex) { return std::string("throw:") + ex.what(); }
@@ -3139,7 +3139,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				e->add_global_ref("box", source);
 				e->add_global("G", script_value(script_int(0), e.get()));
 				(void)e->execute("var& r = box.number; var SRC = [0];");
-				auto reference = e->get_global_environment()->get_ref("r");
+				auto reference = detail::engine_access::get_global_environment(*e)->get_ref("r");
 				if (!reference) { return "no reference"; }
 				auto src = e->get_variable("SRC");
 				src.as_array()[0] = reference.value().get();
@@ -3457,13 +3457,13 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto vm = jai::foundry::make_default_engine();
 			vm->set_backend(backend_type::vm);
 			stdlib::register_all(*vm);
-			auto* symbolizer = vm->get_symbolizer();
+			auto* symbolizer = detail::engine_access::get_symbolizer(*vm);
 			const char* script = "array<int> PIX = [0, 0, 0, 0]; var S = [[1, 2, 3]];"
 			                     " var f = function(var& pix, var& strip, int cy0, int cy1, int vw, int px0, int tstep) {"
 			                     " int gi = cy0 * vw + px0; int tacc = 0; int y = cy0;"
 			                     " while (y < cy1) { int c = strip[tacc >> 11]; pix[gi] = c; pix[gi + 1] = c; tacc += tstep; gi += vw; y = y + 1; }"
 			                     " return gi; };";
-			auto templates = vm->get_registered_template_types();
+			auto templates = detail::engine_access::get_registered_template_types(*vm);
 			jai::lexer lex(script, symbolizer);
 			auto tokens = lex.tokenize();
 			jai::parser p(tokens, symbolizer, vm.get(), templates);
@@ -4197,9 +4197,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				e->execute(prelude);
 				struct shape { const char* call; uint64_t entries; };
 				for (const shape& sh : { shape{ "once(1);", 1 }, shape{ "once(0);", 0 }, shape{ "once(6);", 1 }, shape{ "brk(5);", 1 }, shape{ "later(4);", 1 } }) {
-					const cell_counters c0 = e->cells_counters();
+					const cell_counters c0 = detail::engine_access::cells_counters(*e);
 					e->execute(sh.call);
-					const cell_counters c1 = e->cells_counters();
+					const cell_counters c1 = detail::engine_access::cells_counters(*e);
 					check_eq(sh.entries, c1.entries - c0.entries, std::string(sh.call) + ": block entries");
 					check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(sh.call) + ": nothing misses");
 				}
@@ -4238,9 +4238,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				e->execute(defs);
 				e->execute("find_tile_near(0, 2, 0, 12);");
 				for (int k = 0; k < 3; ++k) {
-					const cell_counters c0 = e->cells_counters();
+					const cell_counters c0 = detail::engine_access::cells_counters(*e);
 					e->execute("find_tile_near(0, 2, 0, 12);");
-					const cell_counters c1 = e->cells_counters();
+					const cell_counters c1 = detail::engine_access::cells_counters(*e);
 					check_true(c1.entries - c0.entries >= 1, "call " + std::to_string(k) + " enters a block: entries " + std::to_string(c1.entries - c0.entries));
 					check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
 				}
@@ -4270,9 +4270,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			e->execute(defs);
 			e->execute("walk(8);");
 			for (int k = 0; k < 3; ++k) {
-				const cell_counters c0 = e->cells_counters();
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
 				e->execute("walk(8);");
-				const cell_counters c1 = e->cells_counters();
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
 				check_eq(uint64_t{1}, c1.entries - c0.entries, "call " + std::to_string(k) + ": the back edge enters once");
 				check_eq(uint64_t{0}, c1.misses - c0.misses, "call " + std::to_string(k) + ": nothing misses");
 			}
@@ -4336,9 +4336,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				e->execute(prelude);
 				struct shape { const char* call; uint64_t entries; };
 				for (const shape& sh : { shape{ "sum([4]);", 1 }, shape{ "sum([]);", 0 }, shape{ "sum([1, 2, 3, 4, 5]);", 1 }, shape{ "brk([3, 4, 5]);", 1 } }) {
-					const cell_counters c0 = e->cells_counters();
+					const cell_counters c0 = detail::engine_access::cells_counters(*e);
 					e->execute(sh.call);
-					const cell_counters c1 = e->cells_counters();
+					const cell_counters c1 = detail::engine_access::cells_counters(*e);
 					check_eq(sh.entries, c1.entries - c0.entries, std::string(sh.call) + ": block entries");
 					check_eq(uint64_t{0}, c1.misses - c0.misses, std::string(sh.call) + ": nothing misses");
 				}
@@ -6858,9 +6858,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			e->execute(defs);
 			struct shape { const char* call; uint64_t iterations; uint64_t boundaries_per_iteration; };
 			for (const shape& sh : { shape{ "tail_store();", 1000, 1 }, shape{ "mid_store();", 1000, 1 }, shape{ "while_store();", 1000, 1 }, shape{ "writes_cell();", 200, 1 } }) {
-				const cell_counters c0 = e->cells_counters();
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
 				e->execute(sh.call);
-				const cell_counters c1 = e->cells_counters();
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
 				const std::string label = std::string(sh.call) + ": entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) +
 				                          ", resumes " + std::to_string(c1.resumes - c0.resumes) + ", misses " + std::to_string(c1.misses - c0.misses);
 				check_true(c1.entries - c0.entries <= 2, "one block entry per loop run (the first iteration may run general): " + label);
@@ -6870,9 +6870,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 			{
 				// a loop whose body is the statement alone stays general: a block would pay a park and a resume per iteration for the counter
-				const cell_counters c0 = e->cells_counters();
+				const cell_counters c0 = detail::engine_access::cells_counters(*e);
 				e->execute("thin();");
-				const cell_counters c1 = e->cells_counters();
+				const cell_counters c1 = detail::engine_access::cells_counters(*e);
 				check_eq(uint64_t{0}, c1.entries - c0.entries, "the thin loop enters no block");
 				check_eq(uint64_t{0}, c1.boundaries - c0.boundaries, "and parks nothing");
 			}
@@ -6905,9 +6905,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			check_true(rl.find("C_BOUNDARY") != std::string::npos && rl.find("defines") != std::string::npos && rl.find("-- open loop") == std::string::npos, "run's loop closes with boundaries inside its grafts: " + rl);
 			auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 			e->execute(defs);
-			const cell_counters c0 = e->cells_counters();
+			const cell_counters c0 = detail::engine_access::cells_counters(*e);
 			e->execute("run(500);");
-			const cell_counters c1 = e->cells_counters();
+			const cell_counters c1 = detail::engine_access::cells_counters(*e);
 			const std::string label = "entries " + std::to_string(c1.entries - c0.entries) + ", boundaries " + std::to_string(c1.boundaries - c0.boundaries) + ", resumes " + std::to_string(c1.resumes - c0.resumes) + ", misses " + std::to_string(c1.misses - c0.misses);
 			check_true(c1.entries - c0.entries <= 2 && c1.boundaries - c0.boundaries >= 4 * 500 - 8 && c1.resumes - c0.resumes + 8 >= c1.boundaries - c0.boundaries, "one entry, four boundaries an iteration, each resumed: " + label);
 			check_eq(uint64_t{0}, c1.misses - c0.misses, "nothing misses: " + label);

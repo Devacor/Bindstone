@@ -114,7 +114,7 @@ namespace jai::detail {
 	template <class Host>
 	JAI_NOINLINE std::optional<checked_result<script_value>> bound_operator_miss(Host& h, const script_value& l, const script_value& r, uint64_t id) {
 		engine* eng = h.engine();
-		string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+		string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
 		if (!symbols || symbols->frozen()) { return std::nullopt; }
 		const std::string op(symbols->get_string(id));
 		const class_definition* lc = h.operand_class(l);
@@ -689,7 +689,7 @@ namespace jai::detail {
 	template <class Host>
 	std::optional<checked_result<script_value>> object_reflected_via_method(Host& h, const script_value& left, const script_value& right, uint64_t op_symbol_id) {
 		if (!right.deref().is_object()) { return std::nullopt; }
-		const uint64_t reflected_id = h.engine()->reflected_operator_id(op_symbol_id);
+		const uint64_t reflected_id = engine_access::reflected_operator_id(*h.engine(), op_symbol_id);
 		if (!reflected_id) { return std::nullopt; }
 		if (h.parallel_worker() && !h.worker_operators_pinned(right, { reflected_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, right, { reflected_id }); }
 		auto target = h.resolve_member_target(right);
@@ -708,7 +708,7 @@ namespace jai::detail {
 	// without one it is a = a op b through the binary operator
 	template <class Host>
 	std::optional<checked_result<script_value>> object_compound_via_method(Host& h, const script_value& target, const script_value& right, uint64_t op_symbol_id) {
-		if (const uint64_t compound_id = h.engine()->compound_operator_id(op_symbol_id)) {
+		if (const uint64_t compound_id = engine_access::compound_operator_id(*h.engine(), op_symbol_id)) {
 			if (h.parallel_worker() && !h.worker_operators_pinned(target, { compound_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, target, { compound_id }); }
 			if (auto owner = h.resolve_member_target(target)) {
 				script_value method_val = h.operator_value(owner, compound_id);

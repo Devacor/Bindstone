@@ -17,15 +17,15 @@ public:
             auto eng = make_engine();
 
             // Test creating a reference type info
-            auto int_type = eng->get_type_info_int();
+            auto int_type = detail::engine_access::get_type_info_int(*eng);
             check(int_type != nullptr);
 
-            auto ref_type = eng->get_type_info_reference(int_type);
+            auto ref_type = detail::engine_access::get_type_info_reference(*eng, int_type);
             check(ref_type != nullptr);
             check(ref_type->is_reference());
 
             // Test creating a reference to a reference (should work)
-            auto ref_ref_type = eng->get_type_info_reference(ref_type);
+            auto ref_ref_type = detail::engine_access::get_type_info_reference(*eng, ref_type);
             check(ref_ref_type != nullptr);
             check(ref_ref_type->is_reference());
         });
@@ -35,12 +35,12 @@ public:
             auto eng = make_engine();
 
             // Test that same types are equal (should return same pointer due to interning)
-            auto int_type1 = eng->get_type_info_int();
-            auto int_type2 = eng->get_type_info_int();
+            auto int_type1 = detail::engine_access::get_type_info_int(*eng);
+            auto int_type2 = detail::engine_access::get_type_info_int(*eng);
             check_eq(int_type1, int_type2);
 
             // Test that different types are not equal
-            auto float_type = eng->get_type_info_float();
+            auto float_type = detail::engine_access::get_type_info_float(*eng);
             check(int_type1 != float_type);
         });
 
@@ -48,8 +48,8 @@ public:
             // Create engine to get type_info objects
             auto eng = make_engine();
 
-            auto int_type = eng->get_type_info_int();
-            auto array_type = eng->get_type_info_array(int_type);
+            auto int_type = detail::engine_access::get_type_info_int(*eng);
+            auto array_type = detail::engine_access::get_type_info_array(*eng, int_type);
 
             check(array_type != nullptr);
             check(array_type->is_array());
@@ -60,9 +60,9 @@ public:
             // Create engine to get type_info objects
             auto eng = make_engine();
 
-            auto string_type = eng->get_type_info_string();
-            auto int_type = eng->get_type_info_int();
-            auto map_type = eng->get_type_info_map(string_type, int_type);
+            auto string_type = detail::engine_access::get_type_info_string(*eng);
+            auto int_type = detail::engine_access::get_type_info_int(*eng);
+            auto map_type = detail::engine_access::get_type_info_map(*eng, string_type, int_type);
 
             check(map_type != nullptr);
             check(map_type->is_map());

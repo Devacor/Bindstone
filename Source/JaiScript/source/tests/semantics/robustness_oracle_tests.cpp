@@ -768,10 +768,10 @@ private:
 						auto fn = [&]() { return keep.twice(); };
 						int r = fn();
 					)");
-					host = e->get_class_definition("RobustnessProbeHost");
-					binary = e->get_class_definition("binary::reader");
-					script = e->get_class_definition("Q");
-					registry = e->get_conversion_registry();
+					host = detail::engine_access::get_class_definition(*e, "RobustnessProbeHost");
+					binary = detail::engine_access::get_class_definition(*e, "binary::reader");
+					script = detail::engine_access::get_class_definition(*e, "Q");
+					registry = detail::engine_access::get_conversion_registry(*e);
 				}
 				const std::string label = std::string(" [") + c.label + "]";
 				check_true(host.expired(), "host class freed" + label);

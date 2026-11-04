@@ -36,6 +36,10 @@ namespace jai {
     namespace detail {
         // a binding treats a held value (an execute result the host passes back in) as the script_value it is
         template <typename T> inline constexpr bool is_script_value_v = std::is_same_v<std::remove_cvref_t<T>, script_value> || std::is_same_v<std::remove_cvref_t<T>, held_value>;
+        struct engine_access;
+        // engine_access from a template written before the engine is complete: naming the engine type E defers the lookup to
+        // the instantiation
+        template <typename E, typename Access = engine_access> struct engine_access_of : Access {};
     }
     class type_info;
     class wrapped_function;

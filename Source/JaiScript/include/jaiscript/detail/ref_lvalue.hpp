@@ -408,7 +408,7 @@ namespace jai::detail {
 		}
 		// ::name bases resolve against the GLOBAL env only
 		if (ident->global_qualified) {
-			return eng ? eng->get_global_environment()->get_value_ptr(symbol_id) : nullptr;
+			return eng ? engine_access::get_global_environment(*eng)->get_value_ptr(symbol_id) : nullptr;
 		}
 		// Caller member scope (call_frame stamp): fields/statics outrank globals
 		// between the function's own scopes and the definition/global chain
@@ -969,7 +969,7 @@ namespace jai::detail {
 		                          : holder->plain_cell() ? holder->cell()->type_info_raw() : nullptr;
 		if (enforced && !var_slot(enforced) && enforced->base_type == declared->base_type) { return; }
 		type_info* twin = declared->cached_declared_reference_type;
-		ref.set_type_info(twin ? twin : eng->get_type_info_declared_reference(declared));
+		ref.set_type_info(twin ? twin : engine_access::get_type_info_declared_reference(*eng, declared));
 	}
 
 	// The declared type is decided at the store: a value already of T's kind passes T's table unchanged, so the storage's own
@@ -1129,7 +1129,7 @@ namespace jai::detail {
 				return std::nullopt;
 			}
 		}
-		execution_limits& limits = eng->execution_limits();
+		execution_limits& limits = engine_access::execution_limits(*eng);
 		const size_t added = ri == script_value::TYPEID_CHAR ? 1 : right.unchecked_as_string().size();
 		if (!limits.memory_charge(sizeof(script_value) + current.unchecked_as_string().size() + added)) [[unlikely]] {
 			return checked_result<script_value>(raise_memory_cap(limits));
@@ -1143,7 +1143,7 @@ namespace jai::detail {
 		if (&text == node.get()) { node->append(std::string(text)); } else { node->append(text); }
 		if (handle) { return script_value(*handle, eng); }
 		type_info* tag = holder->owner_instance && constraint && constraint->base_type == script_value_type::jai_string_type
-			? const_cast<type_info*>(constraint) : eng->get_type_info_string();
+			? const_cast<type_info*>(constraint) : engine_access::get_type_info_string(*eng);
 		if (target->type_info_raw() != tag) { target->set_type_info(type_info_ptr{tag}); }
 		return script_value(*target);
 	}

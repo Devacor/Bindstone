@@ -247,10 +247,10 @@ namespace jai::fuzz {
 			eng->add_function("host_abs", [](script_float a_value) { return std::fabs(a_value); });
 			eng->add_function("host_floor", [](script_float a_value) { return std::floor(a_value); });
 			eng->add_function("host_ceil", [](script_float a_value) { return std::ceil(a_value); });
-			eng->register_math_alias("host_sqrt", "sqrt");
-			eng->register_math_alias("host_abs", "abs");
-			eng->register_math_alias("host_floor", "floor");
-			eng->register_math_alias("host_ceil", "ceil");
+			detail::engine_access::register_math_alias(*eng, "host_sqrt", "sqrt");
+			detail::engine_access::register_math_alias(*eng, "host_abs", "abs");
+			detail::engine_access::register_math_alias(*eng, "host_floor", "floor");
+			detail::engine_access::register_math_alias(*eng, "host_ceil", "ceil");
 		}
 		if (cfg.on_engine) cfg.on_engine(*eng);
 
@@ -300,9 +300,9 @@ namespace jai::fuzz {
 		}
 		try {
 			out.alive = (eng->execute("1 + 1").as_int() == 2);
-			out.alias_binds = eng->parameter_alias_binds();
-			out.local_alias_binds = eng->local_alias_binds();
-			out.lowered_locals = eng->aggregate_lowered_locals();
+			out.alias_binds = detail::engine_access::parameter_alias_binds(*eng);
+			out.local_alias_binds = detail::engine_access::local_alias_binds(*eng);
+			out.lowered_locals = detail::engine_access::aggregate_lowered_locals(*eng);
 		} catch (...) {
 			out.alive = false;
 		}

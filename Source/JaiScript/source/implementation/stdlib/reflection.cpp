@@ -56,7 +56,7 @@ inline class_definition* resolve_class(engine* eng, const script_value& v,
     const script_value& d = v.is_reference() ? v.deref() : v;
     if (d.is_string()) {
         const std::string name = d.as_string();
-        auto def = eng->get_class_definition(name);
+        auto def = detail::engine_access::get_class_definition(*eng, name);
         if (!def) {
             throw runtime_error(std::string("reflect::") + who + ": unknown class '" + name + "'");
         }
@@ -72,7 +72,7 @@ inline class_definition* resolve_class(engine* eng, const script_value& v,
         // Host-bound object without a class_instance wrapper: resolve by semantic name
         if (auto ti = d.get_type_info()) {
             if (!ti->type_name.empty()) {
-                if (auto def = eng->get_class_definition(ti->type_name)) { return def.get(); }
+                if (auto def = detail::engine_access::get_class_definition(*eng, ti->type_name)) { return def.get(); }
             }
         }
     }
@@ -104,7 +104,7 @@ inline const std::string& expect_name(const std::vector<script_value>& args, siz
 // A name the engine never interned names no member, function or namespace: the lookups ask without interning, so a
 // script probing unknown names does not grow the symbolizer (and nothing interns while it is frozen)
 inline std::optional<uint64_t> known_symbol(engine* eng, std::string_view name) {
-    return eng->get_symbolizer()->find(name);
+    return detail::engine_access::get_symbolizer(*eng)->find(name);
 }
 
 // The B-group doors. KEEP ALIGNED with interpreter::resolve_member_target — the ONE
@@ -126,8 +126,8 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
         if (door.instance) { door.def = door.instance->get_class_definition(); }
     } else {
         door.engine_def = holder->type_id() != UINT64_MAX
-            ? eng->get_class_definition(holder->type_id())
-            : eng->get_class_definition(std::string(holder->type_name()));
+            ? detail::engine_access::get_class_definition(*eng, holder->type_id())
+            : detail::engine_access::get_class_definition(*eng, std::string(holder->type_name()));
         door.def = door.engine_def.get();
     }
     return door;
@@ -138,16 +138,16 @@ inline member_door resolve_member_door(engine* eng, const script_value& value) {
 template <typename T>
 [[noreturn]] inline void throw_kernel_error(engine* eng, const checked_result<T>& r) {
     throw runtime_error(format_error_message(r.message(),
-        eng->get_symbolizer()->get_string(r.symbol_id()),
-        eng->get_symbolizer()->get_string(r.symbol_id2())));
+        detail::engine_access::get_symbolizer(*eng)->get_string(r.symbol_id()),
+        detail::engine_access::get_symbolizer(*eng)->get_string(r.symbol_id2())));
 }
 
 // Reflection reaches a script class's private constructors as it reaches its other private members
 inline checked_result<script_value> construct_through_reflection(engine* eng, const std::string& name,
                                                                  const script_value& ctor, const std::vector<script_value>& args) {
-    const std::shared_ptr<class_definition> def = eng->get_class_definition(name);
+    const std::shared_ptr<class_definition> def = detail::engine_access::get_class_definition(*eng, name);
     if (def && def->is_script_class()) {
-        engine::construction_access_waiver waiver(eng);
+        detail::engine_access::construction_access_waiver waiver(eng);
         return ctor.as_function()(args);
     }
     return ctor.as_function()(args);
@@ -175,7 +175,7 @@ inline bool is_qualified_identifier(const std::string& name) {
 // call syntax resolves.
 inline script_value resolve_free_callable(engine* eng, const std::string& name, const char* who) {
     if (auto pos = name.find("::"); pos != std::string::npos) {
-        auto& spaces = eng->script_namespaces();
+        auto& spaces = detail::engine_access::script_namespaces(*eng);
         const auto ns_id = known_symbol(eng, std::string_view(name).substr(0, pos));
         const auto member_known = known_symbol(eng, std::string_view(name).substr(pos + 2));
         auto ns_it = ns_id && member_known ? spaces.find(*ns_id) : spaces.end();
@@ -200,7 +200,7 @@ inline script_value resolve_free_callable(engine* eng, const std::string& name, 
             }
         }
     } else if (const auto id = known_symbol(eng, name)) {
-        auto found = eng->get_global_environment()->get(*id);
+        auto found = detail::engine_access::get_global_environment(*eng)->get(*id);
         if (found && found.value().is_function()) {
             return std::move(found.value());
         }
@@ -216,14 +216,14 @@ inline std::string cpp_type_display_name(engine* eng, std::type_index ti) {
         ti == std::type_index(typeid(script_float))) { return "float"; }
     if (ti == std::type_index(typeid(bool))) { return "bool"; }
     if (ti == std::type_index(typeid(std::string))) { return "string"; }
-    if (auto def = eng->get_class_definition_by_type(ti)) { return def->get_name(); }
+    if (auto def = detail::engine_access::get_class_definition_by_type(*eng, ti)) { return def->get_name(); }
     return "var";
 }
 
 inline script_value make_field_entry(engine* eng, const std::string& name, const std::string& type,
                                      const std::string& kind, const std::string& access,
                                      bool is_static, const std::string& from) {
-    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto entry = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& m = const_cast<script_map&>(entry.as_map());
     m[script_value(std::string("name"), eng)] = script_value(name, eng);
     m[script_value(std::string("type"), eng)] = script_value(type, eng);
@@ -248,7 +248,7 @@ inline void append_fields_of(engine* eng, class_definition* def, script_value& a
     }
     const std::string from = def->get_name();
     for (uint64_t id : def->field_order()) {
-        const std::string name{eng->get_symbolizer()->get_string(id)};
+        const std::string name{detail::engine_access::get_symbolizer(*eng)->get_string(id)};
         const std::string type = declared_type_spelling(def->is_static_field(id) ? def->get_static_declared_type(id)
                                                                                  : def->get_field_declared_type(id));
         std::string access = "public";
@@ -278,7 +278,7 @@ inline void append_fields_of(engine* eng, class_definition* def, script_value& a
 
 inline script_value make_param_entry(engine* eng, const std::string& name,
                                      const std::string& type, bool has_default) {
-    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto entry = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& m = const_cast<script_map&>(entry.as_map());
     m[script_value(std::string("name"), eng)] = script_value(name, eng);
     m[script_value(std::string("type"), eng)] = script_value(type, eng);
@@ -309,7 +309,7 @@ inline std::string cpp_param_type_name(engine* eng, const param_type_info& pt) {
         case script_value_type::jai_array_type: return "array";
         case script_value_type::jai_map_type: return "map";
         case script_value_type::jai_object_type:
-            if (auto def = eng->get_class_definition_by_type(pt.cpp_type)) {
+            if (auto def = detail::engine_access::get_class_definition_by_type(*eng, pt.cpp_type)) {
                 return def->get_name();
             }
             return "object";
@@ -320,7 +320,7 @@ inline std::string cpp_param_type_name(engine* eng, const param_type_info& pt) {
 inline script_value make_method_entry(engine* eng, const std::string& name, int64_t arity,
                                       bool is_static, const std::string& access,
                                       const std::string& from, script_value params) {
-    auto entry = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+    auto entry = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
     auto& m = const_cast<script_map&>(entry.as_map());
     m[script_value(std::string("name"), eng)] = script_value(name, eng);
     m[script_value(std::string("arity"), eng)] = script_value(static_cast<script_int>(arity), eng);
@@ -345,7 +345,7 @@ struct method_collector {
         if (!seen.insert(key).second) { return; }
         std::string access = "public";
         access_level lvl = access_level::public_access;
-        if (level->find_nonpublic_declarer(eng->get_symbolizer()->intern(name), lvl)) {
+        if (level->find_nonpublic_declarer(detail::engine_access::get_symbolizer(*eng)->intern(name), lvl)) {
             access = (lvl == access_level::private_access) ? "private" : "protected";
         }
         entries.emplace_back(std::move(key),
@@ -367,7 +367,7 @@ struct method_collector {
 // sharing the class's name is the constructor surface (construct() owns it).
 inline void collect_methods_of(engine* eng, const class_definition* def,
                                method_collector& out, uint64_t only_id) {
-    auto* sym = eng->get_symbolizer();
+    auto* sym = detail::engine_access::get_symbolizer(*eng);
     auto surfaced = [&](uint64_t id, std::string& name_out) {
         if (only_id && id != only_id) { return false; }
         name_out = std::string(sym->get_string(id));
@@ -434,13 +434,13 @@ inline void collect_methods_of(engine* eng, const class_definition* def,
 } // namespace reflect_detail
 
 void register_reflection_functions(engine& eng_ref) {
-    engine::library_registration library(eng_ref);
+    detail::engine_access::library_registration library(eng_ref);
     engine* eng = &eng_ref;
-    auto& ns = eng_ref.script_namespaces()[eng_ref.get_symbolizer()->intern("reflect")];
+    auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::get_symbolizer(eng_ref)->intern("reflect")];
     if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 
     auto add = [&](const char* name, script_function fn) {
-        ns->variables[eng_ref.get_symbolizer()->intern(name)] =
+        ns->variables[detail::engine_access::get_symbolizer(eng_ref)->intern(name)] =
             script_value::make_function(std::move(fn), eng);
     };
 
@@ -573,7 +573,7 @@ void register_reflection_functions(engine& eng_ref) {
         // computed getters only answer here). No access check: reads see everything.
         if (known) {
             if (door.def) {
-                script_value getter = door.def->get_method(eng->get_symbolizer()->get_getter_id_with_view(id).first, false);
+                script_value getter = door.def->get_method(detail::engine_access::get_symbolizer(*eng)->get_getter_id_with_view(id).first, false);
                 if (getter.is_function()) {
                     return make_bound_method(target, getter).as_function()({});
                 }
@@ -618,7 +618,7 @@ void register_reflection_functions(engine& eng_ref) {
         // (the script auto-setter body IS enforce_field_write + store, so this is
         // raw-store-equivalent there; host property setters only answer here).
         if (known && door.def) {
-            script_value setter = door.def->get_method(eng->get_symbolizer()->get_setter_id_with_view(id).first, false);
+            script_value setter = door.def->get_method(detail::engine_access::get_symbolizer(*eng)->get_setter_id_with_view(id).first, false);
             if (setter.is_function()) {
                 return make_bound_method(target, setter).as_function()({std::move(value)});
             }
@@ -700,7 +700,7 @@ void register_reflection_functions(engine& eng_ref) {
         const std::string& name = reflect_detail::expect_name(args, 0, "construct");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
         // The same global the direct spelling Class(...) resolves
-        auto ctor = eng->get_global_environment()->get(name);
+        auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
         if (!ctor || !ctor.value().is_function()) {
             throw runtime_error(std::string("reflect::construct: unknown class '") + name + "'");
         }
@@ -711,7 +711,7 @@ void register_reflection_functions(engine& eng_ref) {
         reflect_detail::expect_min_args(args, 1, "construct_shared");
         const std::string& name = reflect_detail::expect_name(args, 0, "construct_shared");
         std::vector<script_value> call_args(args.begin() + 1, args.end());
-        auto ctor = eng->get_global_environment()->get(name);
+        auto ctor = detail::engine_access::get_global_environment(*eng)->get(name);
         if (!ctor || !ctor.value().is_function()) {
             throw runtime_error(std::string("reflect::construct_shared: unknown class '") + name + "'");
         }
@@ -723,11 +723,11 @@ void register_reflection_functions(engine& eng_ref) {
         if (value.type() == script_value_type::jai_object_type) {
             type_info* pointee = value.get_type_info().get();
             if (!pointee) {
-                if (auto def = eng->get_class_definition(name)) {
+                if (auto def = detail::engine_access::get_class_definition(*eng, name)) {
                     pointee = def->get_type_info().get();
                 }
             }
-            value.set_type_info(eng->get_type_info_shared_ptr(pointee));
+            value.set_type_info(detail::engine_access::get_type_info_shared_ptr(*eng, pointee));
         }
         return value;
     });
@@ -769,14 +769,14 @@ void register_reflection_functions(engine& eng_ref) {
     add("functions", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 0, "functions");
         std::set<std::string> names;   // sorted, deduped — the determinism contract
-        for (auto& [name_view, value] : eng->get_global_environment()->get_all_variables()) {
+        for (auto& [name_view, value] : detail::engine_access::get_global_environment(*eng)->get_all_variables()) {
             if (!value.is_function()) { continue; }
             std::string name{name_view};
-            if (eng->get_class_definition(name)) { continue; }   // constructors: classes() owns them
+            if (detail::engine_access::get_class_definition(*eng, name)) { continue; }   // constructors: classes() owns them
             names.insert(std::move(name));
         }
-        auto* sym = eng->get_symbolizer();
-        for (auto& [ns_id, data] : eng->script_namespaces()) {
+        auto* sym = detail::engine_access::get_symbolizer(*eng);
+        for (auto& [ns_id, data] : detail::engine_access::script_namespaces(*eng)) {
             if (!data) { continue; }
             const std::string ns{sym->get_string(ns_id)};
             for (auto& [fid, decls] : data->functions) {
@@ -804,7 +804,7 @@ void register_reflection_functions(engine& eng_ref) {
     add("globals", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
         reflect_detail::expect_args(args, 0, "globals");
         std::set<std::string> names;
-        for (auto& [name_view, value] : eng->get_global_environment()->get_all_variables()) {
+        for (auto& [name_view, value] : detail::engine_access::get_global_environment(*eng)->get_all_variables()) {
             if (value.is_function()) { continue; }
             if (value.is_object()) {   // class-definition holders are registry internals
                 auto holder = value.get_object_holder();
@@ -822,8 +822,8 @@ void register_reflection_functions(engine& eng_ref) {
         const std::string& name = reflect_detail::expect_name(args, 0, "function_arguments");
         auto arr = script_value::make_array(nullptr, eng);
         if (auto pos = name.find("::"); pos != std::string::npos) {
-            auto* sym = eng->get_symbolizer();
-            auto& spaces = eng->script_namespaces();
+            auto* sym = detail::engine_access::get_symbolizer(*eng);
+            auto& spaces = detail::engine_access::script_namespaces(*eng);
             const auto ns_id = sym->find(std::string_view(name).substr(0, pos));
             const auto member_id = sym->find(std::string_view(name).substr(pos + 2));
             auto ns_it = ns_id && member_id ? spaces.find(*ns_id) : spaces.end();
@@ -851,7 +851,7 @@ void register_reflection_functions(engine& eng_ref) {
                 }
             }
         } else if (const auto id = reflect_detail::known_symbol(eng, name)) {
-            auto found = eng->get_global_environment()->get(*id);
+            auto found = detail::engine_access::get_global_environment(*eng)->get(*id);
             if (found && found.value().is_function()) {
                 // Script functions carry their decl in the callable payload; host
                 // registrations are type-erased — they answer an EMPTY overload list

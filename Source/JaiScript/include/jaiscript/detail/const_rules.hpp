@@ -633,7 +633,7 @@ namespace jai::detail {
 		receiver_view v;
 		v.field_type = [eng, symbolizer](std::string_view cls, std::string_view field, bool& is_field) -> const type_info* {
 			is_field = false;
-			auto def = eng ? eng->get_class_definition(std::string(cls)) : nullptr;
+			auto def = engine_access::get_class_definition(eng, std::string(cls));
 			if (!def || symbolizer->frozen()) { return nullptr; }
 			const uint64_t id = symbolizer->intern(field);
 			if (!def->find_field_declaring_class(id)) { return nullptr; }
@@ -641,7 +641,7 @@ namespace jai::detail {
 			return def->get_field_declared_type(id).get();
 		};
 		v.methods = [eng, symbolizer](std::string_view cls, std::string_view name, std::vector<const function_decl*>& out) -> bool {
-			auto def = eng ? eng->get_class_definition(std::string(cls)) : nullptr;
+			auto def = engine_access::get_class_definition(eng, std::string(cls));
 			if (!def || symbolizer->frozen()) { return false; }
 			const uint64_t id = symbolizer->intern(name);
 			// the nearest class of the chain that declares the name (an override hides its base's overloads)

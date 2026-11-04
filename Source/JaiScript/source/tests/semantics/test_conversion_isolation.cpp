@@ -35,7 +35,7 @@ public:
                 .build();
             
             // Check if conversions were registered
-            auto conv_registry = engine->get_conversion_registry();
+            auto conv_registry = detail::engine_access::get_conversion_registry(*engine);
             std::cout << "Has conversion for SimpleWidget: " 
                      << conv_registry->has_conversion<SimpleWidget>() << std::endl;
             std::cout << "Has conversion for vector<SimpleWidget>: " 
@@ -74,7 +74,7 @@ public:
                 .build();
             
             // Check if conversions were registered
-            auto conv_registry = engine->get_conversion_registry();
+            auto conv_registry = detail::engine_access::get_conversion_registry(*engine);
             std::cout << "Has conversion for SimpleWidget: " 
                      << conv_registry->has_conversion<SimpleWidget>() << std::endl;
             std::cout << "Has conversion for vector<SimpleWidget>: " 

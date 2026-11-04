@@ -185,7 +185,7 @@ std::optional<checked_result<value_store>> handle_value_assign(const script_valu
             "Cannot assign {0} to shared_ptr - object is not a class instance", value_tag ? value_tag->id : 0);
     }
     const class_definition* def = instance->get_class_definition();
-    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const uint64_t assign_id = engine_access::get_symbolizer(*eng)->intern("=");
     const script_value* method = def->method_ptr(assign_id);
     const bool has_operator = method && method->is_function();
     script_value pointee = current;   // shares the holder: a store into it is a store into the shared object
@@ -256,7 +256,7 @@ std::optional<checked_result<value_store>> slot_value_assign(const script_value&
     class_instance* instance = held_instance(storage);
     const class_definition* def = instance ? instance->get_class_definition() : nullptr;
     if (!def) { return std::nullopt; }
-    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const uint64_t assign_id = engine_access::get_symbolizer(*eng)->intern("=");
     const script_value* method = def->method_ptr(assign_id);
     if (!method || !method->is_function() || !binary_operator_accepts(def, assign_id, value)) { return std::nullopt; }
     return run_assign_operator(storage, *method, value, assign_id, eng);
@@ -302,7 +302,7 @@ std::shared_ptr<script_defined_function> script_defined_function::environment_fo
     if (!fn || !fn->converted() || !eng) { return fn; }
     converted_captures& state = *fn->captures;
     if (!state.environment_twin) {
-        auto scope = std::make_shared<environment>(eng->get_global_environment(), eng->get_symbolizer());
+        auto scope = std::make_shared<environment>(detail::engine_access::get_global_environment(*eng), detail::engine_access::get_symbolizer(*eng));
         for (size_t i = 0; i < state.cells.size(); ++i) { scope->define((*state.ids)[i], state.cells[i]); }
         auto twin = std::make_shared<script_defined_function>(fn->name, fn->shared_parameters, fn->return_type, fn->body, std::move(scope), fn->local_count);
         twin->unit = fn->unit;
@@ -376,12 +376,12 @@ void environment::define(uint64_t id, const script_value& value) {
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
     if (engine_) {
-        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+        detail::engine_access::execution_limits(*engine_).memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(value);  // Update/shadow in flat lookup
     local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
-    if (engine_ && is_program_scope()) { engine_->note_program_scope_cell(this, local_storage_.size() - 1); }
+    if (engine_ && is_program_scope()) { detail::engine_access::note_program_scope_cell(*engine_, this, local_storage_.size() - 1); }
 }
 
 void environment::define(uint64_t id, script_value&& value) {
@@ -399,12 +399,12 @@ void environment::define(uint64_t id, script_value&& value) {
     // engine::memory_cap: environment growth counts toward the script's allowance
     // (approximate slot cost; the raise happens at the next loop back-edge)
     if (engine_) {
-        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+        detail::engine_access::execution_limits(*engine_).memory_charge_deferred(sizeof(script_value) + 64);
     }
     flat_lookup_[id] = &local_storage_.push_back(std::move(value));  // Update/shadow in flat lookup
     local_ids_.insert(id);
     bump_env_epoch();   // a new name can shadow what the vm's lookup caches resolved
-    if (engine_ && is_program_scope()) { engine_->note_program_scope_cell(this, local_storage_.size() - 1); }
+    if (engine_ && is_program_scope()) { detail::engine_access::note_program_scope_cell(*engine_, this, local_storage_.size() - 1); }
 }
 
 bool environment::dies_at_teardown(const script_value& cell) {
@@ -703,7 +703,7 @@ bool environment::define_variable(uint64_t id, script_value&& value) {
     }
     r.versions[id].push_back({flat_unit, *flat});
     if (engine_) {
-        engine_->execution_limits().memory_charge_deferred(sizeof(script_value) + 64);
+        detail::engine_access::execution_limits(*engine_).memory_charge_deferred(sizeof(script_value) + 64);
     }
     *flat = &local_storage_.push_back(std::move(value));
     r.unit_of[id] = unit;

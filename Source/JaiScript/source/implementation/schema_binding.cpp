@@ -124,7 +124,7 @@ void register_schema_property(engine& a_engine, class_definition& class_def, ser
 		}
 		return getter(access.extract(args[0], native_type_id));
 	});
-	class_def.register_property_getter(a_engine.symbolize(name), a_engine.symbolize("_get_" + name));
+	class_def.register_property_getter(engine_access::symbolize(a_engine, name), engine_access::symbolize(a_engine, "_get_" + name));
 
 	class_def.add_method("_set_" + name, [setter = std::move(setter), access, engine_ptr = &a_engine, native_type_id = class_def.get_type_id()](const std::vector<script_value>& args) -> script_value {
 		if (args.size() < 2) {
@@ -135,8 +135,8 @@ void register_schema_property(engine& a_engine, class_definition& class_def, ser
 		return script_value(std::monostate{}, engine_ptr);
 	});
 
-	uint64_t field_id = a_engine.symbolize(name);
-	uint64_t setter_id = a_engine.symbolize("_set_" + name);
+	uint64_t field_id = engine_access::symbolize(a_engine, name);
+	uint64_t setter_id = engine_access::symbolize(a_engine, "_set_" + name);
 	class_def.register_property_setter(field_id, setter_id);
 	class_def.register_host_member_lane(field_id, nullptr);
 }
@@ -183,8 +183,8 @@ void bind_observable_change_method(engine& a_engine, class_definition& class_def
 		return script_value(std::monostate{}, eng);
 	};
 
-	class_def.add_method(observe_method_name, a_engine.guard_function(std::move(method_func), privilege::none), 1,
-		std::vector<param_type_info>{ engine::map_cpp_type_to_param_info<script_value>() }, engine::map_cpp_type_to_param_info<script_value>());
+	class_def.add_method(observe_method_name, engine_access::guard_function(a_engine, std::move(method_func), privilege::none), 1,
+		std::vector<param_type_info>{ engine_access::map_cpp_type_to_param_info<script_value>() }, engine_access::map_cpp_type_to_param_info<script_value>());
 }
 
 template<typename ValueT>
@@ -209,7 +209,7 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 				return script_value(std::monostate{}, eng);
 			}
 			auto ref = std::make_shared<jai::observable_property_ref<ValueT>>(obs_prop, access.manager(self));
-			return eng->make_value_object(ref);
+			return engine_access::make_value_object(*eng, ref);
 		};
 
 		auto setter = [prop_name, access, eng](void* self, const script_value& arg) {
@@ -248,7 +248,7 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 		};
 
 		register_schema_property(a_engine, class_def, metadata, prop_name, access, std::move(getter), std::move(setter));
-		class_def.register_host_member_lane(a_engine.symbolize(prop_name), make_schema_member_lane<ValueT>(prop_name, access, class_def.get_type_id()));
+		class_def.register_host_member_lane(engine_access::symbolize(a_engine, prop_name), make_schema_member_lane<ValueT>(prop_name, access, class_def.get_type_id()));
 	}
 
 	return true;
@@ -259,15 +259,15 @@ bool bind_schema_typed(engine& a_engine, class_definition& class_def, serializat
 void bind_pending_math_properties(engine& a_engine, class_definition& class_def, serialization::class_metadata& metadata,
 	std::vector<pending_math_property>& pending) {
 	for (const pending_math_property& entry : pending) {
-		if (class_def.defines_method(a_engine.symbolize(entry.name))) continue;
+		if (class_def.defines_method(engine_access::symbolize(a_engine, entry.name))) continue;
 		bind_schema_math_property(a_engine, class_def, metadata, entry.name, entry.bridge, entry.access);
 	}
 	pending.clear();
 }
 
 void register_read_only_setter(engine& a_engine, class_definition& class_def, const std::string& name) {
-	const uint64_t field_id = a_engine.symbolize(name);   // interned here, never on the error path
-	const uint64_t setter_id = a_engine.symbolize("_set_" + name);
+	const uint64_t field_id = engine_access::symbolize(a_engine, name);   // interned here, never on the error path
+	const uint64_t setter_id = engine_access::symbolize(a_engine, "_set_" + name);
 	class_def.add_method("_set_" + name, [field_id](const std::vector<script_value>&) -> checked_result<script_value> {
 		return checked_result<script_value>(make_error_code(runtime_error_code::invalid_assignment_target),
 		                                    "Cannot assign to '{0}': it is read-only", field_id);
@@ -333,7 +333,7 @@ void note_region_made(const script_value& value, engine* eng) {
 	if (self.raw_storage_index() != script_value::TYPEID_OBJECT) { return; }
 	const auto holder = self.get_object_holder();
 	if (holder && holder->is_instance()) {
-		holder->unchecked_instance()->region_tag(eng->parallel_region_serial());
+		holder->unchecked_instance()->region_tag(engine_access::parallel_region_serial(*eng));
 	}
 }
 
@@ -380,7 +380,7 @@ void ensure_signal_view_type_registered(engine& a_engine) {
 }
 
 script_value make_signal_view(engine* eng, const signal_script_ops& ops) {
-	return eng->make_value_object(std::make_shared<signal_script_ops>(ops));
+	return engine_access::make_value_object(*eng, std::make_shared<signal_script_ops>(ops));
 }
 
 } // namespace jai::detail

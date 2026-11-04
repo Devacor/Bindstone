@@ -117,7 +117,7 @@ inline std::string cpp_param_text(jai::engine& eng, const jai::param_type_info& 
 		case vt::jai_map_type: return "map";
 		case vt::jai_function_type: return "function";
 		case vt::jai_object_type:
-			if (auto def = eng.get_class_definition_by_type(p.cpp_type)) { return def->get_name(); }
+			if (auto def = jai::detail::engine_access::get_class_definition_by_type(eng, p.cpp_type)) { return def->get_name(); }
 			return "object";
 		default: return "var";
 	}

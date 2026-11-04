@@ -440,9 +440,9 @@ public:
         test("host_registered_namespace_entry_is_read_only", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
-            auto& ns = eng->script_namespaces()[eng->symbolize("cfg")];
+            auto& ns = detail::engine_access::script_namespaces(*eng)[detail::engine_access::symbolize(*eng, "cfg")];
             if (!ns) { ns = std::make_shared<script_namespace_data>(); }
-            ns->variables[eng->symbolize("host")] = script_value(static_cast<script_int>(5), eng.get());
+            ns->variables[detail::engine_access::symbolize(*eng, "host")] = script_value(static_cast<script_int>(5), eng.get());
             auto result = eng->execute(R"(
                 namespace cfg { var own = 1; function peek() { return cfg::host * 10 + own; } }
                 var out = to_string(cfg::host) + " " + to_string(cfg::peek());

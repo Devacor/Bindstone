@@ -89,7 +89,7 @@ namespace deep_detail {
 		script_int id = 0;
 		copy_hook() = default;
 		explicit copy_hook(engine* a_engine) : eng(a_engine) {}
-		copy_hook(const copy_hook& a_other) : eng(a_other.eng), id(a_other.id) { eng->get_output_stream() << id << " "; }
+		copy_hook(const copy_hook& a_other) : eng(a_other.eng), id(a_other.id) { detail::engine_access::get_output_stream(*eng) << id << " "; }
 		copy_hook& operator=(const copy_hook&) = default;
 	};
 

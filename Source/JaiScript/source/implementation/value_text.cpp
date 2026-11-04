@@ -319,7 +319,7 @@ namespace value_text_walk {
 
 		string_symbolizer* symbolizer_of(const class_instance& instance) const {
 			engine* eng = instance.get_engine() ? instance.get_engine() : eng_;
-			return eng ? eng->get_symbolizer() : nullptr;
+			return eng ? engine_access::get_symbolizer(*eng) : nullptr;
 		}
 
 		void stop_at_limit() {

@@ -691,7 +691,7 @@ parser::parser(const std::vector<token>& tokens, string_symbolizer* symbolizer, 
 }
 
 type_info_ptr parser::store_type_info(type_info&& info) {
-    return engine_->get_type_info(info);
+    return detail::engine_access::get_type_info(*engine_, info);
 }
 
 bool parser::apply_using_declarations(const std::vector<token>& in, std::vector<token>& out) {
@@ -843,7 +843,7 @@ bool parser::qualify_namespace_classes(const std::vector<token>& in, std::vector
             walk.step(in, i);
         }
     }
-    auto& spaces = engine_->script_namespaces();
+    auto& spaces = detail::engine_access::script_namespaces(*engine_);
     auto names_class = [&](const std::string& space, std::string_view name) {
         if (auto d = declared.find(space); d != declared.end() && d->second.count(name)) { return true; }
         namespace_queries_.insert(space + "::" + std::string(name));
@@ -944,10 +944,10 @@ void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
     if (d.get_type() == node_type::function_decl) {
         const auto& f = static_cast<const function_decl&>(d);
         if (f.name != "hot_reload_migrate") return;
-        const type_info* previous = engine_->get_type_info_map(engine_->get_type_info_string(), engine_->get_type_info_any());
+        const type_info* previous = detail::engine_access::get_type_info_map(*engine_, detail::engine_access::get_type_info_string(*engine_), detail::engine_access::get_type_info_any(*engine_));
         const bool shaped = !f.is_coroutine && f.parameters.size() == 1 && f.parameters[0].type && f.parameters[0].type->id == previous->id &&
                             !f.parameters[0].is_reference && !f.parameters[0].default_value &&
-                            (!f.return_type || f.return_type->id == engine_->get_type_info_void()->id);
+                            (!f.return_type || f.return_type->id == detail::engine_access::get_type_info_void(*engine_)->id);
         if (!shaped) {
             report_error_at(std::string("hot_reload_migrate at a unit's top level is its reload hook, declared ") + k_signature, f.location);
         } else if (seen) {
@@ -997,7 +997,7 @@ checked_result<std::vector<declaration_ptr>> parser::parse() {
     // Escape-mark + transient-read passes (shared with jaibite loads, which must
     // re-derive the parser-pass flags the serializer does not carry)
     try {
-        if (detail::run_ast_marking_passes(declarations, symbolizer_)) { engine_->note_execute_elapsed_use(); }
+        if (detail::run_ast_marking_passes(declarations, symbolizer_)) { detail::engine_access::note_execute_elapsed_use(*engine_); }
     } catch (const detail::nesting_exhausted& e) {
         report_error_at(std::string(detail::k_nesting_too_deep_listing), e.location());
         return failed_parse();

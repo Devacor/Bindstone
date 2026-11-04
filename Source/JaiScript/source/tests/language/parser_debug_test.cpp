@@ -19,7 +19,7 @@ public:
 
             // Create engine once and use its symbolizer for all parsing
             auto eng = make_engine();
-            auto* symbolizer = eng->get_symbolizer();
+            auto* symbolizer = jai::detail::engine_access::get_symbolizer(*eng);
             std::unordered_set<std::string> empty_types;
 
             // Also test with a simple expression to understand the issue

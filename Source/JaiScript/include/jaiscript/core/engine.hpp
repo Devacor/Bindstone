@@ -44,7 +44,7 @@ namespace jai {
     struct import_site;
     namespace vm { class vm_backend; struct coverage_tables; }
     namespace debug { class controller; class transport; }
-    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; }
+    namespace detail { struct release_machine; struct run_record; struct run_entry_state; struct run_registry; struct engine_access; }
     struct script_namespace_data;
 
     // engine::vm_coverage_summary: the report's class totals as numbers, for a harness that aggregates many runs
@@ -114,16 +114,14 @@ namespace jai {
         bool literal_;
     };
 
-    // The host API is what the embedding pages and the reference document (docs/site/stability.html); the other public members
-    // are the backends' hooks into the engine and can change or go in any release
+    // The public members are the host API, as the embedding pages and the reference document it (docs/site/stability.html);
+    // the library reaches the rest through detail::engine_access (detail/engine_access.hpp), which can change in any release
     class engine : public std::enable_shared_from_this<engine> {
     private:
         engine();
-        
+
     public:
         ~engine();
-
-        using privilege = jai::privilege;
 
         // Filesystem access is enabled by default. Changes affect the next protected
         // operation, including after a reentrant C++ callback; started work is not
@@ -151,18 +149,6 @@ namespace jai {
         void disable(std::initializer_list<std::string_view> names) { disable(std::span(names.begin(), names.size())); }
         bool is_enabled(std::initializer_list<std::string_view> names) const noexcept { return is_enabled(std::span(names.begin(), names.size())); }
         checked_result<void> require_privilege(std::initializer_list<std::string_view> names) const noexcept { return require_privilege(std::span(names.begin(), names.size())); }
-
-        // Attach a requirement to the actual callable, so aliases, overload dispatch
-        // and worker-local copies all recheck this engine's current grants. An empty
-        // requirement returns the original callable with no invocation overhead.
-        script_function guard_function(script_function function, privilege required);
-        script_function guard_function(script_function function, std::span<const std::string_view> names);
-        script_function guard_function(script_function function, std::string_view name) {
-            return guard_function(std::move(function), std::span(&name, 1));
-        }
-        script_function guard_function(script_function function, std::initializer_list<std::string_view> names) {
-            return guard_function(std::move(function), std::span(names.begin(), names.size()));
-        }
         
         // Factory method to ensure engines are always created as shared_ptr
         static std::shared_ptr<engine> make() {
@@ -233,13 +219,6 @@ namespace jai {
         // Identical to execute(content) + path attribution when the cache is disabled or
         // the path is a .jaibite itself.
         script_value execute_file_source(const std::string& resolved_path, const std::string& content);
-        // include: the file runs at the include site, in the current scope and under the running unit, so
-        // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
-        // include runs in (empty at program scope): an enum the file declares there stays local to it.
-        script_value execute_include_source(const std::string& resolved_path, const std::string& content, std::string_view scope = {});
-        // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
-        // module's closure under the stamp it was read at, so a later change to it re-runs the module.
-        bool read_include_file(const std::string& resolved_path, std::string& content);
 
         // Pre-parsed script handle: parse once here, then run it repeatedly via
         // bite.execute() or engine->execute(bite) without re-lexing/parsing (the vm
@@ -258,33 +237,6 @@ namespace jai {
         script_run start_file_source(const std::string& resolved_path, const std::string& content);   // execute_file_source's run
         script_run start(jai::jaibite& bite);
         script_run start(const script_value& callable, std::vector<script_value> args = {});
-
-        // The sleep builtin (detail: script_run.cpp): seconds on the time source; suspends the innermost run when nothing pins it,
-        // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)
-        checked_result<script_value> sleep_builtin(const script_value& seconds);
-        bool sleep_callee(const void* function) const noexcept;
-        // Native code running script inside a run (a host callback, a destructor, a signal receiver, an import, a builtin's
-        // callback): while one is on the stack a sleep blocks instead of suspending the run
-        void pin_run() noexcept { if (active_run_pins_) { ++*active_run_pins_; } }
-        void unpin_run() noexcept { if (active_run_pins_) { --*active_run_pins_; } }
-        class run_pin {
-        public:
-            explicit run_pin(engine* a_engine) noexcept : pins_(a_engine ? a_engine->active_run_pins_ : nullptr) { if (pins_) { ++*pins_; } }
-            ~run_pin() { if (pins_) { --*pins_; } }
-            run_pin(const run_pin&) = delete;
-            run_pin& operator=(const run_pin&) = delete;
-        private:
-            int* pins_;
-        };
-        // The innermost active run's pin count (null: no run is active, so nothing pins); set by every switch into a run
-        int* active_run_pins() const noexcept { return active_run_pins_; }
-        void active_run_pins(int* pins) noexcept { active_run_pins_ = pins; }
-        // A debug sync point (sleep with no duration): pending breakpoint edits apply and a pending pause parks here; one
-        // pointer test while no debugger exists
-        void debug_sync_point();
-        // Internal (script_run.cpp): the run machinery's registry, the exchange of the engine's own per-entry state with a run's
-        detail::run_registry& run_registry();
-        void swap_run_entry_state(detail::run_entry_state& state) noexcept;
 
         // Load a jaibite saved via jaibite::save()/save_bytes(). Symbols and type_info
         // are re-interned into THIS engine, so a bite saved from another engine loads
@@ -335,8 +287,6 @@ namespace jai {
         // differential. Set before the first execute, like the backend; the getter answers the effective setting.
         void aggregate_lowering(bool on);
         bool aggregate_lowering() const;
-        uint64_t aggregate_lowered_locals() const;   // the typed locals and parameters lowered so far (a coverage count for the gates)
-        uint64_t aggregate_lowered_sites() const;    // the function and lambda bodies the lowering rewrote so far (vector buffer statements included)
         // === THE MIDDLE END'S SWITCH (internal/typed_regions_design.md, the pinned forms onward) ===
         // On by default. The VM's proof-based elisions and passes over closed regions (the forms
         // that skip a check the region analysis proved redundant, the passes that rewrite a region)
@@ -366,9 +316,6 @@ namespace jai {
         void cells_miss_every(uint32_t n);
         uint32_t cells_miss_every() const;
         static bool miss_injection_available();
-        // The vm's cell block counters since the engine was made (block entries, boundary operations, resumed blocks, misses): a
-        // testing lever, counted on those paths only; zeros on the interpreter
-        cell_counters cells_counters() const;
         // === THE LISTING SINK (`jaiscript --disasm=<file>`) ===
         // Unset by default. When set, every chunk the VM compiles from here on (a program, a function at its
         // define, a standalone expression or declaration) is disassembled as it is compiled, with the regions'
@@ -387,9 +334,6 @@ namespace jai {
         void vm_coverage_reset();
         std::string vm_coverage_report(size_t top = 25) const;
         vm_coverage_totals vm_coverage_summary() const;
-#ifdef JAISCRIPT_VM_COVERAGE
-        void vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables);   // a vm backend's tables, kept past the backend
-#endif
         // Stamp counters from the most recent proof pass (tests assert proofs happened).
         const proof_stats& last_proof_stats() const;
 
@@ -404,28 +348,6 @@ namespace jai {
         // A free host function that touches state other objects share: a parallel body may not call it. Every other
         // registered host function is taken to be safe on any thread; the library's own builtins are serial unless pure.
         void serial_function(const std::string& name);
-        bool host_function_serial(const std::string& name) const;
-        // A free function the host (or the library) registered by name, as opposed to a function value script made
-        bool host_function_registered(const std::string& name) const;
-        // A global the host (or the library) registered with add_global, as opposed to a variable script declared
-        bool host_global_registered(const std::string& name) const;
-        // The argument positions any registration of `name` writes back through (non-const T& parameters), a bit each
-        uint64_t host_function_writeback(const std::string& name) const;
-        // While one lives, what registers is the library's own: serial unless it is pure (detail::parallel_pure_function)
-        class library_registration {
-        public:
-            explicit library_registration(engine& a_engine);
-            ~library_registration();
-            library_registration(const library_registration&) = delete;
-            library_registration& operator=(const library_registration&) = delete;
-        private:
-            engine& eng;
-        };
-        // The running parallel region's number (0 outside one): what a chunk makes carries it (class_instance::region_tag)
-        uint32_t parallel_region_serial() const;
-        // The scalar result every registration of `name` declares by its C++ return type (int, float, bool, char,
-        // string); false when a registration returns anything else or registrations disagree
-        bool host_function_result(const std::string& name, script_value_type& out) const;
 
         // Constant arguments: a host function ("name") or a bound method ("Class.method") whose argument `index` only the
         // program's own constants may fill: a string literal, a const holding one, a ternary or + of them, an array literal of
@@ -435,11 +357,6 @@ namespace jai {
         // a unit that was never gathered, is refused: the host raises the refusal).
         void constant_argument(const std::string& callable, size_t index, std::string refusal);
         bool constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const;
-        // the indexes and refusals registered for a callable (empty for most): what the checker asks at a call
-        std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const;
-        bool has_constant_arguments() const;
-        // the program's const texts by name, as the units gathered so far declare them (detail::constant_texts reads it)
-        const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const;
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);
@@ -532,13 +449,6 @@ namespace jai {
         void binary_scan_limit(size_t bytes);
         size_t binary_scan_limit() const;
 
-        // Per-engine execution-limit state (terminal-error latch, memory accounting)
-        // shared by the backend and the builtin-method chokepoints. Internal. While a
-        // parallel region's workers are running this resolves to the CALLING WORKER's
-        // own accounting (internal/parallel_design.md §2); outside a region it is the plain
-        // engine instance with one never-taken null test.
-        detail::execution_limits& execution_limits() noexcept;
-
         // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).
         // 0 = auto (hardware concurrency). The calling thread runs one chunk; the pool
@@ -546,64 +456,12 @@ namespace jai {
         void parallel_thread_count(size_t workers);
         size_t parallel_thread_count() const;
 
-        // How long a pool worker (and the joining thread) spins for the next region before
-        // parking on the kernel, when regions arrive at least that densely (a frame's worth of
-        // fork-joins); sparse regions park at once. 0 = always park. Default 1000 us.
-        void parallel_spin_wait_us(size_t microseconds);
-        size_t parallel_spin_wait_us() const;
-
-        // Hot-reload work counter: per-instance field migrations performed since engine
-        // construction. Tests assert DELTAS of this instead of wall-clock ratios (a
-        // fields-unchanged reload proves itself by migrating zero instances).
-        size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
-        void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
-
         // Hot-reload migration reports (off by default): with reporting on, every automatic field operation a
         // reload performs aggregates into hot_reload_reports() until cleared; off, migration records nothing.
         void hot_reload_reporting(bool enabled) { hot_reload_reporting_ = enabled; }
         bool hot_reload_reporting() const noexcept { return hot_reload_reporting_; }
         const std::vector<field_migration_report>& hot_reload_reports() const noexcept { return hot_reload_reports_; }
         void clear_hot_reload_reports() { hot_reload_reports_.clear(); }
-        void record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
-                                    const script_value* before, const script_value* after);
-
-        // Serializes IN-REGION chunk compiles engine-wide (a constructor lazily compiles on worker
-        // threads; compilation copies AST literal strong_ptrs whose counts are non-atomic).
-        // Never taken outside an active parallel region.
-        // unique_ptr: the engine is movable, a mutex is not.
-        std::mutex& parallel_compile_mutex() { return *parallel_compile_mutex_; }
-
-        // The most recent parallel region's cumulative element counts per thread (W+1 entries for W
-        // threads). A weight-hinted region's are the contiguous chunks the hint chose, fixed by the
-        // weights; a hint-less region's count what each thread took from the shared blocks, which
-        // follows timing. Instrumentation for tests/benchmarks — never observable from script.
-        const std::vector<size_t>& last_parallel_chunk_bounds() const;
-
-        // How the most recent parallel_transform provisioned each captured enclosing
-        // name (scalar/string/borrow/snapshot), keyed by INTERNED symbol id (resolve via
-        // symbolize()). Instrumentation: pins the borrow-vs-snapshot classification in
-        // tests — never observable from script.
-        const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& last_parallel_captures() const;
-
-        // Internal: engine-owned parallel machinery (lazily created) and the per-worker
-        // provisioning helper (fresh copies of registered callables whose invocation
-        // shares no refcounts with the engine's stored values).
-        detail::parallel_engine_state& parallel_state();
-        script_value make_parallel_host_function_copy(const std::string& name);
-        size_t interned_type_count() const;   // internal: the type interner's size (a region's prewarm repeats nothing while it holds)
-
-        // Stdlib math builtins the VM evaluates through the math:: kernel while the name still binds the function registered
-        // here (compared per call; any rebinding or re-registration takes the real call). The name must hold exactly one
-        // registration and `intrinsic` must name a kernel whose result equals it for int and float arguments
-        // (detail::math_alias_kernel); anything else registers nothing.
-        struct math_alias_row {
-            const void* identity = nullptr;   // &value.unchecked_as_function()
-            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
-        };
-        static constexpr size_t k_math_alias_rows = 64;
-        void register_math_alias(std::string_view name, std::string_view intrinsic);
-        uint8_t math_alias_fn(uint64_t symbol) const;   // 0xFF: not an alias
-        const math_alias_row* math_alias_rows() const;
 
         // A host function's entry over its arguments where they are, beside the function `name` binds now: a VM call site whose
         // callee is that function runs `invoke(target, args, arity)` for a call of `arity` arguments, none of them a reference,
@@ -611,30 +469,12 @@ namespace jai {
         // those arguments; a re-registration or a rebinding of the name is another function, which the site calls as before.
         using host_direct_invoke = checked_result<script_value> (*)(const void*, const script_value*, size_t);
         static constexpr size_t host_direct_any_arity = SIZE_MAX;   // a variadic function's row: any call of 1 to 8 arguments
-        struct host_direct_row {
-            const void* identity = nullptr;   // &value.unchecked_as_function()
-            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
-            host_direct_invoke invoke = nullptr;
-            const void* target = nullptr;
-            size_t arity = 0;
-        };
         void add_host_direct(std::string_view name, size_t arity, host_direct_invoke invoke, const void* target);
         void add_host_direct(const script_value& function, size_t arity, host_direct_invoke invoke, const void* target);   // a function value (a namespace's)
-        const host_direct_row* host_direct_for(const void* identity) const;
-        const uint64_t* host_direct_generation() const;   // never moves: a row holds for as long as its function is the callee
 
         using stack_frame = ::jai::stack_frame;
         std::vector<stack_frame> last_stack_trace() const;
         std::string format_stack_trace() const;
-
-        // The file whose code is executing right now: the innermost frame's statement, as the
-        // parser stamped it (the resolved path an include/import loaded, the path execute_file was
-        // given, "<script>" for raw content). Empty when nothing is executing.
-        std::string current_source_file() const;
-        // The file the outermost execute_file/execute_file_source is running, kept after it returns
-        // (a host calling script functions later still gets the program's root). Empty before the
-        // first file execute; a nested execute from inside a running script does not replace it.
-        std::string root_source_file() const;
 
         // Per-user folders for an app's data and cache, the platform's convention: %LOCALAPPDATA%/name
         // (cache below it), ~/Library/Application Support/name and ~/Library/Caches/name, $XDG_DATA_HOME
@@ -669,30 +509,6 @@ namespace jai {
         // From the system clock's reading at construction, or from zero on a host monotonic provider
         double engine_elapsed();
         double execute_elapsed();
-        void note_host_entry();
-        // The host entry running now (an execute, execute_file or host call into script, with everything it runs): one execute
-        // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting
-        uint64_t host_entry_generation() const noexcept;
-        // Debug builds: the thread running the engine's outermost execution. An instance may die only there, on a thread of
-        // the region it runs, or while the engine is idle (Release records nothing and answers true)
-        bool debug_enter_execution() noexcept;   // true when this call became the outermost
-        void debug_leave_execution() noexcept;
-        bool debug_releases_here() const noexcept;
-        class debug_execution_scope {
-        public:
-#ifndef NDEBUG
-            explicit debug_execution_scope(engine& a_engine) noexcept : engine_(a_engine.debug_enter_execution() ? &a_engine : nullptr) {}
-            ~debug_execution_scope() { if (engine_) { engine_->debug_leave_execution(); } }
-            debug_execution_scope(const debug_execution_scope&) = delete;
-            debug_execution_scope& operator=(const debug_execution_scope&) = delete;
-        private:
-            engine* engine_;
-#else
-            explicit debug_execution_scope(engine&) noexcept {}
-#endif
-        };
-        bool unit_rerun(unit_stamp unit) const;
-        void note_execute_elapsed_use();
 
         // Object creation through registered class system
         template<typename T, typename... Args>
@@ -704,18 +520,6 @@ namespace jai {
         template<typename T>
         script_value make_object(std::shared_ptr<T> data) { return make_handle(std::move(data)); }
 
-        // The object data owns, as a value: a by-value copy runs the copy constructor (a host T result boxes this way).
-        // Defined in engine_impl.hpp where class_definition is complete.
-        template<typename T>
-        script_value make_value_object(std::shared_ptr<T> data);
-
-        // A host std::shared_ptr<T> entering script is a handle, as new T(...) makes one: copies share the object
-        template<typename T>
-        script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_value_object(std::move(data))); }
-        script_value marked_shared_handle(script_value object);
-        // Interns the handle type of def's objects, ahead of a parallel region whose chunks a host call can hand one
-        void prewarm_handle_type(const class_definition& def);
-
         // Convenient script_value creation methods
         // Usage: engine->make_value(42) instead of script_value(42, engine)
         // A value of another engine enters by copy (import_value); this engine's own values pass as they are
@@ -725,12 +529,6 @@ namespace jai {
         script_value make_value(const held_value& value) { return make_value(value.value()); }
         script_value make_value(held_value& value) { return make_value(value.value()); }
         script_value make_value(held_value&& value) { return make_value(value.value()); }
-        // A value this engine made, or one that names no engine (a host literal): a heap payload records its engine, a
-        // scalar's stamp is one of this engine's types
-        bool owns_value(const script_value& value) const noexcept;
-        // Another engine's value as this engine's: numbers, strings and math values copy, arrays and maps convert deeply; an
-        // object, a function or a reference into the other engine's memory throws, as does a held value that outlived its engine
-        script_value import_value(const script_value& value);
 
         template<typename T>
         requires (std::is_arithmetic_v<std::remove_cvref_t<T>> ||
@@ -801,11 +599,6 @@ namespace jai {
         script_value make_map() {
             return script_value::make_map(nullptr, nullptr, this);
         }
-
-        // Create empty weak_ptr value with specified type
-        script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type) {
-            return script_value::make_empty_weak_ptr(weak_ptr_type, this);
-        }
         
         // === FUNCTION REGISTRATION ===
         
@@ -867,40 +660,8 @@ namespace jai {
         void add_function(const std::string& name, Func&& func, std::initializer_list<std::string_view> names) {
             add_function(name, std::forward<Func>(func), std::span(names.begin(), names.size()));
         }
-
-    private:
-        template <typename R>
-        static constexpr script_value_type host_result_kind() {
-            using D = std::decay_t<R>;
-            if constexpr (std::is_same_v<D, int> || std::is_same_v<D, int64_t> || std::is_same_v<D, script_int>) { return script_value_type::jai_int_type; }
-            else if constexpr (std::is_same_v<D, float> || std::is_same_v<D, double>) { return script_value_type::jai_float_type; }
-            else if constexpr (std::is_same_v<D, bool>) { return script_value_type::jai_bool_type; }
-            else if constexpr (std::is_same_v<D, char> || std::is_same_v<D, script_char>) { return script_value_type::jai_char_type; }
-            else if constexpr (std::is_same_v<D, std::string>) { return script_value_type::jai_string_type; }
-            else { return script_value_type::jai_null_type; }
-        }
-        // the result kind of the registration about to be made (register_overload_impl consumes it; unstaged = unknown)
-        void stage_host_result(script_value_type kind);
-        // the registration about to be made is a by-value binding: its callable's own entry, found inside the stored function
-        struct host_direct_entry {
-            checked_result<script_value> (*invoke)(const void*, const script_value*, size_t) = nullptr;
-            const void* (*locate)(const script_function&) = nullptr;
-        };
-        void stage_host_direct(host_direct_entry entry);
-
-        // The single overloaded-function registration algorithm shared by every public entry point
-        // (add_function*, add_overloaded_function*, add_variadic_function). create_set_on_first is the
-        // only policy difference between the entry points.
-        void register_overload_impl(const std::string& name, size_t arity, script_function func,
-                                    const std::vector<param_type_info>& param_types, bool create_set_on_first);
-
-    public:
         // Overloaded function registration
         void add_overloaded_function(const std::string& name, size_t arg_count, script_function func);
-        void add_overloaded_function_with_full_types(const std::string& name, size_t arg_count, script_function func, const std::vector<param_type_info>& param_types);
-        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types);
-        // the same, declaring the scalar result the checker sees (add_function reads it from the C++ return type)
-        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types, script_value_type result);
         
         // Class registration
         // Register a class with its type information
@@ -914,28 +675,15 @@ namespace jai {
         // Registers base template names (e.g., "Point" from "Point<int>") 
         // so the parser knows which identifiers can be followed by template syntax
         void register_template_type(const std::string& baseTemplateName);
-        
-        // Get all registered template types for parser
-        std::unordered_set<std::string> get_registered_template_types() const;
-        
-        // Get class definition by name
-        std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
 
         // Every class THIS engine can name (host-bound + script-declared), sorted —
         // reflect::classes()'s deterministic source
         std::vector<std::string> registered_class_names() const;
 
-        // Get class definition by type_id (faster than string lookup)
-        std::shared_ptr<class_definition> get_class_definition(uint64_t type_id) const;
-
         // Check if a type is registered (by name)
         bool is_type_registered(const std::string& name) const {
             return get_class_definition(name) != nullptr;
         }
-
-        // Get registered script name for a C++ type
-        template<typename T>
-        std::string get_registered_name() const;
 
         // Check if type T has been registered via dynamic_binder
         template<typename T>
@@ -950,13 +698,6 @@ namespace jai {
         void bind_static_types() {
             (bind_static_type<Ts>(), ...);
         }
-
-        // Enhanced Conversion System
-        // Get the conversion manager for this engine
-        conversions::conversion_manager get_conversion_manager();
-        
-        // Register standard vector and map conversions
-        void add_standard_conversions();
         
         // Register vector conversion for a specific type
         template<typename T>
@@ -972,20 +713,6 @@ namespace jai {
             manager.add_map_conversion<K, V>();
         }
         
-        // Register bound_array conversion for a specific type
-        template<typename T>
-        void add_bound_array_conversion() {
-            auto manager = get_conversion_manager();
-            manager.add_bound_array_conversion<T>();
-        }
-        
-        // Register bound_map conversion for specific key/value types
-        template<typename K, typename V>
-        void add_bound_map_conversion() {
-            auto manager = get_conversion_manager();
-            manager.add_bound_map_conversion<K, V>();
-        }
-        
         // Register custom conversion for any type
         template<typename T>
         void add_custom_conversion(
@@ -999,56 +726,14 @@ namespace jai {
         // a borrow, valid for the call; hold(v) keeps it until this engine is destroyed (held_value)
         held_value hold(script_value value) const;
         bool has_variable(const std::string& name) const;
-        // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
-        // host's writes (add_global / add_global_ref refuse a const)
-        void mark_const_cell(const script_value* cell, bool is_const);
-        bool const_cell(const script_value* cell) const;
-        // the counters a value read once from a program-scope const validates against, read in place on a hot path: the first moves
-        // at every program-scope declaration (each marks its cell), the second is definition_epoch's
-        const uint64_t* const_epoch_counter() const;
-        const uint64_t* definition_epoch_counter() const;
-        bool is_const_global(const std::string& name) const;
         bool has_function(const std::string& name) const;
-        bool is_type_name(const std::string& name) const;
-        
-        // Get the global environment (for internal use)
-        std::shared_ptr<environment> get_global_environment() const;
-        
-        // Performance optimization
-        void set_has_custom_numeric_operators(bool value);
 
         // Backend configuration
         void set_backend(backend_type type);
         backend_type get_backend_type() const;
         std::string get_backend_name() const;
-        execution_backend* get_execution_backend() const;
-        // The backend running script on the calling thread: a parallel region's chunk runs on its own
-        execution_backend* calling_backend() const {
-            return parallel_region_active_ ? region_chunk_backend() : get_execution_backend();
-        }
-        execution_backend* region_chunk_backend() const;
-        // A parallel chunk's call of a class operator through its region pin, on the chunk's backend; nullopt outside a region or for an
-        // operator the region did not pin
-        std::optional<checked_result<script_value>> parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) const;
-        bool backend_unwinding() const;
-        std::string backend_exception_text() const;   // the text of the exception the backend is unwinding with
         // A value's text as string + value spells it (a class's own to_string() runs; its error is the result)
         checked_result<std::string> text_of(const script_value& v) const;
-
-        // Engine-owned script namespace registry (namespace_id -> data); survives across backends
-        std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
-        // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
-        void note_enum_name(uint64_t name_id);
-        bool is_enum_name(uint64_t name_id) const;
-
-        // Get string symbolizer for interning identifiers
-        string_symbolizer* get_symbolizer();
-
-        // Intern a string and return its unique ID (const-safe)
-        uint64_t symbolize(std::string_view str) const;
-        // A transient error text's symbol (string_symbolizer::park): it rides an error's {0} without growing the
-        // interned table. While frozen it is the text's interned id when one exists, else 0 (the caller's slot-less text)
-        uint64_t park_error_text(std::string_view text) const;
 
         // Format a checked_result error to a human-readable string
         // Resolves symbol IDs to their string representations
@@ -1056,21 +741,6 @@ namespace jai {
         std::string format_error(const checked_result<T>& result) {
             return jai::format_error(result, *get_symbolizer());
         }
-
-        // Get class definition by type index
-        std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;
-        
-        // Get the conversion registry - shareable between engines
-        std::shared_ptr<conversions::conversion_registry> get_conversion_registry() const;
-        
-        // Set a shared conversion registry (for sharing between engine instances)
-        void set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry);
-        
-        // Get the serialization registry for this engine
-        serialization::serialization_registry& get_serialization_registry();
-        
-        // Get the class registry for this engine
-        class_registry& get_class_registry();
 
         // Script layers (docs/site/embedding/13-script-extensible.html). A script class deriving a bound C++ class
         // owns its object as its native object; the object carries the layer back through its
@@ -1100,6 +770,385 @@ namespace jai {
         // The live layer owned by this engine, if any.
         template<typename T>
         strong_ptr<class_instance> script_layer(const T& object) const;
+        // Cores (error codes; the public extend throws at the host boundary): extend itself,
+        // the script class behind a constructor value / name, and a layer of script_def over an
+        // object typed as base_def (state from carry_from's fields or fields_json).
+        checked_result<script_value> extend_checked(const script_value& object, const script_value& script_class, const std::string& fields_json);
+        // The elision's kill switch (default on): off binds every by-value parameter with the
+        // clone, observationally identical - the differential gates flip it
+        void parameter_alias(bool on);
+        bool parameter_alias() const;
+        void local_alias(bool on);
+        bool local_alias() const;
+
+        // Script errors at a boundary with no error-value channel (a destructor that fails where nothing can catch it) route
+        // here; a converted std::function callback and a signal's script receiver throw to the host caller instead
+        // (engine_impl.hpp, signal_impl.hpp). Default sink is std::cerr; the message includes the script stack trace if captured.
+        void set_script_error_handler(std::function<void(const std::string&)> a_handler);
+
+        // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
+        // handle method). Always-on, independent of the static checker.
+        // Default sink is std::cerr ("[jaiscript] warning: ..."); the host app / tests
+        // install their own handler to capture. Execution always proceeds.
+        void set_script_warning_handler(std::function<void(const std::string&)> a_handler);
+
+        // RAII scope for C++ code invoking script functions directly (converted callbacks,
+        // signal receivers): without it, reference parameters would bind against whatever
+        // script call happens to be in flight.
+        class external_call_guard {
+        public:
+            explicit external_call_guard(engine* a_engine) : engine_(a_engine) {
+                if (engine_) { engine_->push_external_call_scope(); }
+            }
+            ~external_call_guard() {
+                if (engine_) { engine_->pop_external_call_scope(); }
+            }
+            external_call_guard(const external_call_guard&) = delete;
+            external_call_guard& operator=(const external_call_guard&) = delete;
+        private:
+            engine* engine_;
+        };
+
+        // Output stream redirection
+        // Set a custom output stream for print() and related functions
+        // Pass nullptr to reset to std::cout
+        void set_output_stream(std::shared_ptr<std::ostream> stream);
+        void add_include_path(const std::string& path);
+        // Confinement (opt-in; empty, the default, lets the ladder open any path the process can read): include, import,
+        // resolve_path and file_data open only files whose canonical path lies under one of these folders. A file the ladder
+        // finds outside them is skipped, and when no rung finds one inside, the reach fails with "Path outside the confined
+        // roots: <path as written>". No .cache folder is written beside a source outside them.
+        void confine_paths(const std::vector<std::string>& roots);
+        std::vector<std::string> confine_paths() const;
+        
+        // Import behavior configuration
+        enum class import_behavior {
+            file_timestamp, // Re-import if file modified (DEFAULT)
+            once,           // Import only once, ignore file changes
+            always         // Treat import as include
+        };
+        
+        void set_import_behavior(import_behavior behavior);
+
+        // The engine-wide import check pass (guide ch. 10): at most once per `seconds` (default 0.2; 0 = every reach) the first
+        // import reached opens a pass, every import reached during it stats its modules, and the pass closes when a module it
+        // already checked is reached again or when the outermost execute()/next() returns; between passes an import does
+        // nothing. A frame therefore checks every import it reaches or none. The window runs on the engine's clock sample
+        // (the real steady clock as read at the host entry, at the budget check's samples and by a time:: read of the system
+        // clock), so an import reads no clock itself; a host engine_time::source never moves it.
+        void import_recheck_interval(double seconds);
+        double import_recheck_interval() const;
+        
+        // Import management
+        void reset_imports();
+        void reset_import(const std::string& path);
+        bool is_imported(const std::string& path) const;
+        std::vector<std::string> get_imported_files() const;
+        bool loading() const noexcept { return load_depth_ > 0; }
+
+    private:
+        friend struct detail::engine_access;
+        friend class caught_error_scope;
+
+        // Attach a requirement to the actual callable, so aliases, overload dispatch
+        // and worker-local copies all recheck this engine's current grants. An empty
+        // requirement returns the original callable with no invocation overhead.
+        script_function guard_function(script_function function, privilege required);
+        script_function guard_function(script_function function, std::span<const std::string_view> names);
+        script_function guard_function(script_function function, std::string_view name) {
+            return guard_function(std::move(function), std::span(&name, 1));
+        }
+        script_function guard_function(script_function function, std::initializer_list<std::string_view> names) {
+            return guard_function(std::move(function), std::span(names.begin(), names.size()));
+        }
+        // include: the file runs at the include site, in the current scope and under the running unit, so
+        // its declarations are the includer's (internal/global_shadowing.md). scope names the function or block the
+        // include runs in (empty at program scope): an enum the file declares there stays local to it.
+        script_value execute_include_source(const std::string& resolved_path, const std::string& content, std::string_view scope = {});
+        // An include's file read for the backends: false = it cannot be opened. Inside a running import the file joins the
+        // module's closure under the stamp it was read at, so a later change to it re-runs the module.
+        bool read_include_file(const std::string& resolved_path, std::string& content);
+
+        // The sleep builtin (detail: script_run.cpp): seconds on the time source; suspends the innermost run when nothing pins it,
+        // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)
+        checked_result<script_value> sleep_builtin(const script_value& seconds);
+        bool sleep_callee(const void* function) const noexcept;
+        // Native code running script inside a run (a host callback, a destructor, a signal receiver, an import, a builtin's
+        // callback): while one is on the stack a sleep blocks instead of suspending the run
+        void pin_run() noexcept { if (active_run_pins_) { ++*active_run_pins_; } }
+        void unpin_run() noexcept { if (active_run_pins_) { --*active_run_pins_; } }
+        class run_pin {
+        public:
+            explicit run_pin(engine* a_engine) noexcept : pins_(a_engine ? a_engine->active_run_pins_ : nullptr) { if (pins_) { ++*pins_; } }
+            ~run_pin() { if (pins_) { --*pins_; } }
+            run_pin(const run_pin&) = delete;
+            run_pin& operator=(const run_pin&) = delete;
+        private:
+            int* pins_;
+        };
+        // The innermost active run's pin count (null: no run is active, so nothing pins); set by every switch into a run
+        int* active_run_pins() const noexcept { return active_run_pins_; }
+        void active_run_pins(int* pins) noexcept { active_run_pins_ = pins; }
+        // A debug sync point (sleep with no duration): pending breakpoint edits apply and a pending pause parks here; one
+        // pointer test while no debugger exists
+        void debug_sync_point();
+        // Internal (script_run.cpp): the run machinery's registry, the exchange of the engine's own per-entry state with a run's
+        detail::run_registry& run_registry();
+        void swap_run_entry_state(detail::run_entry_state& state) noexcept;
+        uint64_t aggregate_lowered_locals() const;   // the typed locals and parameters lowered so far (a coverage count for the gates)
+        uint64_t aggregate_lowered_sites() const;    // the function and lambda bodies the lowering rewrote so far (vector buffer statements included)
+        // The vm's cell block counters since the engine was made (block entries, boundary operations, resumed blocks, misses): a
+        // testing lever, counted on those paths only; zeros on the interpreter
+        cell_counters cells_counters() const;
+#ifdef JAISCRIPT_VM_COVERAGE
+        void vm_coverage_adopt(std::shared_ptr<vm::coverage_tables> tables);   // a vm backend's tables, kept past the backend
+#endif
+        bool host_function_serial(const std::string& name) const;
+        // A free function the host (or the library) registered by name, as opposed to a function value script made
+        bool host_function_registered(const std::string& name) const;
+        // A global the host (or the library) registered with add_global, as opposed to a variable script declared
+        bool host_global_registered(const std::string& name) const;
+        // The argument positions any registration of `name` writes back through (non-const T& parameters), a bit each
+        uint64_t host_function_writeback(const std::string& name) const;
+        // While one lives, what registers is the library's own: serial unless it is pure (detail::parallel_pure_function)
+        class library_registration {
+        public:
+            explicit library_registration(engine& a_engine);
+            ~library_registration();
+            library_registration(const library_registration&) = delete;
+            library_registration& operator=(const library_registration&) = delete;
+        private:
+            engine& eng;
+        };
+        // The running parallel region's number (0 outside one): what a chunk makes carries it (class_instance::region_tag)
+        uint32_t parallel_region_serial() const;
+        // The scalar result every registration of `name` declares by its C++ return type (int, float, bool, char,
+        // string); false when a registration returns anything else or registrations disagree
+        bool host_function_result(const std::string& name, script_value_type& out) const;
+        // the indexes and refusals registered for a callable (empty for most): what the checker asks at a call
+        std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const;
+        bool has_constant_arguments() const;
+        // the program's const texts by name, as the units gathered so far declare them (detail::constant_texts reads it)
+        const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const;
+
+        // Per-engine execution-limit state (terminal-error latch, memory accounting)
+        // shared by the backend and the builtin-method chokepoints. Internal. While a
+        // parallel region's workers are running this resolves to the CALLING WORKER's
+        // own accounting (internal/parallel_design.md §2); outside a region it is the plain
+        // engine instance with one never-taken null test.
+        detail::execution_limits& execution_limits() noexcept;
+
+        // How long a pool worker (and the joining thread) spins for the next region before
+        // parking on the kernel, when regions arrive at least that densely (a frame's worth of
+        // fork-joins); sparse regions park at once. 0 = always park. Default 1000 us.
+        void parallel_spin_wait_us(size_t microseconds);
+        size_t parallel_spin_wait_us() const;
+
+        // Hot-reload work counter: per-instance field migrations performed since engine
+        // construction. Tests assert DELTAS of this instead of wall-clock ratios (a
+        // fields-unchanged reload proves itself by migrating zero instances).
+        size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
+        void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
+        void record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
+                                    const script_value* before, const script_value* after);
+
+        // Serializes IN-REGION chunk compiles engine-wide (a constructor lazily compiles on worker
+        // threads; compilation copies AST literal strong_ptrs whose counts are non-atomic).
+        // Never taken outside an active parallel region.
+        // unique_ptr: the engine is movable, a mutex is not.
+        std::mutex& parallel_compile_mutex() { return *parallel_compile_mutex_; }
+
+        // The most recent parallel region's cumulative element counts per thread (W+1 entries for W
+        // threads). A weight-hinted region's are the contiguous chunks the hint chose, fixed by the
+        // weights; a hint-less region's count what each thread took from the shared blocks, which
+        // follows timing. Instrumentation for tests/benchmarks — never observable from script.
+        const std::vector<size_t>& last_parallel_chunk_bounds() const;
+
+        // How the most recent parallel_transform provisioned each captured enclosing
+        // name (scalar/string/borrow/snapshot), keyed by INTERNED symbol id (resolve via
+        // symbolize()). Instrumentation: pins the borrow-vs-snapshot classification in
+        // tests — never observable from script.
+        const std::vector<std::pair<uint64_t, detail::parallel_capture_kind>>& last_parallel_captures() const;
+
+        // Internal: engine-owned parallel machinery (lazily created) and the per-worker
+        // provisioning helper (fresh copies of registered callables whose invocation
+        // shares no refcounts with the engine's stored values).
+        detail::parallel_engine_state& parallel_state();
+        script_value make_parallel_host_function_copy(const std::string& name);
+        size_t interned_type_count() const;   // internal: the type interner's size (a region's prewarm repeats nothing while it holds)
+
+        // Stdlib math builtins the VM evaluates through the math:: kernel while the name still binds the function registered
+        // here (compared per call; any rebinding or re-registration takes the real call). The name must hold exactly one
+        // registration and `intrinsic` must name a kernel whose result equals it for int and float arguments
+        // (detail::math_alias_kernel); anything else registers nothing.
+        struct math_alias_row {
+            const void* identity = nullptr;   // &value.unchecked_as_function()
+            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
+        };
+        static constexpr size_t k_math_alias_rows = 64;
+        void register_math_alias(std::string_view name, std::string_view intrinsic);
+        uint8_t math_alias_fn(uint64_t symbol) const;   // 0xFF: not an alias
+        const math_alias_row* math_alias_rows() const;
+        struct host_direct_row {
+            const void* identity = nullptr;   // &value.unchecked_as_function()
+            script_value value{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
+            host_direct_invoke invoke = nullptr;
+            const void* target = nullptr;
+            size_t arity = 0;
+        };
+        const host_direct_row* host_direct_for(const void* identity) const;
+        const uint64_t* host_direct_generation() const;   // never moves: a row holds for as long as its function is the callee
+
+        // The file whose code is executing right now: the innermost frame's statement, as the
+        // parser stamped it (the resolved path an include/import loaded, the path execute_file was
+        // given, "<script>" for raw content). Empty when nothing is executing.
+        std::string current_source_file() const;
+        // The file the outermost execute_file/execute_file_source is running, kept after it returns
+        // (a host calling script functions later still gets the program's root). Empty before the
+        // first file execute; a nested execute from inside a running script does not replace it.
+        std::string root_source_file() const;
+        void note_host_entry();
+        // The host entry running now (an execute, execute_file or host call into script, with everything it runs): one execute
+        // context. A definition in another context, or in a re-run of its unit, redefines instead of conflicting
+        uint64_t host_entry_generation() const noexcept;
+        // Debug builds: the thread running the engine's outermost execution. An instance may die only there, on a thread of
+        // the region it runs, or while the engine is idle (Release records nothing and answers true)
+        bool debug_enter_execution() noexcept;   // true when this call became the outermost
+        void debug_leave_execution() noexcept;
+        bool debug_releases_here() const noexcept;
+        class debug_execution_scope {
+        public:
+#ifndef NDEBUG
+            explicit debug_execution_scope(engine& a_engine) noexcept : engine_(a_engine.debug_enter_execution() ? &a_engine : nullptr) {}
+            ~debug_execution_scope() { if (engine_) { engine_->debug_leave_execution(); } }
+            debug_execution_scope(const debug_execution_scope&) = delete;
+            debug_execution_scope& operator=(const debug_execution_scope&) = delete;
+        private:
+            engine* engine_;
+#else
+            explicit debug_execution_scope(engine&) noexcept {}
+#endif
+        };
+        bool unit_rerun(unit_stamp unit) const;
+        void note_execute_elapsed_use();
+
+        // The object data owns, as a value: a by-value copy runs the copy constructor (a host T result boxes this way).
+        // Defined in engine_impl.hpp where class_definition is complete.
+        template<typename T>
+        script_value make_value_object(std::shared_ptr<T> data);
+
+        // A host std::shared_ptr<T> entering script is a handle, as new T(...) makes one: copies share the object
+        template<typename T>
+        script_value make_handle(std::shared_ptr<T> data) { return marked_shared_handle(make_value_object(std::move(data))); }
+        script_value marked_shared_handle(script_value object);
+        // Interns the handle type of def's objects, ahead of a parallel region whose chunks a host call can hand one
+        void prewarm_handle_type(const class_definition& def);
+        // A value this engine made, or one that names no engine (a host literal): a heap payload records its engine, a
+        // scalar's stamp is one of this engine's types
+        bool owns_value(const script_value& value) const noexcept;
+        // Another engine's value as this engine's: numbers, strings and math values copy, arrays and maps convert deeply; an
+        // object, a function or a reference into the other engine's memory throws, as does a held value that outlived its engine
+        script_value import_value(const script_value& value);
+
+        // Create empty weak_ptr value with specified type
+        script_value make_empty_weak_ptr(type_info_ptr weak_ptr_type) {
+            return script_value::make_empty_weak_ptr(weak_ptr_type, this);
+        }
+        void add_overloaded_function_with_full_types(const std::string& name, size_t arg_count, script_function func, const std::vector<param_type_info>& param_types);
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types);
+        // the same, declaring the scalar result the checker sees (add_function reads it from the C++ return type)
+        void add_function_with_arity_and_full_types(const std::string& name, script_function func, size_t arity, const std::vector<param_type_info>& param_types, script_value_type result);
+        
+        // Get all registered template types for parser
+        std::unordered_set<std::string> get_registered_template_types() const;
+        
+        // Get class definition by name
+        std::shared_ptr<class_definition> get_class_definition(const std::string& name) const;
+
+        // Get class definition by type_id (faster than string lookup)
+        std::shared_ptr<class_definition> get_class_definition(uint64_t type_id) const;
+
+        // Get registered script name for a C++ type
+        template<typename T>
+        std::string get_registered_name() const;
+
+        // Enhanced Conversion System
+        // Get the conversion manager for this engine
+        conversions::conversion_manager get_conversion_manager();
+        
+        // Register standard vector and map conversions
+        void add_standard_conversions();
+        
+        // Register bound_array conversion for a specific type
+        template<typename T>
+        void add_bound_array_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_bound_array_conversion<T>();
+        }
+        
+        // Register bound_map conversion for specific key/value types
+        template<typename K, typename V>
+        void add_bound_map_conversion() {
+            auto manager = get_conversion_manager();
+            manager.add_bound_map_conversion<K, V>();
+        }
+        // const program-scope and namespace cells (internal/const.md): marked by their declaration, consulted by the checker and the
+        // host's writes (add_global / add_global_ref refuse a const)
+        void mark_const_cell(const script_value* cell, bool is_const);
+        bool const_cell(const script_value* cell) const;
+        // the counters a value read once from a program-scope const validates against, read in place on a hot path: the first moves
+        // at every program-scope declaration (each marks its cell), the second is definition_epoch's
+        const uint64_t* const_epoch_counter() const;
+        const uint64_t* definition_epoch_counter() const;
+        bool is_const_global(const std::string& name) const;
+        bool is_type_name(const std::string& name) const;
+        
+        // Get the global environment (for internal use)
+        std::shared_ptr<environment> get_global_environment() const;
+        
+        // Performance optimization
+        void set_has_custom_numeric_operators(bool value);
+        execution_backend* get_execution_backend() const;
+        // The backend running script on the calling thread: a parallel region's chunk runs on its own
+        execution_backend* calling_backend() const {
+            return parallel_region_active_ ? region_chunk_backend() : get_execution_backend();
+        }
+        execution_backend* region_chunk_backend() const;
+        // A parallel chunk's call of a class operator through its region pin, on the chunk's backend; nullopt outside a region or for an
+        // operator the region did not pin
+        std::optional<checked_result<script_value>> parallel_operator_call(const script_value& self, uint64_t id, std::vector<script_value> args) const;
+        bool backend_unwinding() const;
+        std::string backend_exception_text() const;   // the text of the exception the backend is unwinding with
+
+        // Engine-owned script namespace registry (namespace_id -> data); survives across backends
+        std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
+        // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
+        void note_enum_name(uint64_t name_id);
+        bool is_enum_name(uint64_t name_id) const;
+
+        // Get string symbolizer for interning identifiers
+        string_symbolizer* get_symbolizer();
+
+        // Intern a string and return its unique ID (const-safe)
+        uint64_t symbolize(std::string_view str) const;
+        // A transient error text's symbol (string_symbolizer::park): it rides an error's {0} without growing the
+        // interned table. While frozen it is the text's interned id when one exists, else 0 (the caller's slot-less text)
+        uint64_t park_error_text(std::string_view text) const;
+
+        // Get class definition by type index
+        std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;
+        
+        // Get the conversion registry - shareable between engines
+        std::shared_ptr<conversions::conversion_registry> get_conversion_registry() const;
+        
+        // Set a shared conversion registry (for sharing between engine instances)
+        void set_conversion_registry(std::shared_ptr<conversions::conversion_registry> registry);
+        
+        // Get the serialization registry for this engine
+        serialization::serialization_registry& get_serialization_registry();
+        
+        // Get the class registry for this engine
+        class_registry& get_class_registry();
 
         // Map path for types without the slot, keyed by the native object's pointer.
         // note_script_layer is called from class_instance::set_native.
@@ -1130,10 +1179,6 @@ namespace jai {
         strong_ptr<class_instance> construct_script_layer_for_load(const std::string& script_class_name, std::shared_ptr<void>& cpp_object);
         checked_result<void> hydrate_script_layer(const strong_ptr<class_instance>& layer, const std::string& fields_json);
         std::string detach_object(const strong_ptr<class_instance>& layer);
-        // Cores (error codes; the public extend throws at the host boundary): extend itself,
-        // the script class behind a constructor value / name, and a layer of script_def over an
-        // object typed as base_def (state from carry_from's fields or fields_json).
-        checked_result<script_value> extend_checked(const script_value& object, const script_value& script_class, const std::string& fields_json);
         checked_result<std::shared_ptr<class_definition>> resolve_script_class(const script_value& script_class);
         checked_result<strong_ptr<class_instance>> build_script_layer(const std::shared_ptr<class_definition>& script_def,
             const std::shared_ptr<class_definition>& base_def, const std::shared_ptr<void>& object, bool engine_owned,
@@ -1166,10 +1211,6 @@ namespace jai {
         // (main thread; a test observable for the elision)
         uint64_t parameter_alias_binds() const;
         void note_parameter_alias_bind();
-        // The elision's kill switch (default on): off binds every by-value parameter with the
-        // clone, observationally identical - the differential gates flip it
-        void parameter_alias(bool on);
-        bool parameter_alias() const;
         // The release stack (detail/release_machine.hpp); _here is null while a parallel region runs (workers release natively)
         detail::release_machine& release_machine();
         detail::release_machine* release_machine_here();
@@ -1178,8 +1219,6 @@ namespace jai {
         uint32_t release_recursion_limit() const;
         uint64_t local_alias_binds() const;
         void note_local_alias_bind();
-        void local_alias(bool on);
-        bool local_alias() const;
 
         // Script-class SHAPE change (first definition, non-identical redefinition): the static
         // checker's surface moved, cached entries re-check (and re-stamp proofs) at their next
@@ -1268,18 +1307,7 @@ namespace jai {
         bool park_parallel_registration(weaker_ptr<class_instance>& instance);
         // Cold class-reload boundary: recover surviving worker copies after a failed join.
         void recover_parallel_registrations();
-
-        // Script errors at a boundary with no error-value channel (a destructor that fails where nothing can catch it) route
-        // here; a converted std::function callback and a signal's script receiver throw to the host caller instead
-        // (engine_impl.hpp, signal_impl.hpp). Default sink is std::cerr; the message includes the script stack trace if captured.
-        void set_script_error_handler(std::function<void(const std::string&)> a_handler);
         void report_script_error(const std::string& a_message, std::error_code a_code = {});
-
-        // Advisory diagnostics that are NOT errors (e.g. a class method shadowing a builtin
-        // handle method). Always-on, independent of the static checker.
-        // Default sink is std::cerr ("[jaiscript] warning: ..."); the host app / tests
-        // install their own handler to capture. Execution always proceeds.
-        void set_script_warning_handler(std::function<void(const std::string&)> a_handler);
         void report_script_warning(const std::string& a_message);
 
         // Shelve/restore the in-flight script call's argument metadata around an external
@@ -1318,42 +1346,13 @@ namespace jai {
             uint8_t argument_binding(size_t i, size_t argc) const;
         };
 
-        // RAII scope for C++ code invoking script functions directly (converted callbacks,
-        // signal receivers): without it, reference parameters would bind against whatever
-        // script call happens to be in flight.
-        class external_call_guard {
-        public:
-            explicit external_call_guard(engine* a_engine) : engine_(a_engine) {
-                if (engine_) { engine_->push_external_call_scope(); }
-            }
-            ~external_call_guard() {
-                if (engine_) { engine_->pop_external_call_scope(); }
-            }
-            external_call_guard(const external_call_guard&) = delete;
-            external_call_guard& operator=(const external_call_guard&) = delete;
-        private:
-            engine* engine_;
-        };
-
-        // Output stream redirection
-        // Set a custom output stream for print() and related functions
-        // Pass nullptr to reset to std::cout
-        void set_output_stream(std::shared_ptr<std::ostream> stream);
-
         // Get the current output stream (defaults to std::cout)
         std::ostream& get_output_stream();
 
         // Include/Import path management
         void include_paths(const std::vector<std::string>& paths);
-        void add_include_path(const std::string& path);
         void clear_include_paths();
         std::vector<std::string> get_include_paths() const;
-        // Confinement (opt-in; empty, the default, lets the ladder open any path the process can read): include, import,
-        // resolve_path and file_data open only files whose canonical path lies under one of these folders. A file the ladder
-        // finds outside them is skipped, and when no rung finds one inside, the reach fails with "Path outside the confined
-        // roots: <path as written>". No .cache folder is written beside a source outside them.
-        void confine_paths(const std::vector<std::string>& roots);
-        std::vector<std::string> confine_paths() const;
         bool outside_confined_paths(const std::string& canonicalPath) const;
 
         // The resolution ladder's memo (resolve_include_path): a name asked from a folder answers its earlier canonical result
@@ -1365,25 +1364,7 @@ namespace jai {
         // The builtin method names a receiver of a kind answers (0 array, 1 map, 2 string, 3 utf8_string): the one registry
         // both backends dispatch through, read once (the static checker's member check on typed containers)
         const std::unordered_set<uint64_t>& builtin_method_ids(int kind);
-        
-        // Import behavior configuration
-        enum class import_behavior {
-            file_timestamp, // Re-import if file modified (DEFAULT)
-            once,           // Import only once, ignore file changes
-            always         // Treat import as include
-        };
-        
-        void set_import_behavior(import_behavior behavior);
         import_behavior get_import_behavior() const;
-
-        // The engine-wide import check pass (guide ch. 10): at most once per `seconds` (default 0.2; 0 = every reach) the first
-        // import reached opens a pass, every import reached during it stats its modules, and the pass closes when a module it
-        // already checked is reached again or when the outermost execute()/next() returns; between passes an import does
-        // nothing. A frame therefore checks every import it reaches or none. The window runs on the engine's clock sample
-        // (the real steady clock as read at the host entry, at the budget check's samples and by a time:: read of the system
-        // clock), so an import reads no clock itself; a host engine_time::source never moves it.
-        void import_recheck_interval(double seconds);
-        double import_recheck_interval() const;
         // Both backends' import step. import_skips: no pass is open, the window has not expired and the site has run its
         // modules before (compares against the clock sample and the site's memory; a computed site also hashes its paths).
         // import_modules: the reach the pass lets through - resolve, stat, parse and check every changed module before any
@@ -1417,12 +1398,6 @@ namespace jai {
         // A suspended coroutine's frame dropped whole: its values die last slot first, and a handler it was suspended in lets go
         // of its thrown value as the slot of its catch variable dies
         void release_suspended_values(script_value* values, size_t count) noexcept;
-        
-        // Import management
-        void reset_imports();
-        void reset_import(const std::string& path);
-        bool is_imported(const std::string& path) const;
-        std::vector<std::string> get_imported_files() const;
         
         // Execute a file with import tracking
         script_value execute_import(const std::string& resolved_path);
@@ -1483,7 +1458,6 @@ namespace jai {
             engine* eng;
             bool completed = false;
         };
-        bool loading() const noexcept { return load_depth_ > 0; }
         // A class's properties in the order a load restores them (its declaration order, base first), kept for the
         // load in progress
         struct load_field {
@@ -1498,8 +1472,76 @@ namespace jai {
         // engine's teardown releases it in reverse while destructors still run
         void note_program_scope_cell(environment* scope, size_t slot);
         void note_static_field(class_definition* cls, uint64_t id);
+        // Map C++ types to param_type_info (with type_index for object types). Public so the
+        // binding layer (dynamic_binder) can build per-overload C++ parameter signatures.
+        template<typename T>
+        static param_type_info map_cpp_type_to_param_info() {
+            using decay_t = std::decay_t<T>;
 
-    private:
+            if constexpr (detail::is_script_value_v<decay_t>) {
+                // Wildcard: a script_value parameter accepts ANY argument type (a generic binding,
+                // e.g. pair(script_value, script_value)). jai_null_type is the sentinel — no real
+                // C++ binding parameter is genuinely null-typed — and the overload scorer gives it a
+                // small fixed cost so a concrete-typed overload still ranks ahead.
+                return param_type_info(script_value_type::jai_null_type);
+            } else if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
+                          std::is_same_v<decay_t, script_int> || std::is_enum_v<decay_t>) {
+                return param_type_info(script_value_type::jai_int_type);
+            } else if constexpr (is_specialization_v<decay_t, std::function>) {
+                return param_type_info(script_value_type::jai_function_type);
+            } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||
+                                 std::is_same_v<decay_t, script_float>) {
+                return param_type_info(script_value_type::jai_float_type);
+            } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
+                return param_type_info(script_value_type::jai_bool_type);
+            } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
+                return param_type_info(script_value_type::jai_char_type);
+            } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
+                return param_type_info(script_value_type::jai_string_type);
+            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
+                return param_type_info(script_value_type::jai_array_type);
+            } else if constexpr (is_specialization_v<decay_t, bound_array>) {
+                return param_type_info(script_value_type::jai_array_type);
+            } else if constexpr (is_script_map_like_v<decay_t>) {
+                return param_type_info(script_value_type::jai_map_type);
+            } else if constexpr (is_specialization_v<decay_t, bound_map>) {
+                return param_type_info(script_value_type::jai_map_type);
+            } else if constexpr (is_specialization_v<decay_t, std::shared_ptr>) {
+                using element_type = typename decay_t::element_type;
+                return param_type_info(script_value_type::jai_shared_ptr_type, std::type_index(typeid(element_type)));
+            } else if constexpr (is_specialization_v<decay_t, std::weak_ptr>) {
+                using element_type = typename decay_t::element_type;
+                return param_type_info(script_value_type::jai_weak_ptr_type, std::type_index(typeid(element_type)));
+            } else if constexpr (math_adapted<decay_t>) {
+                return param_type_info(math_adapter<decay_t>::kind);
+            } else {
+                return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
+            }
+        }
+        template <typename R>
+        static constexpr script_value_type host_result_kind() {
+            using D = std::decay_t<R>;
+            if constexpr (std::is_same_v<D, int> || std::is_same_v<D, int64_t> || std::is_same_v<D, script_int>) { return script_value_type::jai_int_type; }
+            else if constexpr (std::is_same_v<D, float> || std::is_same_v<D, double>) { return script_value_type::jai_float_type; }
+            else if constexpr (std::is_same_v<D, bool>) { return script_value_type::jai_bool_type; }
+            else if constexpr (std::is_same_v<D, char> || std::is_same_v<D, script_char>) { return script_value_type::jai_char_type; }
+            else if constexpr (std::is_same_v<D, std::string>) { return script_value_type::jai_string_type; }
+            else { return script_value_type::jai_null_type; }
+        }
+        // the result kind of the registration about to be made (register_overload_impl consumes it; unstaged = unknown)
+        void stage_host_result(script_value_type kind);
+        // the registration about to be made is a by-value binding: its callable's own entry, found inside the stored function
+        struct host_direct_entry {
+            checked_result<script_value> (*invoke)(const void*, const script_value*, size_t) = nullptr;
+            const void* (*locate)(const script_function&) = nullptr;
+        };
+        void stage_host_direct(host_direct_entry entry);
+
+        // The single overloaded-function registration algorithm shared by every public entry point
+        // (add_function*, add_overloaded_function*, add_variadic_function). create_set_on_first is the
+        // only policy difference between the entry points.
+        void register_overload_impl(const std::string& name, size_t arity, script_function func,
+                                    const std::vector<param_type_info>& param_types, bool create_set_on_first);
         friend class held_value;
         void register_held(held_value* held);
         void unregister_held(held_value* held) noexcept;
@@ -1589,54 +1631,6 @@ namespace jai {
         std::vector<param_type_info> extract_parameter_types_with_info_impl(std::index_sequence<Is...>) {
             return {map_cpp_type_to_param_info<std::tuple_element_t<Is, ArgsTuple>>()...};
         }
-
-    public:
-        // Map C++ types to param_type_info (with type_index for object types). Public so the
-        // binding layer (dynamic_binder) can build per-overload C++ parameter signatures.
-        template<typename T>
-        static param_type_info map_cpp_type_to_param_info() {
-            using decay_t = std::decay_t<T>;
-
-            if constexpr (detail::is_script_value_v<decay_t>) {
-                // Wildcard: a script_value parameter accepts ANY argument type (a generic binding,
-                // e.g. pair(script_value, script_value)). jai_null_type is the sentinel — no real
-                // C++ binding parameter is genuinely null-typed — and the overload scorer gives it a
-                // small fixed cost so a concrete-typed overload still ranks ahead.
-                return param_type_info(script_value_type::jai_null_type);
-            } else if constexpr (std::is_same_v<decay_t, int> || std::is_same_v<decay_t, int64_t> ||
-                          std::is_same_v<decay_t, script_int> || std::is_enum_v<decay_t>) {
-                return param_type_info(script_value_type::jai_int_type);
-            } else if constexpr (is_specialization_v<decay_t, std::function>) {
-                return param_type_info(script_value_type::jai_function_type);
-            } else if constexpr (std::is_same_v<decay_t, float> || std::is_same_v<decay_t, double> ||
-                                 std::is_same_v<decay_t, script_float>) {
-                return param_type_info(script_value_type::jai_float_type);
-            } else if constexpr (std::is_same_v<decay_t, bool> || std::is_same_v<decay_t, script_bool>) {
-                return param_type_info(script_value_type::jai_bool_type);
-            } else if constexpr (std::is_same_v<decay_t, char> || std::is_same_v<decay_t, script_char>) {
-                return param_type_info(script_value_type::jai_char_type);
-            } else if constexpr (std::is_same_v<decay_t, std::string> || std::is_same_v<decay_t, script_string>) {
-                return param_type_info(script_value_type::jai_string_type);
-            } else if constexpr (is_specialization_v<decay_t, std::vector>) {
-                return param_type_info(script_value_type::jai_array_type);
-            } else if constexpr (is_specialization_v<decay_t, bound_array>) {
-                return param_type_info(script_value_type::jai_array_type);
-            } else if constexpr (is_script_map_like_v<decay_t>) {
-                return param_type_info(script_value_type::jai_map_type);
-            } else if constexpr (is_specialization_v<decay_t, bound_map>) {
-                return param_type_info(script_value_type::jai_map_type);
-            } else if constexpr (is_specialization_v<decay_t, std::shared_ptr>) {
-                using element_type = typename decay_t::element_type;
-                return param_type_info(script_value_type::jai_shared_ptr_type, std::type_index(typeid(element_type)));
-            } else if constexpr (is_specialization_v<decay_t, std::weak_ptr>) {
-                using element_type = typename decay_t::element_type;
-                return param_type_info(script_value_type::jai_weak_ptr_type, std::type_index(typeid(element_type)));
-            } else if constexpr (math_adapted<decay_t>) {
-                return param_type_info(math_adapter<decay_t>::kind);
-            } else {
-                return param_type_info(script_value_type::jai_object_type, std::type_index(typeid(decay_t)));
-            }
-        }
     };
 
     // Resolve an include/import path against the engine's include paths. Shared by the
@@ -1683,6 +1677,8 @@ namespace jai {
     std::type_index engine_context_type_index() noexcept;
 
 } // namespace jai
+
+#include <jaiscript/detail/engine_access.hpp>
 
 #ifndef JAISCRIPT_ENGINE_BODIES_AFTER_CLASS_DEFINITION
 #include "engine_impl.hpp"

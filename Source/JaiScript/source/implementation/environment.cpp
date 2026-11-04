@@ -404,8 +404,22 @@ void environment::define(uint64_t id, script_value&& value) {
     if (engine_ && is_program_scope()) { detail::engine_access::note_program_scope_cell(*engine_, this, local_storage_.size() - 1); }
 }
 
+// Follows a reference without reading through it: a property's read runs the host getter, the other scratch modes build a copy
 bool environment::dies_at_teardown(const script_value& cell) {
-    const script_value& value = cell.deref();
+    const script_value* named = &cell;
+    while (script_value::reference_holder* ref = const_cast<script_value*>(named)->get_reference_holder()) {
+        if (ref->property) {
+            if (!ref->property->live_member) { return true; }   // it holds its receiver's handle
+            named = ref->cell();
+        } else if (ref->string_element() || ref->component_element()) {
+            return false;
+        } else if (ref->typed_element()) {
+            return ref->container->kind() == script_array::kind_t::obj;
+        } else if (!(named = ref->resolve_target())) {
+            return false;
+        }
+    }
+    const script_value& value = *named;
     switch (value.raw_storage_index()) {
     case script_value::TYPEID_OBJECT: case script_value::TYPEID_ARRAY: case script_value::TYPEID_MAP: return true;
     case script_value::TYPEID_FUNCTION: {

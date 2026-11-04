@@ -300,8 +300,9 @@ namespace jai {
                 if (dies_at_teardown(cell)) { script_value dying = std::move(cell); }
             }
         }
-        // A program-scope value that may own an instance: an object, an array, a map, a lambda (its captures); a declared
-        // function stays for the destructors that call it
+        // A program-scope value that may own an instance: an object, an array, a map, a lambda (its captures), a property
+        // reference (its receiver's handle), or a reference naming one of those; a declared function stays for the destructors
+        // that call it
         static bool dies_at_teardown(const script_value& cell);
         script_value* own_cell(size_t slot) noexcept { return slot < local_storage_.size() ? &local_storage_[slot] : nullptr; }
 

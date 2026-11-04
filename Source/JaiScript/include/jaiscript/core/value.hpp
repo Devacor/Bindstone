@@ -2909,6 +2909,7 @@ namespace detail {
     private:
         // Friends only for essential access patterns
         friend class interpreter;  // For coroutine handle creation (object_holder access)
+        friend class environment;  // dies_at_teardown follows a reference without reading through it
         template<typename T> friend class dynamic_binder;  // For make_cpp_object
         friend strong_ptr<class_instance> detail::make_native_instance(class_definition&, std::string_view, std::shared_ptr<void>, engine*);
         friend class serialization::binary_archive_writer;  // For storage_ access

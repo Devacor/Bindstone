@@ -12966,8 +12966,8 @@ JAI_FORCEINLINE void vm_backend::open_record_frame(call_record& rec, chunk* body
 
 // the arguments bound into the frame's window; a failure or a throw pops the frame again
 template <class ArgsT>
-JAI_FORCEINLINE op_status vm_backend::bind_frame_parameters(call_record& rec, const std::vector<parameter>& parameters, const ArgsT& args, size_t args_base, size_t argc,
-                                                            frame& caller, const call_site* site, const script_defined_function* function, const statement* body) {
+op_status vm_backend::bind_frame_parameters(call_record& rec, const std::vector<parameter>& parameters, const ArgsT& args, size_t args_base, size_t argc,
+                                            frame& caller, const call_site* site, const script_defined_function* function, const statement* body) {
 	op_status bound{};
 	try {
 		bound = bind_parameters(parameters, args, args_base, argc, rec.f, *rec.f.code, rec.env_untouched ? environment_ : rec.prev_env, site, &caller, caller.code,
@@ -21544,7 +21544,7 @@ JAI_FORCEINLINE vm_backend::call_record& vm_backend::open_method_record(frame& c
 // reentry within this dispatcher, which takes the pool). The pop needs no special case: clear_this_on_frame_exit still nulls the
 // receiver, and release_scope_env's use_count guard skips pooling.
 template <class TakeReceiver>
-JAI_FORCEINLINE void vm_backend::enter_method_env(call_record& rec, const script_method_dispatch& dispatch, const chunk& body, TakeReceiver&& take_receiver) {
+void vm_backend::enter_method_env(call_record& rec, const script_method_dispatch& dispatch, const chunk& body, TakeReceiver&& take_receiver) {
 	try {
 		if (rec.env_lazy && environment_.get() == dispatch.definition_env.get()) {
 			rec.env_untouched = true;

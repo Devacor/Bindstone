@@ -12,4 +12,4 @@ if not exist "%EXE%" (
 	pause
 	exit /b 1
 )
-"%EXE%" --no-debug --no-pause "%~dp0scripts\gatorquest.jai" -- %*
+"%EXE%" --no-pause "%~dp0scripts\gatorquest.jai" -- %*

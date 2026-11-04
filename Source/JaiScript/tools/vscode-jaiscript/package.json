@@ -109,7 +109,7 @@
               },
               "port": {
                 "type": "number",
-                "description": "Port the host logs at startup: 52477 for the standalone jaiscript runner, 52472 (jai::debug::default_port) for a host that calls jai::debug::listen(*eng).",
+                "description": "Port the host logs at startup: 52477 for the standalone jaiscript runner run with --debug, 52472 (jai::debug::default_port) for a host that calls jai::debug::listen(*eng).",
                 "default": 52477
               }
             }
@@ -127,7 +127,7 @@
         "configurationSnippets": [
           {
             "label": "JaiScript: Attach",
-            "description": "Attach to a running jaiscript runner (port 52477) or a host listening with jai::debug::listen (port 52472).",
+            "description": "Attach to a jaiscript runner started with --debug (port 52477) or a host listening with jai::debug::listen (port 52472).",
             "body": {
               "type": "jaiscript",
               "request": "attach",

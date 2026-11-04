@@ -327,7 +327,7 @@ void print_usage() {
 		"  --scripts DIR   override the scripts directory\n"
 		"  --debug         listen for a VS Code debugger for the whole run\n"
 		"  --debug-wait    like --debug, but also hold boot until you attach + press Enter\n"
-		"  --debug-port N  port for --debug (default 52472)\n");
+		"  --debug-port N  --debug on port N (default 52472)\n");
 }
 
 } // namespace
@@ -359,7 +359,7 @@ int main(int argc, char** argv) {
 		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
 		else if (a == "--debug") { opt.debug = true; }
 		else if (a == "--debug-wait") { opt.debug = true; opt.debug_wait = true; }
-		else if (a == "--debug-port") { opt.debug_port = std::stoll(next_arg("--debug-port")); }
+		else if (a == "--debug-port") { opt.debug = true; opt.debug_port = std::stoll(next_arg("--debug-port")); }
 		else if (a == "--help" || a == "-h") { print_usage(); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(); return 2; }
 	}

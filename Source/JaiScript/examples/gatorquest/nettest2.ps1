@@ -8,7 +8,7 @@ if (-not (Test-Path $Exe)) { $Exe = Join-Path $here "..\..\out\build\x64-Release
 $game = Join-Path $here "scripts\gatorquest.jai"
 $tmp = Join-Path $env:TEMP "gatorquest_nettest2_$PID"
 New-Item -ItemType Directory -Force $tmp | Out-Null
-$common = @("--no-debug", "--no-pause", "--backend=$Backend", $game, "--")
+$common = @("--no-pause", "--backend=$Backend", $game, "--")
 $host_p = Start-Process -FilePath $Exe -ArgumentList ($common + @("serve", "port", "$Port", "ticks", "150", "nosave", "seed", "4")) -RedirectStandardOutput "$tmp\host.txt" -RedirectStandardError "$tmp\host_err.txt" -PassThru -NoNewWindow
 Start-Sleep -Milliseconds 1500
 $a = Start-Process -FilePath $Exe -ArgumentList ($common + @("client", "127.0.0.1", "port", "$Port", "name", "Alpha", "frames", "200", "say", '"hello from alpha"', "walk", "2")) -RedirectStandardOutput "$tmp\a.txt" -RedirectStandardError "$tmp\a_err.txt" -PassThru -NoNewWindow

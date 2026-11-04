@@ -18,7 +18,7 @@ Every program prints `"<board name>", <seconds per run>, <runs>` and a `checksum
 many times as fit a 0.5 s budget and reports the per-run time (dasProfile's protocol, timed with a `time::stopwatch`).
 
 ```
-build\bin\jaiscript --no-debug --no-pause --backend=vm bench/kernels/jai/dict_typed.jai
+build\bin\jaiscript --no-pause --backend=vm bench/kernels/jai/dict_typed.jai
 bench\kernels\host\build.cmd    -> bench\kernels\bin\jai_kernel_host.exe
 bench\kernels\bin\jai_kernel_host.exe --backend=vm bench/kernels/jai/interop_typed.jai
 ```

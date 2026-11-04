@@ -34,7 +34,7 @@ def command(impl, app, args):
 	folder = os.path.join(HERE, app)
 	if impl.startswith("jai_"):
 		backend = "interp" if impl == "jai_interp" else "vm"
-		return [os.path.join(args.bin, "jaiscript" + EXE), "--no-debug", "--no-pause", f"--backend={backend}",
+		return [os.path.join(args.bin, "jaiscript" + EXE), "--no-pause", f"--backend={backend}",
 			os.path.join(folder, app + ".jai")]
 	if impl == "lua":
 		return [os.path.join(args.bin, "apps_lua" + EXE), os.path.join(folder, app + ".lua")]

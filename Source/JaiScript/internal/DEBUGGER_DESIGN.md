@@ -11,8 +11,10 @@ thread at its next debug sync, through `std::filesystem::canonical` (`normalize_
 the engine's filesystem privilege is enabled, so a VS Code path binds against the engine's canonical node paths
 regardless of drive-letter case or slash direction. With filesystem access disabled, incoming paths stay exact
 virtual source labels and no normalization metadata calls run. Native `controller::set_breakpoints` always takes
-exact labels. The crawler (either backend) and demoreel (its interpreter session) take `--debug [--debug-port N]`
-and `--debug-wait`; embed_quickstart takes `--debug` and `--debug-wait`. Each calls `listen()`, and the connector
+exact labels. The listener takes no password, so nothing in the package listens unasked: the runner takes
+`--debug` and `--debug-port=N`, the crawler (either backend) and demoreel (its interpreter session) take
+`--debug [--debug-port N]` and `--debug-wait`, and embed_quickstart takes `--debug` and `--debug-wait`; a port
+alone implies `--debug`. Each calls `listen()` only under one of them, and the connector
 listens for the whole engine lifetime (attach, detach, re-attach any time); `--debug-wait` also holds boot until
 Enter, for catching boot-time script. Under `--debug` the demoreel loads its scenes with `execute_file` (not the
 concatenated `.jaibite`) so `scenes/*.jai` breakpoints bind.

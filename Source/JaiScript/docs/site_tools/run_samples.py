@@ -165,7 +165,7 @@ def norm(text, sample_dir):
 
 
 def run(runner, backend, main_path, budget, timeout, warnings=False):
-    cmd = [str(runner), "--no-debug", "--no-pause", "--backend=" + backend] + (["--warnings"] if warnings else [])
+    cmd = [str(runner), "--no-pause", "--backend=" + backend] + (["--warnings"] if warnings else [])
     if budget:
         cmd.append("--budget=" + str(budget))
     cmd.append(main_path.name)

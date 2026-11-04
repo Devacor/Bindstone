@@ -203,7 +203,7 @@ public:
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		if (a == "--debug") { flags_.debug = true; return 1; }
 		if (a == "--debug-wait") { flags_.debug = true; flags_.debug_wait = true; return 1; }
-		if (a == "--debug-port" && has_value()) { flags_.debug_port = std::stoll(argv[i + 1]); return 2; }
+		if (a == "--debug-port" && has_value()) { flags_.debug = true; flags_.debug_port = std::stoll(argv[i + 1]); return 2; }
 #endif
 		return 0;
 	}
@@ -216,7 +216,7 @@ public:
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 			"  --debug          listen for a VS Code attach the whole run\n"
 			"  --debug-wait     like --debug, but also hold boot until you attach + press Enter\n"
-			"  --debug-port N   port for --debug (default 52472)\n"
+			"  --debug-port N   --debug on port N (default 52472)\n"
 #endif
 			;
 	}

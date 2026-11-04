@@ -14,5 +14,5 @@ if not defined RUNNER (
 	echo jaiscript.exe not found: set JAI_RUNNER, put it next to this script, or build it ^(docs\BUILD.md^)
 	exit /b 1
 )
-"%RUNNER%" --no-debug --no-pause jaidoom.jai -- bootstrap %*
+"%RUNNER%" --no-pause jaidoom.jai -- bootstrap %*
 exit /b %ERRORLEVEL%

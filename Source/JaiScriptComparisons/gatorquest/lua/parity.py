@@ -23,7 +23,7 @@ def jai_output(args, t, s, b):
 		path = os.path.join(args.ref, f't{t}_s{s}_b{b}.txt')
 		if os.path.exists(path):
 			return open(path, encoding='utf-8', errors='replace').read()
-	cmd = [args.jai, '--no-debug', '--no-pause', '--backend=' + args.backend, 'scripts/gatorquest.jai', '--',
+	cmd = [args.jai, '--no-pause', '--backend=' + args.backend, 'scripts/gatorquest.jai', '--',
 		'smoke', 'ticks', str(t), 'seed', str(s), 'bots', str(b), 'noroundtrip']
 	out = subprocess.run(cmd, cwd=GAME, capture_output=True, text=True, errors='replace').stdout
 	if args.ref:

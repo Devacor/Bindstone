@@ -127,10 +127,10 @@ gate_timedemo() {
 	for backend in vm interp; do
 		hash_on "$backend" || continue
 		rm -rf ./.cache
-		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
+		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
 		want "timedemo $backend: expected STATE_HASH $TIMEDEMO_STATE" "STATE_HASH: $TIMEDEMO_STATE\\b"
 		rm -rf ./.cache
-		run_logged "$BIN/jaiscript" --no-debug --no-pause --backend="$backend" jaidoom.jai -- selftest
+		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" jaidoom.jai -- selftest
 		want "jaidoom selftest $backend: expected ALL GREEN" "SELFTEST: ALL GREEN"
 	done
 	rm -rf ./.cache

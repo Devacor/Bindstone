@@ -77,7 +77,7 @@ def command(impl, kernel):
         script = os.path.join(JAI_KERNELS, "jai", f"{kernel}_{flavor}.jai")
         if kernel == "interop":
             return [HOST, f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
-        return [RUNNER, "--no-debug", "--no-pause", f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
+        return [RUNNER, "--no-pause", f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
     lua_dir = os.path.join(HERE, "lua")
     if impl == "lua":
         return [LUA, f"{kernel}.lua"], lua_dir

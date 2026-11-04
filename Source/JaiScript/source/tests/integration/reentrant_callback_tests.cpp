@@ -588,10 +588,11 @@ public:
 			// a property reference stored in an array<var> element through the native array view; its getter throws on its
 			// third (or first) call: dst.push(SRC[0]) is a call whose argument the fused push reads itself, so the exception
 			// converts in the calling frame and the function's own try catches it, on both backends, proofs on and off
-			// (an acceptance case; the unfused call's argument zone does the same)
+			// (an acceptance case; the unfused call's argument zone does the same). The engine's teardown never reads the program
+			// scope's r: a property reference owns nothing, so the getter runs no more once the engine dies.
 			struct source_t { engine* eng = nullptr; int throw_at = 3; bool armed = false; int calls = 0; };
 			auto run = [&](bool vm, bool proofs, int throw_at) -> std::string {
-				source_t source{ nullptr, throw_at };   // declared first and disarmed before the engine dies: its teardown reads r once more
+				source_t source{ nullptr, throw_at };   // declared first: the engine refers to it until it dies
 				auto e = jai::foundry::make_default_engine();
 				source.eng = e.get();
 				e->set_backend(vm ? backend_type::vm : backend_type::interpreter);
@@ -603,16 +604,21 @@ public:
 				}, nullptr).build();
 				e->add_global_ref("box", source);
 				(void)e->execute("var& r = box.number; var SRC = [0];");
-				auto reference = detail::engine_access::get_global_environment(*e)->get_ref("r");
-				if (!reference) { return "no reference"; }
-				auto src = e->get_variable("SRC");
-				src.as_array()[0] = reference.value().get();
-				source.armed = true; source.calls = 0;
-				std::string out;
-				try { out = e->execute("string probe() { array<int> dst = []; int i = 0; try { while (i < 4) { dst.push(SRC[0]); i++; } } catch (err) { return \"caught:\" + err + \"|\" + to_string(i) + \"|\" + to_string(dst.size()); } return \"ok:\" + to_string(dst.size()); } probe();").to_string(); }
-				catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
-				std::string result = out + "|calls=" + std::to_string(source.calls);
-				source.armed = false;
+				std::string result;
+				{
+					auto reference = detail::engine_access::get_global_environment(*e)->get_ref("r");
+					if (!reference) { return "no reference"; }
+					auto src = e->get_variable("SRC");
+					src.as_array()[0] = reference.value().get();
+					source.armed = true; source.calls = 0;
+					std::string out;
+					try { out = e->execute("string probe() { array<int> dst = []; int i = 0; try { while (i < 4) { dst.push(SRC[0]); i++; } } catch (err) { return \"caught:\" + err + \"|\" + to_string(i) + \"|\" + to_string(dst.size()); } return \"ok:\" + to_string(dst.size()); } probe();").to_string(); }
+					catch (const std::exception& ex) { out = std::string("throw:") + ex.what(); }
+					result = out + "|calls=" + std::to_string(source.calls);
+				}
+				const int calls_before_teardown = source.calls;
+				e.reset();
+				if (source.calls != calls_before_teardown) { result += "|teardown ran the getter"; }
 				return result;
 			};
 			for (bool proofs : { true, false }) {

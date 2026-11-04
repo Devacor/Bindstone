@@ -7,6 +7,7 @@
 #include "../../include/jaiscript/core/bound_array.hpp"
 #include "../../include/jaiscript/core/bound_map.hpp"
 #include "../../include/jaiscript/core/dynamic_binder.hpp"
+#include "../../include/jaiscript/detail/class_runtime.hpp"   // adjust_cpp_pointer
 #include <limits>
 #include <stdexcept>
 #include <algorithm>

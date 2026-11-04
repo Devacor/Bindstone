@@ -553,7 +553,7 @@ inline const script_value* class_definition::method_ptr(uint64_t id) const {
     return cpp_base_class_ ? cpp_base_class_->method_ptr(id) : nullptr;
 }
 
-[[noreturn]] inline JAI_NOINLINE void class_definition::throw_method_missing(const char* kind, uint64_t id) const {
+[[noreturn]] void class_definition::throw_method_missing(const char* kind, uint64_t id) const {
     std::string name;
     if (auto eng = engine_) {
         name = detail::engine_access::get_symbolizer(*eng)->get_string(id);
@@ -1491,7 +1491,7 @@ inline void class_definition::register_live_instance(class_instance* live) {
     register_instance_after_region(weaker_ptr<class_instance>(), nullptr, live);
 }
 
-inline JAI_NOINLINE void class_definition::register_live_instance_in_region(class_instance* live) { register_instance(live->weak_from_this(), live); }
+void class_definition::register_live_instance_in_region(class_instance* live) { register_instance(live->weak_from_this(), live); }
 
 inline void class_definition::register_instance(weaker_ptr<class_instance> instance, class_instance* live) {
     if (engine_ && detail::engine_access::parallel_region_active(*engine_)) {

@@ -41,6 +41,9 @@ SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-
 LEAK_SCAN_SKIP = re.compile(r"^(?:.*/)?third_party/")    # vendored upstream sources ship exactly as their authors wrote them
 INTERNAL_BLOCK = re.compile(r"[ \t]*<!-- internal-only -->.*?<!-- /internal-only -->[ \t]*\r?\n", re.S)
 
+# LF in the repository whatever the publishing machine's core.autocrlf: the Linux CI runs the shell scripts as checked out
+PUBLIC_GITATTRIBUTES = "* text=auto\n"
+
 PUBLIC_GITIGNORE = """out/
 build/
 build-*/
@@ -336,9 +339,10 @@ def stage(args):
             kept[rel] = new.encode("utf-8")
     note(f"release date: {date}; internal/ citations stripped from {stripped_comments} comments in {stripped_files} files")
 
-    if ".gitignore" in kept:
-        fail("the package tracks a root .gitignore; the export writes its own")
-    kept[".gitignore"] = PUBLIC_GITIGNORE.encode("utf-8")
+    for name, text in ((".gitignore", PUBLIC_GITIGNORE), (".gitattributes", PUBLIC_GITATTRIBUTES)):
+        if name in kept:
+            fail(f"the package tracks a root {name}; the export writes its own")
+        kept[name] = text.encode("utf-8")
     for rel, data in kept.items():
         path = os.path.join(staging, rel.replace("/", os.sep))
         os.makedirs(os.path.dirname(path), exist_ok=True)
@@ -483,7 +487,8 @@ def publish(args):
         with open(dst, "wb") as f:
             f.write(data)
     message = args.message or "JaiScript " + args.version
-    subprocess.run(["git", "-C", target, "add", "-A"], check=True)
+    # --force: tracked files an ignore rule covers (tools/vscode-jaiscript/out/, examples/jaidoom's jaidoom_net.json) ship too
+    subprocess.run(["git", "-C", target, "add", "-A", "--force"], check=True)
     subprocess.run(["git", "-C", target, "commit", "-q", "-m", message], check=True)
     subprocess.run(["git", "-C", target, "tag", "-a", "v" + args.version, "-m", message], check=True)
     print(f"published {message} (tag v{args.version}) to {target}")

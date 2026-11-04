@@ -6402,6 +6402,8 @@ namespace {
 		bool in_place = false;
 		const parameter* acc = nullptr;
 		const parameter* element = nullptr;
+		std::string_view acc_name;       // the symbolizer's copies: an AST name outlives the parameters it was mapped from
+		std::string_view element_name;
 	};
 	void map_reduce_expr(expression_ptr& e, const reduce_slot_map& m);
 	void map_reduce_decl(declaration_ptr& d, const reduce_slot_map& m);
@@ -6409,7 +6411,7 @@ namespace {
 		map_reduce_expr(v->initializer, m);
 		const parameter* as = v->name == "__a" ? m.acc : v->name == "__x" ? m.element : nullptr;
 		if (as) {
-			v->name = as->name;
+			v->name = as == m.acc ? m.acc_name : m.element_name;
 			v->name_id = as->symbol_id;
 			v->slot_index = as == m.acc ? 0 : 1;
 			v->type = as->type;
@@ -6456,7 +6458,7 @@ namespace {
 		case node_type::identifier_expr: {
 			auto* id = static_cast<identifier_expr*>(e.get());
 			if (id->name == "__c0" && m.in_place) {
-				id->name = m.acc->name;
+				id->name = m.acc_name;
 				id->symbol_id = m.acc->symbol_id;
 				id->slot_index = 0;
 			} else if (id->slot_index != SIZE_MAX) {
@@ -6509,6 +6511,8 @@ namespace {
 		map.in_place = in_place;
 		map.acc = &acc;
 		map.element = &element;
+		map.acc_name = engine_access::get_symbolizer(eng)->get_string(acc.symbol_id);
+		map.element_name = engine_access::get_symbolizer(eng)->get_string(element.symbol_id);
 		const size_t skeleton_slots = decl->local_count;
 		for (size_t j = 0; j < decl->parameters.size(); ++j) { decl->parameters[j].slot_index += map.base; }
 		if (in_place) {   // the chunk's accumulator IS step's acc

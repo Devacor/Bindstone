@@ -17,14 +17,14 @@ namespace jai::detail {
         using R = checked_result<script_value>;
         auto count_error = [](const char* text) { return R(make_error_code(runtime_error_code::argument_count_mismatch), text); };
         auto type_error = [](const char* text) { return R(make_error_code(runtime_error_code::type_mismatch), text); };
-        auto string_array = [](const builtin_method_context& ctx) { engine* eng = ctx.get_engine(); return script_value::make_array(eng->get_type_info_string(), eng); };
+        auto string_array = [](const builtin_method_context& ctx) { engine* eng = ctx.get_engine(); return script_value::make_array(engine_access::get_type_info_string(*eng), eng); };
 
         m[sym->intern("utf8_chars")] = [=](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> R {
             if (!args.empty()) return count_error("utf8_chars() takes no arguments");
             const std::string& s = self.unchecked_text();
             script_value out = string_array(ctx);
             script_array& a = *out.unchecked_get_array_storage();
-            auto& limits = ctx.get_engine()->execution_limits();
+            auto& limits = engine_access::execution_limits(*ctx.get_engine());
             for (size_t at = 0; at < s.size();) {
                 const utf8::step st = utf8::decode(s, at);
                 if (!limits.memory_charge(sizeof(script_value) + st.length)) [[unlikely]] { return raise_memory_cap(limits); }
@@ -64,7 +64,7 @@ namespace jai::detail {
             const std::string& s = self.unchecked_text();
             script_value out = string_array(ctx);
             script_array& a = *out.unchecked_get_array_storage();
-            auto& limits = ctx.get_engine()->execution_limits();
+            auto& limits = engine_access::execution_limits(*ctx.get_engine());
             size_t start = 0;
             while (start < s.size()) {   // "\n" and "\r\n" end a line; a final line needs no terminator; no empty last element
                 size_t end = s.find('\n', start);

@@ -89,12 +89,12 @@ namespace spider_detail {
 		}
 
 		script_value& header_map(engine* a_engine) {
-			if (!headers.is_map()) { headers = script_value::make_map(a_engine->get_type_info_string(), a_engine->get_type_info_string(), a_engine); }
+			if (!headers.is_map()) { headers = script_value::make_map(detail::engine_access::get_type_info_string(*a_engine), detail::engine_access::get_type_info_string(*a_engine), a_engine); }
 			return headers;
 		}
 
 		script_value& cookie_list(engine* a_engine) {
-			if (!cookies.is_array()) { cookies = script_value::make_array(a_engine->get_type_info_string(), a_engine); }
+			if (!cookies.is_array()) { cookies = script_value::make_array(detail::engine_access::get_type_info_string(*a_engine), a_engine); }
 			return cookies;
 		}
 
@@ -125,7 +125,7 @@ namespace spider_detail {
 	};
 
 	JAI_NOINLINE function_result raise(engine* a_engine, runtime_error_code a_code, const std::string& a_text) {
-		return function_result(make_error_code(a_code), "{0}", a_engine->park_error_text(a_text));
+		return function_result(make_error_code(a_code), "{0}", detail::engine_access::park_error_text(*a_engine, a_text));
 	}
 
 	bool is_token(std::string_view a_text) {
@@ -201,7 +201,7 @@ namespace spider_detail {
 
 	checked_result<void> read_options(engine* a_engine, std::string_view a_function, const script_value& a_options, call_options& a_out) {
 		auto refuse = [&](const std::string& a_what) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", a_engine->park_error_text(std::string(a_function) + ": " + a_what));
+			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", detail::engine_access::park_error_text(*a_engine, std::string(a_function) + ": " + a_what));
 		};
 		if (a_options.is_null()) { return {}; }
 		if (!a_options.is_map()) { return refuse("the options are a map (method, headers, timeout, type, redirects)"); }
@@ -270,7 +270,7 @@ namespace spider_detail {
 	// The body and its Content-Type: text as it is (text/plain), anything else as JSON, a map as a form with type "form"
 	checked_result<void> encode_content(engine* a_engine, std::string_view a_function, const script_value& a_content, const std::string& a_type, std::string& a_body, std::string& a_content_type) {
 		auto refuse = [&](const std::string& a_what) {
-			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", a_engine->park_error_text(std::string(a_function) + ": " + a_what));
+			return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "{0}", detail::engine_access::park_error_text(*a_engine, std::string(a_function) + ": " + a_what));
 		};
 		const script_value& content = a_content.deref();
 		if (a_type == "form") {
@@ -472,7 +472,7 @@ namespace spider_detail {
 				it->second = script_value(it->second.deref().unchecked_text() + ", " + value, a_engine);
 			}
 		}
-		return a_engine->make_value_object(response);
+		return detail::engine_access::make_value_object(*a_engine, response);
 	}
 
 	const script_value& argument_or_null(const std::vector<script_value>& a_args, size_t a_index, const script_value& a_null) {
@@ -513,7 +513,7 @@ namespace spider_detail {
 			.property("url", &response_record::url)
 			.method("ok", [](const response_record& a_self) { return a_self.status >= 200 && a_self.status < 300; })
 			.method("json", [eng](const response_record& a_self) -> script_value {
-				engine::load_session session(eng);
+				detail::engine_access::load_session session(eng);
 				serialization::json_archive_reader reader(a_self.body, eng);
 				script_value result = load_archive_value(eng, reader.read_value(), true);
 				session.complete();
@@ -545,11 +545,11 @@ namespace spider_detail {
 			})
 			.build();
 
-		auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("spider")];
+		auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "spider")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		auto def = [&](const char* a_name, uint8_t a_min, uint8_t a_max, std::vector<svt> a_params, script_function a_call, bool a_network) {
-			const uint64_t id = eng_ref.symbolize(a_name);
-			ns->variables[id] = script_value::make_function(a_network ? eng_ref.guard_function(std::move(a_call), "network") : std::move(a_call), &eng_ref);
+			const uint64_t id = detail::engine_access::symbolize(eng_ref, a_name);
+			ns->variables[id] = script_value::make_function(a_network ? detail::engine_access::guard_function(eng_ref, std::move(a_call), "network") : std::move(a_call), &eng_ref);
 			host_entry_signature signature;
 			signature.min_args = a_min;
 			signature.max_args = a_max;
@@ -572,7 +572,7 @@ namespace spider_detail {
 				response->body = a_args[1].deref().unchecked_text();
 			}
 			response->header_map(eng);
-			return eng->make_value_object(response);
+			return detail::engine_access::make_value_object(*eng, response);
 		}, false);
 
 		auto fetcher = [eng, arity_refusal](const char* a_name, const char* a_arity_text) {

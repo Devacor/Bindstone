@@ -10,7 +10,7 @@ class numeric_operator_transition_tests : public suite {
 		a_engine.add_function("+", [](script_int a_left, script_int a_right) {
 			return a_left * a_right;
 		});
-		a_engine.set_has_custom_numeric_operators(true);
+		detail::engine_access::set_has_custom_numeric_operators(a_engine, true);
 	}
 
 public:

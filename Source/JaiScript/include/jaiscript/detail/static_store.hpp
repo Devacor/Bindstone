@@ -90,7 +90,7 @@ namespace jai::detail {
 	inline std::optional<checked_result<script_value>> store_static_accessor(class_definition& cls, uint64_t member_id, const script_value& incoming) {
 		engine* eng = cls.get_engine();
 		if (!eng) { return std::nullopt; }
-		string_symbolizer* symbols = eng->get_symbolizer();
+		string_symbolizer* symbols = engine_access::get_symbolizer(*eng);
 		script_value setter = cls.static_method_in_chain(symbols->get_setter_id_with_view(member_id).first);
 		if (!setter.is_function()) { return std::nullopt; }
 		std::vector<script_value> argument{incoming};

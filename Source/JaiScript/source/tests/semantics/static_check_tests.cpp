@@ -71,7 +71,7 @@ std::string outcome(jai::engine& e, const std::string& src) {
 }
 
 uint64_t shape_epoch(jai::engine& e, const std::string& cls) {
-    auto def = e.get_class_registry().find_script_class(cls);
+    auto def = detail::engine_access::get_class_registry(e).find_script_class(cls);
     return def ? def->field_shape_epoch() : 0;
 }
 
@@ -96,13 +96,13 @@ std::shared_ptr<jai::engine> program_engine(const std::filesystem::path& dir) {
 
 // the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
 std::vector<uint8_t> unstamped_bite_bytes(jai::engine& a_engine, const std::string& a_source) {
-    const auto templates = a_engine.get_registered_template_types();
-    lexer lex(a_source, a_engine.get_symbolizer());
+    const auto templates = detail::engine_access::get_registered_template_types(a_engine);
+    lexer lex(a_source, detail::engine_access::get_symbolizer(a_engine));
     auto tokens = lex.tokenize();
-    parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+    parser syntax(tokens, detail::engine_access::get_symbolizer(a_engine), &a_engine, templates);
     auto declarations = syntax.parse();
     check_true(bool(declarations), "fixture must parse: " + a_source);
-    return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+    return detail::serialize_jaibite(declarations.value(), *detail::engine_access::get_symbolizer(a_engine), a_engine.registration_fingerprint());
 }
 
 } // namespace
@@ -475,7 +475,7 @@ public:
                     .static_method("pick", [](script_int a, script_int b) -> script_int { return a + b; })
                     .static_method("pick", [](script_int n) -> script_int { return n; })
                     .build();
-                e->get_class_definition("Gate")->add_static_method("any", [raw = e.get()](const std::vector<script_value>& a) -> checked_result<script_value> {
+                detail::engine_access::get_class_definition(*e, "Gate")->add_static_method("any", [raw = e.get()](const std::vector<script_value>& a) -> checked_result<script_value> {
                     return script_value(static_cast<script_int>(a.size()), raw);
                 });
                 return e;
@@ -1356,16 +1356,16 @@ public:
             script_value i((int64_t)5, e.get());
             script_value f(2.5, e.get());
             script_value s(std::string("x"), e.get());
-            check_true(detail::same_type_payload(i, e->get_type_info_int()));
-            check_false(detail::same_type_payload(i, e->get_type_info_float()));
-            check_true(detail::same_type_payload(f, e->get_type_info_float()));
-            check_true(detail::same_type_payload(s, e->get_type_info_string()));
-            check_false(detail::same_type_payload(s, e->get_type_info_int()));
+            check_true(detail::same_type_payload(i, detail::engine_access::get_type_info_int(*e)));
+            check_false(detail::same_type_payload(i, detail::engine_access::get_type_info_float(*e)));
+            check_true(detail::same_type_payload(f, detail::engine_access::get_type_info_float(*e)));
+            check_true(detail::same_type_payload(s, detail::engine_access::get_type_info_string(*e)));
+            check_false(detail::same_type_payload(s, detail::engine_access::get_type_info_int(*e)));
             check_false(detail::same_type_payload(i, nullptr));
             // a non-any tag naming another base defeats the identity claim
             script_value tagged((int64_t)5, e.get());
-            tagged.set_type_info(type_info_ptr{e->get_type_info_float()});
-            check_false(detail::same_type_payload(tagged, e->get_type_info_int()));
+            tagged.set_type_info(type_info_ptr{detail::engine_access::get_type_info_float(*e)});
+            check_false(detail::same_type_payload(tagged, detail::engine_access::get_type_info_int(*e)));
         });
 
         test("proof_battery_results_equal_with_proofs_on_and_off", [this]() {
@@ -2901,10 +2901,10 @@ public:
                 "array<string> names = [\"a\"];\n"
                 "auto n = names[0];\n"
                 "int bad = \"s\";\n";
-            auto types = e->get_registered_template_types();
-            lexer lex(src, e->get_symbolizer());
+            auto types = detail::engine_access::get_registered_template_types(*e);
+            lexer lex(src, detail::engine_access::get_symbolizer(*e));
             auto tokens = lex.tokenize();
-            parser prs(tokens, e->get_symbolizer(), e.get(), types);
+            parser prs(tokens, detail::engine_access::get_symbolizer(*e), e.get(), types);
             auto parsed = prs.parse();
             check_true(static_cast<bool>(parsed), "fixture parses");
             struct recorder : check_observer {
@@ -2929,10 +2929,10 @@ public:
         test("parser_keeps_declarations_around_errors", [this]() {
             auto e = jai::foundry::make_engine();
             const std::string src = "int a = 1;\nint broken( {\nint b = 2;\n";
-            auto types = e->get_registered_template_types();
-            lexer lex(src, e->get_symbolizer());
+            auto types = detail::engine_access::get_registered_template_types(*e);
+            lexer lex(src, detail::engine_access::get_symbolizer(*e));
             auto tokens = lex.tokenize();
-            parser prs(tokens, e->get_symbolizer(), e.get(), types);
+            parser prs(tokens, detail::engine_access::get_symbolizer(*e), e.get(), types);
             auto parsed = prs.parse();
             check_false(static_cast<bool>(parsed), "the fixture does not parse");
             const auto& kept = prs.recovered_declarations();

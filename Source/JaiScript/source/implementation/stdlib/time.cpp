@@ -71,7 +71,7 @@ namespace stdlib {
     // time:: namespace (docs/site/guide/14-time.html): clocks through the engine's time source
     // (engine_time::source), stopwatches and calendar dates
     void register_time_functions(engine& eng_ref) {
-        engine::library_registration library(eng_ref);
+        detail::engine_access::library_registration library(eng_ref);
         engine* eng = &eng_ref;
         using R = checked_result<script_value>;
         using args_t = std::vector<const script_value*>;
@@ -138,13 +138,13 @@ namespace stdlib {
             })
             .build();
 
-        const auto date_class = eng_ref.get_class_definition("time::date");
+        const auto date_class = detail::engine_access::get_class_definition(eng_ref, "time::date");
         const uint64_t date_type = date_class->get_type_id();
         auto as_date = [date_type](const script_value& v) -> date* {
             auto native = detail::checked_native_reference(v.deref(), typeid(date), date_type);
             return native ? static_cast<date*>(native.value()) : nullptr;
         };
-        auto checked_text = [eng](const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", eng->park_error_text(text)); };
+        auto checked_text = [eng](const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", detail::engine_access::park_error_text(*eng, text)); };
         for (const auto& [field, set] : {std::pair<const char*, std::string (date::*)(int64_t)>{"year", &date::set_year}, {"month", &date::set_month},
                                          {"day", &date::set_day}, {"hour", &date::set_hour}, {"minute", &date::set_minute},
                                          {"second", &date::set_second}, {"millisecond", &date::set_millisecond}}) {
@@ -176,7 +176,7 @@ namespace stdlib {
             });
         }
 
-        auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("time")];
+        auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "time")];
         if (!ns) { ns = std::make_shared<script_namespace_data>(); }
         using svt = script_value_type;
         auto sig = [](uint8_t min_args, uint8_t max_args, std::vector<svt> params, svt result, const char* result_class = "") {
@@ -190,7 +190,7 @@ namespace stdlib {
         };
 
         auto def = [&](const char* name, host_entry_signature signature, auto fn) {
-            const uint64_t id = eng_ref.symbolize(name);
+            const uint64_t id = detail::engine_access::symbolize(eng_ref, name);
             ns->variables[id] = script_value::make_function([eng, fn](const std::vector<script_value>& raw) -> R {
                 args_t args;
                 args.reserve(raw.size());
@@ -201,7 +201,7 @@ namespace stdlib {
         };
         auto count_error = [](const char* text) { return R(make_error_code(runtime_error_code::argument_count_mismatch), text); };   // static texts: the result holds a view
         auto type_error = [](const char* text) { return R(make_error_code(runtime_error_code::type_mismatch), text); };
-        auto value_error = [](engine* e, const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", e->park_error_text(text)); };
+        auto value_error = [](engine* e, const std::string& text) { return R(make_error_code(runtime_error_code::invalid_operation), "{0}", detail::engine_access::park_error_text(*e, text)); };
         auto number = [](const script_value* v, double& out) {
             if (v->is_int()) { out = static_cast<double>(v->as_int()); return true; }
             if (v->is_float()) { out = v->as_float(); return true; }
@@ -299,7 +299,7 @@ namespace stdlib {
             });
         }
         for (const char* name : {"stopwatch", "date"}) {
-            const uint64_t id = eng_ref.symbolize(name);
+            const uint64_t id = detail::engine_access::symbolize(eng_ref, name);
             ns->variables[id] = eng_ref.get_variable(std::string("time::") + name);
             ns->signatures[id] = sig(0, 0, {}, svt::jai_object_type, name == std::string_view("date") ? "time::date" : "time::stopwatch");
         }

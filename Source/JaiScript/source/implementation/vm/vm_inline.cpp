@@ -121,7 +121,7 @@ bool nested_call(const call_expr* ce, const land_ctx* lc) {
 bool alias_call(const call_expr* ce, const engine* eng) {
 	if (!eng || !ce->callee || ce->callee->get_type() != node_type::identifier_expr || ce->arguments.size() != 1) return false;
 	auto* id = static_cast<const identifier_expr*>(ce->callee.get());
-	return !id->global_qualified && id->slot_index == SIZE_MAX && eng->math_alias_fn(id->symbol_id) < engine::k_math_alias_rows;
+	return !id->global_qualified && id->slot_index == SIZE_MAX && detail::engine_access::math_alias_fn(*eng, id->symbol_id) < detail::engine_access::k_math_alias_rows;
 }
 // a receiver a body names: a name, or a member chain over one (each step a member read the body may make anyway)
 bool named_receiver(const expression* e) {
@@ -1479,7 +1479,7 @@ expression_ptr vm_compiler::compile_hoist(const hoist_plan& plan, const expressi
 		std::vector<chunk::inline_site::forward_callee> read;
 		detail::ref_write_analysis writes([&](const identifier_expr& id, std::vector<detail::ref_write_callee>& out) -> bool {
 			if (!engine_ || id.global_qualified || id.slot_index != SIZE_MAX || id.symbol_id == UINT64_MAX) return false;
-			const auto env = engine_->get_global_environment();
+			const auto env = detail::engine_access::get_global_environment(*engine_);
 			const script_value* v = env ? env->get_value_ptr(id.symbol_id) : nullptr;
 			if (!v || !v->deref().is_function()) return false;
 			const auto* thunk = v->deref().as_function().target<script_callable_thunk>();

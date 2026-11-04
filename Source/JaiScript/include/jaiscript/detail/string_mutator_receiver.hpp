@@ -153,10 +153,10 @@ namespace jai::detail {
 	// The failing texts of p.reset(h), built on the failing path alone
 	JAI_NOINLINE inline checked_result<void> reset_argument_not_handle(const script_value& arg, engine* eng) {
 		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch),
-			"reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not {0}", eng->get_symbolizer()->intern(slot_source_type_name(arg, eng)));
+			"reset(h) takes a handle (new T(), make_shared<T>() or a shared_ptr), not {0}", engine_access::get_symbolizer(*eng)->intern(slot_source_type_name(arg, eng)));
 	}
 	JAI_NOINLINE inline checked_result<void> reset_class_refused(const std::string& held, const script_value& arg, engine* eng) {
-		string_symbolizer* symbols = eng->get_symbolizer();
+		string_symbolizer* symbols = engine_access::get_symbolizer(*eng);
 		return checked_result<void>(make_error_code(runtime_error_code::type_mismatch), "Cannot reset shared_ptr<{0}> to a shared_ptr<{1}>",
 			symbols->intern(held), symbols->intern(shared_handle_judged_class(arg, eng)));
 	}
@@ -187,7 +187,7 @@ namespace jai::detail {
 			const std::string held_class = shared_handle_judged_class(held, eng);
 			const std::string* judged = shared_handle_judged_class_name(arg, eng);
 			if (!held_class.empty() && judged && *judged != held_class) {
-				auto judged_def = eng->get_class_definition(*judged);
+				auto judged_def = engine_access::get_class_definition(*eng, *judged);
 				if (judged_def && !judged_def->is_subtype_of(held_class)) { return reset_class_refused(held_class, arg, eng); }
 			}
 		}
@@ -196,7 +196,7 @@ namespace jai::detail {
 		if (tag && !tag->dynamic_pointee) {
 			repointed.set_type_info(tag);
 		} else if (!arg_tag->dynamic_pointee && arg_tag->element_type()) {
-			repointed.set_type_info(eng->get_type_info_shared_ptr_dynamic(arg_tag->element_type().get()));
+			repointed.set_type_info(engine_access::get_type_info_shared_ptr_dynamic(*eng, arg_tag->element_type().get()));
 		}
 		*storage = std::move(repointed);
 		return {};

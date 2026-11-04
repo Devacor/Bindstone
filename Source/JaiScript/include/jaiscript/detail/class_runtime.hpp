@@ -107,7 +107,7 @@ inline std::shared_ptr<class_definition>* object_block::definition_pin(control_b
 }
 
 inline strong_ptr<class_instance> class_instance::make(std::string_view class_name, engine* eng) {
-    return make(eng ? eng->get_symbolizer()->intern(class_name) : UINT64_MAX, eng);
+    return make(eng ? detail::engine_access::get_symbolizer(*eng)->intern(class_name) : UINT64_MAX, eng);
 }
 
 inline strong_ptr<class_instance> class_instance::make(uint64_t type_id, engine* eng, uint32_t slots, class_definition* destructor_owner) {
@@ -269,14 +269,14 @@ inline void class_definition::release_values_for_teardown() noexcept {
 inline class_definition::class_definition(std::string_view name, uint64_t type_id, engine* eng) : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),
           null_field_value_(std::monostate{}, eng), class_type_(cpp_class) {
     if (eng) {
-        type_info_ = eng->get_type_info_object(type_id_);
+        type_info_ = detail::engine_access::get_type_info_object(*eng, type_id_);
     }
 }
 
 inline class_definition::class_definition(std::string_view name, uint64_t type_id, class_type type, engine* eng) : name_(name), type_id_(type_id), type_info_(nullptr), engine_(eng),
           null_field_value_(std::monostate{}, eng), class_type_(type) {
     if (eng) {
-        type_info_ = eng->get_type_info_object(type_id_);
+        type_info_ = detail::engine_access::get_type_info_object(*eng, type_id_);
     }
 }
 
@@ -426,7 +426,7 @@ inline type_info_ptr class_definition::field_declared_type_walk(uint64_t id) con
 inline void class_definition::add_static_field(uint64_t id, const script_value& initial_value) {
     if (static_fields_.insert(id).second) {
         bump_method_epoch();   // a new static can shadow a global for bare names in the chain
-        if (engine_) { engine_->note_static_field(this, id); }
+        if (engine_) { detail::engine_access::note_static_field(*engine_, this, id); }
     }
     static_field_values_.insert_or_assign(id, initial_value);
 }
@@ -556,7 +556,7 @@ inline const script_value* class_definition::method_ptr(uint64_t id) const {
 [[noreturn]] inline JAI_NOINLINE void class_definition::throw_method_missing(const char* kind, uint64_t id) const {
     std::string name;
     if (auto eng = engine_) {
-        name = eng->get_symbolizer()->get_string(id);
+        name = detail::engine_access::get_symbolizer(*eng)->get_string(id);
     } else {
         name = std::to_string(id);
     }
@@ -568,7 +568,7 @@ inline bool class_definition::has_method(uint64_t id) const {
 }
 
 inline uint64_t class_definition::destructor_id(engine& eng) const {
-    if (destructor_id_ == 0) { destructor_id_ = eng.symbolize("~" + name_); }
+    if (destructor_id_ == 0) { destructor_id_ = detail::engine_access::symbolize(eng, "~" + name_); }
     return destructor_id_;
 }
 
@@ -600,9 +600,9 @@ inline bool class_definition::script_chain_defines_method(uint64_t id) const {
 
 inline bool class_definition::may_define_to_bool() const {
     if (to_bool_memo_epoch_ != method_epoch_) {
-        assert(!(engine_ && engine_->parallel_region_active()) && "a parallel worker writes the class's to_bool memo (prime it at region start)");
+        assert(!(engine_ && detail::engine_access::parallel_region_active(*engine_)) && "a parallel worker writes the class's to_bool memo (prime it at region start)");
         uint64_t id = 0;
-        if (auto eng = engine_) { id = eng->symbolize("to_bool"); }
+        if (auto eng = engine_) { id = detail::engine_access::symbolize(*eng, "to_bool"); }
         may_define_to_bool_ = id == 0 || defines_method(id);
         to_bool_memo_epoch_ = method_epoch_;
     }
@@ -612,7 +612,7 @@ inline bool class_definition::may_define_to_bool() const {
 inline uint64_t class_definition::script_assign_operator_id() const {
     if (assign_memo_epoch_ != method_epoch_) {
         uint64_t id = 0;
-        if (auto eng = engine_) { id = eng->symbolize("="); }
+        if (auto eng = engine_) { id = detail::engine_access::symbolize(*eng, "="); }
         script_assign_id_ = id != 0 && script_chain_defines_method(id) ? id : 0;
         assign_memo_epoch_ = method_epoch_;
     }
@@ -681,7 +681,7 @@ inline std::vector<std::string_view> class_definition::get_static_field_names() 
     names.reserve(static_fields_.size());
     if (auto eng = engine_) {
         for (const auto& field_id : static_fields_) {
-            names.push_back(eng->get_symbolizer()->get_string(field_id));
+            names.push_back(detail::engine_access::get_symbolizer(*eng)->get_string(field_id));
         }
     }
     return names;
@@ -807,7 +807,7 @@ inline strong_ptr<class_instance> class_definition::create_instance() {
     register_live_instance(instance.get());
 
     // a region's constructions (workers and main's chunk alike) copy no shared default node
-    const bool in_region = engine_ && engine_->parallel_region_active();
+    const bool in_region = engine_ && detail::engine_access::parallel_region_active(*engine_);
     if (const auto& plan = instance_plan(); !plan.empty()) {
         instance->seed_fields_from_plan(plan, field_slot_count(), in_region);
         return instance;
@@ -1101,7 +1101,7 @@ inline std::vector<weaker_ptr<class_instance>> class_definition::registered_inst
 inline bool class_definition::has_native_methods() const noexcept { return !native_methods_.empty(); }
 
 inline void class_definition::restamp_native_methods() {
-    if (engine_) { engine_->bump_class_definition_epoch(); native_stamp_ = engine_->class_definition_epoch(); }
+    if (engine_) { detail::engine_access::bump_class_definition_epoch(*engine_); native_stamp_ = detail::engine_access::class_definition_epoch(*engine_); }
     else { ++native_stamp_; }
 }
 
@@ -1115,7 +1115,7 @@ inline void* class_definition::adjust_cpp_pointer(void* pointer, const std::type
 		}
 	}
 	for (const auto& edge : cpp_base_casts_) {
-		auto base = engine_->get_class_definition_by_type(edge.base);
+		auto base = detail::engine_access::get_class_definition_by_type(*engine_, edge.base);
 		if (base) {
 			if (auto* result = base->adjust_cpp_pointer(edge.adjust(pointer), target)) {
 				return result;
@@ -1160,7 +1160,7 @@ inline std::vector<std::string> class_definition::get_property_names(bool includ
         }
 
         for_each_own_field_id([&](uint64_t id) {
-            std::string prop_name(eng->get_symbolizer()->get_string(id));
+            std::string prop_name(detail::engine_access::get_symbolizer(*eng)->get_string(id));
             if (seen.insert(prop_name).second) {
                 properties.push_back(prop_name);
             }
@@ -1255,14 +1255,14 @@ inline std::shared_ptr<void> class_definition::copy_object(const void* src) cons
 inline void class_definition::set_method_metadata(std::string_view name, const method_metadata& metadata) {
     auto eng = engine_;
     if (!eng) return;
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     method_metadata_[name_id] = metadata;
 }
 
 inline auto class_definition::get_method_metadata(std::string_view name) const -> const method_metadata* {
     auto eng = engine_;
     if (!eng) return nullptr;
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     auto it = method_metadata_.find(name_id);
     return it != method_metadata_.end() ? &it->second : nullptr;
 }
@@ -1270,7 +1270,7 @@ inline auto class_definition::get_method_metadata(std::string_view name) const -
 inline auto class_definition::get_method_metadata_mutable(std::string_view name) -> method_metadata* {
     auto eng = engine_;
     if (!eng) return nullptr;
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
     auto it = method_metadata_.find(name_id);
     return it != method_metadata_.end() ? &it->second : nullptr;
 }
@@ -1279,7 +1279,7 @@ inline auto class_definition::find_method(std::string_view name) -> method_info 
     auto eng = engine_;
     if (!eng) return { nullptr, nullptr };
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
 
     if (has_method(name_id)) {
         return { shared_from_this(), get_method_metadata_mutable(name) };
@@ -1309,11 +1309,11 @@ inline bool class_definition::structural_key_shape_matches(size_t member_count, 
 inline void class_definition::redefine_class(const std::unordered_map<uint64_t, script_value>& new_field_defaults, const std::unordered_map<uint64_t, script_value>& migration_values,
                                              const std::unordered_map<uint64_t, script_value>& new_methods, const std::unordered_map<uint64_t, script_value>& new_static_methods,
                                              engine* engine_ref, bool structurally_identical, const std::function<void()>& discard_unwinding) {
-    if (engine_ref) { engine_ref->recover_parallel_registrations(); }
+    if (engine_ref) { detail::engine_access::recover_parallel_registrations(*engine_ref); }
     field_defaults_cache_valid_ = false; ++defaults_version_;
     field_slots_current_ = false;
     ++reflection_generation_;
-    if (engine_ref) { engine_ref->bump_class_definition_epoch(); }
+    if (engine_ref) { detail::engine_access::bump_class_definition_epoch(*engine_ref); }
     // a changed base list migrates the whole chain: inherited fields come and go as the class's own do
     const std::optional<std::set<uint64_t>> reparented = std::exchange(reparented_from_fields_, std::nullopt);
 
@@ -1389,7 +1389,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
 
     uint64_t migrate_method_id = 0;
     if (engine_ref) {
-        migrate_method_id = engine_ref->symbolize("hot_reload_migrate");
+        migrate_method_id = detail::engine_access::symbolize(*engine_ref, "hot_reload_migrate");
     }
     auto migrate_method_it = new_methods.find(migrate_method_id);
 
@@ -1397,7 +1397,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
     static_methods_ = new_static_methods;
     bump_method_epoch();   // dispatchers replaced: per-site inline caches must refill
     bump_field_shape_epoch();
-    if (engine_ref) { engine_ref->note_class_shape_change(); }
+    if (engine_ref) { detail::engine_access::note_class_shape_change(*engine_ref); }
 
     recompute_property_getters(new_methods, engine_ref);
 
@@ -1428,7 +1428,7 @@ inline void class_definition::redefine_class(const std::unordered_map<uint64_t, 
                 run_migrate_hook(script_value::make_object(name_, instance, engine_ref), migrate_method_it->second, engine_ref, discard_unwinding);
             }
             instance->drop_fields_absent_from(migrated_fields);
-            if (engine_) { engine_->count_hot_reload_field_migration(); }
+            if (engine_) { detail::engine_access::count_hot_reload_field_migration(*engine_); }
         }
         instance->set_class_definition(shared_from_this());
         instance->arm_late_destructor(*this);
@@ -1467,7 +1467,7 @@ inline void class_definition::update_instances_from_base(const std::unordered_ma
             instance->migrate_fields(dummy_old_fields, all_fields);
             instance->drop_fields_absent_from(all_fields);
             instance->arm_late_destructor(*this);
-            if (engine_) { engine_->count_hot_reload_field_migration(); }
+            if (engine_) { detail::engine_access::count_hot_reload_field_migration(*engine_); }
         }
     }
 
@@ -1479,12 +1479,12 @@ inline void class_definition::update_instances_from_base(const std::unordered_ma
 }
 
 inline std::unique_lock<std::mutex> class_definition::registry_lock() const {
-    return engine_ && engine_->parallel_region_active() ? engine_->parallel_instance_registry_lock()
-                                                        : std::unique_lock<std::mutex>();
+    if (engine_ && detail::engine_access::parallel_region_active(*engine_)) { return detail::engine_access::parallel_instance_registry_lock(*engine_); }
+    return std::unique_lock<std::mutex>();
 }
 
 inline void class_definition::register_live_instance(class_instance* live) {
-    if (engine_ && engine_->parallel_region_active()) [[unlikely]] {
+    if (engine_ && detail::engine_access::parallel_region_active(*engine_)) [[unlikely]] {
         register_live_instance_in_region(live);
         return;
     }
@@ -1494,9 +1494,9 @@ inline void class_definition::register_live_instance(class_instance* live) {
 inline JAI_NOINLINE void class_definition::register_live_instance_in_region(class_instance* live) { register_instance(live->weak_from_this(), live); }
 
 inline void class_definition::register_instance(weaker_ptr<class_instance> instance, class_instance* live) {
-    if (engine_ && engine_->parallel_region_active()) {
+    if (engine_ && detail::engine_access::parallel_region_active(*engine_)) {
         // A chunk parks the registration (no lock; the join registers survivors in element order)
-        if (engine_->park_parallel_registration(instance)) { return; }
+        if (detail::engine_access::park_parallel_registration(*engine_, instance)) { return; }
     }
     auto lock = registry_lock();
     register_instance_after_region(std::move(instance), nullptr, live);
@@ -1541,7 +1541,7 @@ inline void class_definition::recompute_property_getters(const std::unordered_ma
     }
     if (!has_property_getters_ && engine_ref) {
         for (const auto& [method_id, _] : new_methods) {
-            std::string_view name = engine_ref->get_symbolizer()->get_string(method_id);
+            std::string_view name = detail::engine_access::get_symbolizer(*engine_ref)->get_string(method_id);
             if (name.size() > 5 && name.substr(0, 5) == "_get_") {
                 has_property_getters_ = true;
                 break;
@@ -1592,7 +1592,7 @@ inline checked_result<script_value> class_definition::cpp_method_dispatch::opera
     const cpp_overload_entry* best = nullptr;
     int best_cost = 0;
     for (const auto& e : entries) {
-        const int cost = eng->cpp_signature_cost(args.data() + 1, e.param_types);
+        const int cost = detail::engine_access::cpp_signature_cost(*eng, args.data() + 1, e.param_types);
         if (cost >= 0 && (!best || cost < best_cost)) { best = &e; best_cost = cost; }
     }
     if (!best) {
@@ -1614,7 +1614,7 @@ inline std::optional<checked_result<script_value>> class_definition::cpp_method_
     auto it = overloads->find(args.size() - 1);
     if (it == overloads->end() || it->second.size() != 1 || it->second.front().param_types.empty()) { return std::nullopt; }
     engine* eng = cls->get_engine();
-    if (!eng || eng->cpp_signature_cost(args.data() + 1, it->second.front().param_types) >= 0) { return std::nullopt; }
+    if (!eng || detail::engine_access::cpp_signature_cost(*eng, args.data() + 1, it->second.front().param_types) >= 0) { return std::nullopt; }
     return checked_result<script_value>(detail::overload_miss(make_error_code(runtime_error_code::argument_count_mismatch), name_id, args.data() + 1, args.size() - 1, eng));
 }
 
@@ -1937,8 +1937,8 @@ inline slot_class_view resolve_slot_class(const script_value& v, engine* eng) {
             }
         }
     } else if (eng) {
-        view.engine_def = holder->type_id() != UINT64_MAX ? eng->get_class_definition(holder->type_id())
-                                                        : eng->get_class_definition(std::string(holder->type_name()));
+        if (holder->type_id() != UINT64_MAX) { view.engine_def = engine_access::get_class_definition(*eng, holder->type_id()); }
+        else { view.engine_def = engine_access::get_class_definition(*eng, std::string(holder->type_name())); }
         view.def = view.engine_def.get();
     }
     return view;
@@ -1963,7 +1963,7 @@ inline bool class_slot_admits(const slot_class_view& view, const script_value& v
         if (!tagged || tag->type_name.empty()) {
             return true;   // an untagged empty handle is null-like
         }
-        auto tag_def = eng ? eng->get_class_definition(tag->type_name) : nullptr;
+        auto tag_def = engine_access::get_class_definition(eng, tag->type_name);
         return tag_def && tag_def->is_subtype_of(want);
     }
     if (view.def && view.def->is_subtype_of(want)) {
@@ -2009,7 +2009,7 @@ inline bool weak_slot_takes_shared(const script_value& value, const type_info_pt
     const std::string& actual_class = value_type_info->element_type() ? value_type_info->element_type()->type_name
                                                                        : value_type_info->type_name;
     if (expected_class == actual_class) { return true; }
-    auto actual_def = eng ? eng->get_class_definition(actual_class) : nullptr;
+    auto actual_def = engine_access::get_class_definition(eng, actual_class);
     return actual_def && actual_def->is_subtype_of(expected_class);
 }
 
@@ -2207,7 +2207,7 @@ inline bool shared_handle_admits(const script_value& v, const type_info_ptr& dec
     if (!judged || *judged == expected->type_name) {
         return true;
     }
-    auto judged_def = eng ? eng->get_class_definition(*judged) : nullptr;
+    auto judged_def = engine_access::get_class_definition(eng, *judged);
     return !judged_def || judged_def->is_subtype_of(expected->type_name);
 }
 
@@ -2388,7 +2388,7 @@ inline std::string argument_type_list(const script_value* args, size_t argc, eng
 // composed only while the symbolizer is unfrozen (a parallel worker gets the list-free shape)
 inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, const script_value* args, size_t argc,
                                       engine* eng, bool constructor) {
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (symbols && !symbols->frozen()) {
         return {ec, constructor ? "No constructor of '{0}' takes {1}" : "No overload of '{0}' takes {1}",
                 name_id, symbols->intern(argument_type_list(args, argc, eng))};
@@ -2399,7 +2399,7 @@ inline error_propagator overload_miss(std::error_code ec, uint64_t name_id, cons
 // A method with one declaration called with a count its parameters do not accept: the function's arity text, the method by
 // name (internal/diagnostics.md family C); a parallel worker's frozen symbolizer keeps the list-free overload shape
 inline error_propagator method_arity_miss(uint64_t name_id, size_t expected, size_t argc, engine* eng) {
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     const std::error_code ec = make_error_code(runtime_error_code::argument_count_mismatch);
     if (symbols && !symbols->frozen()) {
         return {ec, arity_named, name_id, symbols->intern(arity_detail(expected, argc))};
@@ -2467,7 +2467,7 @@ inline bool slot_site_named(const slot_site& site) {
 
 inline error_propagator typed_slot_rejection(const script_value& source, const type_info& target, const slot_site& site, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (!symbols) {
         return {ec, slot_rejection_message_unnamed(site.kind, target.canonical_name()), 0, target.id};
     }
@@ -2517,7 +2517,7 @@ inline constexpr std::string_view compound_mismatch_texts[10] = {
 inline error_propagator compound_mismatch(size_t op, const script_value& target, const script_value& operand, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::type_mismatch);
     const std::string_view text = compound_mismatch_texts[op < 10 ? op : 0];
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (!symbols) { return {ec, text}; }
     return {ec, text, symbols->intern(slot_source_type_name(target, eng)), symbols->intern(slot_source_type_name(operand, eng))};
 }
@@ -2538,7 +2538,7 @@ inline compound_text compound_plus_text(const script_value& target, const script
 inline error_propagator incdec_mismatch(bool increment, const script_value& target, engine* eng) {
     const std::error_code ec = make_error_code(runtime_error_code::invalid_numeric_operand);
     const std::string_view text = increment ? "Cannot apply '++' to {0}" : "Cannot apply '--' to {0}";
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     if (!symbols) { return {ec, text}; }
     return {ec, text, symbols->intern(slot_source_type_name(target, eng))};
 }
@@ -2566,7 +2566,7 @@ inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine*
 		if (tag->dynamic_slot) { return; }
 		const type_info_ptr element = tag->element_type();
 		if (element && element->base_type != script_value_type::jai_any_type && element->base_type != script_value_type::jai_null_type) {
-			value.set_type_info(eng->get_type_info_array_dynamic(tag.get()));
+			value.set_type_info(engine_access::get_type_info_array_dynamic(*eng, tag.get()));
 			return;
 		}
 	}
@@ -2574,18 +2574,18 @@ inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine*
 		if (tag->dynamic_slot) { return; }
 		const auto key = tag->key_type(), mapped = tag->value_type();
 		auto concrete = [](const type_info_ptr& a_type) { return a_type && a_type->base_type != script_value_type::jai_any_type && a_type->base_type != script_value_type::jai_null_type; };
-		if (concrete(key) || concrete(mapped)) { value.set_type_info(eng->get_type_info_map_dynamic(tag.get())); return; }
+		if (concrete(key) || concrete(mapped)) { value.set_type_info(engine_access::get_type_info_map_dynamic(*eng, tag.get())); return; }
 	}
 	value.set_type_info(any_tag && any_tag->base_type == script_value_type::jai_any_type ? any_tag
-						: type_info_ptr(eng ? eng->get_type_info_any() : nullptr));
+						: type_info_ptr(eng ? engine_access::get_type_info_any(*eng) : nullptr));
 }
 
 // A typed declaration's copy of a var-held typed container: the plain spelling again (auto locks to it)
 inline void drop_var_slot(script_value& value, engine* eng) {
 	const type_info_ptr& tag = value.get_type_info();
 	if (tag && tag->dynamic_slot && eng) {
-		if (tag->base_type == script_value_type::jai_map_type) { value.set_type_info(eng->get_type_info_map(tag->key_type().get(),tag->value_type().get())); }
-		else { value.set_type_info(eng->get_type_info_array(tag->element_type().get())); }
+		if (tag->base_type == script_value_type::jai_map_type) { value.set_type_info(engine_access::get_type_info_map(*eng, tag->key_type().get(),tag->value_type().get())); }
+		else { value.set_type_info(engine_access::get_type_info_array(*eng, tag->element_type().get())); }
 	}
 }
 
@@ -2640,7 +2640,7 @@ inline checked_result<script_value> typed_store_convert(const script_value& valu
 inline checked_result<script_value> field_store_convert(const script_value& value, const type_info_ptr& declared, engine* eng,
                                                         uint64_t field_id, const class_definition* owner, bool is_static) {
     return typed_store_convert(value, declared, eng, [&]() {
-        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+        string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
         return slot_site{is_static ? slot_kind::static_field : slot_kind::field,
                          field_id && symbols ? symbols->get_string(field_id) : std::string_view{},
                          owner ? std::string_view(owner->get_name()) : std::string_view{}};
@@ -2766,7 +2766,7 @@ inline bool names_class(const type_info* t) noexcept {
 // class.
 inline checked_result<void> reclass_assign(script_value& current, auto& holder, const class_definition* slot_class,
                                            class_instance* source, const class_definition* source_def, engine* eng) {
-    if (eng->parallel_region_active()) {
+    if (engine_access::parallel_region_active(*eng)) {
         return checked_result<void>(make_error_code(runtime_error_code::unsupported_operation),
             "an assignment that changes an object's class is not admitted in a parallel body");
     }
@@ -2829,9 +2829,9 @@ inline std::optional<checked_result<void>> class_copy_assign(const script_value&
 
 // The class's operator= called on the slot's object with the value (a parallel chunk's through its region pin)
 inline checked_result<void> call_assign_operator(const script_value& current, const script_value* method, const script_value& value, uint64_t assign_id, engine* eng) {
-    if (eng->parallel_region_active()) {
+    if (engine_access::parallel_region_active(*eng)) {
         // a chunk calls the operator through its region pin, on its own backend; an unpinned one keeps the verdict
-        if (auto called = eng->parallel_operator_call(current, assign_id, { value })) {
+        if (auto called = engine_access::parallel_operator_call(*eng, current, assign_id, { value })) {
             if (!*called) {
                 checked_result<void> failed = called->error_value();
                 return failed;
@@ -2890,7 +2890,7 @@ inline std::optional<checked_result<void>> user_assign_operator(const script_val
     if (!def) { return std::nullopt; }
     const script_value& value = value_in.is_reference() ? value_in.deref() : value_in;
     if (value.is_null()) { return std::nullopt; }
-    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const uint64_t assign_id = engine_access::get_symbolizer(*eng)->intern("=");
     if (value.raw_storage_index() == script_value::TYPEID_OBJECT) {
         auto source_holder = const_cast<script_value&>(value).get_object_holder();
         if (source_holder && source_holder->is_instance()) {
@@ -2973,7 +2973,7 @@ inline checked_result<script_value> declared_slot_write(type_info_ptr declared, 
     std::string field_name;
     if (def) {
         if (auto eng = def->get_engine()) {
-            field_name = eng->get_symbolizer()->get_string(id);
+            field_name = engine_access::get_symbolizer(*eng)->get_string(id);
         } else {
             field_name = std::to_string(id);
         }
@@ -2989,7 +2989,7 @@ inline checked_result<script_value> declared_slot_write(type_info_ptr declared, 
 
 [[noreturn]] JAI_NOINLINE inline void throw_field_store_rejection(const script_value& value, const type_info& declared, uint64_t id,
                                                                   const class_definition& def, engine* eng) {
-    string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+    string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
     throw runtime_error(typed_slot_rejection_text(value, declared,
         slot_site{slot_kind::field, symbols ? symbols->get_string(id) : std::string_view{}, def.get_name()}, eng));
 }
@@ -3106,7 +3106,7 @@ inline std::optional<checked_result<void>> element_copy_assign(const script_valu
     auto holder = const_cast<script_value&>(held).get_object_holder();
     if (!holder || !holder->is_instance()) { return std::nullopt; }
     const class_definition* def = holder->unchecked_instance()->get_class_definition();
-    if (!def || !def->is_cpp_class() || !def->has_method(eng->get_symbolizer()->intern("="))) { return std::nullopt; }
+    if (!def || !def->is_cpp_class() || !def->has_method(engine_access::get_symbolizer(*eng)->intern("="))) { return std::nullopt; }
     return user_assign_operator(current, source, eng, element_type.get());
 }
 }
@@ -3148,7 +3148,7 @@ inline void class_instance::note_script_layer_owner(const script_value& value) {
         hooks->attach(object, weak_self);
         return;
     }
-    owner_->note_script_layer(object, weak_self);
+    detail::engine_access::note_script_layer(*owner_, object, weak_self);
 }
 
 inline void class_instance::set_field(uint64_t id, const script_value& value) {
@@ -3179,7 +3179,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
             outcome = field_migration_outcome::added;
             before = nullptr;
         }
-        owner_->record_field_migration(type_name(), field_id, outcome, before, after);
+        detail::engine_access::record_field_migration(*owner_, type_name(), field_id, outcome, before, after);
     };
     // IN-PLACE per-id migration: kept fields keep their storage CELL, so script_value
     // addresses stay stable — suspended coroutines' env chains and this-capturing
@@ -3231,7 +3231,7 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
 inline void class_instance::drop_fields_absent_from(const std::unordered_map<uint64_t, script_value>& new_field_defaults) {
     const bool reporting = owner_ && owner_->hot_reload_reporting();
     auto record = [&](uint64_t field_id, const script_value* before) {
-        if (reporting) { owner_->record_field_migration(type_name(), field_id, field_migration_outcome::removed, before, nullptr); }
+        if (reporting) { detail::engine_access::record_field_migration(*owner_, type_name(), field_id, field_migration_outcome::removed, before, nullptr); }
     };
     // Slots drop IN PLACE (value overwritten with the invalid absent marker: the cell
     // address survives, the dropped value's resources free NOW like the old map erase).
@@ -3316,7 +3316,7 @@ inline void class_instance::finish_deep_copy_level(class_instance& copy, bool ov
                 }
                 copy.set_native(script_value::make_cpp_object(get_class_name(), class_def_->get_type_id(), new_cpp_obj, owner_));
                 copied = true;
-                if (owner_ && owner_->parallel_region_active()) [[unlikely]] { copy.region_tag(owner_->parallel_region_serial()); }
+                if (owner_ && detail::engine_access::parallel_region_active(*owner_)) [[unlikely]] { copy.region_tag(detail::engine_access::parallel_region_serial(*owner_)); }
             }
         }
         if (!copied) { copy.set_native(value.clone_element()); }
@@ -3488,7 +3488,7 @@ inline script_value class_instance::get_method(uint64_t id, bool throw_if_missin
 
 inline class_instance::class_instance(std::string_view class_name, engine* eng)
     : object_holder(k_instance, eng) {
-    if (eng) { type_id_ = eng->get_symbolizer()->intern(class_name); }
+    if (eng) { type_id_ = detail::engine_access::get_symbolizer(*eng)->intern(class_name); }
 }
 
 inline class_instance::~class_instance() {
@@ -3500,7 +3500,7 @@ inline class_instance::~class_instance() {
         }
     }
     // an instance the engine's teardown orphaned (class_def_ cleared) outlives its engine: no region can be running
-    if (extras_ && extras_->native && class_def_ && owner_ && owner_->parallel_region_active()) [[unlikely]] { defer_serial_native(); }
+    if (extras_ && extras_->native && class_def_ && owner_ && detail::engine_access::parallel_region_active(*owner_)) [[unlikely]] { defer_serial_native(); }
     if (class_def_) {
         class_def_->unregister_instance(this);
         if (fields_cascade()) { release_fields(); }

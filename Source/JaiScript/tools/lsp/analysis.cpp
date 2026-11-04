@@ -307,11 +307,11 @@ void workspace::parse(unit& u, bool publish) {
 	u.tokens.clear();
 	u.parse_errors.clear();
 	u.imports.clear();
-	auto registered = eng.get_registered_template_types();
+	auto registered = jai::detail::engine_access::get_registered_template_types(eng);
 	std::vector<jai::token> tokens;
 	std::unique_ptr<jai::lexer> lex;   // literal lexemes view the lexer's own storage: it outlives the parse
 	try {
-		lex = std::make_unique<jai::lexer>(u.text, eng.get_symbolizer(), u.path);
+		lex = std::make_unique<jai::lexer>(u.text, jai::detail::engine_access::get_symbolizer(eng), u.path);
 		tokens = lex->tokenize();
 	} catch (const std::exception& ex) {
 		u.decls.clear();
@@ -329,7 +329,7 @@ void workspace::parse(unit& u, bool publish) {
 	std::stable_sort(u.tokens.begin(), u.tokens.end(), [](const lex_token& a, const lex_token& b) { return a.pos < b.pos; });
 	u.salvaged.clear();
 	try {
-		jai::parser prs(tokens, eng.get_symbolizer(), &eng, registered, u.path);
+		jai::parser prs(tokens, jai::detail::engine_access::get_symbolizer(eng), &eng, registered, u.path);
 		auto result = prs.parse();
 		if (result) {
 			u.decls = std::move(result.value());
@@ -339,7 +339,7 @@ void workspace::parse(unit& u, bool publish) {
 			u.decls = std::move(prs.recovered_declarations());
 			u.parse_ok = false;
 			u.salvaged = salvage_names(u.tokens);
-			jai::detail::run_ast_marking_passes(u.decls, eng.get_symbolizer());
+			jai::detail::run_ast_marking_passes(u.decls, jai::detail::engine_access::get_symbolizer(eng));
 			std::string all;
 			for (const auto& e : prs.get_errors()) { all += e + "\n"; }
 			if (all.empty()) { all = eng.format_error(result); }

@@ -47,7 +47,7 @@ namespace jai {
     // (engine is incomplete here; the dependent E defers the lookup to the instantiation point)
     template<typename E>
     error_propagator host_exception_error(E* eng, const char* text) {
-        const uint64_t id = eng ? eng->park_error_text(text) : 0;
+        const uint64_t id = eng ? detail::engine_access_of<E>::park_error_text(*eng, text) : 0;
         return error_propagator{make_error_code(runtime_error_code::cpp_exception),
                                 id || !eng ? std::string_view("{0}") : host_exception_slotless_text, id, 0};
     }

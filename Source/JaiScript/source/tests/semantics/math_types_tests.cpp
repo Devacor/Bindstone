@@ -357,7 +357,7 @@ public:
             e->execution_budget(0);
             jai::stdlib::register_all(e);
             try { e->execute(src); } catch (const std::exception&) {}
-            check_eq(lowers, e->aggregate_lowered_sites() > 0, std::string(what) + (lowers ? ": the lowering rewrites the row" : ": the row stays as parsed"));
+            check_eq(lowers, detail::engine_access::aggregate_lowered_sites(*e) > 0, std::string(what) + (lowers ? ": the lowering rewrites the row" : ": the row stays as parsed"));
         };
 
         test("lowering", [expect, agree, raised, this]() {

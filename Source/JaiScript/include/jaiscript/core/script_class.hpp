@@ -60,8 +60,8 @@ public:
                             bool is_hot_reload = false) {
         auto eng = get_engine();
         if (!eng) return;
-        uint64_t name_id = eng->symbolize(name);
-        ast->unit = eng->current_unit();
+        uint64_t name_id = detail::engine_access::symbolize(*eng, name);
+        ast->unit = detail::engine_access::current_unit(*eng);
 
         // Constructors and destructors don't need override validation
         bool is_constructor = (name == get_name());
@@ -114,7 +114,7 @@ public:
     // Add constructor from AST
     void add_constructor_from_ast(std::shared_ptr<function_decl> ctor_ast) {
         // Store for later reference
-        if (auto eng = get_engine()) { ctor_ast->unit = eng->current_unit(); }
+        if (auto eng = get_engine()) { ctor_ast->unit = detail::engine_access::current_unit(*eng); }
         for (const auto& earlier : constructor_asts_) {
             if (detail::differs_only_by_reference(ctor_ast->parameters, earlier->parameters)) [[unlikely]] {
                 throw runtime_error(detail::reference_only_overload_text(get_name(), ctor_ast->parameters, earlier->parameters, earlier->location.line));
@@ -194,7 +194,7 @@ public:
     void declare_implicit_default_constructor() {
         auto eng = get_engine();
         if (!eng) { return; }
-        auto [name_id, name_view] = eng->get_symbolizer()->intern_with_view(get_name());
+        auto [name_id, name_view] = detail::engine_access::get_symbolizer(*eng)->intern_with_view(get_name());
         auto ctor = std::make_shared<function_decl>(source_location{}, name_view, name_id);
         ctor->body = std::make_shared<block_stmt>(source_location{}, std::vector<declaration_ptr>{});
         if (!get_parent_classes().empty()) { ctor->initializers.emplace_back("super", std::vector<expression_ptr>{}); }
@@ -239,7 +239,7 @@ public:
     }
     bool chain_initializers_all_literal() const {
         if (literal_memo_epoch_ != method_epoch() || literal_memo_count_ != field_initializer_asts_.size()) {
-            assert(!(get_engine() && get_engine()->parallel_region_active()) && "a parallel worker writes the class's literal-chain memo (prime it at region start)");
+            assert(!(get_engine() && detail::engine_access::parallel_region_active(*get_engine())) && "a parallel worker writes the class's literal-chain memo (prime it at region start)");
             bool all = true;
             for (const auto& parent : get_parent_classes()) {
                 if (parent && parent->is_script_class() &&
@@ -268,7 +268,7 @@ public:
     void clear_asts() {
         // Both backend reload builders enter here before mutating the old class.
         // Recover surviving worker copies before a fallible retry can leave mixed ASTs.
-        if (auto eng = get_engine()) { eng->recover_parallel_registrations(); }
+        if (auto eng = get_engine()) { detail::engine_access::recover_parallel_registrations(*eng); }
         method_asts_.clear();
         constructor_asts_.clear();
         destructor_ast_.reset();
@@ -304,7 +304,7 @@ inline checked_result<const std::shared_ptr<function_decl>*> script_method_dispa
                                                                                               size_t first) const {
     const size_t argc = args.size() - first;
     if (resolved_memo && resolved_memo_epoch == cls->method_epoch() && resolved_memo_argc == argc) { return resolved_memo; }
-    const bool region = eng && eng->parallel_region_active();
+    const bool region = eng && detail::engine_access::parallel_region_active(*eng);
     auto resolved = region ? cls->resolve_method_overload_shared(name_id, args.data() + first, argc)
                            : cls->resolve_method_overload_ref(name_id, args.data() + first, argc);
     if (resolved && !region && cls->method_arity_decides(name_id, argc)) {
@@ -322,21 +322,21 @@ inline checked_result<script_value> script_method_dispatch::invoke(const script_
         return resolved.error_value();
     }
 
-    execution_backend* backend = eng ? eng->calling_backend() : nullptr;
+    execution_backend* backend = eng ? detail::engine_access::calling_backend(*eng) : nullptr;
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
 
     const std::shared_ptr<function_decl>& ast = *resolved.value();
     if (backend->is_executing() || backend->is_unwinding()) {
-        engine::run_pin pin(host_call ? eng : nullptr);
+        detail::engine_access::run_pin pin(host_call ? eng : nullptr);
         return backend->execute_method_from(*this, ast, this_obj, args, first);
     }
     struct call {
         const script_method_dispatch& dispatch; const std::shared_ptr<function_decl>& ast; const script_value& this_obj;
         const std::vector<script_value>& args; size_t first;
     } c{*this, ast, this_obj, args, first};
-    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+    return detail::engine_access::checked_host_entry(*eng, [](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
         return be.execute_method_from(cc->dispatch, cc->ast, cc->this_obj, cc->args, cc->first);
     }, &c);
@@ -353,10 +353,10 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
         has_property_getters_ = true;
     }
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
 
     // Store the AST in method_overloads_ for type-based resolution
-    if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
+    if (auto stamping = get_engine()) { ast->unit = detail::engine_access::current_unit(*stamping); }
     for (const auto& earlier : method_overloads_[name_id]) {
         if (detail::same_run_redefinition(*earlier, *ast)) [[unlikely]] {
             throw runtime_error(detail::duplicate_definition_text(name, ast->parameters, earlier->location.line));
@@ -388,7 +388,7 @@ inline void class_definition::add_script_method(std::string_view name, std::shar
 }
 
 inline checked_result<script_value> script_static_method_dispatch::call(const std::vector<script_value>& args, bool host_call) const {
-    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
+    execution_backend* backend = eng ? detail::engine_access::get_execution_backend(*eng) : nullptr;
     if (!backend) {
         return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
     }
@@ -405,11 +405,11 @@ inline checked_result<script_value> script_static_method_dispatch::call(const st
         if (verdict.best) { payload.more().ast = *verdict.best; }
     }
     if (backend->is_executing() || backend->is_unwinding()) {
-        engine::run_pin pin(host_call ? eng : nullptr);
+        detail::engine_access::run_pin pin(host_call ? eng : nullptr);
         return backend->execute_callable(payload, args);
     }
     struct call { const script_callable& payload; const std::vector<script_value>& args; } c{payload, args};
-    return eng->checked_host_entry([](execution_backend& be, void* ctx) {
+    return detail::engine_access::checked_host_entry(*eng, [](execution_backend& be, void* ctx) {
         auto* cc = static_cast<call*>(ctx);
         return be.execute_callable(cc->payload, cc->args);
     }, &c);
@@ -427,7 +427,7 @@ inline void class_definition::add_static_script_method(std::string_view name, st
         has_property_getters_ = true;
     }
 
-    uint64_t name_id = eng->symbolize(name);
+    uint64_t name_id = detail::engine_access::symbolize(*eng, name);
 
     // Capture shared_ptr to this class definition (C++ scope rules for static methods)
     std::shared_ptr<class_definition> class_def = shared_from_this();
@@ -437,7 +437,7 @@ inline void class_definition::add_static_script_method(std::string_view name, st
     if (method_name_id == UINT64_MAX) {
         method_name_id = name_id;
     }
-    if (auto stamping = get_engine()) { ast->unit = stamping->current_unit(); }
+    if (auto stamping = get_engine()) { ast->unit = detail::engine_access::current_unit(*stamping); }
     for (const auto& earlier : static_method_overloads_[method_name_id]) {
         if (detail::same_run_redefinition(*earlier, *ast)) [[unlikely]] {
             throw runtime_error(detail::duplicate_definition_text(name, ast->parameters, earlier->location.line));
@@ -539,7 +539,7 @@ inline checked_result<void> enforce_constructor_access(const script_class_defini
 }
 
 inline bool converting_constructor_takes(const script_value& arg, const type_info& target, engine* eng) {
-    auto cls = eng ? eng->get_class_definition(target.type_name) : nullptr;
+    auto cls = detail::engine_access::get_class_definition(eng, target.type_name);
     if (!cls || !cls->is_script_class()) { return false; }
     for (const auto& ctor : static_cast<const script_class_definition&>(*cls).get_constructor_asts()) {
         if (ctor->parameters.size() == 1 && parameter_admits(ctor->parameters[0], arg)) { return true; }

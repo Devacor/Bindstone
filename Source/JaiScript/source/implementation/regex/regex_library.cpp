@@ -62,7 +62,7 @@ namespace jai::detail::regex_library {
 
 	// a parallel worker's frozen symbols park no text: it reads as every host failure there does
 	JAI_NOINLINE R refused(engine* eng, const std::string& text) {
-		const uint64_t id = eng->park_error_text(text);
+		const uint64_t id = engine_access::park_error_text(*eng, text);
 		return R(make_error_code(runtime_error_code::invalid_operation), id ? std::string_view("{0}") : host_exception_slotless_text, id);
 	}
 
@@ -154,7 +154,7 @@ namespace jai::detail::regex_library {
 	}
 
 	inline regex::compiled_ptr compile_cached(engine* eng, pattern_cache* cache, const std::string& pattern, const std::string& flags, std::string& error) {
-		const bool cached = cache && !eng->parallel_region_active();
+		const bool cached = cache && !engine_access::parallel_region_active(*eng);
 		std::string key;
 		if (cached) {
 			key.reserve(flags.size() + 1 + pattern.size());
@@ -279,7 +279,7 @@ namespace jai::detail::regex_library {
 		script_value make_bound(class_definition& def, std::shared_ptr<void> object) const {
 			auto instance = detail::make_native_instance(def, def.get_name(), std::move(object), eng);
 			script_value made = script_value::make_object(def.get_name(), instance, eng);
-			if (eng->parallel_region_active()) [[unlikely]] { detail::note_region_made(made, eng); }
+			if (engine_access::parallel_region_active(*eng)) [[unlikely]] { detail::note_region_made(made, eng); }
 			return made;
 		}
 		script_value make_regex(const regex::compiled_ptr& re) const { return make_bound(*regex_def, std::make_shared<regex_value>(re, this)); }
@@ -339,7 +339,7 @@ namespace jai::detail::regex_library {
 			const std::string& text = s.text();
 			script_value out = script_value::make_array(nullptr, eng);
 			script_array& items = *out.unchecked_get_array_storage();
-			auto& limits = eng->execution_limits();
+			auto& limits = engine_access::execution_limits(*eng);
 			regex::searcher searcher(*rv.re, s.kind());
 			position_counter counter{text, s.utf8};
 			std::vector<size_t> slots;
@@ -385,7 +385,7 @@ namespace jai::detail::regex_library {
 					script_value made = make_match(match_of(re, text, s.utf8, slots, counter));
 					R result = with.as_function()(std::vector<script_value>{std::move(made)});
 					if (!result) { return result; }
-					if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
+					if (engine_access::backend_unwinding(*eng)) { return script_value(std::monostate{}, eng); }
 					subject_text piece_text;
 					if (!text_of(result.value(), piece_text)) {
 						raise(std::string("regex: the ") + name + " function must return a string, got " + kind_name(result.value(), eng));
@@ -404,7 +404,7 @@ namespace jai::detail::regex_library {
 				from = end == begin ? regex::next_character(text, end, s.kind()) : end;
 			}
 			out.append(text, last, std::string::npos);
-			auto& limits = eng->execution_limits();
+			auto& limits = engine_access::execution_limits(*eng);
 			if (!limits.memory_charge(out.size())) [[unlikely]] { return raise_memory_cap(limits); }
 			return text_value(eng, std::move(out), s.utf8);
 		}
@@ -423,9 +423,9 @@ namespace jai::detail::regex_library {
 			}
 			const std::string& text = s.text();
 			const size_t groups = regex::group_count(*rv.re);
-			script_value out = script_value::make_array(s.utf8 ? nullptr : eng->get_type_info_string(), eng);
+			script_value out = script_value::make_array(s.utf8 ? nullptr : engine_access::get_type_info_string(*eng), eng);
 			script_array& items = *out.unchecked_get_array_storage();
-			auto& limits = eng->execution_limits();
+			auto& limits = engine_access::execution_limits(*eng);
 			bool denied = false;
 			auto push = [&](size_t at, size_t count) {
 				if (denied || !limits.memory_charge(sizeof(script_value) + count)) { denied = true; return; }
@@ -582,13 +582,13 @@ namespace jai::detail::regex_library {
 			.build();
 		dynamic_binder<regex_match>(eng, "regex::match").build();
 
-		const auto regex_class = eng.get_class_definition("regex");
-		const auto match_class = eng.get_class_definition("regex::match");
+		const auto regex_class = engine_access::get_class_definition(eng, "regex");
+		const auto match_class = engine_access::get_class_definition(eng, "regex::match");
 		auto lib = std::make_shared<library>(library{&eng, type_ids{regex_class->get_type_id(), match_class->get_type_id()}, regex_class.get(), match_class.get()});
 
 		auto method = [&](class_definition& def, const char* name, size_t arity, script_function fn) {
 			def.add_method(name, std::move(fn), arity);
-			def.note_host_overload(eng.symbolize(name), arity, true);
+			def.note_host_overload(engine_access::symbolize(eng, name), arity, true);
 		};
 		class_definition& rc = *regex_class;
 		method(rc, "matches", 1, library_call<&library::matches>{lib});
@@ -604,7 +604,7 @@ namespace jai::detail::regex_library {
 			rc.add_method(std::string("_set_") + field, [lib, is_pattern, field](const std::vector<script_value>& a) -> R {
 				engine* e = lib->eng;
 				if (!e->loading()) {
-					return R(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to '{0}': it is read-only", e->symbolize(field));
+					return R(make_error_code(runtime_error_code::invalid_assignment_target), "Cannot assign to '{0}': it is read-only", engine_access::symbolize(*e, field));
 				}
 				regex_value* r = a.size() == 2 ? detail::extract_cpp_object_ptr<regex_value>(a[0], lib->ids.regex) : nullptr;
 				subject_text t;
@@ -640,11 +640,11 @@ namespace jai::detail::regex_library {
 			return script_value(static_cast<script_int>(lib->match(a).offsets.size() / 2), lib->eng);
 		});
 
-		rc.add_native_method(eng.symbolize("matches"), &matches_lane);
-		rc.add_native_method(eng.symbolize("search"), &search_lane);
-		mc.add_native_method(eng.symbolize("text"), &match_text_lane);
-		mc.add_native_method(eng.symbolize("start"), &match_bound_lane<false>);
-		mc.add_native_method(eng.symbolize("end"), &match_bound_lane<true>);
+		rc.add_native_method(engine_access::symbolize(eng, "matches"), &matches_lane);
+		rc.add_native_method(engine_access::symbolize(eng, "search"), &search_lane);
+		mc.add_native_method(engine_access::symbolize(eng, "text"), &match_text_lane);
+		mc.add_native_method(engine_access::symbolize(eng, "start"), &match_bound_lane<false>);
+		mc.add_native_method(engine_access::symbolize(eng, "end"), &match_bound_lane<true>);
 
 		eng.add_function_with_arity("regex", regex_constructor{lib, std::make_shared<pattern_cache>()}, SIZE_MAX);
 	}

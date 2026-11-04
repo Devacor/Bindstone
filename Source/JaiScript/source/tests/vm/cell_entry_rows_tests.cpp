@@ -40,7 +40,7 @@ public:
 					: e->execute(step);
 				text = v.to_string();
 			} catch (const std::exception& ex) { text = std::string("throw:") + ex.what(); }
-			result.push_back(step_result{ text, e->cells_counters() });
+			result.push_back(step_result{ text, detail::engine_access::cells_counters(*e) });
 		}
 		return result;
 	}

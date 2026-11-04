@@ -239,15 +239,9 @@ struct joined_script {
     }
 };
 
-// Keep the regression buildable against the pre-privilege baseline: that engine
-// cannot revoke filesystem access, so the virtual-label assertion must fail there.
-template<typename Engine>
-void set_filesystem_grant(Engine& eng, bool enabled) {
-    if constexpr (requires { typename Engine::privilege; }) {
-        using privilege = typename Engine::privilege;
-        if (enabled) eng.enable(privilege::filesystem);
-        else eng.disable(privilege::filesystem);
-    }
+void set_filesystem_grant(engine& eng, bool enabled) {
+    if (enabled) { eng.enable(privilege::filesystem); }
+    else { eng.disable(privilege::filesystem); }
 }
 
 } // namespace

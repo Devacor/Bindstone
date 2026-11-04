@@ -656,7 +656,7 @@ namespace jai::detail {
     class ast_reader {
     public:
         ast_reader(const uint8_t* data, size_t size, engine* eng, const ast_frame_context* context = nullptr, std::string own_path = {})
-            : data_(data), size_(size), eng_(eng), symbols_(eng->get_symbolizer()), own_path_(std::move(own_path)) {
+            : data_(data), size_(size), eng_(eng), symbols_(engine_access::get_symbolizer(*eng)), own_path_(std::move(own_path)) {
             if (context) {
                 remap_from_ = context->remap_from;
                 remap_shift_ = context->remap_shift;
@@ -922,8 +922,8 @@ namespace jai::detail {
                     break;
             }
             if (!valid_arity) jaibite_fail("invalid program: type parameter count");
-            temp.id = eng_->symbolize(temp.canonical_name());
-            return type_info_ptr(eng_->get_type_info(temp));
+            temp.id = engine_access::symbolize(*eng_, temp.canonical_name());
+            return type_info_ptr(engine_access::get_type_info(*eng_, temp));
         }
 
         script_value literal() {

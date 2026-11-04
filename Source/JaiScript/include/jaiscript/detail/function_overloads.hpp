@@ -23,7 +23,7 @@ namespace jai::detail {
 
     JAI_NOINLINE inline checked_result<script_value> duplicate_definition_error(const script_defined_function& fn, size_t first_line, engine* eng) {
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "{0}",
-            eng->symbolize(duplicate_definition_text(fn.name, fn.parameters(), first_line)));
+            engine_access::symbolize(*eng, duplicate_definition_text(fn.name, fn.parameters(), first_line)));
     }
 
     // The value a function declaration defines its name to in `env`: the function itself, or the overload set it joins with the
@@ -56,13 +56,13 @@ namespace jai::detail {
         if (duplicate) [[unlikely]] { return duplicate_definition_error(*fn, duplicate->line, eng); }
         // one that differs only by reference: within one execute context the second definition's error, else a redefinition that
         // replaces it (another host entry, or a re-run of the declaring unit)
-        const bool redefines = eng->unit_rerun(fn->unit);
+        const bool redefines = engine_access::unit_rerun(*eng, fn->unit);
         for (size_t i = 0; i < set->members.size();) {
             const auto& member = set->members[i];
             if (!differs_only_by_reference(fn->parameters(), member->parameters())) { ++i; continue; }
             if (member->context == fn->context && !redefines) [[unlikely]] {
                 return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "{0}",
-                    eng->symbolize(reference_only_overload_text(fn->name, fn->parameters(), member->parameters(), member->line)));
+                    engine_access::symbolize(*eng, reference_only_overload_text(fn->name, fn->parameters(), member->parameters(), member->line)));
             }
             set->members.erase(set->members.begin() + static_cast<std::ptrdiff_t>(i));
             set->values.erase(set->values.begin() + static_cast<std::ptrdiff_t>(i));

@@ -567,7 +567,7 @@ namespace jai::detail {
     inline bool local_alias_binds(engine& eng, const variable_decl& d, const script_value& value, bool may_prove) {
         const local_alias_home* home = d.alias_home.get();
         if (!home || !eng.local_alias()) { return false; }
-        const uint64_t epoch = eng.definition_epoch();
+        const uint64_t epoch = engine_access::definition_epoch(eng);
         if (home->epoch != epoch) {
             if (!may_prove) { return false; }
             prove_local_aliases(eng, *home);
@@ -592,7 +592,7 @@ namespace jai::detail {
     // parallel worker may only consume a verdict the main thread already stamped).
     inline bool readonly_parameter_alias(engine& eng, const script_defined_function& fn, size_t i, bool may_prove) {
         if (!fn.alias_candidate || i >= 32 || !eng.parameter_alias()) { return false; }
-        const uint64_t epoch = eng.definition_epoch();
+        const uint64_t epoch = engine_access::definition_epoch(eng);
         if (fn.alias_proof_epoch != epoch) {
             if (!may_prove) { return false; }
             fn.alias_proof_mask = prove_readonly_parameters(eng, fn);

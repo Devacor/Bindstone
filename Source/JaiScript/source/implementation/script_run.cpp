@@ -187,7 +187,7 @@ namespace {
             run.state = *run.result ? detail::run_record::phase::completed : detail::run_record::phase::failed;
         } catch (const std::exception& e) {
             run.thrown = std::current_exception();
-            run.result.emplace(make_error_code(runtime_error_code::evaluation_failed), "{0}", eng.park_error_text(e.what()));
+            run.result.emplace(make_error_code(runtime_error_code::evaluation_failed), "{0}", detail::engine_access::park_error_text(eng, e.what()));
             run.state = detail::run_record::phase::failed;
         } catch (...) {
             run.thrown = std::current_exception();
@@ -200,22 +200,22 @@ namespace {
     // (and come back out after), and a resume is a fresh host entry with its own budget
     void switch_into(detail::run_record& run, bool resumed) {
         engine& eng = *run.eng;
-        detail::run_registry& runs = eng.run_registry();
-        execution_backend* backend = eng.get_execution_backend();
+        detail::run_registry& runs = detail::engine_access::run_registry(eng);
+        execution_backend* backend = detail::engine_access::get_execution_backend(eng);
         run.outer = runs.active;
         runs.active = &run;
-        eng.active_run_pins(&run.pins);
-        eng.swap_run_entry_state(run.entry);
+        detail::engine_access::active_run_pins(eng, &run.pins);
+        detail::engine_access::swap_run_entry_state(eng, run.entry);
         backend->swap_run_state(*run.backend_state);
         if (resumed) { backend->begin_host_call(); }
         {
-            engine::debug_execution_scope executing(eng);
+            detail::engine_access::debug_execution_scope executing(eng);
             mco_resume(run.fiber->co);
         }
-        eng.swap_run_entry_state(run.entry);
+        detail::engine_access::swap_run_entry_state(eng, run.entry);
         backend->swap_run_state(*run.backend_state);
         runs.active = run.outer;
-        eng.active_run_pins(run.outer ? &run.outer->pins : nullptr);
+        detail::engine_access::active_run_pins(eng, run.outer ? &run.outer->pins : nullptr);
         run.outer = nullptr;
     }
 
@@ -223,7 +223,7 @@ namespace {
     // host's call, as execute() would throw it
     void settle(detail::run_record& run, bool rethrow) {
         engine& eng = *run.eng;
-        detail::run_registry& runs = eng.run_registry();
+        detail::run_registry& runs = detail::engine_access::run_registry(eng);
         auto suspended = std::find(runs.suspended.begin(), runs.suspended.end(), &run);
         if (!run.finished) {
             if (suspended == runs.suspended.end()) { runs.suspended.push_back(&run); }
@@ -233,7 +233,7 @@ namespace {
         run.fiber->job = nullptr;
         runs.idle_fibers.push_back(run.fiber);
         run.fiber = nullptr;
-        execution_backend* backend = eng.get_execution_backend();
+        execution_backend* backend = detail::engine_access::get_execution_backend(eng);
         if (run.state == detail::run_record::phase::failed) { backend->adopt_run_trace(*run.backend_state); }
         backend->reset_run_state(*run.backend_state);
         runs.spare_states.push_back(std::move(run.backend_state));
@@ -326,7 +326,7 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
 namespace {
 
     std::unique_ptr<detail::run_record> prepare_run(engine& eng, detail::run_record::body_kind kind) {
-        detail::run_registry& runs = eng.run_registry();
+        detail::run_registry& runs = detail::engine_access::run_registry(eng);
         std::unique_ptr<detail::run_record> run;
         if (!runs.spare_records.empty()) {
             run = std::move(runs.spare_records.back());
@@ -335,7 +335,7 @@ namespace {
             run = std::make_unique<detail::run_record>();
         }
         run->eng = &eng;
-        run->alive = eng.lifetime_token();
+        run->alive = detail::engine_access::lifetime_token(eng);
         run->kind = kind;
         run->bite = nullptr;
         run->state = detail::run_record::phase::running;
@@ -347,7 +347,7 @@ namespace {
         run->warned = run->cancel = run->finished = false;
         run->outer = nullptr;
         run->entry = detail::run_entry_state{};
-        execution_backend* backend = eng.get_execution_backend();
+        execution_backend* backend = detail::engine_access::get_execution_backend(eng);
         if (!runs.spare_states.empty()) {
             run->backend_state = std::move(runs.spare_states.back());
             runs.spare_states.pop_back();
@@ -359,7 +359,7 @@ namespace {
 
     void recycle_run(std::unique_ptr<detail::run_record> run) {
         if (!run || run->alive.expired() || !run->eng) { return; }
-        detail::run_registry& runs = run->eng->run_registry();
+        detail::run_registry& runs = detail::engine_access::run_registry(*run->eng);
         run->result.reset();
         run->callable.reset();
         run->args.clear();

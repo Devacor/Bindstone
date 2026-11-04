@@ -17,15 +17,15 @@ namespace stdlib {
     // string as an argument and return a new one, leaving the argument untouched.
     // ASCII byte semantics (chars are bytes 0..255 under the promotion rules).
     void register_string_functions(engine& eng_ref) {
-        engine::library_registration library(eng_ref);
-        auto& ns = eng_ref.script_namespaces()[eng_ref.symbolize("string")];
+        detail::engine_access::library_registration library(eng_ref);
+        auto& ns = detail::engine_access::script_namespaces(eng_ref)[detail::engine_access::symbolize(eng_ref, "string")];
         if (!ns) { ns = std::make_shared<script_namespace_data>(); }
         engine* eng = &eng_ref;
         constexpr auto text = script_value_type::jai_string_type;
         constexpr auto integer = script_value_type::jai_int_type;
         constexpr auto any = script_value_type::jai_null_type;
-        auto sign = [&](const char* name, host_entry_signature sig) { ns->signatures[eng_ref.symbolize(name)] = std::move(sig); };
-        ns->variables[eng_ref.symbolize("whitespace")] = script_value(std::string(k_whitespace_text), eng);
+        auto sign = [&](const char* name, host_entry_signature sig) { ns->signatures[detail::engine_access::symbolize(eng_ref, name)] = std::move(sig); };
+        ns->variables[detail::engine_access::symbolize(eng_ref, "whitespace")] = script_value(std::string(k_whitespace_text), eng);
         sign("to_lower", {1, 1, {text}, any, true});
         sign("to_upper", {1, 1, {text}, any, true});
         sign("from_code", {1, 1, {integer}, text, false});
@@ -52,7 +52,7 @@ namespace stdlib {
                     for (const auto& a : raw) { args.push_back(&a.deref()); }
                     return held->fn(held->e, args_view(args.data(), args.size()));
                 }, &eng_ref);
-            ns->variables[eng_ref.symbolize(name)] = value;
+            ns->variables[detail::engine_access::symbolize(eng_ref, name)] = value;
             eng_ref.add_host_direct(value, engine::host_direct_any_arity, [](const void* target, const script_value* raw, size_t count) -> R {
                 const entry& h = *static_cast<const entry*>(target);
                 const script_value* args[8];

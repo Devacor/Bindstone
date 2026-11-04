@@ -134,7 +134,7 @@ const builtin_names& builtin_method_names(jai::engine& eng) {
 	static const builtin_names names = [&eng]() {
 		builtin_names result;
 		jai::builtin_method_registries reg;
-		auto* sym = eng.get_symbolizer();
+		auto* sym = jai::detail::engine_access::get_symbolizer(eng);
 		jai::init_builtin_method_registries(sym, reg);
 		auto fill = [&](const auto& table, std::vector<std::string>& out) {
 			for (const auto& [id, _] : table) { out.emplace_back(sym->get_string(id)); }
@@ -203,9 +203,9 @@ void add_class_members(program_view& view, item_list& items, std::string_view cl
 		for (auto base : cd->base_classes) { add_class_members(view, items, base, statics_only, depth + 1); }
 		return;
 	}
-	auto def = eng.get_class_definition(std::string(cls));
+	auto def = jai::detail::engine_access::get_class_definition(eng, std::string(cls));
 	if (!def) { return; }
-	auto* sym = eng.get_symbolizer();
+	auto* sym = jai::detail::engine_access::get_symbolizer(eng);
 	std::vector<const jai::class_definition*> chain{def.get()};
 	for (size_t i = 0; i < chain.size() && i < 32; ++i) {
 		const jai::class_definition* d = chain[i];
@@ -249,9 +249,9 @@ void add_namespace_members(program_view& view, item_list& items, const std::stri
 	if (ns == "math") {
 		for (const auto& n : math_intrinsic_names()) { items.add(n, 3, "math::" + n, 1); }
 	}
-	auto it = eng.script_namespaces().find(eng.symbolize(ns));
-	if (it == eng.script_namespaces().end() || !it->second) { return; }
-	auto* sym = eng.get_symbolizer();
+	auto it = jai::detail::engine_access::script_namespaces(eng).find(jai::detail::engine_access::symbolize(eng, ns));
+	if (it == jai::detail::engine_access::script_namespaces(eng).end() || !it->second) { return; }
+	auto* sym = jai::detail::engine_access::get_symbolizer(eng);
 	for (const auto& [id, _] : it->second->functions) { items.add(std::string(sym->get_string(id)), 3, prefix + std::string(sym->get_string(id)), 1); }
 	for (const auto& [id, value] : it->second->variables) {
 		items.add(std::string(sym->get_string(id)), value.is_function() ? 3 : 6, prefix + std::string(sym->get_string(id)), 1);
@@ -265,14 +265,14 @@ void add_namespace_members(program_view& view, item_list& items, const std::stri
 
 void add_host_names(program_view& view, item_list& items) {
 	auto& eng = view.ws.engine();
-	if (auto env = eng.get_global_environment()) {
+	if (auto env = jai::detail::engine_access::get_global_environment(eng)) {
 		for (const auto& [name, value] : env->get_all_variables()) {
 			std::string n(name);
 			if (value.is_object()) {
 				auto holder = value.get_object_holder();
 				if (holder && holder->type_name() == "class_definition") { continue; }
 			}
-			if (eng.get_class_definition(n)) { continue; }
+			if (jai::detail::engine_access::get_class_definition(eng, n)) { continue; }
 			if (value.is_function()) {
 				auto sigs = view.host_signatures(n);
 				items.add(n, 3, sigs.empty() ? n + "(...)" : sigs.front(), 4);
@@ -282,8 +282,8 @@ void add_host_names(program_view& view, item_list& items) {
 		}
 	}
 	for (const auto& c : eng.registered_class_names()) { items.add(c, 7, "class " + c, 4); }
-	auto* sym = eng.get_symbolizer();
-	for (const auto& [id, data] : eng.script_namespaces()) {
+	auto* sym = jai::detail::engine_access::get_symbolizer(eng);
+	for (const auto& [id, data] : jai::detail::engine_access::script_namespaces(eng)) {
 		std::string n(sym->get_string(id));
 		if (n.find("::") == std::string::npos) { items.add(n, 9, "namespace " + n, 5); }
 	}
@@ -699,7 +699,7 @@ rename_result workspace::rename(unit& u, text_pos pos, const std::string& new_na
 			return result;
 		}
 		std::string target = s.container.empty() ? new_name : s.container + "::" + new_name;
-		if (view.has_top(target) || engine_->has_function(target) || engine_->has_variable(target) || engine_->get_class_definition(target)) {
+		if (view.has_top(target) || engine_->has_function(target) || engine_->has_variable(target) || jai::detail::engine_access::get_class_definition(*engine_, target)) {
 			result.error = "Cannot rename '" + s.name + "': '" + new_name + "' is already declared in this program.";
 			return result;
 		}

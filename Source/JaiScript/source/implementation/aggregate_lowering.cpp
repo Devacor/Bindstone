@@ -480,9 +480,9 @@ struct stmt_ctx {
 class rewriter {
 public:
 	rewriter(engine& eng, std::vector<candidate>& cands, const analysis& an, size_t first_temp, bool dry)
-		: eng_(eng), sym_(*eng.get_symbolizer()), cands_(cands), an_(an), next_slot_(first_temp), dry_(dry) {
-		t_float_ = eng_.get_type_info_float();
-		t_int_ = eng_.get_type_info_int();
+		: eng_(eng), sym_(*engine_access::get_symbolizer(eng)), cands_(cands), an_(an), next_slot_(first_temp), dry_(dry) {
+		t_float_ = engine_access::get_type_info_float(eng_);
+		t_int_ = engine_access::get_type_info_int(eng_);
 		auto [mid, mview] = sym_.intern_with_view("math");
 		math_id_ = mid; math_view_ = mview;
 	}
@@ -2087,7 +2087,7 @@ bool lower_site(engine& eng, const site_input& in, lowered_site& out, size_t& ou
 	for (const auto& c : cands) if (!c.escaped) ++lowered;
 	if (lowered == 0 && an.vec_buffer.empty()) return false;   // a vector buffer's element statements lower without a lowered local
 
-	string_symbolizer& sym = *eng.get_symbolizer();
+	string_symbolizer& sym = *engine_access::get_symbolizer(eng);
 	size_t next = locals;
 	for (auto& c : cands) {
 		if (c.escaped) continue;

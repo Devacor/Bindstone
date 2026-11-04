@@ -212,14 +212,14 @@ public:
 
         custom_test("queries_never_register_or_intern_names", [this](auto& eng) {
             auto edit = permission(eng, "app.edit");
-            const auto name_id = eng.symbolize("app.edit");
-            check_eq(name_id, *eng.get_symbolizer()->find("app.edit"));
-            check_false(eng.get_symbolizer()->find("app.unknown").has_value());
+            const auto name_id = detail::engine_access::symbolize(eng, "app.edit");
+            check_eq(name_id, *detail::engine_access::get_symbolizer(eng)->find("app.edit"));
+            check_false(detail::engine_access::get_symbolizer(eng)->find("app.unknown").has_value());
             check_false(eng.is_enabled(std::string_view("app.unknown")));
             check_false(eng.execute("reflect::is_enabled(\"app.unknown\")").as_bool());
-            check_false(eng.get_symbolizer()->find("app.unknown").has_value());
+            check_false(detail::engine_access::get_symbolizer(eng)->find("app.unknown").has_value());
             eng.enable(edit);
-            auto* symbols = eng.get_symbolizer();
+            auto* symbols = detail::engine_access::get_symbolizer(eng);
             struct thaw_guard {
                 string_symbolizer* symbols;
                 ~thaw_guard() { symbols->set_frozen(false); }
@@ -233,20 +233,20 @@ public:
 
         custom_test("active_region_rejects_all_mutation_before_interning", [this](auto& eng) {
             auto edit = permission(eng, "app.edit");
-            auto& state = eng.parallel_state();
+            auto& state = detail::engine_access::parallel_state(eng);
             detail::parallel_region_table region;
             struct region_guard {
                 detail::parallel_engine_state& state;
                 string_symbolizer* symbols;
                 ~region_guard() { state.active_region = nullptr; symbols->set_frozen(false); }
-            } restore{state, eng.get_symbolizer()};
+            } restore{state, detail::engine_access::get_symbolizer(eng)};
             state.active_region = &region;
-            eng.get_symbolizer()->set_frozen(true);
+            detail::engine_access::get_symbolizer(eng)->set_frozen(true);
             const std::string expected = "Cannot change privileges during a parallel region";
             check_eq(expected, failure([&]() { eng.enable(edit); }));
             check_eq(expected, failure([&]() { eng.disable({edit, "filesystem"}); }));
             check_eq(expected, failure([&]() { eng.register_privilege("app.new_in_region"); }));
-            check_false(eng.get_symbolizer()->find("app.new_in_region").has_value());
+            check_false(detail::engine_access::get_symbolizer(eng)->find("app.new_in_region").has_value());
             check_false(eng.is_enabled(edit));
             check_true(eng.is_enabled(jai::filesystem));
         });
@@ -263,7 +263,7 @@ public:
             check_false(bool(result));
             check_eq(std::string("Unknown privilege name"), eng.format_error(result));
             check_throws([&]() { eng.add_function("invalid", []() {}, invalid); });
-            check_false(eng.get_symbolizer()->find("app.unknown").has_value());
+            check_false(detail::engine_access::get_symbolizer(eng)->find("app.unknown").has_value());
         });
 
         custom_test("builtin_name_is_an_alias_and_empty_name_rejected", [this](auto& eng) {
@@ -291,7 +291,7 @@ public:
         custom_test("worker_callable_copy_retains_live_gate", [this](auto& eng) {
             eng.register_privilege("app.edit");
             eng.add_function("edit", []() { return script_int(42); }, "app.edit");
-            auto copy = eng.make_parallel_host_function_copy("edit");
+            auto copy = detail::engine_access::make_parallel_host_function_copy(eng, "edit");
             eng.enable("app.edit");
             auto allowed = copy.as_function()({});
             check_true(bool(allowed));

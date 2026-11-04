@@ -19,14 +19,9 @@ class filesystem_privilege_tests : public suite {
 public:
     filesystem_privilege_tests() : suite("Filesystem Privilege") {}
 
-    // Baseline-compatible probes: an old engine leaves access enabled so the
-    // behavioral tests demonstrate the missing gate, not just a missing API.
-    template<class Engine>
-    static void filesystem_enabled(Engine& eng, bool enabled) {
-        if constexpr (requires { typename Engine::privilege; }) {
-            if (enabled) { eng.enable(Engine::privilege::filesystem); }
-            else { eng.disable(Engine::privilege::filesystem); }
-        }
+    static void filesystem_enabled(engine& eng, bool enabled) {
+        if (enabled) { eng.enable(privilege::filesystem); }
+        else { eng.disable(privilege::filesystem); }
     }
 
     template<class F>
@@ -41,28 +36,17 @@ public:
     // denial reads exactly as the caught one.
     static std::string runtime_denied() { return denied(); }
 
-    template<class Engine, class Function>
-    static void add_protected(Engine& eng, const std::string& name, Function function) {
-        if constexpr (requires { typename Engine::privilege; }) {
-            eng.add_function(name, std::move(function), Engine::privilege::filesystem);
-        } else {
-            eng.add_function(name, std::move(function));
-        }
+    template<class Function>
+    static void add_protected(engine& eng, const std::string& name, Function function) {
+        eng.add_function(name, std::move(function), privilege::filesystem);
     }
 
-    template<class Engine>
-    static void bind_probe(Engine& eng) {
+    static void bind_probe(engine& eng) {
         dynamic_binder<filesystem_binding_probe> binder(eng, "FilesystemProbe");
-        binder.template constructor<>();
-        if constexpr (requires { typename Engine::privilege; }) {
-            binder.method("read", &filesystem_binding_probe::read, Engine::privilege::filesystem)
-                .method("query", &filesystem_binding_probe::query, Engine::privilege::filesystem)
-                .method("lambda", [](filesystem_binding_probe& self) { return self.read(); }, Engine::privilege::filesystem);
-        } else {
-            binder.method("read", &filesystem_binding_probe::read)
-                .method("query", &filesystem_binding_probe::query)
-                .method("lambda", [](filesystem_binding_probe& self) { return self.read(); });
-        }
+        binder.constructor<>();
+        binder.method("read", &filesystem_binding_probe::read, privilege::filesystem)
+            .method("query", &filesystem_binding_probe::query, privilege::filesystem)
+            .method("lambda", [](filesystem_binding_probe& self) { return self.read(); }, privilege::filesystem);
         binder.build();
     }
 
@@ -171,13 +155,13 @@ public:
             auto eng = make_engine();
             eng->jaibite_cache(false);
             check_eq(script_int(42), eng->execute_file(path.string()).as_int());
-            eng->execute_import(path.string());
+            detail::engine_access::execute_import(*eng, path.string());
             auto bite = eng->jaibite("40 + 2;");
             bite.save(bite_path.string());
             auto bytes = bite.save_bytes();
             filesystem_enabled(*eng, false);
             check_eq(denied(), failure([&]() { eng->execute_file(path.string()); }));
-            check_eq(denied(), failure([&]() { eng->execute_import(path.string()); }));
+            check_eq(denied(), failure([&]() { detail::engine_access::execute_import(*eng, path.string()); }));
             check_eq(denied(), failure([&]() { eng->jaibite_load(bite_path.string()); }));
             check_eq(denied(), failure([&]() { bite.save(bite_path.string()); }));
             check_eq(bytes, bite.save_bytes());

@@ -33,7 +33,7 @@ inline class_instance* host_this_instance(const script_value& self) {
 inline bool host_layer_answers(const class_definition* cd, uint64_t member_id, engine* eng) {
 	const uint32_t slot = cd->field_slot(member_id);
 	if (slot != class_definition::k_no_field_slot && !cd->slot_is_cpp_property(slot)) { return true; }
-	auto* symbols = eng->get_symbolizer();
+	auto* symbols = engine_access::get_symbolizer(*eng);
 	if (cd->script_declares_user_accessor(symbols->get_getter_id_with_view(member_id).first) ||
 	    cd->script_declares_user_accessor(symbols->get_setter_id_with_view(member_id).first)) {
 		return true;
@@ -48,7 +48,7 @@ inline bool host_receiver_measure(const class_definition* cd, const class_instan
                                   engine* eng, const void*& stored, std::ptrdiff_t& owner_delta, host_receiver_layout& out) {
 	const script_value::object_holder* holder = host_member_stored(inst, stored);
 	if (!holder || holder->type_id() == UINT64_MAX) { return false; }
-	auto stored_def = eng->get_class_definition(holder->type_id());
+	auto stored_def = engine_access::get_class_definition(*eng, holder->type_id());
 	if (!stored_def || !stored_def->is_cpp_class()) { return false; }
 	owner_delta = 0;
 	if (owner && holder->type_id() != owner->get_type_id()) {

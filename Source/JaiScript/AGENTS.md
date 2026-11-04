@@ -98,6 +98,9 @@ rather than throw, so "deep nesting does not crash" is tested as "execute return
   serialization order) and equivalent keys hash alike. Float keys order totally (a NaN key is found again; `0.0` and
   `-0.0` are one key); complex values order and hash by held-pointer identity, except a class value map key, which keys
   by its class's `<`/`<=>`, else its `hash()` with `==`, else by identity (`core/script_map.hpp`).
+- `jai::engine`'s public members are the host API the site documents. Library code, the tools and the tests reach every
+  other member through `detail::engine_access` (`detail/engine_access.hpp`): a new internal member is private and gets
+  its inline forwarder there; a new public one gets its page.
 - Never read a `script_value` after moving from it (the move constructor nulls the source).
 - Integer arithmetic goes through `jai::ints::try_add/try_sub/try_mul/try_div/mod`, never raw `a + b` on `script_int`:
   the overflow policy (checked by default, `JAISCRIPT_WRAP_ON_OVERFLOW` wraps) lives there, and arithmetic is never UB.

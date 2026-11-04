@@ -204,7 +204,7 @@ namespace stdlib {
             if (shown.empty()) { shown = args; }
             auto text = eng->text_of(a);
             if (!text) { return checked_result<script_value>(text.error_value()); }
-            if (eng->backend_unwinding()) { return checked_result<script_value>(script_value(std::monostate{}, eng)); }
+            if (detail::engine_access::backend_unwinding(*eng)) { return checked_result<script_value>(script_value(std::monostate{}, eng)); }
             shown[i] = script_value(std::move(text.value()), eng);
         }
         return std::nullopt;
@@ -239,7 +239,7 @@ namespace stdlib {
             if (texts.empty()) { texts.reserve(count); }
             auto text = eng->text_of(*kept[i]);
             if (!text) { return text.error_value(); }
-            if (eng->backend_unwinding()) { return script_value(std::monostate{}, eng); }
+            if (detail::engine_access::backend_unwinding(*eng)) { return script_value(std::monostate{}, eng); }
             texts.emplace_back(std::move(text.value()), eng);
             shown[i] = &texts.back();
         }
@@ -294,7 +294,7 @@ namespace stdlib {
     }
 
     void register_io_functions(engine& eng_ref) {
-        engine::library_registration library(eng_ref);
+        detail::engine_access::library_registration library(eng_ref);
         engine* eng = &eng_ref;
         dynamic_binder<skip_newline_t>(eng_ref, "skip_newline_t").build();
         dynamic_binder<skip_flush_t>(eng_ref, "skip_flush_t").build();
@@ -302,8 +302,8 @@ namespace stdlib {
         auto skip_newline_ptr = std::make_shared<skip_newline_t>();
         auto skip_flush_ptr = std::make_shared<skip_flush_t>();
 
-        eng_ref.add_global("skip_newline", eng_ref.make_value_object(skip_newline_ptr));
-        eng_ref.add_global("skip_flush", eng_ref.make_value_object(skip_flush_ptr));
+        eng_ref.add_global("skip_newline", detail::engine_access::make_value_object(eng_ref, skip_newline_ptr));
+        eng_ref.add_global("skip_flush", detail::engine_access::make_value_object(eng_ref, skip_flush_ptr));
         // Usage:
         //   print()                           - Prints just a newline
         //   print(value)                      - Prints value followed by newline
@@ -332,7 +332,7 @@ namespace stdlib {
             if (auto failed = show_arguments(eng, raw_args, shown)) { return std::move(*failed); }
             const bool first_was_shown = !raw_args.empty() && !detail::plain_text_value(raw_args[0]);
             const std::vector<script_value>& args = shown.empty() ? raw_args : shown;
-            std::ostream& out = eng ? eng->get_output_stream() : std::cout;
+            std::ostream& out = eng ? detail::engine_access::get_output_stream(*eng) : std::cout;
 
             if (args.empty()) {
                 out << std::endl;
@@ -435,7 +435,7 @@ namespace stdlib {
             if (detail::plain_text_value(args[0])) { return script_value(args[0].to_string(), e); }
             auto text = e->text_of(args[0]);
             if (!text) { return text.error_value(); }
-            if (e->backend_unwinding()) { return script_value(std::monostate{}, e); }
+            if (detail::engine_access::backend_unwinding(*e)) { return script_value(std::monostate{}, e); }
             return script_value(std::move(text.value()), e);
         };
         eng_ref.add_variadic_function("to_string", [eng, to_string_of](const std::vector<script_value>& args) -> checked_result<script_value> {

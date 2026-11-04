@@ -17,8 +17,8 @@ namespace detail {
 		if (!result) {
 			throw runtime_error(eng->format_error(result));
 		}
-		if (eng->backend_unwinding()) {
-			throw runtime_error(eng->backend_exception_text());
+		if (engine_access::backend_unwinding(*eng)) {
+			throw runtime_error(engine_access::backend_exception_text(*eng));
 		}
 	}
 
@@ -32,7 +32,7 @@ namespace detail {
 			// the conversion's failure
 			if (fn.deref().is_null()) { return {}; }
 			if (!fn.is_function() || !fn.payload_engine()) { throw runtime_error("Cannot convert a value that is not a function to a std::function callback"); }
-			std::weak_ptr<const void> alive = fn.payload_engine()->lifetime_token();
+			std::weak_ptr<const void> alive = engine_access::lifetime_token(*fn.payload_engine());
 			return [fn = std::move(fn), alive = std::move(alive)](Args... args) -> R {
 				// a callback the host kept past its engine never reaches the dead engine
 				if (alive.expired()) { throw runtime_error("Cannot call a script function after its engine was destroyed"); }
@@ -202,7 +202,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         // a script weak_ptr watches a script handle, and a host weak_ptr has none to watch
         throw runtime_error("A host function returning std::weak_ptr<T> is not supported; return shared_ptr<T>");
     } else {
-        auto registry = eng->get_conversion_registry();
+        auto registry = detail::engine_access::get_conversion_registry(*eng);
         if (registry && registry->template has_conversion<NonConstT>()) {
             return registry->template convert_to_script<NonConstT>(t);
         }
@@ -211,7 +211,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
         if (!eng) {
             throw runtime_error("Engine reference required for custom type conversion");
         }
-        return eng->make_value_object(sharedObj);
+        return detail::engine_access::make_value_object(*eng, sharedObj);
     }
 }
 
@@ -220,7 +220,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
     requires (!std::is_copy_constructible_v<std::remove_const_t<T>>)
 {
     using NonConstT = std::remove_const_t<T>;
-    auto registry = eng->get_conversion_registry();
+    auto registry = detail::engine_access::get_conversion_registry(*eng);
     if (registry && registry->template has_conversion<NonConstT>()) {
         return registry->template convert_to_script<NonConstT>(t);
     }
@@ -232,7 +232,7 @@ script_value convert_custom_type_with_registry(const T& t, engine* eng)
 template<typename T>
 std::optional<script_value> try_convert_shared_ptr_with_registry(const std::shared_ptr<T>& ptr, engine* eng) {
     if (eng && eng->template has_registered_class<T>()) {
-        return eng->make_handle(ptr);
+        return detail::engine_access::make_handle(*eng, ptr);
     }
     return std::nullopt;
 }
@@ -247,7 +247,7 @@ script_value convert_reference_with_registry(T& t, engine* eng) {
         if (!t) {
             return script_value(std::monostate{}, eng);
         }
-        return eng->make_handle(t);
+        return detail::engine_access::make_handle(*eng, t);
     } else {
         if (eng && eng->has_registered_class<NonConstT>()) {
             return script_value::make_cpp_bound(&t, eng);
@@ -290,7 +290,7 @@ template<typename T>
 script_value conversions::convert_vector_to_script_array(const std::vector<T>& vec, engine* eng) {
     if constexpr (std::is_same_v<T, uint8_t>) {
         // a host byte buffer is an array<uint8>: one copy
-        script_value bytes = script_value::make_array(eng->get_type_info_uint8(), eng);
+        script_value bytes = script_value::make_array(detail::engine_access::get_type_info_uint8(*eng), eng);
         bytes.unchecked_get_array_storage()->bytes().assign(vec.begin(), vec.end());
         return bytes;
     }
@@ -304,7 +304,7 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
         // stays dynamic (a class-typed element type would mint an object buffer)
         element_type = nullptr;
     } else {
-        element_type = eng->get_type_info_for_cpp_type<T>();
+        element_type = detail::engine_access::get_type_info_for_cpp_type<T>(*eng);
     }
 
     auto script_array = script_value::make_array(element_type, eng);
@@ -330,14 +330,14 @@ script_value conversions::convert_vector_to_script_array(const std::vector<T>& v
             arr.push(convert_custom_type_with_registry(item, eng));   // the vector buffer of the adapter's kind
         } else {
             if (eng) {
-                auto registry = eng->get_conversion_registry();
+                auto registry = detail::engine_access::get_conversion_registry(*eng);
                 if (registry && registry->template has_conversion<T>()) {
                     arr.push(registry->template convert_to_script<T>(item));
                     continue;
                 }
             }
             auto sharedObj = std::make_shared<T>(item);
-            arr.push(eng->make_value_object(sharedObj));
+            arr.push(detail::engine_access::make_value_object(*eng, sharedObj));
         }
     }
 
@@ -364,7 +364,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
                    std::is_same_v<V, std::string> || detail::is_script_value_v<V>) {
         value_type = nullptr;
     } else {
-        value_type = eng->get_type_info_for_cpp_type<V>();
+        value_type = detail::engine_access::get_type_info_for_cpp_type<V>(*eng);
     }
 
     auto map_value = script_value::make_map(key_type, value_type, eng);
@@ -385,7 +385,7 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
             converted_key = eng->make_value(key);
         } else {
             if (eng) {
-                auto registry = eng->get_conversion_registry();
+                auto registry = detail::engine_access::get_conversion_registry(*eng);
                 if (registry && registry->template has_conversion<K>()) {
                     converted_key = registry->template convert_to_script<K>(key);
                 } else {
@@ -409,16 +409,16 @@ script_value conversions::convert_stdmap_to_script_map(const std::map<K, V>& std
             converted_value = eng->make_value(value);
         } else {
             if (eng) {
-                auto registry = eng->get_conversion_registry();
+                auto registry = detail::engine_access::get_conversion_registry(*eng);
                 if (registry && registry->template has_conversion<V>()) {
                     converted_value = registry->template convert_to_script<V>(value);
                 } else {
                     auto sharedObj = std::make_shared<V>(value);
-                    converted_value = eng->make_value_object(sharedObj);
+                    converted_value = detail::engine_access::make_value_object(*eng, sharedObj);
                 }
             } else {
                 auto sharedObj = std::make_shared<V>(value);
-                converted_value = eng->make_value_object(sharedObj);
+                converted_value = detail::engine_access::make_value_object(*eng, sharedObj);
             }
         }
 
@@ -438,15 +438,15 @@ void engine::add_custom_conversion(
 }
 
 inline detail::parameter_storage::scope_guard::scope_guard(engine* eng, parameter_storage* storage)
-    : engine_(eng), previous_(eng ? eng->get_current_parameter_storage() : nullptr) {
+    : engine_(eng), previous_(eng ? detail::engine_access::get_current_parameter_storage(*eng) : nullptr) {
     if (eng) {
-        eng->set_current_parameter_storage(storage);
+        detail::engine_access::set_current_parameter_storage(*eng, storage);
     }
 }
 
 inline detail::parameter_storage::scope_guard::~scope_guard() {
     if (engine_) {
-        engine_->set_current_parameter_storage(previous_);
+        detail::engine_access::set_current_parameter_storage(*engine_, previous_);
     }
 }
 

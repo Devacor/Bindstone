@@ -1708,7 +1708,7 @@ public:
             check(eng->execute("raw").get_class_instance() == eng->script_layer(*slot), "raw is still the layer after the re-derive");
             check_eq(std::string("Slotspawn"), eng->execute("raw").get_class_instance()->get_class_definition()->get_name(), "raw's instance is Slotspawn");
             check_eq((script_int)9, eng->execute("raw.chomp").as_int(), "a field both classes declare carries over");
-            check(eng->script_layer(*slot)->has_field(eng->symbolize("fangs")), "the new class's field exists on the instance");
+            check(eng->script_layer(*slot)->has_field(detail::engine_access::symbolize(*eng, "fangs")), "the new class's field exists on the instance");
             check_eq((script_int)1, eng->execute("raw.fangs").as_int(), "the new class's own fields take their initializers");
             check_eq(std::string("slotspawn"), eng->execute("raw.speak()").as<std::string>(), "the new class dispatches");
             check_eq((script_int)1, eng->execute("same.fangs").as_int(), "a wrapper made before the extend resolves to the layer");

@@ -542,17 +542,17 @@ public:
             std::ofstream(dir / "main.jai") << "import \"lib/mod.jai\";\nvar seen = [probe(), where()];\nfunction later() -> string { return probe(); }\n";
             auto engine = make_engine();
             jai::engine* raw = engine.get();
-            engine->add_function("probe", [raw]() -> std::string { return raw->current_source_file(); });
-            check_eq(std::string(), engine->root_source_file());
-            check_eq(std::string(), engine->current_source_file());
+            engine->add_function("probe", [raw]() -> std::string { return detail::engine_access::current_source_file(*raw); });
+            check_eq(std::string(), detail::engine_access::root_source_file(*engine));
+            check_eq(std::string(), detail::engine_access::current_source_file(*engine));
             engine->add_include_path(dir.string());   // as the runner does for the entry script's folder
             std::string mainPath = (dir / "main.jai").string();
             engine->execute_file(mainPath);
-            check_eq(mainPath, engine->root_source_file());
+            check_eq(mainPath, detail::engine_access::root_source_file(*engine));
             auto seen = engine->execute("seen");
             check_eq(fs::path(mainPath).lexically_normal(), fs::path(seen.as_array()[0].as_string()).lexically_normal());
             check_eq((dir / "lib" / "mod.jai").lexically_normal(), fs::path(seen.as_array()[1].as_string()).lexically_normal());
-            check_eq(mainPath, engine->root_source_file());   // a raw-content execute does not replace the root
+            check_eq(mainPath, detail::engine_access::root_source_file(*engine));   // a raw-content execute does not replace the root
             check_eq(fs::path(mainPath).lexically_normal(), fs::path(engine->execute("later()").as_string()).lexically_normal());
             std::error_code ec;
             fs::remove_all(dir, ec);
@@ -573,7 +573,7 @@ public:
             std::ofstream(a / "main.jai") << "import \"lib/mod.jai\";\nvar seen = [probe(), where()];\n";
             auto first = make_engine();
             jai::engine* rawFirst = first.get();
-            first->add_function("probe", [rawFirst]() -> std::string { return rawFirst->current_source_file(); });
+            first->add_function("probe", [rawFirst]() -> std::string { return detail::engine_access::current_source_file(*rawFirst); });
             first->add_include_path(a.string());
             first->execute_file((a / "main.jai").string());
             check_true(fs::exists(a / ".cache" / "main.jai.jaibite"));
@@ -584,7 +584,7 @@ public:
             const auto mainBiteBefore = fs::last_write_time(b / ".cache" / "main.jai.jaibite", ec);
             auto second = make_engine();
             jai::engine* rawSecond = second.get();
-            second->add_function("probe", [rawSecond]() -> std::string { return rawSecond->current_source_file(); });
+            second->add_function("probe", [rawSecond]() -> std::string { return detail::engine_access::current_source_file(*rawSecond); });
             second->add_include_path(b.string());
             second->execute_file((b / "main.jai").string());
             auto seen = second->execute("seen");
@@ -1407,15 +1407,15 @@ public:
             )");
             engine->execute("run(50);");
             engine->execute("run(50);");
-            const size_t before = engine->get_symbolizer()->size();
+            const size_t before = detail::engine_access::get_symbolizer(*engine)->size();
             engine->execute("run(50);");
             for (int i = 0; i < 50; ++i) {
-                auto missing = engine->get_global_environment()->get("missing_" + std::to_string(i));
+                auto missing = detail::engine_access::get_global_environment(*engine)->get("missing_" + std::to_string(i));
                 check_false(static_cast<bool>(missing));
                 if (i == 49) { check_eq(std::string("Undefined variable 'missing_49'"), engine->format_error(missing)); }
-                check_false(engine->get_global_environment()->contains("missing_" + std::to_string(i)));
+                check_false(detail::engine_access::get_global_environment(*engine)->contains("missing_" + std::to_string(i)));
             }
-            check_eq(before, engine->get_symbolizer()->size());
+            check_eq(before, detail::engine_access::get_symbolizer(*engine)->size());
             check_eq(std::string("fail 149"), engine->execute("last_host").as_string());
             check_eq(std::string("reflect::get: 'Probe' has no member 'nosuch149'"), engine->execute("last_reflect").as_string());
             check_eq(std::string("Cannot skip 159 bytes at position 0: the data is 3 bytes"), engine->execute("last_binary").as_string());

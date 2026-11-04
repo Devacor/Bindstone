@@ -12,10 +12,10 @@ public:
     jaibite_validation_tests() : suite("Jaibite Validation") {}
 
     static std::vector<declaration_ptr> parse(engine& eng, const std::string& source) {
-        auto templates = eng.get_registered_template_types();
-        lexer lex(source, eng.get_symbolizer());
+        auto templates = detail::engine_access::get_registered_template_types(eng);
+        lexer lex(source, detail::engine_access::get_symbolizer(eng));
         auto tokens = lex.tokenize();
-        parser parse(tokens, eng.get_symbolizer(), &eng, templates);
+        parser parse(tokens, detail::engine_access::get_symbolizer(eng), &eng, templates);
         auto result = parse.parse();
         check_true(bool(result), "validation fixture must parse normally");
         return std::move(result.value());
@@ -33,7 +33,7 @@ public:
     }
 
     static void reject(engine& eng, const std::vector<declaration_ptr>& declarations) {
-        const auto bytes = detail::serialize_jaibite(declarations, *eng.get_symbolizer(), eng.registration_fingerprint());
+        const auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(eng), eng.registration_fingerprint());
         reject_bytes(eng, bytes);
     }
 
@@ -69,7 +69,7 @@ public:
             auto fn = std::static_pointer_cast<function_decl>(declarations.front());
             detail::body_walker walk{
                 [&](identifier_expr* id) { id->slot_index = fn->local_count + 99; },
-                {}, eng->get_symbolizer()
+                {}, detail::engine_access::get_symbolizer(*eng)
             };
             walk.stmt(fn->body);
             reject(*eng, declarations);
@@ -97,7 +97,7 @@ public:
             auto declarations = parse(*eng, "int n = 3;");
             std::static_pointer_cast<variable_decl>(declarations.front())->slot_index = 0;
             // the writer drops a program's own slots (they are re-derived at load): a body-mode writer still puts the claim on the wire
-            reject_bytes(*eng, detail::ast_writer(*eng->get_symbolizer()).in_body().serialize(declarations, eng->registration_fingerprint()));
+            reject_bytes(*eng, detail::ast_writer(*detail::engine_access::get_symbolizer(*eng)).in_body().serialize(declarations, eng->registration_fingerprint()));
         });
 
         test("function_body_must_not_be_null", [this]() {
@@ -219,7 +219,7 @@ public:
             auto declarations = parse(*eng, "array<int> xs = [1];");
             auto local = std::static_pointer_cast<variable_decl>(declarations.front());
             auto malformed = *local->type;
-            malformed.type_params.push_back(eng->get_type_info_bool());
+            malformed.type_params.push_back(detail::engine_access::get_type_info_bool(*eng));
             local->type = &malformed;
             reject(*eng, declarations);
         });
@@ -229,7 +229,7 @@ public:
             auto declarations = parse(*eng, "int n = 1;");
             auto local = std::static_pointer_cast<variable_decl>(declarations.front());
             auto malformed = *local->type;
-            malformed.type_params.push_back(eng->get_type_info_bool());
+            malformed.type_params.push_back(detail::engine_access::get_type_info_bool(*eng));
             local->type = &malformed;
             reject(*eng, declarations);
         });
@@ -239,7 +239,7 @@ public:
             auto declarations = parse(*eng, "map<string, int> xs;");
             auto local = std::static_pointer_cast<variable_decl>(declarations.front());
             auto malformed = *local->type;
-            malformed.type_params.push_back(eng->get_type_info_bool());
+            malformed.type_params.push_back(detail::engine_access::get_type_info_bool(*eng));
             local->type = &malformed;
             reject(*eng, declarations);
         });
@@ -247,7 +247,7 @@ public:
         test("terminal_varint_must_not_overflow", [this]() {
             auto eng = make_engine();
             const std::vector<declaration_ptr> declarations;
-            auto bytes = detail::serialize_jaibite(declarations, *eng->get_symbolizer(), eng->registration_fingerprint());
+            auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(*eng), eng->registration_fingerprint());
             const size_t header = detail::k_jaibite_header_size;
             check_eq(header + 2, bytes.size(), "fixture expects the fixed header and two empty vectors");
             check_eq(uint8_t(0), bytes[header], "fixture string table must be empty");

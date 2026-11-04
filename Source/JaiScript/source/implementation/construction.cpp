@@ -55,7 +55,7 @@ JAI_NOINLINE std::optional<error_propagator> refuse_cdtor_call(class_instance* i
 	const class_definition* level = instance->get_class_definition();
 	engine* eng = instance->get_engine();
 	if (phase == class_instance::cdtor_phase::none || !level || !eng || level->method_ptr(name_id) != nullptr) { return std::nullopt; }
-	for (const auto& [name, cls] : eng->get_class_registry().script_classes_) {
+	for (const auto& [name, cls] : engine_access::get_class_registry(*eng).script_classes_) {
 		if (cls.get() == level || !cls->derives_from(level) || cls->method_ptr(name_id) == nullptr) { continue; }
 		return error_propagator{make_error_code(runtime_error_code::member_not_found),
 			phase == class_instance::cdtor_phase::construction ? k_call_under_construction : k_call_under_destruction,

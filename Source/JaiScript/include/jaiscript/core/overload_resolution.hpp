@@ -75,7 +75,7 @@ inline bool host_operator_accepts(const script_value& method, const script_value
     if (unary == dispatch->overloads->end() || unary->second.empty()) { return false; }
     engine* eng = dispatch->cls->get_engine();
     for (const auto& entry : unary->second) {
-        if (!eng || entry.param_types.empty() || eng->cpp_signature_cost(&arg, entry.param_types) >= 0) { return true; }
+        if (!eng || entry.param_types.empty() || detail::engine_access::cpp_signature_cost(*eng, &arg, entry.param_types) >= 0) { return true; }
     }
     return false;
 }
@@ -112,7 +112,7 @@ inline bool value_of_class(const class_definition* def, const script_value& othe
     } else if (holder->type_name() == def->get_name()) {
         return true;
     } else if (engine* eng = def->get_engine(); eng && !holder->type_name().empty()) {
-        other_def = eng->get_class_definition(std::string(holder->type_name())).get();
+        other_def = detail::engine_access::get_class_definition(*eng, std::string(holder->type_name())).get();
     }
     return other_def && (other_def == def || other_def->is_subtype_of(def->get_name()));
 }
@@ -166,7 +166,7 @@ inline bool object_declares_method(const script_value& arg, std::string_view nam
     auto def = instance ? instance->get_class_definition() : nullptr;
     engine* eng = def ? def->get_engine() : nullptr;
     if (!eng) { return false; }
-    const auto id = eng->get_symbolizer()->find(name);
+    const auto id = detail::engine_access::get_symbolizer(*eng)->find(name);
     return id && def->defines_method(*id);
 }
 
@@ -455,7 +455,7 @@ namespace detail {
     JAI_NOINLINE inline error_propagator ambiguous_call(uint64_t name_id, const std::vector<parameter>& best, const std::vector<parameter>& rival,
                                                        const script_value* args, size_t argc, engine* eng) {
         const std::error_code ec = make_error_code(runtime_error_code::ambiguous_call);
-        string_symbolizer* symbols = eng ? eng->get_symbolizer() : nullptr;
+        string_symbolizer* symbols = eng ? engine_access::get_symbolizer(*eng) : nullptr;
         if (symbols && !symbols->frozen()) {
             const std::string spelled(symbols->get_string(name_id));
             return {ec, "Ambiguous call to '{0}' with {1}", name_id,
@@ -557,7 +557,7 @@ inline const std::shared_ptr<function_decl>* class_definition::resolve_method_ov
             }
         }
         if (arity_match_count == 1 && may_cache) {
-            assert(!(engine_ && engine_->parallel_region_active()) && "a parallel worker writes the class's shared overload cache");
+            assert(!(engine_ && detail::engine_access::parallel_region_active(*engine_)) && "a parallel worker writes the class's shared overload cache");
             overload_cache_key cache_key{name_id, argc};
             return &overload_resolution_cache_.insert_or_assign(cache_key, *best_ast).first->second;
         }

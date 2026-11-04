@@ -602,7 +602,7 @@ public:
 				}, nullptr).build();
 				e->add_global_ref("box", source);
 				(void)e->execute("var& r = box.number; var SRC = [0];");
-				auto reference = e->get_global_environment()->get_ref("r");
+				auto reference = detail::engine_access::get_global_environment(*e)->get_ref("r");
 				if (!reference) { return "no reference"; }
 				auto src = e->get_variable("SRC");
 				src.as_array()[0] = reference.value().get();

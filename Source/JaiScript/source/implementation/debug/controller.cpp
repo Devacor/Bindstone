@@ -291,16 +291,16 @@ void controller::detach() {
 // ---------------------------------------------------------------------------
 
 script_value* controller::variable_storage(const std::string& name) const {
-    auto* backend = engine_->get_execution_backend();
+    auto* backend = detail::engine_access::get_execution_backend(*engine_);
     if (!backend) { return nullptr; }
     if (script_value* local = backend->debug_local_storage(name)) { return local; }
     const auto env = backend->get_current_environment();
-    return env ? env->get_env_var_ptr(engine_->get_symbolizer()->intern(name)) : nullptr;
+    return env ? env->get_env_var_ptr(detail::engine_access::get_symbolizer(*engine_)->intern(name)) : nullptr;
 }
 
 script_value controller::get_variable(const std::string& name) const {
     if (const script_value* storage = variable_storage(name)) { return storage->deref(); }
-    if (auto* backend = engine_->get_execution_backend()) {
+    if (auto* backend = detail::engine_access::get_execution_backend(*engine_)) {
         for (const auto& [local, value] : backend->get_frame_locals(0)) {   // a lowered aggregate: its components folded back
             if (local == name) { return value; }
         }
@@ -311,8 +311,8 @@ script_value controller::get_variable(const std::string& name) const {
 void controller::set_variable(const std::string& name, const script_value& value) {
     script_value* storage = variable_storage(name);
     if (!storage) { throw runtime_error("No variable '" + name + "' is in scope at this stop"); }
-    const auto program = engine_->get_global_environment();
-    if (engine_->is_const_global(name) && program && storage == program->get_env_var_ptr(engine_->get_symbolizer()->intern(name))) {
+    const auto program = detail::engine_access::get_global_environment(*engine_);
+    if (detail::engine_access::is_const_global(*engine_, name) && program && storage == program->get_env_var_ptr(detail::engine_access::get_symbolizer(*engine_)->intern(name))) {
         throw runtime_error("Cannot assign to '" + name + "': it is read-only");
     }
     script_value assigned = value;
@@ -390,7 +390,7 @@ std::vector<std::pair<std::string, script_value>> block_scope_variables(const en
 
 std::vector<frame_info> controller::list_frames() const {
     std::vector<frame_info> out;
-    if (auto* backend = engine_->get_execution_backend()) {
+    if (auto* backend = detail::engine_access::get_execution_backend(*engine_)) {
         for (const auto& f : backend->debug_frames()) {
             out.push_back(frame_info{ f.function, f.file, static_cast<int>(f.line) });
         }
@@ -403,7 +403,7 @@ std::vector<frame_info> controller::list_frames() const {
 }
 
 std::vector<variable_info> controller::list_locals(size_t frame) const {
-    auto* backend = engine_->get_execution_backend();
+    auto* backend = detail::engine_access::get_execution_backend(*engine_);
     if (!backend) return {};
     // A frame's slot locals come outermost first; an inner declaration hides an outer one of its name. The top level's block
     // scopes are environments, reachable only while it is the innermost frame.
@@ -417,7 +417,7 @@ std::vector<variable_info> controller::list_locals(size_t frame) const {
     }
     if (!top_level) return rendered_variables(named);
     const auto env = backend->get_current_environment();
-    const auto program = engine_->get_global_environment();
+    const auto program = detail::engine_access::get_global_environment(*engine_);
     for (auto& scoped : block_scope_variables(env.get(), program.get())) {
         if (std::none_of(named.begin(), named.end(), [&](const auto& n) { return n.first == scoped.first; })) { named.push_back(std::move(scoped)); }
     }
@@ -427,10 +427,10 @@ std::vector<variable_info> controller::list_locals(size_t frame) const {
 // The program's own variables: the engine's internals (__class_*) and what the host registered (add_global) stay out
 std::vector<variable_info> controller::list_globals() const {
     std::vector<std::pair<std::string, script_value>> named;
-    if (const auto program = engine_->get_global_environment()) {
+    if (const auto program = detail::engine_access::get_global_environment(*engine_)) {
         for (const auto& [name, value] : program->get_local_variables()) {
             std::string text(name);
-            if (text.starts_with("__") || engine_->host_global_registered(text)) { continue; }
+            if (text.starts_with("__") || detail::engine_access::host_global_registered(*engine_, text)) { continue; }
             named.emplace_back(std::move(text), value);
         }
     }
@@ -454,7 +454,7 @@ variable_info controller::evaluate(const std::string& path) const {
             const std::string field = name();
             const auto* holder = held.raw_storage_index() == script_value::TYPEID_OBJECT ? held.peek_object_holder() : nullptr;
             const script_value* found = holder && holder->is_instance()
-                ? holder->unchecked_instance()->find_script_field_value(engine_->get_symbolizer()->intern(field)) : nullptr;
+                ? holder->unchecked_instance()->find_script_field_value(detail::engine_access::get_symbolizer(*engine_)->intern(field)) : nullptr;
             if (!found) { throw runtime_error("'" + path.substr(0, at - field.size() - 1) + "' has no field '" + field + "'"); }
             value = *found;
         } else if (path[at] == '[') {
@@ -643,7 +643,7 @@ void controller::on_statement(const ast_node* node, int depth) {
     // breakpoints or stepping (we'd park recursively). Same thread, so a plain flag.
     if (in_command_) return;
     // An armed session's next statement applies a pending breakpoint edit, pause or detach
-    if (sync_requested_.load(std::memory_order_relaxed)) [[unlikely]] { engine_->get_execution_backend()->sync_debug_hook(); }
+    if (sync_requested_.load(std::memory_order_relaxed)) [[unlikely]] { detail::engine_access::get_execution_backend(*engine_)->sync_debug_hook(); }
     if (!stops_at(node)) return;
     const uint64_t detaches = detaches_.load(std::memory_order_acquire);
     // A detach can race the cached gate; never park for a session that just ended.
@@ -687,7 +687,7 @@ void controller::park(const stop_info& si, uint64_t detaches_at_entry) {
     // Park exit is a debug sync point: a step mode set by the resume side and any
     // breakpoints edited during the pause must be live from the very next statement,
     // and a detach during the pause disarms the backend's gate at once.
-    engine_->get_execution_backend()->sync_debug_hook();
+    detail::engine_access::get_execution_backend(*engine_)->sync_debug_hook();
 }
 
 void controller::service() {
@@ -703,7 +703,7 @@ void controller::sleep_for(std::chrono::nanoseconds duration) {
             std::unique_lock<std::mutex> lk(mtx_);
             if (!cv_.wait_until(lk, until, [&] { return sync_requested_.load(); })) return;
         }
-        auto* backend = engine_->get_execution_backend();
+        auto* backend = detail::engine_access::get_execution_backend(*engine_);
         backend->sync_debug_hook();
         const uint64_t detaches = detaches_.load(std::memory_order_acquire);
         if (in_command_ || !enabled_.load(std::memory_order_relaxed) || !backend->is_executing()) continue;

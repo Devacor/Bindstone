@@ -39,8 +39,8 @@ bool span_spells(const unit& u, text_span span, std::string_view name) {
 }
 
 bool engine_instance_member(jai::engine& eng, const jai::class_definition& def, std::string_view member) {
-	const uint64_t id = eng.symbolize(member);
-	const uint64_t getter_id = eng.symbolize("_get_" + std::string(member));
+	const uint64_t id = jai::detail::engine_access::symbolize(eng, member);
+	const uint64_t getter_id = jai::detail::engine_access::symbolize(eng, "_get_" + std::string(member));
 	return !def.get_method(id, false).is_invalid() || def.find_field_declaring_class(id) != nullptr ||
 	       !def.get_method(getter_id, false).is_invalid() ||
 	       def.is_static_field(id) || def.has_static_field(id) || def.has_static_method(id);
@@ -171,7 +171,7 @@ const jai::class_decl* program_view::find_class(std::string_view name) {
 }
 
 bool program_view::class_known(std::string_view name) {
-	return find_class(name) != nullptr || ws.engine().get_class_definition(std::string(name)) != nullptr;
+	return find_class(name) != nullptr || jai::detail::engine_access::get_class_definition(ws.engine(), std::string(name)) != nullptr;
 }
 
 program_view::member_ref program_view::find_member(std::string_view cls, std::string_view member, bool want_static, int depth) {
@@ -195,8 +195,8 @@ program_view::member_ref program_view::find_member(std::string_view cls, std::st
 		return miss;
 	}
 	auto& eng = ws.engine();
-	if (auto def = eng.get_class_definition(std::string(cls))) {
-		const uint64_t id = eng.symbolize(member);
+	if (auto def = jai::detail::engine_access::get_class_definition(eng, std::string(cls))) {
+		const uint64_t id = jai::detail::engine_access::symbolize(eng, member);
 		bool hit = want_static ? (def->has_static_method(id) || def->is_static_field(id) || def->has_static_field(id))
 		                       : engine_instance_member(eng, *def, member);
 		if (hit) { return {true, nullptr, nullptr, std::string(cls)}; }
@@ -240,7 +240,7 @@ const jai::enum_decl* program_view::find_enum(std::string_view name) {
 
 bool program_view::host_namespace(const std::string& path) {
 	auto& eng = ws.engine();
-	return path == "math" || eng.script_namespaces().count(eng.symbolize(path)) != 0;
+	return path == "math" || jai::detail::engine_access::script_namespaces(eng).count(jai::detail::engine_access::symbolize(eng, path)) != 0;
 }
 
 bool program_view::is_namespace(const std::string& path) {
@@ -395,9 +395,9 @@ uint32_t program_view::member_symbol(unit_model& m, const member_ref& r, std::st
 		s.name = std::string(member);
 		s.container = r.host_class;
 		auto& eng = ws.engine();
-		const uint64_t id = eng.symbolize(member);
+		const uint64_t id = jai::detail::engine_access::symbolize(eng, member);
 		std::vector<const jai::class_definition*> chain;
-		if (auto def = eng.get_class_definition(r.host_class)) { chain.push_back(def.get()); }
+		if (auto def = jai::detail::engine_access::get_class_definition(eng, r.host_class)) { chain.push_back(def.get()); }
 		for (size_t i = 0; i < chain.size() && i < 32; ++i) {
 			const jai::class_definition* d = chain[i];
 			if (auto it = d->cpp_method_overload_table().find(id); it != d->cpp_method_overload_table().end()) {
@@ -486,7 +486,7 @@ uint32_t program_view::host_symbol(unit_model& m, const std::string& name, symbo
 			break;
 		case symbol_kind::host_global: {
 			s.detail = name;
-			if (auto env = eng.get_global_environment()) {
+			if (auto env = jai::detail::engine_access::get_global_environment(eng)) {
 				auto v = env->get(name);
 				if (v && v.value().get_type_info()) {
 					s.type = type_text(v.value().get_type_info());
@@ -608,7 +608,7 @@ uint32_t semantic_walker::resolve_name(std::string_view name, bool global_only) 
 		return s;
 	}
 	if (const jai::enum_decl* e = view_.find_enum_value(name)) { return view_.enum_value_symbol(m_, e, name); }
-	if (eng_.get_class_definition(n)) {
+	if (jai::detail::engine_access::get_class_definition(eng_, n)) {
 		uint32_t s = view_.host_symbol(m_, n, symbol_kind::host_class);
 		symbol_type_[s] = nav_type::of_class(n);
 		return s;
@@ -617,7 +617,7 @@ uint32_t semantic_walker::resolve_name(std::string_view name, bool global_only) 
 	if (eng_.has_variable(n)) {
 		uint32_t s = view_.host_symbol(m_, n, symbol_kind::host_global);
 		if (!symbol_type_.count(s)) {
-			if (auto env = eng_.get_global_environment()) {
+			if (auto env = jai::detail::engine_access::get_global_environment(eng_)) {
 				auto v = env->get(n);
 				if (v) { symbol_type_[s] = nav_from_type_info(v.value().get_type_info()); }
 			}
@@ -1244,7 +1244,7 @@ void semantic_walker::type_name_pass() {
 		uint32_t s = UINT32_MAX;
 		if (view_.find_class(t.lexeme) || view_.find_enum(t.lexeme)) {
 			s = view_.global_symbol(m_, std::string(t.lexeme));
-		} else if (eng_.get_class_definition(std::string(t.lexeme))) {
+		} else if (jai::detail::engine_access::get_class_definition(eng_, std::string(t.lexeme))) {
 			s = view_.host_symbol(m_, std::string(t.lexeme), symbol_kind::host_class);
 		}
 		if (s != UINT32_MAX) { occur({t.pos, {t.pos.line, t.pos.col + t.length}}, s, false); }

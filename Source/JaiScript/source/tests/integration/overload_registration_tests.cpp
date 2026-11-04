@@ -178,9 +178,9 @@ public:
                     .method("guarded", &Acc::get_total, jai::filesystem)
                     .build();
                 if (lanes) {
-                    auto def = e->get_class_definition("Acc");
+                    auto def = detail::engine_access::get_class_definition(*e, "Acc");
                     for (const char* n : { "add", "bump", "scaled", "narrow", "reset", "get_total", "boom", "label", "tagged", "pick", "guarded" }) {
-                        if (def && def->find_native_method(e->symbolize(n))) { *lanes += std::string(n) + " "; }
+                        if (def && def->find_native_method(detail::engine_access::symbolize(*e, n))) { *lanes += std::string(n) + " "; }
                     }
                 }
                 std::string got;
@@ -330,10 +330,10 @@ public:
                 e->execute("auto a = Acc(); function go(var acc, int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s = s + acc.add(i); } return s; }");
                 const std::string tag = vm ? " (vm)" : " (interpreter)";
                 check_eq((int64_t)20, e->execute("go(a, 5)").as_int(), "the lane" + tag);
-                auto def = e->get_class_definition("Acc");
-                def->withdraw_native_lane(e->symbolize("add"));
+                auto def = detail::engine_access::get_class_definition(*e, "Acc");
+                def->withdraw_native_lane(detail::engine_access::symbolize(*e, "add"));
                 check_eq((int64_t)20, e->execute("go(a, 5)").as_int(), "the withdrawn lane's ordinary call" + tag);
-                def->add_native_method(e->symbolize("add"), [](void*, const script_value& receiver, const script_value*, size_t argc, script_value& out) {
+                def->add_native_method(detail::engine_access::symbolize(*e, "add"), [](void*, const script_value& receiver, const script_value*, size_t argc, script_value& out) {
                     if (argc != 1) { return false; }
                     out = script_value(script_int(1000), receiver.payload_engine());
                     return true;

@@ -497,13 +497,13 @@ public:
             // a strict region inside a warn region survives the trip too: bytes no checker saw (parsed and
             // serialized directly) gate the loader on the strict region alone
             auto unstamped_bytes = [](engine& a_engine, const std::string& a_source) {
-                const auto templates = a_engine.get_registered_template_types();
-                lexer lex(a_source, a_engine.get_symbolizer());
+                const auto templates = detail::engine_access::get_registered_template_types(a_engine);
+                lexer lex(a_source, detail::engine_access::get_symbolizer(a_engine));
                 auto tokens = lex.tokenize();
-                parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+                parser syntax(tokens, detail::engine_access::get_symbolizer(a_engine), &a_engine, templates);
                 auto declarations = syntax.parse();
                 check_true(bool(declarations), "fixture must parse: " + a_source);
-                return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+                return detail::serialize_jaibite(declarations.value(), *detail::engine_access::get_symbolizer(a_engine), a_engine.registration_fingerprint());
             };
             auto saver = fresh_engine(false, {});
             auto loader = fresh_engine(false, {});
@@ -605,16 +605,16 @@ public:
                 return out;
             };
             for (const auto& [name, source] : corpus_sources()) {
-                lexer lex(source, author->get_symbolizer());
+                lexer lex(source, detail::engine_access::get_symbolizer(*author));
                 auto tokens = lex.tokenize();
-                parser syntax(tokens, author->get_symbolizer(), author.get(), author->get_registered_template_types());
+                parser syntax(tokens, detail::engine_access::get_symbolizer(*author), author.get(), detail::engine_access::get_registered_template_types(*author));
                 auto declarations = syntax.parse();
                 if (!declarations) { continue; }
-                const auto bytes = detail::serialize_jaibite(declarations.value(), *author->get_symbolizer(), 0);
+                const auto bytes = detail::serialize_jaibite(declarations.value(), *detail::engine_access::get_symbolizer(*author), 0);
                 std::vector<uint8_t> again;
                 try {
                     uint64_t fingerprint = 0;
-                    again = detail::serialize_jaibite(detail::deserialize_jaibite(bytes.data(), bytes.size(), reader.get(), fingerprint), *reader->get_symbolizer(), 0);
+                    again = detail::serialize_jaibite(detail::deserialize_jaibite(bytes.data(), bytes.size(), reader.get(), fingerprint), *detail::engine_access::get_symbolizer(*reader), 0);
                 } catch (const std::exception& ex) {
                     check_true(false, name + ": " + ex.what());
                     continue;
@@ -773,9 +773,9 @@ public:
                 "int f(int a) {\n    array<int> xs = [1, 2, 3];\n    int k = a;\n    parallel_for (auto& x : xs) { x += k; }\n    return xs[0];\n}\nf(1);";
             auto author = fresh_engine(false, {});
             const auto parse = [&]() {
-                lexer lex(source, author->get_symbolizer());
+                lexer lex(source, detail::engine_access::get_symbolizer(*author));
                 auto tokens = lex.tokenize();
-                parser syntax(tokens, author->get_symbolizer(), author.get(), author->get_registered_template_types());
+                parser syntax(tokens, detail::engine_access::get_symbolizer(*author), author.get(), detail::engine_access::get_registered_template_types(*author));
                 auto declarations = syntax.parse();
                 check_true(bool(declarations), "fixture must parse");
                 return declarations.value();
@@ -792,7 +792,7 @@ public:
                 return static_cast<parallel_for_stmt*>(nullptr);
             };
             const auto load = [&](const std::vector<declaration_ptr>& declarations) {
-                const auto bytes = detail::serialize_jaibite(declarations, *author->get_symbolizer(), author->registration_fingerprint());
+                const auto bytes = detail::serialize_jaibite(declarations, *detail::engine_access::get_symbolizer(*author), author->registration_fingerprint());
                 fresh_engine(false, {})->jaibite_load_bytes(bytes);
             };
             const auto refused = [&](const std::vector<declaration_ptr>& declarations, const std::string& text) {

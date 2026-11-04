@@ -96,7 +96,7 @@ namespace jai::detail {
         }
         // a host callable's non-const T& (a C++ T&, which the call writes back) binds the lvalue
         if (const auto* w = fn.target<host_writeback_function>()) return i < 64 && ((w->mask >> i) & 1) ? arg_binding::reference : arg_binding::opaque;
-        if (const auto* d = fn.target<engine::overload_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
+        if (const auto* d = fn.target<engine_access::overload_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
         if (const auto* d = fn.target<class_definition::cpp_method_dispatch>()) return static_cast<arg_binding>(d->argument_binding(i, argc));
         return arg_binding::opaque;
     }

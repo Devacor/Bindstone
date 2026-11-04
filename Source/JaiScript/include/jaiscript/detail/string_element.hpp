@@ -19,7 +19,7 @@
 namespace jai::detail {
 
 	JAI_NOINLINE inline checked_result<void> string_element_out_of_bounds(size_t index, size_t size, engine* eng) {
-		string_symbolizer* symbolizer = eng->get_symbolizer();
+		string_symbolizer* symbolizer = engine_access::get_symbolizer(*eng);
 		if (symbolizer->frozen()) {   // a parallel worker cannot intern the numbers: the same text without them
 			return checked_result<void>(make_error_code(runtime_error_code::index_out_of_bounds), "String index out of bounds");
 		}
@@ -29,7 +29,7 @@ namespace jai::detail {
 	}
 
 	JAI_NOINLINE inline checked_result<void> string_element_kind_error(const script_value& value, engine* eng) {
-		string_symbolizer* symbolizer = eng->get_symbolizer();
+		string_symbolizer* symbolizer = engine_access::get_symbolizer(*eng);
 		const std::string spelled = container_value_type_name(value);
 		const auto known = symbolizer->frozen() ? symbolizer->find(spelled) : std::optional<uint64_t>(symbolizer->intern(spelled));
 		if (!known) {
@@ -54,7 +54,7 @@ namespace jai::detail {
 				return string_element_kind_error(value, eng);
 		}
 		if (storage.raw_storage_index() == script_value::TYPEID_UTF8_STRING) {
-			const bool cache = !eng->parallel_region_active();
+			const bool cache = !engine_access::parallel_region_active(*eng);
 			const script_utf8& view = storage.unchecked_as_utf8();
 			const size_t len = utf8::length(view, cache);
 			if (index >= len) { return string_element_out_of_bounds(index, len, eng); }

@@ -151,9 +151,9 @@ public:
 		test("generic_field_retype_marks_shape_change", [this]() {
 			auto engine = jai::foundry::make_engine();
 			engine->execute("class Generic { array<int> items = []; } Generic live = Generic();");
-			const auto before = engine->hot_reload_field_migrations();
+			const auto before = detail::engine_access::hot_reload_field_migrations(*engine);
 			engine->execute("class Generic { array<float> items = []; }");
-			check(engine->hot_reload_field_migrations() > before, "generic argument change migrates live fields");
+			check(detail::engine_access::hot_reload_field_migrations(*engine) > before, "generic argument change migrates live fields");
 		});
 
         test("basic_class_redefinition", [this]() {
@@ -865,9 +865,9 @@ public:
                 auto eng = jai::foundry::make_engine();
                 eng->execute("class Entity { auto x = 0.0; auto health = 100; auto active = true; } auto entities = []; "
                              "for (auto i = 0; i < " + std::to_string(n) + "; i = i + 1) { auto e = Entity(); e.x = i * 1.0; entities.push(e); }");
-                const size_t before = eng->hot_reload_field_migrations();
+                const size_t before = detail::engine_access::hot_reload_field_migrations(*eng);
                 eng->execute("class Entity { auto x = 0.0; auto z = 0.0; auto health = 100; auto armor = 0; }");
-                return eng->hot_reload_field_migrations() - before;
+                return detail::engine_access::hot_reload_field_migrations(*eng) - before;
             };
             const size_t at_hundred = reload_work(100);
             check(at_hundred > 0, "a reload migrates the live instances");
@@ -1027,7 +1027,7 @@ public:
                 }
             )");
             
-            const size_t migrations_before_unchanged = engine->hot_reload_field_migrations();
+            const size_t migrations_before_unchanged = detail::engine_access::hot_reload_field_migrations(*engine);
             auto start_optimized = std::chrono::high_resolution_clock::now();
 
             engine->execute(R"(
@@ -1053,7 +1053,7 @@ public:
             )");
 
             auto end_optimized = std::chrono::high_resolution_clock::now();
-            const size_t migrations_after_unchanged = engine->hot_reload_field_migrations();
+            const size_t migrations_after_unchanged = detail::engine_access::hot_reload_field_migrations(*engine);
             auto duration_optimized = std::chrono::duration_cast<std::chrono::microseconds>(
                 end_optimized - start_optimized).count();
             
@@ -1066,7 +1066,7 @@ public:
                 dp500.analyze(); // New method should work
             )");
             
-            const size_t migrations_before_changed = engine->hot_reload_field_migrations();
+            const size_t migrations_before_changed = detail::engine_access::hot_reload_field_migrations(*engine);
             auto start_unoptimized = std::chrono::high_resolution_clock::now();
 
             engine->execute(R"(
@@ -1086,7 +1086,7 @@ public:
                     }
                 }
             )");
-            const size_t migrations_after_changed = engine->hot_reload_field_migrations();
+            const size_t migrations_after_changed = detail::engine_access::hot_reload_field_migrations(*engine);
             
             auto end_unoptimized = std::chrono::high_resolution_clock::now();
             auto duration_unoptimized = std::chrono::duration_cast<std::chrono::microseconds>(
@@ -1195,7 +1195,7 @@ public:
                 }
             )");
 
-            auto calc_def = engine->get_class_definition("Calculator");
+            auto calc_def = detail::engine_access::get_class_definition(*engine, "Calculator");
             check_not_null(calc_def.get(), "Calculator definition should be registered");
             check_eq((size_t)0, calc_def->identical_redefinitions());   // first redefinition seeds the key
 

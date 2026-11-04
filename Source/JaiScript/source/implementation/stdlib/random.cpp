@@ -137,7 +137,7 @@ namespace stdlib {
 namespace random_detail {
 
 	uint64_t random_type_id(engine* a_engine) {
-		const auto definition = a_engine->get_class_definition("random");
+		const auto definition = detail::engine_access::get_class_definition(*a_engine, "random");
 		return definition ? definition->get_type_id() : UINT64_MAX;
 	}
 
@@ -176,7 +176,7 @@ namespace random_detail {
 
 	void register_random_functions(engine& eng_ref) {
 		using namespace random_detail;
-		engine::library_registration library(eng_ref);
+		detail::engine_access::library_registration library(eng_ref);
 		engine* eng = &eng_ref;
 		using R = checked_result<script_value>;
 
@@ -200,7 +200,7 @@ namespace random_detail {
 			.property("state", [](const random& a_random) -> std::string { return a_random.state(); }, unused_setter)
 			.build();
 
-		const auto random_class = eng_ref.get_class_definition("random");
+		const auto random_class = detail::engine_access::get_class_definition(eng_ref, "random");
 		const uint64_t type_id = random_class->get_type_id();
 		// shuffle writes its argument in place, and a refused state store raises a catchable error: both are checked methods
 		random_class->add_method("shuffle", host_writeback_function{ [type_id, eng](const std::vector<script_value>& a_args) -> R {

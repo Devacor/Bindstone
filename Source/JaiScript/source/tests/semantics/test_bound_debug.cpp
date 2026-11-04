@@ -17,7 +17,7 @@ public:
             auto engine = make_engine();
             
             // Register standard conversions
-            engine->add_standard_conversions();
+            detail::engine_access::add_standard_conversions(*engine);
             
             // Test function that takes bound_array<int>
             std::cout << "Registering sum_ints function...\n";
@@ -56,12 +56,12 @@ public:
             bound_array<script_int> moved = std::move(ref);     // move ctor must carry engine_ref_
             moved.push_back((script_int)7);                     // element is built via engine_ref_
             check_eq((size_t)1, backing.size());
-            check(backing[0].get_type_info().get() == eng->get_type_info_int(), "moved bound_array lost its engine_ref_");
+            check(backing[0].get_type_info().get() == detail::engine_access::get_type_info_int(*eng), "moved bound_array lost its engine_ref_");
 
             bound_array<script_int> assigned(holder, eng.get());
             assigned = std::move(moved);                        // move assignment too
             assigned.push_back((script_int)9);
-            check(backing.back().get_type_info().get() == eng->get_type_info_int(), "move-assigned bound_array lost its engine_ref_");
+            check(backing.back().get_type_info().get() == detail::engine_access::get_type_info_int(*eng), "move-assigned bound_array lost its engine_ref_");
         });
     }
 };

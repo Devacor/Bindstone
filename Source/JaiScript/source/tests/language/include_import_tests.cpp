@@ -1349,14 +1349,14 @@ public:
             eng->execute("void frame() { import(\"cl_main.jai\"); }\nframe();");
             check_eq(1, runs);
             check_eq(std::string("1 2 3"), eng->execute("to_string(cl_a()) + \" \" + to_string(cl_b()) + \" \" + to_string(cl_spliced());").to_string());
-            const uint64_t warm = eng->import_stat_count();
+            const uint64_t warm = detail::engine_access::import_stat_count(*eng);
             eng->execute("for (int i = 0; i < 50; i++) { frame(); }");
-            check_eq(warm, eng->import_stat_count(), "between passes the closure is not queried");
+            check_eq(warm, detail::engine_access::import_stat_count(*eng), "between passes the closure is not queried");
             eng->import_recheck_interval(1.0e6);
-            const uint64_t before = eng->import_stat_count();
+            const uint64_t before = detail::engine_access::import_stat_count(*eng);
             eng->execute("frame();");
             check_eq(1, runs, "an unchanged closure does not re-run");
-            check_eq(before + 4, eng->import_stat_count(), "one query per file of the closure in a pass");
+            check_eq(before + 4, detail::engine_access::import_stat_count(*eng), "one query per file of the closure in a pass");
             struct edit { const char* file; const char* body; int shift; const char* probe; const char* expect; const char* why; };
             const edit edits[] = {
                 {"cl_b.jai", "int cl_b() { return 5; }\n", 0, "cl_b();", "5", "a nested include changed"},
@@ -1406,14 +1406,14 @@ public:
             eng->execute("void frame() { import(\"nm_big.jai\"); }\nframe();");
             check_true(big_runs == 1 && mod_runs == 1, "the first frame loads the tree, the module reached twice once");
             check_eq(script_int(111), eng->execute("big_value();").as_int());
-            const uint64_t warm = eng->import_stat_count();
+            const uint64_t warm = detail::engine_access::import_stat_count(*eng);
             eng->execute("for (int i = 0; i < 50; i++) { frame(); }");
-            check_eq(warm, eng->import_stat_count(), "between passes the tree is not queried");
+            check_eq(warm, detail::engine_access::import_stat_count(*eng), "between passes the tree is not queried");
             auto pass = [&](const char* what) {
                 eng->import_recheck_interval(1.0e6);
-                const uint64_t before = eng->import_stat_count();
+                const uint64_t before = detail::engine_access::import_stat_count(*eng);
                 eng->execute("frame();");
-                check_eq(before + 4, eng->import_stat_count(), std::string("one query per module and include of the tree: ") + what);
+                check_eq(before + 4, detail::engine_access::import_stat_count(*eng), std::string("one query per module and include of the tree: ") + what);
             };
             pass("unchanged");
             check_true(big_runs == 1 && mod_runs == 1, "an unchanged tree does not re-run");
@@ -1488,9 +1488,9 @@ public:
             check_true(a_runs == 1 && z_runs == 1 && y_runs == 0, "the untaken branch imports nothing");
             auto pass = [&](uint64_t queries, const std::string& what) {
                 eng->import_recheck_interval(1.0e6);
-                const uint64_t before = eng->import_stat_count();
+                const uint64_t before = detail::engine_access::import_stat_count(*eng);
                 eng->execute("frame();");
-                if (queries) { check_eq(before + queries, eng->import_stat_count(), what); }
+                if (queries) { check_eq(before + queries, detail::engine_access::import_stat_count(*eng), what); }
             };
             pass(3, "a, w (in the tree and reached by tick, queried once) and z");
             write("tr_y.jai", "y_ran();\nint y_value() { return 10; }\n");
@@ -2062,18 +2062,18 @@ public:
                 write_module("pp_nest.jai", "import \"pp_one.jai\";\npass_ran(\"nest\");\n");
                 eng->execute("void frame() { import \"pp_one.jai\"; import \"pp_nest.jai\"; import \"pp_two.jai\"; }\nframe();");
                 check_true(runs["one"] == 1 && runs["two"] == 1 && runs["nest"] == 1, "the first frame loads every module");
-                const uint64_t warm = eng->import_stat_count();
+                const uint64_t warm = detail::engine_access::import_stat_count(*eng);
                 eng->execute("for (int i = 0; i < 100; i++) { frame(); }");
-                check_eq(warm, eng->import_stat_count(), "between passes an import does no file work (0 queries)");
+                check_eq(warm, detail::engine_access::import_stat_count(*eng), "between passes an import does no file work (0 queries)");
                 write_module("pp_two.jai", "pass_ran(\"two\");\n");
                 write_module("pp_nest.jai", "import \"pp_one.jai\";\npass_ran(\"nest\");\n");
                 eng->execute("frame();");
                 check_eq(1, runs["two"], "a touch waits for the next pass");
                 eng->import_recheck_interval(1.0e6);   // the window starts over: the next import reached opens a pass
-                const uint64_t before = eng->import_stat_count();
+                const uint64_t before = detail::engine_access::import_stat_count(*eng);
                 eng->execute("for (int i = 0; i < 5; i++) { frame(); }");
                 check_true(runs["nest"] == 2 && runs["two"] == 2 && runs["one"] == 1, "one frame took both changes (the nested import did not end the pass)");
-                check_eq(before + 3, eng->import_stat_count(), "one query per module in the pass, none in the frames after it");
+                check_eq(before + 3, detail::engine_access::import_stat_count(*eng), "one query per module in the pass, none in the frames after it");
                 write_module("pp_one.jai", "pass_ran(\"one\");\n");
                 eng->execute("frame();");
                 check_eq(1, runs["one"], "still inside the window");
@@ -2085,14 +2085,14 @@ public:
                 write_module("pp_late.jai", "pass_ran(\"late\");\n");
                 eng->execute("array<string> MODS = [\"pp_one.jai\", \"pp_two.jai\"];\nvoid scan() { for (auto m : MODS) { import(m); } }\nscan();\nMODS.push(\"pp_late.jai\");\nscan();");
                 check_eq(1, runs["late"], "a new path in the list loads on its first reach");
-                const uint64_t steady = eng->import_stat_count();
+                const uint64_t steady = detail::engine_access::import_stat_count(*eng);
                 eng->execute("for (int i = 0; i < 50; i++) { scan(); }");
-                check_eq(steady, eng->import_stat_count(), "the computed site skips between passes too");
+                check_eq(steady, detail::engine_access::import_stat_count(*eng), "the computed site skips between passes too");
                 // 0: every reach checks
                 eng->import_recheck_interval(0);
-                const uint64_t zero = eng->import_stat_count();
+                const uint64_t zero = detail::engine_access::import_stat_count(*eng);
                 eng->execute("for (int i = 0; i < 4; i++) { import \"pp_one.jai\"; }");
-                check_eq(zero + 4, eng->import_stat_count(), "0 checks on every reach");
+                check_eq(zero + 4, detail::engine_access::import_stat_count(*eng), "0 checks on every reach");
                 check_near(0.0, eng->execute("import_recheck_interval();").as_float(), 1e-12);
                 eng->disable(jai::filesystem);
                 check_eq(std::string("Insufficient privilege: filesystem."), eng->execute("var m = \"\";\ntry { frame(); } catch (e) { m = e; }\nm;").to_string(), "a disabled privilege is never skipped");
@@ -2118,20 +2118,20 @@ public:
                     auto fake = std::make_shared<std::chrono::nanoseconds>(std::chrono::seconds(100));
                     if (host_clock) { eng->time().source([fake] { return *fake += std::chrono::seconds(1000); }, {}, {}); }
                     engine* raw = eng.get();
-                    eng->add_function("stats", [raw]() { return static_cast<script_int>(raw->import_stat_count()); });
+                    eng->add_function("stats", [raw]() { return static_cast<script_int>(detail::engine_access::import_stat_count(*raw)); });
                     eng->add_function("wait_ms", [](script_int ms) { std::this_thread::sleep_for(std::chrono::milliseconds(ms)); });
                     const std::string be = std::string(use_vm ? " (vm" : " (interpreter") + (host_clock ? ", host clock)" : ")");
                     eng->import_recheck_interval(1.0e6);
                     eng->execute("void poll() { import \"cs_a.jai\"; }\npoll();");
                     eng->execute(lines);
-                    const uint64_t stats = eng->import_stat_count();
-                    const uint64_t before_empty = eng->clock_sample_count();
+                    const uint64_t stats = detail::engine_access::import_stat_count(*eng);
+                    const uint64_t before_empty = detail::engine_access::clock_sample_count(*eng);
                     eng->execute("0;");
-                    const uint64_t entry = eng->clock_sample_count() - before_empty;
-                    const uint64_t before_idle = eng->clock_sample_count();
+                    const uint64_t entry = detail::engine_access::clock_sample_count(*eng) - before_empty;
+                    const uint64_t before_idle = detail::engine_access::clock_sample_count(*eng);
                     eng->execute(lines);
-                    check_eq(entry, eng->clock_sample_count() - before_idle, "40 idle imports read no clock beyond the host entry's" + be);
-                    check_eq(stats, eng->import_stat_count(), "and query no file" + be);
+                    check_eq(entry, detail::engine_access::clock_sample_count(*eng) - before_idle, "40 idle imports read no clock beyond the host entry's" + be);
+                    check_eq(stats, detail::engine_access::import_stat_count(*eng), "and query no file" + be);
                     eng->import_recheck_interval(0.001);
                     check_eq(std::string(host_clock ? "1 0 0" : "1 0 1"), eng->execute(
                         "int s0 = stats();\npoll();\nint s1 = stats();\nwait_ms(5);\npoll();\nint s2 = stats();\ntime::now();\npoll();\nint s3 = stats();\n"

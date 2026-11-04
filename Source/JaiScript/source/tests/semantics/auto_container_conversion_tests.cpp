@@ -316,7 +316,7 @@ public:
             
             // Debug: Try explicitly registering the conversion
             // This shouldn't be necessary since script_value vectors are native
-            if (!engine->get_conversion_registry()->has_conversion<std::vector<script_value>>()) {
+            if (!detail::engine_access::get_conversion_registry(*engine)->has_conversion<std::vector<script_value>>()) {
                 std::cout << "Registering std::vector<script_value> conversion..." << std::endl;
                 engine->add_vector_conversion<script_value>();
             }

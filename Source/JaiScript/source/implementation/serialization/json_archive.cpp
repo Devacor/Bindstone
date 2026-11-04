@@ -404,7 +404,7 @@ void json_archive_writer::begin_instance_members(const script_value& value, stro
         // slot order: deterministic, close to declaration order
         write_frame& f = frames.emplace_back(write_shape::fields, value);
         instance->for_each_field([&](uint64_t field_id, const script_value& field_val) {
-            f.fields.emplace_back(std::string(engine_ref_->get_symbolizer()->get_string(field_id)), field_val);
+            f.fields.emplace_back(std::string(detail::engine_access::get_symbolizer(*engine_ref_)->get_string(field_id)), field_val);
         });
     }
 }
@@ -512,8 +512,8 @@ void json_archive_writer::write_value_separator(bool comma) {
 
 void json_archive_writer::append_indentation() {
     const size_t width = detail::saturating_text_size(static_cast<size_t>(json_depth_), static_cast<size_t>(indent_));
-    if (charges_indentation_ && engine_ref_ && !engine_ref_->execution_limits().memory_charge_items(1, width)) [[unlikely]] {
-        detail::throw_memory_cap(engine_ref_->execution_limits());
+    if (charges_indentation_ && engine_ref_ && !detail::engine_access::execution_limits(*engine_ref_).memory_charge_items(1, width)) [[unlikely]] {
+        detail::throw_memory_cap(detail::engine_access::execution_limits(*engine_ref_));
     }
     out_.append(width, ' ');
 }
@@ -1038,7 +1038,7 @@ script_value json_archive_reader::materialize(uint32_t idx) {
                 leaf = std::move(math_value);
                 return true;
             }
-            frames.push_back({n, 0, script_value::make_map(eng->get_type_info_string(), nullptr, eng)});
+            frames.push_back({n, 0, script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng)});
             const_cast<script_map&>(frames.back().container.as_map()).reserve(node.u.agg.count);
             return false;
         }

@@ -41,7 +41,7 @@ namespace jai {
 }
 
 [[noreturn]] JAI_NOINLINE void throw_checked_error(engine* eng, std::string_view message, uint64_t id1, uint64_t id2) {
-    if (eng && message == "{0}") { throw runtime_error(std::string(eng->get_symbolizer()->get_string(id1))); }
+    if (eng && message == "{0}") { throw runtime_error(std::string(detail::engine_access::get_symbolizer(*eng)->get_string(id1))); }
     throw runtime_error(format_error_message_numeric(message, id1, id2));
 }
 
@@ -107,7 +107,7 @@ JAI_NOINLINE error_propagator conversion_error(const script_value& value, const 
     const std::string_view builtin = builtin_conversion_text(held.current_type(), target);
     engine* eng = held.payload_engine();
     if (name != base_type_spelling(held.current_type()) && eng) {
-        if (const uint64_t id = eng->park_error_text("Cannot convert " + name + " to " + target)) {
+        if (const uint64_t id = engine_access::park_error_text(*eng, "Cannot convert " + name + " to " + target)) {
             return error_propagator{make_error_code(code), "{0}", id, 0};
         }
     }
@@ -133,25 +133,25 @@ JAI_NOINLINE error_propagator conversion_error(const script_value& value, const 
 
 script_value::script_value(script_int i, engine* eng) : storage_(i) {
     if (eng) {
-        set_stamp(eng->get_type_info_int());
+        set_stamp(detail::engine_access::get_type_info_int(*eng));
     }
 }
 
 script_value::script_value(script_float f, engine* eng) : storage_(f) {
     if (eng) {
-        set_stamp(eng->get_type_info_float());
+        set_stamp(detail::engine_access::get_type_info_float(*eng));
     }
 }
 
 script_value::script_value(const script_string& s, engine* eng) : storage_(make_strong<script_string>(s)) {
     if (eng) {
-        set_stamp(eng->get_type_info_string());
+        set_stamp(detail::engine_access::get_type_info_string(*eng));
     }
 }
 
 script_value::script_value(script_string&& s, engine* eng) : storage_(make_strong<script_string>(std::move(s))) {
     if (eng) {
-        set_stamp(eng->get_type_info_string());
+        set_stamp(detail::engine_access::get_type_info_string(*eng));
     }
 }
 
@@ -162,31 +162,31 @@ script_value::script_value(strong_ptr<object_holder> handle, type_info_ptr tag, 
 script_value script_value::make_utf8(std::string bytes, engine* eng) {
     script_value v(std::monostate{}, eng);
     v.storage_ = make_strong<script_utf8>(std::move(bytes));
-    v.set_stamp(eng ? eng->get_type_info_utf8_string() : nullptr);
+    v.set_stamp(eng ? detail::engine_access::get_type_info_utf8_string(*eng) : nullptr);
     return v;
 }
 
 script_value::script_value(strong_ptr<script_string> shared, engine* eng) : storage_(std::move(shared)) {
     if (eng) {
-        set_stamp(eng->get_type_info_string());
+        set_stamp(detail::engine_access::get_type_info_string(*eng));
     }
 }
 
 script_value::script_value(const char* s, engine* eng) : storage_(make_strong<script_string>(s)) {
     if (eng) {
-        set_stamp(eng->get_type_info_string());
+        set_stamp(detail::engine_access::get_type_info_string(*eng));
     }
 }
 
 script_value::script_value(script_char c, engine* eng) : storage_(c) {
     if (eng) {
-        set_stamp(eng->get_type_info_char());
+        set_stamp(detail::engine_access::get_type_info_char(*eng));
     }
 }
 
 script_value::script_value(script_bool b, engine* eng) : storage_(b) {
     if (eng) {
-        set_stamp(eng->get_type_info_bool());
+        set_stamp(detail::engine_access::get_type_info_bool(*eng));
     }
 }
 
@@ -214,7 +214,7 @@ script_value script_value::make_vec(script_value_type kind, const uint32_t* word
     std::memcpy(node->words, words, sizeof(uint32_t) * node->count);
     script_value v(std::monostate{}, eng);
     v.storage_ = std::move(node);
-    if (eng) { v.set_stamp(eng->get_type_info_math(kind)); }
+    if (eng) { v.set_stamp(detail::engine_access::get_type_info_math(*eng, kind)); }
     return v;
 }
 
@@ -287,7 +287,7 @@ const script_value& script_value::reference_holder::materialize_string_element(e
     while (storage->is_reference()) { storage = &storage->deref(); }
     script_value v(std::monostate{}, eng);
     if (storage->raw_storage_index() == TYPEID_UTF8_STRING) {
-        const bool cache = !eng->parallel_region_active();
+        const bool cache = !detail::engine_access::parallel_region_active(*eng);
         if (container_index >= detail::utf8::length(storage->unchecked_as_utf8(), cache)) {
             throw runtime_error("Reference to a removed string character");
         }
@@ -340,7 +340,7 @@ void script_value::reference_holder::store_component(const script_value& value, 
         ? detail::math::store_component(*storage, static_cast<int>(container_index), rhs.bound_decoded_temp(), eng)
         : detail::math::store_component(*storage, static_cast<int>(container_index), rhs, eng);
     if (!stored) {
-        throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+        throw runtime_error(format_error(stored, *detail::engine_access::get_symbolizer(*eng)));
     }
     if (auto* sr = pin.scratch_ref_holder()) { sr->commit_scratch(); }
 }
@@ -366,7 +366,7 @@ checked_result<script_value> script_value::reference_holder::read_property(engin
 const script_value& script_value::reference_holder::materialize_property(engine* eng) {
     auto read = read_property(eng, /*bind_point*/ false);
     if (!read) {
-        throw runtime_error(format_error(read, *eng->get_symbolizer()));
+        throw runtime_error(format_error(read, *detail::engine_access::get_symbolizer(*eng)));
     }
     if (property->has_scratch) {
         *cell() = std::move(read.value());
@@ -394,11 +394,11 @@ void script_value::reference_holder::store_property(const script_value& value, e
     }
     if (!site.setter_id) {   // unreachable for binder properties (a getter-only one registers the rejecting setter)
         throw runtime_error(format_error_message("Cannot assign to '{0}': it is read-only",
-                                                 eng->get_symbolizer()->get_string(property->field_id)));
+                                                 detail::engine_access::get_symbolizer(*eng)->get_string(property->field_id)));
     }
     auto stored = detail::write_cpp_property(receiver, site.view.def, site.setter_id, value);
     if (!stored) {
-        throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+        throw runtime_error(format_error(stored, *detail::engine_access::get_symbolizer(*eng)));
     }
 }
 
@@ -415,7 +415,7 @@ void script_value::reference_holder::commit_scratch() {
         engine* eng = owner;
         auto stored = detail::store_string_element(*this, *cell(), eng);
         if (!stored) {
-            throw runtime_error(format_error(stored, *eng->get_symbolizer()));
+            throw runtime_error(format_error(stored, *detail::engine_access::get_symbolizer(*eng)));
         }
         return;
     }
@@ -466,7 +466,7 @@ script_value* script_value::reference_holder::field_cell() const {
     script_value* found = inst->field_slot_value(slot);
     if (found) {
         engine* eng = inst->get_engine();
-        if (!eng || !eng->parallel_region_active()) {
+        if (!eng || !detail::engine_access::parallel_region_active(*eng)) {
             field_class = cd;
             field_class_epoch = cd->field_shape_epoch();
             field_slot = slot;
@@ -567,13 +567,13 @@ struct holder_block_pool {
         pool->free_if_drained();
     }
 
-    JAI_NOINLINE static void install(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*))) {
+    JAI_NOINLINE static void install(engine* eng, void*& slot, void (*set_teardown)(engine&, void (*)(void*))) {
         slot = new holder_block_pool();
-        (eng->*set_teardown)(&teardown);
+        set_teardown(*eng, &teardown);
     }
 
     template <class... A>
-    static strong_ptr<T> acquire_from(engine* eng, void*& slot, void (engine::*set_teardown)(void (*)(void*)), A&&... args) {
+    static strong_ptr<T> acquire_from(engine* eng, void*& slot, void (*set_teardown)(engine&, void (*)(void*)), A&&... args) {
         if (!slot) [[unlikely]] { install(eng, slot, set_teardown); }
         return static_cast<holder_block_pool*>(slot)->acquire(std::forward<A>(args)...);
     }
@@ -589,7 +589,7 @@ engine* owner_of(const Handle& a_handle) noexcept {
 }
 // engine::memory_cap: a copy's fresh storage counts toward its engine's allowance (raised at the next loop back-edge)
 void charge_deferred(engine* a_engine, size_t a_bytes) {
-    if (a_engine) { a_engine->execution_limits().memory_charge_deferred(a_bytes); }
+    if (a_engine) { detail::engine_access::execution_limits(*a_engine).memory_charge_deferred(a_bytes); }
 }
 }
 
@@ -618,8 +618,8 @@ engine* script_value::payload_engine() const noexcept {
 }
 
 strong_ptr<script_value::reference_holder> script_value::acquire_reference_holder(engine* eng) {
-    auto result = eng->parallel_region_active() ? jai::detail::holder_block_pool<reference_holder, 256>::acquire_plain()
-        : jai::detail::holder_block_pool<reference_holder, 256>::acquire_from(eng, eng->reference_holder_pool_slot(), &engine::set_reference_holder_pool_teardown);
+    auto result = detail::engine_access::parallel_region_active(*eng) ? jai::detail::holder_block_pool<reference_holder, 256>::acquire_plain()
+        : jai::detail::holder_block_pool<reference_holder, 256>::acquire_from(eng, detail::engine_access::reference_holder_pool_slot(*eng), &detail::engine_access::set_reference_holder_pool_teardown);
     result->owner = eng;
     return result;
 }
@@ -629,8 +629,8 @@ static_assert(jai::detail::cb_storage_offset<script_value::object_holder> == jai
               "an object value's handle finds its holder's control block where the holder's own family put it");
 
 strong_ptr<script_value::object_holder> script_value::acquire_object_holder(engine* eng) {
-    auto result = !eng || eng->parallel_region_active() ? jai::detail::holder_block_pool<host_holder, 1024>::acquire_plain()
-        : jai::detail::holder_block_pool<host_holder, 1024>::acquire_from(eng, eng->object_holder_pool_slot(), &engine::set_object_holder_pool_teardown);
+    auto result = !eng || detail::engine_access::parallel_region_active(*eng) ? jai::detail::holder_block_pool<host_holder, 1024>::acquire_plain()
+        : jai::detail::holder_block_pool<host_holder, 1024>::acquire_from(eng, detail::engine_access::object_holder_pool_slot(*eng), &detail::engine_access::set_object_holder_pool_teardown);
     result->set_owner(eng);
     return jai::detail::adopt_pooled<object_holder>(static_cast<object_holder*>(result.release()));
 }
@@ -650,11 +650,11 @@ void script_value::object_holder::last_release(object_holder* holder, jai::detai
 }
 
 strong_ptr<script_vec_node> script_value::acquire_vec_node(engine* eng) {
-    if (!eng || eng->parallel_region_active()) [[unlikely]] {
+    if (!eng || detail::engine_access::parallel_region_active(*eng)) [[unlikely]] {
         return jai::detail::holder_block_pool<script_vec_node, 1024>::acquire_plain();
     }
-    return jai::detail::holder_block_pool<script_vec_node, 1024>::acquire_from(eng, eng->vec_node_pool_slot(),
-        &engine::set_vec_node_pool_teardown);
+    return jai::detail::holder_block_pool<script_vec_node, 1024>::acquire_from(eng, detail::engine_access::vec_node_pool_slot(*eng),
+        &detail::engine_access::set_vec_node_pool_teardown);
 }
 
 void script_value::unshare_vec_node() {
@@ -673,9 +673,9 @@ script_value script_value::make_cell_reference(script_value&& boxed, engine* eng
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(boxed.get_type_info()));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, boxed.get_type_info()));
     // engine::memory_cap: cells are heap boxes (raised at the next loop back-edge)
-    eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
+    detail::engine_access::execution_limits(*eng).memory_charge_deferred(sizeof(reference_holder));
     auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(std::move(boxed));
     ref->has_cell = true;
@@ -724,7 +724,7 @@ bool script_value::release_plain_cells(std::vector<script_value>& cells, engine*
         garbage[i] = at == i ? cells[i].storage_.get_if<TYPEID_REFERENCE>()->use_count() == held : garbage[at];
         any = any || garbage[i];
     }
-    void*& slot = eng->cell_cycle_registry_slot();
+    void*& slot = detail::engine_access::cell_cycle_registry_slot(*eng);
     if (any && slot) {
         auto& deferred = static_cast<cell_cycle_registry*>(slot)->deferred;
         for (size_t i = 0; i < n; ++i) {
@@ -754,7 +754,7 @@ bool script_value::release_plain_cells(std::vector<script_value>& cells, engine*
 // cycle, and clearing its value lets the cycle die.
 void script_value::release_cell_cycles(std::vector<script_value>& cells, engine* eng) {
     if (cells.empty()) return;
-    if (!eng || eng->parallel_region_active()) { cells.clear(); return; }
+    if (!eng || detail::engine_access::parallel_region_active(*eng)) { cells.clear(); return; }
     if (cells.size() <= 16 && release_plain_cells(cells, eng)) return;
     enum : uint8_t { node_cell, node_function, node_definition, node_environment };
     struct node { const void* key; size_t count; size_t internal; uint32_t held; uint32_t first_edge; uint32_t edge_count; uint8_t kind; bool live; };
@@ -863,7 +863,7 @@ void script_value::release_cell_cycles(std::vector<script_value>& cells, engine*
     }
     // A live cell a closure holds is listed for a later check; a listed cell found garbage leaves the list (a callee
     // listed its caller's cell, the caller's exit clears it). Only the newest entries are searched.
-    void*& slot = eng->cell_cycle_registry_slot();
+    void*& slot = detail::engine_access::cell_cycle_registry_slot(*eng);
     auto listed_at = [&](const reference_holder* holder) -> size_t {
         auto& deferred = static_cast<cell_cycle_registry*>(slot)->deferred;
         const size_t floor = deferred.size() > 8 ? deferred.size() - 8 : 0;
@@ -878,7 +878,7 @@ void script_value::release_cell_cycles(std::vector<script_value>& cells, engine*
         if (n.live && n.internal > 0) {
             if (!slot) {
                 slot = new cell_cycle_registry();
-                eng->set_cell_cycle_registry_teardown(&cell_cycle_registry::teardown);
+                detail::engine_access::set_cell_cycle_registry_teardown(*eng, &cell_cycle_registry::teardown);
             }
             if (listed_at(holder.get()) == SIZE_MAX) static_cast<cell_cycle_registry*>(slot)->deferred.emplace_back(holder);
         } else if (slot && !n.live) {
@@ -913,7 +913,7 @@ void script_value::release_cell_cycles(std::vector<script_value>& cells, engine*
 }
 
 void script_value::release_deferred_cell_cycles(engine* eng) {
-    void*& slot = eng->cell_cycle_registry_slot();
+    void*& slot = detail::engine_access::cell_cycle_registry_slot(*eng);
     auto* registry = static_cast<cell_cycle_registry*>(slot);
     if (!registry) return;
     registry->sweeping = true;
@@ -940,8 +940,8 @@ script_value script_value::make_map_entry_reference(const strong_ptr<script_map>
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(entry ? entry->get_type_info() : nullptr));
-    eng->execution_limits().memory_charge_deferred(sizeof(reference_holder));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, entry ? entry->get_type_info() : nullptr));
+    detail::engine_access::execution_limits(*eng).memory_charge_deferred(sizeof(reference_holder));
     auto ref = acquire_reference_holder(eng);
     new (ref->cell_storage) script_value(key.is_reference() ? key.deref() : key);
     ref->has_map_key = true;
@@ -962,7 +962,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
         throw runtime_error("Cannot create array with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_array(element_type));
+    v.set_stamp(detail::engine_access::get_type_info_array(*eng, element_type));
 
     // The declared element type IS the representation: int/float element types mint
     // raw-buffer nodes, array<var> (null element type) the script_value vector. The
@@ -984,8 +984,8 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
     }
 
     // Create node with small default capacity to avoid first few reallocations
-    auto node = eng->parallel_region_active() ? jai::detail::holder_block_pool<script_array, 1024>::acquire_plain(node_kind)
-        : jai::detail::holder_block_pool<script_array, 1024>::acquire_from(eng, eng->array_node_pool_slot(), &engine::set_array_node_pool_teardown, node_kind);
+    auto node = detail::engine_access::parallel_region_active(*eng) ? jai::detail::holder_block_pool<script_array, 1024>::acquire_plain(node_kind)
+        : jai::detail::holder_block_pool<script_array, 1024>::acquire_from(eng, detail::engine_access::array_node_pool_slot(*eng), &detail::engine_access::set_array_node_pool_teardown, node_kind);
     node->owner = eng;
     node->reserve(8);
     v.storage_ = node;
@@ -997,7 +997,7 @@ script_value script_value::make_map(type_info_ptr keyType, type_info_ptr valueTy
         throw runtime_error("Cannot create map with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_map(keyType, valueType));
+    v.set_stamp(detail::engine_access::get_type_info_map(*eng, keyType, valueType));
     v.storage_ = make_strong<script_map>(eng);
     return v;
 }
@@ -1006,7 +1006,7 @@ namespace {
 // a type's name as the engine's interned text: read by the interned id the caller already holds (an index, no hash), interning only
 // when the id is missing or names other text
 std::string_view interned_type_text(engine* eng, std::string_view name, uint64_t type_id) {
-    auto* symbols = eng->get_symbolizer();
+    auto* symbols = detail::engine_access::get_symbolizer(*eng);
     if (type_id != UINT64_MAX) {
         const std::string_view text = symbols->get_string(type_id);
         if (text == name) { return text; }
@@ -1020,7 +1020,7 @@ script_value script_value::make_object(std::string_view type_name, detail::objec
         throw runtime_error("Cannot create object with null engine pointer");
     }
 
-    uint64_t type_id = eng->get_symbolizer()->intern(type_name);
+    uint64_t type_id = detail::engine_access::get_symbolizer(*eng)->intern(type_name);
     return make_object(type_name, type_id, std::move(data), eng);
 }
 
@@ -1029,7 +1029,7 @@ script_value script_value::make_object(std::string_view type_name, uint64_t type
         throw runtime_error("Cannot create object with null engine pointer");
     }
     // the registry's class names the object: a type_info::make_object() temporary would die before the value
-    auto class_def = eng->get_class_definition(type_id);
+    auto class_def = detail::engine_access::get_class_definition(*eng, type_id);
     if (!class_def) {
         throw runtime_error("Cannot create object of unregistered class '" + std::string(type_name) +
             "'. Classes must be registered with engine.register_class() before instantiation.");
@@ -1058,13 +1058,13 @@ void release_last_instance(class_instance* instance) noexcept {
 }
 
 std::string_view instance_type_name(engine* eng, uint64_t id) noexcept {
-    return eng && id != UINT64_MAX ? eng->get_symbolizer()->get_string(id) : std::string_view();
+    return eng && id != UINT64_MAX ? engine_access::get_symbolizer(*eng)->get_string(id) : std::string_view();
 }
 
 #ifndef NDEBUG
 void check_instance_type_identity(engine* eng, std::string_view name, uint64_t id) noexcept {
     const bool unnamed = id == UINT64_MAX || !eng;
-    assert((unnamed ? name.empty() : eng->get_symbolizer()->get_string(id) == name) && "an instance's type id names its type name");
+    assert((unnamed ? name.empty() : engine_access::get_symbolizer(*eng)->get_string(id) == name) && "an instance's type id names its type name");
 }
 #endif
 }
@@ -1093,7 +1093,7 @@ script_value script_value::make_cpp_object(std::string_view type_name, uint64_t 
 
     // CRITICAL: Get persistent type_info from class registry (fast O(1) lookup by type_id)
 
-    auto class_def = eng->get_class_definition(type_id);
+    auto class_def = detail::engine_access::get_class_definition(*eng, type_id);
     if (!class_def) {
         throw runtime_error("Cannot create cpp_object of unregistered class '" + std::string(type_name) +
             "'. Classes must be registered with engine.register_class() before instantiation.");
@@ -1114,7 +1114,7 @@ script_value script_value::make_cpp_reference(std::string_view type_name, uint64
     if (!eng) {
         throw runtime_error("Cannot create cpp_reference with null engine pointer");
     }
-    auto class_def = eng->get_class_definition(type_id);
+    auto class_def = detail::engine_access::get_class_definition(*eng, type_id);
     if (!class_def) {
         throw runtime_error("Cannot create cpp_reference of unregistered class '" + std::string(type_name) + "'");
     }
@@ -1133,7 +1133,7 @@ script_value script_value::make_empty_weak_ptr(type_info_ptr weak_ptr_type, engi
     if (weak_ptr_type) {
         v.set_stamp(weak_ptr_type);
     } else if (eng) {
-        v.set_stamp(eng->get_type_info_weak_ptr(nullptr));
+        v.set_stamp(detail::engine_access::get_type_info_weak_ptr(*eng, nullptr));
     }
     v.storage_ = jai::weaker_ptr<object_holder>();
     return v;
@@ -1143,7 +1143,7 @@ script_value script_value::make_invalid(engine* eng) {
     script_value val(std::monostate{}, eng);  // Start with null
     val.storage_ = invalid_tag{};  // Change to invalid
     if (eng) {
-        val.set_stamp(eng->get_type_info_invalid());  // Set proper type info
+        val.set_stamp(detail::engine_access::get_type_info_invalid(*eng));  // Set proper type info
     }
     return val;
 }
@@ -1155,7 +1155,7 @@ checked_result<script_value> script_value::make_weak_ptr(const script_value& val
             "Cannot create weak_ptr with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_weak_ptr(value.get_type_info()));
+    v.set_stamp(detail::engine_access::get_type_info_weak_ptr(*eng, value.get_type_info()));
 
     // Only accept shared_ptr types for weak_ptr creation
     // Regular objects have value semantics and get cloned when passed as parameters,
@@ -1197,21 +1197,21 @@ script_value script_value::make_element_reference(const strong_ptr<script_array>
         switch (container->kind()) {
             case script_array::kind_t::i64:
             case script_array::kind_t::u8:
-            case script_array::kind_t::i8: referent_tag = eng->get_type_info_int(); break;
-            case script_array::kind_t::f64: referent_tag = eng->get_type_info_float(); break;
-            case script_array::kind_t::b8: referent_tag = eng->get_type_info_bool(); break;
-            case script_array::kind_t::c8: referent_tag = eng->get_type_info_char(); break;
+            case script_array::kind_t::i8: referent_tag = detail::engine_access::get_type_info_int(*eng); break;
+            case script_array::kind_t::f64: referent_tag = detail::engine_access::get_type_info_float(*eng); break;
+            case script_array::kind_t::b8: referent_tag = detail::engine_access::get_type_info_bool(*eng); break;
+            case script_array::kind_t::c8: referent_tag = detail::engine_access::get_type_info_char(*eng); break;
             case script_array::kind_t::obj: referent_tag = container->objs()[index].tag; break;
             case script_array::kind_t::v2: case script_array::kind_t::iv2: case script_array::kind_t::v3:
             case script_array::kind_t::iv3: case script_array::kind_t::v4: case script_array::kind_t::rgba:
-                referent_tag = eng->get_type_info_math(script_array::vec_value_type(container->kind()));
+                referent_tag = detail::engine_access::get_type_info_math(*eng, script_array::vec_value_type(container->kind()));
                 break;
-            default: referent_tag = eng->get_type_info_string(); break;
+            default: referent_tag = detail::engine_access::get_type_info_string(*eng); break;
         }
     } else {
         referent_tag = container->values()[index].get_type_info();
     }
-    v.set_stamp(eng->get_type_info_reference(referent_tag));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, referent_tag));
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;          // owns the node (keeps it alive) + enables re-resolve
@@ -1227,7 +1227,7 @@ script_value script_value::make_removed_element_reference(const strong_ptr<scrip
         throw runtime_error("Cannot create reference: null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(element_type));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, element_type));
     auto ref = acquire_reference_holder(eng);
     ref->container_element_type = element_type;
     ref->container = container;
@@ -1256,9 +1256,9 @@ script_value script_value::make_field_reference(strong_ptr<class_instance> owner
                                                 engine* eng, type_info_ptr field_type, const script_value& field_value,
                                                 uint32_t field_slot) {
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(field_value.get_type_info()));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, field_value.get_type_info()));
     auto ref = acquire_reference_holder(eng);
-    if (field_slot != UINT32_MAX && !eng->parallel_region_active()) {
+    if (field_slot != UINT32_MAX && !detail::engine_access::parallel_region_active(*eng)) {
         if (const class_definition* cd = owner->get_class_definition()) {
             ref->field_class = cd;
             ref->field_class_epoch = cd->field_shape_epoch();
@@ -1285,11 +1285,11 @@ void script_value::pin_element_root(script_value& reference, const strong_ptr<sc
 
 type_info_ptr script_value::cpp_bound_type_info(engine* eng, uint8_t semantic_index) {
     switch (semantic_index) {
-        case TYPEID_INT: return eng->get_type_info_int();
-        case TYPEID_FLOAT: return eng->get_type_info_float();
-        case TYPEID_BOOL: return eng->get_type_info_bool();
-        case TYPEID_STRING: return eng->get_type_info_string();
-        case TYPEID_CHAR: return eng->get_type_info_char();
+        case TYPEID_INT: return detail::engine_access::get_type_info_int(*eng);
+        case TYPEID_FLOAT: return detail::engine_access::get_type_info_float(*eng);
+        case TYPEID_BOOL: return detail::engine_access::get_type_info_bool(*eng);
+        case TYPEID_STRING: return detail::engine_access::get_type_info_string(*eng);
+        case TYPEID_CHAR: return detail::engine_access::get_type_info_char(*eng);
         default: return nullptr;
     }
 }
@@ -1303,7 +1303,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(handle.stamp()));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, handle.stamp()));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = holder;
@@ -1311,7 +1311,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
     ref->property->object_pin = holder->keep_alive();
     ref->property->live_member = true;
     ref->property->referent = holder->bound_object();
-    ref->property->referent_class = holder->type_id() != UINT64_MAX ? eng->get_class_definition(holder->type_id()).get() : nullptr;
+    ref->property->referent_class = holder->type_id() != UINT64_MAX ? detail::engine_access::get_class_definition(*eng, holder->type_id()).get() : nullptr;
     new (ref->cell_storage) script_value(handle);
     v.storage_ = ref;
     return v;
@@ -1320,7 +1320,7 @@ script_value script_value::make_referent_reference(const script_value& handle, e
 // an assignment through a reference to a bound object: the operator= the referent's class binds ("="), as C++ calls the class's own
 void script_value::reference_holder::store_referent(const script_value& value, engine* eng) {
     const class_definition* def = property->referent_class;
-    const uint64_t assign_id = eng->get_symbolizer()->intern("=");
+    const uint64_t assign_id = detail::engine_access::get_symbolizer(*eng)->intern("=");
     if (!def || !def->has_method(assign_id)) {
         throw runtime_error("Cannot assign to a reference to '" + (def ? def->get_name() : std::string("object")) + "': its binding has no operator=");
     }
@@ -1328,7 +1328,7 @@ void script_value::reference_holder::store_referent(const script_value& value, e
     std::vector<script_value> args{ *cell(), value.is_reference() ? value.deref() : value };
     auto assigned = assign.as_function()(args);
     if (!assigned) {
-        throw runtime_error(format_error(assigned, *eng->get_symbolizer()));
+        throw runtime_error(format_error(assigned, *detail::engine_access::get_symbolizer(*eng)));
     }
 }
 
@@ -1345,7 +1345,7 @@ script_value script_value::make_cpp_member_reference(const script_value& receive
     box.set_stamp(cpp_bound_type_info(eng, semantic_index));
     box.storage_ = make_strong<cpp_bound_holder>(address, size_and_sign, semantic_index, eng);
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(box.stamp()));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, box.stamp()));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = receiver.get_object_holder();
@@ -1366,7 +1366,7 @@ script_value script_value::make_property_reference(const script_value& receiver,
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(nullptr));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->property = std::make_unique<property_binding>();
     ref->property->receiver = receiver.get_object_holder();
@@ -1384,7 +1384,7 @@ script_value script_value::make_string_element_reference(const script_value& pin
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(nullptr));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->string_base = pin.storage_.get<strong_ptr<reference_holder>>();
     ref->container_index = index;
@@ -1400,7 +1400,7 @@ script_value script_value::make_component_reference(const script_value& pin, siz
         throw runtime_error("Cannot create reference to null");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(nullptr));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, nullptr));
     auto ref = acquire_reference_holder(eng);
     ref->component_base = pin.storage_.get<strong_ptr<reference_holder>>();
     ref->container_index = component;
@@ -1410,14 +1410,14 @@ script_value script_value::make_component_reference(const script_value& pin, siz
 
 script_value script_value::make_component_pin(const reference_holder& holder, engine* eng) {
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(nullptr));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, nullptr));
     v.storage_ = holder.component_base;
     return v;
 }
 
 script_value script_value::make_string_element_pin(const reference_holder& holder, engine* eng) {
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_reference(nullptr));
+    v.set_stamp(detail::engine_access::get_type_info_reference(*eng, nullptr));
     v.storage_ = holder.string_base;
     return v;
 }
@@ -1431,7 +1431,7 @@ script_value script_value::make_function(script_function&& func, engine* eng) {
         throw runtime_error("Cannot create function with null engine pointer");
     }
     script_value v(std::monostate{}, eng);
-    v.set_stamp(eng->get_type_info_untyped_function());
+    v.set_stamp(detail::engine_access::get_type_info_untyped_function(*eng));
     v.storage_ = make_strong<script_function_node>(std::move(func), eng);
     return v;
 }
@@ -1589,7 +1589,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             return result;
         }
 
-        auto class_def = obj_holder->owner() ? obj_holder->owner()->get_class_definition(obj_holder->type_id()) : nullptr;
+        auto class_def = detail::engine_access::get_class_definition(obj_holder->owner(), obj_holder->type_id());
         if (class_def && class_def->has_copy_function()) {
             auto new_cpp_obj = class_def->copy_object(obj_holder->object());
             if (new_cpp_obj) {
@@ -1715,7 +1715,7 @@ script_value script_value::clone_level(detail::deep_copy_work& work, unsigned de
             } else {
                 bool copied = false;
                 if (engine* owner = obj_holder->owner()) {
-                    auto class_def = owner->get_class_definition(obj_holder->type_id());
+                    auto class_def = detail::engine_access::get_class_definition(*owner, obj_holder->type_id());
                     if (class_def && class_def->has_copy_function()) {
                         // cpp_bound references own nothing (data null) - the live object is
                         // bound_ptr. Deep copy from it and drop the binding so the
@@ -1820,9 +1820,9 @@ namespace {
                 bytes += str->size() + sizeof(script_string);
                 fresh->strs().push_back(make_strong<script_string>(*str));
             }
-            eng->execution_limits().memory_charge_deferred(bytes);
+            detail::engine_access::execution_limits(*eng).memory_charge_deferred(bytes);
         } else {
-            eng->execution_limits().memory_charge_deferred(sizeof(script_int) * (src.size() + 1));
+            detail::engine_access::execution_limits(*eng).memory_charge_deferred(sizeof(script_int) * (src.size() + 1));
             fresh->assign_buffer(src);
         }
         return fresh;
@@ -2036,7 +2036,7 @@ script_value script_value::parallel_detached_level(engine* eng, std::vector<type
         }
         default: {
             // a worker's read through a shared object reaches its objects as borrows, never their handles
-            if (idx == TYPEID_OBJECT && eng && eng->parallel_region_active()) { return detail::parallel_shared_object(*this, *eng); }
+            if (idx == TYPEID_OBJECT && eng && detail::engine_access::parallel_region_active(*eng)) { return detail::parallel_shared_object(*this, *eng); }
             const char* what = idx == TYPEID_OBJECT ? "object"
                 : idx == TYPEID_FUNCTION ? "function"
                 : idx == TYPEID_WEAK_PTR ? "weak_ptr"
@@ -2121,7 +2121,7 @@ std::optional<script_value> script_value::try_unwrap_transparent_wrapper() const
     if (!holder) {
         return std::nullopt;
     }
-    auto class_def = payload_engine()->get_class_definition(holder->type_id());
+    auto class_def = detail::engine_access::get_class_definition(*payload_engine(), holder->type_id());
     if (!class_def || !class_def->is_transparent_wrapper()) {
         return std::nullopt;
     }
@@ -2266,7 +2266,7 @@ void script_value::assign_through_reference(V&& value) {
             // a host's store converts as a script element store does (a script store arrives converted)
             engine* eng = payload_engine();
             auto converted = detail::convert_container_element(eng, value, refHolder->container_element_type);
-            if (!converted) { throw runtime_error(eng ? format_error(converted, *eng->get_symbolizer()) : std::string(converted.message())); }
+            if (!converted) { throw runtime_error(eng ? format_error(converted, *detail::engine_access::get_symbolizer(*eng)) : std::string(converted.message())); }
             refHolder->container->set(refHolder->container_index, std::move(converted.value()));
             return;
         }
@@ -2296,7 +2296,7 @@ void script_value::assign_through_reference(V&& value) {
     if (refHolder->string_base) {
         auto stored = detail::store_string_element(*refHolder, value, refHolder->owner);
         if (!stored) {
-            throw runtime_error(format_error(stored, *refHolder->owner->get_symbolizer()));
+            throw runtime_error(format_error(stored, *detail::engine_access::get_symbolizer(*refHolder->owner)));
         }
         return;
     }
@@ -2534,11 +2534,11 @@ namespace {
 		}
 		engine* eng = key.payload_engine();
 		if (!eng) { return nullptr; }
-		if (holder->type_id() != UINT64_MAX) { return eng->get_class_definition(holder->type_id()).get(); }
-		return holder->type_name().empty() ? nullptr : eng->get_class_definition(std::string(holder->type_name())).get();
+		if (holder->type_id() != UINT64_MAX) { return detail::engine_access::get_class_definition(*eng, holder->type_id()).get(); }
+		return holder->type_name().empty() ? nullptr : detail::engine_access::get_class_definition(*eng, std::string(holder->type_name())).get();
 	}
 
-	key_policy policy_of(const class_definition* cls, const engine::map_key_ids& ids) {
+	key_policy policy_of(const class_definition* cls, const detail::engine_access::map_key_ids& ids) {
 		if (cls->defines_method(ids.less) || cls->defines_method(ids.spaceship)) { return key_policy::ordered; }
 		if (cls->defines_method(ids.hash)) { return key_policy::hashed; }
 		return key_policy::identity;
@@ -2546,7 +2546,7 @@ namespace {
 
 	execution_backend& key_backend(const script_value& key) {
 		engine* eng = key.payload_engine();
-		execution_backend* backend = eng ? eng->calling_backend() : nullptr;
+		execution_backend* backend = eng ? detail::engine_access::calling_backend(*eng) : nullptr;
 		if (!backend) { throw runtime_error("A class map key's operators need the engine that made the key"); }
 		return *backend;
 	}
@@ -2559,24 +2559,24 @@ namespace {
 
 	bool key_less(const script_value& a, const script_value& b) {
 		execution_backend& backend = key_backend(a);
-		engine::run_pin pin(a.payload_engine());   // a map's key order is the map's callback
+		detail::engine_access::run_pin pin(a.payload_engine());   // a map's key order is the map's callback
 		auto answer = backend.language_less(a, b);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
 		return answer.value();
 	}
 
-	bool key_equal(const script_value& a, const script_value& b, const class_definition* cls, const engine::map_key_ids& ids) {
+	bool key_equal(const script_value& a, const script_value& b, const class_definition* cls, const detail::engine_access::map_key_ids& ids) {
 		if (!cls->defines_method(ids.equal)) { return (a <=> b) == 0; }
 		execution_backend& backend = key_backend(a);
-		engine::run_pin pin(a.payload_engine());
+		detail::engine_access::run_pin pin(a.payload_engine());
 		auto answer = backend.language_equal(a, b);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(a, answer ? error_propagator{} : answer.error_value()); }
 		return answer.value();
 	}
 
-	JAI_NOINLINE script_int key_hash_value(const script_value& key, const engine::map_key_ids& ids) {
+	JAI_NOINLINE script_int key_hash_value(const script_value& key, const detail::engine_access::map_key_ids& ids) {
 		execution_backend& backend = key_backend(key);
-		engine::run_pin pin(key.payload_engine());
+		detail::engine_access::run_pin pin(key.payload_engine());
 		auto answer = backend.invoke_method(key, ids.hash);
 		if (!answer || backend.is_unwinding()) [[unlikely]] { raise_key_failure(key, answer ? error_propagator{} : answer.error_value()); }
 		const script_value& value = answer.value().deref();
@@ -2586,7 +2586,7 @@ namespace {
 		return value.unchecked_as_int();
 	}
 
-	const engine::map_key_ids& key_ids(const script_value& key) { return key.payload_engine()->map_key_operator_ids(); }
+	const detail::engine_access::map_key_ids& key_ids(const script_value& key) { return detail::engine_access::map_key_operator_ids(*key.payload_engine()); }
 
 }
 
@@ -2596,7 +2596,7 @@ const class_definition* map_class_key_class(const script_value& key) {
 	const key_policy policy = policy_of(cls, key_ids(key));
 	if (policy != key_policy::identity) { return cls; }
 	if (cls->first_identity_key()) {
-		key.payload_engine()->report_script_warning("map keys of class '" + cls->get_name() +
+		detail::engine_access::report_script_warning(*key.payload_engine(), "map keys of class '" + cls->get_name() +
 			"' compare by identity: declare operator<=> (or operator<) or hash() to key its values by value");
 	}
 	return nullptr;
@@ -2624,7 +2624,7 @@ void script_map::refresh_class_runs() const {
 	for (size_t r = 0; r < runs.size();) {
 		class_key_index::run& run = runs[r];
 		if (run.epoch == run.cls->method_epoch()) { ++r; continue; }
-		const engine::map_key_ids& ids = key_ids(run.keys.front()->kv.first);
+		const detail::engine_access::map_key_ids& ids = key_ids(run.keys.front()->kv.first);
 		const key_policy policy = policy_of(run.cls, ids);
 		if (policy == key_policy::identity) {
 			runs.erase(runs.begin() + static_cast<ptrdiff_t>(r));
@@ -2676,7 +2676,7 @@ script_map::class_probe script_map::probe_class(const script_value& key, const c
 	refresh_class_runs();
 	class_probe at;
 	at.hash = script_value_hash{}(key);
-	const engine::map_key_ids& ids = key_ids(key);
+	const detail::engine_access::map_key_ids& ids = key_ids(key);
 	const bool hashed = policy_of(cls, ids) == key_policy::hashed;
 	if (hashed) { at.key_hash = key_hash_value(key, ids); }
 	if (!class_keys_) { return at; }
@@ -2804,7 +2804,7 @@ void script_map::order_by_key(std::vector<entry*>& entries) const noexcept {
 // The kinds ranked below objects come first in the order, then the class runs by class_run_before, then the other objects:
 // the position after key is the runs ahead of its class's plus its place in its own run
 size_t script_map::index_after_class_key(const script_value& key, const class_definition* cls) const {
-	const engine::map_key_ids& ids = key_ids(key);
+	const detail::engine_access::map_key_ids& ids = key_ids(key);
 	const bool hashed = policy_of(cls, ids) == key_policy::hashed;
 	const script_int key_hash = hashed ? key_hash_value(key, ids) : 0;
 	const auto objects = std::partition_point(order_.begin(), order_.end(),
@@ -2829,7 +2829,7 @@ int map_class_key_order(const script_value& a, const script_value& b) {
 	if (!ca && !cb) { return identity(); }
 	if (!ca || !cb) { return ca ? -1 : 1; }
 	if (ca != cb) { return class_run_before(ca, cb) ? -1 : 1; }
-	const engine::map_key_ids& ids = key_ids(a);
+	const detail::engine_access::map_key_ids& ids = key_ids(a);
 	if (policy_of(ca, ids) == key_policy::ordered) {
 		if (key_less(a, b)) { return -1; }
 		return key_less(b, a) ? 1 : 0;

@@ -392,9 +392,9 @@ public:
 			check_matches_serial_at(e, src, {1, 2, 8});
 			// Classification pin: an all-primitive, subscript-only grid rides the borrow
 			// tier (zero-copy raw reads) on BOTH backends; the scalar copies per worker
-			const auto& caps = e->last_parallel_captures();
-			const uint64_t grid_id = e->symbolize("grid");
-			const uint64_t w_id = e->symbolize("w");
+			const auto& caps = detail::engine_access::last_parallel_captures(*e);
+			const uint64_t grid_id = detail::engine_access::symbolize(*e, "grid");
+			const uint64_t w_id = detail::engine_access::symbolize(*e, "w");
 			bool saw_grid = false, saw_w = false;
 			for (const auto& [id, kind] : caps) {
 				if (id == grid_id) {
@@ -429,8 +429,8 @@ public:
 					return [pout, sout];
 				)";
 				check_matches_serial_at(e, src, {1, 2, 8});
-				const auto& caps = e->last_parallel_captures();
-				const uint64_t pal_id = e->symbolize("pal");
+				const auto& caps = detail::engine_access::last_parallel_captures(*e);
+				const uint64_t pal_id = detail::engine_access::symbolize(*e, "pal");
 				bool saw = false;
 				for (const auto& [id, kind] : caps) {
 					if (id == pal_id) {
@@ -611,13 +611,13 @@ public:
 			script_value nodes = e->get_variable("nodes");
 			const script_array* arr = nodes.deref().unchecked_array_node();
 			check_true(arr && arr->is_typed() && arr->kind() == script_array::kind_t::obj, "typed object array");
-			auto cd = e->get_class_registry().find_script_class("Node");
-			auto leaf_cd = e->get_class_registry().find_script_class("Leaf");
+			auto cd = detail::engine_access::get_class_registry(*e).find_script_class("Node");
+			auto leaf_cd = detail::engine_access::get_class_registry(*e).find_script_class("Leaf");
 			check_not_null(cd); check_not_null(leaf_cd);
-			const uint32_t counts_slot = cd->field_slot(e->symbolize("counts"));
-			const uint32_t names_slot = cd->field_slot(e->symbolize("names"));
-			const uint32_t leaf_slot = cd->field_slot(e->symbolize("leaf"));
-			const uint32_t tag_slot = leaf_cd->field_slot(e->symbolize("tag"));
+			const uint32_t counts_slot = cd->field_slot(detail::engine_access::symbolize(*e, "counts"));
+			const uint32_t names_slot = cd->field_slot(detail::engine_access::symbolize(*e, "names"));
+			const uint32_t leaf_slot = cd->field_slot(detail::engine_access::symbolize(*e, "leaf"));
+			const uint32_t tag_slot = leaf_cd->field_slot(detail::engine_access::symbolize(*e, "tag"));
 			for (size_t i = 0; i < arr->size(); ++i) {
 				auto* inst = static_cast<class_instance*>(arr->objs()[i].handle->object());
 				const script_value* counts = inst->field_slot_value(counts_slot);
@@ -686,11 +686,11 @@ public:
 				auto e = make_engine();
 				jai::stdlib::register_all(*e);
 				e->parallel_thread_count(8);
-				check_eq((size_t)1000, e->parallel_spin_wait_us(), "default budget");
-				e->parallel_spin_wait_us(budget);
-				check_eq(budget, e->parallel_spin_wait_us());
+				check_eq((size_t)1000, detail::engine_access::parallel_spin_wait_us(*e), "default budget");
+				detail::engine_access::parallel_spin_wait_us(*e, budget);
+				check_eq(budget, detail::engine_access::parallel_spin_wait_us(*e));
 				outs.push_back(e->execute(src).as_string());
-				if (budget == 50) { e->parallel_spin_wait_us(1000); check_eq(outs.back(), e->execute(src).as_string(), "budget flipped on a live pool"); }
+				if (budget == 50) { detail::engine_access::parallel_spin_wait_us(*e, 1000); check_eq(outs.back(), e->execute(src).as_string(), "budget flipped on a live pool"); }
 			}
 			auto s = make_engine();
 			jai::stdlib::register_all(*s);
@@ -725,7 +725,7 @@ public:
 				check_true(out[0].as<bool>(), label + " in-place range");
 				check_true(out[1].as<bool>(), label + " zip");
 				check_true(out[2].as<bool>(), label + " transform");
-				const auto& b = e->last_parallel_chunk_bounds();
+				const auto& b = detail::engine_access::last_parallel_chunk_bounds(*e);
 				check_eq(workers + 1, b.size(), label + " chunk count");
 				check_eq((size_t)37, b.back(), label + " counts sum to n");
 				for (size_t k = 0; k + 1 < b.size(); ++k) { check(b[k] <= b[k + 1], label + " counts are cumulative"); }
@@ -1663,16 +1663,16 @@ public:
 			// adaptive fan-out is a performance hint the measured cost drives: without it the worker count is the engine's, and the
 			// hint's bounds are the cumulative-weight split of the weights alone
 			const auto without_measured_cost = [&] {
-				auto& state = e->parallel_state();
+				auto& state = detail::engine_access::parallel_state(*e);
 				state.worker_overhead_ns = 0.0;
 				for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
 			};
 			without_measured_cost();
 			auto flat = e->execute(flat_src);
-			auto flat_bounds = e->last_parallel_chunk_bounds();   // what each thread took: follows timing, so only its shape is asserted
+			auto flat_bounds = detail::engine_access::last_parallel_chunk_bounds(*e);   // what each thread took: follows timing, so only its shape is asserted
 			without_measured_cost();
 			auto weighted = e->execute(weighted_src);
-			auto weighted_bounds = e->last_parallel_chunk_bounds();
+			auto weighted_bounds = detail::engine_access::last_parallel_chunk_bounds(*e);
 			check_true(arrays_equal(flat, weighted), "observable output identical");
 			check_eq((size_t)5, flat_bounds.size());
 			check_eq((size_t)0, flat_bounds.front());
@@ -1683,7 +1683,7 @@ public:
 			check_true(weighted_bounds == std::vector<size_t>{0, 3, 5, 7, 64}, "the weighted split is the weights' cumulative split");
 			without_measured_cost();
 			e->execute(weighted_src);
-			check_true(weighted_bounds == e->last_parallel_chunk_bounds(), "the same region chooses the same bounds again");
+			check_true(weighted_bounds == detail::engine_access::last_parallel_chunk_bounds(*e), "the same region chooses the same bounds again");
 		});
 
 		// A worker remembers which function each of its call sites validated (vm_backend::worker_callee_memo_): rows hold raw node
@@ -1901,8 +1901,8 @@ public:
 	}
 
 	detail::parallel_capture_kind capture_kind(const std::shared_ptr<engine>& e, const char* name) {
-		const uint64_t id = e->symbolize(name);
-		for (const auto& [seen, kind] : e->last_parallel_captures()) {
+		const uint64_t id = detail::engine_access::symbolize(*e, name);
+		for (const auto& [seen, kind] : detail::engine_access::last_parallel_captures(*e)) {
 			if (seen == id) { return kind; }
 		}
 		check_true(false, std::string("no capture named ") + name);
@@ -3346,16 +3346,16 @@ public:
 				detail::parallel_region_table table;
 				table.entries.push_back({ std::this_thread::get_id(), &limits });
 				table.entries.back().deferred_releases = &deferred;
-				e->parallel_state().active_region = &table;
-				e->note_parallel_region(true);
+				detail::engine_access::parallel_state(*e).active_region = &table;
+				detail::engine_access::note_parallel_region(*e, true);
 				first = script_value(std::monostate{}, e.get());
 				hybrid = script_value(std::monostate{}, e.get());
 				plain = script_value(std::monostate{}, e.get());
 				deferred.push_back({ 7, std::move(later) });
 				deferred.push_back({ 3, std::move(earlier) });
 				const std::vector<int64_t> during = parallel_serial_deaths;
-				e->note_parallel_region(false);
-				e->parallel_state().active_region = nullptr;
+				detail::engine_access::note_parallel_region(*e, false);
+				detail::engine_access::parallel_state(*e).active_region = nullptr;
 				detail::release_deferred_in_order({ &deferred });
 
 				auto spelled = [](const std::vector<int64_t>& ids) {
@@ -3475,7 +3475,7 @@ public:
 				std::string got;
 				try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
 				check_eq(std::to_string(expected), got, std::string("reference parameters ") + (vm ? "vm" : "interp"));
-				check_true(e->get_current_parameter_storage() == nullptr, std::string("no call's storage outlives the region ") + (vm ? "vm" : "interp"));
+				check_true(detail::engine_access::get_current_parameter_storage(*e) == nullptr, std::string("no call's storage outlives the region ") + (vm ? "vm" : "interp"));
 			}
 		});
 
@@ -4481,20 +4481,20 @@ public:
 		if (warm) { check_eq(script_int(15), result.eng->execute(result.call).as_int()); }
 		// Adaptive fan-out is a performance hint, not a semantic input. Remove the
 		// measured cost from this test so fresh/warm ordinal traces use four slots.
-		auto& state = result.eng->parallel_state();
+		auto& state = detail::engine_access::parallel_state(*result.eng);
 		state.worker_overhead_ns = 0.0;
 		for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
 		return result;
 	}
 
 	static void arm(engine& eng, fault_trace& trace) {
-		auto& faults = eng.parallel_state().faults;
+		auto& faults = detail::engine_access::parallel_state(eng).faults;
 		faults.context = &trace;
 		faults.callback = &fault_trace::visit;
 	}
 
 	static void disarm(engine& eng) {
-		auto& faults = eng.parallel_state().faults;
+		auto& faults = detail::engine_access::parallel_state(eng).faults;
 		faults.callback = nullptr;
 		faults.context = nullptr;
 	}
@@ -4514,14 +4514,14 @@ public:
 
 	static void check_recovered(fixture& fixture, const std::string& label) {
 		auto& eng = *fixture.eng;
-		check_false(eng.parallel_region_active(), label + ": active region survived");
-		check_false(eng.parallel_state().region_running, label + ": running flag survived");
-		check_false(eng.get_symbolizer()->frozen(), label + ": symbolizer stayed frozen");
+		check_false(detail::engine_access::parallel_region_active(eng), label + ": active region survived");
+		check_false(detail::engine_access::parallel_state(eng).region_running, label + ": running flag survived");
+		check_false(detail::engine_access::get_symbolizer(eng)->frozen(), label + ": symbolizer stayed frozen");
 		check_eq(uint32_t(0), fixture.input->live_elem_refs, label + ": input cursor survived");
 		check_eq(script_int(42), eng.execute("int after_injected_failure() { return 42; } after_injected_failure();").as_int(), label);
 		check_eq(script_int(15), eng.execute(fixture.call).as_int(), label + ": following identical region");
-		check_false(eng.parallel_region_active(), label);
-		check_false(eng.get_symbolizer()->frozen(), label);
+		check_false(detail::engine_access::parallel_region_active(eng), label);
+		check_false(detail::engine_access::get_symbolizer(eng)->frozen(), label);
 		check_eq(uint32_t(0), fixture.input->live_elem_refs, label + ": following region retained input");
 	}
 
@@ -4531,14 +4531,14 @@ public:
 			fault_trace trace;
 			trace.fail_point = "region.tasks_reserve";
 			const bool failed = execute_injected(fixture, trace);
-			const bool inactive = !fixture.eng->parallel_region_active();
-			const bool unfrozen = !fixture.eng->get_symbolizer()->frozen();
-			const bool stopped = !fixture.eng->parallel_state().region_running;
+			const bool inactive = !detail::engine_access::parallel_region_active(*fixture.eng);
+			const bool unfrozen = !detail::engine_access::get_symbolizer(*fixture.eng)->frozen();
+			const bool stopped = !detail::engine_access::parallel_state(*fixture.eng).region_running;
 			// This particular point precedes every region submission. Repair only
 			// after observing the flags so the test can fail safely on the old code.
-			fixture.eng->parallel_state().active_region = nullptr;
-			fixture.eng->parallel_state().region_running = false;
-			fixture.eng->get_symbolizer()->set_frozen(false);
+			detail::engine_access::parallel_state(*fixture.eng).active_region = nullptr;
+			detail::engine_access::parallel_state(*fixture.eng).region_running = false;
+			detail::engine_access::get_symbolizer(*fixture.eng)->set_frozen(false);
 			check_true(trace.fired, "region.tasks_reserve checkpoint was not reached");
 			check_true(failed, "injected allocation failure did not reach the caller");
 			check_true(inactive, "allocation failure left a dangling active-region table");
@@ -4555,7 +4555,7 @@ public:
 			eng->parallel_thread_count(4);
 			eng->execution_budget(60.0);
 			std::atomic<int> builds{0};
-			auto& faults = eng->parallel_state().faults;
+			auto& faults = detail::engine_access::parallel_state(*eng).faults;
 			faults.context = &builds;
 			faults.callback = [](void* context, const char* point, size_t) {
 				if (std::strcmp(point, "region.pool_create") == 0) {
@@ -4565,7 +4565,7 @@ public:
 			};
 			std::vector<std::chrono::steady_clock::time_point> deadlines;
 			engine* raw_eng = eng.get();
-			eng->add_function("deadline_mark", [raw_eng, &deadlines]() { deadlines.push_back(raw_eng->get_execution_backend()->execution_deadline()); });
+			eng->add_function("deadline_mark", [raw_eng, &deadlines]() { deadlines.push_back(detail::engine_access::get_execution_backend(*raw_eng)->execution_deadline()); });
 			eng->execute(R"(
 				array<int> xs = [];
 				for (int i = 0; i < 4096; i++) { xs.push(i); }
@@ -4584,7 +4584,7 @@ public:
 			auto fixture = prepare(0, false);
 			auto call = fixture.eng->jaibite("parallel_transform(fault_input, fault_step).size();");
 			std::atomic<bool> fired{false};
-			auto& faults = fixture.eng->parallel_state().faults;
+			auto& faults = detail::engine_access::parallel_state(*fixture.eng).faults;
 			faults.context = &fired;
 			faults.callback = [](void* context, const char* point, size_t index) {
 				auto& fired = *static_cast<std::atomic<bool>*>(context);
@@ -4655,9 +4655,9 @@ public:
 				const bool failed = execute_injected(fixture, trace);
 				check_true(trace.fired, "failure must follow worker provisioning and capture publication");
 				check_true(failed, "prewarm failure did not reach the caller");
-				check_false(fixture.eng->parallel_region_active());
-				check_false(fixture.eng->parallel_state().region_running);
-				check_false(fixture.eng->get_symbolizer()->frozen());
+				check_false(detail::engine_access::parallel_region_active(*fixture.eng));
+				check_false(detail::engine_access::parallel_state(*fixture.eng).region_running);
+				check_false(detail::engine_access::get_symbolizer(*fixture.eng)->frozen());
 				check_eq(uint32_t(0), fixture.eng->get_variable("lifetime_input").unchecked_array_node()->live_elem_refs);
 				// No recovery call rebuilds the slots before this scope ends. Destroy
 				// every engine, bite and local owner; only the weak probe survives.
@@ -4709,33 +4709,33 @@ public:
 			// A worker building a type the barrier did not pre-warm must fail before it inserts its name: the insert would move the
 			// symbol tables the other workers read
 			auto e = make_engine();
-			type_info* nested = e->get_type_info_int();
-			for (int depth = 0; depth < 4; ++depth) { nested = e->get_type_info_array(nested); }
-			auto* symbols = e->get_symbolizer();
+			type_info* nested = detail::engine_access::get_type_info_int(*e);
+			for (int depth = 0; depth < 4; ++depth) { nested = detail::engine_access::get_type_info_array(*e, nested); }
+			auto* symbols = detail::engine_access::get_symbolizer(*e);
 			const size_t interned = symbols->size();
 			symbols->set_frozen(true);
 			std::vector<std::string> errors;
 			const auto attempt = [&](const auto& build) {
 				try { build(); errors.push_back("no error"); } catch (const std::exception& ex) { errors.push_back(ex.what()); }
 			};
-			attempt([&]() { (void)e->get_type_info_array(nested); });
-			attempt([&]() { (void)e->get_type_info_map(nested, nested); });
-			attempt([&]() { (void)e->get_type_info_weak_ptr(nested); });
-			attempt([&]() { (void)e->get_type_info_function(nested, {nested, nested}); });
+			attempt([&]() { (void)detail::engine_access::get_type_info_array(*e, nested); });
+			attempt([&]() { (void)detail::engine_access::get_type_info_map(*e, nested, nested); });
+			attempt([&]() { (void)detail::engine_access::get_type_info_weak_ptr(*e, nested); });
+			attempt([&]() { (void)detail::engine_access::get_type_info_function(*e, nested, {nested, nested}); });
 			const size_t after = symbols->size();
 			symbols->set_frozen(false);
 			for (const std::string& error : errors) {
 				check_eq(std::string("parallel_transform: type shape was not pre-warmed at the region barrier (internal) - please report this body shape"), error);
 			}
 			check_eq(interned, after, "nothing was interned while frozen");
-			check_true(e->get_type_info_array(nested) != nullptr, "the shape interns once the region is over");
+			check_true(detail::engine_access::get_type_info_array(*e, nested) != nullptr, "the shape interns once the region is over");
 		});
 
 		test("a_name_missed_by_the_barrier_throws_instead_of_interning", [this]() {
 			// A frozen symbolizer only answers: a miss throws in every build (an insert would move the tables the other workers
 			// read), and the accessor caches are read, never filled, while frozen
 			auto e = make_engine();
-			auto* symbols = e->get_symbolizer();
+			auto* symbols = detail::engine_access::get_symbolizer(*e);
 			const uint64_t member = symbols->intern("frozen_probe_member");
 			(void)symbols->intern("_get_frozen_probe_member");
 			const size_t interned = symbols->size();
@@ -4764,12 +4764,12 @@ public:
 				auto fixture = prepare(0, true);
 				fault_trace trace;
 				if (inject) { trace.fail_point = "region.tasks_reserve"; }
-				fixture.eng->get_symbolizer()->set_frozen(true);
+				detail::engine_access::get_symbolizer(*fixture.eng)->set_frozen(true);
 				const bool failed = execute_injected(fixture, trace);
-				const bool still_frozen = fixture.eng->get_symbolizer()->frozen();
+				const bool still_frozen = detail::engine_access::get_symbolizer(*fixture.eng)->frozen();
 				// The host deliberately froze it; return the engine to normal before
 				// assertion diagnostics or the fresh-symbol recovery test can run.
-				fixture.eng->get_symbolizer()->set_frozen(false);
+				detail::engine_access::get_symbolizer(*fixture.eng)->set_frozen(false);
 				check_eq(inject, failed, "unexpected warmed-region result");
 				check_true(still_frozen, "region discarded the host's prior frozen state");
 				if (inject) { check_true(trace.fired); }
@@ -4815,10 +4815,10 @@ public:
 		// Warm the pool before arming the batch hook: calibration also submits a
 		// batch, but carries no class copies and is not the failure under test.
 		check_eq(script_int(256), eng->execute(call).as_int());
-		auto& state = eng->parallel_state();
+		auto& state = detail::engine_access::parallel_state(*eng);
 		state.worker_overhead_ns = 0.0;
 		for (auto& pool : state.region_pools) { pool.ns_per_element = 0.0; }
-		auto def = eng->get_class_registry().find_script_class("PendingLeaf");
+		auto def = detail::engine_access::get_class_registry(*eng).find_script_class("PendingLeaf");
 		check_not_null(def);
 		const size_t expected_live = def->live_instances().size();
 		const script_array* input = eng->get_variable("pending_nodes").unchecked_array_node();
@@ -4844,9 +4844,9 @@ public:
 		state.faults = {};
 		check_true(failure.fired, "second submission/registration checkpoint was not reached");
 		check_true(failed, "injected failure did not reach the caller");
-		check_false(eng->parallel_region_active(), "exception left the region active");
+		check_false(detail::engine_access::parallel_region_active(*eng), "exception left the region active");
 		check_false(state.region_running, "exception left the region running");
-		check_false(eng->get_symbolizer()->frozen(), "exception left the symbolizer frozen");
+		check_false(detail::engine_access::get_symbolizer(*eng)->frozen(), "exception left the symbolizer frozen");
 		check_eq(uint32_t(0), input->live_elem_refs, "exception retained an element cursor");
 
 		if (repeated_reload_failure) {
@@ -4871,9 +4871,9 @@ public:
 			check_true(retry_failure.fired, "immediate reload did not retry pending registrations");
 			check_true(reload_failed, "second injected registration failure did not reach the caller");
 			check_true(state.pending_registration_retry, "second failure discarded the remaining retry obligation");
-			check_false(eng->parallel_region_active());
+			check_false(detail::engine_access::parallel_region_active(*eng));
 			check_false(state.region_running);
-			check_false(eng->get_symbolizer()->frozen());
+			check_false(detail::engine_access::get_symbolizer(*eng)->frozen());
 
 			// Evaluate both observations before the assertion so the red diagnostic
 			// reports constructor AND method behavior. Temporaries die at each execute;
@@ -5019,8 +5019,8 @@ public:
 				parallel_for (auto& n : registry_nodes) { n.b = null; n.b = n.a; }
 				registry_shared_leaves();
 			)");
-			auto& state = eng->parallel_state();
-			auto def = eng->get_class_registry().find_script_class("RegistryLeaf");
+			auto& state = detail::engine_access::parallel_state(*eng);
+			auto def = detail::engine_access::get_class_registry(*eng).find_script_class("RegistryLeaf");
 			check_not_null(def);
 			for (int round = 0; round < 40; ++round) {
 				state.worker_overhead_ns = 0.0;
@@ -5035,7 +5035,7 @@ public:
 		test("failed_append_cannot_unregister_a_later_survivor", [this]() {
 			auto eng = make_engine();
 			eng->execute("class RegistryFaultCell {}");
-			auto def = eng->get_class_registry().find_script_class("RegistryFaultCell");
+			auto def = detail::engine_access::get_class_registry(*eng).find_script_class("RegistryFaultCell");
 			check_not_null(def);
 			check_false(def->has_live_instances());
 

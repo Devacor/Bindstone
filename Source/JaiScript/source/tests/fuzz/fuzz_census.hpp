@@ -60,7 +60,7 @@ namespace jai::fuzz::census {
 			if (census) e.vm_coverage_reset();
 		};
 		cfg.after_segment = [&](size_t i, engine& e) {
-			const cell_counters now = e.cells_counters();
+			const cell_counters now = detail::engine_access::cells_counters(e);
 			current.label = segment_label(p, i);
 			current.entries = now.entries - before.entries;
 			current.misses = now.misses - before.misses;

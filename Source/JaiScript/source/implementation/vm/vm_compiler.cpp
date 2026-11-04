@@ -688,7 +688,7 @@ void vm_compiler::patch_jump(size_t at, size_t target) {
 
 uint32_t vm_compiler::add_constant(const script_value& v) {
 	// a compile inside a parallel region (serialized engine-wide) mints its own string: the AST literal's node stays the main thread's
-	if (engine_ && engine_->parallel_region_active() && v.raw_storage_index() == script_value::TYPEID_STRING) [[unlikely]] {
+	if (engine_ && detail::engine_access::parallel_region_active(*engine_) && v.raw_storage_index() == script_value::TYPEID_STRING) [[unlikely]] {
 		chunk_->constants.push_back(v.parallel_detached_copy(const_cast<engine*>(engine_)));
 		return static_cast<uint32_t>(chunk_->constants.size() - 1);
 	}
@@ -6591,8 +6591,8 @@ detail::math_fn vm_compiler::math_alias_operand(const call_expr* call) const {
 	if (identifier_slot_operand(id) != k_invalid_u32) return detail::math_fn::none;
 	const expression* arg = call->arguments[0].get();
 	if (arg->get_type() != node_type::identifier_expr && jai::detail::is_ref_bindable_lvalue(arg)) return detail::math_fn::none;
-	const uint8_t fn = engine_->math_alias_fn(id->symbol_id);
-	return fn >= engine::k_math_alias_rows ? detail::math_fn::none : static_cast<detail::math_fn>(fn);
+	const uint8_t fn = detail::engine_access::math_alias_fn(*engine_, id->symbol_id);
+	return fn >= detail::engine_access::k_math_alias_rows ? detail::math_fn::none : static_cast<detail::math_fn>(fn);
 }
 
 bool vm_compiler::math_alias_call(const expression* e) {

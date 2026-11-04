@@ -82,11 +82,11 @@ namespace jai {
         // where they are used.
         template<typename Engine>
         bool builtin_memory_charge(Engine* a_engine, size_t a_count, size_t a_each = 1) {
-            return !a_engine || a_engine->execution_limits().memory_charge_items(a_count, a_each);
+            return !a_engine || engine_access::execution_limits(*a_engine).memory_charge_items(a_count, a_each);
         }
         template<typename Engine>
         error_propagator builtin_memory_cap(Engine* a_engine) {
-            return raise_memory_cap(a_engine->execution_limits());
+            return raise_memory_cap(engine_access::execution_limits(*a_engine));
         }
         // count copies of a text of `size` bytes, saturated: a reserve past max_size reports like any oversized text
         inline size_t saturating_text_size(size_t a_size, size_t a_count) noexcept {

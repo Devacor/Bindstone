@@ -141,7 +141,7 @@ namespace {
         prepared_callback* prepared_ = nullptr;
     public:
         builtin_callback(const script_value& callback, engine* eng) : fn_(callback.deref().unchecked_as_function()) {
-            backend_ = eng ? eng->get_execution_backend() : nullptr;
+            backend_ = eng ? detail::engine_access::get_execution_backend(*eng) : nullptr;
             prepared_ = backend_ ? backend_->prepare_callback(callback) : nullptr;
         }
         ~builtin_callback() { if (prepared_) { backend_->release_callback(prepared_); } }
@@ -293,7 +293,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
         // engine::memory_cap chokepoint: deny the growth before it exists
         if (engine* eng = ctx.get_engine()) {
-            auto& limits = eng->execution_limits();
+            auto& limits = detail::engine_access::execution_limits(*eng);
             const size_t bytes = sizeof(script_value) + (converted.is_string() ? converted.unchecked_as_string().size() : 0);
             if (!limits.memory_charge(bytes)) [[unlikely]] {
                 return detail::raise_memory_cap(limits);
@@ -483,7 +483,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 				return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), "sort() comparator must be a function");
 			}
 			auto& node = *a_self.unchecked_get_array_storage();
-			auto* backend = a_context.get_engine()->get_execution_backend();
+			auto* backend = detail::engine_access::get_execution_backend(*a_context.get_engine());
 			if (a_args.empty() && node.is_typed() && backend && backend->native_less_available()) {
 				// Direct buffer sorting: no boxing, snapshot or script comparison calls.
 				switch (node.kind()) {
@@ -528,7 +528,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			if (lvalues) { arguments.reserve(2); }
 			std::optional<error_propagator> error;
 			struct SortAborted {};
-			engine::run_pin pin(a_context.get_engine());   // the comparisons are the builtin's callbacks
+			detail::engine_access::run_pin pin(a_context.get_engine());   // the comparisons are the builtin's callbacks
 			try {
 				merge_sort_any_order(values, [&](const script_value& a_left, const script_value& a_right) {
 					if (!predicate) {
@@ -965,8 +965,8 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
         auto converted = detail::convert_container_element(eng, args[1], element_type);
         if (!converted) { return converted.error_value(); }
-        if (!eng->execution_limits().memory_charge(sizeof(script_value))) [[unlikely]] {
-            return detail::raise_memory_cap(eng->execution_limits());
+        if (!detail::engine_access::execution_limits(*eng).memory_charge(sizeof(script_value))) [[unlikely]] {
+            return detail::raise_memory_cap(detail::engine_access::execution_limits(*eng));
         }
         if (!node.is_typed()) {
             node.values().insert(node.values().begin() + static_cast<std::ptrdiff_t>(index), std::move(converted.value()));
@@ -1839,7 +1839,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
             // engine::memory_cap chokepoint: deny the growth before it exists
             if (engine* eng = ctx.get_engine()) {
-                auto& limits = eng->execution_limits();
+                auto& limits = detail::engine_access::execution_limits(*eng);
                 if (!limits.memory_charge(text.size())) [[unlikely]] {
                     return detail::raise_memory_cap(limits);
                 }
@@ -1991,10 +1991,10 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 return checked_result<script_value>(make_error_code(runtime_error_code::internal_error), "Engine reference expired");
             }
 
-            script_value array_val = script_value::make_array(eng->get_type_info_string(), eng);
+            script_value array_val = script_value::make_array(detail::engine_access::get_type_info_string(*eng), eng);
             script_array& result = *array_val.unchecked_get_array_storage();   // array<string> is a handle buffer: push through the node
             // each piece is the array's growth (engine::memory_cap): a denied piece is never added
-            auto& limits = eng->execution_limits();
+            auto& limits = detail::engine_access::execution_limits(*eng);
             auto push_piece = [&](size_t a_at, size_t a_count) {
                 const size_t length = std::min(a_count, str.size() - a_at);
                 if (!limits.memory_charge(sizeof(script_value) + length)) [[unlikely]] { return false; }
@@ -2064,13 +2064,13 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             // the handle type: a declared weak_ptr<T> names T itself
             auto weak_type_info = self.get_type_info();
             if (weak_type_info && weak_type_info->element_type() && weak_type_info->element_type()->base_type == script_value_type::jai_object_type) {
-                result.set_type_info(type_info_ptr{ctx.get_engine()->get_type_info_shared_ptr(weak_type_info->element_type().get())});
+                result.set_type_info(type_info_ptr{detail::engine_access::get_type_info_shared_ptr(*ctx.get_engine(), weak_type_info->element_type().get())});
             } else if (weak_type_info && weak_type_info->element_type()) {
                 result.set_type_info(weak_type_info->element_type());
             } else {
                 // Fallback: use the object type
                 if (auto eng = ctx.get_engine()) {
-                    result.set_type_info(eng->get_type_info_object(locked->type_id()));
+                    result.set_type_info(detail::engine_access::get_type_info_object(*eng, locked->type_id()));
                 }
             }
 
@@ -2264,7 +2264,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 namespace detail {
 
 void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
-    auto* sym = eng.get_symbolizer();
+    auto* sym = engine_access::get_symbolizer(eng);
     if (!sym) { return; }
     // LOCAL methods only (has_method, not defines_method): warn where the shadow is
     // introduced, once per colliding method per class definition - subclasses that merely
@@ -2272,7 +2272,7 @@ void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
     for (std::string_view name : k_shadowable_handle_method_names) {
         if (def.has_method(sym->intern(name))) {
             std::string m(name);
-            eng.report_script_warning(
+            engine_access::report_script_warning(eng, 
                 "class method '" + m + "' shadows the builtin shared_ptr " + m +
                 "() - the builtin is unreachable on " + def.get_name() +
                 " instances; rename the class method to reach it");

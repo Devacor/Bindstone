@@ -205,7 +205,7 @@ public:
 			check_true(engine->execute("random r(3); var nest = [[r], [r]]; array<int> outs = [0, 0]; parallel_for (auto& g, auto& o : nest, outs) { o = g[0].next_int(1, 9); } outs[0] == outs[1];").as<bool>());
 			auto* raw = engine.get();
 			engine->add_function("share_generator", [raw](const script_value& a_from, const script_value& a_to) {
-				const uint64_t id = raw->symbolize("rng");
+				const uint64_t id = detail::engine_access::symbolize(*raw, "rng");
 				auto* from = static_cast<class_instance*>(a_from.get_object_holder()->object());
 				auto* to = static_cast<class_instance*>(a_to.get_object_holder()->object());
 				*to->find_field_value(id) = *from->find_field_value(id);

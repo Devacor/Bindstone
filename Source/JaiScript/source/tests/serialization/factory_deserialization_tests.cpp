@@ -101,7 +101,7 @@ public:
             original->set_data("test_data");
 
             // Wrap in class_instance for serialization
-            auto class_def = eng->get_class_definition("ContextRequiredObject");
+            auto class_def = detail::engine_access::get_class_definition(*eng, "ContextRequiredObject");
             auto instance = class_def->create_instance();
             instance->set_native(script_value::make_cpp_object("ContextRequiredObject", class_def->get_type_id(), original, eng.get()));
             script_value obj_val = script_value::make_object("ContextRequiredObject", instance, eng.get());
@@ -166,7 +166,7 @@ public:
             original->set_name("TestObject");
 
             // Wrap in class_instance for serialization
-            auto class_def = eng->get_class_definition("PropertyPrereadObject");
+            auto class_def = detail::engine_access::get_class_definition(*eng, "PropertyPrereadObject");
             auto instance = class_def->create_instance();
             instance->set_native(script_value::make_cpp_object("PropertyPrereadObject", class_def->get_type_id(), original, eng.get()));
             script_value obj_val = script_value::make_object("PropertyPrereadObject", instance, eng.get());
@@ -218,7 +218,7 @@ public:
             original->set_value(999);
 
             // Wrap in class_instance for serialization
-            auto class_def = eng->get_class_definition("ComplexObject");
+            auto class_def = detail::engine_access::get_class_definition(*eng, "ComplexObject");
             auto instance = class_def->create_instance();
             instance->set_native(script_value::make_cpp_object("ComplexObject", class_def->get_type_id(), original, eng.get()));
             script_value obj_val = script_value::make_object("ComplexObject", instance, eng.get());

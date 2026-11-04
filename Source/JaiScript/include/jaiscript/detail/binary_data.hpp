@@ -216,7 +216,7 @@ namespace jai::binary {
 
 	// n bytes as an array<uint8>, one copy
 	inline script_value byte_array(engine* eng, const unsigned char* p, size_t n) {
-		script_value out = script_value::make_array(eng->get_type_info_uint8(), eng);
+		script_value out = script_value::make_array(detail::engine_access::get_type_info_uint8(*eng), eng);
 		out.unchecked_get_array_storage()->bytes().assign(p, p + n);
 		return out;
 	}
@@ -370,7 +370,7 @@ namespace jai::binary {
 		// naming the bound that stopped it, and moves nothing
 		std::string text() {
 			const size_t left = remaining();
-			const size_t limit = get_engine()->execution_limits().binary_scan_limit;
+			const size_t limit = detail::engine_access::execution_limits(*get_engine()).binary_scan_limit;
 			const size_t window = limit < left ? limit : left;
 			const char* p = data().data() + pos_;
 			const void* nul = window ? std::memchr(p, 0, window) : nullptr;
@@ -401,7 +401,7 @@ namespace jai::binary {
 		script_value unpack(const layout& l) {
 			engine* eng = get_engine();
 			if (l.bytes > remaining()) { probe(l); }
-			script_value out = script_value::make_map(eng->get_type_info_string(), nullptr, eng);
+			script_value out = script_value::make_map(detail::engine_access::get_type_info_string(*eng), nullptr, eng);
 			script_map& m = out.as_map();
 			for (const auto& f : l.fields) { m.insert_or_assign(f.key, read_field(f)); }
 			return out;
@@ -548,7 +548,7 @@ namespace jai::binary {
 		void charge_growth(size_t a_end) {
 			if (!engine_) { return; }
 			const size_t step = std::max<size_t>(a_end - charged_, 4096);
-			auto& limits = engine_->execution_limits();
+			auto& limits = detail::engine_access::execution_limits(*engine_);
 			if (!limits.memory_charge(step)) [[unlikely]] { jai::detail::throw_memory_cap(limits); }
 			charged_ += step;
 		}
@@ -573,7 +573,7 @@ namespace jai::binary {
 		const script_value& ctor = cls.deref();
 		if (!ctor.is_function()) { raise("read expects a class, got " + value_kind_name(ctor)); }
 		checked_result<script_value> made = [&]() {
-			engine::construction_access_waiver waiver(eng);
+			detail::engine_access::construction_access_waiver waiver(eng);
 			return ctor.as_function()(std::vector<script_value>{});
 		}();
 		if (!made) { raise("read could not construct the class: " + eng->format_error(made)); }
@@ -601,7 +601,7 @@ namespace jai::binary {
 			raise("Cannot read " + cname + " from a layout of " + count_text(l.fields.size(), " field", " fields") + ": " + cname + " has " +
 				count_text(slots.size(), " field", " fields"));
 		}
-		auto* sym = eng->get_symbolizer();
+		auto* sym = detail::engine_access::get_symbolizer(*eng);
 		for (size_t i = 0; i < slots.size(); ++i) {
 			const field& f = l.fields[i];
 			type_info_ptr declared = slots[i].first->get_field_declared_type(slots[i].second);
@@ -639,8 +639,8 @@ namespace jai::binary {
 			.method("size", [](const layout& l) -> script_int { return static_cast<script_int>(l.bytes); })
 			.method("count", [](const layout& l) -> script_int { return static_cast<script_int>(l.fields.size()); })
 			.build();
-		const uint64_t width_id = eng.get_class_definition("binary::width")->get_type_id();
-		const uint64_t layout_id = eng.get_class_definition("binary::layout")->get_type_id();
+		const uint64_t width_id = detail::engine_access::get_class_definition(eng, "binary::width")->get_type_id();
+		const uint64_t layout_id = detail::engine_access::get_class_definition(eng, "binary::layout")->get_type_id();
 
 		dynamic_binder<reader>(eng, "binary::reader")
 			.strict_signatures()
@@ -672,7 +672,7 @@ namespace jai::binary {
 				return read_instance(r, cls, *lay);
 			})
 			.build();
-		auto reader_def = eng.get_class_definition("binary::reader");
+		auto reader_def = detail::engine_access::get_class_definition(eng, "binary::reader");
 		const uint64_t reader_id = reader_def->get_type_id();
 		reader_def->add_method("unpack", [reader_id, width_id, layout_id](const std::vector<script_value>& args) -> checked_result<script_value> {
 			reader* r = jai::detail::extract_cpp_object_ptr<reader>(args[0], reader_id);
@@ -711,46 +711,46 @@ namespace jai::binary {
 			.method("to_string", [](const writer& w) -> std::string { return w.data(); })
 			.build();
 
-		auto& ns = eng.script_namespaces()[eng.symbolize("binary")];
+		auto& ns = detail::engine_access::script_namespaces(eng)[detail::engine_access::symbolize(eng, "binary")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		engine* e = &eng;
-		auto global = eng.get_global_environment();
+		auto global = detail::engine_access::get_global_environment(eng);
 		for (const char* cls : {"reader", "writer"}) {
 			auto ctor = global->get(std::string("binary::") + cls);
-			if (ctor) { ns->variables[eng.symbolize(cls)] = ctor.value(); }
+			if (ctor) { ns->variables[detail::engine_access::symbolize(eng, cls)] = ctor.value(); }
 		}
-		auto width_value = [e](kind k, uint64_t length) { return e->make_value_object(std::make_shared<width>(width{k, length})); };
+		auto width_value = [e](kind k, uint64_t length) { return detail::engine_access::make_value_object(*e, std::make_shared<width>(width{k, length})); };
 		const std::pair<const char*, kind> widths[] = {
 			{"int8", kind::int8}, {"int16", kind::int16}, {"int32", kind::int32}, {"int64", kind::int64}, {"uint8", kind::uint8},
 			{"uint16", kind::uint16}, {"uint32", kind::uint32}, {"float32", kind::float32}, {"float64", kind::float64}};
-		for (const auto& [name, k] : widths) { ns->variables[eng.symbolize(name)] = width_value(k, 0); }
-		ns->variables[eng.symbolize("text")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
+		for (const auto& [name, k] : widths) { ns->variables[detail::engine_access::symbolize(eng, name)] = width_value(k, 0); }
+		ns->variables[detail::engine_access::symbolize(eng, "text")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
 			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::text expects one int length"); }
 			const script_int n = args[0].deref().as_int();
 			if (n < 0) { raise("binary::text expects a length of 0 or more, got " + std::to_string(n)); }
 			return width_value(kind::text, static_cast<uint64_t>(n));
 		}, &eng);
-		ns->variables[eng.symbolize("bytes")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
+		ns->variables[detail::engine_access::symbolize(eng, "bytes")] = script_value::make_function([width_value](const std::vector<script_value>& args) -> checked_result<script_value> {
 			if (args.size() != 1 || !args[0].deref().is_int()) { raise("binary::bytes expects one int length"); }
 			const script_int n = args[0].deref().as_int();
 			if (n < 0) { raise("binary::bytes expects a length of 0 or more, got " + std::to_string(n)); }
 			return width_value(kind::bytes, static_cast<uint64_t>(n));
 		}, &eng);
 		add_lanes(eng);
-		ns->variables[eng.symbolize("layout")] = script_value::make_function([e, width_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-			return e->make_value_object(std::make_shared<layout>(make_layout(args.data(), args.size(), "binary::layout", e, width_id)));
+		ns->variables[detail::engine_access::symbolize(eng, "layout")] = script_value::make_function([e, width_id](const std::vector<script_value>& args) -> checked_result<script_value> {
+			return detail::engine_access::make_value_object(*e, std::make_shared<layout>(make_layout(args.data(), args.size(), "binary::layout", e, width_id)));
 		}, &eng);
 
-		auto& strings = eng.script_namespaces()[eng.symbolize("string")];
+		auto& strings = detail::engine_access::script_namespaces(eng)[detail::engine_access::symbolize(eng, "string")];
 		if (!strings) { strings = std::make_shared<script_namespace_data>(); }
-		strings->variables[eng.symbolize("from_bytes")] = script_value::make_function([e](const std::vector<script_value>& args) -> checked_result<script_value> {
+		strings->variables[detail::engine_access::symbolize(eng, "from_bytes")] = script_value::make_function([e](const std::vector<script_value>& args) -> checked_result<script_value> {
 			if (args.size() != 1) { raise("string::from_bytes expects exactly 1 argument"); }
 			const script_value& a = args[0].deref();
 			if (!a.is_array()) { raise("string::from_bytes expects an array of bytes, got " + value_kind_name(a)); }
 			const script_array* node = a.unchecked_array_node();
 			const size_t n = node ? node->size() : 0;
 			auto bad = [](size_t i, const std::string& what) { raise("string::from_bytes expects bytes (0 to 255): element " + std::to_string(i) + " is " + what); };
-			if (!e->execution_limits().memory_charge(n)) [[unlikely]] { return jai::detail::raise_memory_cap(e->execution_limits()); }
+			if (!detail::engine_access::execution_limits(*e).memory_charge(n)) [[unlikely]] { return jai::detail::raise_memory_cap(detail::engine_access::execution_limits(*e)); }
 			std::string out(n, '\0');
 			if (n == 0) { return script_value(std::move(out), e); }
 			if (node->kind() == script_array::kind_t::u8 || node->kind() == script_array::kind_t::c8) {
@@ -781,7 +781,7 @@ namespace jai::binary {
 		}, &eng);
 	}
 
-	inline script_value make_reader(engine& eng, const script_value& source) { return eng.make_value_object(std::make_shared<reader>(&eng, source)); }
+	inline script_value make_reader(engine& eng, const script_value& source) { return detail::engine_access::make_value_object(eng, std::make_shared<reader>(&eng, source)); }
 
 	// The direct lanes (class_definition::native_method) for the members hot loops call: exact int / float / string
 	// arguments only, anything else declines to the bound method
@@ -812,9 +812,9 @@ namespace jai::binary {
 
 	inline void add_lanes(engine& eng) {
 		using N = class_definition::native_method;
-		auto reader_def = eng.get_class_definition("binary::reader");
-		auto writer_def = eng.get_class_definition("binary::writer");
-		auto on = [&](class_definition& def, const char* name, N fn) { def.add_native_method(eng.symbolize(name), fn); };
+		auto reader_def = detail::engine_access::get_class_definition(eng, "binary::reader");
+		auto writer_def = detail::engine_access::get_class_definition(eng, "binary::writer");
+		auto on = [&](class_definition& def, const char* name, N fn) { def.add_native_method(detail::engine_access::symbolize(eng, name), fn); };
 		class_definition& r = *reader_def;
 		on(r, "int8", &read_integer_lane<kind::int8>);
 		on(r, "int16", &read_integer_lane<kind::int16>);
@@ -912,8 +912,8 @@ namespace jai::detail {
 					symbols->intern(range), symbols->intern(std::to_string(size)));
 			}
 			engine* eng = ctx.get_engine();
-			if (!eng->execution_limits().memory_charge(static_cast<size_t>(count))) [[unlikely]] {
-				return raise_memory_cap(eng->execution_limits());
+			if (!engine_access::execution_limits(*eng).memory_charge(static_cast<size_t>(count))) [[unlikely]] {
+				return raise_memory_cap(engine_access::execution_limits(*eng));
 			}
 			return binary::byte_array(eng, reinterpret_cast<const unsigned char*>(s.data()) + offset, static_cast<size_t>(count));
 		};

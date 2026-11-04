@@ -2154,8 +2154,8 @@ public:
                 auto obj = e->execute("c");
                 auto instance = obj.as<jai::strong_ptr<jai::class_instance>>();
                 check_not_null(instance.get());
-                uint64_t v_id = e->symbolize("v");
-                uint64_t w_id = e->symbolize("w");
+                uint64_t v_id = detail::engine_access::symbolize(*e, "v");
+                uint64_t w_id = detail::engine_access::symbolize(*e, "w");
                 // Converts like '='
                 instance->set_field(v_id, jai::script_value(4.7, e.get()));
                 check_eq((int64_t)4, e->execute("c.v").as_int());
@@ -3159,7 +3159,7 @@ public:
             jai::stdlib::register_all(e);
             auto ints = e->execute("array<int> ints = [1, 2, 3]; ints");
             check(ints.unchecked_array_node()->kind() == jai::script_array::kind_t::i64, "source is an i64 buffer");
-            jai::type_info_ptr open{e->get_type_info_array(e->get_type_info_any())};
+            jai::type_info_ptr open{detail::engine_access::get_type_info_array(*e, detail::engine_access::get_type_info_any(*e))};
             auto out = jai::detail::enforce_container_boundary(ints, open, e.get());
             check(out.value.has_value(), "open boundary admits a typed source");
             check(out.value->unchecked_array_node() != ints.unchecked_array_node(), "rebuilt into a fresh node");
@@ -3743,10 +3743,10 @@ public:
                 auto instance = e->execute("h").as<jai::strong_ptr<jai::class_instance>>();
                 check_not_null(instance.get());
                 bool threw = false;
-                try { instance->set_field(e->symbolize("c"), jai::script_value((int64_t)5, e.get())); }
+                try { instance->set_field(detail::engine_access::symbolize(*e, "c"), jai::script_value((int64_t)5, e.get())); }
                 catch (const std::exception& ex) { threw = std::string(ex.what()).find("Cannot assign int to field 'c' of H (declared C)") != std::string::npos; }
                 check(threw, "set_field: ctor conversion is a script row, refused from C++");
-                instance->set_field(e->symbolize("s"), jai::script_value((int64_t)5, e.get()));
+                instance->set_field(detail::engine_access::symbolize(*e, "s"), jai::script_value((int64_t)5, e.get()));
                 check_eq(std::string("5"), e->execute("h.s").as<std::string>(), "set_field: to_string row still converts");
                 e->execute("class R { int f = 0; } R r = R(); r.f = 5; class X { int to_int() { return 7; } } class R2 { X f = X(); } R2 r2 = R2();");
                 e->execute("class R { C f; }");

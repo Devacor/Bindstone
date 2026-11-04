@@ -24,13 +24,13 @@ public:
 private:
 	// the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
 	static std::vector<uint8_t> unstamped_bite_bytes(engine& a_engine, const std::string& a_source) {
-		const auto templates = a_engine.get_registered_template_types();
-		lexer lex(a_source, a_engine.get_symbolizer());
+		const auto templates = detail::engine_access::get_registered_template_types(a_engine);
+		lexer lex(a_source, detail::engine_access::get_symbolizer(a_engine));
 		auto tokens = lex.tokenize();
-		parser syntax(tokens, a_engine.get_symbolizer(), &a_engine, templates);
+		parser syntax(tokens, detail::engine_access::get_symbolizer(a_engine), &a_engine, templates);
 		auto declarations = syntax.parse();
 		check_true(bool(declarations), "fixture must parse: " + a_source);
-		return detail::serialize_jaibite(declarations.value(), *a_engine.get_symbolizer(), a_engine.registration_fingerprint());
+		return detail::serialize_jaibite(declarations.value(), *detail::engine_access::get_symbolizer(a_engine), a_engine.registration_fingerprint());
 	}
 
 	void rules_456_and_controls() {

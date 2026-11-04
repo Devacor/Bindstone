@@ -24,15 +24,15 @@ namespace jai::detail {
 
 	// A class a namespace declares is named ns::Name (C++); the namespace lists it under its bare name, the one its blocks read
 	inline void register_namespace_class(engine& eng, script_namespace_data& ns, const class_decl& decl) {
-		auto def = eng.get_class_definition(std::string(decl.name));
+		auto def = engine_access::get_class_definition(eng, std::string(decl.name));
 		if (!def) { return; }
 		const size_t cut = decl.name.rfind("::");
-		ns.classes[eng.get_symbolizer()->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2))] = std::move(def);
+		ns.classes[engine_access::get_symbolizer(eng)->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2))] = std::move(def);
 	}
 
 	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {
 		if (!ns.scope) {
-			ns.scope = std::make_shared<environment>(eng.get_global_environment(), eng.get_symbolizer());
+			ns.scope = std::make_shared<environment>(engine_access::get_global_environment(eng), engine_access::get_symbolizer(eng));
 			ns.scope->mark_namespace_scope();
 		}
 		return ns.scope;
@@ -70,7 +70,7 @@ namespace jai::detail {
 		if (!path_id) {
 			return std::nullopt;
 		}
-		auto& spaces = eng.script_namespaces();
+		auto& spaces = engine_access::script_namespaces(eng);
 		auto ns_it = spaces.find(*path_id);
 		if (ns_it == spaces.end() || !ns_it->second) {
 			return std::nullopt;

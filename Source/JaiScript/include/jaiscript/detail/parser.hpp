@@ -106,11 +106,16 @@ namespace jai {
         bool check(token_type type) const;
         bool match(token_type type);
         bool match(std::initializer_list<token_type> types);
-        checked_result<token> consume(token_type type, const std::string& message);
+        checked_result<token> consume(token_type type, std::string_view message);
+        checked_result<void> expect(token_type type, std::string_view message);   // consume, when the token itself is not needed
+        error_propagator expected_token(std::string_view message);
         
         // declaration parsing
         checked_result<declaration_ptr> declaration();
         checked_result<declaration_ptr> declaration_body();
+        checked_result<declaration_ptr> attributed_declaration();
+        checked_result<declaration_ptr> declaration_rest();
+        checked_result<declaration_ptr> statement_declaration();
         checked_result<declaration_ptr> class_declaration(bool nocopy = false, std::string_view space = {});
         checked_result<declaration_ptr> namespace_declaration();
         checked_result<declaration_ptr> function_declaration();
@@ -135,12 +140,17 @@ namespace jai {
         bool const_method_suffix();   // `) const`: JaiScript has no const methods
         bool untyped_declaration_ahead() const;   // IDENT followed by ';' or '='
         bool untyped_member_declaration_ahead() const;   // the same, or a keyword other than a type naming a class or namespace member
+        bool check_mode_attribute_ahead() const;
         checked_result<uint8_t> check_mode_attribute();
         std::optional<std::string> parse_operator_method_symbol();
         
         // statement parsing
         checked_result<statement_ptr> statement();
         checked_result<statement_ptr> statement_body();
+        checked_result<statement_ptr> attributed_statement();
+        checked_result<statement_ptr> block_map_error();
+        checked_result<statement_ptr> import_statement();
+        checked_result<statement_ptr> fallthrough_statement();
         checked_result<statement_ptr> expression_statement();
         checked_result<statement_ptr> block_statement();
         checked_result<statement_ptr> if_statement();
@@ -166,23 +176,32 @@ namespace jai {
         
         // expression parsing (precedence climbing)
         checked_result<expression_ptr> expression();
-        checked_result<expression_ptr> assignment();
-        checked_result<expression_ptr> ternary();
-        checked_result<expression_ptr> coalesce();
         checked_result<expression_ptr> null_chain_rest(size_t chain_start, const std::vector<size_t>& links, expression_ptr expr);
-        checked_result<expression_ptr> logical_or();
-        checked_result<expression_ptr> logical_and();
-        checked_result<expression_ptr> bitwise_or();
-        checked_result<expression_ptr> bitwise_xor();
-        checked_result<expression_ptr> bitwise_and();
-        checked_result<expression_ptr> equality();
-        checked_result<expression_ptr> relational();
-        checked_result<expression_ptr> shift();
-        checked_result<expression_ptr> additive();
-        checked_result<expression_ptr> multiplicative();
+        // an operand and every operator after it that binds at least min_precedence (= is 0, * / % the tightest)
+        checked_result<expression_ptr> operator_expression(int min_precedence);
         checked_result<expression_ptr> unary();
         checked_result<expression_ptr> postfix();
         checked_result<expression_ptr> primary();
+        // what follows a production's first operand parses in a continuation of its own: a level of nesting holds only small frames
+        checked_result<expression_ptr> operator_rest(expression_ptr left, int min_precedence, size_t operand_start);
+        checked_result<expression_ptr> assignment_rest(expression_ptr target, size_t target_start);
+        checked_result<expression_ptr> coalesce_assignment(expression_ptr target, size_t target_start);
+        checked_result<expression_ptr> ternary_rest(expression_ptr condition);
+        checked_result<expression_ptr> coalesce_rest(expression_ptr left);
+        checked_result<expression_ptr> unary_operator();
+        bool postfix_operator_ahead() const;
+        checked_result<expression_ptr> postfix_rest(expression_ptr expr, size_t chain_start, bool chain_starts_clean);
+        checked_result<expression_ptr> postfix_operator(expression_ptr expr, std::vector<size_t>& null_links);
+        checked_result<expression_ptr> brace_construction(expression_ptr expr);
+        checked_result<expression_ptr> static_member_access(expression_ptr expr);
+        checked_result<expression_ptr> subscript(expression_ptr expr);
+        checked_result<expression_ptr> primary_rest();
+        checked_result<expression_ptr> new_expression(bool make_shared_spelling);
+        checked_result<expression_ptr> identifier_expression();
+        std::optional<checked_result<expression_ptr>> type_constructor_expression();
+        checked_result<expression_ptr> parenthesized();
+        checked_result<expression_ptr> bracket_expression();
+        checked_result<expression_ptr> cast_expression();
         
         // Helper parsers
         checked_result<expression_ptr> finish_call(expression_ptr callee);
@@ -190,7 +209,19 @@ namespace jai {
         bool looks_like_map_literal();  // Lookahead to distinguish map literals from blocks
         bool json_map_ahead(size_t offset = 1) const;
         checked_result<expression_ptr> parse_map_literal();
+        expression_ptr identifier_map_key();
         checked_result<type_info_ptr> parse_type();
+        // the generic types nest: each parses in its own frame and builds its type_info in another (a type_info is large)
+        checked_result<type_info_ptr> array_type();
+        checked_result<type_info_ptr> map_type();
+        checked_result<type_info_ptr> weak_ptr_type();
+        checked_result<type_info_ptr> shared_ptr_type();
+        checked_result<type_info_ptr> named_type();
+        type_info_ptr byte_element_type();
+        type_info_ptr array_type_of(const type_info_ptr& element);
+        type_info_ptr map_type_of(const type_info_ptr& key, const type_info_ptr& value);
+        type_info_ptr weak_ptr_type_of(const type_info_ptr& pointee);
+        type_info_ptr shared_ptr_type_of(const type_info_ptr& pointee);
 
         // Constant folding optimization: evaluates literal operations at parse time
         expression_ptr try_constant_fold(expression_ptr left, const token& op, expression_ptr right);
@@ -202,11 +233,14 @@ namespace jai {
         // Lambda parsing (anonymous `function (params) {...}` desugars to a no-capture
         // lambda through the shared tail)
         checked_result<expression_ptr> lambda_expression();
+        checked_result<void> lambda_captures(lambda_expr& lambda);
+        checked_result<void> lambda_signature(lambda_expr& lambda);
         checked_result<expression_ptr> anonymous_function_expression();
         checked_result<expression_ptr> finish_lambda_after_captures(std::shared_ptr<lambda_expr> lambda);
         // the scope, the parameter slots and the body of a lambda whose parameters are parsed; an arrow function's body may
         // be one expression, its value returned
         checked_result<expression_ptr> finish_lambda_body(std::shared_ptr<lambda_expr> lambda, bool expression_body);
+        checked_result<expression_ptr> lambda_expression_body(std::shared_ptr<lambda_expr> lambda);
         // (params) => expr, (params) => { body }, name => expr: a function expression, closing over its scope by reference
         bool arrow_function_ahead() const;
         checked_result<expression_ptr> arrow_function_expression();
@@ -221,7 +255,7 @@ namespace jai {
         bool reference_method_head() const;
         
         // Helper for parsing > in generic contexts (handles >> token splitting)
-        void consume_greater_in_generic(const std::string& message);
+        void consume_greater_in_generic(std::string_view message);
         
         // every recursive production asks it first: nesting past the host thread's stack is one parse error, never 0xC00000FD
         detail::native_stack_mark stack_;

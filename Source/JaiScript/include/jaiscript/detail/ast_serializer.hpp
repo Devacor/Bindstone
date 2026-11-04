@@ -22,8 +22,10 @@
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/map_entry_binding.hpp>
+#include <jaiscript/detail/native_stack.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <array>
 #include <cstring>
 #include <unordered_map>
 #include <unordered_set>
@@ -88,10 +90,9 @@ namespace jai::detail {
     // path the jaibite is loaded under, so a moved folder still names its files
     // (stack traces, breakpoints, engine::current_source_file).
     inline constexpr std::string_view k_jaibite_own_file = "";
-    inline constexpr int k_jaibite_max_depth = 1000;
 
-    [[noreturn]] inline void jaibite_fail(const std::string& why) {
-        throw jai::runtime_error("jaibite: " + why);
+    [[noreturn]] JAI_NOINLINE inline void jaibite_fail(std::string_view why) {
+        throw jai::runtime_error("jaibite: " + std::string(why));
     }
 
     class ast_writer {
@@ -216,10 +217,8 @@ namespace jai::detail {
             varint(t->native_size);
             flag(t->is_signed);
             varint(t->type_params.size());
-            ++depth_;
-            if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("type nesting too deep");
+            if (stack_.low()) jaibite_fail("type nesting too deep");
             for (const auto& p : t->type_params) type(p);
-            --depth_;
         }
 
         // AST literals are engine-less placeholder values (ast_literal_tag) — scalar payloads only.
@@ -269,367 +268,485 @@ namespace jai::detail {
 
         void node(const ast_node* n) {
             if (!n) { u8(0xFF); return; }
-            ++depth_;
-            if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("AST nesting too deep");
+            if (stack_.low()) jaibite_fail("AST nesting too deep");
             u8(uint8_t(n->get_type()));
             location(n->location);
             if (n->get_type() >= node_type::expression_stmt) u8(static_cast<const statement*>(n)->check_mode_attr);
             switch (n->get_type()) {
-                case node_type::literal_expr: {
-                    auto* e = static_cast<const literal_expr*>(n);
-                    literal(e->value);
+                case node_type::literal_expr:
+                    write_literal_expr(n);
                     break;
-                }
-                case node_type::identifier_expr: {
-                    auto* e = static_cast<const identifier_expr*>(n);
-                    str(e->name);
-                    symbol(e->symbol_id, UINT64_MAX);
-                    slot(e->slot_index);
-                    flag(e->global_qualified);   // ::name is pure syntax - not re-derivable
+                case node_type::identifier_expr:
+                    write_identifier_expr(n);
                     break;
-                }
-                case node_type::binary_expr: {
-                    auto* e = static_cast<const binary_expr*>(n);
-                    node(e->left.get());
-                    tok(e->op);
-                    node(e->right.get());
+                case node_type::binary_expr:
+                    write_binary_expr(n);
                     break;
-                }
-                case node_type::unary_expr: {
-                    auto* e = static_cast<const unary_expr*>(n);
-                    tok(e->op);
-                    node(e->operand.get());
-                    flag(e->is_postfix);
+                case node_type::unary_expr:
+                    write_unary_expr(n);
                     break;
-                }
-                case node_type::assignment_expr: {
-                    auto* e = static_cast<const assignment_expr*>(n);
-                    node(e->target.get());
-                    tok(e->op);
-                    node(e->value.get());
-                    u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0) | (e->yields_reference ? 4 : 0)));
+                case node_type::assignment_expr:
+                    write_assignment_expr(n);
                     break;
-                }
-                case node_type::call_expr: {
-                    auto* e = static_cast<const call_expr*>(n);
-                    node(e->callee.get());
-                    varint(e->arguments.size());
-                    for (const auto& a : e->arguments) node(a.get());
+                case node_type::call_expr:
+                    write_call_expr(n);
                     break;
-                }
-                case node_type::member_expr: {
-                    auto* e = static_cast<const member_expr*>(n);
-                    node(e->object.get());
-                    str(e->member);
-                    symbol(e->member_id, UINT64_MAX);
-                    symbol(e->getter_id, UINT64_MAX);
-                    flag(e->is_arrow);
-                    flag(e->is_static);
-                    flag(e->null_safe);
+                case node_type::member_expr:
+                    write_member_expr(n);
                     break;
-                }
-                case node_type::lambda_expr: {
-                    auto* e = static_cast<const lambda_expr*>(n);
-                    ++frame_depth_;
-                    u8(uint8_t(e->default_capture));
-                    varint(e->captures.size());
-                    for (const auto& c : e->captures) {
-                        str(c.name);
-                        flag(c.by_reference);
-                        symbol(c.symbol_id, UINT64_MAX);
-                        slot(c.outer_slot);
-                        node(c.initializer.get());
-                    }
-                    parameters(e->parameters);
-                    type(e->return_type);
-                    node(e->body.get());
-                    varint(e->local_count);
-                    outer_slot_plan(e->outer_slot_plan, e->outer_slot_plan_built);
-                    varint(e->chained_outer_slots.size());
-                    for (const auto& [sym, s] : e->chained_outer_slots) { symbol(sym, UINT64_MAX); slot(s); }
-                    varint(e->chained_outer_names.size());
-                    for (uint64_t sym : e->chained_outer_names) symbol(sym, UINT64_MAX);
-                    --frame_depth_;
+                case node_type::lambda_expr:
+                    write_lambda_expr(n);
                     break;
-                }
-                case node_type::new_expr: {
-                    auto* e = static_cast<const new_expr*>(n);
-                    type(e->type);
-                    varint(e->arguments.size());
-                    for (const auto& a : e->arguments) node(a.get());
+                case node_type::new_expr:
+                    write_new_expr(n);
                     break;
-                }
-                case node_type::ternary_expr: {
-                    auto* e = static_cast<const ternary_expr*>(n);
-                    node(e->condition.get());
-                    node(e->then_expression.get());
-                    node(e->else_expression.get());
+                case node_type::ternary_expr:
+                    write_ternary_expr(n);
                     break;
-                }
-                case node_type::array_literal_expr: {
-                    auto* e = static_cast<const array_literal_expr*>(n);
-                    varint(e->elements.size());
-                    for (const auto& el : e->elements) node(el.get());
+                case node_type::array_literal_expr:
+                    write_array_literal_expr(n);
                     break;
-                }
-                case node_type::map_literal_expr: {
-                    auto* e = static_cast<const map_literal_expr*>(n);
-                    varint(e->entries.size());
-                    for (const auto& [k, v] : e->entries) { node(k.get()); node(v.get()); }
+                case node_type::map_literal_expr:
+                    write_map_literal_expr(n);
                     break;
-                }
                 case node_type::this_expr:
                 case node_type::super_expr:
                     break;
-                case node_type::throw_expr: {
-                    auto* e = static_cast<const throw_expr*>(n);
-                    node(e->value.get());
+                case node_type::throw_expr:
+                    write_throw_expr(n);
                     break;
-                }
-                case node_type::yield_expr: {
-                    auto* e = static_cast<const yield_expr*>(n);
-                    node(e->value.get());
+                case node_type::yield_expr:
+                    write_yield_expr(n);
                     break;
-                }
-                case node_type::cast_expr: {
-                    auto* e = static_cast<const cast_expr*>(n);
-                    type(e->target);
-                    u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0) | (e->binding_ref ? 4 : 0)));
-                    node(e->operand.get());
+                case node_type::cast_expr:
+                    write_cast_expr(n);
                     break;
-                }
-                case node_type::expression_stmt: {
-                    auto* s = static_cast<const expression_stmt*>(n);
-                    node(s->expression.get());
+                case node_type::expression_stmt:
+                    write_expression_stmt(n);
                     break;
-                }
-                case node_type::block_stmt: {
-                    auto* s = static_cast<const block_stmt*>(n);
-                    varint(s->declarations.size());
-                    for (const auto& d : s->declarations) node(d.get());
+                case node_type::block_stmt:
+                    write_block_stmt(n);
                     break;
-                }
-                case node_type::if_stmt: {
-                    auto* s = static_cast<const if_stmt*>(n);
-                    node(s->condition.get());
-                    node(s->then_statement.get());
-                    node(s->else_statement.get());
+                case node_type::if_stmt:
+                    write_if_stmt(n);
                     break;
-                }
-                case node_type::while_stmt: {
-                    auto* s = static_cast<const while_stmt*>(n);
-                    node(s->condition.get());
-                    node(s->body.get());
+                case node_type::while_stmt:
+                    write_while_stmt(n);
                     break;
-                }
-                case node_type::for_stmt: {
-                    auto* s = static_cast<const for_stmt*>(n);
-                    node(s->initializer.get());
-                    node(s->condition.get());
-                    node(s->update.get());
-                    node(s->body.get());
+                case node_type::for_stmt:
+                    write_for_stmt(n);
                     break;
-                }
-                case node_type::range_for_stmt: {
-                    auto* s = static_cast<const range_for_stmt*>(n);
-                    type(s->auto_spelled ? type_info_ptr{} : s->element_type);   // auto stays auto: the checker re-types it at load
-                    str(s->variable_name);
-                    symbol(s->variable_name_id, UINT64_MAX);
-                    slot(s->variable_slot_index);
-                    flag(s->is_reference);
-                    flag(s->is_const);
-                    node(s->container.get());
-                    node(s->body.get());
+                case node_type::range_for_stmt:
+                    write_range_for_stmt(n);
                     break;
-                }
-                case node_type::parallel_for_stmt: {
-                    auto* s = static_cast<const parallel_for_stmt*>(n);
-                    std::vector<parameter> all{ s->loop_param };
-                    all.insert(all.end(), s->extra_params.begin(), s->extra_params.end());
-                    ++frame_depth_;
-                    parameters(all);
-                    --frame_depth_;
-                    varint(s->local_count);
-                    varint(s->frame_captures.size());
-                    for (const auto& [sym, slot] : s->frame_captures) { symbol(sym, UINT64_MAX); varint(slot); }
-                    node(s->container.get());
-                    varint(s->extra_containers.size());
-                    for (const auto& c : s->extra_containers) node(c.get());
-                    ++frame_depth_;
-                    node(s->body.get());
-                    --frame_depth_;
+                case node_type::parallel_for_stmt:
+                    write_parallel_for_stmt(n);
                     break;
-                }
-                case node_type::return_stmt: {
-                    auto* s = static_cast<const return_stmt*>(n);
-                    node(s->value.get());
+                case node_type::return_stmt:
+                    write_return_stmt(n);
                     break;
-                }
                 case node_type::break_stmt:
                 case node_type::continue_stmt:
                 case node_type::fallthrough_stmt:
                     break;
-                case node_type::try_stmt: {
-                    auto* s = static_cast<const try_stmt*>(n);
-                    node(s->try_block.get());
-                    str(s->catch_var);
-                    symbol(s->catch_var_id, UINT64_MAX);
-                    slot(s->catch_slot_index);
-                    node(s->catch_block.get());
+                case node_type::try_stmt:
+                    write_try_stmt(n);
                     break;
-                }
-                case node_type::switch_stmt: {
-                    auto* s = static_cast<const switch_stmt*>(n);
-                    node(s->condition.get());
-                    varint(s->cases.size());
-                    for (const auto& c : s->cases) node(c.get());
-                    node(s->default_case.get());
+                case node_type::switch_stmt:
+                    write_switch_stmt(n);
                     break;
-                }
-                case node_type::case_stmt: {
-                    auto* s = static_cast<const case_stmt*>(n);
-                    node(s->value.get());
-                    varint(s->body.size());
-                    for (const auto& b : s->body) node(b.get());
-                    flag(s->has_fallthrough);
+                case node_type::case_stmt:
+                    write_case_stmt(n);
                     break;
-                }
-                case node_type::default_stmt: {
-                    auto* s = static_cast<const default_stmt*>(n);
-                    varint(s->body.size());
-                    for (const auto& b : s->body) node(b.get());
+                case node_type::default_stmt:
+                    write_default_stmt(n);
                     break;
-                }
-                case node_type::variable_decl: {
-                    auto* d = static_cast<const variable_decl*>(n);
-                    type(d->auto_spelled ? type_info_ptr{} : d->type);   // auto stays auto: the checker re-types it at load
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    node(d->initializer.get());
-                    flag(d->is_static);
-                    flag(d->function_spelling);
-                    flag(d->default_initialized);
-                    flag(d->is_inline);
-                    flag(d->is_const);
-                    slot(d->slot_index);
+                case node_type::variable_decl:
+                    write_variable_decl(n);
                     break;
-                }
-                case node_type::function_decl: {
-                    auto* d = static_cast<const function_decl*>(n);
-                    ++frame_depth_;
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    parameters(d->parameters);
-                    type(d->return_type);
-                    node(d->body.get());
-                    varint(d->initializers.size());
-                    for (const auto& init : d->initializers) {
-                        str(init.target);
-                        varint(init.arguments.size());
-                        for (const auto& a : init.arguments) node(a.get());
-                    }
-                    flag(d->is_override);
-                    flag(d->is_static);
-                    flag(d->is_coroutine);
-                    varint(d->local_count);
-                    outer_slot_plan(d->outer_slot_plan, d->outer_slot_plan_built);
-                    --frame_depth_;
+                case node_type::function_decl:
+                    write_function_decl(n);
                     break;
-                }
-                case node_type::class_decl: {
-                    auto* d = static_cast<const class_decl*>(n);
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    u8(d->nocopy ? 1 : 0);
-                    varint(d->base_classes.size());
-                    for (const auto& b : d->base_classes) str(b);
-                    varint(d->members.size());
-                    for (const auto& m : d->members) {
-                        u8(uint8_t(m.visibility));
-                        node(m.declaration.get());
-                    }
+                case node_type::class_decl:
+                    write_class_decl(n);
                     break;
-                }
-                case node_type::namespace_decl: {
-                    auto* d = static_cast<const namespace_decl*>(n);
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    varint(d->declarations.size());
-                    for (const auto& dd : d->declarations) node(dd.get());
+                case node_type::namespace_decl:
+                    write_namespace_decl(n);
                     break;
-                }
-                case node_type::expression_decl: {
-                    auto* d = static_cast<const expression_decl*>(n);
-                    node(d->expression.get());
-                    flag(d->implicit_return);
+                case node_type::expression_decl:
+                    write_expression_decl(n);
                     break;
-                }
-                case node_type::statement_decl: {
-                    auto* d = static_cast<const statement_decl*>(n);
-                    node(d->statement.get());
+                case node_type::statement_decl:
+                    write_statement_decl(n);
                     break;
-                }
-                case node_type::include_decl: {
-                    auto* d = static_cast<const include_decl*>(n);
-                    str(d->path);
-                    node(d->path_expr.get());
+                case node_type::include_decl:
+                    write_include_decl(n);
                     break;
-                }
-                case node_type::include_expr: {
-                    auto* e = static_cast<const include_expr*>(n);
-                    str(e->path);
-                    node(e->path_expr.get());
+                case node_type::include_expr:
+                    write_include_expr(n);
                     break;
-                }
-                case node_type::import_decl: {
-                    auto* d = static_cast<const import_decl*>(n);
-                    str(d->path);
-                    node(d->path_expr.get());
+                case node_type::import_decl:
+                    write_import_decl(n);
                     break;
-                }
-                case node_type::import_expr: {
-                    auto* e = static_cast<const import_expr*>(n);
-                    varint(e->paths.size());
-                    for (const auto& p : e->paths) str(p);
-                    varint(e->path_exprs.size());
-                    for (const auto& a : e->path_exprs) node(a.get());
-                    flag(e->force);
+                case node_type::import_expr:
+                    write_import_expr(n);
                     break;
-                }
-                case node_type::extern_decl: {
-                    auto* d = static_cast<const extern_decl*>(n);
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    flag(d->is_function);
-                    flag(d->is_const);
-                    type(d->type);
+                case node_type::extern_decl:
+                    write_extern_decl(n);
                     break;
-                }
-                case node_type::enum_decl: {
-                    auto* d = static_cast<const enum_decl*>(n);
-                    str(d->name);
-                    symbol(d->name_id, UINT64_MAX);
-                    varint(d->values.size());
-                    for (const auto& [vname, vid] : d->values) {
-                        str(vname);
-                        symbol(vid, UINT64_MAX);
-                    }
+                case node_type::enum_decl:
+                    write_enum_decl(n);
                     break;
-                }
-                case node_type::destructuring_decl: {
-                    auto* d = static_cast<const destructuring_decl*>(n);
-                    varint(d->names.size());
-                    for (const auto& [nm, id] : d->names) { str(nm); symbol(id, UINT64_MAX); }
-                    varint(d->slot_indices.size());
-                    for (size_t s : d->slot_indices) slot(s);
-                    flag(d->is_const);
-                    node(d->initializer.get());
+                case node_type::destructuring_decl:
+                    write_destructuring_decl(n);
                     break;
-                }
                 default:
                     jaibite_fail("unserializable AST node type " + std::to_string(int(n->get_type())));
             }
-            --depth_;
+        }
+
+        JAI_NOINLINE void write_literal_expr(const ast_node* n) {
+            auto* e = static_cast<const literal_expr*>(n);
+            literal(e->value);
+        }
+
+        JAI_NOINLINE void write_identifier_expr(const ast_node* n) {
+            auto* e = static_cast<const identifier_expr*>(n);
+            str(e->name);
+            symbol(e->symbol_id, UINT64_MAX);
+            slot(e->slot_index);
+            flag(e->global_qualified);   // ::name is pure syntax - not re-derivable
+        }
+
+        JAI_NOINLINE void write_binary_expr(const ast_node* n) {
+            auto* e = static_cast<const binary_expr*>(n);
+            node(e->left.get());
+            tok(e->op);
+            node(e->right.get());
+        }
+
+        JAI_NOINLINE void write_unary_expr(const ast_node* n) {
+            auto* e = static_cast<const unary_expr*>(n);
+            tok(e->op);
+            node(e->operand.get());
+            flag(e->is_postfix);
+        }
+
+        JAI_NOINLINE void write_assignment_expr(const ast_node* n) {
+            auto* e = static_cast<const assignment_expr*>(n);
+            node(e->target.get());
+            tok(e->op);
+            node(e->value.get());
+            u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0) | (e->yields_reference ? 4 : 0)));
+        }
+
+        JAI_NOINLINE void write_call_expr(const ast_node* n) {
+            auto* e = static_cast<const call_expr*>(n);
+            node(e->callee.get());
+            varint(e->arguments.size());
+            for (const auto& a : e->arguments) node(a.get());
+        }
+
+        JAI_NOINLINE void write_member_expr(const ast_node* n) {
+            auto* e = static_cast<const member_expr*>(n);
+            node(e->object.get());
+            str(e->member);
+            symbol(e->member_id, UINT64_MAX);
+            symbol(e->getter_id, UINT64_MAX);
+            flag(e->is_arrow);
+            flag(e->is_static);
+            flag(e->null_safe);
+        }
+
+        JAI_NOINLINE void write_lambda_expr(const ast_node* n) {
+            auto* e = static_cast<const lambda_expr*>(n);
+            ++frame_depth_;
+            u8(uint8_t(e->default_capture));
+            varint(e->captures.size());
+            for (const auto& c : e->captures) {
+                str(c.name);
+                flag(c.by_reference);
+                symbol(c.symbol_id, UINT64_MAX);
+                slot(c.outer_slot);
+                node(c.initializer.get());
+            }
+            parameters(e->parameters);
+            type(e->return_type);
+            node(e->body.get());
+            varint(e->local_count);
+            outer_slot_plan(e->outer_slot_plan, e->outer_slot_plan_built);
+            varint(e->chained_outer_slots.size());
+            for (const auto& [sym, s] : e->chained_outer_slots) { symbol(sym, UINT64_MAX); slot(s); }
+            varint(e->chained_outer_names.size());
+            for (uint64_t sym : e->chained_outer_names) symbol(sym, UINT64_MAX);
+            --frame_depth_;
+        }
+
+        JAI_NOINLINE void write_new_expr(const ast_node* n) {
+            auto* e = static_cast<const new_expr*>(n);
+            type(e->type);
+            varint(e->arguments.size());
+            for (const auto& a : e->arguments) node(a.get());
+        }
+
+        JAI_NOINLINE void write_ternary_expr(const ast_node* n) {
+            auto* e = static_cast<const ternary_expr*>(n);
+            node(e->condition.get());
+            node(e->then_expression.get());
+            node(e->else_expression.get());
+        }
+
+        JAI_NOINLINE void write_array_literal_expr(const ast_node* n) {
+            auto* e = static_cast<const array_literal_expr*>(n);
+            varint(e->elements.size());
+            for (const auto& el : e->elements) node(el.get());
+        }
+
+        JAI_NOINLINE void write_map_literal_expr(const ast_node* n) {
+            auto* e = static_cast<const map_literal_expr*>(n);
+            varint(e->entries.size());
+            for (const auto& [k, v] : e->entries) { node(k.get()); node(v.get()); }
+        }
+
+        JAI_NOINLINE void write_throw_expr(const ast_node* n) {
+            auto* e = static_cast<const throw_expr*>(n);
+            node(e->value.get());
+        }
+
+        JAI_NOINLINE void write_yield_expr(const ast_node* n) {
+            auto* e = static_cast<const yield_expr*>(n);
+            node(e->value.get());
+        }
+
+        JAI_NOINLINE void write_cast_expr(const ast_node* n) {
+            auto* e = static_cast<const cast_expr*>(n);
+            type(e->target);
+            u8(static_cast<uint8_t>((e->by_reference ? 1 : 0) | (e->implicit_ref ? 2 : 0) | (e->binding_ref ? 4 : 0)));
+            node(e->operand.get());
+        }
+
+        JAI_NOINLINE void write_expression_stmt(const ast_node* n) {
+            auto* s = static_cast<const expression_stmt*>(n);
+            node(s->expression.get());
+        }
+
+        JAI_NOINLINE void write_block_stmt(const ast_node* n) {
+            auto* s = static_cast<const block_stmt*>(n);
+            varint(s->declarations.size());
+            for (const auto& d : s->declarations) node(d.get());
+        }
+
+        JAI_NOINLINE void write_if_stmt(const ast_node* n) {
+            auto* s = static_cast<const if_stmt*>(n);
+            node(s->condition.get());
+            node(s->then_statement.get());
+            node(s->else_statement.get());
+        }
+
+        JAI_NOINLINE void write_while_stmt(const ast_node* n) {
+            auto* s = static_cast<const while_stmt*>(n);
+            node(s->condition.get());
+            node(s->body.get());
+        }
+
+        JAI_NOINLINE void write_for_stmt(const ast_node* n) {
+            auto* s = static_cast<const for_stmt*>(n);
+            node(s->initializer.get());
+            node(s->condition.get());
+            node(s->update.get());
+            node(s->body.get());
+        }
+
+        JAI_NOINLINE void write_range_for_stmt(const ast_node* n) {
+            auto* s = static_cast<const range_for_stmt*>(n);
+            type(s->auto_spelled ? type_info_ptr{} : s->element_type);   // auto stays auto: the checker re-types it at load
+            str(s->variable_name);
+            symbol(s->variable_name_id, UINT64_MAX);
+            slot(s->variable_slot_index);
+            flag(s->is_reference);
+            flag(s->is_const);
+            node(s->container.get());
+            node(s->body.get());
+        }
+
+        JAI_NOINLINE void write_parallel_for_stmt(const ast_node* n) {
+            auto* s = static_cast<const parallel_for_stmt*>(n);
+            std::vector<parameter> all{ s->loop_param };
+            all.insert(all.end(), s->extra_params.begin(), s->extra_params.end());
+            ++frame_depth_;
+            parameters(all);
+            --frame_depth_;
+            varint(s->local_count);
+            varint(s->frame_captures.size());
+            for (const auto& [sym, slot] : s->frame_captures) { symbol(sym, UINT64_MAX); varint(slot); }
+            node(s->container.get());
+            varint(s->extra_containers.size());
+            for (const auto& c : s->extra_containers) node(c.get());
+            ++frame_depth_;
+            node(s->body.get());
+            --frame_depth_;
+        }
+
+        JAI_NOINLINE void write_return_stmt(const ast_node* n) {
+            auto* s = static_cast<const return_stmt*>(n);
+            node(s->value.get());
+        }
+
+        JAI_NOINLINE void write_try_stmt(const ast_node* n) {
+            auto* s = static_cast<const try_stmt*>(n);
+            node(s->try_block.get());
+            str(s->catch_var);
+            symbol(s->catch_var_id, UINT64_MAX);
+            slot(s->catch_slot_index);
+            node(s->catch_block.get());
+        }
+
+        JAI_NOINLINE void write_switch_stmt(const ast_node* n) {
+            auto* s = static_cast<const switch_stmt*>(n);
+            node(s->condition.get());
+            varint(s->cases.size());
+            for (const auto& c : s->cases) node(c.get());
+            node(s->default_case.get());
+        }
+
+        JAI_NOINLINE void write_case_stmt(const ast_node* n) {
+            auto* s = static_cast<const case_stmt*>(n);
+            node(s->value.get());
+            varint(s->body.size());
+            for (const auto& b : s->body) node(b.get());
+            flag(s->has_fallthrough);
+        }
+
+        JAI_NOINLINE void write_default_stmt(const ast_node* n) {
+            auto* s = static_cast<const default_stmt*>(n);
+            varint(s->body.size());
+            for (const auto& b : s->body) node(b.get());
+        }
+
+        JAI_NOINLINE void write_variable_decl(const ast_node* n) {
+            auto* d = static_cast<const variable_decl*>(n);
+            type(d->auto_spelled ? type_info_ptr{} : d->type);   // auto stays auto: the checker re-types it at load
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            node(d->initializer.get());
+            flag(d->is_static);
+            flag(d->function_spelling);
+            flag(d->default_initialized);
+            flag(d->is_inline);
+            flag(d->is_const);
+            slot(d->slot_index);
+        }
+
+        JAI_NOINLINE void write_function_decl(const ast_node* n) {
+            auto* d = static_cast<const function_decl*>(n);
+            ++frame_depth_;
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            parameters(d->parameters);
+            type(d->return_type);
+            node(d->body.get());
+            varint(d->initializers.size());
+            for (const auto& init : d->initializers) {
+                str(init.target);
+                varint(init.arguments.size());
+                for (const auto& a : init.arguments) node(a.get());
+            }
+            flag(d->is_override);
+            flag(d->is_static);
+            flag(d->is_coroutine);
+            varint(d->local_count);
+            outer_slot_plan(d->outer_slot_plan, d->outer_slot_plan_built);
+            --frame_depth_;
+        }
+
+        JAI_NOINLINE void write_class_decl(const ast_node* n) {
+            auto* d = static_cast<const class_decl*>(n);
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            u8(d->nocopy ? 1 : 0);
+            varint(d->base_classes.size());
+            for (const auto& b : d->base_classes) str(b);
+            varint(d->members.size());
+            for (const auto& m : d->members) {
+                u8(uint8_t(m.visibility));
+                node(m.declaration.get());
+            }
+        }
+
+        JAI_NOINLINE void write_namespace_decl(const ast_node* n) {
+            auto* d = static_cast<const namespace_decl*>(n);
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            varint(d->declarations.size());
+            for (const auto& dd : d->declarations) node(dd.get());
+        }
+
+        JAI_NOINLINE void write_expression_decl(const ast_node* n) {
+            auto* d = static_cast<const expression_decl*>(n);
+            node(d->expression.get());
+            flag(d->implicit_return);
+        }
+
+        JAI_NOINLINE void write_statement_decl(const ast_node* n) {
+            auto* d = static_cast<const statement_decl*>(n);
+            node(d->statement.get());
+        }
+
+        JAI_NOINLINE void write_include_decl(const ast_node* n) {
+            auto* d = static_cast<const include_decl*>(n);
+            str(d->path);
+            node(d->path_expr.get());
+        }
+
+        JAI_NOINLINE void write_include_expr(const ast_node* n) {
+            auto* e = static_cast<const include_expr*>(n);
+            str(e->path);
+            node(e->path_expr.get());
+        }
+
+        JAI_NOINLINE void write_import_decl(const ast_node* n) {
+            auto* d = static_cast<const import_decl*>(n);
+            str(d->path);
+            node(d->path_expr.get());
+        }
+
+        JAI_NOINLINE void write_import_expr(const ast_node* n) {
+            auto* e = static_cast<const import_expr*>(n);
+            varint(e->paths.size());
+            for (const auto& p : e->paths) str(p);
+            varint(e->path_exprs.size());
+            for (const auto& a : e->path_exprs) node(a.get());
+            flag(e->force);
+        }
+
+        JAI_NOINLINE void write_extern_decl(const ast_node* n) {
+            auto* d = static_cast<const extern_decl*>(n);
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            flag(d->is_function);
+            flag(d->is_const);
+            type(d->type);
+        }
+
+        JAI_NOINLINE void write_enum_decl(const ast_node* n) {
+            auto* d = static_cast<const enum_decl*>(n);
+            str(d->name);
+            symbol(d->name_id, UINT64_MAX);
+            varint(d->values.size());
+            for (const auto& [vname, vid] : d->values) {
+                str(vname);
+                symbol(vid, UINT64_MAX);
+            }
+        }
+
+        JAI_NOINLINE void write_destructuring_decl(const ast_node* n) {
+            auto* d = static_cast<const destructuring_decl*>(n);
+            varint(d->names.size());
+            for (const auto& [nm, id] : d->names) { str(nm); symbol(id, UINT64_MAX); }
+            varint(d->slot_indices.size());
+            for (size_t s : d->slot_indices) slot(s);
+            flag(d->is_const);
+            node(d->initializer.get());
         }
 
         const string_symbolizer& symbols_;
@@ -638,7 +755,7 @@ namespace jai::detail {
         std::vector<uint8_t> body_;
         std::vector<std::string> table_;
         std::unordered_map<std::string, uint64_t> table_lookup_;
-        int depth_ = 0;
+        native_stack_mark stack_;   // armed where the writer is made: the thread that walks the tree
     };
 
     // Only the trusted in-memory parallel body copier supplies this context. A
@@ -875,7 +992,7 @@ namespace jai::detail {
             return slot >= remap_from_ ? slot + remap_shift_ : slot;
         }
 
-        source_location location() {
+        JAI_NOINLINE source_location location() {
             source_location loc;
             const std::string& name = str();
             loc.filename = name == k_jaibite_own_file ? own_path_ : name;
@@ -888,16 +1005,26 @@ namespace jai::detail {
             if (!u8()) return type_info_ptr(nullptr);
             uint8_t bt = u8();
             if (bt > uint8_t(k_last_script_value_type)) jaibite_fail("corrupt type_info");
-            ++depth_;
-            if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("type nesting too deep");
-            type_info temp(static_cast<script_value_type>(bt));
-            temp.type_name = str();
-            temp.native_size = size_t(varint());
-            temp.is_signed = flag();
+            if (stack_.low()) jaibite_fail("type nesting too deep");
+            const std::string& name = str();
+            const size_t native_size = size_t(varint());
+            const bool is_signed = flag();
             uint64_t n = varint();
             check_count(n);
-            for (uint64_t i = 0; i < n; ++i) temp.type_params.push_back(type());
-            --depth_;
+            std::vector<type_info_ptr> params;
+            for (uint64_t i = 0; i < n; ++i) params.push_back(type());
+            return interned_type(static_cast<script_value_type>(bt), name, native_size, is_signed, std::move(params));
+        }
+
+        // a type_info is large: it is built in a frame of its own, never in one of the walk's
+        JAI_NOINLINE type_info_ptr interned_type(script_value_type base, const std::string& name, size_t native_size, bool is_signed,
+                                                 std::vector<type_info_ptr> params) {
+            const uint64_t n = params.size();
+            type_info temp(base);
+            temp.type_name = name;
+            temp.native_size = native_size;
+            temp.is_signed = is_signed;
+            temp.type_params = std::move(params);
             // Check the encoded shape before interning: primitive/container keys
             // deliberately ignore surplus parameters, which would hide corruption.
             bool valid_arity = true;
@@ -993,10 +1120,11 @@ namespace jai::detail {
             if (n->get_type() >= node_type::expression_stmt) jaibite_fail("expected expression node");
             return std::static_pointer_cast<expression>(n);
         }
-        expression_ptr expr_req() {
-            auto e = expr_opt();
-            if (!e) jaibite_fail("missing required expression node");
-            return e;
+        JAI_FORCEINLINE expression_ptr expr_req() { return required_expression(node()); }
+        JAI_NOINLINE expression_ptr required_expression(ast_node_ptr n) {
+            if (!n) jaibite_fail("missing required expression node");
+            if (n->get_type() >= node_type::expression_stmt) jaibite_fail("expected expression node");
+            return std::static_pointer_cast<expression>(std::move(n));
         }
         statement_ptr stmt_opt() {
             auto n = node();
@@ -1007,10 +1135,13 @@ namespace jai::detail {
             }
             return std::static_pointer_cast<statement>(n);
         }
-        statement_ptr stmt_req() {
-            auto s = stmt_opt();
-            if (!s) jaibite_fail("missing required statement node");
-            return s;
+        JAI_FORCEINLINE statement_ptr stmt_req() { return required_statement(node()); }
+        JAI_NOINLINE statement_ptr required_statement(ast_node_ptr n) {
+            if (!n) jaibite_fail("missing required statement node");
+            if (n->get_type() < node_type::expression_stmt || n->get_type() == node_type::case_stmt || n->get_type() == node_type::default_stmt) {
+                jaibite_fail("expected statement node");
+            }
+            return std::static_pointer_cast<statement>(std::move(n));
         }
         declaration_ptr decl_opt() {
             auto n = node();
@@ -1018,10 +1149,11 @@ namespace jai::detail {
             if (n->get_type() < node_type::variable_decl) jaibite_fail("expected declaration node");
             return std::static_pointer_cast<declaration>(n);
         }
-        declaration_ptr decl_req() {
-            auto d = decl_opt();
-            if (!d) jaibite_fail("missing required declaration node");
-            return d;
+        JAI_FORCEINLINE declaration_ptr decl_req() { return required_declaration(node()); }
+        JAI_NOINLINE declaration_ptr required_declaration(ast_node_ptr n) {
+            if (!n) jaibite_fail("missing required declaration node");
+            if (n->get_type() < node_type::variable_decl) jaibite_fail("expected declaration node");
+            return std::static_pointer_cast<declaration>(std::move(n));
         }
         std::shared_ptr<block_stmt> block_opt() {
             auto n = node();
@@ -1038,517 +1170,581 @@ namespace jai::detail {
         ast_node_ptr node() {
             uint8_t tag = u8();
             if (tag == 0xFF) return nullptr;
-            ++depth_;
-            if (depth_ > k_jaibite_max_depth || native_stack_low()) jaibite_fail("AST nesting too deep");
+            if (stack_.low()) jaibite_fail("AST nesting too deep");
             source_location loc = location();
             const uint8_t check_mode_attr = tag >= uint8_t(node_type::expression_stmt) ? u8() : 0;
             if (check_mode_attr > check_mode_attr_strict) jaibite_fail("corrupt check mode attribute");
-            ast_node_ptr result;
-            switch (static_cast<node_type>(tag)) {
-                case node_type::literal_expr: {
-                    auto e = std::make_shared<literal_expr>(loc, literal());
-                    result = e;
-                    break;
+            static constexpr std::array<construct_reader, k_construct_tags> readers = construct_readers();
+            if (tag >= k_construct_tags || !readers[tag]) corrupt_node_tag(static_cast<node_type>(tag));
+            ast_node_ptr result = (this->*readers[tag])(loc);
+            if (check_mode_attr && result) static_cast<statement*>(result.get())->check_mode_attr = check_mode_attr;
+            return result;
+        }
+
+        using construct_reader = ast_node_ptr (ast_reader::*)(const source_location&);
+        static constexpr size_t k_construct_tags = 64;
+        // node() calls a construct's reader through this table rather than through a dispatch frame of its own
+        static constexpr std::array<construct_reader, k_construct_tags> construct_readers() {
+            std::array<construct_reader, k_construct_tags> result{};
+            result[size_t(node_type::literal_expr)] = &ast_reader::read_literal_expr;
+            result[size_t(node_type::identifier_expr)] = &ast_reader::read_identifier_expr;
+            result[size_t(node_type::binary_expr)] = &ast_reader::read_binary_expr;
+            result[size_t(node_type::unary_expr)] = &ast_reader::read_unary_expr;
+            result[size_t(node_type::assignment_expr)] = &ast_reader::read_assignment_expr;
+            result[size_t(node_type::call_expr)] = &ast_reader::read_call_expr;
+            result[size_t(node_type::member_expr)] = &ast_reader::read_member_expr;
+            result[size_t(node_type::lambda_expr)] = &ast_reader::read_lambda_expr;
+            result[size_t(node_type::new_expr)] = &ast_reader::read_new_expr;
+            result[size_t(node_type::ternary_expr)] = &ast_reader::read_ternary_expr;
+            result[size_t(node_type::array_literal_expr)] = &ast_reader::read_array_literal_expr;
+            result[size_t(node_type::map_literal_expr)] = &ast_reader::read_map_literal_expr;
+            result[size_t(node_type::this_expr)] = &ast_reader::read_this_expr;
+            result[size_t(node_type::super_expr)] = &ast_reader::read_super_expr;
+            result[size_t(node_type::throw_expr)] = &ast_reader::read_throw_expr;
+            result[size_t(node_type::yield_expr)] = &ast_reader::read_yield_expr;
+            result[size_t(node_type::cast_expr)] = &ast_reader::read_cast_expr;
+            result[size_t(node_type::expression_stmt)] = &ast_reader::read_expression_stmt;
+            result[size_t(node_type::block_stmt)] = &ast_reader::read_block_stmt;
+            result[size_t(node_type::if_stmt)] = &ast_reader::read_if_stmt;
+            result[size_t(node_type::while_stmt)] = &ast_reader::read_while_stmt;
+            result[size_t(node_type::for_stmt)] = &ast_reader::read_for_stmt;
+            result[size_t(node_type::range_for_stmt)] = &ast_reader::read_range_for_stmt;
+            result[size_t(node_type::parallel_for_stmt)] = &ast_reader::read_parallel_for_stmt;
+            result[size_t(node_type::return_stmt)] = &ast_reader::read_return_stmt;
+            result[size_t(node_type::break_stmt)] = &ast_reader::read_break_stmt;
+            result[size_t(node_type::continue_stmt)] = &ast_reader::read_continue_stmt;
+            result[size_t(node_type::try_stmt)] = &ast_reader::read_try_stmt;
+            result[size_t(node_type::switch_stmt)] = &ast_reader::read_switch_stmt;
+            result[size_t(node_type::case_stmt)] = &ast_reader::read_case_stmt;
+            result[size_t(node_type::default_stmt)] = &ast_reader::read_default_stmt;
+            result[size_t(node_type::fallthrough_stmt)] = &ast_reader::read_fallthrough_stmt;
+            result[size_t(node_type::variable_decl)] = &ast_reader::read_variable_decl;
+            result[size_t(node_type::function_decl)] = &ast_reader::read_function_decl;
+            result[size_t(node_type::class_decl)] = &ast_reader::read_class_decl;
+            result[size_t(node_type::namespace_decl)] = &ast_reader::read_namespace_decl;
+            result[size_t(node_type::expression_decl)] = &ast_reader::read_expression_decl;
+            result[size_t(node_type::statement_decl)] = &ast_reader::read_statement_decl;
+            result[size_t(node_type::include_decl)] = &ast_reader::read_include_decl;
+            result[size_t(node_type::include_expr)] = &ast_reader::read_include_expr;
+            result[size_t(node_type::import_decl)] = &ast_reader::read_import_decl;
+            result[size_t(node_type::import_expr)] = &ast_reader::read_import_expr;
+            result[size_t(node_type::extern_decl)] = &ast_reader::read_extern_decl;
+            result[size_t(node_type::enum_decl)] = &ast_reader::read_enum_decl;
+            result[size_t(node_type::destructuring_decl)] = &ast_reader::read_destructuring_decl;
+            return result;
+        }
+
+        [[noreturn]] JAI_NOINLINE static void corrupt_node_tag(node_type kind) { jaibite_fail("corrupt node tag " + std::to_string(int(kind))); }
+
+        JAI_NOINLINE ast_node_ptr read_break_stmt(const source_location& loc) {
+            if (breakable_ == 0) jaibite_fail("invalid program: 'break' outside a loop or switch");
+            return std::make_shared<break_stmt>(loc);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_continue_stmt(const source_location& loc) {
+            if (continuable_ == 0) jaibite_fail("invalid program: 'continue' outside a loop");
+            return std::make_shared<continue_stmt>(loc);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_fallthrough_stmt(const source_location& loc) { return std::make_shared<fallthrough_stmt>(loc); }
+
+        JAI_NOINLINE ast_node_ptr read_expression_stmt(const source_location& loc) {
+            return std::make_shared<expression_stmt>(loc, expr_req());
+        }
+
+        JAI_NOINLINE ast_node_ptr read_return_stmt(const source_location& loc) {
+            return std::make_shared<return_stmt>(loc, expr_opt());
+        }
+
+        JAI_NOINLINE ast_node_ptr read_statement_decl(const source_location& loc) {
+            return std::make_shared<statement_decl>(loc, stmt_req());
+        }
+
+        JAI_NOINLINE ast_node_ptr read_literal_expr(const source_location& loc) {
+            auto e = std::make_shared<literal_expr>(loc, literal());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_identifier_expr(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t sym = symbol(UINT64_MAX);
+            auto e = std::make_shared<identifier_expr>(loc, name, sym);
+            e->slot_index = slot_val();
+            e->global_qualified = flag();
+            if (capture_slots_ && !e->global_qualified) {
+                if (auto it = capture_slots_->find(sym); it != capture_slots_->end()) { e->slot_index = it->second; }
+            }
+            track_slot(e->slot_index, sym, true);
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_binary_expr(const source_location& loc) {
+            ast_node_ptr result = binary_head(loc, expr_req());
+            static_cast<binary_expr*>(result.get())->right = expr_req();
+            return result;
+        }
+
+        JAI_NOINLINE ast_node_ptr binary_head(const source_location& loc, expression_ptr left) {
+            return std::make_shared<binary_expr>(loc, std::move(left), tok(), nullptr);
+        }
+
+        // an operator's token is read into its node before the operand after it: no token lives in a frame across the walk
+        JAI_NOINLINE ast_node_ptr read_unary_expr(const source_location& loc) {
+            ast_node_ptr result = unary_head(loc);
+            auto* e = static_cast<unary_expr*>(result.get());
+            e->operand = expr_req();
+            e->is_postfix = flag();
+            return result;
+        }
+
+        JAI_NOINLINE ast_node_ptr unary_head(const source_location& loc) {
+            return std::make_shared<unary_expr>(loc, tok(), nullptr);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_assignment_expr(const source_location& loc) {
+            auto e = assignment_head(loc, expr_req());
+            e->value = expr_req();
+            { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->yields_reference = (fl & 4) != 0; }
+            return e;
+        }
+
+        JAI_NOINLINE std::shared_ptr<assignment_expr> assignment_head(const source_location& loc, expression_ptr target) {
+            return std::make_shared<assignment_expr>(loc, std::move(target), tok(), nullptr);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_call_expr(const source_location& loc) {
+            auto callee = expr_req();
+            auto e = std::make_shared<call_expr>(loc, callee, expr_list());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_member_expr(const source_location& loc) {
+            auto obj = expr_req();
+            std::string_view member = view();
+            uint64_t member_id = symbol(UINT64_MAX);
+            uint64_t getter_id = symbol(UINT64_MAX);
+            bool arrow = flag();
+            bool is_static = flag();
+            auto e = std::make_shared<member_expr>(loc, obj, member, member_id, arrow, is_static);
+            e->getter_id = getter_id;
+            e->null_safe = flag();
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_lambda_expr(const source_location& loc) {
+            auto e = std::make_shared<lambda_expr>(loc);
+            uint8_t cd = u8();
+            if (cd > uint8_t(lambda_expr::capture_default::by_reference)) jaibite_fail("corrupt capture default");
+            e->default_capture = static_cast<lambda_expr::capture_default>(cd);
+            uint64_t nc = varint();
+            check_count(nc);
+            for (uint64_t i = 0; i < nc; ++i) {
+                std::string_view cname = view();
+                bool by_ref = flag();
+                lambda_expr::capture c(cname, by_ref);
+                c.symbol_id = symbol(UINT64_MAX);
+                c.outer_slot = slot_val();
+                track_slot(c.outer_slot, c.symbol_id);
+                c.initializer = expr_opt();
+                e->captures.push_back(std::move(c));
+            }
+            e->parameters = parameters();
+            e->return_type = type();
+            enter_frame(e->parameters);
+            {
+                auto body = function_body();
+                e->body = block_req();
+            }
+            e->local_count = size_t(varint());
+            leave_frame(e->local_count);
+            bool built = false;
+            outer_slot_plan(e->outer_slot_plan, built);
+            e->outer_slot_plan_built = built;
+            uint64_t nchain = varint();
+            check_count(nchain);
+            for (uint64_t i = 0; i < nchain; ++i) {
+                uint64_t sym = symbol(UINT64_MAX);
+                size_t s = slot_val();
+                e->chained_outer_slots.emplace_back(sym, s);
+                track_slot(s, sym);
+            }
+            uint64_t nnames = varint();
+            check_count(nnames);
+            for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol(UINT64_MAX));
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_new_expr(const source_location& loc) {
+            auto t = type();
+            auto e = std::make_shared<new_expr>(loc, t, expr_list());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_ternary_expr(const source_location& loc) {
+            auto c = expr_req();
+            auto t = expr_req();
+            auto f = expr_req();
+            auto e = std::make_shared<ternary_expr>(loc, c, t, f);
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_array_literal_expr(const source_location& loc) {
+            auto e = std::make_shared<array_literal_expr>(loc, expr_list());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_map_literal_expr(const source_location& loc) {
+            uint64_t n = varint();
+            check_count(n);
+            std::vector<std::pair<expression_ptr, expression_ptr>> entries;
+            for (uint64_t i = 0; i < n; ++i) {
+                auto k = expr_req();
+                auto v = expr_req();
+                entries.emplace_back(k, v);
+            }
+            auto e = std::make_shared<map_literal_expr>(loc, std::move(entries));
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_this_expr(const source_location& loc) {
+            auto e = std::make_shared<this_expr>(loc);
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_super_expr(const source_location& loc) {
+            auto e = std::make_shared<super_expr>(loc);
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_throw_expr(const source_location& loc) {
+            auto e = std::make_shared<throw_expr>(loc, expr_opt());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_yield_expr(const source_location& loc) {
+            auto e = std::make_shared<yield_expr>(loc, expr_opt());
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_cast_expr(const source_location& loc) {
+            auto target = type();
+            const uint8_t cast_flags = u8();
+            auto e = std::make_shared<cast_expr>(loc, target, (cast_flags & 1) != 0, expr_req());
+            e->implicit_ref = (cast_flags & 2) != 0;
+            e->binding_ref = (cast_flags & 4) != 0;
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_block_stmt(const source_location& loc) {
+            uint64_t n = varint();
+            check_count(n);
+            std::vector<declaration_ptr> decls;
+            for (uint64_t i = 0; i < n; ++i) decls.push_back(decl_req());
+            return std::make_shared<block_stmt>(loc, std::move(decls));
+        }
+
+        JAI_NOINLINE ast_node_ptr read_if_stmt(const source_location& loc) {
+            auto c = expr_req();
+            auto t = stmt_req();
+            auto e = stmt_opt();
+            return std::make_shared<if_stmt>(loc, c, t, e);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_while_stmt(const source_location& loc) {
+            auto c = expr_req();
+            auto b = [&] { auto body = loop_body(); return stmt_req(); }();
+            return std::make_shared<while_stmt>(loc, c, b);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_for_stmt(const source_location& loc) {
+            auto i = decl_opt();
+            if (i && i->get_type() != node_type::variable_decl &&
+                i->get_type() != node_type::expression_decl) {
+                jaibite_fail("invalid program: for initializer must be a variable or expression declaration");
+            }
+            auto c = expr_opt();
+            auto u = expr_opt();
+            auto b = [&] { auto body = loop_body(); return stmt_req(); }();
+            return std::make_shared<for_stmt>(loc, i, c, u, b);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_range_for_stmt(const source_location& loc) {
+            auto et = type();
+            std::string_view vname = view();
+            uint64_t vid = symbol(UINT64_MAX);
+            size_t vslot = slot_val();
+            bool is_ref = flag();
+            bool is_const = flag();
+            auto cont = expr_req();
+            auto body = [&] { auto scope = loop_body(); return stmt_req(); }();
+            auto s = std::make_shared<range_for_stmt>(loc, et, vname, vid, is_ref, is_const, cont, body);
+            s->variable_slot_index = vslot;
+            track_slot(vslot, vid, false, true);
+            stamp_map_entry_bindings(*s, symbols_);
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_parallel_for_stmt(const source_location& loc) {
+            auto params = parameters();
+            if (params.empty()) jaibite_fail("invalid program: parallel_for has no loop variable");
+            size_t locals = size_t(varint());
+            const uint64_t frame_capture_count = varint();
+            check_count(frame_capture_count);
+            std::vector<std::pair<uint64_t, size_t>> frame_captures;
+            for (uint64_t i = 0; i < frame_capture_count; ++i) {
+                const uint64_t sym = symbol(UINT64_MAX);
+                const size_t slot = size_t(varint());
+                track_slot(slot, sym);
+                frame_captures.emplace_back(sym, slot);
+            }
+            auto cont = expr_req();
+            auto extras = expr_list();
+            if (extras.size() + 1 != params.size()) jaibite_fail("invalid program: parallel_for zips one array per loop variable");
+            for (size_t i = 0; i < params.size(); ++i) {
+                if (params[i].slot_index != i) {
+                    jaibite_fail("invalid program: parallel parameter slot does not match its position");
                 }
-                case node_type::identifier_expr: {
-                    std::string_view name = view();
-                    uint64_t sym = symbol(UINT64_MAX);
-                    auto e = std::make_shared<identifier_expr>(loc, name, sym);
-                    e->slot_index = slot_val();
-                    e->global_qualified = flag();
-                    if (capture_slots_ && !e->global_qualified) {
-                        if (auto it = capture_slots_->find(sym); it != capture_slots_->end()) { e->slot_index = it->second; }
-                    }
-                    track_slot(e->slot_index, sym, true);
-                    result = e;
-                    break;
-                }
-                case node_type::binary_expr: {
-                    auto l = expr_req();
-                    token op = tok();
-                    auto r = expr_req();
-                    auto e = std::make_shared<binary_expr>(loc, l, op, r);
-                    result = e;
-                    break;
-                }
-                case node_type::unary_expr: {
-                    token op = tok();
-                    auto operand = expr_req();
-                    bool postfix = flag();
-                    auto e = std::make_shared<unary_expr>(loc, op, operand, postfix);
-                    result = e;
-                    break;
-                }
-                case node_type::assignment_expr: {
-                    auto t = expr_req();
-                    token op = tok();
-                    auto v = expr_req();
-                    auto e = std::make_shared<assignment_expr>(loc, t, op, v);
-                    { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->yields_reference = (fl & 4) != 0; }
-                    result = e;
-                    break;
-                }
-                case node_type::call_expr: {
-                    auto callee = expr_req();
-                    auto e = std::make_shared<call_expr>(loc, callee, expr_list());
-                    result = e;
-                    break;
-                }
-                case node_type::member_expr: {
-                    auto obj = expr_req();
-                    std::string_view member = view();
-                    uint64_t member_id = symbol(UINT64_MAX);
-                    uint64_t getter_id = symbol(UINT64_MAX);
-                    bool arrow = flag();
-                    bool is_static = flag();
-                    auto e = std::make_shared<member_expr>(loc, obj, member, member_id, arrow, is_static);
-                    e->getter_id = getter_id;
-                    e->null_safe = flag();
-                    result = e;
-                    break;
-                }
-                case node_type::lambda_expr: {
-                    auto e = std::make_shared<lambda_expr>(loc);
-                    uint8_t cd = u8();
-                    if (cd > uint8_t(lambda_expr::capture_default::by_reference)) jaibite_fail("corrupt capture default");
-                    e->default_capture = static_cast<lambda_expr::capture_default>(cd);
-                    uint64_t nc = varint();
-                    check_count(nc);
-                    for (uint64_t i = 0; i < nc; ++i) {
-                        std::string_view cname = view();
-                        bool by_ref = flag();
-                        lambda_expr::capture c(cname, by_ref);
-                        c.symbol_id = symbol(UINT64_MAX);
-                        c.outer_slot = slot_val();
-                        track_slot(c.outer_slot, c.symbol_id);
-                        c.initializer = expr_opt();
-                        e->captures.push_back(std::move(c));
-                    }
-                    e->parameters = parameters();
-                    e->return_type = type();
-                    enter_frame(e->parameters);
-                    {
-                        auto body = function_body();
-                        e->body = block_req();
-                    }
-                    e->local_count = size_t(varint());
-                    leave_frame(e->local_count);
-                    bool built = false;
-                    outer_slot_plan(e->outer_slot_plan, built);
-                    e->outer_slot_plan_built = built;
-                    uint64_t nchain = varint();
-                    check_count(nchain);
-                    for (uint64_t i = 0; i < nchain; ++i) {
-                        uint64_t sym = symbol(UINT64_MAX);
-                        size_t s = slot_val();
-                        e->chained_outer_slots.emplace_back(sym, s);
-                        track_slot(s, sym);
-                    }
-                    uint64_t nnames = varint();
-                    check_count(nnames);
-                    for (uint64_t i = 0; i < nnames; ++i) e->chained_outer_names.push_back(symbol(UINT64_MAX));
-                    result = e;
-                    break;
-                }
-                case node_type::new_expr: {
-                    auto t = type();
-                    auto e = std::make_shared<new_expr>(loc, t, expr_list());
-                    result = e;
-                    break;
-                }
-                case node_type::ternary_expr: {
-                    auto c = expr_req();
-                    auto t = expr_req();
-                    auto f = expr_req();
-                    auto e = std::make_shared<ternary_expr>(loc, c, t, f);
-                    result = e;
-                    break;
-                }
-                case node_type::array_literal_expr: {
-                    auto e = std::make_shared<array_literal_expr>(loc, expr_list());
-                    result = e;
-                    break;
-                }
-                case node_type::map_literal_expr: {
-                    uint64_t n = varint();
-                    check_count(n);
-                    std::vector<std::pair<expression_ptr, expression_ptr>> entries;
-                    for (uint64_t i = 0; i < n; ++i) {
-                        auto k = expr_req();
-                        auto v = expr_req();
-                        entries.emplace_back(k, v);
-                    }
-                    auto e = std::make_shared<map_literal_expr>(loc, std::move(entries));
-                    result = e;
-                    break;
-                }
-                case node_type::this_expr: {
-                    auto e = std::make_shared<this_expr>(loc);
-                    result = e;
-                    break;
-                }
-                case node_type::super_expr: {
-                    auto e = std::make_shared<super_expr>(loc);
-                    result = e;
-                    break;
-                }
-                case node_type::throw_expr: {
-                    auto e = std::make_shared<throw_expr>(loc, expr_opt());
-                    result = e;
-                    break;
-                }
-                case node_type::yield_expr: {
-                    auto e = std::make_shared<yield_expr>(loc, expr_opt());
-                    result = e;
-                    break;
-                }
-                case node_type::cast_expr: {
-                    auto target = type();
-                    const uint8_t cast_flags = u8();
-                    auto e = std::make_shared<cast_expr>(loc, target, (cast_flags & 1) != 0, expr_req());
-                    e->implicit_ref = (cast_flags & 2) != 0;
-                    e->binding_ref = (cast_flags & 4) != 0;
-                    result = e;
-                    break;
-                }
-                case node_type::expression_stmt:
-                    result = std::make_shared<expression_stmt>(loc, expr_req());
-                    break;
-                case node_type::block_stmt: {
-                    uint64_t n = varint();
-                    check_count(n);
-                    std::vector<declaration_ptr> decls;
-                    for (uint64_t i = 0; i < n; ++i) decls.push_back(decl_req());
-                    result = std::make_shared<block_stmt>(loc, std::move(decls));
-                    break;
-                }
-                case node_type::if_stmt: {
-                    auto c = expr_req();
-                    auto t = stmt_req();
-                    auto e = stmt_opt();
-                    result = std::make_shared<if_stmt>(loc, c, t, e);
-                    break;
-                }
-                case node_type::while_stmt: {
-                    auto c = expr_req();
-                    auto b = [&] { auto body = loop_body(); return stmt_req(); }();
-                    result = std::make_shared<while_stmt>(loc, c, b);
-                    break;
-                }
-                case node_type::for_stmt: {
-                    auto i = decl_opt();
-                    if (i && i->get_type() != node_type::variable_decl &&
-                        i->get_type() != node_type::expression_decl) {
-                        jaibite_fail("invalid program: for initializer must be a variable or expression declaration");
-                    }
-                    auto c = expr_opt();
-                    auto u = expr_opt();
-                    auto b = [&] { auto body = loop_body(); return stmt_req(); }();
-                    result = std::make_shared<for_stmt>(loc, i, c, u, b);
-                    break;
-                }
-                case node_type::range_for_stmt: {
-                    auto et = type();
-                    std::string_view vname = view();
-                    uint64_t vid = symbol(UINT64_MAX);
-                    size_t vslot = slot_val();
-                    bool is_ref = flag();
-                    bool is_const = flag();
-                    auto cont = expr_req();
-                    auto body = [&] { auto scope = loop_body(); return stmt_req(); }();
-                    auto s = std::make_shared<range_for_stmt>(loc, et, vname, vid, is_ref, is_const, cont, body);
-                    s->variable_slot_index = vslot;
-                    track_slot(vslot, vid, false, true);
-                    stamp_map_entry_bindings(*s, symbols_);
-                    result = s;
-                    break;
-                }
-                case node_type::parallel_for_stmt: {
-                    auto params = parameters();
-                    if (params.empty()) jaibite_fail("invalid program: parallel_for has no loop variable");
-                    size_t locals = size_t(varint());
-                    const uint64_t frame_capture_count = varint();
-                    check_count(frame_capture_count);
-                    std::vector<std::pair<uint64_t, size_t>> frame_captures;
-                    for (uint64_t i = 0; i < frame_capture_count; ++i) {
-                        const uint64_t sym = symbol(UINT64_MAX);
-                        const size_t slot = size_t(varint());
-                        track_slot(slot, sym);
-                        frame_captures.emplace_back(sym, slot);
-                    }
-                    auto cont = expr_req();
-                    auto extras = expr_list();
-                    if (extras.size() + 1 != params.size()) jaibite_fail("invalid program: parallel_for zips one array per loop variable");
-                    for (size_t i = 0; i < params.size(); ++i) {
-                        if (params[i].slot_index != i) {
-                            jaibite_fail("invalid program: parallel parameter slot does not match its position");
-                        }
-                    }
-                    enter_frame(params, false);
-                    auto body = [&] { auto scope = parallel_body(); return block_req(); }();
-                    leave_frame(locals);
-                    auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
-                    s->extra_params.assign(params.begin() + 1, params.end());
-                    s->extra_containers = std::move(extras);
-                    s->local_count = locals;
-                    s->frame_captures = std::move(frame_captures);
-                    result = s;
-                    break;
-                }
-                case node_type::return_stmt:
-                    result = std::make_shared<return_stmt>(loc, expr_opt());
-                    break;
-                case node_type::break_stmt:
-                    if (breakable_ == 0) jaibite_fail("invalid program: 'break' outside a loop or switch");
-                    result = std::make_shared<break_stmt>(loc);
-                    break;
-                case node_type::continue_stmt:
-                    if (continuable_ == 0) jaibite_fail("invalid program: 'continue' outside a loop");
-                    result = std::make_shared<continue_stmt>(loc);
-                    break;
-                case node_type::try_stmt: {
-                    auto try_blk = block_req();
-                    std::string catch_var = str();
-                    uint64_t catch_id = symbol(UINT64_MAX);
-                    size_t catch_slot = slot_val();
-                    auto catch_blk = block_req();
-                    auto s = std::make_shared<try_stmt>(loc, try_blk, catch_blk, catch_var);
-                    s->catch_var_id = catch_id;
-                    s->catch_slot_index = catch_slot;
-                    track_slot(catch_slot, catch_id, false, true);
-                    result = s;
-                    break;
-                }
-                case node_type::switch_stmt: {
-                    auto s = std::make_shared<switch_stmt>(loc, expr_req());
-                    auto cases = switch_body();
-                    uint64_t n = varint();
-                    check_count(n);
-                    for (uint64_t i = 0; i < n; ++i) {
-                        auto c = node();
-                        if (!c || c->get_type() != node_type::case_stmt) jaibite_fail("expected case statement node");
-                        s->cases.push_back(std::static_pointer_cast<case_stmt>(c));
-                    }
-                    auto def = node();
-                    if (def) {
-                        if (def->get_type() != node_type::default_stmt) jaibite_fail("expected default statement node");
-                        s->default_case = std::static_pointer_cast<default_stmt>(def);
-                    }
-                    result = s;
-                    break;
-                }
-                case node_type::case_stmt: {
-                    auto s = std::make_shared<case_stmt>(loc, expr_req());
-                    uint64_t n = varint();
-                    check_count(n);
-                    for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
-                    s->has_fallthrough = flag();
-                    bool terminal_fallthrough = false;
-                    for (size_t i = 0; i < s->body.size(); ++i) {
-                        if (s->body[i]->get_type() == node_type::fallthrough_stmt) {
-                            if (i + 1 != s->body.size()) {
-                                jaibite_fail("invalid program: inconsistent case fallthrough");
-                            }
-                            terminal_fallthrough = true;
-                        }
-                    }
-                    if (s->has_fallthrough != terminal_fallthrough) {
+            }
+            enter_frame(params, false);
+            auto body = [&] { auto scope = parallel_body(); return block_req(); }();
+            leave_frame(locals);
+            auto s = std::make_shared<parallel_for_stmt>(loc, std::move(params[0]), cont, body);
+            s->extra_params.assign(params.begin() + 1, params.end());
+            s->extra_containers = std::move(extras);
+            s->local_count = locals;
+            s->frame_captures = std::move(frame_captures);
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_try_stmt(const source_location& loc) {
+            auto try_blk = block_req();
+            std::string catch_var = str();
+            uint64_t catch_id = symbol(UINT64_MAX);
+            size_t catch_slot = slot_val();
+            auto catch_blk = block_req();
+            auto s = std::make_shared<try_stmt>(loc, try_blk, catch_blk, catch_var);
+            s->catch_var_id = catch_id;
+            s->catch_slot_index = catch_slot;
+            track_slot(catch_slot, catch_id, false, true);
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_switch_stmt(const source_location& loc) {
+            auto s = std::make_shared<switch_stmt>(loc, expr_req());
+            auto cases = switch_body();
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) {
+                auto c = node();
+                if (!c || c->get_type() != node_type::case_stmt) jaibite_fail("expected case statement node");
+                s->cases.push_back(std::static_pointer_cast<case_stmt>(c));
+            }
+            auto def = node();
+            if (def) {
+                if (def->get_type() != node_type::default_stmt) jaibite_fail("expected default statement node");
+                s->default_case = std::static_pointer_cast<default_stmt>(def);
+            }
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_case_stmt(const source_location& loc) {
+            auto s = std::make_shared<case_stmt>(loc, expr_req());
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
+            s->has_fallthrough = flag();
+            bool terminal_fallthrough = false;
+            for (size_t i = 0; i < s->body.size(); ++i) {
+                if (s->body[i]->get_type() == node_type::fallthrough_stmt) {
+                    if (i + 1 != s->body.size()) {
                         jaibite_fail("invalid program: inconsistent case fallthrough");
                     }
-                    result = s;
-                    break;
+                    terminal_fallthrough = true;
                 }
-                case node_type::default_stmt: {
-                    auto s = std::make_shared<default_stmt>(loc);
-                    uint64_t n = varint();
-                    check_count(n);
-                    for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
-                    result = s;
-                    break;
-                }
-                case node_type::fallthrough_stmt:
-                    result = std::make_shared<fallthrough_stmt>(loc);
-                    break;
-                case node_type::variable_decl: {
-                    auto t = type();
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    auto init = expr_opt();
-                    if (!init && t && t->base_type == script_value_type::jai_reference_type) jaibite_fail("a reference declaration without an initializer");
-                    auto d = std::make_shared<variable_decl>(loc, t, name, nid, init);
-                    d->is_static = flag();
-                    d->function_spelling = flag();
-                    d->default_initialized = flag();
-                    d->is_inline = flag();
-                    d->is_const = flag();
-                    d->slot_index = slot_val();
-                    track_slot(d->slot_index, nid, false, true);
-                    result = d;
-                    break;
-                }
-                case node_type::function_decl: {
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    auto d = std::make_shared<function_decl>(loc, name, nid);
-                    d->parameters = parameters();
-                    d->return_type = type();
-                    enter_frame(d->parameters);
-                    {
-                        auto body = function_body();
-                        d->body = block_req();
-                    }
-                    // Constructor initializers, like parameter defaults, are parsed
-                    // in the surrounding scope, not in the function body frame.
-                    const size_t body_frame = current_frame_;
-                    current_frame_ = frames_[body_frame].parent;
-                    uint64_t ni = varint();
-                    check_count(ni);
-                    for (uint64_t i = 0; i < ni; ++i) {
-                        std::string target = str();
-                        d->initializers.emplace_back(target, expr_list());
-                    }
-                    d->is_override = flag();
-                    d->is_static = flag();
-                    d->is_coroutine = flag();
-                    d->local_count = size_t(varint());
-                    frames_[body_frame].local_count = d->local_count;
-                    bool built = false;
-                    outer_slot_plan(d->outer_slot_plan, built);
-                    d->outer_slot_plan_built = built;
-                    result = d;
-                    break;
-                }
-                case node_type::class_decl: {
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    auto d = std::make_shared<class_decl>(loc, name, nid);
-                    d->nocopy = u8() != 0;
-                    uint64_t nb = varint();
-                    check_count(nb);
-                    for (uint64_t i = 0; i < nb; ++i) d->base_classes.push_back(view());
-                    uint64_t nm = varint();
-                    check_count(nm);
-                    for (uint64_t i = 0; i < nm; ++i) {
-                        uint8_t vis = u8();
-                        if (vis > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
-                        auto member_decl = decl_req();
-                        if (member_decl->get_type() != node_type::variable_decl &&
-                            member_decl->get_type() != node_type::function_decl) {
-                            jaibite_fail("invalid program: class member must be a variable or function declaration");
-                        }
-                        d->members.push_back({ static_cast<class_decl::member_visibility>(vis), member_decl });
-                    }
-                    result = d;
-                    break;
-                }
-                case node_type::namespace_decl: {
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    auto d = std::make_shared<namespace_decl>(loc, name, nid);
-                    uint64_t n = varint();
-                    check_count(n);
-                    for (uint64_t i = 0; i < n; ++i) d->declarations.push_back(decl_req());
-                    result = d;
-                    break;
-                }
-                case node_type::expression_decl: {
-                    auto e = expr_req();
-                    bool implicit = flag();
-                    result = std::make_shared<expression_decl>(loc, e, implicit);
-                    break;
-                }
-                case node_type::statement_decl:
-                    result = std::make_shared<statement_decl>(loc, stmt_req());
-                    break;
-                case node_type::include_decl: {
-                    std::string path = str();
-                    auto d = std::make_shared<include_decl>(loc, path);
-                    d->path_expr = expr_opt();
-                    result = d;
-                    break;
-                }
-                case node_type::include_expr: {
-                    std::string path = str();
-                    auto e = std::make_shared<include_expr>(loc, path);
-                    e->path_expr = expr_opt();
-                    result = e;
-                    break;
-                }
-                case node_type::import_decl: {
-                    std::string path = str();
-                    auto d = std::make_shared<import_decl>(loc, path);
-                    d->path_expr = expr_opt();
-                    result = d;
-                    break;
-                }
-                case node_type::import_expr: {
-                    auto e = std::make_shared<import_expr>(loc);
-                    const uint64_t n_paths = varint();
-                    check_count(n_paths);
-                    for (uint64_t i = 0; i < n_paths; ++i) { e->paths.push_back(str()); }
-                    e->path_exprs = expr_list();
-                    e->force = flag();
-                    result = e;
-                    break;
-                }
-                case node_type::extern_decl: {
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    bool is_function = flag();
-                    bool is_const = flag();
-                    type_info_ptr t = type();
-                    auto d = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
-                    d->is_const = is_const;
-                    result = d;
-                    break;
-                }
-                case node_type::enum_decl: {
-                    std::string_view name = view();
-                    uint64_t nid = symbol(UINT64_MAX);
-                    auto d = std::make_shared<enum_decl>(loc, name, nid);
-                    uint64_t n = varint();
-                    check_count(n);
-                    for (uint64_t i = 0; i < n; ++i) {
-                        std::string_view vname = view();
-                        uint64_t vid = symbol(UINT64_MAX);
-                        d->values.emplace_back(vname, vid);
-                    }
-                    result = d;
-                    break;
-                }
-				case node_type::destructuring_decl: {
-					std::vector<std::pair<std::string_view, uint64_t>> names;
-					uint64_t n = varint();
-					check_count(n);
-					for (uint64_t i = 0; i < n; ++i) {
-						std::string_view nm = view();
-						uint64_t id = symbol(UINT64_MAX);
-						names.emplace_back(nm, id);
-					}
-					uint64_t ns = varint();
-					check_count(ns);
-					if (ns != n) {
-						jaibite_fail("destructuring name/slot count mismatch");
-					}
-					std::vector<size_t> slots;
-					for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
-					const bool is_const = flag();
-					auto d = std::make_shared<destructuring_decl>(loc, expr_req());
-					d->is_const = is_const;
-					d->names = std::move(names);
-					d->slot_indices = std::move(slots);
-					for (size_t i = 0; i < d->slot_indices.size(); ++i) {
-						track_slot(d->slot_indices[i], d->names[i].second, false, true);
-					}
-					result = d;
-					break;
-				}
-                default:
-                    jaibite_fail("corrupt node tag " + std::to_string(int(tag)));
             }
-            if (check_mode_attr && result) static_cast<statement*>(result.get())->check_mode_attr = check_mode_attr;
-            --depth_;
-            return result;
+            if (s->has_fallthrough != terminal_fallthrough) {
+                jaibite_fail("invalid program: inconsistent case fallthrough");
+            }
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_default_stmt(const source_location& loc) {
+            auto s = std::make_shared<default_stmt>(loc);
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) s->body.push_back(stmt_req());
+            return s;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_variable_decl(const source_location& loc) {
+            auto t = type();
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            auto init = expr_opt();
+            if (!init && t && t->base_type == script_value_type::jai_reference_type) jaibite_fail("a reference declaration without an initializer");
+            auto d = std::make_shared<variable_decl>(loc, t, name, nid, init);
+            d->is_static = flag();
+            d->function_spelling = flag();
+            d->default_initialized = flag();
+            d->is_inline = flag();
+            d->is_const = flag();
+            d->slot_index = slot_val();
+            track_slot(d->slot_index, nid, false, true);
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_function_decl(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            auto d = std::make_shared<function_decl>(loc, name, nid);
+            d->parameters = parameters();
+            d->return_type = type();
+            enter_frame(d->parameters);
+            {
+                auto body = function_body();
+                d->body = block_req();
+            }
+            // Constructor initializers, like parameter defaults, are parsed
+            // in the surrounding scope, not in the function body frame.
+            const size_t body_frame = current_frame_;
+            current_frame_ = frames_[body_frame].parent;
+            uint64_t ni = varint();
+            check_count(ni);
+            for (uint64_t i = 0; i < ni; ++i) {
+                std::string target = str();
+                d->initializers.emplace_back(target, expr_list());
+            }
+            d->is_override = flag();
+            d->is_static = flag();
+            d->is_coroutine = flag();
+            d->local_count = size_t(varint());
+            frames_[body_frame].local_count = d->local_count;
+            bool built = false;
+            outer_slot_plan(d->outer_slot_plan, built);
+            d->outer_slot_plan_built = built;
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_class_decl(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            auto d = std::make_shared<class_decl>(loc, name, nid);
+            d->nocopy = u8() != 0;
+            uint64_t nb = varint();
+            check_count(nb);
+            for (uint64_t i = 0; i < nb; ++i) d->base_classes.push_back(view());
+            uint64_t nm = varint();
+            check_count(nm);
+            for (uint64_t i = 0; i < nm; ++i) {
+                uint8_t vis = u8();
+                if (vis > uint8_t(class_decl::Protected)) jaibite_fail("corrupt member visibility");
+                auto member_decl = decl_req();
+                if (member_decl->get_type() != node_type::variable_decl &&
+                    member_decl->get_type() != node_type::function_decl) {
+                    jaibite_fail("invalid program: class member must be a variable or function declaration");
+                }
+                d->members.push_back({ static_cast<class_decl::member_visibility>(vis), member_decl });
+            }
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_namespace_decl(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            auto d = std::make_shared<namespace_decl>(loc, name, nid);
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) d->declarations.push_back(decl_req());
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_expression_decl(const source_location& loc) {
+            auto e = expr_req();
+            bool implicit = flag();
+            return std::make_shared<expression_decl>(loc, e, implicit);
+        }
+
+        JAI_NOINLINE ast_node_ptr read_include_decl(const source_location& loc) {
+            std::string path = str();
+            auto d = std::make_shared<include_decl>(loc, path);
+            d->path_expr = expr_opt();
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_include_expr(const source_location& loc) {
+            std::string path = str();
+            auto e = std::make_shared<include_expr>(loc, path);
+            e->path_expr = expr_opt();
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_import_decl(const source_location& loc) {
+            std::string path = str();
+            auto d = std::make_shared<import_decl>(loc, path);
+            d->path_expr = expr_opt();
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_import_expr(const source_location& loc) {
+            auto e = std::make_shared<import_expr>(loc);
+            const uint64_t n_paths = varint();
+            check_count(n_paths);
+            for (uint64_t i = 0; i < n_paths; ++i) { e->paths.push_back(str()); }
+            e->path_exprs = expr_list();
+            e->force = flag();
+            return e;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_extern_decl(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            bool is_function = flag();
+            bool is_const = flag();
+            type_info_ptr t = type();
+            auto d = std::make_shared<extern_decl>(loc, t, is_function, name, nid);
+            d->is_const = is_const;
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_enum_decl(const source_location& loc) {
+            std::string_view name = view();
+            uint64_t nid = symbol(UINT64_MAX);
+            auto d = std::make_shared<enum_decl>(loc, name, nid);
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) {
+                std::string_view vname = view();
+                uint64_t vid = symbol(UINT64_MAX);
+                d->values.emplace_back(vname, vid);
+            }
+            return d;
+        }
+
+        JAI_NOINLINE ast_node_ptr read_destructuring_decl(const source_location& loc) {
+            std::vector<std::pair<std::string_view, uint64_t>> names;
+            uint64_t n = varint();
+            check_count(n);
+            for (uint64_t i = 0; i < n; ++i) {
+                std::string_view nm = view();
+                uint64_t id = symbol(UINT64_MAX);
+                names.emplace_back(nm, id);
+            }
+            uint64_t ns = varint();
+            check_count(ns);
+            if (ns != n) {
+                jaibite_fail("destructuring name/slot count mismatch");
+            }
+            std::vector<size_t> slots;
+            for (uint64_t i = 0; i < ns; ++i) slots.push_back(slot_val());
+            const bool is_const = flag();
+            auto d = std::make_shared<destructuring_decl>(loc, expr_req());
+            d->is_const = is_const;
+            d->names = std::move(names);
+            d->slot_indices = std::move(slots);
+            for (size_t i = 0; i < d->slot_indices.size(); ++i) {
+                track_slot(d->slot_indices[i], d->names[i].second, false, true);
+            }
+            return d;
         }
 
         std::vector<expression_ptr> expr_list() {
@@ -1569,7 +1765,7 @@ namespace jai::detail {
         std::vector<frame_record> frames_{frame_record{}};
         std::vector<slot_record> slots_;
         size_t current_frame_ = 0;
-        int depth_ = 0;
+        native_stack_mark stack_;   // armed where the writer is made: the thread that walks the tree
         int breakable_ = 0;
         int continuable_ = 0;
         std::string own_path_;

@@ -1353,46 +1353,70 @@ public:
             std::atomic<size_t> stops{0};
             dbg.set_on_stopped([&stops](const jai::debug::stop_info&) { ++stops; });
             std::atomic<bool> finish{false};
-            eng->add_function("keep_going", [&finish]() { return !finish.load(); });
+            std::atomic<size_t> loop_heads{0};
+            eng->add_function("keep_going", [&finish, &loop_heads]() { ++loop_heads; return !finish.load(); });
             std::thread script([&] { eng->execute("while (keep_going()) { sleep(0.00001); }"); });
+            // once a session ends the script reaches two more loop heads (the first may have begun before the end), so no park
+            // outlived it; a script that reaches none for the hang guard is parked for a session that is gone
+            const auto runs_on = [&] {
+                const size_t target = loop_heads.load() + 2;
+                size_t seen = loop_heads.load();
+                auto progressed_at = std::chrono::steady_clock::now();
+                while (loop_heads.load() < target) {
+                    const size_t now_seen = loop_heads.load();
+                    const auto now = std::chrono::steady_clock::now();
+                    if (now_seen != seen) {
+                        seen = now_seen;
+                        progressed_at = now;
+                    } else if (now - progressed_at > kHangGuard) {
+                        return false;
+                    }
+                    std::this_thread::yield();
+                }
+                return true;
+            };
             size_t stranded = 0;
             std::mt19937 rng(7);
-            // a count of stops, not a span of time: a loaded machine takes longer to race the same number of them
-            const size_t races = 1000;
-            const auto give_up = std::chrono::steady_clock::now() + kHangGuard;
-            while (stops.load() < races && std::chrono::steady_clock::now() < give_up) {
+            const size_t rounds = 1000;
+            for (size_t round = 0; round < rounds; ++round) {
                 dbg.set_enabled(true);
                 dbg.request_pause();
                 const int spins = static_cast<int>(rng() % 200000);
                 for (volatile int spin = 0; spin < spins; ++spin) {}
                 dbg.set_enabled(false);
-                // stranded: still paused at the hang guard after the session ended (a park already under way when it ended shows
-                // briefly and is woken by the detach); settled: unpaused for a millisecond
-                using clock = std::chrono::steady_clock;
-                std::optional<clock::time_point> paused_since;
-                auto unpaused_since = clock::now();
-                for (;;) {
-                    const auto now = clock::now();
-                    if (dbg.is_paused()) {
-                        if (!paused_since) { paused_since = now; }
-                        if (now - *paused_since > kHangGuard) {
-                            ++stranded;
-                            dbg.resume();
-                            break;
-                        }
-                    } else {
-                        if (paused_since) { paused_since.reset(); unpaused_since = now; }
-                        if (now - unpaused_since > std::chrono::milliseconds(1)) { break; }
+                if (!runs_on()) {
+                    ++stranded;
+                    dbg.resume();
+                }
+            }
+            // a session that waits for its pause sees the script stop, then run on once it ends
+            dbg.set_enabled(true);
+            const size_t raced_stops = stops.load();
+            dbg.request_pause();
+            {
+                size_t seen = loop_heads.load();
+                auto progressed_at = std::chrono::steady_clock::now();
+                while (stops.load() == raced_stops) {
+                    const auto now = std::chrono::steady_clock::now();
+                    if (loop_heads.load() != seen) {
+                        seen = loop_heads.load();
+                        progressed_at = now;
+                    } else if (now - progressed_at > kHangGuard) {
+                        break;
                     }
                     std::this_thread::yield();
                 }
             }
-            finish = true;
+            const bool waited_stop = stops.load() > raced_stops;
             dbg.set_enabled(false);
+            const bool ran_after_waited_stop = runs_on();
+            finish = true;
             dbg.detach();
             script.join();
-            check_eq(size_t(0), stranded, "a parked thread outlived the session that stopped it");
-            check_true(stops.load() >= races, "the script stopped " + std::to_string(stops.load()) + " times");
+            check_eq(size_t(0), stranded, "a parked thread outlived the session that stopped it (" + std::to_string(raced_stops) + " stops in " +
+                std::to_string(rounds) + " rounds)");
+            check_true(waited_stop, "the requested pause stopped the script");
+            check_true(ran_after_waited_stop, "the script ran on after the session that stopped it ended");
         });
 
         // ---- cost-model benchmarks (verbose runs only; non-asserting) ----

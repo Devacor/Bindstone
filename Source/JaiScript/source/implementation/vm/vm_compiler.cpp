@@ -701,8 +701,8 @@ uint32_t vm_compiler::add_symbol(uint64_t id) {
 	return static_cast<uint32_t>(chunk_->symbols.size() - 1);
 }
 
-uint32_t vm_compiler::add_message(std::string msg) {
-	chunk_->messages.push_back(std::move(msg));
+uint32_t vm_compiler::add_message(std::string_view msg) {
+	chunk_->messages.push_back(symbolizer_->keep_text(msg));
 	return static_cast<uint32_t>(chunk_->messages.size() - 1);
 }
 
@@ -741,7 +741,7 @@ std::shared_ptr<chunk> vm_compiler::within_native_stack(std::string_view name, s
 		chunk_ = result.get();
 		current_stmt_ = at.get();
 		chunk_->nodes.push_back(std::move(at));
-		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::max_recursion_depth), add_message(std::string(detail::k_nesting_too_deep)), k_invalid_u32);
+		emit(opcode::op_error, static_cast<uint32_t>(runtime_error_code::max_recursion_depth), add_message(detail::k_nesting_too_deep), k_invalid_u32);
 		emit(opcode::op_halt);
 		chunk_ = nullptr;
 		current_stmt_ = nullptr;

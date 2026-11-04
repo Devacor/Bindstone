@@ -1167,20 +1167,6 @@ namespace jai::detail {
             return result;
         }
 
-        ast_node_ptr node() {
-            uint8_t tag = u8();
-            if (tag == 0xFF) return nullptr;
-            if (stack_.low()) jaibite_fail("AST nesting too deep");
-            source_location loc = location();
-            const uint8_t check_mode_attr = tag >= uint8_t(node_type::expression_stmt) ? u8() : 0;
-            if (check_mode_attr > check_mode_attr_strict) jaibite_fail("corrupt check mode attribute");
-            static constexpr std::array<construct_reader, k_construct_tags> readers = construct_readers();
-            if (tag >= k_construct_tags || !readers[tag]) corrupt_node_tag(static_cast<node_type>(tag));
-            ast_node_ptr result = (this->*readers[tag])(loc);
-            if (check_mode_attr && result) static_cast<statement*>(result.get())->check_mode_attr = check_mode_attr;
-            return result;
-        }
-
         using construct_reader = ast_node_ptr (ast_reader::*)(const source_location&);
         static constexpr size_t k_construct_tags = 64;
         // node() calls a construct's reader through this table rather than through a dispatch frame of its own
@@ -1233,6 +1219,21 @@ namespace jai::detail {
             result[size_t(node_type::destructuring_decl)] = &ast_reader::read_destructuring_decl;
             return result;
         }
+
+        ast_node_ptr node() {
+            uint8_t tag = u8();
+            if (tag == 0xFF) return nullptr;
+            if (stack_.low()) jaibite_fail("AST nesting too deep");
+            source_location loc = location();
+            const uint8_t check_mode_attr = tag >= uint8_t(node_type::expression_stmt) ? u8() : 0;
+            if (check_mode_attr > check_mode_attr_strict) jaibite_fail("corrupt check mode attribute");
+            static constexpr std::array<construct_reader, k_construct_tags> readers = construct_readers();
+            if (tag >= k_construct_tags || !readers[tag]) corrupt_node_tag(static_cast<node_type>(tag));
+            ast_node_ptr result = (this->*readers[tag])(loc);
+            if (check_mode_attr && result) static_cast<statement*>(result.get())->check_mode_attr = check_mode_attr;
+            return result;
+        }
+
 
         [[noreturn]] JAI_NOINLINE static void corrupt_node_tag(node_type kind) { jaibite_fail("corrupt node tag " + std::to_string(int(kind))); }
 

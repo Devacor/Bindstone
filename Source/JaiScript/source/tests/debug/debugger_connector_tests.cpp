@@ -4,6 +4,7 @@
 // routing + park/pump wiring without needing VS Code, on the backend --backend= picks.
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/core/engine.hpp>
 
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
@@ -43,9 +44,6 @@ namespace jai::foundry::tests {
 
 namespace {
 
-// A wait for what must happen fails only past this guard against a hang: it never bounds speed
-constexpr int kHangGuardMs = 10 * 60 * 1000;
-
 #ifdef _WIN32
     using sock_t = SOCKET;
     constexpr sock_t kBad = INVALID_SOCKET;
@@ -72,7 +70,7 @@ sock_t connect_client(int port) {
             addr.sin_port = htons(static_cast<uint16_t>(port));
             ::inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr);
             if (::connect(s, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) == 0) {
-                // 100 ms recv timeout so wait_for() polls toward its own deadline.
+                // 100 ms recv timeout so wait_for() polls its stall watch.
 #ifdef _WIN32
                 DWORD tv = 100;
                 ::setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, reinterpret_cast<const char*>(&tv), sizeof(tv));
@@ -107,12 +105,12 @@ bool recv_timed_out() {
 #endif
 }
 
-// Recv into an accumulating buffer until it contains `needle`; false once the peer closes
+// Recv into an accumulating buffer until it contains `needle`; false once the peer closes or sends nothing for the hang guard
 bool wait_for(sock_t s, std::string& buf, const std::string& needle) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
     if (buf.find(needle) != std::string::npos) return true;
+    stall_watch watch;
     char tmp[4096];
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (!watch.stalled(buf.size())) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
         if (n == 0 || (n < 0 && !recv_timed_out())) return false;
         if (n > 0) {
@@ -125,9 +123,9 @@ bool wait_for(sock_t s, std::string& buf, const std::string& needle) {
 
 // Like wait_for, ending early once `done` holds: true when the needle came first
 bool wait_for_unless(sock_t s, std::string& buf, const std::string& needle, const std::atomic<bool>& done) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
+    stall_watch watch;
     char tmp[4096];
-    while (buf.find(needle) == std::string::npos && std::chrono::steady_clock::now() < deadline) {
+    while (buf.find(needle) == std::string::npos && !watch.stalled(buf.size())) {
         const bool finished = done.load();
         int n = ::recv(s, tmp, sizeof(tmp), 0);
         if (n == 0 || (n < 0 && !recv_timed_out())) return false;
@@ -168,25 +166,29 @@ void set_send_timeout(sock_t s, int timeout_ms) {
 
 // True once the peer closes or resets the connection (pending replies are read and dropped)
 bool closed_by_peer(sock_t s) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
+    stall_watch watch;
+    uint64_t dropped = 0;
     char tmp[4096];
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (!watch.stalled(dropped)) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
         if (n == 0) return true;
         if (n < 0 && !recv_timed_out()) return true;
+        if (n > 0) dropped += static_cast<uint64_t>(n);
     }
     return false;
 }
 
 // Like wait_for, keeping only enough of the stream to match the needle (replies may run to many MB)
 bool wait_for_streaming(sock_t s, const std::string& needle, size_t* bytes_read = nullptr) {
-    auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs);
+    stall_watch watch;
+    uint64_t received = 0;
     std::string window;
     char tmp[65536];
-    while (std::chrono::steady_clock::now() < deadline) {
+    while (!watch.stalled(received)) {
         int n = ::recv(s, tmp, sizeof(tmp), 0);
         if (n == 0 || (n < 0 && !recv_timed_out())) return false;
         if (n > 0) {
+            received += static_cast<uint64_t>(n);
             if (bytes_read) *bytes_read += static_cast<size_t>(n);
             window.append(tmp, tmp + n);
             if (window.find(needle) != std::string::npos) return true;
@@ -512,7 +514,7 @@ public:
                     if (thread.joinable()) thread.join();
                 }
             } join{eng->debugger(), script, keep_looping};
-            check_true(looping.get_future().wait_for(std::chrono::milliseconds(kHangGuardMs)) == std::future_status::ready);
+            check_true(looping.get_future().wait_for(k_hang_guard) == std::future_status::ready);
 
             send_dap(cli, R"({"seq":2,"type":"request","command":"attach"})");
             check_true(wait_for(cli, buf, "\"command\":\"attach\""));
@@ -769,7 +771,7 @@ public:
             dbg.set_enabled(true);
             std::thread script([&] { second_engine->execute("var q = 1;\n"); });
             joined_script join{dbg, script};
-            for (auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(kHangGuardMs); !dbg.is_paused() && std::chrono::steady_clock::now() < deadline;) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
+            for (stall_watch watch; !dbg.is_paused() && !watch.stalled(0);) { std::this_thread::sleep_for(std::chrono::milliseconds(10)); }
             check_true(dbg.is_paused());
             dbg.set_enabled(false);
             script.join();

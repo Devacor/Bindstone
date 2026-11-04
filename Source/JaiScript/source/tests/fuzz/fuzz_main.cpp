@@ -28,6 +28,7 @@
 #include <sys/wait.h>
 #endif
 
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/testing/unattended.hpp>
 
 using namespace jai::fuzz;
@@ -565,12 +566,13 @@ int main(int argc, char** argv) {
 	}
 
 	if (opt.child) {
-		// Wall-clock watchdog: a program that never reaches a budget check (or a hang
-		// in native code) must not stall the run - the child exits with the HANG
-		// code and the parent reports the seed.
-		const double hang_ms = std::max(10000.0, opt.timeout_ms * 40.0);
-		std::thread([hang_ms]() {
-			std::this_thread::sleep_for(std::chrono::milliseconds(static_cast<long long>(hang_ms)));
+		// No-progress watchdog: a segment that never reaches a budget check (or hangs in native code) must not stall the run.
+		// Once no segment has finished for the guard the child exits with the HANG code and the parent reports the seed; a
+		// slow program that keeps finishing segments never trips it
+		const auto guard = std::chrono::milliseconds(static_cast<long long>(std::max(10000.0, opt.timeout_ms * 40.0)));
+		std::thread([guard]() {
+			jai::foundry::stall_watch watch(guard);
+			while (!watch.stalled(segments_finished.load(std::memory_order_relaxed))) { std::this_thread::sleep_for(std::chrono::milliseconds(100)); }
 			std::fflush(stdout);
 			std::_Exit(23);
 		}).detach();

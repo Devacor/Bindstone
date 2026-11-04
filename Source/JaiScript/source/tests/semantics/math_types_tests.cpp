@@ -1,6 +1,7 @@
 // The native math kinds (docs/site/guide/15-math.html): math::vec2, math::vec3 (binary32 components) and math::ivec2,
 // math::ivec3 (int32 components), inline in the value. Every row runs on both backends with proofs on and off.
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/math/types.hpp>
@@ -13,9 +14,7 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/archive.hpp>
-#include <chrono>
 #include <cstdlib>
-#include <cstdio>
 #include <vector>
 
 using namespace jai;
@@ -844,7 +843,7 @@ public:
         });
 
         test("adapter_vs_class_binding_timing", [this]() {
-            // A/B against the class-bound path (a Point bound with dynamic_binder): opt-in, prints ns per call
+            // A/B against the class-bound path (a Point bound with dynamic_binder): opt-in, prints the ratio
             if (!std::getenv("JAI_MATH_ADAPTER_BENCH")) { return; }
             for (bool use_vm : {false, true}) {
                 auto e = host(use_vm);
@@ -854,20 +853,9 @@ public:
                 e->add_function("cscale3", [](cpoint p, float k) { return cpoint(p.x * k, p.y * k, p.z * k); });
                 const char* adapted = "function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); float s = 0.0; for (int i = 0; i < n; i++) { math::vec3 q = scale3(p, 1.5); s += q.x; } return s; } f(200000);";
                 const char* classed = "function f(int n) -> float { var p = CPoint(1, 2, 3); float s = 0.0; for (int i = 0; i < n; i++) { var q = cscale3(p, 1.5); s += q.x; } return s; } f(200000);";
-                auto time = [&](const char* src) {
-                    double best = 1e30;
-                    for (int r = 0; r < 5; ++r) {
-                        auto t0 = std::chrono::steady_clock::now();
-                        e->execute(src);
-                        const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / 200000.0;
-                        if (ns < best) best = ns;
-                    }
-                    return best;
-                };
-                const double a = time(adapted), c = time(classed);
-                std::printf("BENCH adapter_%s %.1f\nBENCH class_%s %.1f\n", use_vm ? "vm" : "interp", a, use_vm ? "vm" : "interp", c);
+                auto timed = [&e](const char* src) { return [&e, src] { return time_seconds([&] { e->execute(src); }); }; };
+                compare_speed(std::string("math::vec3 through the adapter against a class-bound point") + (use_vm ? " (vm)" : " (interpreter)"), timed(classed), timed(adapted), 5);
             }
-            check(true, "timing printed");
         });
     }
 };

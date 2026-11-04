@@ -1,14 +1,15 @@
-// Method-call cost cases: ns per call over the bare loop on both backends, best of 7 runs of a 200000-iteration typed loop.
+// Method-call cost cases: each row's 200000-iteration typed loop timed against the bare loop's on both backends (the ratio
+// and the medians' ns per call over the loop).
 // The rows split a method call by receiver and callee: a script class's method through a var, a typed local, a handle, an
 // inherited and an overridden method, a method that touches no field, a sibling call and this.m() inside a method, a static
 // method, and a host class's bound method (var and typed receivers, no arguments). A before/after of a method-call change is
 // one run of this suite: compare the printed METHODCALL rows.
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
-#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -76,30 +77,18 @@ public:
 			};
 			for (bool use_vm : {false, true}) {
 				auto e = host(use_vm);
-				auto time = [&](const std::string& src) {
-					double best = 1e30;
-					for (int r = 0; r < 7; ++r) {
-						const auto t0 = std::chrono::steady_clock::now();
-						e->execute(src);
-						const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / 200000.0;
-						if (ns < best) best = ns;
-					}
-					return best;
+				auto timed = [&e](std::string src) { return [&e, src] { return time_seconds([&] { e->execute(src); }); }; };
+				const char* backend = use_vm ? "vm    " : "interp";
+				auto report = [&](const char* name, const std::string& reference, const std::string& src) {
+					const speed_ratio speed = compare_speed(std::string("METHODCALL ") + backend + " " + name + " against its loop", timed(reference), timed(src));
+					std::printf("METHODCALL %s %-22s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / 200000.0,
+					            (speed.measured_seconds - speed.reference_seconds) * 1e9 / 200000.0);
 				};
-				double loop_ns = 0;
-				for (const auto& r : rows) {
-					const double ns = time(std::string("function f(int n) -> float { ") + r.decl + " float s = 0.0; float k = 1.5; for (int i = 0; i < n; i++) { " + r.body + " } return s; } f(200000);");
-					if (std::string(r.name) == "loop") loop_ns = ns;
-					std::printf("METHODCALL %s %-22s %7.1f ns/iter %7.1f over the loop\n", use_vm ? "vm    " : "interp", r.name, ns, ns - loop_ns);
-				}
-				double method_loop_ns = 0;
-				for (const auto& r : in_method) {
-					const double ns = time(std::string("S o = S(); o.") + r.body + "(200000, 1.5);");
-					if (std::string(r.name) == "in_method_loop") method_loop_ns = ns;
-					std::printf("METHODCALL %s %-22s %7.1f ns/iter %7.1f over the loop\n", use_vm ? "vm    " : "interp", r.name, ns, ns - method_loop_ns);
-				}
+				auto free_loop = [](const row& r) { return std::string("function f(int n) -> float { ") + r.decl + " float s = 0.0; float k = 1.5; for (int i = 0; i < n; i++) { " + r.body + " } return s; } f(200000);"; };
+				auto method_loop = [](const row& r) { return std::string("S o = S(); o.") + r.body + "(200000, 1.5);"; };
+				for (const auto& r : rows) { report(r.name, free_loop(rows[0]), free_loop(r)); }
+				for (const auto& r : in_method) { report(r.name, method_loop(in_method[0]), method_loop(r)); }
 			}
-			check(true, "timings printed");
 		});
 	}
 };

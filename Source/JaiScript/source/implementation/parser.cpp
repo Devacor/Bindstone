@@ -961,6 +961,7 @@ void parser::check_reload_hook(const jai::declaration& d, bool& seen) {
 
 checked_result<std::vector<declaration_ptr>> parser::parse() {
     stack_.arm();
+    paren_close_.clear();
     std::vector<declaration_ptr> declarations;
     bool reload_hook_seen = false;
     if (qualify_namespace_classes(*stream_, namespace_stream_)) { stream_ = &namespace_stream_; }
@@ -2634,6 +2635,7 @@ checked_result<expression_ptr> parser::null_chain_rest(size_t chain_start, const
     stream_ = saved_stream;
     current_ = saved_current;
     pushed_back_token_.reset();
+    paren_close_.erase(&rewritten);
     if (!parsed) { return parsed.error_value(); }
     if (!whole) {
         report_error("unexpected tokens in an optional chain", tokens[link]);
@@ -3262,6 +3264,11 @@ JAI_NOINLINE checked_result<void> parser::lambda_signature(lambda_expr& lambda) 
     return {};
 }
 
+namespace {
+    constexpr uint32_t k_paren_unknown = 0xFFFFFFFFu;
+    constexpr uint32_t k_paren_unclosed = 0xFFFFFFFEu;
+}
+
 bool parser::arrow_function_ahead() const {
     const std::vector<token>& tokens = *stream_;
     if (pushed_back_token_) return false;
@@ -3269,18 +3276,37 @@ bool parser::arrow_function_ahead() const {
         return current_ + 1 < tokens.size() && tokens[current_ + 1].type == token_type::fat_arrow;
     }
     if (!check(token_type::left_paren)) return false;
-    size_t depth = 0;
-    for (size_t i = current_; i < tokens.size(); ++i) {
+    const uint32_t close = paren_close(current_);
+    return close != k_paren_unclosed && close + 1 < tokens.size() && tokens[close + 1].type == token_type::fat_arrow;
+}
+
+// A ';', '{', '}' or the end before a group closes leaves it and every group open around it unclosed; a group already closed is
+// stepped over whole, so a stream's parentheses are walked once
+uint32_t parser::paren_close(size_t open) const {
+    const std::vector<token>& tokens = *stream_;
+    std::vector<uint32_t>& close = paren_close_[stream_];
+    if (close.size() != tokens.size()) { close.assign(tokens.size(), k_paren_unknown); }
+    if (close[open] != k_paren_unknown) { return close[open]; }
+    std::vector<size_t> opened{open};
+    for (size_t i = open + 1; i < tokens.size() && !opened.empty(); ++i) {
         const token_type t = tokens[i].type;
         if (t == token_type::left_paren) {
-            ++depth;
+            if (close[i] == k_paren_unknown) {
+                opened.push_back(i);
+            } else if (close[i] == k_paren_unclosed) {
+                break;
+            } else {
+                i = close[i];
+            }
         } else if (t == token_type::right_paren) {
-            if (--depth == 0) return i + 1 < tokens.size() && tokens[i + 1].type == token_type::fat_arrow;
+            close[opened.back()] = static_cast<uint32_t>(i);
+            opened.pop_back();
         } else if (t == token_type::semicolon || t == token_type::left_brace || t == token_type::right_brace || t == token_type::eof) {
-            return false;
+            break;
         }
     }
-    return false;
+    for (size_t at : opened) { close[at] = k_paren_unclosed; }
+    return close[open];
 }
 
 // (params) => expr / (params) => { body } / name => expr: the JavaScript and C# arrow function, a function expression that
@@ -3613,6 +3639,7 @@ bool parser::splice_include(const declaration_ptr& decl, std::vector<declaration
     splice_spelled_.pop_back();
     splice_active_.pop_back(); --splice_depth_;
     stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
+    paren_close_.erase(&tokens);
     spliced_files_.push_back(resolved.value());
     return true;
 }

@@ -243,6 +243,10 @@ namespace jai {
         checked_result<expression_ptr> lambda_expression_body(std::shared_ptr<lambda_expr> lambda);
         // (params) => expr, (params) => { body }, name => expr: a function expression, closing over its scope by reference
         bool arrow_function_ahead() const;
+        // the ')' that closes each '(' of a token stream, found once per stream: nested groups each ask arrow_function_ahead, which
+        // would otherwise rescan the whole group at every level
+        uint32_t paren_close(size_t open) const;
+        mutable std::unordered_map<const std::vector<token>*, std::vector<uint32_t>> paren_close_;
         checked_result<expression_ptr> arrow_function_expression();
         checked_result<std::pair<std::vector<lambda_expr::capture>, lambda_expr::capture_default>> parse_capture_list();
 

@@ -79,10 +79,33 @@ HASH_BACKENDS="${HASH_BACKENDS:-vm interp}"
 hash_on() { case " $HASH_BACKENDS " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 
 # JAI_TEST_SHARD=i/n runs one shard of the suites (jaiscript_tests --shard; tools/ci/ci_lib.sh jai_debug_suites); --progress prints a
-# dot per test, the output the watchdog reads as progress
-gate_tests_interp() { run "$BIN/jaiscript_tests" --progress --backend=interpreter ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
-gate_tests_vm() { run "$BIN/jaiscript_tests" --progress --backend=vm ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
-gate_tests_vm_reference() { run "$BIN/jaiscript_tests" --progress --backend=vm-reference ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}; }
+# dot per test, the output the watchdog reads as progress. JAI_TEST_SHARDS=n runs a suite as n shards at once, each its own process
+# and log, printed in shard order when all have ended (the Debug suites are single-threaded: a 4-vCPU runner takes them in a third
+# of the time).
+suite_run() {
+	local backend="$1" shards="${JAI_TEST_SHARDS:-1}" dir i failed=0 pids=()
+	if [ -n "${JAI_TEST_SHARD:-}" ] || [ "$shards" -le 1 ]; then
+		run "$BIN/jaiscript_tests" --progress --backend="$backend" ${JAI_TEST_SHARD:+"--shard=$JAI_TEST_SHARD"}
+		return
+	fi
+	dir="$(mktemp -d)"
+	echo "+ $BIN/jaiscript_tests --progress --backend=$backend, shards 0..$((shards - 1)) of $shards at once"
+	for ((i = 0; i < shards; i++)); do
+		"$BIN/jaiscript_tests" --progress --backend="$backend" "--shard=$i/$shards" > "$dir/$i.log" 2>&1 &
+		pids+=($!)
+	done
+	for ((i = 0; i < shards; i++)); do
+		wait "${pids[$i]}" || failed=1
+		echo "-- shard $i/$shards"
+		tr -d '\r' < "$dir/$i.log"
+	done
+	rm -rf "$dir"
+	[ "$failed" = 0 ] || { echo "::error::jaiscript_tests --backend=$backend: a shard failed"; return 1; }
+}
+
+gate_tests_interp() { suite_run interpreter; }
+gate_tests_vm() { suite_run vm; }
+gate_tests_vm_reference() { suite_run vm-reference; }
 
 fuzz_run() {
 	local corpus=()
@@ -348,8 +371,8 @@ gate_asan() {
 	# ASan clears the stack an exception unwinds only on a stack of at most 64 MiB (__asan_handle_no_return); past that the
 	# unwound frames stay poisoned and a later test reads them as a stack-use-after-scope
 	ulimit -s 61440 2>/dev/null || true
-	run "$BIN/jaiscript_tests" --progress --backend=interpreter
-	run "$BIN/jaiscript_tests" --progress --backend=vm
+	suite_run interpreter
+	suite_run vm
 	FUZZ_ITERATIONS="${FUZZ_ITERATIONS:-100}"
 	fuzz_run --timeout-ms 2000
 	want "asan fuzz: expected no crash" "^crashes: +0\b"

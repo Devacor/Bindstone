@@ -12,6 +12,8 @@
 #include <memory>
 #include <string>
 
+#include "foundry/small_stack.hpp"
+
 using namespace jai;
 using namespace jai::foundry;
 
@@ -194,15 +196,18 @@ public:
 		});
 
 		// ---- #0/#14 parser depth guards cover statements and grouping parens ----
+		// 20,000 levels clear a 1 MB stack on every build: one parse error, and the engine stays usable
 		test("deep_if_nesting_no_crash", [this]() {
-			auto e = make_engine();
-			std::string src;
-			for (int i = 0; i < 500000; ++i) { src += "if (true) "; }
-			src += "1;";
-			std::string failure;
-			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
-			check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
-			check_eq((int64_t)3, e->execute("1 + 2").as_int());
+			on_small_stack([this]() {
+				auto e = make_engine();
+				std::string src;
+				for (int i = 0; i < 20000; ++i) { src += "if (true) "; }
+				src += "1;";
+				std::string failure;
+				try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+				check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
+				check_eq((int64_t)3, e->execute("1 + 2").as_int());
+			});
 		});
 		test("deep_block_nesting_no_crash", [this]() {
 			auto e = make_engine();
@@ -211,14 +216,16 @@ public:
 			check_eq((int64_t)3, e->execute("1 + 2").as_int());
 		});
 		test("deep_paren_nesting_no_crash", [this]() {
-			auto e = make_engine();
-			std::string src(500000, '(');
-			src += "1";
-			src += std::string(500000, ')');
-			std::string failure;
-			try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
-			check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
-			check_eq((int64_t)3, e->execute("1 + 2").as_int());
+			on_small_stack([this]() {
+				auto e = make_engine();
+				std::string src(20000, '(');
+				src += "1";
+				src += std::string(20000, ')');
+				std::string failure;
+				try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+				check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
+				check_eq((int64_t)3, e->execute("1 + 2").as_int());
+			});
 		});
 		// depths past what a 1 MB stack held before each nesting level kept a small frame in every pass
 		test("nesting_hundreds_deep_still_works", [this]() {

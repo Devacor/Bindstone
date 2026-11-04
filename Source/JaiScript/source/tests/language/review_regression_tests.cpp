@@ -14,6 +14,8 @@
 #include <atomic>
 #include <thread>
 
+#include "foundry/small_stack.hpp"
+
 using namespace jai;
 using namespace jai::foundry;
 
@@ -220,14 +222,16 @@ public:
             check(e->execute(src).as_bool());
         });
         test("deep_unary_chain_guard_no_crash", [this]() {
-            auto e = make_engine();
-            std::string src(1000000, '!');
-            src += "true";
-            // past the host thread's stack: one parse error, and the engine stays usable
-            std::string failure;
-            try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
-            check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
-            check_eq((int64_t)3, e->execute("1 + 2").as_int());
+            // 20,000 levels clear a 1 MB stack on every build: one parse error, and the engine stays usable
+            on_small_stack([this]() {
+                auto e = make_engine();
+                std::string src(20000, '!');
+                src += "true";
+                std::string failure;
+                try { e->execute(src); } catch (const std::exception& error) { failure = error.what(); }
+                check_true(failure.find("nesting too deep for the host thread's stack") != std::string::npos, failure.substr(0, 200));
+                check_eq((int64_t)3, e->execute("1 + 2").as_int());
+            });
         });
 
         // ---- chained subscript on a temporary across the execute boundary ----

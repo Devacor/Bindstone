@@ -369,7 +369,7 @@ public:
 				row("identical reload: large class, 1000 instances", largeClass.size(), largeNs);
 
 #if !PARSE_KEY_BENCH_BASELINE
-				auto def = eng->get_class_definition("Calc");
+				auto def = detail::engine_access::get_class_definition(*eng, "Calc");
 				check_not_null(def.get(), "Calc definition");
 				check_true(def->identical_redefinitions() > 0, "structural fast path engaged during bench");
 				std::fprintf(stderr, "  (Calc identical_redefinitions = %zu)\n", def->identical_redefinitions());

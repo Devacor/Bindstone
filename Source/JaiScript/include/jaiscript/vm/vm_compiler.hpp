@@ -154,8 +154,9 @@ namespace jai::vm {
         static uint8_t raw_scalar_kind(const type_info* t);       // the cell kind of a declared int, float or bool; 0 otherwise
         static bool raw_signature(const function_decl* fn);       // a free function a raw call may enter: scalar by-value parameters, a scalar result
         bool raw_call_operand(const expression* e) const;         // a hoistable call whose checked callee has the raw signature and a frame program
-        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body);   // the callee is the function itself, or forms a frame program
-        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting);
+        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, const detail::native_stack_mark& stack);   // the callee is the function itself, or forms a frame program
+        static bool raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting,
+                                             const detail::native_stack_mark& stack);
         chunk::typed_site& typed_site_at(size_t ip);
         void lower_typed_ops(chunk& c);
         void lower_dynamic_ops(chunk& c);

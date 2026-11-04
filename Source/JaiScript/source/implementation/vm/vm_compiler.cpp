@@ -854,7 +854,7 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 	return binary_shape_none;
 }
 
-static bool loop_free_body(const ast_node* n);
+static bool loop_free_body(const ast_node* n, const detail::native_stack_mark& stack);
 
 std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame) {
 	return within_native_stack({}, 0, false, [&] { return compile_program_code(declarations, program_frame); });
@@ -1029,7 +1029,7 @@ JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::open_callable(std::string_view 
 	callable_.coroutine_body = detail::aggregate_lowering_impl::contains_yield(body.get());
 	callable_body_ = body.get();
 	frame_param_kinds_.clear();
-	frame_eligible_ = parameters.size() <= 8 && loop_free_body(body.get());
+	frame_eligible_ = parameters.size() <= 8 && loop_free_body(body.get(), stack_);
 	for (size_t i = 0; frame_eligible_ && i < parameters.size(); ++i) {
 		const parameter& p = parameters[i];
 		const uint8_t k = raw_scalar_kind(p.type.get());
@@ -1115,14 +1115,15 @@ JAI_NOINLINE void vm_compiler::close_callable(chunk& result, const block_stmt& b
 }
 
 // a body the first form of a frame program covers: no loop anywhere (a switch, a try or a nested declaration counts as one: the region refuses them)
-static bool loop_free_body(const ast_node* n) {
+static bool loop_free_body(const ast_node* n, const detail::native_stack_mark& stack) {
 	if (!n) return true;
+	stack.guard(n->location);
 	switch (n->get_type()) {
 	case node_type::block_stmt:
-		for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { if (!loop_free_body(d.get())) return false; }
+		for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { if (!loop_free_body(d.get(), stack)) return false; }
 		return true;
-	case node_type::statement_decl: return loop_free_body(static_cast<const statement_decl*>(n)->statement.get());
-	case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); return loop_free_body(s->then_statement.get()) && loop_free_body(s->else_statement.get()); }
+	case node_type::statement_decl: return loop_free_body(static_cast<const statement_decl*>(n)->statement.get(), stack);
+	case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); return loop_free_body(s->then_statement.get(), stack) && loop_free_body(s->else_statement.get(), stack); }
 	case node_type::expression_stmt: case node_type::return_stmt: case node_type::variable_decl: case node_type::expression_decl: return true;
 	default: return false;
 	}
@@ -1131,25 +1132,27 @@ static bool loop_free_body(const ast_node* n) {
 // a call a frame program's body makes that can be raw at run time: to the function itself, or to a loop-free function of the raw shape that forms a
 // frame program itself (one of its own raw-signature calls reaches one; a cycle of such functions forms programs all round); a leaf, or a function
 // whose calls reach only loops, has no frame program, so a call to one stays the general call
-bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body) {
+bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, const detail::native_stack_mark& mark) {
 	std::vector<const function_decl*> visiting;
-	return raw_call_reaches_program(callee, self_body, visiting);
+	return raw_call_reaches_program(callee, self_body, visiting, mark);
 }
-bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting) {
+bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, std::vector<const function_decl*>& visiting,
+                                           const detail::native_stack_mark& mark) {
 	if (!callee || !callee->body) return false;
 	if (callee->body.get() == self_body) return true;
-	if (!loop_free_body(callee->body.get())) return false;
+	if (!loop_free_body(callee->body.get(), mark)) return false;
 	if (std::find(visiting.begin(), visiting.end(), callee) != visiting.end()) return true;
 	if (visiting.size() >= 8) return false;
 	visiting.push_back(callee);
 	bool found = false;
 	auto visit_expr = [&](auto&& self, const expression* e) -> void {
 		if (!e || found) return;
+		mark.guard(e->location);
 		switch (e->get_type()) {
 		case node_type::call_expr: {
 			const auto* c = static_cast<const call_expr*>(e);
 			const auto d = c->proven_callee_decl.lock();
-			if (d && raw_signature(d.get()) && c->arguments.size() == d->parameters.size() && raw_call_reaches_program(d.get(), callee->body.get(), visiting)) { found = true; return; }
+			if (d && raw_signature(d.get()) && c->arguments.size() == d->parameters.size() && raw_call_reaches_program(d.get(), callee->body.get(), visiting, mark)) { found = true; return; }
 			for (const auto& a : c->arguments) { self(self, a.get()); }
 			return;
 		}
@@ -4154,7 +4157,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (ins.op == opcode::op_probe_callee && ins.a < c.call_sites.size() && c.call_sites[ins.a].call_node < c.nodes.size()) {
 				const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[ins.a].call_node].get());
 				const auto decl = ce->proven_callee_decl.lock();
-				if (decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) { raw_site = true; }
+				if (decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_)) { raw_site = true; }
 			}
 		}
 		if (!raw_site) return false;
@@ -5235,7 +5238,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (c.call_sites[st.a].call_node < c.nodes.size() && code[call_ip].c == 0) {   // a tail call keeps the general splice (no raw frame grows the chain)
 					const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[st.a].call_node].get());
 					const auto decl = ce->proven_callee_decl.lock();
-					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_)) {
+					if (calls.size() < 65534 && decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_)) {
 						cc.raw = 1;   // the arguments instruction may enter the callee's frame program raw
 						for (size_t pi = 0; pi < decl->parameters.size(); ++pi) { cc.raw_kinds |= static_cast<uint32_t>(raw_scalar_kind(decl->parameters[pi].type.get())) << (4 * pi); }
 					}
@@ -7450,7 +7453,7 @@ bool vm_compiler::raw_call_operand(const expression* e) const {
 	if (!call_temp_operand(e)) return false;
 	const auto* call = static_cast<const call_expr*>(e);
 	const auto decl = call->proven_callee_decl.lock();
-	return decl && raw_signature(decl.get()) && call->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_);
+	return decl && raw_signature(decl.get()) && call->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_);
 }
 JAI_NOINLINE void vm_compiler::compile_call_into_temp(const expression_ptr& e, fused_operand& out) {
 	compile_call(std::static_pointer_cast<call_expr>(e));

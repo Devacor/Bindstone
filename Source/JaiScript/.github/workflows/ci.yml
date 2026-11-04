@@ -12,6 +12,10 @@ concurrency:
 permissions:
   contents: read
 
+# A hosted runner has 4 vCPUs and 16 GB: Ninja's default of 6 jobs peaks near 16 GB on the GCC Release test sources
+env:
+  CMAKE_BUILD_PARALLEL_LEVEL: 4
+
 jobs:
   # Three compilers x two configurations. Every cell builds the library, the suite, the
   # fuzzer, the runner and the example games, then runs the suite on both backends, a
@@ -27,8 +31,9 @@ jobs:
         name: [windows-msvc, linux-gcc, linux-clang]
         config: [Debug, Release]
         include:
+          # the image with Visual Studio 2026 (MSVC 14.5x), the toolset the package is verified with; windows-latest may still be VS 2022
           - name: windows-msvc
-            os: windows-latest
+            os: windows-2025-vs2026
             cxx: cl
           - name: linux-gcc
             os: ubuntu-24.04
@@ -42,7 +47,7 @@ jobs:
     env:
       CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: MSVC environment
         if: runner.os == 'Windows'
@@ -119,7 +124,7 @@ jobs:
         if: matrix.config == 'Release'
         run: bash tools/ci/gates.sh gatorquest
 
-      # Release only: it holds a wall-clock budget (median edit-to-diagnostics under 100 ms).
+      # Release only: it asserts how many units an edit re-checks and prints the edit-to-diagnostics times for reading.
       - name: Language server latency
         if: matrix.config == 'Release'
         run: bash tools/ci/gates.sh lsp-latency
@@ -137,7 +142,7 @@ jobs:
       CC: clang
       CXX: clang++
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
       - name: ASan + UBSan suites and fuzz
         run: bash tools/ci/gates.sh asan
@@ -146,14 +151,10 @@ jobs:
   # without waiting for the full matrix.
   syntax-sweep:
     runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - name: g++ -fsyntax-only sweep
-        run: |
-          fails=0
-          for f in $(find source/implementation -name '*.cpp' | sort); do
-            g++-14 -std=c++20 -fsyntax-only -Iinclude -Isource "$f" || fails=$((fails+1))
-          done
-          exit $fails
+        run: find source/implementation -name '*.cpp' | sort | xargs -P 4 -n 1 g++-14 -std=c++20 -fsyntax-only -Iinclude -Isource
       - name: Public headers alone and warning-free
         run: HEADER_CXX=g++-14 bash tools/ci/gates.sh headers && HEADER_CXX=clang++ bash tools/ci/gates.sh headers

@@ -1,9 +1,10 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/core/jaibite.hpp>
 #include <vector>
 #include <map>
-#include <chrono>
 #include <numeric>
 #include <cmath>
 
@@ -15,30 +16,30 @@ namespace jai::foundry::tests {
 class container_conversion_tests : public suite {
 public:
     container_conversion_tests() : suite("Container Conversion Tests") {}
+
+    // one timed round: twenty calls of the precompiled bite
+    static std::function<double()> timed_calls(jai::jaibite& call) {
+        return [&call] { return time_seconds([&call] { for (int i = 0; i < 20; ++i) { call.execute(); } }); };
+    }
     
     void forge_tests() override {
         test("large_vector_performance", [this]() {
+            // converting ten times the elements costs about ten times as much; a quadratic conversion would cost a hundred
             auto engine = make_engine();
-            engine->execution_budget(0.0);   // correctness+measurement test, not a wall-clock gate:
-                                             // the 10k-element build loop must not flake under load
+            engine->execution_budget(0.0);   // a measurement, not a wall-clock gate
 
             engine->add_function("sum_large", [](std::vector<int> nums) -> int64_t {
                 int64_t sum = 0;
                 for (int n : nums) sum += n;
                 return sum;
             });
-            
-            engine->execute("auto large_array = [];");
-            engine->execute("for (auto i = 0; i < 10000; i += 1) { large_array.push(i); }");
+            engine->execute("auto small_array = []; for (auto i = 0; i < 1000; i += 1) { small_array.push(i); }");
+            engine->execute("auto large_array = []; for (auto i = 0; i < 10000; i += 1) { large_array.push(i); }");
+            check_eq(engine->execute("sum_large(large_array)").as<int64_t>(), 49995000LL);
 
-            auto start = std::chrono::high_resolution_clock::now();
-            auto result = engine->execute("sum_large(large_array)");
-            auto end = std::chrono::high_resolution_clock::now();
-            
-            check_eq(result.as<int64_t>(), 49995000LL);
-            
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "    Large vector (10k elements) conversion time: " << duration << "uS" << std::endl;
+            auto small_call = engine->jaibite("sum_large(small_array);");
+            auto large_call = engine->jaibite("sum_large(large_array);");
+            check_speed_ratio(compare_speed("a 10k-element vector<int> conversion against a 1k one", timed_calls(small_call), timed_calls(large_call)), 30.0);
         });
         
         test("vector_int_basic", [this]() {
@@ -182,78 +183,6 @@ public:
             check(!engine->execute("is_empty_map({\"a\": 1})").as<bool>());
         });
         
-        test("large_vector_performance", [this]() {
-            auto engine = make_engine();
-            engine->execution_budget(0.0);   // correctness+measurement test, not a wall-clock gate:
-                                             // the 10k-element build loop must not flake under load
-
-            engine->add_function("print", [](const std::string& str) { std::cout << str << std::endl; });
-            engine->add_function("to_string", [](int val) -> std::string { return std::to_string(val); });
-            
-            engine->add_function("sum_large", [](std::vector<int> nums) -> int64_t {
-                std::cout << "    sum_large called with vector size: " << nums.size() << std::endl;
-                std::cout << "    Vector address: " << &nums << std::endl;
-                if (nums.size() < 10) {
-                    std::cout << "    First few elements: ";
-                    for (size_t i = 0; i < nums.size(); ++i) {
-                        std::cout << nums[i] << " ";
-                    }
-                    std::cout << std::endl;
-                }
-                int64_t sum = 0;
-                for (int n : nums) sum += n;
-                return sum;
-            });
-            
-            engine->add_variadic_function("debug_sum_large", [engine](std::vector<script_value> args) -> script_value {
-                if (args.size() != 1) {
-                    throw runtime_error("debug_sum_large expects 1 argument");
-                }
-                const auto& val = args[0];
-                std::cout << "    debug_sum_large called with type: " << static_cast<int>(val.type()) << std::endl;
-                if (val.is_array()) {
-                    const auto& arr = val.as_array();
-                    std::cout << "    Array size: " << arr.size() << std::endl;
-                    std::cout << "    First few elements: ";
-                    for (size_t i = 0; i < std::min(size_t(5), arr.size()); ++i) {
-                        std::cout << arr[i].as_int() << " ";
-                    }
-                    std::cout << std::endl;
-                }
-                return engine->make_value(0);
-            });
-            
-            engine->execute("auto large_array = [];");
-            engine->execute("for (auto i = 0; i < 10000; i += 1) { large_array.push(i); }");
-
-            engine->execute("print(\"About to call sum_large with array size: \" + to_string(large_array.size()));");
-
-            auto size_result = engine->execute("large_array.size()");
-            std::cout << "    Array size: " << size_result.as<int>() << std::endl;
-
-            auto array_val = engine->get_variable("large_array");
-            auto& arr = array_val.as_array();
-            std::cout << "    First few elements in large_array: ";
-            for (size_t i = 0; i < std::min(size_t(5), arr.size()); ++i) {
-                std::cout << arr[i].as_int() << " ";
-            }
-            std::cout << std::endl;
-
-            std::cout << "    Testing direct sum_large([1,2,3,4,5])..." << std::endl;
-            auto test_result = engine->execute("sum_large([1, 2, 3, 4, 5])");
-            std::cout << "    Direct call result: " << test_result.as<int64_t>() << std::endl;
-            
-            auto start = std::chrono::high_resolution_clock::now();
-            auto result = engine->execute("sum_large(large_array)");
-            auto end = std::chrono::high_resolution_clock::now();
-            
-            std::cout << "    Result: " << result.as<int64_t>() << " (expected: 49995000)" << std::endl;
-            check_eq(result.as<int64_t>(), 49995000LL);
-            
-            auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
-            std::cout << "    Large vector (10k elements) conversion time: " << duration << "uS" << std::endl;
-        });
-        
         test("type_mismatch_errors", [this]() {
             auto engine = make_engine();
             
@@ -328,8 +257,9 @@ public:
         });
         
         test("performance_comparison", [this]() {
+            // a typed std::vector<int> parameter against a variadic call reading the same array: reported, not bounded
             auto engine = make_engine();
-            
+
             engine->add_variadic_function("sum_variadic", [engine](std::vector<script_value> args) -> script_value {
                 if (args.size() != 1 || !args[0].is_array()) {
                     throw runtime_error("Expected single array argument");
@@ -341,36 +271,19 @@ public:
                 }
                 return engine->make_value(sum);
             });
-            
+
             engine->add_function("sum_typed", [](std::vector<int> nums) -> int {
                 return std::accumulate(nums.begin(), nums.end(), 0);
             });
-            
+
             engine->execute("auto test_array = [];");
             engine->execute("for (auto i = 0; i < 1000; i += 1) { test_array.push(i); }");
-            
-            auto start1 = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < 100; ++i) {
-                engine->execute("sum_variadic(test_array)");
-            }
-            auto end1 = std::chrono::high_resolution_clock::now();
-            auto variadic_time = std::chrono::duration_cast<std::chrono::microseconds>(end1 - start1).count();
-            
-            try {
-                auto start2 = std::chrono::high_resolution_clock::now();
-                for (int i = 0; i < 100; ++i) {
-                    engine->execute("sum_typed(test_array)");
-                }
-                auto end2 = std::chrono::high_resolution_clock::now();
-                auto typed_time = std::chrono::duration_cast<std::chrono::microseconds>(end2 - start2).count();
-                
-                std::cout << "    Performance comparison (100 iterations, 1000 elements):" << std::endl;
-                std::cout << "      Variadic version: " << variadic_time << "uS" << std::endl;
-                std::cout << "      Typed version: " << typed_time << "uS" << std::endl;
-                std::cout << "      Speedup: " << (double)variadic_time / typed_time << "x" << std::endl;
-            } catch (...) {
-                std::cout << "    Typed version not working yet, variadic took: " << variadic_time << "uS" << std::endl;
-            }
+
+            auto variadic = engine->jaibite("sum_variadic(test_array);");
+            auto typed = engine->jaibite("sum_typed(test_array);");
+            check_eq((int64_t)499500, variadic.execute().as_int(), "the variadic sum");
+            check_eq((int64_t)499500, typed.execute().as_int(), "the typed sum");
+            compare_speed("a typed vector<int> parameter against a variadic one (1000 elements)", timed_calls(variadic), timed_calls(typed));
         });
     }
 };

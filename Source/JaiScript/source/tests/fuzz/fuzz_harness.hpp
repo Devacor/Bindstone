@@ -7,6 +7,7 @@
 
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/value.hpp>
+#include <atomic>
 #include <cmath>
 
 #include <cstdint>
@@ -24,6 +25,9 @@ namespace jai::fuzz {
 	// Generated programs are not statically clean and the differential measures runtime parity: every unit the harness
 	// executes opens a [[warn_mode]] region on its first line, so the checker reports and the load proceeds
 	inline constexpr const char* k_warn_region_prefix = "[[warn_mode]]; ";
+
+	// Every segment either backend has finished: an isolated child's watchdog reads a hang as this standing still
+	inline std::atomic<uint64_t> segments_finished{0};
 
 	// ------------------------------------------------------------------
 	// Deterministic RNG (splitmix64) - no random_device, no wall clock.
@@ -291,6 +295,7 @@ namespace jai::fuzz {
 			double elapsed = std::chrono::duration<double>(std::chrono::steady_clock::now() - seg_start).count();
 			if (cfg.budget_seconds > 0 && elapsed >= cfg.budget_seconds * 0.9) out.budget_hit = true;
 			out.segment_results.push_back(std::move(r));
+			segments_finished.fetch_add(1, std::memory_order_relaxed);
 			if (cfg.after_segment) cfg.after_segment(out.segment_results.size() - 1, *eng);
 		}
 		try {

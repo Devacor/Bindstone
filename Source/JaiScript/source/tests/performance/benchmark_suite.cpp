@@ -1,8 +1,8 @@
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <optional>
-#include <chrono>
 #include <iostream>
 #include <vector>
 #include <algorithm>
@@ -44,25 +44,21 @@ public:
         // Optional: Clean up after each test if needed
     }
 
-    // Real-world macro bench: one script, BOTH backends, deterministic int result as
-    // the parity tripwire, wall ms reported per backend (chrono, not the uS harness).
+    // Real-world macro bench: one script, BOTH backends, deterministic int result as the parity tripwire, the VM timed
+    // against the interpreter (each round a fresh engine, its setup untimed)
     void run_macro_bench(const char* name, const char* src) {
-        double ms[2] = {0, 0};
         int64_t hash[2] = {0, 0};
-        for (bool use_vm : {false, true}) {
-            auto e = jai::foundry::make_default_engine();
-            e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-            jai::stdlib::register_all(e);
-            e->execution_budget(0);
-            auto t0 = std::chrono::steady_clock::now();
-            auto r = e->execute(src);
-            auto t1 = std::chrono::steady_clock::now();
-            ms[use_vm ? 1 : 0] = std::chrono::duration<double, std::milli>(t1 - t0).count();
-            hash[use_vm ? 1 : 0] = r.as_int();
-        }
+        auto timed = [&](bool use_vm) {
+            return [&, use_vm] {
+                auto e = jai::foundry::make_default_engine();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                jai::stdlib::register_all(e);
+                e->execution_budget(0);
+                return time_seconds([&] { hash[use_vm ? 1 : 0] = e->execute(src).as_int(); });
+            };
+        };
+        compare_speed(std::string("[bench] ") + name + ": the vm against the interpreter", timed(false), timed(true), 3);
         check_eq(hash[0], hash[1], std::string(name) + " backend hash parity");
-        std::cerr << "[bench] " << name << ": interp " << ms[0] << " ms | vm " << ms[1]
-                  << " ms | ratio " << (ms[1] > 0 ? ms[0] / ms[1] : 0) << " | hash " << hash[1] << std::endl;
     }
 
     void forge_tests() override {
@@ -1299,30 +1295,14 @@ public:
     std::shared_ptr<jai::engine> eng;
     void pre_test() override { eng = make_engine(); jai::stdlib::register_all(eng); }
 
-    // Median warm bite.execute() wall time in nanoseconds.
-    double warm_ns(const char* src, int reps = 9, int warmup = 3) {
-        auto bite = eng->jaibite(src);
-        for (int i = 0; i < warmup; ++i) bite.execute();
-        std::vector<double> samples;
-        samples.reserve(reps);
-        for (int i = 0; i < reps; ++i) {
-            auto t0 = std::chrono::steady_clock::now();
-            bite.execute();
-            auto t1 = std::chrono::steady_clock::now();
-            samples.push_back(std::chrono::duration<double, std::nano>(t1 - t0).count());
-        }
-        std::sort(samples.begin(), samples.end());
-        return samples[samples.size() / 2];
-    }
-
-    // Report per-op ns as (body - overhead) / ops, both scripts identical in shape
-    // save the measured op, so array-build + loop overhead cancel.
+    // Per-op ns as (body - overhead) / ops: both scripts share their shape save the measured op, so the array build and the
+    // loop cancel
     void row(const char* label, const char* body, const char* overhead, double ops) {
-        const double b = warm_ns(body);
-        const double o = warm_ns(overhead);
-        const double per = (b - o) / ops;
-        std::cout << "  [ns-harness] " << label << ": " << per << " ns/op"
-                  << "  (body " << b / 1e3 << " us, overhead " << o / 1e3 << " us)\n";
+        auto body_bite = eng->jaibite(body);
+        auto overhead_bite = eng->jaibite(overhead);
+        auto timed = [](jai::jaibite& bite) { return [&bite] { return time_seconds([&bite] { bite.execute(); }); }; };
+        const speed_ratio speed = compare_speed(std::string("[ns-harness] ") + label + " against its overhead loop", timed(overhead_bite), timed(body_bite), 9);
+        std::cout << "  [ns-harness] " << label << ": " << (speed.measured_seconds - speed.reference_seconds) * 1e9 / ops << " ns/op\n";
     }
 
     void forge_tests() override {

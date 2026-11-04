@@ -14,12 +14,15 @@ const vscode = require('vscode');
 
 function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 
-async function waitFor(what, test, timeoutMs) {
-	const deadline = Date.now() + timeoutMs;
+// A wait for what must happen fails only past this guard against a hang: it never bounds speed
+const HANG_GUARD_MS = 10 * 60 * 1000;
+
+async function waitFor(what, test) {
+	const deadline = performance.now() + HANG_GUARD_MS;
 	for (;;) {
 		const value = await test();
 		if (value) { return value; }
-		if (Date.now() > deadline) { throw new Error('timed out waiting for ' + what); }
+		if (performance.now() > deadline) { throw new Error('hung waiting for ' + what); }
 		await sleep(200);
 	}
 }
@@ -35,7 +38,7 @@ async function run() {
 		await vscode.window.showTextDocument(doc);
 		check('language id', doc.languageId === 'jaiscript', doc.languageId);
 		const ext = vscode.extensions.getExtension('snapjaw.jaiscript');
-		if (ext) { await waitFor('activation', async () => ext.isActive, 30000).catch(() => {}); }
+		if (ext) { await waitFor('activation', async () => ext.isActive).catch(() => {}); }
 		check('extension active', ext && ext.isActive, ext ? ext.isActive : 'missing');
 
 		const text = doc.getText();
@@ -44,7 +47,7 @@ async function run() {
 		const definition = await waitFor('definition', async () => {
 			const r = await vscode.commands.executeCommand('vscode.executeDefinitionProvider', file, at('CHARS[slot]'));
 			return r && r.length ? r : undefined;
-		}, 60000);
+		});
 		const target = definition[0].uri ? definition[0] : { uri: definition[0].targetUri, range: definition[0].targetRange };
 		check('definition CHARS -> gq_state.jai:103', path.basename(target.uri.fsPath) === 'gq_state.jai' && target.range.start.line === 102,
 			path.basename(target.uri.fsPath) + ':' + (target.range.start.line + 1));
@@ -74,12 +77,12 @@ async function run() {
 		const diagnostics = await waitFor('the typed error', async () => {
 			const list = vscode.languages.getDiagnostics(file);
 			return list.some((d) => d.message.includes('typo_probe')) ? list : undefined;
-		}, 60000);
+		});
 		check('typing a type error shows its diagnostic', diagnostics.some((d) => d.message.includes("cannot initialize 'typo_probe'")), diagnostics.map((d) => d.message).join(' | '));
 		const fix = new vscode.WorkspaceEdit();
 		fix.delete(file, new vscode.Range(insertAt, new vscode.Position(insertAt.line + 1, 1)));
 		await vscode.workspace.applyEdit(fix);
-		await waitFor('the diagnostic to clear', async () => !vscode.languages.getDiagnostics(file).some((d) => d.message.includes('typo_probe')), 60000);
+		await waitFor('the diagnostic to clear', async () => !vscode.languages.getDiagnostics(file).some((d) => d.message.includes('typo_probe')));
 		check('fixing it clears the diagnostic', vscode.languages.getDiagnostics(file).length === 0, vscode.languages.getDiagnostics(file).map((d) => d.message).join(' | '));
 
 		const importedFile = vscode.Uri.file(path.join(root, 'scripts', 'gq_util.jai'));
@@ -90,7 +93,7 @@ async function run() {
 		const leafDiagnostics = await waitFor('the imported file\'s error', async () => {
 			const list = vscode.languages.getDiagnostics(importedFile);
 			return list.some((d) => d.message.includes('leaf_probe')) ? list : undefined;
-		}, 60000);
+		});
 		const leafLine = leafDiagnostics.find((d) => d.message.includes('leaf_probe')).range.start.line;
 		check('an error in an imported file is reported in that file at its line', leafLine === leaf.lineCount - 2, 'line ' + (leafLine + 1) + ' of ' + leaf.lineCount);
 

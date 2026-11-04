@@ -1,15 +1,16 @@
-// Host-call cost cases: ns per call over the bare loop on both backends, best of 7 runs of a 200000-iteration typed loop.
+// Host-call cost cases: each row's 200000-iteration typed loop timed against the bare loop's on both backends (the ratio and
+// the medians' ns per call over the loop).
 // The rows split a host call into its parts: a plain script_function global (the call mechanics), the binder's
 // conversions without an overload set, a typed add_function (one overload), a real overload set, a statement-position
 // call, a host method on a bound class, and the math adapters' vector argument and result. A before/after of a host-call
 // change is one run of this suite: compare the printed HOSTCALL rows.
 
 #include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/timing.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/math/adapter.hpp>
-#include <chrono>
 #include <cstdio>
 #include <string>
 
@@ -65,24 +66,20 @@ public:
 				{"vec_result", "s += vf(k).x;"},
 				{"script_fn", "s += sfs(k);"},
 			};
+			auto source_of = [](const char* body) {
+				return std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); var c = Counter(); float s = 0.0; float k = 1.5; "
+				                   "for (int i = 0; i < n; i++) { ") + body + " } return s; } f(200000);";
+			};
 			for (bool use_vm : {false, true}) {
 				auto e = host(use_vm);
-				double loop_ns = 0;
+				auto timed = [&e](std::string src) { return [&e, src] { return time_seconds([&] { e->execute(src); }); }; };
+				const char* backend = use_vm ? "vm    " : "interp";
 				for (const auto& [name, body] : rows) {
-					const std::string src = std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); var c = Counter(); float s = 0.0; float k = 1.5; "
-					                                    "for (int i = 0; i < n; i++) { ") + body + " } return s; } f(200000);";
-					double best = 1e30;
-					for (int r = 0; r < 7; ++r) {
-						const auto t0 = std::chrono::steady_clock::now();
-						e->execute(src);
-						const double ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - t0).count() / 200000.0;
-						if (ns < best) best = ns;
-					}
-					if (std::string(name) == "loop") loop_ns = best;
-					std::printf("HOSTCALL %s %-20s %7.1f ns/iter %7.1f over the loop\n", use_vm ? "vm    " : "interp", name, best, best - loop_ns);
+					const speed_ratio speed = compare_speed(std::string("HOSTCALL ") + backend + " " + name + " against the bare loop", timed(source_of(rows[0].second)), timed(source_of(body)));
+					std::printf("HOSTCALL %s %-20s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / 200000.0,
+					            (speed.measured_seconds - speed.reference_seconds) * 1e9 / 200000.0);
 				}
 			}
-			check(true, "timings printed");
 		});
 	}
 };

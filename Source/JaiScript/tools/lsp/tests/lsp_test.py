@@ -30,7 +30,7 @@ JAISCRIPT = HERE.parents[2]
 FIXTURES = HERE / "fixtures"
 GOLDEN = HERE / "golden" / "fixtures.json"
 GATORQUEST = JAISCRIPT / "examples" / "gatorquest" / "scripts"
-HANG_GUARD = 600   # seconds: a wait for what must happen fails only past this, it never bounds speed
+HANG_GUARD = 600   # seconds: a wait for what must happen fails only after this long without it, it never bounds speed
 
 
 def default_exe():
@@ -111,10 +111,10 @@ class Client:
         rid = self.next_id
         self.next_id += 1
         self._send({"jsonrpc": "2.0", "id": rid, "method": method, "params": params})
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         with self.cv:
             while rid not in self.responses:
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError(method)
                 self.cv.wait(remaining)
@@ -143,25 +143,29 @@ class Client:
         return self.versions[uri]
 
     def wait_diagnostics(self, uri, version=None, timeout=HANG_GUARD):
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         with self.cv:
             while True:
                 params = self.diagnostics.get(uri)
                 if params is not None and (version is None or params.get("version") == version):
                     return params
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise TimeoutError("diagnostics for " + uri)
                 self.cv.wait(remaining)
 
     def settle(self, timeout=HANG_GUARD):
-        deadline = time.time() + timeout
-        while time.time() < deadline:
+        """the background checks drained; a hang is their pending count standing still for the guard, never a slow drain"""
+        pending, moved = None, time.monotonic()
+        while True:
             status = self.request("jaiscript/status", {})
             if status["pending"] == 0:
                 return status
+            if status["pending"] != pending:
+                pending, moved = status["pending"], time.monotonic()
+            elif time.monotonic() - moved >= timeout:
+                raise TimeoutError("background checks")
             time.sleep(0.05)
-        raise TimeoutError("background checks")
 
     def close(self):
         try:
@@ -634,10 +638,10 @@ class RawServer:
 
     def answered(self, rid, timeout=HANG_GUARD):
         needle = b'"id":%d,' % rid
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         with self.cv:
             while needle not in self.out:
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0 or self.proc.poll() is not None:
                     return needle in self.out
                 self.cv.wait(min(remaining, 0.2))
@@ -646,7 +650,7 @@ class RawServer:
     def response(self, rid, timeout=HANG_GUARD):
         if not self.answered(rid, timeout):
             return None
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         with self.cv:
             while True:
                 data = bytes(self.out)
@@ -655,7 +659,7 @@ class RawServer:
                 body_start = data.index(b"\r\n\r\n", start) + 4
                 if len(data) >= body_start + length:
                     return json.loads(data[body_start:body_start + length].decode("utf-8"))
-                if time.time() > deadline:
+                if time.monotonic() > deadline:
                     return None
                 self.cv.wait(0.2)
 
@@ -666,7 +670,7 @@ class RawServer:
 
     def reply_with(self, needle, timeout=HANG_GUARD):
         """the first message whose body holds needle, decoded"""
-        deadline = time.time() + timeout
+        deadline = time.monotonic() + timeout
         with self.cv:
             while True:
                 data = bytes(self.out)
@@ -677,7 +681,7 @@ class RawServer:
                     body_start = data.index(b"\r\n\r\n", start) + 4
                     if len(data) >= body_start + length:
                         return json.loads(data[body_start:body_start + length].decode("utf-8"))
-                remaining = deadline - time.time()
+                remaining = deadline - time.monotonic()
                 if remaining <= 0 or self.proc.poll() is not None:
                     return None
                 self.cv.wait(min(remaining, 0.2))

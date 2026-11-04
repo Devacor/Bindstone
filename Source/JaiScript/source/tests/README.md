@@ -50,6 +50,13 @@ Create engines with `make_engine()` so the runner's backend choice reaches the t
 an existing file when you can: the test list is a `file(GLOB_RECURSE)` evaluated at configure
 time, so a **new** `.cpp` needs a CMake reconfigure before it builds.
 
+A test never asserts an absolute time. Count the work instead (calls, migrations, parses, bytes
+moved). Where speed itself is the point, `compare_speed` (`include/jaiscript/testing/timing.hpp`)
+times the measured side against a reference operation, interleaved in the same process, and
+prints the median ratio. `check_speed_ratio` fails only past a bound that marks a regression
+(a lost complexity class, a fast path gone) with room for load. A wait for what must happen is
+a hang rail: `stall_watch` trips once a progress reading stands still for `k_hang_guard`.
+
 ## Building and running
 
 ```bash

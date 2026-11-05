@@ -54,7 +54,10 @@ def main():
 	parser.add_argument("--max-background-cores", type=float, default=0.20)
 	parser.add_argument("--max-attempts", type=int, default=20)
 	parser.add_argument("--conformance-only", action="store_true")
+	parser.add_argument("--expected-hash", help="16-hex frame-stream hash every run must print; default: the baseline JaiScript VM's own reference run")
 	args = parser.parse_args()
+	if args.expected_hash is not None and not re.fullmatch(r"[0-9a-f]{16}", args.expected_hash):
+		parser.error("--expected-hash is 16 lowercase hex digits.")
 	if args.rounds < 3 or args.frames < 1 or args.warmup < args.frames:
 		parser.error("Use at least three rounds and a full workload of warm-up frames.")
 	out = args.output.resolve()
@@ -136,12 +139,13 @@ def main():
 		COMMON.save(out / "runs.json", records)
 		print(f"{len(records):03d} {config['key']} {layout} {phase}: {row['ms_per_frame']} ms/frame hash={matches} background={background:.3f} accepted={row['accepted']}", flush=True)
 		return row
-	# Interpreter supplies the reference under the identical host/workload, not a performance point.
-	oracle = dict(configs[0], key="jai-interpreter-reference", backend="interpreter")
-	ref = run(oracle, "normal", "reference")
-	if ref["exit_code"] or not ref["hash_match"]:
-		raise RuntimeError("Interpreter OSSUARY reference failed.")
-	expected = ref["hash"]
+	expected = args.expected_hash
+	if expected is None:
+		# The VM is the reference: demoreel does not link the interpreter, and the ports are checked against what the VM prints.
+		ref = run(dict(configs[0], key="jai-vm-reference"), "normal", "reference")
+		if ref["exit_code"] or not ref["hash_match"]:
+			raise RuntimeError("JaiScript VM OSSUARY reference failed.")
+		expected = ref["hash"]
 	metadata["expected_hash"] = expected
 	valid = []
 	for config in configs:

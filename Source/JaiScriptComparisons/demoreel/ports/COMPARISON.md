@@ -8,7 +8,7 @@ The runner measures the zero-based scene 15 at 100x40, t=3.0 and seed 20260705. 
 
 JaiScript baseline/candidate, shaped/natural, serial/six workers, Lua 5.4.8 and Squirrel 3.2 are interleaved for at least three rounds. Each runtime/layout gets six accepted samples. Serial processes use one detected P core; the six-worker configurations use six. Only one workload process runs at a time.
 
-An interpreter run establishes the frame-stream reference. Both layouts of every configuration must match it before timing. A nonconforming port is reported without a timing point; a JaiScript mismatch stops the comparison. Every timed run rechecks the hash. Executable and script hashes are checked again at completion.
+A run of the baseline JaiScript VM establishes the frame-stream reference (or --expected-hash HEX16 supplies it). Both layouts of every configuration must match it before timing. A nonconforming port is reported without a timing point; a JaiScript mismatch stops the comparison. Every timed run rechecks the hash. Executable and script hashes are checked again at completion.
 
 The normal and padded executables differ by 40 retained volatile statements in their cold help function. Report normal and padded medians, sample ranges and the paired padding band together. The default background CPU ceiling is 0.20 core equivalents. A user-authorized alternative must be supplied explicitly with --max-background-cores and identified in the report. The runner records actual background activity and observed competing build/test/benchmark processes.
 

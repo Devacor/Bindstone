@@ -4,9 +4,23 @@
 // one of its overloads takes the value, else takes the new value. Every place a var lives answers alike.
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 
+#include <memory>
 #include <string>
+
+namespace var_assignment_hosts {
+	struct host_node {
+		int64_t value = 0;
+		std::shared_ptr<host_node> left;
+		explicit host_node(int64_t a_value) : value(a_value) {}
+	};
+	struct host_gauge {
+		int64_t value = 0;
+		explicit host_gauge(int64_t a_value) : value(a_value) {}
+	};
+}
 
 namespace jai::foundry::tests {
 
@@ -24,9 +38,31 @@ public:
 		string run(function f) { string out = ""; try { out = f(); } catch (e) { out = "ERR " + e; } return out; }
 	)";
 
+	static void bind_hosts(const std::shared_ptr<jai::engine>& a_engine) {
+		using var_assignment_hosts::host_node;
+		using var_assignment_hosts::host_gauge;
+		jai::dynamic_binder<host_node>(*a_engine, "HostNode")
+			.constructor<int64_t>()
+			.property("value", &host_node::value)
+			.property("left", &host_node::left, jai::skip_type_check)
+			.build();
+		jai::dynamic_binder<host_gauge>(*a_engine, "HostGauge")
+			.constructor<int64_t>()
+			.property("value", &host_gauge::value)
+			.method("=", [](host_gauge& a_self, const host_gauge& a_other) -> host_gauge& { a_self.value = a_other.value + 100; return a_self; })
+			.build();
+		a_engine->add_function("make_node", [](int64_t a_value) { return std::make_shared<host_node>(a_value); });
+		a_engine->add_function("make_gauge", [](int64_t a_value) { return std::make_shared<host_gauge>(a_value); });
+		a_engine->add_function("grow", [](std::shared_ptr<host_node> a_root, int64_t a_value) {
+			a_root->left = std::make_shared<host_node>(a_value);
+			return a_root;
+		});
+	}
+
 	void expect(const std::string& a_what, const std::string& a_body, const std::string& a_expected) {
 		auto eng = make_engine();
 		jai::stdlib::register_all(eng);
+		bind_hosts(eng);
 		eng->execute(k_classes);
 		auto value = eng->execute("run([]() { " + a_body + " })");
 		check_eq(a_expected, value.is_null() ? std::string("<null>") : value.as_string(), a_what + ": " + a_body);
@@ -48,6 +84,24 @@ public:
 			expect("a var loop variable", R"(array<shared_ptr<P>> xs = [new P()]; string o = ""; for (var x : xs) { x = 5; o = type_of(x); } return o + " " + to_string(xs[0].x);)", "int 1");
 			expect("a var from a call returning a handle", R"(auto mk = []() -> shared_ptr<P> { return new P(); }; var a = mk(); a = 3; return type_of(a);)", "int");
 			expect("through a var&", R"(var a = new P(); var b = a; var& r = a; r = "s"; return type_of(a) + " " + to_string(b.x);)", "string 1");
+		});
+
+		test("a_var_holding_a_host_handle_follows_the_site_rules", [this]() {
+			expect("a host-returned handle rebinds to a value its binding cannot assign", R"(var a = make_node(1); var b = a; a = HostNode(8); return type_of(a) + " " + to_string(a.value) + " " + to_string(b.value) + " " + to_string(same_object(a, b));)", "HostNode 8 1 false");
+			expect("a new handle rebinds the same way", R"(var a = new HostNode(1); a = HostNode(8); return type_of(a) + " " + to_string(a.value);)", "HostNode 8");
+			expect("a binding's operator= assigns into the shared object", R"(var a = make_gauge(1); var b = a; a = HostGauge(2); return to_string(b.value) + " " + to_string(same_object(a, b));)", "102 true");
+			expect("a var field", R"(Holder h = Holder(); h.m = make_node(1); h.m = HostNode(8); return type_of(h.m) + " " + to_string(h.m.value);)", "HostNode 8");
+			expect("an element", R"(array<var> xs = [make_node(1)]; xs[0] = HostNode(8); return type_of(xs[0]) + " " + to_string(xs[0].value);)", "HostNode 8");
+			expect("a typed handle still raises", R"(shared_ptr<HostNode> h = make_node(1); h = HostNode(8); return "stored";)", "ERR Cannot assign HostNode to 'h' (declared shared_ptr<HostNode>)");
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			bind_hosts(eng);
+			eng->execute("var root = null;");
+			std::string out;
+			for (int i = 0; i < 3; ++i) {
+				out += eng->execute("root = HostNode(8); root = grow(root, 4); to_string(root.value) + to_string(root.left.value) + \" \"").as_string();
+			}
+			check_eq(std::string("84 84 84 "), out, "a global var taking a value, then a host handle, each run");
 		});
 
 		test("a_typed_handle_local_assigns_a_value_into_its_object", [this]() {

@@ -194,6 +194,7 @@ std::optional<checked_result<value_store>> handle_value_assign(const script_valu
             return value_store::assigned;
         }
     }
+    if (dynamic) { return value_store::rebind; }   // a var takes the value a typed holder would reject
     if (has_operator) { return run_assign_operator(pointee, *method, value, assign_id, eng); }
     return std::nullopt;
 }

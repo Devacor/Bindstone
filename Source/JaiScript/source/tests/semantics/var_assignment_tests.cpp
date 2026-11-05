@@ -84,6 +84,8 @@ public:
 			expect("a var loop variable", R"(array<shared_ptr<P>> xs = [new P()]; string o = ""; for (var x : xs) { x = 5; o = type_of(x); } return o + " " + to_string(xs[0].x);)", "int 1");
 			expect("a var from a call returning a handle", R"(auto mk = []() -> shared_ptr<P> { return new P(); }; var a = mk(); a = 3; return type_of(a);)", "int");
 			expect("through a var&", R"(var a = new P(); var b = a; var& r = a; r = "s"; return type_of(a) + " " + to_string(b.x);)", "string 1");
+			expect("an emptied handle", R"(var a = new P(); a.reset(); a = 5; return type_of(a);)", "int");
+			expect("an emptied handle reset through a var&", R"(var a = new P(); var& r = a; r.reset(); a = B(); return type_of(a);)", "B");
 		});
 
 		test("a_var_holding_a_host_handle_follows_the_site_rules", [this]() {
@@ -149,6 +151,13 @@ public:
 				var gr = new R(); var gr2 = gr; R gn = R(); gn.x = 2; gr = gn;
 				type_of(ga) + " " + to_string(gb.x) + "|" + type_of(gq) + " " + to_string(gq.x) + "|" + to_string(gr2.x) + " " + to_string(same_object(gr, gr2))
 			)").as_string(), "globals");
+			check_eq(std::string("int string int"), eng->execute(R"(
+				var gh = new P(); gh.reset(); gh = 5;
+				var gs = 1; var& gr = gs; gr = new P(); gs = "s";
+				namespace gns { var h = null; }
+				gns::h = new P(); gns::h = 5;
+				type_of(gh) + " " + type_of(gs) + " " + type_of(gns::h)
+			)").as_string(), "a global that held a handle stays a var");
 		});
 	}
 };

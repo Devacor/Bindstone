@@ -2564,14 +2564,7 @@ checked_result<script_value> vm_backend::converted_for_variable(const type_info_
 	}
 	value = std::move(enforced.value());
 	detail::keep_handle_slot_type(value, tag);
-	if (detail::var_slot(tag.get())) {
-		// a var keeps a shared_ptr-tagged value's marker (flattening to 'any' would detach the handle at the copy), rebindable
-		if (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
-			detail::var_stamp(value, tag, engine_);
-		} else if (value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
-			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
-		}
-	}
+	if (detail::var_slot(tag.get())) { detail::var_stamp(value, tag, engine_); }
 	return value;
 }
 
@@ -2871,7 +2864,7 @@ JAI_NOINLINE bool vm_backend::store_ref_alias_var(frame& f, const vm_instruction
 	const type_info* tag = storage.type_info_raw();
 	if (storage.raw_storage_index() == script_value::TYPEID_CPP_BOUND || !tag || !detail::var_slot(tag) || detail::slot_value_assign_candidate(storage)) return false;
 	script_value v = taken_for_reference_store(value, ins.c);
-	if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { detail::var_stamp(v, storage.get_type_info(), engine_); }
+	detail::var_stamp(v, storage.get_type_info(), engine_);
 	storage = std::move(v);
 	if (!(ins.c & store_flag_no_result)) { stack_.push_back(std::move(value)); }
 	return true;
@@ -3046,16 +3039,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					value = std::move(enforced.value());
 					detail::keep_handle_slot_type(value, slot_type);
 				}
-				// var slots keep a shared_ptr-tagged rhs's marker (decl parity;
-				// flattening to 'any' would detach at the copy)
-				if (detail::var_slot(slot_type.get()) &&
-				    (!value.get_type_info() ||
-				     value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-					detail::var_stamp(value, slot_type, engine_);
-				} else if (detail::var_slot(slot_type.get()) && value.get_type_info()->element_type() && !value.get_type_info()->dynamic_pointee) {
-					// var target adopting a handle: mark it rebindable (the environment row's twin)
-					value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(value.get_type_info()->element_type().get()));
-				}
+				if (detail::var_slot(slot_type.get())) { detail::var_stamp(value, slot_type, engine_); }
 			}
 			if (detail::uniquely_held(value)) {   // a prvalue is the stored object
 				JAI_CENSUS_F(move_hit, 8);
@@ -11415,19 +11399,10 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 			}
 			value = std::move(enforced.value());
 		}
-		if (effective_decl_type->base_type == script_value_type::jai_any_type &&
-		    (!value.get_type_info() || value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-			detail::var_stamp(value, effective_decl_type, engine_);   // a typed array keeps its element type
-		} else if (effective_decl_type->base_type != script_value_type::jai_any_type ||
-		    !value.get_type_info() ||
-		    value.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) {
+		if (effective_decl_type->base_type == script_value_type::jai_any_type) {
+			detail::var_stamp(value, effective_decl_type, engine_);   // a handle and a typed array keep their types, rebindable
+		} else {
 			value.set_type_info(effective_decl_type);
-		} else if (engine_ && value.get_type_info()->element_type() &&
-		           !value.get_type_info()->dynamic_pointee) {
-			// var-held handle: '=' with a handle rhs REBINDS unchecked
-			// (enforcement guards copy-assign-to-underlying, not re-pointing)
-			value.set_type_info(engine_->get_type_info_shared_ptr_dynamic(
-				value.get_type_info()->element_type().get()));
 		}
 	} else if (has_init && value.get_type_info() &&
 	           value.get_type_info()->base_type == script_value_type::jai_shared_ptr_type &&
@@ -16046,10 +16021,7 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 		}
 		incoming = std::move(enforced.value());
 		detail::keep_handle_slot_type(incoming, slot_type);
-		if (detail::var_slot(slot_type.get()) &&
-		    (!incoming.get_type_info() || incoming.get_type_info()->base_type != script_value_type::jai_shared_ptr_type)) {
-			detail::var_stamp(incoming, slot_type, engine_);
-		}
+		if (detail::var_slot(slot_type.get())) { detail::var_stamp(incoming, slot_type, engine_); }
 	}
 	*storage = std::move(incoming);
 	if (stored_out) { *stored_out = *storage; }

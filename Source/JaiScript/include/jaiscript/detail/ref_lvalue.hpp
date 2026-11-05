@@ -894,7 +894,7 @@ namespace jai::detail {
 		}
 		if (tag && var_slot(tag.get())) {   // a var stays a var (a typed array keeps its element type)
 			script_value v = clone_for_assignment(value);
-			if (!v.get_type_info() || v.get_type_info()->base_type != script_value_type::jai_shared_ptr_type) { var_stamp(v, tag, eng); }
+			var_stamp(v, tag, eng);
 			storage = std::move(v);
 			return {};
 		}

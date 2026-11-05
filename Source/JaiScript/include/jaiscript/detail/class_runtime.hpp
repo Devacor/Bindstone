@@ -2555,13 +2555,19 @@ inline std::string typed_slot_rejection_text(const script_value& source, const t
 
 // A var slot's tag: any, or a typed container's twin (contents keep their constraints; the slot stays dynamic)
 inline bool var_slot(const type_info* t) noexcept {
-	return t && (t->base_type == script_value_type::jai_any_type || t->dynamic_slot);
+	return t && (t->base_type == script_value_type::jai_any_type || t->dynamic_slot || t->dynamic_pointee);
 }
 
-// The tag a value takes in a var slot: a typed container keeps its constraints through the dynamic
-// twin, anything else takes `any_tag` (the slot's own any)
+// The tag a value takes in a var slot: a handle and a typed container keep their types through the dynamic
+// twins, anything else takes `any_tag` (the slot's own any)
 inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine* eng) {
 	const type_info_ptr& tag = value.get_type_info();
+	if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) {
+		if (!tag->dynamic_pointee && tag->element_type() && eng) {
+			value.set_type_info(engine_access::get_type_info_shared_ptr_dynamic(*eng, tag->element_type().get()));
+		}
+		return;
+	}
 	if (tag && tag->base_type == script_value_type::jai_array_type && eng && value.raw_storage_index() == script_value::TYPEID_ARRAY) {
 		if (tag->dynamic_slot) { return; }
 		const type_info_ptr element = tag->element_type();

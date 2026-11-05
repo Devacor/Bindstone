@@ -164,7 +164,6 @@ namespace {
             if (symbol == UINT64_MAX) {
                 return false;
             }
-            auto dynamic = [](const type_info* t) { return !t || t->base_type == script_value_type::jai_any_type; };
             for (auto it = scopes.rbegin(); it != scopes.rend(); ++it) {
                 auto vr = it->vars.equal_range(symbol);
                 auto pr = it->params.equal_range(symbol);
@@ -178,7 +177,7 @@ namespace {
                     if (!v->second->type || v->second->type->base_type != script_value_type::jai_any_type) { result = false; }
                 }
                 for (auto q = pr.first; q != pr.second; ++q) {
-                    if (q->second->is_reference || !dynamic(q->second->type.get())) { result = false; }
+                    if (q->second->is_reference || !q->second->declared_var()) { result = false; }
                 }
                 for (auto r = rr.first; r != rr.second; ++r) {
                     if (r->second->is_reference || !r->second->element_type || r->second->element_type->base_type != script_value_type::jai_any_type) { result = false; }
@@ -3163,14 +3162,12 @@ checked_result<std::vector<parameter>> parser::parse_parameter_list() {
                     JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected parameter name", "parameter"));
                     name = name_tok.lexeme;
                 } else if (check(token_type::comma) || check(token_type::right_paren) || check(token_type::equal)) {
-                    // No identifier after type - treat the type as the parameter name with auto type
-                    // This handles shorthand like: void foo(x) where x is untyped, including
-                    // untyped defaults foo(x = 3) (the '=' is consumed by the shared default
-                    // parse below)
+                    // No identifier after type: the type was the name of an untyped parameter, a var (foo(x), foo(x = 3); the '='
+                    // is consumed by the shared default parse below)
                     if (type && type->base_type == script_value_type::jai_object_type && !type->type_name.empty() &&
                         type->type_name.find("::") == std::string::npos) {
                         name = type->type_name;
-                        type = nullptr; // Auto type
+                        type = store_type_info(type_info::make_any(*symbolizer_));
                     } else {
                         report_expected_name("expected parameter name", "parameter");
     return make_error_code(parse_error_code::syntax_error);
@@ -3316,7 +3313,7 @@ checked_result<expression_ptr> parser::arrow_function_expression() {
     lambda->default_capture = lambda_expr::capture_default::by_reference;
     if (check(token_type::identifier)) {
         token name = advance();
-        parameter param(nullptr, std::string(name.lexeme));
+        parameter param(store_type_info(type_info::make_any(*symbolizer_)), std::string(name.lexeme));
         param.symbol_id = get_symbol_id(name);
         lambda->parameters.push_back(std::move(param));
     } else {

@@ -2586,6 +2586,17 @@ inline void var_stamp(script_value& value, const type_info_ptr& any_tag, engine*
 						: type_info_ptr(eng ? engine_access::get_type_info_any(*eng) : nullptr));
 }
 
+// A by-value var parameter (an untyped one is a var) binds as a var declaration does, whatever tag its argument carried; an
+// escaping parameter's cell holds the value
+inline void var_parameter_stamp(script_value& bound, const type_info_ptr& declared, engine* eng) {
+	script_value* value = &bound;
+	if (auto* holder = bound.get_reference_holder()) {
+		if (!holder->plain_cell()) { return; }
+		value = holder->cell();
+	}
+	if (value->type_info_raw() != declared.get()) { var_stamp(*value, declared, eng); }
+}
+
 // A typed declaration's copy of a var-held typed container: the plain spelling again (auto locks to it)
 inline void drop_var_slot(script_value& value, engine* eng) {
 	const type_info_ptr& tag = value.get_type_info();

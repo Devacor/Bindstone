@@ -129,7 +129,7 @@ namespace jai::detail {
                     for (const auto& ctor_ast : script_class->get_constructor_asts()) {
                         if (ctor_ast->parameters.size() != 1) continue;
                         const auto& param = ctor_ast->parameters[0];
-                        if (!param.type || param.type->type_name.empty()) {
+                        if (!param.type || param.type->type_name.empty() || param.type->base_type == script_value_type::jai_any_type) {
                             matching = true;
                             break;
                         }

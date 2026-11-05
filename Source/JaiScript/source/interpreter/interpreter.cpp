@@ -9303,7 +9303,13 @@ checked_result<script_value> interpreter::call_function(const script_defined_fun
     // vm_backend::bind_parameters)
     for (size_t i = 0; i < function.parameters().size() && !is_unwinding_; ++i) {
         const auto& param = function.parameters()[i];
-        if (!param.is_reference || !param.type) { continue; }
+        if (!param.is_reference) {
+            if (param.declared_var()) {
+                if (script_value* bound = call_stack_[frame_index].get_local(param.slot_index)) { detail::var_parameter_stamp(*bound, param.type, engine_); }
+            }
+            continue;
+        }
+        if (!param.type) { continue; }
         const script_value* bound = call_stack_[frame_index].get_local(param.slot_index);
         if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
             // a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with vm_backend::bind_parameters)

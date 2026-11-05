@@ -1134,6 +1134,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 					}
 					default_val = std::move(bound.value());
 				}
+				if (param.declared_var()) { detail::var_parameter_stamp(default_val, param.type, engine_); }
 				if (param.ref_escaping && !default_val.is_reference()) {
 					default_val = script_value::make_cell_reference(std::move(default_val), engine_);
 				}
@@ -1166,6 +1167,7 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 			} else {
 				bound = converted_arg.clone();
 			}
+			if (param.declared_var()) { detail::var_parameter_stamp(bound, param.type, engine_); }
 			if (param.ref_escaping && !bound.is_reference()) {
 				bound = script_value::make_cell_reference(std::move(bound), engine_);
 			}
@@ -3011,7 +3013,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 			// a payload the slot's type already names makes enforcement the identity
 			const bool identity = slot_type && detail::same_type_payload(value, slot_type.get());
 			if (detail::slot_value_assign_candidate(*storage) && !identity && (!slot_type || slot_type->base_type != script_value_type::jai_object_type)) {
-				// a var parameter or loop variable holds a handle under the handle's own tag: the store names a var declaration
+				// a var loop variable holds a handle under the handle's own tag: the store names a var declaration
 				const type_info* held_tag = storage->type_info_raw();
 				const bool declared_var = held_tag && held_tag->base_type == script_value_type::jai_shared_ptr_type && !held_tag->dynamic_pointee &&
 				                          (ins.c & store_flag_var_target) != 0;
@@ -12723,7 +12725,7 @@ static JAI_FORCEINLINE bool shares_as_argument(const script_value& a) {
 }
 
 // bind_parameters' in-place rows: a primitive or string argument whose storage matches its by-value slot (any storage of those for a
-// var slot), or a handle or null into a var slot, is already the slot, its type tag verbatim (each one's copy is its binding)
+// var slot), or a handle or null into a var slot, is already the slot (each one's copy is its binding; a var slot's then takes lean_var_stamp)
 static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_value& a) {
 	const size_t ri = a.raw_storage_index();
 	const script_value_type bt = p.type ? p.type->base_type : script_value_type::jai_any_type;
@@ -12738,9 +12740,14 @@ static JAI_FORCEINLINE bool lean_slot_takes(const parameter& p, const script_val
 	}
 }
 
+// a var parameter's in-place argument takes the tag a var declaration gives (detail::var_parameter_stamp)
+static JAI_FORCEINLINE void lean_var_stamp(const parameter& p, script_value& a, engine* eng) {
+	if (p.declared_var() && a.type_info_raw() != p.type.get()) { detail::var_stamp(a, p.type, eng); }
+}
+
 // a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them: the function rows
 // (lean_slot_takes), and a handle or null already tagged with a shared_ptr parameter's exact type
-static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, const script_value* args, size_t argc) {
+static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, script_value* args, size_t argc, engine* eng) {
 	if (ast.vm_lean_bind == 0) {
 		uint8_t lean = 1;
 		for (size_t i = 0; i < ast.parameters.size(); ++i) {
@@ -12760,6 +12767,7 @@ static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, cons
 			continue;
 		}
 		if (!lean_slot_takes(p, args[i])) { return false; }
+		lean_var_stamp(p, args[i], eng);
 	}
 	return true;
 }
@@ -12807,7 +12815,7 @@ static const script_value* silent_referent(const script_value& a) {
 
 // the slice from the first reference argument on: each a reference read silently whose referent its slot takes in place, or an argument
 // its slot takes; true replaces each reference by its referent's copy (the general binding's clone of it), false changes nothing
-static JAI_NOINLINE bool bind_slice_references(const std::vector<parameter>& ps, script_value* args, size_t argc, size_t first) {
+static JAI_NOINLINE bool bind_slice_references(const std::vector<parameter>& ps, script_value* args, size_t argc, size_t first, engine* eng) {
 	for (size_t i = first; i < argc; ++i) {
 		if (args[i].raw_storage_index() == script_value::TYPEID_REFERENCE) {
 			const script_value* v = silent_referent(args[i]);
@@ -12821,19 +12829,21 @@ static JAI_NOINLINE bool bind_slice_references(const std::vector<parameter>& ps,
 			script_value v(*silent_referent(args[i]));
 			args[i] = std::move(v);
 		}
+		lean_var_stamp(ps[i], args[i], eng);
 	}
 	return true;
 }
 
 // binds_in_place over a stack slice, a reference argument read silently binding its referent's copy
-static JAI_FORCEINLINE bool binds_slice_in_place(const script_defined_function& function, script_value* args, size_t argc) {
+static JAI_FORCEINLINE bool binds_slice_in_place(const script_defined_function& function, script_value* args, size_t argc, engine* eng) {
 	if ((function.backend_lean_bind ? function.backend_lean_bind : lean_bind_of(function)) != 1) { return false; }
 	const auto& ps = function.parameters();
 	if (argc != ps.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		if (!lean_slot_takes(ps[i], args[i])) {
-			return args[i].raw_storage_index() == script_value::TYPEID_REFERENCE && bind_slice_references(ps, args, argc, i);
+			return args[i].raw_storage_index() == script_value::TYPEID_REFERENCE && bind_slice_references(ps, args, argc, i, eng);
 		}
+		lean_var_stamp(ps[i], args[i], eng);
 	}
 	return true;
 }
@@ -12859,9 +12869,10 @@ bool vm_backend::bind_plain_references(const script_defined_function& function, 
 	if (argc != ps.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		const parameter& p = ps[i];
-		const script_value& a = stack_[args_base + i];
+		script_value& a = stack_[args_base + i];
 		if (!p.is_reference) {
 			if (!lean_slot_takes(p, a)) { return false; }
+			lean_var_stamp(p, a, engine_);
 			continue;
 		}
 		if (i < site.arg_lvalue_nodes.size() && site.arg_lvalue_nodes[i] != k_invalid_u32 && a.is_reference() && a.get_reference_holder() &&
@@ -12984,7 +12995,7 @@ bool vm_backend::push_plain_frame(frame& caller, const call_site& site, const sc
 		                              : lean_bind_of(function) == 1 ? 2 : plain_reference_parameters(function) ? 3 : 1;
 	}
 	if (function.backend_frame_plan == 1 || (!function.closure_env && !function.block_defined && environment_ && environment_->block_scope())) { return false; }
-	if (function.backend_frame_plan == 2 ? !binds_slice_in_place(function, stack_.data() + args_base, argc)
+	if (function.backend_frame_plan == 2 ? !binds_slice_in_place(function, stack_.data() + args_base, argc, engine_)
 	                                     : !bind_plain_references(function, caller, site, args_base, argc)) { return false; }
 	if (++budget_tick_ >= 1024 || limits_->memory_tripped()) [[unlikely]] {
 		--budget_tick_;
@@ -13078,7 +13089,7 @@ op_status vm_backend::open_script_frame(frame& caller, const script_defined_func
 	const bool args_on_stack = args_are_stack(args);
 	open_record_frame(rec, body_chunk, args_on_stack ? args_base : stack_.size(), args_on_stack ? argc : 0, args_on_stack ? stack_base : stack_.size(),
 	                  function.unit, &function);
-	if (!pin || !binds_slice_in_place(function, stack_.data() + args_base, argc)) {
+	if (!pin || !binds_slice_in_place(function, stack_.data() + args_base, argc, engine_)) {
 		VM_TRY(bind_frame_parameters(rec, function.parameters(), args, args_base, argc, caller, site, &function, nullptr));
 	}
 	assert(!args_on_stack || stack_.size() == args_base + argc);   // conversions during binding push and pop above the arguments
@@ -21252,7 +21263,7 @@ JAI_FORCEINLINE vm_backend::frame* vm_backend::push_lean_method_frame(frame& cal
 		return nullptr;
 	}
 	chunk* body_chunk = static_cast<chunk*>(dispatch.body_cache.get());
-	if (body_chunk->needs_frame_env || receiver.raw_storage_index() == script_value::TYPEID_REFERENCE || !method_binds_in_place(decl, stack_.data() + args_base, argc)) {
+	if (body_chunk->needs_frame_env || receiver.raw_storage_index() == script_value::TYPEID_REFERENCE || !method_binds_in_place(decl, stack_.data() + args_base, argc, engine_)) {
 		return nullptr;
 	}
 	if (budget_tick_ >= 1023 || limits_->memory_tripped()) [[unlikely]] { return nullptr; }
@@ -21472,7 +21483,7 @@ op_status vm_backend::push_method_frame_sliced(frame& caller, const script_value
 	// callee slot when one sits below), so the pop's truncation destroys window and pin together
 	open_record_frame(rec, body_chunk, args_base, argc, frame_base, ast->unit, nullptr);
 	if (body_chunk->member_class && rec.env_lazy) { bind_member_layout(rec.f, *body_chunk); } else { rec.f.this_inst = nullptr; }
-	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc)) {
+	if (!method_binds_in_place(*rec.ast, stack_.data() + args_base, argc, engine_)) {
 		VM_TRY(bind_frame_parameters(rec, rec.ast->parameters, stack_, args_base, argc, caller, site, nullptr, rec.ast->body.get()));
 	}
 	// Conversions during binding push and pop above the args, so the slice is intact; a default argument extends the window
@@ -22892,7 +22903,13 @@ op_status vm_backend::bind_parameters(const std::vector<parameter>& parameters,
 	// the interpreter's call_function)
 	for (size_t i = 0; i < parameters.size() && !is_unwinding_; ++i) {
 		const parameter& param = parameters[i];
-		if (!param.is_reference || !param.type) { continue; }
+		if (!param.is_reference) {
+			if (param.declared_var()) {
+				if (script_value* bound = frame_slot(callee, param.slot_index)) { detail::var_parameter_stamp(*bound, param.type, engine_); }
+			}
+			continue;
+		}
+		if (!param.type) { continue; }
 		const script_value* bound = frame_slot(callee, param.slot_index);
 		if (bound && !detail::reference_binding_admits(param.type.get(), *bound, engine_)) {
 			// a const T& binds a T made from the argument, as a T parameter converts it (C++; KEEP BYTE-PARALLEL with the interpreter)
@@ -23299,7 +23316,10 @@ checked_result<script_value> vm_backend::run_callback(callback_session& s, const
 
 	const bool bound_in_place = binds_in_place(function, args.data(), args.size());
 	if (bound_in_place) {
-		for (const script_value& a : args) { stack_.push_back(a); }
+		for (size_t i = 0; i < args.size(); ++i) {
+			stack_.push_back(args[i]);
+			lean_var_stamp(function.parameters()[i], stack_.back(), engine_);
+		}
 		f.window_live = static_cast<uint32_t>(args.size());
 	} else {
 		op_status bound{};

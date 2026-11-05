@@ -35,6 +35,13 @@ public:
 		class Q { int x = 1; void operator=(int v) { x = v; } }
 		class R { int x = 1; void operator=(R o) { x = o.x + 100; } }
 		class Holder { var m = null; var v = null; void bare() { v = 7; m = "s"; } }
+		class Takes { string t = ""; Takes(var x) { x = "s"; t = type_of(x); } string m(var x) { x = 2.5; return to_string(x); } static string sm(x) { x = "s"; return type_of(x); } }
+		class Converts { int v = 0; Converts(var x) { v = 1; } }
+		coroutine string takes_gen(var x) { x = "s"; yield type_of(x); }
+		void rebind_ref(var& r) { r = "s"; }
+		function var_to_s(var x) { x = "s"; return type_of(x); }
+		function untyped_to_s(x) { x = "s"; return type_of(x); }
+		function var_to_int(var x) { x = 1; return type_of(x); }
 		string run(function f) { string out = ""; try { out = f(); } catch (e) { out = "ERR " + e; } return out; }
 	)";
 
@@ -139,6 +146,28 @@ public:
 			expect("a map value holding an object", R"(map<string, var> m = {"k": Q()}; m["k"] = 5; return to_string(m["k"].x);)", "5");
 			expect("a map value in a loop", R"(map<int, var> m = {0: Q()}; for (int i = 0; i < 3; ++i) { m[0] = i + 30; } return to_string(m[0].x);)", "32");
 			expect("a map value holding a handle", R"(map<string, var> m = {"k": new P()}; var m0 = m["k"]; P n = P(); n.x = 7; m["k"] = n; return to_string(m0.x) + " " + to_string(same_object(m0, m["k"]));)", "7 true");
+		});
+
+		test("a_var_or_untyped_parameter_takes_any_value", [this]() {
+			expect("a float into an int argument's var", R"(auto f = [](var x) { x = 2.5; return to_string(x); }; return f(1);)", "2.5");
+			expect("a compound store", R"(auto f = [](var x) { x += 0.5; return to_string(x); }; return f(1);)", "1.5");
+			expect("a string into an int argument's var", R"(return var_to_s(1);)", "string");
+			expect("a float, a char and a bool argument", R"(return var_to_s(1.5) + " " + var_to_s('c') + " " + var_to_s(true);)", "string string string");
+			expect("a typed local's argument", R"(int n = 1; return var_to_s(n);)", "string");
+			expect("an object, an array, a typed array and a map argument", R"(array<int> a = [1]; return var_to_int(P()) + " " + var_to_int([1, 2]) + " " + var_to_int(a) + " " + var_to_int({"k": 1});)", "int int int int");
+			expect("an untyped parameter", R"(return untyped_to_s(1);)", "string");
+			expect("untyped lambda and arrow parameters", R"(auto f = [](p) { p = 2.5; return to_string(p); }; auto g = p => { p = "s"; return type_of(p); }; auto h = (p) => { p = "s"; return type_of(p); }; return f(1) + " " + g(1) + " " + h(1);)", "2.5 string string");
+			expect("through a var& to it", R"(auto f = [](var x) { var& a = x; a = "s"; return type_of(x); }; return f(1);)", "string");
+			expect("from a [&] capture", R"(auto f = [](var x) { auto g = [&]() { x = "s"; }; g(); return type_of(x); }; return f(1);)", "string");
+			expect("passed on to a var& parameter", R"(auto f = [](var x) { rebind_ref(x); return type_of(x); }; return f(1);)", "string");
+			expect("defaults", R"(auto f = [](var x = 1) { x = "s"; return type_of(x); }; auto g = [](x = 1) { x = "s"; return type_of(x); }; return f() + " " + g();)", "string string");
+			expect("after ++", R"(auto f = [](var x) { x++; x = "s"; return type_of(x); }; return f(1);)", "string");
+			expect("a constructor, a method and a static", R"(return Takes(1).t + " " + Takes(1).m(1) + " " + Takes::sm(1);)", "string 2.5 string");
+			expect("a coroutine", R"(auto g = takes_gen(1); return g.next();)", "string");
+			expect("each call of a loop", R"(string r = ""; for (int i = 0; i < 3; ++i) { r = r + var_to_s(i); } return r;)", "stringstringstring");
+			expect("a converting constructor's var parameter", R"(Converts c = 5; return to_string(c.v);)", "1");
+			expect("an auto parameter still locks to its argument", R"(auto f = [](auto x) { x = "s"; return type_of(x); }; return f(1);)", "ERR Cannot assign string to 'x' (declared int)");
+			expect("an auto parameter holding a handle locks too", R"(auto f = [](auto p) { p = 5; return type_of(p); }; return f(new P());)", "ERR Cannot assign int to 'p' (declared shared_ptr<P>)");
 		});
 
 		test("a_global_var_answers_like_a_local", [this]() {

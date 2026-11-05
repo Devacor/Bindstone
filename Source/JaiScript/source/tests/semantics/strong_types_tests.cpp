@@ -1465,8 +1465,8 @@ public:
         test("compound_auto_locked_behaves_typed", [this, check_both]() {
             check_both("auto x = 10; x += 2.5; type_of(x) + \":\" + to_string(x)", "int:12", "auto-locked int");
             check_both("auto f = 1.0; f += 2.5; type_of(f) + \":\" + to_string(f)", "float:3.5", "auto-locked float");
-            // Untyped params are inferred-then-enforced (auto), so they convert back too
-            check_both("function f(x) { x += 2.5; return type_of(x) + \":\" + to_string(x); } f(10)", "int:12", "inferred param");
+            // An auto parameter is inferred-then-enforced, so it converts back too
+            check_both("function f(auto x) { x += 2.5; return type_of(x) + \":\" + to_string(x); } f(10)", "int:12", "inferred param");
             check_both("function f(int x) { x += 2.5; return to_string(x); } f(10)", "12", "typed param");
             check_both("function g() { int y = 10; y += 2.5; return to_string(y); } g()", "12", "slot local");
         });
@@ -2629,7 +2629,7 @@ public:
             check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'a' of C (declared int) 1|1.5|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
             check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|true|true|true", "var static takes anything");
             check_quad(q("setArr([4, 5, 6]) + \" \" + setArr([\"a\"]) + \" \" + setArr(7) + \" \" + o.dump()").c_str(), "ok Cannot assign array to static 'arr' of C (declared array<int>) Cannot assign int to static 'arr' of C (declared array<int>) 1|1.5|a|false|10|0|3|true|true|true", "array<int> static: typed array ok, wrong element type and scalar raise");
-            check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 Cannot assign int to static 'other' of C (declared C)", "object static: by-value copy, scalar raises");
+            check_quad(q("auto o2 = C(); string r1 = setOther(o2); o2.x = 99; r1 + \" \" + to_string(C::other.x) + \" \" + setOther(5)").c_str(), "ok 0 ok", "object static: by-value copy, a scalar converts through C(var)");
             check_quad(q("setSp(shared_ptr<C>()) + \" \" + setSp(C()) + \" \" + setSp(3) + \" \" + o.dump()").c_str(), "ok ok Cannot assign int to static 'sp' of C (declared shared_ptr<C>) 1|1.5|a|false|10|0|2|true|false|true", "shared_ptr static: handle, value, scalar");
             check_quad(q("auto keep = shared_ptr<C>(); setW(keep) + \" \" + setW(C()) + \" \" + o.dump()").c_str(), "ok Cannot assign C to static 'w' of C (declared weak_ptr<C>) 1|1.5|a|false|10|0|2|true|true|false", "weak_ptr static: the instance-field rows (a shared handle downgrades, a value raises)");
             check_quad("class P { int v = 1; } class S { static shared_ptr<P> p; } auto h = shared_ptr<P>(); S::p = h; h.v = 5; to_string(S::p.v)", "5", "shared_ptr static shares the handle on both backends");

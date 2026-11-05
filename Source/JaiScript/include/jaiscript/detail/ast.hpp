@@ -132,6 +132,9 @@ namespace jai {
 
         parameter(type_info_ptr t, const std::string& n, bool ref = false, bool c = false)
             : type(t), name(n), is_reference(ref), is_const(c), symbol_id(UINT64_MAX), slot_index(SIZE_MAX) {}
+
+        // `var` or untyped (an `auto` parameter has no type): a by-value binding takes the var tag, as a var declaration does
+        bool declared_var() const noexcept { return type && type->base_type == script_value_type::jai_any_type; }
     };
     
     // Base AST node

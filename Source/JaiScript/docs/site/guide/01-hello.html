@@ -121,7 +121,7 @@ print(to_json({"a": 1}));</code></pre></div>
 {&quot;a&quot;: 1, &quot;b&quot;: [&quot;x&quot;]}
 [1,2,3]
 {&quot;a&quot;:1}</code></pre></div>
-<p><code>type_of(x)</code> answers <code>null</code>, <code>bool</code>, <code>int</code>, <code>float</code>, <code>char</code>, <code>string</code>, <code>utf8_string</code>, <code>array</code>, <code>map</code>, <code>function</code> or <code>weak_ptr</code>. A class instance answers its class's name, and so does a <code>shared_ptr</code> handle to one (<code>Foo</code>, <code>math::vec2</code>, <code>time::stopwatch</code>); a reference answers the type of what it refers to; a coroutine handle answers <code>object</code>. A typed array is still <code>array</code>: its element type lives in its declaration.</p>
+<p><code>type_of(x)</code> answers <code>null</code>, <code>bool</code>, <code>int</code>, <code>float</code>, <code>char</code>, <code>string</code>, <code>utf8_string</code>, <code>array</code>, <code>map</code>, <code>function</code>, <code>weak_ptr</code> or <code>coroutine_handle</code>. A class instance answers its class's name, and so does a <code>shared_ptr</code> handle to one (<code>Foo</code>, <code>math::vec2</code>, <code>time::stopwatch</code>); a reference answers the type of what it refers to; a coroutine handle answers <code>coroutine_handle</code>. A typed array is still <code>array</code>: its element type lives in its declaration.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { }
 var handle = new Foo();
 int x = 1;

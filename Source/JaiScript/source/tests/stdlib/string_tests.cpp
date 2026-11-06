@@ -693,8 +693,8 @@ public:
             stdlib::register_all(*engine);
             check_eq(std::string(R"({"012":0,"1-2":2,"12":226,"121":-6,"1212":2,"34":4,"a1b2c":-2,"v113":113,"v226":226}|{"12":"ss"}|226|3443)"),
                 engine->execute(R"(
-                    map<string, int> heat;
-                    map<string, string> names;
+                    map<string, int> heat = {"012": 0, "1-2": 0, "12": 0, "121": 0, "1212": 0, "34": 0, "a1b2c": 0};
+                    map<string, string> names = {"12": ""};
                     void f(int x, int y) {
                         heat[`${x}${y}`]++;
                         heat[`${x}${y}`] += 2;

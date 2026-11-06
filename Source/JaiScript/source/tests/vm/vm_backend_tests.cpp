@@ -2004,8 +2004,8 @@ public:
 		});
 
 		test("tier2_missing_key_and_residue_rejections", [this]() {
-			// Map reads never insert: binding a ref to a MISSING key keeps the
-			// non-lvalue error (matches var& decl behavior over missing keys). And
+			// Map reads never insert: binding a ref to a MISSING key raises the read's
+			// error (as a var& decl over a missing key does). And
 			// member-FINAL chains over computed subscripts stay rejected - field reads
 			// evaluate to copies and the structural kernel can't take computed indices;
 			// bind a var& row first (documented residue).
@@ -2026,7 +2026,7 @@ public:
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				auto got = e->execute(src).as<std::string>();
-				check_true(got.find("Cannot pass non-lvalue to reference parameter&") != std::string::npos,
+				check_true(got.find("Key \"missing\" not found in map&") == 0,
 					"missing map key rejects: " + got);
 				check_true(got.rfind("Cannot pass non-lvalue") > got.find("&"),
 					"member-final over computed subscript rejects: " + got);
@@ -2326,7 +2326,7 @@ public:
 			check_eq((int64_t)1, e->execute("var m = {\"k\": 1, \"j\": 2}; m[\"k\"]").as_int());
 			check_eq((int64_t)5, e->execute("m[\"k\"] = 5; m[\"k\"]").as_int());
 			check_eq((int64_t)42, e->execute("m[\"new\"] = 42; m[\"new\"]").as_int());
-			check_true(e->execute("m[\"missing\"] == null").as<bool>());
+			check_throws([&]() { e->execute("m[\"missing\"] == null"); }, "a missing key raises");
 		});
 
 		test("nested_containers", [this]() {

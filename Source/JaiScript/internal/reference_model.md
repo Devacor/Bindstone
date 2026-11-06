@@ -69,7 +69,7 @@ allocates except the first boxing of a variable.
   argument keeps the component-only stamp: the parameter's kind is unknown at parse time and a by-value argument
   would pay the mint.
 - **Map steps** in a structural chain (`m[k]`, `m[k].f`, `rows[k][i]`, an identifier or int-literal key) bind an
-  existing entry; a missing key is the kernel's non-lvalue verdict (a read never inserts). A ref return or a
+  existing entry; a missing key falls to the operand's own read, which raises `Key "k" not found in map` (a read never inserts). A ref return or a
   reference parameter's default whose chain the kernel cannot bind evaluates the operand instead (an `operator[]`
   returning `T&`, a computed key): the vm's `op_ref_return_lvalue` pushes the reference and true, or false and the
   operand's code follows.

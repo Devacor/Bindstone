@@ -329,19 +329,41 @@ public:
         });
 
         test("map_missing_key_behavior", [&]() {
+            // every read of a missing key raises, a compound's and a reference's too, and none grows the map; m[k] = v inserts
             auto eng = make_engine();
-
-            eng->execute(R"(
-                auto m = {"key1": "value1"};
+            auto result = eng->execute(R"(
+                map<string, int> hp = {"health": 3};
+                var loose = {"a": {"b": 1}};
+                var typed_as_var = hp;
+                map<string, int> make() { return {"t": 1}; }
+                string out = "";
+                try { int x = hp["helth"]; } catch (e) { out += e + "|"; }
+                try { hp["helth"] += 1; } catch (e) { out += e + "|"; }
+                try { hp["helth"]++; } catch (e) { out += e + "|"; }
+                try { --hp["helth"]; } catch (e) { out += e + "|"; }
+                try { var& r = hp["helth"]; } catch (e) { out += e + "|"; }
+                try { var x = loose["a"]["c"]; } catch (e) { out += e + "|"; }
+                try { loose["q"]["c"] = 1; } catch (e) { out += e + "|"; }
+                try { loose['z'] -= 1; } catch (e) { out += e + "|"; }
+                try { var x = loose[2.5] ?? 0; } catch (e) { out += e + "|"; }
+                var array_key = [1, "two"];
+                try { loose[array_key] ??= 1; } catch (e) { out += e + "|"; }
+                try { var x = make()["u"]; } catch (e) { out += e + "|"; }
+                try { var x = typed_as_var[5]; } catch (e) { out += e + "|"; }
+                try { var [k, v] = loose["pair"]; } catch (e) { out += e + "|"; }
+                out += "" + hp.size() + " " + loose.size() + " " + loose["a"].size();
+                hp["fresh"] = 1;
+                hp["fresh"] += 1;
+                hp["count"] = hp.get("count", 0) + 1;
+                out + " " + hp
             )");
-
-            // Accessing missing key should throw or return null/default
-            try {
-                eng->execute("m[\"nonexistent\"]");
-                // Some implementations might allow this and return null/default
-            } catch (const std::exception&) {
-                // Other implementations throw - both are valid
-            }
+            check_eq(std::string("Key \"helth\" not found in map|Key \"helth\" not found in map|Key \"helth\" not found in map|"
+                                 "Key \"helth\" not found in map|Key \"helth\" not found in map|Key \"c\" not found in map|"
+                                 "Key \"q\" not found in map|Key 'z' not found in map|Key 2.5 not found in map|"
+                                 "Key [1, \"two\"] not found in map|Key \"u\" not found in map|"
+                                 "Cannot use 'int' as a key of type 'string'|Key \"pair\" not found in map|"
+                                 "1 1 1 {\"count\": 1, \"fresh\": 2, \"health\": 3}"),
+                     result.as<std::string>());
         });
 
         test("map_in_function_parameter", [&]() {
@@ -742,11 +764,12 @@ m[1] = "int"; m[1.0] = "float"; m['1'] = "char"; m[true] = "bool"; m["1"] = "str
 for (int i = 100; i < 160; ++i) { m[i] = i * 2; }
 string out = to_string(m[1]) + to_string(m[1.0]) + to_string(m['1']) + to_string(m[true]) + to_string(m["1"]) + to_string(m[-7]);
 int s = 0; for (int i = 90; i < 170; ++i) { if (m.has(i)) { s += m.get(i, 0); } }
-out += " " + to_string(s) + " " + to_string(m[2]) + " " + to_string(m.size());
+string miss = ""; try { miss = to_string(m[2]); } catch (e) { miss = e; }
+out += " " + to_string(s) + " " + miss + " " + to_string(m.size());
 out;
 )JAI";
             auto [i_out, v_out] = both_mode(src, true);
-            check_eq(std::string("intfloatcharboolstringneg 15540 null 66"), i_out, "interpreter");
+            check_eq(std::string("intfloatcharboolstringneg 15540 Key 2 not found in map 66"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
         });
 

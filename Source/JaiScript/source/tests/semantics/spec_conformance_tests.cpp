@@ -2443,7 +2443,7 @@ private:
 				try { for (auto& x : a) { x = "s"; } } catch (e) { r += "raised|"; }
 				try { int y = a[5]; } catch (e) { r += e; }
 				r;
-			)", "Cannot initialize 'x' (declared int) with null|raised|Array index 5 out of bounds for array of size 1");
+			)", "Key \"missing\" not found in map|raised|Array index 5 out of bounds for array of size 1");
 		});
 		test("bitwise_compound_assignments_are_x_op_equals_y_with_x_evaluated_once", [this]() {
 			// &= |= ^= <<= >>= on every lvalue (a local, a field, this's field, a static, a namespace
@@ -2456,7 +2456,7 @@ private:
 				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
 				t([]() { int x = 6; x &= 3; x |= 8; x ^= 1; x <<= 2; x >>= 1; return x; }) + "|" +
 				t([]() { Flags o; o.f |= 6; o.bump(); Flags::s <<= 4; ns::m &= 4; return "" + o.f + " " + Flags::s + " " + ns::m; }) + "|" +
-				t([]() { array<int> a = [5, 3]; var v = [12]; map<string, int> m; a[at()] &= 4; v[0] >>= 2; m["k"] |= 3; return "" + a[0] + " " + v[0] + " " + m["k"] + " " + calls; }) + "|" +
+				t([]() { array<int> a = [5, 3]; var v = [12]; map<string, int> m = {"k": 0}; a[at()] &= 4; v[0] >>= 2; m["k"] |= 3; return "" + a[0] + " " + v[0] + " " + m["k"] + " " + calls; }) + "|" +
 				t([]() { int x = 5; int y = (x ^= 3); return y; }) + "|" +
 				t([]() { var s = 1.5; s &= 1; return s; }) + "|" +
 				t([]() { int x = 1; x <<= 64; return x; }) + "|" +
@@ -4462,27 +4462,29 @@ private:
 	}
 
 	void missing_key_compound() {
-		test("a_compound_on_a_missing_key_starts_from_the_value_types_default", [this]() {
-			// C++ operator[] value-initializes the entry; a var-valued map has no default, so its entry meets null
+		test("a_compound_on_a_missing_key_raises_its_read", [this]() {
+			// a compound reads its target first, so a missing key raises as a read does, on every map, and nothing is inserted
 			expect("missing key compound", R"(
 				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
-				map<string, int> mi = {}; mi["k"] += 5; mi["j"]++; mi["q"] -= 2;
-				map<string, float> mf = {}; mf["k"] += 1.5;
-				map<string, string> ms = {}; ms["k"] += "s";
-				map<int, int> counts = {}; for (int x : [3, 1, 3, 3]) { counts[x] += 1; }
-				"" + mi["k"] + mi["j"] + mi["q"] + mi.size() + "|" + mf["k"] + "|" + ms["k"] + "|" + counts[3] + counts[1] + counts.size() + "|" +
-				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" + t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); });
-			)", "51-23|1.5|s|312|raised:Cannot apply '+=' to null and int|raised:Cannot use 'int' as a key of type 'string'", warn_region);
+				t([]() { map<string, int> m = {}; m["k"] += 5; return m.size(); }) + "|" +
+				t([]() { map<string, int> m = {}; m["j"]++; return m.size(); }) + "|" +
+				t([]() { map<string, float> m = {}; m["k"] -= 1.5; return m.size(); }) + "|" +
+				t([]() { map<string, string> m = {}; m["k"] += "s"; return m.size(); }) + "|" +
+				t([]() { map<int, int> m = {3: 0}; for (int x : [3, 1, 3]) { m[x] += 1; } return m.size(); }) + "|" +
+				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" +
+				t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); }) + "|" +
+				t([]() { map<int, int> m = {}; for (int x : [3, 1, 3]) { m[x] = m.get(x, 0) + 1; } return "" + m[3] + m[1] + m.size(); });
+			)", "raised:Key \"k\" not found in map|raised:Key \"j\" not found in map|raised:Key \"k\" not found in map|raised:Key \"k\" not found in map|"
+			    "raised:Key 1 not found in map|raised:Key \"k\" not found in map|raised:Cannot use 'int' as a key of type 'string'|212", warn_region);
 		});
-		test("a_compound_on_a_missing_key_of_a_temporary_typed_map_meets_the_rvalue_target", [this]() {
-			// the default enters the temporary, the compound applies, and the store finds no lvalue
+		test("a_compound_on_a_temporary_map_reads_before_it_meets_the_rvalue_target", [this]() {
 			expect("temporary map compound", R"(
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = "raised:" + e; } return r; }
 				function fresh() -> map<string, int> { map<string, int> m = {}; return m; }
 				function held() -> map<string, int> { map<string, int> m = {"k": 1}; return m; }
 				t([]() { fresh()["k"] += 1; }) + "|" + t([]() { fresh()["k"]++; }) + "|" + t([]() { held()["k"] += 1; }) + "|" +
 				t([]() { fresh()[5] += 1; });
-			)", "raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|raised:Cannot assign to rvalue expression|"
+			)", "raised:Key \"k\" not found in map|raised:Key \"k\" not found in map|raised:Cannot assign to rvalue expression|"
 			    "raised:Cannot use 'int' as a key of type 'string'", warn_region);
 		});
 	}

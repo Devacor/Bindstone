@@ -5747,14 +5747,14 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 				type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
 				stack_.push_back(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
 			} else {
-				stack_.push_back(make_null());
+				return raise_from(detail::map_key_missing_error(symbolizer_, left.type_info_raw(), right));
 			}
 		} else {
 			if (const script_map::value_type* hit = map.lookup(right)) {
 				script_value val = hit->second;
 				stack_.push_back(std::move(val));
 			} else {
-				stack_.push_back(make_null());
+				return raise_from(detail::map_key_missing_error(symbolizer_, left.type_info_raw(), right));
 			}
 		}
 		return {};
@@ -6449,9 +6449,9 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 			}
 		}
 	}
-	// Scalar-key map READ: the same plain-read branch of exec_index (a hit copies with the engine stamped, a miss sinks null) for a
-	// raw int, float, string, bool or char key operand, whenever exec_index would copy (no write, and no lvalue shape or a transient
-	// read); a reference key, a write or an entry reference replays
+	// Scalar-key map READ: the same plain-read branch of exec_index (a hit copies with the engine stamped) for a raw int, float,
+	// string, bool or char key operand, whenever exec_index would copy (no write, and no lvalue shape or a transient read); a miss
+	// (it raises), a reference key, a write or an entry reference replays
 	if (left.raw_storage_index() == script_value::TYPEID_MAP && !(flags & index_flag_lvalue_write) &&
 	    (!(flags & index_flag_lvalue_shape) || ((flags & index_flag_transient_read) != 0 && !has_custom_binary_ops_))) {
 		const script_value* key = idx.computed ? &*idx.computed : (have_raw_index ? nullptr : index_ptr);
@@ -6464,10 +6464,8 @@ op_status vm_backend::index_fused_read(frame& f, const vm_instruction& ins, Sink
 				if (hit) {
 					script_value val = hit->second;
 					sink(std::move(val));
-				} else {
-					sink(make_null());
+					return {};
 				}
-				return {};
 			}
 		}
 	}
@@ -10961,21 +10959,16 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 		// [rhs, container, index] -> [container, index, rhs]
 		std::rotate(&stack_[stack_.size() - 3], &stack_[stack_.size() - 2], &stack_[stack_.size() - 1] + 1);
 	}
-	// a missing key of a typed-value map takes the value type's default first (C++ operator[]; KEEP BYTE-PARALLEL with the
-	// interpreter's general compound)
+	// a compound reads its target first: a missing key raises as the read does (KEEP BYTE-PARALLEL with the interpreter's general compound)
 	if (stack_.size() >= 3) {
 		script_value& container = stack_[stack_.size() - 3].deref();
 		if (container.raw_storage_index() == script_value::TYPEID_MAP) {
 			const script_value& key = stack_[stack_.size() - 2].deref();
-			auto tag = container.get_type_info();
-			type_info_ptr key_type = tag ? tag->key_type() : nullptr;
-			if (key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
-				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key, key_type));
-			}
-			script_value* target = detail::map_compound_target(container, key, engine_);
-			if (target && (ins.b & index_flag_lvalue_shape) != 0 && (ins.a & compound_flag_old_result) == 0 && !(operator_table_ && operator_table_->any())) {
+			const script_map::value_type* hit = container.unchecked_get_map_storage()->lookup(key);
+			if (!hit) [[unlikely]] { return raise_from(detail::map_key_missing_error(symbolizer_, container.type_info_raw(), key)); }
+			if ((ins.b & index_flag_lvalue_shape) != 0 && (ins.a & compound_flag_old_result) == 0 && !(operator_table_ && operator_table_->any())) {
 				bool handled = false;
-				const op_status st = map_numeric_compound(f, ins, container, *target, handled);
+				const op_status st = map_numeric_compound(f, ins, container, const_cast<script_value&>(hit->second), handled);
 				if (handled) { return st; }
 			}
 		}

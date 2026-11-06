@@ -110,7 +110,7 @@ through `object_of(name)` (`ti = eng_.get_type_info_object(name)`, the parser's 
     }
 ```
 `element_proof` makes an element of a declared typed array certain (an `array<int>` holds ints); a map's
-value stays tentative, because a missing key reads null.
+value stays tentative (a missing key raises, so a read that returns holds the value type; the proofs do not claim it yet).
 
 NOT certain, by construction: `unknown`, `null_k`, `array_k`, `map_k`, a map's value, `function_k`,
 `class_ref_k`, `enum_ref_k`, objects reached through a shared_ptr/weak_ptr/cpp_bound/any

@@ -274,8 +274,9 @@ public:
                     ms[keys[0]] = 7;
                     var v = (ms[keys[0]] = 9);   // the assignment's value
                     string out = "" + ms["a"] + "," + ms[k] + "," + v + "," + ms.size();
-                    var miss = ms["zz"];
-                    out = out + "," + (miss == null) + "," + ms.size() + "," + ms.has(keys[1]) + "," + ms.has("q");
+                    string miss = "";
+                    try { var x = ms["zz"]; } catch (e) { miss = e; }
+                    out = out + "," + miss + "," + ms.size() + "," + ms.has(keys[1]) + "," + ms.has("q");
                     var xs = "x"; try { ms[keys[0]] = xs; } catch (e) { out = out + "|" + e; }
                     out = out + "," + ms.size();
                     map<int, float> mi = {};
@@ -289,7 +290,7 @@ public:
                 }
                 run();
             )");
-            check_eq(std::string("9,2,9,2,true,2,true,false|Cannot assign 'string' to element of type 'int',2|4.0,3.0,2|Cannot use 'string' as a key of type 'int'|5"),
+            check_eq(std::string("9,2,9,2,Key \"zz\" not found in map,2,true,false|Cannot assign 'string' to element of type 'int',2|4.0,3.0,2|Cannot use 'string' as a key of type 'int'|5"),
                      r.as<std::string>());
         });
     }

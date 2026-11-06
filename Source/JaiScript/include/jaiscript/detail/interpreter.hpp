@@ -533,7 +533,6 @@ namespace jai {
         checked_result<script_value> binary_operator(token_type op, const script_value& left, const script_value& right);
         checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
         checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
-        const expression* compound_map_target_ = nullptr;   // the subscript a general compound is reading as its target
         // A function value running script calls: while a run is active a script callable enters without pinning it
         checked_result<script_value> call_value(const script_function& f, const std::vector<script_value>& args) {
             return engine_ && engine_->active_run_pins() ? detail::call_function_value(f, args) : f(args);

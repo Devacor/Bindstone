@@ -56,7 +56,7 @@ routes.post("/api/entries", (spider::Request req) => {
 	} catch (e) {
 		return spider::json({"error": "the body is not JSON"}, 400);
 	}
-	if (type_of(body) != "map" || type_of(body["name"]) != "string" || type_of(body["message"]) != "string") {
+	if (type_of(body) != "map" || type_of(body.get("name")) != "string" || type_of(body.get("message")) != "string") {
 		return spider::json({"error": "send {\"name\": string, \"message\": string}"}, 422);
 	}
 	int id = add_entry(body["name"], body["message"]);

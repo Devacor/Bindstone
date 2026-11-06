@@ -204,7 +204,7 @@ public:
             auto eng = make_engine();
             check_eq(std::string("reflect::is_enabled expects at least 1 argument"),
                 failure([&]() { eng->execute("reflect::is_enabled()"); }));
-            for (const char* args : {"true", "-1", "2", "jai::filesystem, 2"}) {
+            for (const char* args : {"true", "-1", "4", "jai::filesystem, 4"}) {
                 check_eq(std::string("reflect::is_enabled expects valid privilege flags"),
                     failure([&]() { eng->execute(std::string("reflect::is_enabled(") + args + ")"); }));
             }

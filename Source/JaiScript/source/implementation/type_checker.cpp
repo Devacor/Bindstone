@@ -335,6 +335,31 @@ private:
     mutable std::unordered_set<std::string> names_;
 };
 
+// A namespace's members by their qualified names ("ns::f", "a::b::C"), and every path it opens marked with a trailing "::"
+// ("a::", "a::b::"), which no identifier spells: what a qualified name may name, whichever unit declares it. A nested block's
+// name is already its full path (the parser prefixes the enclosing ones).
+void collect_namespace_members(const namespace_decl* n, std::unordered_set<std::string>& out) {
+    const std::string path(n->name);
+    for (size_t cut = path.find("::"); cut != std::string::npos; cut = path.find("::", cut + 2)) { out.emplace(path.substr(0, cut + 2)); }
+    out.emplace(path + "::");
+    const auto member = [&](std::string_view name) { out.emplace(path + "::" + std::string(name)); };
+    for (const auto& d : n->declarations) {
+        if (!d) { continue; }
+        switch (d->get_type()) {
+            case node_type::function_decl: member(static_cast<const function_decl*>(d.get())->name); break;
+            case node_type::variable_decl: member(static_cast<const variable_decl*>(d.get())->name); break;
+            case node_type::extern_decl: member(static_cast<const extern_decl*>(d.get())->name); break;
+            case node_type::class_decl: member(static_cast<const class_decl*>(d.get())->name); break;
+            case node_type::enum_decl: member(static_cast<const enum_decl*>(d.get())->name); break;
+            case node_type::destructuring_decl:
+                for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) { member(name); }
+                break;
+            case node_type::namespace_decl: collect_namespace_members(static_cast<const namespace_decl*>(d.get()), out); break;
+            default: break;
+        }
+    }
+}
+
 class static_checker {
 public:
     static_checker(engine& eng, const std::vector<declaration_ptr>& decls,
@@ -461,6 +486,7 @@ private:
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
     std::unordered_set<std::string_view> namespaces_;
+    std::unordered_set<std::string> namespace_members_;   // this unit's namespace members and paths (collect_namespace_members)
     std::unordered_map<std::string, const variable_decl*> namespace_vars_;   // "path::name" -> its declaration (null: two spellings)
     // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
     // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
@@ -1007,7 +1033,10 @@ private:
     void collect_top_level() {
         collect_scope_decls(decls_);
         for (const auto& d : decls_) {
-            if (d && d->get_type() == node_type::namespace_decl) { collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), ""); }
+            if (d && d->get_type() == node_type::namespace_decl) {
+                collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), "");
+                collect_namespace_members(static_cast<const namespace_decl*>(d.get()), namespace_members_);
+            }
         }
         for (const auto& d : decls_) {
             if (d && (d->get_type() == node_type::include_decl || d->get_type() == node_type::import_decl)) {
@@ -2103,6 +2132,33 @@ private:
     // every dynamic value the site can hold is either the identity case or falls to the ladder.
     bool known_class(std::string_view name) { return classes_.count(name) || engine_class(name) != nullptr; }
 
+    // A class, enum or host type of that name anywhere the program or the host declares one
+    bool known_type_name(std::string_view name) {
+        if (known_class(name) || find_sclass(name) || enums_.count(name)) { return true; }
+        const std::string n(name);
+        if (program_enums_) {
+            eng_.note(n);
+            if (program_enums_->count(n)) { return true; }
+        }
+        return eng_.is_type_name(n) || (n.find("::") != std::string::npos && extra_global(n));   // a class another unit's namespace declares
+    }
+
+    // C++ [basic.lookup]: every type a declaration spells names a type; a template instance's own name is the host's, its
+    // arguments are checked. A dynamic-path include can declare anything, as for an undeclared identifier.
+    void check_spelled_type(const type_info* ti, const source_location& loc) {
+        if (!ti) { return; }
+        const bool object = ti->base_type == script_value_type::jai_object_type;
+        if (object && ti->type_params.empty() && !ti->type_name.empty() && !known_type_name(ti->type_name)) {
+            const std::string name(ti->type_name);
+            const std::string math = "math::" + name;
+            const std::string hint = math_type_from_name(math) != script_value_type::jai_null_type
+                ? "; did you mean '" + math + "' (using " + math + ";)?" : "";
+            diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc, "unknown type '" + name + "'" + hint);
+            return;
+        }
+        for (const auto& param : ti->type_params) { check_spelled_type(param.get(), loc); }
+    }
+
     // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
     // runtime is right); the warning names the aliasing spellings. Warning severity: never gates.
     enum class cast_source : uint8_t { plain, handle, reference };
@@ -2836,8 +2892,48 @@ private:
     }
 
     bool namespace_known(const std::string& path) {
-        return namespaces_.count(std::string_view(path)) != 0 ||
-               eng_.find_namespace(path) != nullptr;
+        const std::string opened = path + "::";
+        return namespaces_.count(std::string_view(path)) != 0 || namespace_members_.count(opened) != 0 ||
+               eng_.find_namespace(path) != nullptr || extra_global(opened);
+    }
+
+    // C++ [namespace.qual]: a qualified name names what a declaration of its namespace declares (a unit of the program, an earlier
+    // run, the host's registrations, the math:: intrinsics), a namespace nested in it, or a class or enum of that name; a
+    // namespace that is also a class answers with the class's statics too
+    bool namespace_declares(const std::string& space, std::string_view member) {
+        const std::string qualified = space + "::" + std::string(member);
+        if (namespace_members_.count(qualified) || extra_global(qualified) || namespace_known(qualified) || known_type_name(qualified)) { return true; }
+        if (eng_.has_variable(qualified) || eng_.has_function(qualified) || known_class(space) || find_sclass(space)) { return true; }
+        if (space == "math" && math_intrinsic_from_name(member) != math_fn::none) { return true; }
+        eng_.note(qualified);
+        const script_namespace_data* ns = eng_.find_namespace(space);
+        if (!ns) { return false; }
+        const uint64_t id = eng_.symbolize(member);
+        return ns->functions.count(id) || ns->variables.count(id) || ns->classes.count(id) || ns->signatures.count(id) ||
+               (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr);
+    }
+
+    // the longest prefix of a qualified name that names a namespace must declare the segment after it
+    void check_namespace_member(const member_expr* m) {
+        std::vector<std::string_view> parts{m->member};
+        const expression* e = m->object.get();
+        while (e && e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static) {
+            parts.push_back(static_cast<const member_expr*>(e)->member);
+            e = static_cast<const member_expr*>(e)->object.get();
+        }
+        if (!e || e->get_type() != node_type::identifier_expr) { return; }
+        parts.push_back(static_cast<const identifier_expr*>(e)->name);
+        std::reverse(parts.begin(), parts.end());
+        std::string path, space;
+        size_t next = 0;
+        for (size_t k = 0; k + 1 < parts.size(); ++k) {
+            if (k) { path += "::"; }
+            path += parts[k];
+            if (namespace_known(path)) { space = path; next = k + 1; }
+        }
+        if (space.empty() || namespace_declares(space, parts[next])) { return; }
+        diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, m->location,
+             "no member '" + std::string(parts[next]) + "' in namespace '" + space + "'");
     }
 
     // A method call on a declared container or string: the name must be one the builtin registry dispatches (the runtime's
@@ -4202,7 +4298,10 @@ private:
     ctype infer_member_impl(member_expr* m, bool writing, const variable_decl** typed_field_out,
                             ctype* recv_out, member_hit* hit_out) {
         if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
-        if (m->is_static && namespace_path_receiver(m)) { return {}; }
+        if (m->is_static && namespace_path_receiver(m)) {
+            check_namespace_member(m);
+            return {};
+        }
         ctype recv = infer(m->object.get());
         if (recv_out) { *recv_out = recv; }
         if (recv.kind == ctype::math_k) {
@@ -4601,7 +4700,10 @@ private:
                 if (fn != math_fn::none && !detail::math_arity_accepts(fn, args.size())) { return {}; }   // the kernel raises the table's text
                 if (fn != math_fn::none && args.size() <= 8) { return math_intrinsic_result(fn, args); }
                 if (ctype t; library_namespace_call(c, m, args, t)) { return t; }
-                if (namespace_path_receiver(m)) { return check_namespace_entry(m, args, c->location); }
+                if (namespace_path_receiver(m)) {
+                    check_namespace_member(m);
+                    return check_namespace_entry(m, args, c->location);
+                }
             }
             ctype recv = declared_container_receiver(m->object.get(), infer(m->object.get()));
             if (!m->is_static && recv.kind == ctype::object_k && !recv.cls.empty() && eng_.has_constant_arguments()) {
@@ -5286,6 +5388,7 @@ private:
             elem = ctype::make(ctype::char_k);
         }
         if (!f->element_type) { f->auto_spelled = true; }
+        check_spelled_type(f->element_type.get(), f->location);
         if (f->auto_spelled && !f->auto_typed && semantic_walk() && container.kind != ctype::map_k) {
             f->auto_typed = true;   // an auto over elements without a static type is a var, decided once
             if (elem.is_unknown()) { f->element_type = eng_.get_type_info_any(); }
@@ -5645,6 +5748,7 @@ private:
 
     JAI_NOINLINE void walk_variable_decl(variable_decl* decl) {
         if (!decl->type && !decl->function_spelling) { decl->auto_spelled = true; }
+        check_spelled_type(decl->type.get(), decl->location);
         check_inline_redefinition(decl);
         const ctype init = decl->initializer ? infer(decl->initializer.get()) : ctype{};
         declare_variable(decl, init);
@@ -5790,6 +5894,7 @@ private:
                    : (class_ctx_ && !fn->is_static && fn->name.size() > 1 && fn->name[0] == '~') ? cdtor_ctx::destruction : cdtor_ctx::none;
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
+        check_spelled_type(fn->return_type.get(), fn->location);
         define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor, /*binds_copies=*/fn->is_coroutine);
         fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
@@ -5832,6 +5937,7 @@ private:
     void define_params(const std::vector<parameter>& params, const source_location& fn_loc,
                        bool warn_field_shadows = true, bool binds_copies = false) {
         for (const auto& p : params) {
+            check_spelled_type(p.type.get(), fn_loc);
             ctype pt = ctype_from_type_info(p.type.get());
             if (p.default_value) {
                 ctype dv = infer(p.default_value.get());
@@ -5939,6 +6045,7 @@ private:
                 warn_member_shadows_global(f->is_static ? "static field" : "field",
                                            f->name, cd->name, f->location);
                 if (!f->type && !f->function_spelling) { f->auto_spelled = true; }
+                check_spelled_type(f->type.get(), f->location);
                 if (f->initializer) {
                     const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
                     ctype init = infer(f->initializer.get());
@@ -5998,6 +6105,7 @@ private:
         struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
         open_lambda_scope(l);
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
+        check_spelled_type(l->return_type.get(), l->location);
         define_lambda_names(l);
         walk_stmt(l->body.get());
         close_lambda_scope(l);
@@ -6377,6 +6485,7 @@ void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordere
                     out.emplace(n->name.substr(0, pos));
                 }
                 collect_unit_names(n->declarations, out);
+                collect_namespace_members(n, out);
                 break;
             }
             default:

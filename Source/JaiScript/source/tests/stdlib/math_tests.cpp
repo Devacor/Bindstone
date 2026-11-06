@@ -348,8 +348,9 @@ public:
             auto engine = make_engine();
             stdlib::register_all(*engine);
             for (const char* name : {"random", "random_int", "random_range", "random_seed"}) {
-                const std::string source = std::string("string m = \"\"; try { var f = math::") + name + "; } catch (e) { m = e; } m;";
-                check_eq(std::string("Undefined variable 'math::") + name + "'", engine->execute(source).as<std::string>(), name);
+                std::string refused;
+                try { engine->execute(std::string("var f = math::") + name + ";"); } catch (const jai::static_check_error& e) { refused = e.what(); }
+                check_true(refused.find(std::string("error: no member '") + name + "' in namespace 'math'") != std::string::npos, refused);
             }
         });
     }

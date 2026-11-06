@@ -1086,7 +1086,7 @@ public:
         const std::string probe = "class Point { var x = 2; }\n"
                                   "namespace geo {\n"
                                   "    int probe() { Point p = Point(); return p.x; }\n"
-                                  "    void reseat() { Point p = Point(); geo::Point q; p = q; }\n"
+                                  "    void reseat() { Point p = Point(); Point q = Point(); p = q; }\n"
                                   "}\n"
                                   "geo::probe();\n";
 

@@ -1678,6 +1678,64 @@ public:
             check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "unknown type in cast: 'Nope'"));
         });
 
+        test("a_declared_type_must_name_a_type", [this]() {
+            // every spelling a declaration's type takes: a variable, a field, a parameter, a return, an element, a pointee, a
+            // range-for variable, a lambda's parameter
+            const auto message = [this](const std::string& source) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                try { e->execute(source); } catch (const static_check_error& err) { return std::string(err.what()); }
+                return std::string("loaded");
+            };
+            for (const char* source : {"Nope n;", "class C { Nope z; }", "void f(Nope n) { }", "Nope g() { return null; }",
+                                       "array<Nope> xs;", "map<string, Nope> m;", "shared_ptr<Nope> h;", "weak_ptr<Nope> w;",
+                                       "for (Nope x : [1]) { }", "auto l = [](Nope n) { return 1; };", "int f(const Nope& n) { return 1; }"}) {
+                check_true(message(source).find("error: unknown type 'Nope'") != std::string::npos, std::string(source) + " -> " + message(source));
+            }
+            check_true(message("vec2 p;").find("error: unknown type 'vec2'; did you mean 'math::vec2' (using math::vec2;)?") != std::string::npos,
+                       message("vec2 p;"));
+            check_eq(std::string("loaded"), message("class A { B b; } class B { int x = 1; } namespace ns { class K { } } ns::K k; using ns::K; K k2; "
+                                                    "time::date d; random r(1); regex re(\"a\"); math::vec3 v; shared_ptr<A> h; array<B> bs;"));
+            auto w = make_engine();
+            w->execute("[[warn_mode]]; void f(Nope n) { } 1;");
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "unknown type 'Nope'"));
+        });
+
+        test("a_qualified_name_must_name_a_namespace_member", [this]() {
+            // a host namespace (math::, string::, reflect::), a script one, nested paths; a member another declaration of the
+            // namespace adds (a script's math::, a later reopening) is declared wherever it stands
+            const auto message = [this](const std::string& source) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                try { e->execute(source); } catch (const static_check_error& err) { return std::string(err.what()); }
+                return std::string("loaded");
+            };
+            const auto rejects = [&](const std::string& source, const std::string& text) {
+                check_true(message(source).find("error: " + text) != std::string::npos, source + " -> " + message(source));
+            };
+            rejects("float x = 4.0; print(math::sqroot(x));", "no member 'sqroot' in namespace 'math'");
+            rejects("print(math::pi);", "no member 'pi' in namespace 'math'");
+            rejects("print(string::to_uper(\"a\"));", "no member 'to_uper' in namespace 'string'");
+            rejects("print(reflect::clases());", "no member 'clases' in namespace 'reflect'");
+            rejects("namespace a::b { int x = 1; } print(a::b::y);", "no member 'y' in namespace 'a::b'");
+            rejects("namespace a { int x = 1; } print(a::c::y);", "no member 'c' in namespace 'a'");
+            rejects("namespace a { int x = 1; } a::z = 2;", "no member 'z' in namespace 'a'");
+            check_eq(std::string("loaded"), message(
+                "float twice(float v) { return math::double_it(v); }\n"
+                "namespace math { float double_it(float v) { return v * 2.0; } }\n"
+                "namespace geo { namespace inner { int k = 3; } class Box { static int n = 1; } }\n"
+                "print(math::sqrt(4.0), math::PI, string::to_lower(\"A\"), geo::inner::k, geo::Box::n, twice(1.0));"));
+            auto earlier = make_engine();
+            earlier->execute("namespace tools { int k = 7; }");
+            check_eq((int64_t)7, earlier->execute("tools::k;").as_int(), "a member an earlier run declared");
+            bool refused = false;
+            try { earlier->execute("tools::kk;"); } catch (const static_check_error& err) { refused = std::string(err.what()).find("no member 'kk' in namespace 'tools'") != std::string::npos; }
+            check_true(refused, "a member no run declared");
+            auto w = make_engine();
+            w->execute("[[warn_mode]]; var f = 1; try { f = math::sqroot(4.0); } catch (e) { } 1;");
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "no member 'sqroot' in namespace 'math'"));
+        });
+
         test("cast_value_is_a_proof_source_reference_is_not", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             const std::string prelude =

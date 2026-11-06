@@ -298,8 +298,7 @@ then globals, the order the run time takes, so the member is checked and <code>:
 <code>s</code> inside the class, the compound forms).</li>
 <li><strong>Enum values</strong> are checked for existence: <code>Direction.zzz</code> is <code>no value 'zzz'
 in enum 'Direction'</code>.</li>
-<li><strong>Lenient by design:</strong> builtin container/string/map methods, subscripts, namespaces at every
-depth, and the handle builtins a <code>shared_ptr</code> answers (<code>use_count</code>, <code>cpp_ref_count</code>,
+<li><strong>Lenient by design:</strong> builtin container/string/map methods, subscripts, and the handle builtins a <code>shared_ptr</code> answers (<code>use_count</code>, <code>cpp_ref_count</code>,
 <code>unique</code>, <code>same_as</code>, <code>reset</code>). A class method of the same name wins
 first. Any ancestor the checker cannot resolve opens the whole class: silence.</li>
 </ul>
@@ -333,8 +332,13 @@ cast itself is covered in the <a href="../guide/02-type-ladder.html#cast-the-exp
 <p><code>math::&lt;fn&gt;(...)</code> is typed by its kernel's result (<code>int</code> for
 <code>itrunc</code>/<code>ifloor</code>/<code>wrap_*</code>, <code>float</code> for the transcendental and
 interpolation families, operand-typed for <code>math::abs</code>/<code>math::min</code>/<code>math::max</code>/<code>math::clamp</code>);
-arity there is the kernel's run-time error. A user namespace path <code>a::b::c</code> is lenient at every
-depth.</p>
+arity there is the kernel's run-time error. A qualified name must name something its namespace declares: the
+longest prefix of <code>a::b::c</code> that names a namespace must declare the next segment, or the load fails with
+<code>no member 'c' in namespace 'a::b'</code>. Every declaration of the namespace counts, in any unit of the program,
+an earlier run, or the host's registrations (a script's <code>namespace math { ... }</code> extends
+<code>math::</code>); a namespace that is also a class answers with the class's statics, and a unit with a
+dynamic-path include gets a warning. Every type a declaration spells must name a class, enum or registered type
+(<code>unknown type 'Nope'</code>), with the same warning rule.</p>
 <p>An erroring expression assumes its declared or expected type afterwards, so one bad line produces one
 diagnostic rather than a cascade; identical (line, column, message) triples are deduplicated; the listing
 caps at 100 with <code>report.capped</code> set.</p>
@@ -480,7 +484,7 @@ mistake in any of these spots is a run-time error, never a load error:</p>
 <tr><td>stores <em>through</em> a reference (<code>T&amp;</code> declarations, <code>auto&amp;</code> loop variables, by-reference parameters)</td><td>the referenced variable&#x27;s table runs at run time; binding the reference and member lookup through it are still checked</td></tr>
 <tr><td>container elements the checker cannot type: map keys, elements of untyped containers and <code>var</code> receivers, subscripts, builtin container/string method results (literal elements, pushes and element stores into a declared <code>array&lt;T&gt;</code> or <code>map&lt;K,V&gt;</code> are checked)</td><td>the runtime element boundary is the check</td></tr>
 <tr><td>engine globals (typed off the value tag; a later retag is invisible), host-object conversions, callables held in variables, host functions beyond arity and primitive certainties, binder (C++) methods reached through a script chain, binder properties</td><td>no static signature in view</td></tr>
-<tr><td>dynamic-path <code>import(expr)</code>/<code>include(expr)</code> units (undeclared identifiers drop to warnings), untyped <code>extern</code> names, a parent found nowhere, namespaces at every depth</td><td>such a unit or name can define anything</td></tr>
+<tr><td>dynamic-path <code>import(expr)</code>/<code>include(expr)</code> units (undeclared identifiers drop to warnings, unknown types and namespace members too), untyped <code>extern</code> names, a parent found nowhere</td><td>such a unit or name can define anything</td></tr>
 <tr><td>accessor-bearing members whose declaration is ambiguous (two getter/setter overloads, <code>var</code>/<code>auto</code>/coroutine/parameterized getters, reference or untyped setter parameters, an accessor on a registered-only ancestor)</td><td>no single declaration to trust</td></tr>
 <tr><td>coroutines: yield and return types, and what a handle's <code>next()</code> returns (the handle itself is typed: <code>next</code> and <code>done</code> are its only members)</td><td>the checker does not model what a coroutine yields</td></tr>
 <tr><td>mixed-branch ternaries, <code>this</code>/<code>super</code> as values, hot-reload redefinitions (receivers that carry the old shape are open), <code>extend</code>ed classes and everything passed to <code>extend(...)</code></td><td>the shape is decided at run time</td></tr>

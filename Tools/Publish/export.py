@@ -41,8 +41,9 @@ SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-
 LEAK_SCAN_SKIP = re.compile(r"^(?:.*/)?third_party/")    # vendored upstream sources ship exactly as their authors wrote them
 INTERNAL_BLOCK = re.compile(r"[ \t]*<!-- internal-only -->.*?<!-- /internal-only -->[ \t]*\r?\n", re.S)
 
-# LF in the repository whatever the publishing machine's core.autocrlf: the Linux CI runs the shell scripts as checked out
-PUBLIC_GITATTRIBUTES = "* text=auto\n"
+# LF in the repository whatever the publishing machine's core.autocrlf; in every checkout, shell scripts stay LF (curl | sh)
+# and batch files CRLF (CMD), so the site serves the installers right from any machine
+PUBLIC_GITATTRIBUTES = "* text=auto\n*.sh text eol=lf\n*.cmd text eol=crlf\n*.bat text eol=crlf\n"
 
 PUBLIC_GITIGNORE = """out/
 build/

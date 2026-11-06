@@ -263,10 +263,17 @@ inline std::shared_ptr<jai::http_transport> make_http_transport(std::string* a_d
 #endif
 }
 
+// One transport for the process, shared by every engine on every thread: a WinHTTP session takes concurrent requests, the
+// socket transport keeps each exchange's state on its caller's stack and openssl_tls only reads its context
+inline const std::shared_ptr<jai::http_transport>& shared_http_transport() {
+	static const std::shared_ptr<jai::http_transport> result = make_http_transport();
+	return result;
+}
+
 // spider:: with this build's transport and the network permission granted
 inline void register_http_client(jai::engine& a_engine) {
 	jai::stdlib::register_spider(a_engine);
-	a_engine.http_transport(make_http_transport());
+	a_engine.http_transport(shared_http_transport());
 	a_engine.enable("network");
 }
 

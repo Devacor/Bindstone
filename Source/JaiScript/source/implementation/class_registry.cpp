@@ -1157,8 +1157,10 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         script_callable ctor_payload;
         ctor_payload.kind = script_callable::kind_type::constructor;
         ctor_payload.more().cls = class_def;
+        const bool namespace_member = env->is_program_scope() && env != global_env;
+        class_def->set_namespace_scope(namespace_member ? env : nullptr);
         if (found_constructor) {
-            ctor_payload.more().definition_env = global_env;
+            ctor_payload.more().definition_env = namespace_member ? env : global_env;
         }
         global_env->define(decl->name_id, script_value::make_function(script_callable_thunk{eng, std::move(ctor_payload)}, eng));
     }

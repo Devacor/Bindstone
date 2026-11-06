@@ -33,6 +33,7 @@
 #include <jaiscript/detail/aggregate_init.hpp>
 #include <jaiscript/detail/static_store.hpp>  // class-qualified static stores (vm parity)
 #include <jaiscript/detail/namespace_scope.hpp>  // a namespace's variable cells and the ns::x store target (shared with the vm)
+#include <jaiscript/detail/namespace_function.hpp>   // a namespace function's cell and body environment (shared with the vm)
 #include <jaiscript/detail/transient_read.hpp>
 #include <jaiscript/detail/binary_handlers.hpp>
 #include <jaiscript/detail/arg_capture.hpp>   // call arguments take their value when evaluated (vm parity)
@@ -4216,107 +4217,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         if (is_namespace) {
             auto& ns_data = ns_it->second;
 
-            // Use parser's pre-computed member ID (always set by parser)
-            // Look for function in namespace (handles overloads by arity)
-            // This will be called later with arguments, so we need to return a callable
-            auto func_it = ns_data->functions.find(expr->member_id);
-            if (func_it != ns_data->functions.end()) {
-                // Create a namespace function wrapper
-                // Store all overloads for arity-based dispatch
-                auto overloads = func_it->second;
-
-                // Check if there's also a class with the same name (for fallback)
-                std::shared_ptr<class_definition> fallback_class;
-                auto [fallback_class_var_id, fallback_class_var_name] = string_symbolizer_->get_class_var_id_with_view(name_id);
-                auto class_var_result = environment_->get(fallback_class_var_id);
-                if (class_var_result) {
-                    script_value class_var = std::move(class_var_result.value());
-                    if (class_var.is_object()) {
-                        auto objHolder = class_var.get_object_holder();
-                        if (objHolder && objHolder->type_id() == class_definition_type_id_) {
-                            fallback_class = std::static_pointer_cast<class_definition>(objHolder->host_object());
-                        }
-                    }
-                }
-                // No class with this name - that's fine, fallback_class remains null
-
-                // Create a script_function that dispatches based on arity.
-                // Captures engine* + payload only; the namespace registry is read through the
-                // engine at call time and the body runs through the live backend.
-                uint64_t namespace_id = name_id;
-                uint64_t member_id = expr->member_id;
-                engine* eng = engine_;
-                script_function namespace_func = [eng, overloads, namespace_id, fallback_class, member_id](const std::vector<script_value>& args) -> checked_result<script_value> {
-                    execution_backend* backend = eng ? eng->get_execution_backend() : nullptr;
-                    if (!backend) {
-                        return checked_result<script_value>(make_error_code(runtime_error_code::engine_destroyed), "Engine backend unavailable");
-                    }
-
-                    // The overload these arguments select through the one scorer (a tie raises), else the sole arity match
-                    auto ns_selected = select_declaration(overloads, args, member_id, eng);
-                    if (!ns_selected) { return ns_selected.error_value(); }
-                    std::shared_ptr<function_decl> ns_pick = std::move(ns_selected.value());
-                    {
-                        const auto& func_decl = ns_pick;
-                        if (func_decl) {
-                            // The namespace's scope is the body's environment (its cells, then the globals);
-                            // host-registered entries stay visible by their bare names through a layer above it
-                            auto& namespaces = eng->script_namespaces();
-                            auto ns_it = namespaces.find(namespace_id);
-                            std::shared_ptr<environment> ns_env = ns_it != namespaces.end() && ns_it->second
-                                ? detail::namespace_scope(*eng, *ns_it->second)
-                                : std::make_shared<environment>(eng->get_global_environment(), eng->get_symbolizer());
-                            if (ns_it != namespaces.end() && ns_it->second && !ns_it->second->variables.empty()) {
-                                auto host_layer = std::make_shared<environment>(ns_env, eng->get_symbolizer());
-                                for (const auto& [var_id, var_value] : ns_it->second->variables) {
-                                    host_layer->define(var_id, var_value);
-                                }
-                                ns_env = std::move(host_layer);
-                            }
-
-                            if (func_decl->is_coroutine) {   // a coroutine member mints a handle over the namespace's scope
-                                auto handle = std::make_shared<coroutine_handle>(eng);
-                                handle->set_function(func_decl, args, ns_env);
-                                return script_value::make_coroutine_handle(eng->symbolize("coroutine_handle"), std::static_pointer_cast<void>(handle), eng);
-                            }
-                            // Found matching arity - create script_defined_function with namespace environment
-                            script_callable payload;
-                            payload.kind = script_callable::kind_type::function;
-                            payload.fn = std::make_shared<script_defined_function>(
-                                func_decl->name,
-                                shared_parameters_for(func_decl.get()),
-                                func_decl->return_type,
-                                func_decl->body,
-                                ns_env,  // Environment with namespace variables
-                                func_decl->local_count
-                            );
-                            payload.fn->unit = func_decl->unit;
-                            return backend->execute_callable(payload, args);
-                        }
-                    }
-
-                    // No matching overload found in namespace - try fallback to class static method
-                    if (fallback_class) {
-                        // get_static_method with false doesn't throw - returns null if not found
-                        script_value static_method = fallback_class->static_method_in_chain(member_id);
-                        if (!static_method.is_null() && static_method.is_function()) {
-                            // Call the class static method
-                            auto func = static_method.as_function();
-                            return eng->active_run_pins() ? detail::call_function_value(func, args) : func(args);
-                        }
-                    }
-
-                    // Neither namespace nor class has matching method
-                    (void)namespace_id;
-                    return detail::overload_miss(make_error_code(runtime_error_code::not_a_function),
-                        member_id, args.data(), args.size(), eng);
-                };
-
-                push_value(script_value::make_function(namespace_func, engine_));
-                return {};
-            }
-
-            // Look for variable in namespace
+            // a function or a variable the namespace declares, then a host entry, then a class
             if (ns_data->scope) {
                 if (script_value* cell = ns_data->scope->get_own_value_ptr(expr->member_id)) {
                     push_value(*cell);
@@ -7792,6 +7693,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
     if (!ns_data) {
         ns_data = std::make_shared<script_namespace_data>();
     }
+    detail::namespace_scope(*engine_, *ns_data, decl->name_id);
 
     // Process all declarations within the namespace
     // Functions, variables, and classes are stored in the namespace_data registry
@@ -7842,8 +7744,8 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 }
             }
 
-            // Store function declaration
             overloads.emplace_back(std::make_shared<function_decl>(*func_decl));
+            detail::publish_namespace_function(*engine_, *ns_data, decl->name_id, func_decl->name_id);
 
         } else if (member_decl->get_type() == node_type::variable_decl) {
             auto* var_decl = static_cast<variable_decl*>(member_decl.get());
@@ -7855,7 +7757,7 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
             // The declaration runs in the namespace's scope (visit_variable_decl's every path): its cell lives there
             // and its initializer sees the members declared before it. KEEP BYTE-PARALLEL with vm_backend::exec_namespace_variable.
             struct scope_swap { std::shared_ptr<environment>& slot; std::shared_ptr<environment> saved; ~scope_swap() { slot = std::move(saved); } } swap{environment_, environment_};
-            environment_ = detail::namespace_scope(*engine_, *ns_data);
+            environment_ = detail::namespace_scope(*engine_, *ns_data, decl->name_id);
             if (!var_decl->is_inline && !environment_->plain_declare(var_decl->name_id)) [[unlikely]] {
                 return detail::inline_redefinition(*string_symbolizer_, var_decl->name_id, var_decl);
             }
@@ -7874,7 +7776,11 @@ checked_result<void> interpreter::visit_namespace_decl(namespace_decl* decl) {
                 class_decl_ptr->name_id = string_symbolizer_->intern(class_decl_ptr->name);
             }
 
-            JAISCRIPT_TRY(dispatch_decl(class_decl_ptr));
+            {   // its methods, constructors and initializers read the namespace's members by their bare names (KEEP BYTE-PARALLEL with the vm)
+                struct scope_swap { std::shared_ptr<environment>& slot; std::shared_ptr<environment> saved; ~scope_swap() { slot = std::move(saved); } } swap{environment_, environment_};
+                environment_ = detail::namespace_class_environment(*engine_, decl->name_id);
+                JAISCRIPT_TRY(dispatch_decl(class_decl_ptr));
+            }
             detail::register_namespace_class(*engine_, *ns_data, *class_decl_ptr);
 
         } else {

@@ -510,19 +510,18 @@ private:
     // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
     // or class declares is visible only in its own scope, which the walk's scopes and member lookups resolve.
     std::unordered_set<std::string_view> all_names_;
-    std::unordered_set<std::string_view> namespace_names_;   // what namespace bodies declare: bare only inside a namespace
     int collect_depth_ = 0;   // collect_names: 0 at program scope
     native_stack_mark stack_;
     bool collecting_namespace_names_ = false;
     void collect_program_name(std::string_view name) {
-        if (collect_depth_ == 0) { (collecting_namespace_names_ ? namespace_names_ : all_names_).insert(name); }
+        if (collect_depth_ == 0 && !collecting_namespace_names_) { all_names_.insert(name); }   // a namespace's names: enclosing_namespace_member
     }
     std::unordered_map<std::string_view, source_location> program_decls_;   // this unit's program-scope variables, functions and classes: each name's first declaration
     void note_program_decl(std::string_view name, const source_location& at) {
         if (collect_depth_ == 0 && !collecting_namespace_names_) { program_decls_.emplace(name, at); }
     }
     bool program_or_derived_name(std::string_view name) {
-        return all_names_.count(name) || (!namespace_scopes_.empty() && namespace_names_.count(name)) || derived_class_member(name);
+        return all_names_.count(name) || !enclosing_namespace_member(name).empty() || derived_class_member(name);
     }
     // names an assignment expression or a reference declaration targets, and each variable declaration's binary::layout(...)
     // initializer (null for any other initializer): a layout variable declared once and never assigned is statically known
@@ -611,6 +610,7 @@ private:
     }
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
     std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
+    std::vector<std::string_view> namespace_walk_names_;   // the namespace each of those bodies declares into
     std::unordered_map<std::string, var_entry> qualified_externs_;   // "ns::x" -> what its extern declares, from the extern on
 
     const enum_decl* find_enum(std::string_view name) {
@@ -968,7 +968,7 @@ private:
         if (!id->global_qualified) {
             size_t at = 0;
             var_entry* local = find_local(id->name, &at);
-            if (local && member_hides_program_name(id->name, at)) { return nullptr; }
+            if (local && (member_hides_program_name(id->name, at) || namespace_hides_program_name(id->name, at))) { return nullptr; }
             if (scope_index) { *scope_index = at; }
             if (local && local->placeholders) {
                 diag(diag_level::error, id->location, "'_' is declared more than once in this scope, so it names none of them: give the variable you use its own name");
@@ -993,7 +993,7 @@ private:
             if (!d) { continue; }
             switch (d->get_type()) {
                 case node_type::function_decl:
-                    add_overload(functions_[static_cast<const function_decl*>(d.get())->name], static_cast<const function_decl*>(d.get()));
+                    if (!collecting_namespace_) { add_overload(functions_[static_cast<const function_decl*>(d.get())->name], static_cast<const function_decl*>(d.get())); }
                     break;
                 case node_type::variable_decl:
                     global_var_names_.insert(static_cast<const variable_decl*>(d.get())->name);
@@ -1868,6 +1868,10 @@ private:
                 is_const = h.field->is_const;
                 if (!h.foreign) { hit.line = h.field->location.line; hit.column = h.field->location.column; }
                 from_type(h.field->type.get());
+            } else if (const std::string space = id->global_qualified ? std::string() : enclosing_namespace_member(id->name); !space.empty()) {
+                if (!namespace_host_entry(space, id->name)) { return none; }   // the namespace's own member: its declaration's rules
+                is_const = true;   // the host's entry, read-only from script as `ns::name` is
+                known = false;
             } else if (const enum_decl* en = find_enum(id->name)) {   // an enum's name: a const map<string, int> (internal/const.md 11)
                 is_const = true;
                 known = true; library = true;
@@ -3088,6 +3092,58 @@ private:
         const uint64_t id = eng_.symbolize(member);
         return ns->functions.count(id) || ns->variables.count(id) || ns->classes.count(id) || ns->signatures.count(id) ||
                (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr);
+    }
+
+    // what a bare name in the namespace's code finds there: a member some declaration of the namespace declares (a unit of the
+    // program, an earlier run, the host's registrations), never a class's statics or a nested namespace
+    bool namespace_member_declared(const std::string& space, std::string_view member) {
+        const std::string qualified = space + "::" + std::string(member);
+        if (known_type_name(qualified) || find_sclass(qualified)) { return false; }   // the parser reads a namespace's bare class name qualified
+        if (namespace_members_.count(qualified) || extra_global(qualified) || eng_.has_variable(qualified) || eng_.has_function(qualified)) { return true; }
+        eng_.note(qualified);
+        const script_namespace_data* ns = eng_.find_namespace(space);
+        if (!ns) { return false; }
+        const uint64_t id = eng_.symbolize(member);
+        return ns->functions.count(id) || ns->variables.count(id) || (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr);
+    }
+
+    // a member the host registered in the namespace (script_namespace_data::variables, a qualified add_global or add_function),
+    // which no script declaration of the namespace declares
+    bool namespace_host_entry(const std::string& space, std::string_view member) {
+        const std::string qualified = space + "::" + std::string(member);
+        if (namespace_members_.count(qualified)) { return false; }
+        if (const script_namespace_data* ns = eng_.find_namespace(space)) {
+            const uint64_t id = eng_.symbolize(member);
+            if (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr) { return false; }
+            if (ns->variables.count(id)) { return true; }
+        }
+        return eng_.has_variable(qualified) || eng_.has_function(qualified);
+    }
+
+    // C++ [basic.lookup.unqual]: a bare name in a namespace's code searches that namespace, then each enclosing one ("a::b", then
+    // "a"), then the program scope; the innermost namespace longer than `nearer_than` characters that declares it, else empty
+    std::string enclosing_namespace_member(std::string_view name, size_t nearer_than = 0) {
+        if (namespace_walk_names_.empty()) { return {}; }
+        std::string space(namespace_walk_names_.back());
+        while (space.size() > nearer_than) {
+            if (namespace_member_declared(space, name)) { return space; }
+            const size_t cut = space.rfind("::");
+            if (cut == std::string::npos) { break; }
+            space.resize(cut);
+        }
+        return {};
+    }
+
+    // A name the walk holds at program scope or in an enclosing namespace's body, which a nearer namespace declares again
+    bool namespace_hides_program_name(std::string_view name, size_t scope_index) {
+        if (namespace_walk_names_.empty()) { return false; }
+        size_t nearer_than = 0;
+        if (scope_index != 0) {
+            auto at = std::find(namespace_scopes_.begin(), namespace_scopes_.end(), scope_index);
+            if (at == namespace_scopes_.end()) { return false; }   // a function's, a block's or a lambda's own name
+            nearer_than = namespace_walk_names_[static_cast<size_t>(at - namespace_scopes_.begin())].size();
+        }
+        return !enclosing_namespace_member(name, nearer_than).empty();
     }
 
     // the longest prefix of a qualified name that names a namespace must declare the segment after it
@@ -4355,7 +4411,7 @@ private:
     bool bare_this_field_ = false;
     // a bare name of a method body no local and no member of the modeled class chain takes (every ancestor resolved)
     bool bare_program_name(const identifier_expr* id) {
-        if (!bare_field_context() || id->global_qualified || id->slot_index != SIZE_MAX) { return false; }
+        if (!bare_field_context() || id->global_qualified || id->slot_index != SIZE_MAX || !namespace_walk_names_.empty()) { return false; }
         size_t scope_index = 0;
         if (find_named(id, &scope_index) && scope_index != 0) { return false; }   // a local or a namespace's name; the unit's own program scope reads as any program-scope name
         const member_hit hit = lookup_member(class_ctx_name_, id->name, /*want_static=*/false);
@@ -4408,6 +4464,10 @@ private:
                 return {};
             }
             if (hit.unresolved) { return {}; }   // an ancestor nowhere to be found can define anything
+        }
+        if (!id->global_qualified) {
+            const std::string space = enclosing_namespace_member(id->name);
+            if (!space.empty()) { return namespace_fns_.count(space + "::" + std::string(id->name)) ? ctype::make(ctype::function_k) : ctype{}; }
         }
         if (functions_.count(id->name)) {
             note_global_use(id->name);
@@ -4859,7 +4919,8 @@ private:
             if (id->name == "weak_from_this" || id->name == "shared_from_this") { return {}; }   // call-shape builtins, resolved before any lookup
             stamp(id->program_name, semantic_walk() && bare_program_name(id), false);
             size_t scope_index = 0;
-            if (find_local(id->name, &scope_index) && (id->global_qualified || !member_hides_program_name(id->name, scope_index))) {
+            if (find_local(id->name, &scope_index) && (id->global_qualified ||
+                (!member_hides_program_name(id->name, scope_index) && !namespace_hides_program_name(id->name, scope_index)))) {
                 if (scope_index == 0) { note_global_use(id->name); }
                 return {};   // callable local: signature unknown
             }
@@ -4877,6 +4938,16 @@ private:
                     return {};
                 }
                 if (hit.unresolved) { return {}; }
+            }
+            if (!id->global_qualified) {
+                if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
+                    const std::string qualified = space + "::" + std::string(id->name);
+                    if (auto fit = namespace_fns_.find(qualified); fit != namespace_fns_.end()) {
+                        check_namespace_function_nodiscard(qualified, fit->second);
+                        return check_script_overloads(id->name, fit->second, args, c->location).result;
+                    }
+                    return {};
+                }
             }
             if (auto it = functions_.find(id->name); it != functions_.end()) {
                 note_global_use(id->name);
@@ -5162,6 +5233,7 @@ private:
                 }
                 if (hit.unresolved) { return done(rhs); }
             }
+            if (!id->global_qualified && !enclosing_namespace_member(id->name).empty()) { return done(rhs); }
             std::string name(id->name);
             if (extra_global(name)) {
                 note_global_use(id->name);
@@ -6947,7 +7019,9 @@ private:
                 auto* n = static_cast<namespace_decl*>(d);
                 scopes_.emplace_back();
                 namespace_scopes_.push_back(scopes_.size() - 1);
+                namespace_walk_names_.push_back(n->name);
                 for (auto& inner : n->declarations) { walk_decl(inner.get()); }
+                namespace_walk_names_.pop_back();
                 namespace_scopes_.pop_back();
                 scopes_.pop_back();
                 break;
@@ -7819,7 +7893,11 @@ void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordere
                 for (size_t pos = n->name.find("::"); pos != std::string_view::npos; pos = n->name.find("::", pos + 2)) {
                     out.emplace(n->name.substr(0, pos));
                 }
-                collect_unit_names(n->declarations, out);
+                std::vector<declaration_ptr> qualified_members;   // its classes and nested namespaces carry qualified names
+                for (const auto& member : n->declarations) {
+                    if (member && (member->get_type() == node_type::class_decl || member->get_type() == node_type::namespace_decl)) { qualified_members.push_back(member); }
+                }
+                collect_unit_names(qualified_members, out);
                 collect_namespace_members(n, out);
                 break;
             }

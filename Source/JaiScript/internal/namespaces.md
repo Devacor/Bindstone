@@ -31,8 +31,9 @@ inside the namespace reads the namespace's `x`).
   dynamic; a reference-declared variable stores through to what it refers to). The value of the assignment
   expression is the stored value.
 - A namespace function reads and writes the namespace's variables by their bare names: its free names
-  resolve in the namespace's scope first, then in the program scope. `function set(v) { x = v; }` inside
-  `ns` writes `ns::x`, and every later read, qualified or bare, sees it. A lambda inside such a function
+  resolve in the namespace's scope first, then in each enclosing namespace's (`a::b`'s scope is parented on
+  `a`'s), then in the program scope. `function set(v) { x = v; }` inside `ns` writes `ns::x`, and every later
+  read, qualified or bare, sees it. A lambda inside such a function
   captures the variable like any variable of an enclosing scope (`[&]` shares the cell).
 - Reopening the namespace and declaring a name again writes the same cell in place; functions that read it
   see the new value.
@@ -48,16 +49,25 @@ inside the namespace reads the namespace's `x`).
 ## Functions
 
 Namespace functions are overload sets by arity. A later declaration with the same name and arity needs
-`override`. A namespace function is called as `ns::f(...)`; inside the namespace a sibling function is also
-reached by its qualified name (`ns::b()` from within `a`), since the bare name of a function is not a
-variable of the scope. A namespace function's environment is the namespace's scope over the program scope:
-it does not see the caller's locals or `this`.
+`override`. Each name the namespace admits a function under is a cell of the namespace's scope holding the
+set's dispatcher (`detail/namespace_function.hpp`), the value `ns::f` reads, redefined whenever a declaration
+(a reopening, an `override`, a unit's re-run) changes the set. So a sibling is called by its bare name
+(`b()` from within `a`), as C++ unqualified lookup finds it, and a reload is what the next bare call reaches. A
+namespace function's environment is the namespace's scope (over the enclosing namespaces' scopes and the
+program scope) under a per-call layer of the host entries: it does not see the caller's locals or `this`.
+
+The strict checker resolves a bare name the same way: a name the walk does not hold locally, which a
+namespace of the walk's chain declares (any unit of the program, an earlier run, the host's registrations), is
+that member, ahead of a program-scope name; a bare call checks against the namespace's declarations. Outside
+the namespace, or in another one, the bare name is undeclared.
 
 ## Classes
 
 A class declared inside a namespace is named `ns::Rect` (C++): its type id, class variable, constructor, `type_of` and
 archive `$type` all carry the qualified name, and it is recorded as the namespace's member under its bare name.
-`ns::Rect()` constructs it and `ns::Rect::method()` reaches its statics. Inside the namespace's blocks (and a nested
+`ns::Rect()` constructs it and `ns::Rect::method()` reaches its statics. Its methods, constructors and field
+initializers run over the namespace's scope (the class records it for an implicit construction), so they read
+the namespace's members by their bare names too. Inside the namespace's blocks (and a nested
 namespace's, innermost first) the bare `Rect` reads as `ns::Rect`: the parser rewrites it before parsing, as a using
 declaration does, from the classes the file declares in that namespace and those the engine already holds for it
 (a namespace reopened by a later unit). Outside, the bare name reaches it only through `using ns::Rect;`, so two
@@ -66,9 +76,11 @@ namespaces' `Rect`s are two classes and a global `Rect` is a third.
 ## Host-registered entries
 
 The host can place values in a namespace directly (`script_namespace_data::variables`), the way the engine
-registers `string::to_lower`, `jai::filesystem` and `reflect::is_enabled`. Such an entry is read through
-`ns::name` (inside the namespace's functions too: the strict checker does not know the entry's bare name),
-and it is read-only from script: a store raises `Cannot assign to 'name': it is read-only`. A script
+registers `string::to_lower`, `jai::filesystem` and `reflect::is_enabled`. A qualified host registration (`add_global("game::tick", v)`, `add_function("game::spawn", f)`) is
+published into the namespace's entries the same way, and the qualified global stays what the host API names.
+Such an entry is read through `ns::name`, and by its bare name in the namespace's code (a function's per-call
+layer, a class's layer refilled at each declaration and registration); it is read-only from script: a
+qualified store raises `Cannot assign to 'name': it is read-only`. A script
 declaration and a host entry never share a name.
 
 A host function entry may declare its signature in `script_namespace_data::signatures` (`host_entry_signature`: arity range, argument

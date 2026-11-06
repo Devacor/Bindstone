@@ -304,11 +304,11 @@ public:
             const std::string decls =
                 "class C { int hp = 1; int heal() { return 2; } }\n"
                 "enum E { Alpha, Beta }\n"
-                "namespace ns { int nv = 3; }\n"
+                "namespace ns { int nv = 3; int nfn() { return 1; } }\n"
                 "function f(int pn) { int loc = 1; for (var rv : [1]) {} return pn + loc; }\n"
                 "var lam = [](int lp) { int ll = 2; return lp + ll; };\n"
                 "if (true) { int block_local = 4; }\n";
-            for (const char* use : {"hp", "heal()", "Alpha", "nv", "pn", "loc", "rv", "lp", "ll", "block_local"}) {
+            for (const char* use : {"hp", "heal()", "Alpha", "nv", "nfn()", "pn", "loc", "rv", "lp", "ll", "block_local"}) {
                 auto r = e->check(decls + "print(" + use + ");");
                 check_eq((size_t)1, error_count(r), std::string(use) + ": " + r.format());
                 check_true(r.format().find("use of undeclared identifier") != std::string::npos, r.format());
@@ -319,9 +319,15 @@ public:
             check_eq((size_t)1, error_count(other), other.format());
             auto reader = e->check("if (true) { var g = 1; }\nfunction reader() { return g; }");
             check_eq((size_t)1, error_count(reader), reader.format());
+            auto sibling = e->check(decls + "namespace other { int peek() { return nv + nfn(); } }");
+            check_eq((size_t)2, error_count(sibling), "another namespace's members: " + sibling.format());
+            auto arity = e->check("namespace ns4 { int caller() { return later(); } int later(int x) { return x; } }");
+            check_eq((size_t)1, error_count(arity), "a bare call checks against the namespace's own declaration: " + arity.format());
             // the program scope in any order, a namespace's own names inside it, and what a derived class declares from a base's bodies
             check_eq((size_t)0, error_count(e->check("function reads() { return later_global; }\nint later_global = 2;\nreads();")));
             check_eq((size_t)0, error_count(e->check("namespace ns2 { function nf() { return nv2; } int nv2 = 3; }\nns2::nf();")));
+            check_eq((size_t)0, error_count(e->check("int later = 1; namespace ns3 { int caller() { return later(2); } int later(int x) { return x; } }\nns3::caller();")));
+            check_eq((size_t)0, error_count(e->check("namespace o { int f() { return 1; } namespace i { int g() { return f(); } } }\nnamespace o::i::d { int h() { return f(); } }\no::i::d::h();")));
             const std::string derived = "class B : A { int dfield = 10; int helper() { return 1; } }";
             check_eq((size_t)0, error_count(e->check("class A { int go() { return helper() + dfield; } }\n" + derived)));
             check_eq((size_t)0, error_count(e->check("class A { int go() { auto l = [this]() { return helper(); }; return l(); } }\n" + derived)));

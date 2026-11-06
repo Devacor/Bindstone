@@ -271,7 +271,8 @@ checked_result<script_value> construct_default_instance(Host& host, const std::s
 		auto instance = cls->create_instance();
 		instance->construction_pending(true);
 		auto this_value = script_value::make_class_object(*cls, instance, host.eng);
-		const auto definition_env = sandbox ? sandbox : cls->base_needs_construction() ? host.global_environment() : environment_chain_root(host.current_environment());
+		const auto definition_env = sandbox ? sandbox : cls->namespace_scope() ? cls->namespace_scope()
+			: cls->base_needs_construction() ? host.global_environment() : environment_chain_root(host.current_environment());
 		auto constructed = host.construct_implicitly(cls, definition_env, this_value);
 		if (!constructed) { return constructed.error_value(); }
 		if (!host.unwinding) { instance->construction_pending(false); }
@@ -284,7 +285,7 @@ checked_result<script_value> construct_default_instance(Host& host, const std::s
 		if (!instance->seeded_from_plan()) { stamp_literal_field_initializers(*instance, *cls, false, host.eng); }
 		return this_value;
 	}
-	const auto scope_parent = sandbox ? sandbox : environment_chain_root(host.current_environment());
+	const auto scope_parent = sandbox ? sandbox : cls->namespace_scope() ? cls->namespace_scope() : environment_chain_root(host.current_environment());
 	construction_kernel::level_scope<Host> init_env(host);
 	host.open_scope(init_env.scope, scope_parent, this_value, cls.get());   // aggregate filling reads the environment
 	auto initialized = host.evaluate_field_initializers(instance, cls, init_env.scope, false, &aggregate);

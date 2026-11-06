@@ -1288,24 +1288,17 @@ JAI_NOINLINE error_propagator parser::expected_token(std::string_view message) {
 
 // Primary expressions: the productions that nest first, each in its own frame, so a level of nesting holds none of the others' locals
 checked_result<expression_ptr> parser::primary() {
-    const bool namespace_name = current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::colon_colon;
     switch (peek().type) {
         case token_type::left_brace:
             if (looks_like_map_literal()) { return parse_map_literal(); }
             break;
         case token_type::left_paren:
             if (arrow_function_ahead()) { return arrow_function_expression(); }
-            if (!namespace_name) {
-                advance();
-                return parenthesized();
-            }
-            break;
+            advance();
+            return parenthesized();
         case token_type::left_bracket:
-            if (!namespace_name) {
-                advance();
-                return bracket_expression();
-            }
-            break;
+            advance();
+            return bracket_expression();
         case token_type::cast_keyword:
             advance();
             return cast_expression();

@@ -659,6 +659,9 @@ public:
             stdlib::register_all(*engine);
             auto result = engine->execute(R"(auto hp = 80; auto max_hp = 100; `Health: ${hp}/${max_hp} (${hp * 100 / max_hp}%)`;)");
             check_eq(result.as<std::string>(), "Health: 80/100 (80%)");
+            // :: in a splice is scope resolution, a format spec starts at a lone ':' (a parenthesized ::name is a group)
+            auto scoped = engine->execute(R"(int hp = 7; namespace ns { int hp = 3; } `${::hp} ${ns::hp} ${ (::hp) } ${::hp:3} ${ns::hp:.1f} ${[::hp][0]}`;)");
+            check_eq(std::string("7 3 7   7 3.0 7"), scoped.as<std::string>());
         });
 
         test("template_string_escape_backtick", [this]() {

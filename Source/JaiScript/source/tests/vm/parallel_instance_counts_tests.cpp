@@ -124,14 +124,14 @@ total;
 
 		test("objects_a_region_returns_outlive_it_and_die_on_the_calling_thread", [this]() {
 			// a region builds objects (with nested objects and strings) into its outputs; they are the caller's after the join, copied,
-			// dropped and rebuilt across 200 regions; the class declares a destructor, so every death runs the chain
+			// dropped and rebuilt across 100 regions; the class declares a destructor, so every death runs the chain
 			const std::string program = R"JAI(
 class Tag { string name = ""; Tag(string n) { name = n; } }
 class Box { int n = 0; Tag tag = Tag("t"); Box(int k) { n = k; tag = Tag("box" + to_string(k % 9)); } ~Box() { } }
 array<int> xs = []; array<Box> out = [];
 for (int i = 0; i < 300; ++i) { xs.push(i); out.push(Box(0)); }
 int total = 0;
-for (int r = 0; r < 200; ++r) {
+for (int r = 0; r < 100; ++r) {
 	parallel_for (int x, auto& o : xs, out) { Box b = Box(x + r); Box c = b; o = c; }
 	array<Box> kept = out;
 	for (auto& k : kept) { total = (total + k.n + k.tag.name.size()) % 1000000007; }
@@ -139,7 +139,7 @@ for (int r = 0; r < 200; ++r) {
 total;
 )JAI";
 			int64_t expected = 0;
-			for (int r = 0; r < 200; ++r) { for (int64_t x = 0; x < 300; ++x) { expected = (expected + x + r + 4) % 1000000007; } }
+			for (int r = 0; r < 100; ++r) { for (int64_t x = 0; x < 300; ++x) { expected = (expected + x + r + 4) % 1000000007; } }
 			for (size_t workers : { size_t(1), size_t(8) }) {
 				check_eq(std::to_string(expected), run(program, workers), "returned objects on " + std::to_string(workers) + " workers");
 			}

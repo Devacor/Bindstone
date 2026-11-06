@@ -1130,8 +1130,12 @@ namespace jai {
         type_info_ptr type;   // null for `extern name;` (var) and the function form
         bool is_function;     // extern function name; - a callable of unknown signature
         bool is_const = false;   // extern const T name;: this unit never writes it
-        std::string_view name;
+        std::string_view name;   // qualified by the enclosing namespaces: `namespace game { extern a::b; }` names "game::a::b"
         uint64_t name_id;
+        uint32_t written_at = 0;   // where the spelling the declaration wrote begins in name ("a::b" above)
+
+        std::string_view written() const { return name.substr(written_at); }
+        bool qualified() const { return name.find("::") != std::string_view::npos; }
 
         extern_decl(const source_location& loc, type_info_ptr t, bool fn, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::extern_decl), type(std::move(t)), is_function(fn), name(n), name_id(nid) {}

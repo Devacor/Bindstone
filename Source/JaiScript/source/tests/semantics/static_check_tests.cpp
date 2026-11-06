@@ -2638,6 +2638,63 @@ public:
             check_true(call.rfind("ERROR 'host_fn' is declared extern but never defined", 0) == 0, call);
         });
 
+        test("extern_declares_a_qualified_name_the_host_registers_later", [this]() {
+            // a qualified name its namespace does not declare is a load error until an extern declares it, at program scope or in
+            // a namespace (there it is qualified by the namespace); a use while nothing defines it raises the extern's text
+            const auto message = [this](const std::string& source) {
+                auto e = make_engine();
+                try { e->execute(source); } catch (const static_check_error& err) { return std::string(err.what()); }
+                return std::string("loaded");
+            };
+            check_true(message("bool t() { return time::now() >= 0.0; }").find("error: use of undeclared identifier 'time'") != std::string::npos,
+                       message("bool t() { return time::now() >= 0.0; }"));
+            check_true(message("namespace game { int k = 1; } int t() { return game::tick; }").find("error: no member 'tick' in namespace 'game'") != std::string::npos);
+            auto e = make_engine();
+            e->execute("extern function time::now;\nextern int game::tick;\nextern a::b::c;\n"
+                       "namespace zone { extern function spawn; extern int depth; extern inner::depth; int level() { return depth + 1; } }\n"
+                       "bool t() { return time::now() >= 0.0; }\nint tick() { return game::tick + 1; }\nvoid set_tick() { game::tick = 2; }\n"
+                       "void bump_tick() { game::tick += 2; }\nvar read_c() { return a::b::c; }\nvoid set_c() { a::b::c = 1; }\n"
+                       "int spawn_one() { return zone::spawn(1); }\nvar inner_depth() { return zone::inner::depth; }\n");
+            const auto raises = [&](const std::string& source, const std::string& text) {
+                const std::string got = outcome(*e, source);
+                check_true(got.rfind("ERROR " + text, 0) == 0, source + " -> " + got);
+            };
+            raises("t();", "'time::now' is declared extern but never defined");
+            raises("tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("set_tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("bump_tick();", "'game::tick' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("read_c();", "'a::b::c' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("set_c();", "'a::b::c' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("spawn_one();", "'zone::spawn' is declared extern but never defined");
+            raises("zone::level();", "'depth' is declared extern but never defined (an 'inline' declaration creates it)");
+            raises("inner_depth();", "'zone::inner::depth' is declared extern but never defined (an 'inline' declaration creates it)");
+            jai::stdlib::register_time_functions(*e);
+            check_true(e->execute("t();").as_bool(), "the host registered time::now after the script loaded");
+            e->execute("namespace game { int tick = 41; }\nnamespace a::b { var c = \"c\"; }\nnamespace zone { int spawn(int n) { return n + 6; } int depth = 6; }");
+            check_eq((int64_t)42, e->execute("tick();").as_int(), "a later unit defines game::tick");
+            check_eq(std::string("c"), e->execute("read_c();").as_string());
+            check_eq((int64_t)7, e->execute("spawn_one();").as_int(), "a later unit defines zone::spawn");
+            check_eq((int64_t)7, e->execute("zone::level();").as_int(), "a bare name in the namespace reads the extern");
+            // the typed form types the qualified name as a plain typed extern types its name; the namespace opens for its other members
+            const auto errors = [this](const std::string& source) {
+                auto c = make_engine();
+                std::string result;
+                for (const auto& d : c->check(source).diagnostics) {
+                    if (d.severity == dlevel::error) { result += d.message + "\n"; }
+                }
+                return result;
+            };
+            check_eq(std::string("cannot assign 'string' to 'game::tick' declared 'int'\n"),
+                     errors("extern int game::tick;\nvoid f() { game::tick = \"fast\"; }"));
+            check_eq(std::string("cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`\n"),
+                     errors("extern int game::tick;\nstring s = game::tick;"));
+            const std::string constant = errors("extern const int game::cap;\nvoid f() { game::cap = 2; }");
+            check_true(constant.find("'game::cap'") != std::string::npos, constant);
+            check_eq(std::string("no member 'd' in namespace 'a::b'\n"), errors("extern a::b::c;\nvar x = a::b::c;\nvar y = a::b::d;"));
+            check_eq(std::string(), errors("namespace game { extern int tick; int next() { return tick + 1; } }\nint n = game::tick;\n"
+                                           "extern function game::spawn;\nvoid f() { game::spawn(1, \"any\"); }"));
+        });
+
         test("inline_declares_a_checked_global", [this]() {
             auto e = make_engine();
             check_eq((size_t)0, error_count(e->check("inline int hp;\nfunction f() -> int { return hp + 1; }")));

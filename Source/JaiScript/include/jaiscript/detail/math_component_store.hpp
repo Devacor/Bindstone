@@ -82,7 +82,7 @@ namespace jai::detail::math {
 	                                                           string_symbolizer& symbols, const class_definition* access_context) {
 		if (auto ns = resolve_namespace_store(eng, m, symbols)) {
 			if (ns->missing) {
-				return checked_result<script_value*>(namespace_member_missing(m, symbols));
+				return checked_result<script_value*>(namespace_member_missing(env, m, symbols));
 			}
 			if (!ns->cell) {
 				return checked_result<script_value*>(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", m->member_id);

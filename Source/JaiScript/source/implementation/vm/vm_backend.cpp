@@ -14868,6 +14868,7 @@ op_status vm_backend::static_member_value(frame& f, member_expr* expr, script_va
 	auto [class_var_id, class_var_view] = symbolizer_->get_class_var_id_with_view(name_id);
 	auto class_var_result = environment_->get(class_var_id);
 	if (!class_var_result) {
+		if (auto declared = detail::qualified_extern_missing(*environment_, name, expr->member, *symbolizer_)) { return raise_from(*declared); }   // KEEP BYTE-PARALLEL with the interpreter
 		if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
 			return raise_(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
 		}
@@ -16116,7 +16117,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 // entry is read-only. KEEP BYTE-PARALLEL with interpreter::store_namespace_cell.
 op_status vm_backend::store_namespace_cell(const detail::namespace_store_target& target, member_expr* member, script_value incoming, script_value* stored_out) {
 	if (target.missing) {
-		return raise_from(detail::namespace_member_missing(member, *symbolizer_));
+		return raise_from(detail::namespace_member_missing(*environment_, member, *symbolizer_));
 	}
 	if (!target.cell) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch), "Cannot assign to '{0}': it is read-only", member->member_id);
@@ -17978,6 +17979,7 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<extern_decl*>(f.code->nodes[ins.a].get());
 	environment_->note_extern(decl->name_id, decl->is_function);
+	if (decl->written_at && decl->written().find("::") == std::string_view::npos) { environment_->note_extern(symbolizer_->intern(decl->written()), decl->is_function); }   // the namespace's own blocks read it bare
 	return {};
 }
 

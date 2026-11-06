@@ -340,6 +340,13 @@ private:
 // A namespace's members by their qualified names ("ns::f", "a::b::C"), and every path it opens marked with a trailing "::"
 // ("a::", "a::b::"), which no identifier spells: what a qualified name may name, whichever unit declares it. A nested block's
 // name is already its full path (the parser prefixes the enclosing ones).
+// A qualified extern (`extern game::tick;`, or any extern in a namespace) declares its full name and opens every path above it
+void collect_qualified_extern(const extern_decl* x, std::unordered_set<std::string>& out) {
+    const std::string name(x->name);
+    for (size_t cut = name.find("::"); cut != std::string::npos; cut = name.find("::", cut + 2)) { out.emplace(name.substr(0, cut + 2)); }
+    out.emplace(name);
+}
+
 void collect_namespace_members(const namespace_decl* n, std::unordered_set<std::string>& out) {
     const std::string path(n->name);
     for (size_t cut = path.find("::"); cut != std::string::npos; cut = path.find("::", cut + 2)) { out.emplace(path.substr(0, cut + 2)); }
@@ -350,7 +357,7 @@ void collect_namespace_members(const namespace_decl* n, std::unordered_set<std::
         switch (d->get_type()) {
             case node_type::function_decl: member(static_cast<const function_decl*>(d.get())->name); break;
             case node_type::variable_decl: member(static_cast<const variable_decl*>(d.get())->name); break;
-            case node_type::extern_decl: member(static_cast<const extern_decl*>(d.get())->name); break;
+            case node_type::extern_decl: collect_qualified_extern(static_cast<const extern_decl*>(d.get()), out); break;
             case node_type::class_decl: member(static_cast<const class_decl*>(d.get())->name); break;
             case node_type::enum_decl: member(static_cast<const enum_decl*>(d.get())->name); break;
             case node_type::destructuring_decl:
@@ -603,6 +610,7 @@ private:
     }
     std::vector<std::unordered_map<std::string_view, var_entry>> scopes_;
     std::vector<size_t> namespace_scopes_;   // indices into scopes_ that are namespace bodies (their enums are the namespace's)
+    std::unordered_map<std::string, var_entry> qualified_externs_;   // "ns::x" -> what its extern declares, from the extern on
 
     const enum_decl* find_enum(std::string_view name) {
         for (size_t i = scopes_.size(); i-- > 0;) {
@@ -982,7 +990,7 @@ private:
                     }
                     break;
                 case node_type::extern_decl:
-                    global_var_names_.insert(static_cast<const extern_decl*>(d.get())->name);
+                    global_var_names_.insert(static_cast<const extern_decl*>(d.get())->written());
                     break;
                 case node_type::destructuring_decl:
                     for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) {
@@ -1064,6 +1072,8 @@ private:
             if (d && d->get_type() == node_type::namespace_decl) {
                 collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), "");
                 collect_namespace_members(static_cast<const namespace_decl*>(d.get()), namespace_members_);
+            } else if (d && d->get_type() == node_type::extern_decl && static_cast<const extern_decl*>(d.get())->qualified()) {
+                collect_qualified_extern(static_cast<const extern_decl*>(d.get()), namespace_members_);
             }
         }
         for (const auto& d : decls_) {
@@ -1870,6 +1880,10 @@ private:
                 is_const = nv->is_const;
                 hit.line = nv->location.line; hit.column = nv->location.column;
                 from_type(nv->type.get());
+            } else if (const var_entry* x = qualified_extern(m)) {
+                is_const = x->is_const;
+                hit.line = x->line; hit.column = x->column;
+                from_type(x->declared);
             } else if (m->object && m->object->get_type() == node_type::identifier_expr) {
                 const std::string_view cls = static_cast<const identifier_expr*>(m->object.get())->name;
                 member_hit h = lookup_member(cls, m->member, true);
@@ -4482,6 +4496,7 @@ private:
         if (m->is_static && binary_width_token(m)) { return object_of("binary::width"); }
         if (m->is_static && namespace_path_receiver(m)) {
             check_namespace_member(m);
+            if (const var_entry* x = qualified_extern(m); x && !x->dynamic) { return x->type; }
             return {};
         }
         ctype recv = infer(m->object.get());
@@ -5167,6 +5182,10 @@ private:
                     check_store(rhs, compound, base_op, nt, declared_variable_type_name(nv), "'" + qualified + "'", a->location,
                                 nv->location.line, nv->location.column);
                     if (!nt.is_unknown()) { return nt; }
+                }
+                if (const var_entry* x = qualified_extern(m); x && !x->dynamic) {
+                    check_store(rhs, compound, base_op, x->type, x->display, "'" + qualified_spelling(m) + "'", a->location, x->line, x->column);
+                    return x->type;
                 }
             }
             // An assignment expression's value is the destination's stored value:
@@ -6859,7 +6878,25 @@ private:
         } else {
             entry.dynamic = true;
         }
-        scopes_.back().emplace(x->name, std::move(entry));
+        if (x->qualified()) { qualified_externs_[std::string(x->name)] = entry; }
+        if (x->written().find("::") == std::string_view::npos) { scopes_.back().emplace(x->written(), std::move(entry)); }
+    }
+
+    // `ns::x` as the one qualified string its extern declares ("" when the chain is not identifiers joined by ::)
+    static std::string qualified_spelling(const member_expr* m) {
+        std::string result(m->member);
+        const expression* e = m->object.get();
+        while (e && e->get_type() == node_type::member_expr && static_cast<const member_expr*>(e)->is_static) {
+            result = std::string(static_cast<const member_expr*>(e)->member) + "::" + result;
+            e = static_cast<const member_expr*>(e)->object.get();
+        }
+        if (!e || e->get_type() != node_type::identifier_expr) { return {}; }
+        return std::string(static_cast<const identifier_expr*>(e)->name) + "::" + result;
+    }
+    const var_entry* qualified_extern(const member_expr* m) const {
+        if (qualified_externs_.empty() || !m->is_static) { return nullptr; }
+        auto it = qualified_externs_.find(qualified_spelling(m));
+        return it != qualified_externs_.end() ? &it->second : nullptr;
     }
 
     JAI_NOINLINE void walk_decl(declaration* d) {
@@ -7479,7 +7516,7 @@ void static_checker::collect_names(const statement* node) {
             break;
         }
         case node_type::extern_decl:
-            collect_program_name(static_cast<const extern_decl*>(node)->name);
+            collect_program_name(static_cast<const extern_decl*>(node)->written());
             break;
         case node_type::function_decl: {
             auto* f = static_cast<const function_decl*>(node);
@@ -7731,9 +7768,12 @@ void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordere
             case node_type::variable_decl:
                 out.emplace(static_cast<const variable_decl*>(d.get())->name);
                 break;
-            case node_type::extern_decl:
-                out.emplace(static_cast<const extern_decl*>(d.get())->name);
+            case node_type::extern_decl: {
+                auto* x = static_cast<const extern_decl*>(d.get());
+                out.emplace(x->written());
+                if (x->qualified()) { collect_qualified_extern(x, out); }
                 break;
+            }
             case node_type::destructuring_decl:
                 for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) { out.emplace(name); }
                 break;

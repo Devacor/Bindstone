@@ -3258,7 +3258,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
 // entry is read-only. KEEP BYTE-PARALLEL with vm_backend::store_namespace_cell.
 checked_result<script_value> interpreter::store_namespace_cell(const detail::namespace_store_target& target, const member_expr* member, script_value incoming) {
     if (target.missing) {
-        return detail::namespace_member_missing(member, *string_symbolizer_);
+        return detail::namespace_member_missing(*environment_, member, *string_symbolizer_);
     }
     if (!target.cell) {
         return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch),
@@ -4348,6 +4348,7 @@ checked_result<void> interpreter::visit_member_expr_t(member_expr* expr, const r
         auto [class_var_id, class_var_view] = string_symbolizer_->get_class_var_id_with_view(name_id);
         auto class_var_result = environment_->get(class_var_id);
         if (!class_var_result) {
+            if (auto declared = detail::qualified_extern_missing(*environment_, name, expr->member, *string_symbolizer_)) { return *declared; }   // KEEP BYTE-PARALLEL with the vm
             if (engine_->script_namespaces().count(name_id)) {   // a namespace without that member: name the member, not the class fallback
                 return checked_result<void>(make_error_code(runtime_error_code::undefined_variable), "Undefined variable '{0}::{1}'", name_id, expr->member_id);
             }
@@ -10141,6 +10142,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
 // extern's own text. KEEP BYTE-PARALLEL with vm_backend::exec_extern_decl.
 checked_result<void> interpreter::visit_extern_decl(extern_decl* decl) {
     environment_->note_extern(decl->name_id, decl->is_function);
+    if (decl->written_at && decl->written().find("::") == std::string_view::npos) { environment_->note_extern(string_symbolizer_->intern(decl->written()), decl->is_function); }   // the namespace's own blocks read it bare
     return {};
 }
 

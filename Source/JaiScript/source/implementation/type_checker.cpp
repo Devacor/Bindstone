@@ -678,6 +678,10 @@ private:
     std::string_view class_ctx_name_{};
     enum class cdtor_ctx : uint8_t { none, construction, destruction };
     cdtor_ctx cdtor_ctx_ = cdtor_ctx::none;   // code the class's constructor, field initializers or destructor run (not a lambda they create)
+    // C++ [class.base.init]: fields initialize in declaration order, so an instance field's initializer (not a lambda it creates)
+    // reads its own field and the class's later ones before their initialization
+    struct initializing_field { std::string_view name; std::unordered_map<std::string_view, const variable_decl*> unready; };
+    const initializing_field* initializing_field_ = nullptr;
     int parallel_body_depth_ = 0;   // a parallel_for body, or a lambda written as a parallel_transform/parallel_reduce argument (not combine)
 
     bool core_sleep_bound() const {
@@ -829,6 +833,13 @@ private:
                 methods.emplace(name, d);
             }
         }
+    }
+
+    // C++ [basic.namespace]: a namespace names no object, so its name alone is no expression (the run time finds no variable of it)
+    void namespace_as_value(const source_location& loc, std::string_view name) {
+        const std::string ns(name);
+        diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc,
+             "'" + ns + "' is a namespace, not a value; name one of its members (" + ns + "::name)");
     }
 
     void undeclared(const source_location& loc, std::string_view name) {
@@ -2652,9 +2663,17 @@ private:
         return {};
     }
 
+    bool class_name_constructs(std::string_view cls) {
+        const std::string name(cls);
+        return find_sclass(cls) || eng_.find_script_class(name) || eng_.has_function(name);
+    }
+
     bool assignable(const ctype& src, const ctype& dst) {
         if (dst.is_unknown() || src.is_unknown()) { return true; }
         if (literal_int_overflow(src, dst)) { return false; }
+        if (src.kind == ctype::class_ref_k && dst.kind != ctype::class_ref_k && dst.kind != ctype::enum_ref_k && class_name_constructs(src.cls)) {
+            return assignable(ctype::make(ctype::function_k), dst);   // a class's name as a value is its constructor
+        }
         if (dst.kind == ctype::class_ref_k || dst.kind == ctype::enum_ref_k ||
             src.kind == ctype::class_ref_k || src.kind == ctype::enum_ref_k) {
             return true;   // exotic; stay lenient
@@ -4131,12 +4150,37 @@ private:
         return binary_result(l, b->op.type, r);
     }
 
+    // The builtin unary - + ~ over an operand no row takes and no operator of its class answers: the run time's text, at load
+    void check_unary_operand(const unary_expr* u, const ctype& operand) {
+        const token_type op = u->op.type;
+        if (operand.tentative || operand.diagnostic_only || (op != token_type::minus && op != token_type::plus && op != token_type::tilde)) { return; }
+        bool refused = false;
+        switch (operand.kind) {
+            case ctype::bool_k: case ctype::string_k: case ctype::utf8_k: case ctype::null_k:
+            case ctype::array_k: case ctype::map_k: case ctype::function_k: refused = true; break;
+            case ctype::float_k: refused = op == token_type::tilde; break;
+            case ctype::math_k: refused = op != token_type::minus; break;
+            case ctype::object_k: {
+                if (operand.cls.empty() || (operand.ti && operand.ti->base_type == script_value_type::jai_shared_ptr_type)) { break; }
+                const std::string_view name = op == token_type::minus ? "-" : op == token_type::plus ? "+" : "~";
+                const member_hit hit = lookup_member(operand.cls, name, /*want_static=*/false);
+                refused = !hit.found && hit.certain && !extended_members_.count(name) && !chain_open(operand.cls);
+                break;
+            }
+            default: break;
+        }
+        if (!refused) { return; }
+        diag(diag_level::error, u->location, op == token_type::minus ? "Unary minus requires numeric operand"
+                                           : op == token_type::plus ? "Unary plus requires numeric operand" : "Bitwise NOT requires integer operand");
+    }
+
     JAI_NOINLINE ctype infer_unary(unary_expr* u) {
         ctype operand = infer(u->operand.get());
         if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
                                                 u->op.type == token_type::tilde)) {
             if (auto user = class_unary_operator(operand.cls, u->op.type)) { return *user; }
         }
+        check_unary_operand(u, operand);
         switch (u->op.type) {
             case token_type::bang: return ctype::make(ctype::bool_k);
             case token_type::minus:
@@ -4300,6 +4344,7 @@ private:
                     return ctype::make(ctype::function_k);
                 }
                 if (hit.field && !hit.field->is_static && !hit.methods && bare_field_context() && !chain_has_user_accessor(class_ctx_name_, id->name)) { bare_this_field_ = true; }
+                report_unready_field_read(hit.field, id->location);
                 if (hit.field && (hit.field->type || hit.field->function_spelling)) { return member_type(hit); }
                 return {};
             }
@@ -4315,8 +4360,11 @@ private:
             return ctype{ctype::class_ref_k, id->name};
         }
         if (enums_.count(id->name)) { return ctype{ctype::enum_ref_k, id->name}; }
-        if (namespaces_.count(id->name)) { return {}; }
         std::string name(id->name);
+        if (namespaces_.count(id->name)) {
+            if (!program_global(name) && !extra_global(name)) { namespace_as_value(id->location, id->name); }
+            return {};
+        }
         report_use_before_declaration(id->name, id->location, false, [&] { return eng_.has_variable(name); });
         if (const variable_decl* g = program_global(name)) { note_global_use(id->name); return program_global_type(g); }   // the proof pass alone types a global another unit declares
         if (extra_global(name)) { note_global_use(id->name); return {}; }
@@ -4325,6 +4373,10 @@ private:
         }
         if (eng_.has_function(name)) { note_global_use(id->name); return ctype::make(ctype::function_k); }
         if (eng_.has_variable(name)) { note_global_use(id->name); return engine_global_type(name); }
+        if (eng_.find_namespace(name) && !eng_.get_registered_template_types().count(name) && !derived_class_member(id->name)) {
+            namespace_as_value(id->location, id->name);
+            return {};
+        }
         if (engine_knows_name(name)) { return {}; }
         if (program_or_derived_name(id->name)) { return {}; }
         if (stale_field_context()) { return {}; }   // bare old-shape field in a redefined class's method
@@ -4475,6 +4527,7 @@ private:
         if (hit_out) { *hit_out = hit; }
         if (!want_static && chain_has_user_accessor(cls, m->member)) { return accessor_read_type(cls, m->member); }   // a user _get_/_set_ answers: known member, typed only by a single declared getter, never a proof
         if (hit.found) {
+            if (!writing && !want_static && m->object->get_type() == node_type::this_expr) { report_unready_field_read(hit.field, m->location); }
             if (typed_field_out && hit.field && (hit.field->type || hit.field->function_spelling)) { *typed_field_out = hit.field; }
             if (hit.methods) {
                 if (!writing && !want_static) {   // a method is called or bound, never read bare
@@ -7206,6 +7259,29 @@ private:
         }
     }
 
+    // The instance fields of the class from `first` on, in declaration order
+    static std::unordered_map<std::string_view, const variable_decl*> fields_from(const class_decl* cd, const variable_decl* first) {
+        std::unordered_map<std::string_view, const variable_decl*> result;
+        bool reached = false;
+        for (const auto& m : cd->members) {
+            if (!m.declaration || m.declaration->get_type() != node_type::variable_decl) { continue; }
+            const auto* f = static_cast<const variable_decl*>(m.declaration.get());
+            reached = reached || f == first;
+            if (reached && !f->is_static) { result.emplace(f->name, f); }
+        }
+        return result;
+    }
+
+    // A field initializer reads its own field or a later one: in C++ the read is undefined, here it would hand a typed field null
+    void report_unready_field_read(const variable_decl* field, const source_location& loc) {
+        if (!initializing_field_ || !field) { return; }
+        const auto it = initializing_field_->unready.find(field->name);
+        if (it == initializing_field_->unready.end() || it->second != field) { return; }
+        const std::string read(field->name), initializing(initializing_field_->name);
+        diag(diag_level::error, loc, "field initializer of '" + initializing + "' reads '" + read + "' before its initialization: fields initialize in declaration order" +
+             (read == initializing ? std::string() : "; declare '" + read + "' above '" + initializing + "'"), field->location.line, field->location.column);
+    }
+
     void walk_class(const class_decl* cd) {
         check_class_bases(cd);
         check_member_names(cd);
@@ -7225,7 +7301,11 @@ private:
                 check_spelled_type(f->type.get(), f->location);
                 if (f->initializer) {
                     const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, f->is_static ? cdtor_ctx::none : cdtor_ctx::construction);
+                    initializing_field initializing{f->name, {}};
+                    if (!f->is_static) { initializing.unready = fields_from(cd, f); }
+                    initializing_field_ = f->is_static ? nullptr : &initializing;
                     ctype init = infer(f->initializer.get());
+                    initializing_field_ = nullptr;
                     cdtor_ctx_ = enclosing_cdtor;
                     if (f->auto_spelled) { type_auto_slot(f, numeric_ternary_type(f->initializer.get(), init)); }   // an auto field: its initializer's static type
                     if ((f->type && !f->auto_spelled) || f->function_spelling) {
@@ -7268,6 +7348,8 @@ private:
         // the body may run after the constructor or destructor that creates the lambda has returned
         const cdtor_ctx enclosing_cdtor = std::exchange(cdtor_ctx_, cdtor_ctx::none);
         struct restore_cdtor { cdtor_ctx& slot; cdtor_ctx was; ~restore_cdtor() { slot = was; } } restore{cdtor_ctx_, enclosing_cdtor};
+        const initializing_field* enclosing_field = std::exchange(initializing_field_, nullptr);
+        struct restore_field { const initializing_field*& slot; const initializing_field* was; ~restore_field() { slot = was; } } restore_init{initializing_field_, enclosing_field};
         open_lambda_scope(l);
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         check_spelled_type(l->return_type.get(), l->location);

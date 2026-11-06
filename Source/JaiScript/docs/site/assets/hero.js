@@ -32,6 +32,7 @@
     "int map array namespace nullptr override private public return static string this void while auto var let super " +
     "weak_ptr shared_ptr try catch throw switch case default fallthrough include import coroutine yield enum new " +
     "protected parallel_for nocopy cast extern inline true false null").split(" ");
+  var NAMESPACES = ["math", "time", "reflect", "crypto", "binary", "string"];
   var ESCAPES = { n: "\n", r: "\r", t: "\t", "\\": "\\", '"': '"', "'": "'" };
 
   function isDigit(c) { return c >= "0" && c <= "9"; }
@@ -60,7 +61,8 @@
     return { err: "unterminated string literal" };
   }
 
-  // The lexer's scan_number: 0x and 0b prefixes, C octal, a fraction only before a digit, an exponent that needs digits.
+  // The lexer's scan_number: 0x and 0b prefixes, C octal, C++'s fraction (1.5, 1., 1.e5; a '.' before a name stays a member
+  // access), an exponent that needs digits.
   function lexNumber(t, i) {
     var j = i, isFloat = false, isHex = false, isBinary = false;
     if (t[j] === "0") {
@@ -72,7 +74,9 @@
       while (isDigit(t[j])) j++;
     }
     if (!isHex && !isBinary) {
-      if (t[j] === "." && isDigit(t[j + 1])) { isFloat = true; j++; while (isDigit(t[j])) j++; }
+      if (t[j] === "." && t[j + 1] !== "." && (!isWordStart(t[j + 1]) || t[j + 1] === "e" || t[j + 1] === "E")) {
+        isFloat = true; j++; while (isDigit(t[j])) j++;
+      }
       if (t[j] === "e" || t[j] === "E") {
         isFloat = true; j++;
         if (t[j] === "+" || t[j] === "-") j++;
@@ -124,7 +128,12 @@
     if (t[i] === "+" || t[i] === "-") {
       if (t[i + 1] === t[i]) return demoNote;
       sign = t[i] === "-" ? -1 : 1;
+      var op = i;
       i = skipSpace(t, i + 1);
+      var operand = /^\w+/.exec(t.slice(i));
+      if (operand && (operand[0] === "true" || operand[0] === "false") && skipSpace(t, i + operand[0].length) === t.length) {
+        return diag("check", at, op, sign < 0 ? "Unary minus requires numeric operand" : "Unary plus requires numeric operand");
+      }
       if (!isDigit(t[i])) return demoNote;
     }
     var start = i;
@@ -139,7 +148,12 @@
       word = /^\w+/.exec(t.slice(i))[0];
       token = { end: i + word.length, value: word === "true" ? 1 : 0 };
       if (word === "null") token.check = "cannot initialize field 'spd' declared 'int' with 'null'";
-      else if (word !== "true" && word !== "false") token[DECLARED.indexOf(word) >= 0 ? "demo" : "undeclared"] = word;
+      else if (word === "random") token.check = "cannot initialize field 'spd' declared 'int' with 'class random'";
+      else if (NAMESPACES.indexOf(word) >= 0) token.atStart = "'" + word + "' is a namespace, not a value; name one of its members (" + word + "::name)";
+      else if (word === "spd" || word === "slices") {
+        token.atStart = "field initializer of 'spd' reads '" + word + "' before its initialization: fields initialize in declaration order" +
+          (word === "spd" ? "" : "; declare 'slices' above 'spd'");
+      } else if (word !== "true" && word !== "false") token[DECLARED.indexOf(word) >= 0 ? "demo" : "undeclared"] = word;
     } else {
       return demoNote;
     }
@@ -153,6 +167,7 @@
     }
     if (token.demo) return demoNote;
     if (token.undeclared) return diag("check", at, start, "use of undeclared identifier '" + token.undeclared + "'");
+    if (token.atStart) return diag("check", at, start, token.atStart);
     if (token.check) return diag("check", at, field, token.check);
     var value = sign * token.value;
     if (token.isFloat && !(Math.abs(value) < 9223372036854775808)) {

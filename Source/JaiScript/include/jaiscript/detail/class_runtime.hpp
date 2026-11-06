@@ -3203,6 +3203,23 @@ inline void class_instance::set_field(uint64_t id, const script_value& value) {
     set_field_unchecked(id, value);
 }
 
+inline void class_instance::set_initialized_field(uint64_t id, const script_value& value) {
+    if (class_def_ && value.is_null()) [[unlikely]] {
+        if (type_info_ptr declared = class_def_->get_field_declared_type(id);
+            declared && declared->base_type != script_value_type::jai_any_type) {
+            auto converted = detail::field_store_convert_no_script(value, declared, owner_);
+            if (!converted) [[unlikely]] {
+                detail::throw_field_store_rejection(value, *declared, id, *class_def_, owner_);
+            }
+            if (!converted->is_null()) {
+                set_field_unchecked(id, *converted);
+                return;
+            }
+        }
+    }
+    set_field(id, value);
+}
+
 inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_ids,
                                            const std::unordered_map<uint64_t, script_value>& new_field_defaults,
                                            bool preseeded) {

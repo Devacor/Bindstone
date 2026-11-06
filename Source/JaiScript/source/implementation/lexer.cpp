@@ -175,7 +175,10 @@ token lexer::next_token() {
         case ';': return make_token(token_type::semicolon);
         case ',': return make_token(token_type::comma);
         case '?':
-            if (match('.')) return make_token(token_type::question_dot);
+            if (peek() == '.' && !is_digit(peek_next())) {   // c?.5:1 is a ternary over the literal .5, as in C++
+                advance();
+                return make_token(token_type::question_dot);
+            }
             if (match('?')) {
                 if (match('=')) return make_token(token_type::question_question_equal);
                 return make_token(token_type::question_question);
@@ -284,6 +287,11 @@ token lexer::next_token() {
             return make_token(token_type::greater);
             
         case '.':
+            if (is_digit(peek())) {   // C++'s .5
+                current_--;
+                column_--;
+                return scan_number();
+            }
             return make_token(token_type::dot);
             
         case ':':
@@ -467,7 +475,9 @@ token lexer::scan_number() {
     }
 
     if (!is_hex && !is_binary) {
-        if (peek() == '.' && is_digit(peek_next())) {
+        // C++'s floating literal: digits, a '.', optional digits, an optional exponent (1.5, 1., 1.e5); a '.' before a name
+        // or another '.' stays the member access or the operator it begins
+        if (peek() == '.' && peek_next() != '.' && (!is_alpha(peek_next()) || peek_next() == 'e' || peek_next() == 'E')) {
             is_float = true;
             advance(); // Consume '.'
             while (is_digit(peek())) {

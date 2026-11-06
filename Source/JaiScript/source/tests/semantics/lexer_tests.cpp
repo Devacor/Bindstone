@@ -71,6 +71,23 @@ public:
             check_near(0.0, tokens[1].float_value, 0.001);
             check_eq(token_type::float_literal, tokens[2].type);
             check_near(42.0, tokens[2].float_value, 0.001);
+            // C++'s floating literal: the fraction's digits are optional around the '.', and so is the exponent's sign
+            lexer cpp("1.e5 1.E+5 2.e-1 1. .5 10.;", &symbolizer, "test.jai");
+            const auto forms = cpp.tokenize();
+            check_eq(std::size_t(8), forms.size());
+            const double values[] = {1e5, 1e5, 0.2, 1.0, 0.5, 10.0};
+            for (size_t i = 0; i < 6; ++i) {
+                check_eq(token_type::float_literal, forms[i].type, std::string(forms[i].lexeme));
+                check_near(values[i], forms[i].float_value, 1e-9);
+            }
+            // a '.' before a name stays a member access, and ?.5 is a ternary over .5
+            lexer member("1.size c?.5:x", &symbolizer, "test.jai");
+            const auto rest = member.tokenize();
+            check_eq(token_type::integer_literal, rest[0].type);
+            check_eq(token_type::dot, rest[1].type);
+            check_eq(token_type::identifier, rest[2].type);
+            check_eq(token_type::question, rest[4].type);
+            check_eq(token_type::float_literal, rest[5].type);
         });
 
         test("string_literals", [this]() {
@@ -202,6 +219,7 @@ public:
             const token number = first_error("var x = 99999999999999999999;");
             check_eq(std::string("number literal out of range: '99999999999999999999'"), std::string(number.lexeme));
             check_eq(std::size_t(9), number.location.column);
+            check_eq(std::string("invalid number literal: exponent has no digits in '1.e'"), std::string(first_error("var f = 1.e;").lexeme));
             check_eq(std::string("a character literal holds one character: write text in double quotes"), std::string(first_error("var c = 'ab';").lexeme));
             check_eq(std::string("unterminated character literal"), std::string(first_error("var c = 'a").lexeme));
         });

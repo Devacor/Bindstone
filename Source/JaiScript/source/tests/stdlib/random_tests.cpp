@@ -33,20 +33,20 @@ public:
 			                     "1.8888361481067484 0.5838077129492963|true true true false false false|23,116,129,88,84,162,29,154,240,122,156|0,5,8,7,2,1,9,6,3,4|ef|"
 			                     "4556341079545628172|33411ec09134a89a4cb397f1d6c8bf43f5a2aebc4cb4c40e3be15a6cc24ed93b"), es(R"(
 				random r(42);
-				string out = r.state + "|";
+				string out = `${r.state}|`;
 				array<int> ints = [];
 				for (int i = 0; i < 12; ++i) { ints.push(r.next_int(1, 6)); }
-				out += ints.join(",") + "|";
-				out += to_string(r.next_float()) + " " + r.next_float() + " " + r.next_float() + "|";
-				out += to_string(r.next_float(-2.5, 2.5)) + " " + r.next_float(-2.5, 2.5) + "|";
-				out += to_string(r.next_bool()) + " " + r.next_bool() + " " + r.next_bool() + " " + r.next_bool() + " " + r.next_bool() + " " + r.next_bool() + "|";
-				out += r.next_bytes(11).to_bytes().join(",") + "|";
+				out += `${ints.join(",")}|`;
+				out += `${to_string(r.next_float())} ${r.next_float()} ${r.next_float()}|`;
+				out += `${to_string(r.next_float(-2.5, 2.5))} ${r.next_float(-2.5, 2.5)}|`;
+				out += `${to_string(r.next_bool())} ${r.next_bool()} ${r.next_bool()} ${r.next_bool()} ${r.next_bool()} ${r.next_bool()}|`;
+				out += `${r.next_bytes(11).to_bytes().join(",")}|`;
 				array<int> xs = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
 				r.shuffle(xs);
-				out += xs.join(",") + "|" + r.pick(["ab", "cd", "ef"]) + "|";
-				out += to_string(r.next_int(-9223372036854775807 - 1, 9223372036854775807)) + "|" + r.state;
+				out += `${xs.join(",")}|${r.pick(["ab", "cd", "ef"])}|`;
+				out += `${to_string(r.next_int(-9223372036854775807 - 1, 9223372036854775807))}|${r.state}`;
 				out;)"));
-			check_eq(std::string("e220a8397b1dcdaf6e789e6aa1b965f406c45d188009454ff88bb8a8724c81ec 559892704"), es("random z(0); random n(-1); z.state + \" \" + n.next_int(0, 1000000000);"));
+			check_eq(std::string("e220a8397b1dcdaf6e789e6aa1b965f406c45d188009454ff88bb8a8724c81ec 559892704"), es("random z(0); random n(-1); `${z.state} ${n.next_int(0, 1000000000)}`;"));
 		});
 
 		test("the_three_declarations_construct_and_the_default_is_seeded_by_the_system", [this, es]() {
@@ -55,8 +55,7 @@ public:
 				random b(9);
 				random c;
 				random d;
-				to_string(a.state == b.state) + " " + (a.next_int(0, 1000000) == b.next_int(0, 1000000)) + " " + type_of(c) + " " + type_of(random()) + " " +
-				    c.state.size() + " " + (c.state != d.state);)"));
+				`${to_string(a.state == b.state)} ${(a.next_int(0, 1000000) == b.next_int(0, 1000000))} ${type_of(c)} ${type_of(random())} ${c.state.size()} ${(c.state != d.state)}`;)"));
 			check_eq(std::string("true"), es("random r(5); r.next_int(0, 9); r.seed(5); random fresh(5); to_string(r.state == fresh.state);"));
 		});
 
@@ -74,9 +73,7 @@ public:
 				array<random> pushed = [];
 				pushed.push(a);
 				int x = a.next_int(0, 1000000);
-				to_string(b.next_int(0, 1000000) == x) + " " + (c.next_int(0, 1000000) == x) + " " + (d.next_int(0, 1000000) == x) + " " + (by_value == x) + " " +
-				    (keyed["k"].next_int(0, 1000000) == x) + " " +
-				    (pushed[0].next_int(0, 1000000) == x);)"));
+				`${to_string(b.next_int(0, 1000000) == x)} ${(c.next_int(0, 1000000) == x)} ${(d.next_int(0, 1000000) == x)} ${(by_value == x)} ${(keyed["k"].next_int(0, 1000000) == x)} ${(pushed[0].next_int(0, 1000000) == x)}`;)"));
 		});
 
 		test("the_state_round_trips_through_every_archive", [this, es]() {
@@ -89,7 +86,7 @@ public:
 				random copied(1);
 				copied.state = a.state;
 				int x = a.next_int(0, 1000000000);
-				type_of(json) + " " + (json.next_int(0, 1000000000) == x) + " " + (binary.next_int(0, 1000000000) == x) + " " + (copied.next_int(0, 1000000000) == x);)"));
+				`${type_of(json)} ${(json.next_int(0, 1000000000) == x)} ${(binary.next_int(0, 1000000000) == x)} ${(copied.next_int(0, 1000000000) == x)}`;)"));
 			check_eq(std::string("random::state expects 64 hex digits, not all zero"), es("string m = \"\"; random r(1); try { r.state = \"zz\"; } catch (e) { m = e; } m;"));
 			check_eq(std::string("random::state expects 64 hex digits, not all zero"), es("string m = \"\"; random r(1); try { r.state = string::repeat(\"0\", 64); } catch (e) { m = e; } m;"));
 			auto engine = make_engine();
@@ -147,7 +144,7 @@ public:
 				r.shuffle(points);
 				var mixed = [1, "two", 3.0];
 				r.shuffle(mixed);
-				to_string(ints.size()) + " " + total + " | " + words.size() + " | " + points.size() + " | " + mixed.size() + " | " + (words.join("").size() == 3);)"));
+				`${to_string(ints.size())} ${total} | ${words.size()} | ${points.size()} | ${mixed.size()} | ${(words.join("").size() == 3)}`;)"));
 		});
 
 		test("each_element_draws_its_own_stream_from_a_captured_random_at_every_worker_count", [this]() {
@@ -166,7 +163,7 @@ public:
 				parallel_for (auto& s, auto& g : streams, got) { g = s.next_int(1, 1000000); }
 				array<int> made = [0, 0, 0, 0];
 				parallel_for (auto& m : made) { random local(5); m = local.next_int(0, 99); }
-				to_string(total) + " " + h + " " + q.next_int(0, 1000000000) + " " + got.join(",") + " " + made.join(",");)";
+				`${to_string(total)} ${h} ${q.next_int(0, 1000000000)} ${got.join(",")} ${made.join(",")}`;)";
 			for (size_t workers : {size_t(1), size_t(4), size_t(8)}) {
 				auto engine = make_engine();
 				stdlib::register_all(*engine);
@@ -192,7 +189,7 @@ public:
 					if (agents[i].roll == serial[i].roll && agents[i].rng.next_int(0, 99) == serial[i].rng.next_int(0, 99)) { ++same; }
 					h = (h * 31 + agents[i].roll) % 1000000007;
 				}
-				to_string(same) + " " + h + " " + got.join(",");)";
+				`${to_string(same)} ${h} ${got.join(",")}`;)";
 			for (size_t workers : {size_t(1), size_t(4), size_t(8)}) {
 				auto engine = make_engine();
 				stdlib::register_all(*engine);

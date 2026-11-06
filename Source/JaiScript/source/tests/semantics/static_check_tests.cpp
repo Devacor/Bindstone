@@ -920,7 +920,20 @@ public:
             check_eq((size_t)1, error_count(e->check("bool c = true; int x = c ? \"a\" : \"b\";")));
             check_eq((size_t)1, error_count(e->check("int x = 1 < 2;\nchar c = x;")));   // bool -> char? no: int decl from bool ok; char from int errors
             check_eq((size_t)1, error_count(e->check("char c = \"a\" + \"b\";")));       // string into char
-            check_eq((size_t)0, error_count(e->check("string s = 1 + \"b\";")));
+            // a string's + joins text: a number, bool, char or null beside it is the run-time text at load, in either order; a
+            // template string's own + makes its splice text
+            for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
+                     {"string s = 1 + \"b\";", "cannot apply '+' to 'int' and 'string': stringify it with to_string(x) or `${x}`"},
+                     {"string s = \"b\" + 2.5;", "cannot apply '+' to 'string' and 'float': stringify it with to_string(x) or `${x}`"},
+                     {"bool f = true; string s = \"b\" + f;", "cannot apply '+' to 'string' and 'bool': stringify it with to_string(x) or `${x}`"},
+                     {"string t = \"a\"; char c = t[0]; string s = c + t;", "cannot apply '+' to 'char' and 'string': stringify it with to_string(x) or `${x}`"},
+                     {"string s = \"b\" + null;", "cannot apply '+' to 'string' and 'null': stringify it with to_string(x) or `${x}`"}}) {
+                auto r = e->check(source);
+                check_eq((size_t)1, error_count(r), source);
+                check_true(has_diag(r, dlevel::error, text), source + "\n" + r.format(source));
+            }
+            check_eq((size_t)0, error_count(e->check("int n = 1; char c = 'c'; string s = `${n}${c}${null}${true}` + \"b\";")), "template splices are text");
+            check_eq((size_t)0, error_count(e->check("[[warn_mode]]; string s = 1 + \"b\";")));
         });
 
         // A mixed-branch ternary has no single static type, so 'auto x = c ? 0 : 1.5' is a var;
@@ -1030,7 +1043,7 @@ public:
 				warned->set_backend(backend);
 				check_eq(std::string("VALUE 12|33"), outcome(*warned,
 					"[[warn_mode]]; class C { int x = 1; auto f() { return []() { return x; }; } auto g(int k) { return [k]() { return k; }; } } C c = C(); string m = \"\"; "
-					"try { c.f(); } catch (e) { m += \"1\"; } try { c.f(); } catch (e) { m += \"2\"; } m + \"|\" + c.g(3)() + c.g(3)()"),
+					"try { c.f(); } catch (e) { m += \"1\"; } try { c.f(); } catch (e) { m += \"2\"; } `${m}|${c.g(3)()}${c.g(3)()}`"),
 					"an unverified capture list raises at every creation; a verified one is checked once");
 			}
 		});
@@ -2039,8 +2052,8 @@ public:
                 check_true(has_diag(e->check("class C { string s = \"\"; }\nC c = C();\nc.s++;"), dlevel::error, "cannot apply '++' to 'string'"));
                 check_eq((size_t)1, error_count(e->check("string s = \"\";\ns += 2.5;")));
                 // the spellings that work stay clean
-                check_eq((size_t)0, error_count(e->check("string z = \"\";\nint a = 1;\nz += to_char(a);\nz += \"\" + to_char(a) + to_char(a);\nz += \"x\";\nvar q = to_char(a) + 1;\nint n = to_char(a) + to_char(a);")));
-                check_eq((size_t)0, error_count(e->check("var t = string::repeat(\"ab\", 2) + string::pad_left(\"7\", 3, '0') + string::pad_right(\"x\", 2, \"-\");\nutf8_string u = \"a\";\nvar w = string::repeat(u, 2);\narray<string> v;\nint a = 1;\nv.push(\"\" + to_char(a));\narray<string> elems = [\"x\"];\nelems[0] += 5;")));
+                check_eq((size_t)0, error_count(e->check("string z = \"\";\nint a = 1;\nz += to_char(a);\nz += `${to_char(a)}${to_char(a)}`;\nz += \"x\";\nvar q = to_char(a) + 1;\nint n = to_char(a) + to_char(a);")));
+                check_eq((size_t)0, error_count(e->check("var t = string::repeat(\"ab\", 2) + string::pad_left(\"7\", 3, '0') + string::pad_right(\"x\", 2, \"-\");\nutf8_string u = \"a\";\nvar w = string::repeat(u, 2);\narray<string> v;\nint a = 1;\nv.push(`${to_char(a)}`);\narray<string> elems = [\"x\"];\nelems[0] += 5;")));
                 check_eq((size_t)0, error_count(e->check("var s = \"\";\ns += 5;")), "a var target stays dynamic");
             }
         });
@@ -2159,7 +2172,7 @@ public:
                 off->execute("[[warn_mode]]; auto lf = [](int& q = 2 + 3) { return q; };\nvar msg = \"\";\ntry { lf(); } catch (err) { msg = err; }\nmsg;").to_string());
             check_eq(std::string("7 5 11"),
                 off->execute("[[warn_mode]]; int peek(int& p = 5) { return p; }\nint v = 7;\nint k(const int& p = 5) { return p; }\nint g = 1;\nvoid bump(int& p = g) { p += 10; }\nbump();\n"
-                             "\"\" + peek(v) + \" \" + k() + \" \" + g;").to_string());
+                             "`${peek(v)} ${k()} ${g}`;").to_string());
         });
 
         // A conditional of two arm types is a converted temporary (C++), so a non-const reference cannot bind it in any position;
@@ -2222,8 +2235,7 @@ public:
                 string lambda_named = append(existing);
                 string lambda_literal = append("literal");
                 Receiver receiver = Receiver("ctor");
-                lambda_named + "|" + existing + "|" + lambda_literal + "|" + receiver.saved + "|" +
-                    receiver.upper("method") + "|" + Receiver::decorate("static") + "|" + receiver.pick("overload") + "|" + receiver.pick(4);
+                `${lambda_named}|${existing}|${lambda_literal}|${receiver.saved}|${receiver.upper("method")}|${Receiver::decorate("static")}|${receiver.pick("overload")}|${receiver.pick(4)}`;
             )JAI";
             for (bool vm : {false, true}) {
                 for (bool proofs : {false, true}) {
@@ -3488,8 +3500,8 @@ public:
             for (bool use_vm : {false, true}) {
                 auto x = make_engine();
                 x->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
-                check_eq(std::string("5|1"), x->execute("string log = \"\";\nclass D { int hp = 1; ~D() { if (log == \"\") { log = \"\" + hp; } } }\n"
-                    "array<D> ds = [D()];\nfor (auto d : ds) { d.hp = 5; }\nlog + \"|\" + ds[0].hp").to_string(), use_vm ? "vm" : "interp");
+                check_eq(std::string("5|1"), x->execute("string log = \"\";\nclass D { int hp = 1; ~D() { if (log == \"\") { log = `${hp}`; } } }\n"
+                    "array<D> ds = [D()];\nfor (auto d : ds) { d.hp = 5; }\n`${log}|${ds[0].hp}`").to_string(), use_vm ? "vm" : "interp");
             }
             auto w = e->check("[[warn_mode]];\n" + decls + "for (auto e : es) { e.hp -= 1; }");
             check_eq((size_t)0, error_count(w), w.format());

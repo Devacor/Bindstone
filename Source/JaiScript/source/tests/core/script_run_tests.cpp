@@ -395,7 +395,7 @@ public:
             const std::string be = backend_label(*h.eng);
             h.eng->max_call_depth(backend_type::interpreter, INT_MAX - 1);   // the native-stack guard stops it
             h.eng->max_call_depth(backend_type::vm, 200000);
-            const std::string src = "int deepest = 0;\nvoid r(int n) { deepest = n; r(n + 1); }\nvar m = \"\";\ntry { r(0); } catch (e) { m = e; }\nm + \"|\" + deepest;";
+            const std::string src = "int deepest = 0;\nvoid r(int n) { deepest = n; r(n + 1); }\nvar m = \"\";\ntry { r(0); } catch (e) { m = e; }\n`${m}|${deepest}`;";
             const std::string direct = h.eng->execute(src).to_string();
             script_run run = h.eng->start(src);
             check_true(run.state() == script_run::status::completed, "completed" + be);

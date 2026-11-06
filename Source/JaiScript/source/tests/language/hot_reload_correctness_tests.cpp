@@ -167,8 +167,8 @@ public:
         test("migrate_hook_sees_retyped_fields_converted", [&]() {
             auto eng = make_engine();
             eng->execute("class Player { int hp = 100; } var p = Player(); p.hp = 62;");
-            eng->execute("class Player { string hp = \"0\"; int n = 0; void hot_reload_migrate() { n = hp.size(); hp = hp + \"!\"; } }");
-            check_eq(std::string("62! 2"), eng->execute("p.hp + \" \" + p.n").to_string());
+            eng->execute("class Player { string hp = \"0\"; int n = 0; void hot_reload_migrate() { n = hp.size(); hp = `${hp}!`; } }");
+            check_eq(std::string("62! 2"), eng->execute("`${p.hp} ${p.n}`").to_string());
         });
 
         // A changed base list migrates the inherited fields: the new base's fields start from their initializers, the old
@@ -179,24 +179,24 @@ public:
             eng->add_function("note", [&log](std::string s) { log += s; });
             eng->execute(R"(
                 class B1 { int x = 1; int who() { return 1; } }
-                class B2 { int y = 2; int who() { return 2; } ~B2() { note("~" + y); } }
+                class B2 { int y = 2; int who() { return 2; } ~B2() { note(`~${y}`); } }
                 class D : B1 { int d = 0; D(int v) { d = v; } }
                 var a = D(1);
                 class E : D { int e = 5; E() : D(3) {} }
                 var b = E();
             )");
             eng->execute("class D : B2 { int d = 0; D(int v) { d = v; } }");
-            check_eq(std::string("2 2 1 2 3 5"), eng->execute("\"\" + a.who() + \" \" + a.y + \" \" + a.d + \" \" + b.y + \" \" + b.d + \" \" + b.e").to_string());
+            check_eq(std::string("2 2 1 2 3 5"), eng->execute("`${a.who()} ${a.y} ${a.d} ${b.y} ${b.d} ${b.e}`").to_string());
             check_eq(std::string("D has no member 'x'"), eng->execute("var r = \"\"; try { var gone = a.x; } catch (e) { r = e; } r;").to_string());
             eng->execute("a = null; b = null;");
             check_eq(std::string("~2~2"), log);
             eng->execute("var c = D(4);");
             eng->execute("class D { int d = 0; D(int v) { d = v; } }");
-            check_eq(std::string("D has no member 'y' 4"), eng->execute("var r = \"\"; try { var gone = c.y; } catch (e) { r = e; } r + \" \" + c.d;").to_string(),
+            check_eq(std::string("D has no member 'y' 4"), eng->execute("var r = \"\"; try { var gone = c.y; } catch (e) { r = e; } `${r} ${c.d}`;").to_string(),
                      "a base the reload removes takes its fields along");
             eng->execute("class B3 { int x = 1; } class D3 : B3 { int d = 0; } var k = D3(); k.x = 5;");
             eng->execute("class D3 : B3 { int d = 0; int e = 1; }");
-            check_eq(std::string("5 1"), eng->execute("\"\" + k.x + \" \" + k.e").to_string(), "a derived class's own field change keeps its inherited values");
+            check_eq(std::string("5 1"), eng->execute("`${k.x} ${k.e}`").to_string(), "a derived class's own field change keeps its inherited values");
         });
 
         // A hot_reload_migrate hook that constructs a new same-class instance must not hang
@@ -366,7 +366,7 @@ public:
                     int bump(int n) { reenter(); x = x + n; return x; }
                 }
                 var w = W2(3);
-                "" + w.x + ":" + g_r;
+                `${w.x}:${g_r}`;
             )");
             check_eq(std::string("3:1"), ctor_result.as<std::string>());
             check_eq((int64_t)10, eng->execute("w.bump(7)").as_int());
@@ -405,7 +405,7 @@ public:
             check_true(host_caught);
             // Not catchable by an unrelated outer try/catch either
             check_eq(std::string("none"),
-                eng->execute("var got = \"none\"; try { swallow(); } catch (e) { got = \"\" + e; } got;").as<std::string>());
+                eng->execute("var got = \"none\"; try { swallow(); } catch (e) { got = `${e}`; } got;").as<std::string>());
             check_eq((int64_t)7, eng->execute("3 + 4").as_int());
         });
 

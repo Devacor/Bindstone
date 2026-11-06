@@ -900,18 +900,18 @@ public:
                 var a = h.next();
                 class W { int v = 1; string extra = "e"; coroutine int gen() { yield 8; return 0; } }
                 var b = h.next();
-                to_string(a) + "|" + to_string(b) + "|" + w.extra
+                `${to_string(a)}|${to_string(b)}|${w.extra}`
             )", "40|41|e", "field added mid-suspension: old body continues on stable storage");
             check_both(R"(
-                class W { int v = 1; coroutine var gen() { yield v; yield v + 1; return 0; } }
+                class W { int v = 1; coroutine var gen() { yield v; yield type_of(v); return 0; } }
                 var w = W();
                 w.v = 40;
                 var h = w.gen();
                 var a = h.next();
                 class W { string v = ""; coroutine var gen() { yield 8; return 0; } }
                 var b = to_string(h.next());
-                to_string(a) + "|" + b + "|" + w.v
-            )", "40|401|40", "retype mid-suspension: old body sees the converted value");
+                `${to_string(a)}|${b}|${w.v}`
+            )", "40|string|40", "retype mid-suspension: old body sees the converted value");
         });
 
         // Method coroutines MATCH that precedent: a class hot reload while a method
@@ -1589,7 +1589,7 @@ public:
         test("yield_inside_string_range_for", [this, both_drained]() {
             // a string iterates one char per element by value; the suspended position and the
             // evaluated string ride the continuation like an array's do
-            both_drained("coroutine string g() { string t = \"xyz\"; string a = \"\"; for (auto c : t) { yield a + c; a += c; } return a; }\nauto h = g(); drain(h)",
+            both_drained("coroutine string g() { string t = \"xyz\"; string a = \"\"; for (auto c : t) { yield `${a}${c}`; a += c; } return a; }\nauto h = g(); drain(h)",
                 "x|xy|xyz|xyz", "yield per char inside a string range-for");
             both_drained("coroutine int g() { for (auto c : \"ab\") yield c + 0; return 9; }\nauto h = g(); drain(h)",
                 "97|98|9", "brace-less range-for body over a string literal");

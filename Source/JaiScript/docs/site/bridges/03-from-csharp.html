@@ -74,7 +74,7 @@ public:
     int _get_hp() { return hp_value; }
     void _set_hp(int v) { hp_value = v &lt; 0 ? 0 : v; }
     string describe() { return name; }
-    string to_string() { return name + " (" + hp_value + " hp)"; }
+    string to_string() { return `${name} (${hp_value} hp)`; }
 }
 class Paladin : Hero {
     Paladin(string n) : super(n) {}
@@ -223,7 +223,7 @@ door 3/3
 door done</code></pre></div>
 <h3 id="print-and-to-string">to_string() speaks for an instance<a class="hlink" href="#print-and-to-string" aria-label="link">&#8203;</a></h3>
 <p>A class's <code>string to_string()</code> is what <code>to_string(x)</code>, <code>"text" + x</code>, a template splice and <code>print(x)</code> show, as <code>ToString()</code> is in C#. A class without one prints its class name and fields:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point { int x = 1; int y = 2; string to_string() { return "(" + x + ", " + y + ")"; } }
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point { int x = 1; int y = 2; string to_string() { return `(${x}, ${y})`; } }
 class Plain { int x = 1; }
 Point p;
 print(p);

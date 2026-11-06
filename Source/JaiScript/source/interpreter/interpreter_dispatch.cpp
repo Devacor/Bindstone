@@ -5,6 +5,7 @@ namespace jai {
 
 struct interpreter::binary_host {
     interpreter& in;
+    bool joins_text = false;
     script_value make_int(script_int v) const noexcept { return in.make_value(v); }
     script_value make_float(script_float v) const noexcept { return in.make_value(v); }
     script_value make_bool(bool v) const noexcept { return in.make_value(v); }
@@ -85,6 +86,13 @@ std::optional<checked_result<script_value>> interpreter::compound_in_place(const
 script_value interpreter::call_operator_of(const script_value& callee) {
     binary_host h{*this};
     return detail::call_operator_of(h, callee);
+}
+
+// a template string's `+` (the global operator table consulted already): a scalar beside the string becomes text.
+// KEEP BYTE-PARALLEL with vm_backend::join_text
+checked_result<script_value> interpreter::join_text(const script_value& left, const script_value& right) {
+    binary_host h{*this, true};
+    return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
 }
 
 checked_result<script_value> interpreter::binary_operator(token_type op, const script_value& left, const script_value& right) {

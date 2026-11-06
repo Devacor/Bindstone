@@ -9,9 +9,9 @@
 // char is a binary-data footgun the language opts out of.
 //
 // Strictly additive by construction: promotion fires only when both operands are
-// numeric-or-char, so every previously-working shape keeps its meaning — char+string
-// still concatenates text, object custom operators still receive the raw char, and
-// comparison operators keep their native char rows. There is no implicit int->char.
+// numeric-or-char: a char beside a string is string_join.hpp's error (a template string
+// makes it text), object custom operators still receive the raw char, and comparison
+// operators keep their native char rows. There is no implicit int->char.
 
 #include <jaiscript/core/value.hpp>
 

@@ -18,7 +18,7 @@ class Palette {
 		int ir = itrunc(r < 0.0 ? 0.0 : (r > 255.0 ? 255.0 : r));
 		int ig = itrunc(g < 0.0 ? 0.0 : (g > 255.0 ? 255.0 : g));
 		int ib = itrunc(b < 0.0 ? 0.0 : (b > 255.0 ? 255.0 : b));
-		string c = "" + ir + ";" + ig + ";" + ib + "m";
+		string c = `${ir};${ig};${ib}m`;
 		fg.push(ESC + "[38;2;" + c);
 		bg.push(ESC + "[48;2;" + c);
 		rgb.push(ir * 65536 + ig * 256 + ib);
@@ -155,7 +155,7 @@ class Gfx {
 
 	string fmt1(float v) {
 		int t = itrunc(v * 10.0 + 0.5);
-		return "" + (t / 10) + "." + (t % 10);
+		return `${(t / 10)}.${(t % 10)}`;
 	}
 
 	int text_width(string text, int sx) {

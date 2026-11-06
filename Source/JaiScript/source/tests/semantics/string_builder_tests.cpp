@@ -63,14 +63,14 @@ public:
 					string s = ""; var v = ""; utf8_string u = ""; Holder h; Builder b;
 					array<string> a = ["", ""]; array<var> av = [""]; map<string, string> m = {"k": "", "0": "", "1": ""};
 					for (int i = 0; i < 50; ++i) {
-						s += "a"; s += 'b'; s = s + "c"; s = s + i % 10 + "-" + to_string(i % 3);
-						v += "a"; v = v + "b" + 1;
+						s += "a"; s += 'b'; s = s + "c"; s = s + to_string(i % 10) + "-" + to_string(i % 3);
+						v += "a"; v = v + "b" + to_string(1);
 						u += "é"; u += 'x';
 						h.s += "a"; h.s += 'b'; Holder::st += "c";
 						b.bare("a"); b.self("b"); b.plus("c"); b.chain("d");
 						a[i & 1] += "a"; av[0] += "b"; m["k"] += "c"; m[to_string(i % 2)] += 'd';
 						app(s, "!"); app_plus(s, "?"); app(h.s, "!"); app(a[0], "!");
-						g = g + "a" + i % 10;
+						g = g + "a" + to_string(i % 10);
 					}
 					return to_string(s.size()) + " " + to_string(v.size()) + " " + to_string(u.size()) + "/" + to_string(u.byte_size()) + " " +
 					       to_string(h.s.size()) + " " + to_string(Holder::st.size()) + " " + to_string(b.html.size()) + " " +
@@ -114,7 +114,7 @@ public:
 				string clobber() { g = "zz"; return "1"; }
 				g = g + "a" + clobber() + "b";
 				string s = "xy";
-				s = s + "a" + s.size() + s;
+				s = s + "a" + to_string(s.size()) + s;
 				string order = "";
 				string note(string x) { order += x; return x; }
 				string t = "t";
@@ -138,20 +138,22 @@ public:
 			)", "keep boom keep", "a raise mid-chain stores nothing");
 		});
 
-		test("a_chain_joins_every_operand_as_the_concatenation_does", [this]() {
+		test("a_chain_joins_objects_and_containers_and_refuses_a_scalar_where_the_concatenation_does", [this]() {
 			both(R"(
 				class P { string to_string() { return "P"; } }
 				P p;
 				string s = "x";
-				s = s + 1 + 2.5 + true + 'c' + p + "|" + null;
+				s = s + p + "|" + to_string(1) + to_string(2.5) + to_string(null);
 				var n = 1;
 				n = n + 2 + 3;
 				var m = 1;
-				m = m + "a" + 2;
+				string err = "";
+				try { [[warn_mode]] m = m + "a" + 2; } catch (e) { err = e; }
 				string q = "q";
 				q = q + [1, 2] + {"a": 1};
-				s + " " + to_string(n) + " " + m + " " + q
-			)", "x12.5truecP|null 6 1a2 q[1, 2]{\"a\": 1}", "the operands' texts, numbers and objects alike");
+				s + " " + to_string(n) + " " + to_string(m) + " " + q + " " + err
+			)", "xP|12.5null 6 1 q[1, 2]{\"a\": 1} cannot apply '+' to 'int' and 'string': stringify it with to_string(x) or `${x}`",
+			   "objects and containers join their texts; a number beside a string raises at its step and stores nothing");
 		});
 
 		test("an_object_operand_runs_its_to_string_where_the_chain_does", [this]() {
@@ -174,7 +176,7 @@ public:
 				P p;
 				string a = "a";
 				int n = 7;
-				string t = a + "-" + p + b + n + 'c' + 2.5 + true;
+				string t = a + "-" + p + b + to_string(n) + to_string('c') + to_string(2.5) + to_string(true);
 				string u = `${a}|${p}|${b}|${n}`;
 				string w = "x" + a + [1] + b;
 				t + " " + u + " " + w
@@ -199,7 +201,7 @@ public:
 				string snaps = "";
 				for (int i = 0; i < 3; ++i) {
 					d.body += "x";
-					d.body = d.body + i;
+					d.body = d.body + to_string(i);
 					Doc back = from_json(to_json(d));
 					snaps += back.body + ";";
 				}
@@ -216,7 +218,7 @@ public:
 				k = k + "c";
 				m[k] = 2;
 				string keys = "";
-				for (auto kv : m) { keys += kv.first + "=" + kv.second + ","; }
+				for (auto kv : m) { keys += kv.first + "=" + to_string(kv.second) + ","; }
 				keys
 			)", "a=1,abc=2,", "a key is its own copy");
 		});
@@ -226,7 +228,7 @@ public:
 				map<string, string> m = {"a": "", "b": "x"};
 				string keep = m["b"];
 				for (int i = 0; i < 3; ++i) {
-					for (auto& [k, v] : m) { v += k; v = v + "-" + i; }
+					for (auto& [k, v] : m) { v += k; v = v + "-" + to_string(i); }
 					for (auto& kv : m) { kv.second += "."; }
 				}
 				var vm = {"q": ""};
@@ -261,7 +263,7 @@ public:
 
 		test("the_memory_cap_trips_where_the_concatenation_charges", [this]() {
 			const std::string spellings[] = {
-				"s += \"xxxxxxxx\";", "s += 'x';", "s = s + \"xxxxxxxx\";", "s = s + \"x\" + 7 + \"y\";", "h.s += \"xxxxxxxx\";",
+				"s += \"xxxxxxxx\";", "s += 'x';", "s = s + \"xxxxxxxx\";", "s = s + \"x\" + to_string(7) + \"y\";", "h.s += \"xxxxxxxx\";",
 				"h.s += 'x';", "a[0] += \"xxxxxxxx\";", "m[\"k\"] += \"xxxxxxxx\";", "g = g + \"xx\" + \"yy\";", "Holder::st += \"xxxxxxxx\";",
 			};
 			for (const auto& step : spellings) {
@@ -291,7 +293,7 @@ public:
 				class Holder { string s; }
 				int run() {
 					string s = ""; Holder h; array<string> a = [""]; map<string, string> m = {"k": ""};
-					for (int i = 0; i < 200000; ++i) { s += "x"; s = s + "y"; s = s + "z" + i % 10; h.s += 'q'; a[0] += "w"; m["k"] += "v"; }
+					for (int i = 0; i < 200000; ++i) { s += "x"; s = s + "y"; s = s + "z" + to_string(i % 10); h.s += 'q'; a[0] += "w"; m["k"] += "v"; }
 					return s.size() + h.s.size() + a[0].size() + m["k"].size();
 				}
 				run()

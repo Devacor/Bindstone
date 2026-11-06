@@ -618,7 +618,7 @@ class Kinstein : Scene {
 			grid[(cy - d) * w + gx0] = chc;
 			grid[(cy + d) * w + gx0] = chc;
 		}
-		string tally = "KILLS " + (kills < 10 ? "0" : "") + kills;
+		string tally = `KILLS ${(kills < 10 ? "0" : "")}${kills}`;
 		gfx.draw_text(grid, w, h, tally, 2, 2, 1, 1, sprite_base + 42, 2, sprite_base + 44, 99);
 	}
 }

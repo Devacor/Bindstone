@@ -140,7 +140,7 @@ public:
 				}
 				S s = S();
 				int k = s - "x";
-				s + "x" + "|" + k + "|" + (s & "x") + "|" + (s <=> "x") + "|" + (s < "x");
+				s + "x" + "|" + to_string(k) + "|" + to_string(s & "x") + "|" + to_string(s <=> "x") + "|" + to_string(s < "x");
 			)", "S+x|7|9|-1|true");
 			expect("the checker types the operator's result", R"(
 				class N { int operator+(string s) { return s.size(); } }
@@ -617,17 +617,17 @@ public:
 				var m = {"k": 1};
 				var u = utf8_string("é");
 				string out = "";
-				try { var ys = xs.filter(x => x > 1); } catch (e) { out += e.message + "|"; }
-				try { var t = s.trim().to_upper(); } catch (e) { out += e.message + "|"; }
-				try { var n = m.filter((k, v) => false); } catch (e) { out += e.message + "|"; }
-				try { var w = u.append("x"); } catch (e) { out += e.message + "|"; }
-				try { var p = xs.push(4); } catch (e) { out += e.message + "|"; }
+				try { var ys = xs.filter(x => x > 1); } catch (e) { out += `${e.message}|`; }
+				try { var t = s.trim().to_upper(); } catch (e) { out += `${e.message}|`; }
+				try { var n = m.filter((k, v) => false); } catch (e) { out += `${e.message}|`; }
+				try { var w = u.append("x"); } catch (e) { out += `${e.message}|`; }
+				try { var p = xs.push(4); } catch (e) { out += `${e.message}|`; }
 				for (int i = 0; i < 1; xs.sort()) { i++; }
 				true ? xs.reverse() : xs.sort();
 				var none = null;
 				none?.sort();
 				var b = Box();
-				out + to_json(xs) + "|[" + s + "]|" + to_json(m) + "|" + to_string(u.size()) + "|" + b.filter(1) + "|" + b.trim();
+				`${out}${to_json(xs)}|[${s}]|${to_json(m)}|${to_string(u.size())}|${b.filter(1)}|${b.trim()}`;
 			)", "filter changes xs in place and returns nothing; array::filter(xs, f) returns a filtered copy|"
 			    "trim changes s in place and returns nothing; string::trim(s) returns a trimmed copy|"
 			    "filter changes m in place and returns nothing; map::filter(m, f) returns a filtered copy|"
@@ -639,10 +639,10 @@ public:
 				string name = "ada";
 				shared_ptr<Node> p = new Node();
 				string out = "";
-				try { auto r = name.to_upper(); } catch (e) { out += e.message + "|"; }
-				try { auto r = xs.map(x => x * 2).size(); } catch (e) { out += e.message + "|"; }
-				try { auto r = p.reset(); } catch (e) { out += e.message + "|"; }
-				out + name + "|" + to_json(xs) + "|" + to_string(p != null);
+				try { auto r = name.to_upper(); } catch (e) { out += `${e.message}|`; }
+				try { auto r = xs.map(x => x * 2).size(); } catch (e) { out += `${e.message}|`; }
+				try { auto r = p.reset(); } catch (e) { out += `${e.message}|`; }
+				`${out}${name}|${to_json(xs)}|${to_string(p != null)}`;
 			)", "to_upper changes name in place and returns nothing; string::to_upper(name) returns an uppercased copy|"
 			    "map changes xs in place and returns nothing; array::map(xs, f) returns a mapped copy|"
 			    "reset changes p in place and returns nothing|ada|[1,2]|true", warn_region);
@@ -815,7 +815,7 @@ private:
 					var r6 = (m["k"] = 1.5);
 					var r7 = c.set_bare();
 					var r8 = c.set_this();
-					return "" + r1 + "," + r2 + "," + r3 + "," + r4 + "," + r5 + "," + r6 + "," + r7 + "," + r8 + "|" + type_of(r1) + type_of(r5) + type_of(r6);
+					return `${r1},${r2},${r3},${r4},${r5},${r6},${r7},${r8}|${type_of(r1)}${type_of(r5)}${type_of(r6)}`;
 				}
 				run();
 			)", "3,4,5,40,2,1,7,8|intintint");
@@ -832,7 +832,7 @@ private:
 					var r4 = m["k"]--;
 					var r5 = ++xs[0];
 					var r6 = (xs[0] -= 0.5);
-					return "" + r1 + "," + r2 + "," + r3 + "," + r4 + "," + r5 + "," + r6 + "|" + t + "," + c.n + "," + xs[0] + "," + m["k"];
+					return `${r1},${r2},${r3},${r4},${r5},${r6}|${t},${c.n},${xs[0]},${m["k"]}`;
 				}
 				run();
 			)", "3,2,5,5,7,6|3,2,6,4");
@@ -841,7 +841,7 @@ private:
 			// "A setter-only member (no field, no getter in the chain) yields its right-hand side"; the int parameter truncates
 			expect("setter only", R"(
 				class W { var got = null; void _set_v(int x) { got = x; } }
-				function run() -> string { W w = W(); var r = (w.v = 2.5); return "" + r + "|" + w.got + "|" + type_of(r); }
+				function run() -> string { W w = W(); var r = (w.v = 2.5); return `${r}|${w.got}|${type_of(r)}`; }
 				run();
 			)", "2.5|2|float");
 		});
@@ -874,8 +874,8 @@ private:
 					int acc = 0; int acc2 = 0; int acc3 = 0;
 					for (int i = 0; i < 6; i++) { acc += leaf(i); acc2 += leaf2(i); acc3 += leaf3(i); }
 					string s = "";
-					for (int i = 0; i < 6; i++) { s += "" + xs[i] + ","; }
-					return "" + acc + "|" + s + "|" + acc2 + "|" + acc3 + "," + A.v;
+					for (int i = 0; i < 6; i++) { s += `${xs[i]},`; }
+					return `${acc}|${s}|${acc2}|${acc3},${A.v}`;
 				}
 				run();
 			)", "15|0,0,3,2,6,4,|17|19,9");
@@ -894,14 +894,14 @@ private:
 					array<int> xs; xs.push(4); yield xs.size() + xs[0];
 					int q{5}; yield q;
 				}
-				function run() -> string { string out = ""; for (auto v : gen()) { out += "" + v + ","; } return out; }
+				function run() -> string { string out = ""; for (auto v : gen()) { out += `${v},`; } return out; }
 				run();
 			)", "2,12,22,10,5,5,");
 		});
 		test("defaulted_class_fields_take_their_type_defaults", [this]() {
 			expect("field defaults", R"(
 				class Q { int a; string b; array<int> c; bool d; float f; var v; }
-				function run() -> string { Q q = Q(); return "" + q.a + "|" + q.b + "|" + q.c.size() + "|" + q.d + "|" + q.f + "|" + type_of(q.v); }
+				function run() -> string { Q q = Q(); return `${q.a}|${q.b}|${q.c.size()}|${q.d}|${q.f}|${type_of(q.v)}`; }
 				run();
 			)", "0||0|false|0.0|null");
 		});
@@ -915,7 +915,7 @@ private:
 					D() : this(-1) { path += "K"; d = 5; }
 					D(string s) : this(7) { if (s == "x") { return; } path += "L"; }
 				}
-				function show(D v) -> string { return "" + v.b + "," + v.d + "," + v.path; }
+				function show(D v) -> string { return `${v.b},${v.d},${v.path}`; }
 				show(D()) + "|" + show(D(3)) + "|" + show(D("x")) + "|" + show(D("y"));
 			)", "-1,5,IK|3,30,IJ|7,70,IJ|7,70,IJL");
 		});
@@ -935,7 +935,7 @@ private:
 					D v = D();
 					string err = "";
 					try { var l = Loop(); } catch (e) { err = e; }
-					return "" + v.b + "," + v.d + "," + v.log + "|" + err;
+					return `${v.b},${v.d},${v.log}|${err}`;
 				}
 				run();
 			)";
@@ -949,7 +949,7 @@ private:
 			expect("delegated throw", R"(
 				var LOG = [];
 				class R { int id = 0; R(int i) { id = i; if (i == 2) { throw "boom"; } } R() : this(2) { id = 99; } ~R() { LOG.push(id); } }
-				function run() -> string { R keep = R(1); string err = ""; try { keep = R(); } catch (e) { err = e; } return "" + keep.id + "|" + err + "|" + to_json(LOG); }
+				function run() -> string { R keep = R(1); string err = ""; try { keep = R(); } catch (e) { err = e; } return `${keep.id}|${err}|${to_json(LOG)}`; }
 				run();
 			)", "1|boom|[]");
 		});
@@ -973,7 +973,7 @@ private:
 					var loc = [7];
 					var cl = [&]() { return loc; };
 					cl().push(8);
-					return "" + G.size() + "," + h.items.size() + "," + rows[0].size() + "," + loc.size();
+					return `${G.size()},${h.items.size()},${rows[0].size()},${loc.size()}`;
 				}
 				run();
 			)", "4,1,1,1");
@@ -987,7 +987,7 @@ private:
 				function run() -> string {
 					Out c = get(); c.p.x = 42; c.v.push(2); c.w.x = 5;
 					get().p.x += 1; get().v.push(3);
-					return "" + O.p.x + "," + O.v.size() + "," + O.w.x + "," + to_string(same_object(c.p, O.p)) + "," + to_string(c.p == O.p);
+					return `${O.p.x},${O.v.size()},${O.w.x},${to_string(same_object(c.p, O.p))},${to_string(c.p == O.p)}`;
 				}
 				run();
 			)", "43,1,1,true,true");
@@ -1016,7 +1016,7 @@ private:
 				for (var v : arr) { var u = v; u.x += 1; }
 				function bump(var c) { c.x += 10; }
 				for (var v : [h]) { bump(v); }
-				"" + h.x;
+				`${h.x}`;
 			)", "17", warn_region);
 		});
 		// A var loop variable takes a typed container element as var x = element; would: its value keeps the element type
@@ -1026,8 +1026,8 @@ private:
 				array<array<int>> grid = [[1]];
 				array<map<string, int>> ms = [{"a": 1}];
 				string out = "";
-				for (var row : grid) { try { row.push("s"); out += "taken "; } catch (e) { out += "refused "; } row = "whole"; out += row + " "; }
-				for (var m : ms) { try { m["b"] = "s"; out += "taken "; } catch (e) { out += "refused "; } m = 3; out += m + " "; }
+				for (var row : grid) { try { row.push("s"); out += "taken "; } catch (e) { out += "refused "; } row = "whole"; out += `${row} `; }
+				for (var m : ms) { try { m["b"] = "s"; out += "taken "; } catch (e) { out += "refused "; } m = 3; out += `${m} `; }
 				var direct = grid[0];
 				try { direct.push("s"); out += "taken"; } catch (e) { out += "refused"; }
 				out;
@@ -1049,7 +1049,7 @@ private:
 				var g = null; g = flag ? c : d; g.x = 6;
 				var n = c ?? d; n.x = 7;
 				function local() { C mine = C(); var t = flag ? mine : mine; t.x = 8; return mine.x; }
-				"" + c.x + d.x + local() + a.x + b.x + e.x + l[0].x + m["k"].x + g.x + n.x;
+				`${c.x}${d.x}${local()}${a.x}${b.x}${e.x}${l[0].x}${m["k"].x}${g.x}${n.x}`;
 			)", "0001234567");
 		});
 		// A yield hands out what a return of the same operand would: an existing object (a global, the coroutine's own local, an
@@ -1062,19 +1062,19 @@ private:
 				coroutine global_gen() { yield c; }
 				var g = global_gen();
 				var y1 = g.next(); y1.x = 7;
-				out += "" + c.x;
-				coroutine local_gen() { C mine = C(); yield mine; out += "" + mine.x; mine.x = 3; yield mine; }
+				out += `${c.x}`;
+				coroutine local_gen() { C mine = C(); yield mine; out += `${mine.x}`; mine.x = 3; yield mine; }
 				var l = local_gen();
 				var y2 = l.next(); y2.x = 9;
 				var y3 = l.next();
-				out += "" + y2.x + y3.x;
-				coroutine element_gen() { array<C> cs = [C()]; yield cs[0]; out += "" + cs[0].x; }
+				out += `${y2.x}${y3.x}`;
+				coroutine element_gen() { array<C> cs = [C()]; yield cs[0]; out += `${cs[0].x}`; }
 				var el = element_gen();
 				var y4 = el.next(); y4.x = 5; el.next();
 				coroutine temp_gen() { yield C(); }
 				var tg = temp_gen();
 				var y5 = tg.next(); y5.x = 4;
-				out += "" + y5.x;
+				out += `${y5.x}`;
 				out;
 			)", "009304");
 		});
@@ -1105,7 +1105,7 @@ private:
 				bump();
 				function touch(C& p = c) { p.x = 3; }
 				touch();
-				"" + cs[0].x + " " + truncated() + " " + widened() + " " + pushed + " " + g + " " + c.x;
+				`${cs[0].x} ${truncated()} ${widened()} ${pushed} ${g} ${c.x}`;
 			)", "0 2 1.0 refused 11 3");
 		});
 		// A conditional whose arms both name storage is the lvalue it picks (C++): a T& argument, an auto& or T& declaration, a T&
@@ -1128,7 +1128,7 @@ private:
 					bump(pick ? c : d);
 					cast<int&>(pick ? g : h) += 100;
 					(pick ? c.x : d.x) = 9;
-					return "" + g + "," + h + "," + xs[0] + "," + xs[1] + "," + c.x + "," + d.x;
+					return `${g},${h},${xs[0]},${xs[1]},${c.x},${d.x}`;
 				}
 				int G = 1;
 				int H = 2;
@@ -1146,7 +1146,7 @@ private:
 				int yielded = co.next(); yielded = 0;
 				string mixed = "bound";
 				try { int& m = PICK ? G : 5; m = 0; } catch (e) { mixed = "refused"; }
-				run(true) + " | " + run(false) + " | " + G + "," + H + " " + mixed;
+				`${run(true)} | ${run(false)} | ${G},${H} ${mixed}`;
 			)", "113,2,7,2,9,0 | 1,113,1,7,0,9 | 30,40 refused", warn_region);
 		});
 		// A member arm may name no storage (an enumerator, a computed property): passed by value the conditional yields its value, and a
@@ -1159,10 +1159,10 @@ private:
 				int show(int x) { return x; }
 				void set9(int& r) { r = 9; }
 				bool flag = true;
-				string out = "" + show(flag ? Fx.blood : Fx.bones) + show(flag ? p.twice : p.v);
+				string out = `${show(flag ? Fx.blood : Fx.bones)}${show(flag ? p.twice : p.v)}`;
 				try { set9(flag ? p.twice : p.v); out += " bound"; } catch (e) { out += " refused"; }
 				set9(!flag ? p.twice : p.v);
-				out + " " + p.v;
+				`${out} ${p.v}`;
 			)", "16 refused 9", warn_region);
 		});
 		// A range-for variable may be spelled with any type, template types included (shared_ptr<C>, weak_ptr<C>, array<int>,
@@ -1184,7 +1184,7 @@ private:
 				for (array<int>& row : grid) { row.push(7); }
 				array<map<string, int>> ms = [{"a": 1}];
 				for (map<string, int> m : ms) { [[warn_mode]] m["a"] = 50; }
-				return "" + h.x + " " + alive + " " + cells + " " + grid[0].size() + " " + ms[0]["a"];
+				return `${h.x} ${alive} ${cells} ${grid[0].size()} ${ms[0]["a"]}`;
 			)", "6 1 3 3 1");
 		});
 		test("aggregate_copies_copy_values_and_share_handles", [this]() {
@@ -1197,7 +1197,7 @@ private:
 					array<shared_ptr<In>> xs = [new In()]; var ys = xs; ys[0].x = 3;
 					array<In> zs = [In()]; array<In> ws = zs; ws[0].x = 4;
 					map<string, shared_ptr<In>> m = {"a": new In()}; var m2 = m; m2["a"].x = 8;
-					return "" + a.h.x + "," + a.v.x + "," + a.hs[0].x + "," + a.vs[0].x + "|" + xs[0].x + "," + zs[0].x + "," + m["a"].x;
+					return `${a.h.x},${a.v.x},${a.hs[0].x},${a.vs[0].x}|${xs[0].x},${zs[0].x},${m["a"].x}`;
 				}
 				run();
 			)", "5,1,6,1|3,1,8");
@@ -1282,12 +1282,12 @@ private:
 					try { m[k] = 1; s += "stored"; } catch (e) { s += e; }
 					s += "|";
 					map<var, int> mv = {}; mv[5] = 1; mv["5"] = 2;
-					s += "" + mv.size() + "|";
+					s += `${mv.size()}|`;
 					map<auto, int> ma = {5: 1}; var ks = "x";
 					try { ma[ks] = 2; s += "stored"; } catch (e) { s += e; }
 					s += "|";
 					map<auto, int> me = {}; me[1] = 1; me["a"] = 2;
-					s += "" + me.size();
+					s += `${me.size()}`;
 					return s;
 				}
 				run();
@@ -1302,7 +1302,7 @@ private:
 					try { while (i < 5) { m[keys[i]] = i * i; i++; } } catch (e) { err = e; }
 					int total = 0;
 					for (auto kv : m) { total += kv.first * 100 + kv.second; }
-					return "" + m.size() + "|" + i + "|" + err + "|" + total;
+					return `${m.size()}|${i}|${err}|${total}`;
 				}
 				run();
 			)", "4|3|Cannot use 'string' as a key of type 'int'|605");
@@ -1319,7 +1319,7 @@ private:
 					map<auto, int> h = {0: 0, 1: 0, 2: 0, 3: 0, 4: 0, 5: 0, 6: 0};
 					for (int j = 0; j < 1000; j++) { h[j % 7] += j; }
 					string s = "";
-					for (int k = 0; k < 7; k++) { s += "" + h[k] + ","; }
+					for (int k = 0; k < 7; k++) { s += `${h[k]},`; }
 					return s;
 				}
 				run();
@@ -1347,7 +1347,7 @@ private:
 					try { cast<Der&>(plain).t = 1; } catch (e) { err = e; }
 					int before = cast<Der&>(h.p).t;
 					for (int i = 0; i < 100; i++) { cast<Der&>(h.p).t += i; }
-					return "" + before + "," + cast<Der&>(sp).t + "," + err + "," + cast<Der&>(h.p).t;
+					return `${before},${cast<Der&>(sp).t},${err},${cast<Der&>(h.p).t}`;
 				}
 				run();
 			)", "7,8,Cannot cast 'Base' to 'Der&',4957");
@@ -1417,7 +1417,7 @@ private:
 			expect("catch capture", R"(
 				coroutine int g() { try { throw 3; } catch (e) { yield e.value; var f = [=]() { return e.value * 2; }; yield f(); yield e.value + 1; } }
 				function mk() { var f = null; try { throw 5; } catch (e) { f = [&]() { return e.value * 2; }; } return f; }
-				function run() -> string { string o = ""; for (auto v : g()) { o += "" + v + ","; } var f = mk(); o += "" + f(); return o; }
+				function run() -> string { string o = ""; for (auto v : g()) { o += `${v},`; } var f = mk(); o += `${f()}`; return o; }
 				run();
 			)", "3,6,4,10");
 		});
@@ -1438,7 +1438,7 @@ private:
 				var a2 = geometry::area(3, 4);
 				string bare = "";
 				try { var r = Rect(); } catch (e) { bare = e; }
-				"" + a1 + "|" + a2 + "|" + geometry::calls + "|" + geometry::Rect().w + geometry::Rect().h + "|" + bare;
+				`${a1}|${a2}|${geometry::calls}|${geometry::Rect().w}${geometry::Rect().h}|${bare}`;
 			)", "24|120|2|11|Undefined variable 'Rect'", warn_region);
 		});
 		test("a_namespace_class_is_named_by_its_qualified_name", [this]() {
@@ -1454,12 +1454,11 @@ private:
 				)");
 				e.execute("namespace a { int again() { return K().who(); } }");
 				std::string out = spec::render(e.execute(R"(
-					"" + x.who() + y.who() + z.g + a::again() + "|" + type_of(x) + " " + type_of(y) + " " + type_of(z) + " " + type_of(a::build().self()) + "|" +
-					outer::inner::read() + " " + type_of(outer::inner::D()) + " " + outer::inner::D().p;
+					`${x.who()}${y.who()}${z.g}${a::again()}|${type_of(x)} ${type_of(y)} ${type_of(z)} ${type_of(a::build().self())}|${outer::inner::read()} ${type_of(outer::inner::D())} ${outer::inner::D().p}`;
 				)"));
 				e.execute("namespace a { class K { int v = 1; int who() { return 11; } } }");
-				out += "|" + spec::render(e.execute(R"("" + x.who() + " " + y.who() + " " + z.g;)"));
-				return out + "|" + spec::render(e.execute(R"("" + a::K().who() + " " + b::K().who();)"));
+				out += "|" + spec::render(e.execute(R"(`${x.who()} ${y.who()} ${z.g}`;)"));
+				return out + "|" + spec::render(e.execute(R"(`${a::K().who()} ${b::K().who()}`;)"));
 			});
 		});
 		test("namespace_functions_write_the_namespace_cell_by_bare_name", [this]() {
@@ -1469,7 +1468,7 @@ private:
 				var x = 100;
 				ns::set(5);
 				namespace ns { var x = 6; }
-				"" + ns::x + "|" + x + "|" + ns2::y + "|" + ns::get();
+				`${ns::x}|${x}|${ns2::y}|${ns::get()}`;
 			)", "6|100|4|6");
 		});
 		test("namespace_typed_variables_store_through_the_assignment_table", [this]() {
@@ -1477,10 +1476,10 @@ private:
 				namespace n4 { int y = 0; }
 				function run() -> string {
 					string s = ""; var str = "str";
-					try { n4::y = str; } catch (e) { s += e + "|"; }
+					try { n4::y = str; } catch (e) { s += `${e}|`; }
 					var r = (n4::y = 2.9);
 					n4::y += 1.5; n4::y++;
-					return s + r + "|" + n4::y;
+					return `${s}${r}|${n4::y}`;
 				}
 				run();
 			)", "Cannot assign string to 'y' (declared int)|2|4");
@@ -1492,7 +1491,7 @@ private:
 				function run() -> string {
 					string s = "";
 					try { take(n5::x); s += "bound"; } catch (e) { s += e; }
-					return s + "|" + n5::x;
+					return `${s}|${n5::x}`;
 				}
 				run();
 			)", "bound|9");
@@ -1509,7 +1508,7 @@ private:
 			every_config("ns units", "7|50|7", [](engine& e) {
 				e.execute("namespace n7 { var x = 1; function get() { return x; } }");
 				e.execute("var x = 50; n7::x = 7;");
-				return e.execute("\"\" + n7::x + \"|\" + x + \"|\" + n7::get()").as_string();
+				return e.execute("`${n7::x}|${x}|${n7::get()}`").as_string();
 			});
 		});
 	}
@@ -1527,12 +1526,12 @@ private:
 				"  utf8_string u = \"a" + E + J1 + "b\";\n"
 				"  int s1 = u.size(); var c2 = u[2];\n"
 				"  auto& r = u; r.insert(1, \"" + O + "\");\n"
-				"  string o = \"\" + s1 + \",\" + c2 + \",\" + u.size() + \",\" + u[2] + \",\" + u[3];\n"
+				"  string o = `${s1},${c2},${u.size()},${u[2]},${u[3]}`;\n"
 				"  ed(u);\n"
-				"  o += \"|\" + u.size() + \",\" + u[0] + \",\" + u.find(\"" + J1 + "\");\n"
-				"  H h = H(); int hs = h.t.size(); h.t += \"" + J1 + J2 + "\"; o += \"|\" + hs + \",\" + h.t.size() + \",\" + h.t[2];\n"
+				"  o += `|${u.size()},${u[0]},${u.find(\"" + J1 + "\")}`;\n"
+				"  H h = H(); int hs = h.t.size(); h.t += \"" + J1 + J2 + "\"; o += `|${hs},${h.t.size()},${h.t[2]}`;\n"
 				"  utf8_string a = \"" + J1 + J2 + J3 + "\"; var b = a; int as = a.size(); b.insert(0, \"x\");\n"
-				"  o += \"|\" + as + \",\" + a.size() + \",\" + b.size() + \",\" + a[0] + \",\" + b[1];\n"
+				"  o += `|${as},${a.size()},${b.size()},${a[0]},${b[1]}`;\n"
 				"  return o;\n"
 				"}\n"
 				"run();\n";
@@ -1545,7 +1544,7 @@ private:
 				"  string s = \"\"; for (int i = 0; i < 100; i++) { s += \"a" + E + J1 + "\"; }\n"
 				"  utf8_string u = s; var before = u[200]; var last = u[299]; int n = u.size();\n"
 				"  var& r = u; r.insert(0, \"" + E + "\");\n"
-				"  return \"\" + n + \",\" + u.size() + \",\" + to_string(u[201] == before) + \",\" + to_string(u[300] == last) + \",\" + to_string(u[0] == \"" + E + "\") + \",\" + to_string(u[1] == \"a\");\n"
+				"  return `${n},${u.size()},${u[201] == before},${u[300] == last},${u[0] == \"" + E + "\"},${u[1] == \"a\"}`;\n"
 				"}\n"
 				"run();\n";
 			expect("breadcrumbs", src, "300,301,true,true,true,true");
@@ -1560,17 +1559,17 @@ private:
 				class In { int x = 1; }
 				function run() -> string {
 					string s = "";
-					array<array<int>> g = [[1], [2]]; var row = [2.9]; g.push(row); s += "" + g[2][0] + ",";
-					map<string, array<int>> m = {}; m["a"] = [1.9, 2]; s += "" + m["a"][0] + ",";
+					array<array<int>> g = [[1], [2]]; var row = [2.9]; g.push(row); s += `${g[2][0]},`;
+					map<string, array<int>> m = {}; m["a"] = [1.9, 2]; s += `${m["a"][0]},`;
 					array<int> ai = []; var str = "x";
-					try { ai.push(str); } catch (e) { s += e + ","; }
+					try { ai.push(str); } catch (e) { s += `${e},`; }
 					array<string> as = []; var one = 1;
-					try { as.push(one); } catch (e) { s += e + ","; }
-					array<bool> ab = []; ab.push(one); ai.push(true); s += to_string(ab[0]) + "," + ai[0] + ",";
-					array<shared_ptr<In>> hs = [null]; hs.push(null); s += "" + hs.size() + ",";
+					try { as.push(one); } catch (e) { s += `${e},`; }
+					array<bool> ab = []; ab.push(one); ai.push(true); s += `${to_string(ab[0])},${ai[0]},`;
+					array<shared_ptr<In>> hs = [null]; hs.push(null); s += `${hs.size()},`;
 					array<In> vs = []; var n = null;
-					try { array<In> lit = [In(), n]; } catch (e) { s += e + ","; }
-					try { vs.push(n); } catch (e) { s += e + ","; }
+					try { array<In> lit = [In(), n]; } catch (e) { s += `${e},`; }
+					try { vs.push(n); } catch (e) { s += `${e},`; }
 					var box = In();
 					try { ai.push(box); } catch (e) { s += e; }
 					return s;
@@ -1588,7 +1587,7 @@ private:
 				function run() -> string {
 					C c = C(); c.bump(); var r = c.a[0]++;
 					var g = [[1, 2], [3]]; g[1][0]++; ++g[0][1];
-					return "" + c.n + c.a[0] + c.a[1] + c.m["k"] + r + "|" + (g[0][1] + g[1][0]);
+					return `${c.n}${c.a[0]}${c.a[1]}${c.m["k"]}${r}|${(g[0][1] + g[1][0])}`;
 				}
 				run();
 			)", "22321|7");
@@ -1605,7 +1604,7 @@ private:
 					int k = 3; array<int> xs = [1, 2, 3, 4]; array<int> ys = [1, 2, 3, 4];
 					parallel_for (auto& x : xs) { x = x * k; }
 					parallel_for (auto& y : ys) { y = leaf(y) * k; }
-					return "" + xs[0] + "," + xs[1] + "," + xs[2] + "," + xs[3] + "|" + ys[0] + "," + ys[1] + "," + ys[2] + "," + ys[3];
+					return `${xs[0]},${xs[1]},${xs[2]},${xs[3]}|${ys[0]},${ys[1]},${ys[2]},${ys[3]}`;
 				}
 				f();
 			)", "3,6,9,12|6,9,12,15");
@@ -1628,7 +1627,7 @@ private:
 					for (j += 1; j < 8; j++) { s += 100; }
 					for (++j; j < 11; j++) { s += 1000; }
 					for (P p = P(2); p.x < 4; p.x++) { s += 10000; }
-					return "" + i + "," + s + "," + o[0] + "," + j;
+					return `${i},${s},${o[0]},${j}`;
 				}
 				run();
 			)", "3,22223,3,11");
@@ -1638,12 +1637,12 @@ private:
 			const std::string expected = probe->throw_on_overflow() ? "Integer overflow in '-'" : "9223372036854775807";
 			expect("minus overflow", R"(
 				var a = -9223372036854775807 - 1; var b = 1; string m = "";
-				try { var r = a - b; m = "" + r; } catch (e) { m = e; }
+				try { var r = a - b; m = `${r}`; } catch (e) { m = e; }
 				m;
 			)", expected);
 		});
 		test("a_literal_without_an_element_type_held_by_var_is_the_dynamic_form", [this]() {
-			expect("var literal", "var v = [1, 2]; v.push(\"s\"); \"\" + v.size();", "3");
+			expect("var literal", "var v = [1, 2]; v.push(\"s\"); `${v.size()}`;", "3");
 		});
 	}
 
@@ -1654,10 +1653,10 @@ private:
 				class C { string got = ""; C operator+(var x) { got = type_of(x); return this; } }
 				function run() -> string {
 					string s = "";
-					s += "" + ('d' / 2) + "," + ('a' / 2.0) + ",";
-					s += "" + ('a' | 1) + "," + ('a' ^ ' ') + "," + ('b' >> 1) + ",";
+					s += `${('d' / 2)},${('a' / 2.0)},`;
+					s += `${('a' | 1)},${('a' ^ ' ')},${('b' >> 1)},`;
 					var m = {}; m['a'] = 1; m['b'] = 2;
-					s += "" + (m['a'] + m.size()) + "," + to_string(m.has('a')) + ",";
+					s += `${(m['a'] + m.size())},${to_string(m.has('a'))},`;
 					var u = {}; u['\xC3'] = 1; u['a'] = 2;
 					s += to_string(u.keys()[0] == 'a') + ",";
 					var c = C(); var r = c + 'a';
@@ -1691,12 +1690,12 @@ private:
 		test("a_nan_key_is_storable_and_findable", [this]() {
 			every_config("nan key", "12", [](engine& e) {
 				e.add_global("nan", script_value(std::numeric_limits<double>::quiet_NaN(), &e));
-				return e.execute("var m = {}; m[nan] = 1; m[nan] = 2; \"\" + (m.size() * 10 + m[nan]);").as_string();
+				return e.execute("var m = {}; m[nan] = 1; m[nan] = 2; `${(m.size() * 10 + m[nan])}`;").as_string();
 			});
 		});
 		test("equal_content_arrays_are_distinct_keys_and_cpp_equality_is_identity", [this]() {
 			every_config("identity keys", "2|false|true", [](engine& e) {
-				std::string out = e.execute("var a = [1]; var b = [1]; var m = {}; m[a] = 1; m[b] = 2; \"\" + m.size();").as_string();
+				std::string out = e.execute("var a = [1]; var b = [1]; var m = {}; m[a] = 1; m[b] = 2; `${m.size()}`;").as_string();
 				const script_value x = e.execute("[1];");
 				const script_value y = e.execute("[1];");
 				out += std::string("|") + (x == y ? "true" : "false");
@@ -1720,7 +1719,7 @@ private:
 				function h() -> int { var rg = 0; { var G = 5; rg = g(); } return rg; }
 				var e = "g"; string rc = "";
 				try { throw "x"; } catch (e) { rc = ::e + e; }
-				"" + x + f() + "|" + r + x + "|" + h() + G + "|" + rc;
+				`${x}${f()}|${r}${x}|${h()}${G}|${rc}`;
 			)", "11|11|11|gx");
 		});
 		test("default_arguments_constructors_and_namespace_functions_resolve_in_their_declaring_unit", [this]() {
@@ -1728,7 +1727,7 @@ private:
 				e.execute("var D = 1; function f(int a = D) { return a; } class C { int v = 0; C() { v = D; } } namespace ns { function h() { return D; } } function k() { return D; }");
 				e.execute("int D = 5;");
 				e.execute("function k() { return D; }");
-				return e.execute("\"\" + f() + \"|\" + C().v + \"|\" + ns::h() + \"|\" + k();").as_string();
+				return e.execute("`${f()}|${C().v}|${ns::h()}|${k()}`;").as_string();
 			});
 		});
 		test("a_host_callback_and_a_parallel_region_resolve_as_the_code_that_runs_them", [this]() {
@@ -1737,7 +1736,7 @@ private:
 				e.add_function("peek", [raw]() -> script_value { return raw->get_variable("G"); });
 				e.execute("var G = 1; function f() { return peek(); } function fill(var& a) { parallel_for (auto& x : a) { x = G; } }");
 				e.execute("int G = 5;");
-				return e.execute("var A = [0, 0]; fill(A); \"\" + f() + \"|\" + A[0];").as_string();
+				return e.execute("var A = [0, 0]; fill(A); `${f()}|${A[0]}`;").as_string();
 			});
 		});
 		test("an_import_is_its_own_unit_and_an_include_is_the_includers", [this]() {
@@ -1746,11 +1745,11 @@ private:
 			std::ofstream(dir / "lib.jai") << "var X = 1; function getx() { return X; }\n";
 			every_config("import unit", "1|2", [&](engine& e) {
 				e.add_include_path(dir.string());
-				return e.execute("import \"lib.jai\"; var X = 2; \"\" + getx() + \"|\" + X;").as_string();
+				return e.execute("import \"lib.jai\"; var X = 2; `${getx()}|${X}`;").as_string();
 			});
 			every_config("include unit", "2|2", [&](engine& e) {
 				e.add_include_path(dir.string());
-				return e.execute("include \"lib.jai\"; var X = 2; \"\" + getx() + \"|\" + X;").as_string();
+				return e.execute("include \"lib.jai\"; var X = 2; `${getx()}|${X}`;").as_string();
 			});
 		});
 		test("engines_share_no_script_state", [this]() {
@@ -1758,7 +1757,7 @@ private:
 				e.execute("var g = 1;");
 				auto other = jai::foundry::make_default_engine();
 				other->set_backend(e.get_backend_type());
-				return other->execute(spec::in_warn_region("var r = \"\"; try { r = \"\" + g; } catch (x) { r = x; } r;")).as_string();
+				return other->execute(spec::in_warn_region("var r = \"\"; try { r = `${g}`; } catch (x) { r = x; } r;")).as_string();
 			});
 		});
 	}
@@ -1784,7 +1783,7 @@ private:
 					try { mm["k"] = s; } catch (e) { d = e; }
 					var& rm = mm["k"];
 					try { rm = s; } catch (e) { o = e; }
-					return "" + G + "|" + log + "|" + a + "|" + arr[0] + m["k"] + "|" + to_string(o == d && o != "") + mm["k"] + "|" + typed_name();
+					return `${G}|${log}|${a}|${arr[0]}${m["k"]}|${to_string(o == d && o != "")}${mm["k"]}|${typed_name()}`;
 				}
 				run();
 			)", "5|ab|1|39|true1|Cannot assign string to 'x' (declared int)|2");
@@ -1794,7 +1793,7 @@ private:
 				array<int> A = [1];
 				coroutine int co() { auto& r = A[0]; yield 0; r = 7; yield 1; }
 				var h = co(); h.next(); A.push(2); h.next();
-				"" + A[0];
+				`${A[0]}`;
 			)", "7");
 		});
 		test("coroutine_handles_returned_by_value_share", [this]() {
@@ -1803,7 +1802,7 @@ private:
 				var H = co();
 				function get() { return H; }
 				get().next();
-				"" + H.next();
+				`${H.next()}`;
 			)", "2");
 		});
 		// a const reference holds the temporary instead (C++ lifetime extension)
@@ -1814,7 +1813,7 @@ private:
 				try { var& p = fv(); r = "bound"; } catch (e) { r = e.starts_with("Cannot take reference of non-lvalue expression") ? "raised" : e; }
 				const auto& c = fv();
 				const var& v = fv();
-				r + "|" + c.size() + v[0];
+				`${r}|${c.size()}${v[0]}`;
 			)", "raised|11", warn_region);
 			// a reference names a variable from its declaration on (C++): one without an initializer never loads, warn region or not
 			for (const char* src : {"void f() { int& r; print(\"x\"); } f();", "[[warn_mode]]; const var& r;", "namespace ns { int& r; }"}) {
@@ -1847,7 +1846,7 @@ private:
 				G = 5;
 				var fc = cap::mk(); fc(); fc();
 				bump::go();
-				"" + a::b::get() + "|" + hp::w.lock().v + "|" + dyn::x + "|" + G + "|" + cap::x + "," + x + "|" + bump::x + "|" + Cm().m();
+				`${a::b::get()}|${hp::w.lock().v}|${dyn::x}|${G}|${cap::x},${x}|${bump::x}|${Cm().m()}`;
 			)", "1|5|s|5|3,100|2|1");
 		});
 		test("a_namespace_variable_may_be_reference_declared", [this]() {
@@ -1859,14 +1858,14 @@ private:
 				rf::r = 5;
 				rf::r += 1;
 				auto& q = rf::get(); q = 9;
-				"" + G + "|" + rf::r;
+				`${G}|${rf::r}`;
 			)", "9|9");
 		});
 		test("a_namespace_redeclared_by_another_unit_writes_in_place", [this]() {
 			every_config("ns other unit", "2", [](engine& e) {
 				e.execute("namespace ns { var x = 1; function get() { return x; } }");
 				e.execute("namespace ns { var x = 2; }");
-				return e.execute("\"\" + ns::get();").as_string();
+				return e.execute("`${ns::get()}`;").as_string();
 			});
 		});
 		test("a_typed_namespace_store_is_checked_at_run_time_under_strict", [this]() {
@@ -1895,7 +1894,7 @@ private:
 					string r = "";
 					try { try { throw "x"; } catch (e) { try { throw "y"; } catch (e2) { r += e2; } throw; } } catch (z) { r += z; }
 					try { try { throw "p"; } catch { try { throw "q"; } catch (e3) { r += e3; } throw; } } catch (z2) { r += z2; }
-					try { try { throw 1; } catch (e) { try { try { throw 2; } catch (e4) { r += "" + e4; } throw; } catch (e5) { r += "" + e5; } throw; } } catch (z3) { r += "" + z3; }
+					try { try { throw 1; } catch (e) { try { try { throw 2; } catch (e4) { r += `${e4}`; } throw; } catch (e5) { r += `${e5}`; } throw; } } catch (z3) { r += `${z3}`; }
 					return r;
 				}
 				run();
@@ -1936,10 +1935,10 @@ private:
 				function k(int x) -> int { int y = x > 0 ? x : throw "neg3"; return y; }
 				string r = "";
 				try { g(-1); } catch (e) { r += e; }
-				try { k(-1); } catch (e) { r += "|" + e; }
-				try { var q = true ? throw "neg4" : 1; } catch (e) { r += "|" + e; }
-				try { int s = 1 + (false ? 1 : throw "neg5"); } catch (e) { r += "|" + e; }
-				r + "|" + g(2);
+				try { k(-1); } catch (e) { r += `|${e}`; }
+				try { var q = true ? throw "neg4" : 1; } catch (e) { r += `|${e}`; }
+				try { int s = 1 + (false ? 1 : throw "neg5"); } catch (e) { r += `|${e}`; }
+				`${r}|${g(2)}`;
 			)", "neg|neg3|neg4|neg5|2", warn_region);
 		});
 		test("a_native_exception_in_a_call_argument_converts_in_the_calling_frame", [this]() {
@@ -1962,7 +1961,7 @@ private:
 				function sh() -> int { shared_ptr<T> s = new T(); auto l = [=]() { s.v = 5; }; l(); return s.v; }
 				function ob() -> int { T p = T(); auto l = [=]() { return p.v; }; p.v = 9; return l(); }
 				function mk() -> string { var fs = []; for (int i = 0; i < 3; i++) { fs.push([=]() { return i; }); } string s = ""; for (auto f : fs) { s += to_string(f()); } return s; }
-				"" + sh() + "|" + ob() + "|" + mk();
+				`${sh()}|${ob()}|${mk()}`;
 			)", "5|1|012");
 		});
 		test("utf8_erase_counts_characters", [this]() {
@@ -2054,7 +2053,7 @@ private:
 				{"ifloor", "var f = -1e100;", "var z = math::ifloor(f);", text.c_str()},
 				{"cast", "var f = 1e100;", "var z = cast<int>(f);", text.c_str()},
 			});
-			expect("unwritten", "var f = 1e100; int x = 7; try { x = f; } catch (e) { } \"\" + x;", "7");
+			expect("unwritten", "var f = 1e100; int x = 7; try { x = f; } catch (e) { } `${x}`;", "7");
 		});
 		test("untouched_family_texts", [this]() {
 			expect_texts({
@@ -2109,14 +2108,14 @@ private:
 				function inner() { int z = 0; calls += 1; int q = 5 / z; }
 				array<int> v = [3, 1, 2];
 				string r = "no error";
-				try { v.sort([](int a, int b) { inner(); return a < b; }); } catch (e) { r = "caught:" + e; }
-				r + "|calls=" + calls + "|" + v[0] + v[1] + v[2];
+				try { v.sort([](int a, int b) { inner(); return a < b; }); } catch (e) { r = `caught:${e}`; }
+				`${r}|calls=${calls}|${v[0]}${v[1]}${v[2]}`;
 			)", "caught:Division by zero|calls=1|312");
 			expect("sort throw", R"(
 				array<int> v = [3, 1, 2];
 				string r = "no error";
-				try { v.sort([](int a, int b) -> bool { if (a > -100) { throw "cmp"; } return a < b; }); } catch (e) { r = "caught:" + e; }
-				r + "|" + v[0] + v[1] + v[2];
+				try { v.sort([](int a, int b) -> bool { if (a > -100) { throw "cmp"; } return a < b; }); } catch (e) { r = `caught:${e}`; }
+				`${r}|${v[0]}${v[1]}${v[2]}`;
 			)", "caught:cmp|312");
 		});
 		test("an_uncaught_comparator_error_ends_the_program_with_the_callbacks_trace", [this]() {
@@ -2166,7 +2165,7 @@ private:
 		test("to_bool_and_to_string_errors_propagate", [this]() {
 			const char* Q = R"(
 				class Q { bool to_bool() { int z = 0; return 1 / z > 0; } }
-				class TS { string to_string() { int z = 0; return "t" + (1 / z); } }
+				class TS { string to_string() { int z = 0; return `t${(1 / z)}`; } }
 				auto q = Q();
 				auto ts = TS();
 			)";
@@ -2176,8 +2175,8 @@ private:
 				{"!q", Q, "bool b = !q;", div},
 				{"q ? :", Q, "int w = q ? 1 : 2;", div},
 				{"bool slot", Q, "bool b = q;", div},
-				{"string + object", Q, "string s = \"x\" + ts;", div},
-				{"object + string", Q, "string s = ts + \"x\";", div},
+				{"string + object", Q, "string s = `x${ts}`;", div},
+				{"object + string", Q, "string s = `${ts}x`;", div},
 			});
 		});
 		test("a_user_operator_assign_error_propagates_with_its_own_text", [this]() {
@@ -2202,7 +2201,7 @@ private:
 				class P { int raw = 1; int _get_v() { int z = 0; return raw / z; } }
 				var a = from_json("{\"$type\":\"L2\",\"$val\":{\"v\":3}}");
 				var b = from_json("{\"$type\":\"S2\",\"$val\":{\"v\":3}}");
-				"" + a.v + "|" + b.v + "|" + to_json(b) + "|" + to_json(P());
+				`${a.v}|${b.v}|${to_json(b)}|${to_json(P())}`;
 			)", "13|300|{\"$type\":\"S2\",\"$val\":{\"v\":3}}|{\"$type\":\"P\",\"$val\":{\"raw\":1}}");
 		});
 		test("array_slice_defaults_and_removal_presence", [this]() {
@@ -2291,9 +2290,9 @@ private:
 			expect("default sort", R"(
 				class K { int v = 0; K(int x) { v = x; } }
 				class L { int v = 0; L(int x) { v = x; } bool operator<(L o) { return v < o.v; } }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { array<L> ls = [L(3), L(1), L(2)]; ls.sort(); return "" + ls[0].v + ls[1].v + ls[2].v; }) + "|" +
-				t([]() { var ls = [L(3), L(1), L(2)]; ls.sort(); return "" + ls[0].v + ls[1].v + ls[2].v; }) + "|" +
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				t([]() { array<L> ls = [L(3), L(1), L(2)]; ls.sort(); return `${ls[0].v}${ls[1].v}${ls[2].v}`; }) + "|" +
+				t([]() { var ls = [L(3), L(1), L(2)]; ls.sort(); return `${ls[0].v}${ls[1].v}${ls[2].v}`; }) + "|" +
 				t([]() { array<K> ks = [K(3), K(1)]; ks.sort(); return "sorted"; }) + "|" +
 				t([]() { var a = [[3], [1]]; a.sort(); return "sorted"; }) + "|" +
 				t([]() { var a = [3, "a", 1.5, true]; a.sort(); return to_json(a); });
@@ -2332,13 +2331,13 @@ private:
 				g = 3;
 				H::s = 2;
 				ns::n = 6;
-				"" + local() + "|" + auto_local() + "|" + field() + "|" + bare() + "|" + this_field() + "|" + g.v + "|" + H::s.v + "|" + ns::n.v;
+				`${local()}|${auto_local()}|${field()}|${bare()}|${this_field()}|${g.v}|${H::s.v}|${ns::n.v}`;
 			)", "50|40|50|70|80|30|20|60");
 		});
 		test("operator_assign_value_is_the_destination_and_a_copy", [this, OK]() {
 			expect("expression value", std::string(OK) + R"(
-				function local() -> string { OK2 a = OK2(); var r = (a = 6); r.v = 1; return type_of(r) + ":" + a.v; }
-				function global() -> string { var r = (g = 9); r.v = 2; return type_of(r) + ":" + g.v; }
+				function local() -> string { OK2 a = OK2(); var r = (a = 6); r.v = 1; return `${type_of(r)}:${a.v}`; }
+				function global() -> string { var r = (g = 9); r.v = 2; return `${type_of(r)}:${g.v}`; }
 				local() + "|" + global();
 			)", "OK2:60|OK2:90");
 		});
@@ -2351,7 +2350,7 @@ private:
 					B2 c = B2(); c = D2();
 					B2 d = B2(); d = 3;
 					B2 e = 4;
-					return "" + a.v + "|" + c.v + "|" + d.v + "|" + e.v;
+					return `${a.v}|${c.v}|${d.v}|${e.v}`;
 				}
 				run();
 			)", "7|42|300|4");
@@ -2453,10 +2452,10 @@ private:
 				namespace ns { int m = 12; }
 				int calls = 0;
 				function at() -> int { calls += 1; return 0; }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { int x = 6; x &= 3; x |= 8; x ^= 1; x <<= 2; x >>= 1; return x; }) + "|" +
-				t([]() { Flags o; o.f |= 6; o.bump(); Flags::s <<= 4; ns::m &= 4; return "" + o.f + " " + Flags::s + " " + ns::m; }) + "|" +
-				t([]() { array<int> a = [5, 3]; var v = [12]; map<string, int> m = {"k": 0}; a[at()] &= 4; v[0] >>= 2; m["k"] |= 3; return "" + a[0] + " " + v[0] + " " + m["k"] + " " + calls; }) + "|" +
+				t([]() { Flags o; o.f |= 6; o.bump(); Flags::s <<= 4; ns::m &= 4; return `${o.f} ${Flags::s} ${ns::m}`; }) + "|" +
+				t([]() { array<int> a = [5, 3]; var v = [12]; map<string, int> m = {"k": 0}; a[at()] &= 4; v[0] >>= 2; m["k"] |= 3; return `${a[0]} ${v[0]} ${m["k"]} ${calls}`; }) + "|" +
 				t([]() { int x = 5; int y = (x ^= 3); return y; }) + "|" +
 				t([]() { var s = 1.5; s &= 1; return s; }) + "|" +
 				t([]() { int x = 1; x <<= 64; return x; }) + "|" +
@@ -2494,7 +2493,7 @@ private:
 		test("file_name_is_lexical_and_parent_dir_canonicalizes", [this]() {
 			expect("locations", R"(
 				string d = working_dir();
-				"" + file_name("no/such/dir/x.jai") + "|" + to_string(parent_dir(d + "/x.jai") == parent_dir(d + "/sub/../x.jai"));
+				`${file_name("no/such/dir/x.jai")}|${to_string(parent_dir(d + "/x.jai") == parent_dir(d + "/sub/../x.jai"))}`;
 			)", "x.jai|true");
 		});
 		test("a_bare_engine_has_no_host_file_functions", [this]() {
@@ -2541,8 +2540,7 @@ private:
 			// docs/site/guide/04-operators.html, C++ precedence (lowest to highest): assignment (right), ternary (right), ||, &&, |, ^, &, equality, relational, shift, additive
 			expect("precedence", R"(
 				var a = 0; var b = 0; a = b = 5;
-				"" + a + b + "|" + to_string(true || false && false) + "|" + (1 | 2 ^ 3) + "|" + to_string(1 < 2 == true) + "|" + (1 << 2 + 1) + "|" +
-				(-2 * 3) + "|" + to_string(!false == true) + "|" + (2 | 1 ^ 3 & 1) + "|" + (8 >> 1 + 1) + "|" + (true ? 1 : false ? 2 : 3) + (false ? 1 : true ? 2 : 3);
+				`${a}${b}|${to_string(true || false && false)}|${(1 | 2 ^ 3)}|${to_string(1 < 2 == true)}|${(1 << 2 + 1)}|${(-2 * 3)}|${to_string(!false == true)}|${(2 | 1 ^ 3 & 1)}|${(8 >> 1 + 1)}|${(true ? 1 : false ? 2 : 3)}${(false ? 1 : true ? 2 : 3)}`;
 			)", "55|true|1|true|8|-6|true|2|2|12");
 		});
 		test("guide_function_and_lambda_examples", [this]() {
@@ -2553,7 +2551,7 @@ private:
 				function g(int x) { return x > 0 ? x : throw "neg"; }
 				function f() -> int { int a = 1; int m = 10; auto h = [&, m]() { a = 7; }; h(); return a * 100 + m; }
 				string e = ""; try { g(-1); } catch (x) { e = x; }
-				"" + mul4(2.5, 2) + "|" + pick(true) + "|" + pick(false) + "|" + ops["square"](7) + "|" + g(2) + "|" + e + "|" + f();
+				`${mul4(2.5, 2)}|${pick(true)}|${pick(false)}|${ops["square"](7)}|${g(2)}|${e}|${f()}`;
 			)", "5.0|42|none|49|2|neg|710");
 		});
 		test("guide_class_examples", [this]() {
@@ -2565,7 +2563,7 @@ private:
 				class A { int v = 1; };
 				class Vec { float x = 0.0; Vec(float a) { x = a; } Vec operator+(Vec o) { return Vec(x + o.x); } }
 				string err = ""; try { var t = cast<Tiger&>(Cat()).stripes; } catch (x) { err = x; }
-				"" + err + "|" + C().m() + "|" + S().use() + " " + S::st() + "|" + A().v + "|" + (Vec(1.0) + Vec{3.0}).x;
+				`${err}|${C().m()}|${S().use()} ${S::st()}|${A().v}|${(Vec(1.0) + Vec{3.0}).x}`;
 			)", "Cannot cast 'Cat' to 'Tiger&'|59|7 4|1|4.0");
 		});
 		test("guide_container_and_string_examples", [this]() {
@@ -2576,7 +2574,7 @@ private:
 				map<var, int> anything = {}; anything[5] = 1; anything["five"] = 5;
 				var s = "Jai\x21"; var word = (s[0] + 0) | ((s[1] + 0) << 8);
 				var e = ""; try { var z = 10 / 0; } catch (x) { e = x; }
-				c + "|" + to_json(g) + "|" + to_json(anything) + "|" + "b".compare("a") + "|" + word + "|" + e + "|" + `[${"ab":^5}] [${7:*^4}]`;
+				c + "|" + to_json(g) + "|" + to_json(anything) + "|" + to_string("b".compare("a")) + "|" + to_string(word) + "|" + e + "|" + `[${"ab":^5}] [${7:*^4}]`;
 			)", "Cannot push 'string' to array<int>|[1,2,3]|{\"$map\":[[5,1],[\"five\",5]]}|1|24906|Division by zero|[ ab  ] [*7**]");
 		});
 		test("guide_parallel_transform_rows", [this]() {
@@ -2598,7 +2596,7 @@ private:
 				array<int> a = [1, 2, 3];
 				string r = "ok";
 				try { parallel_for (auto& x : a) { x = helper(x); } } catch (e) { r = e; }
-				to_string(r.contains("enclosing state 'g'")) + "|" + to_json(a) + "|" + g;
+				`${to_string(r.contains("enclosing state 'g'"))}|${to_json(a)}|${g}`;
 			)", "true|[1,2,3]|0");
 		});
 		test("cells_in_a_parallel_worker_match_the_serial_rows", [this]() {
@@ -2608,7 +2606,7 @@ private:
 				var rows = []; for (int i = 0; i < 64; i++) { rows.push(i); }
 				var par = parallel_transform(rows, f);
 				int bad = 0; for (int i = 0; i < 64; i++) { if (par[i] != f(i)) { bad++; } }
-				"" + bad + "|" + par[0];
+				`${bad}|${par[0]}`;
 			)", "0|131");
 		});
 		test("parallel_for_iterates_arrays_only", [this]() {
@@ -2629,16 +2627,9 @@ private:
 				function t(function f) -> string { string r = "none"; try { f(); } catch (e) { r = e; } return r; }
 				string top = "none";
 				try { Probe q = Probe(); q.v = -1; } catch (e) { top = e; }
-				string in_fn() { Probe p = Probe(); string r = "none"; try { p.v = -2; } catch (e) { r = e; } return r + ":" + p.v; }
+				string in_fn() { Probe p = Probe(); string r = "none"; try { p.v = -2; } catch (e) { r = e; } return `${r}:${p.v}`; }
 				Probe p = Probe();
-				top + "|" + in_fn() + "|" +
-				t([]() { Probe a = Probe(); a.v = -3; }) + "|" +
-				t([]() { Probe a = Probe(); a.lv = 500; }) + "|" +
-				t([]() { Probe a = Probe(); var x = a.bad; }) + "|" +
-				t([]() { Probe a = Probe(); a.poke(0); }) + "|" +
-				t([]() { Probe a = Probe(); a.v += -9; }) + "|" +
-				t([]() { Probe a = Probe(); var b = a * -1; }) + "|" +
-				(t([]() { Probe a = Probe(); var b = a + 5; }) != "none" ? "operand raised" : "operand accepted") + "|" + p.v;
+				`${top}|${in_fn()}|${t([]() { Probe a = Probe(); a.v = -3; })}|${t([]() { Probe a = Probe(); a.lv = 500; })}|${t([]() { Probe a = Probe(); var x = a.bad; })}|${t([]() { Probe a = Probe(); a.poke(0); })}|${t([]() { Probe a = Probe(); a.v += -9; })}|${t([]() { Probe a = Probe(); var b = a * -1; })}|${(t([]() { Probe a = Probe(); var b = a + 5; }) != "none" ? "operand raised" : "operand accepted")}|${p.v}`;
 			)";
 			every_config("native boundary", "negative v|negative v:1|negative v|lv too big|getter failed|poke zero|negative v|negative scale|operand raised|1",
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(spec::in_warn_region(src))); });
@@ -2691,7 +2682,7 @@ private:
 			class Thief { int steal(Wallet w) { return w.secret; } }
 			function t(function f) -> string {
 				string r = "";
-				try { r = "" + f(); }
+				try { r = `${f()}`; }
 				catch (e) {
 					r = e == "Cannot access private member 'secret' of class 'Wallet'" ? "S"
 					  : e == "Cannot access private member 'hidden' of class 'Wallet'" ? "H"
@@ -2822,7 +2813,7 @@ private:
 			function trip(var v) -> string { return to_json(from_json(to_json(v))) + " " + to_json(from_binary(to_binary(v))); }
 			function t(function f) -> string {
 				string r = "";
-				try { r = "" + f(); }
+				try { r = `${f()}`; }
 				catch (e) {
 					r = e == "Cannot access private constructor of class 'Token'" ? "X"
 					  : e == "Cannot access private constructor of class 'Mixed'" ? "M"
@@ -2904,7 +2895,7 @@ private:
 				function t7() -> int { auto l = [=]() { g = 11; }; l(); return g; }
 				function t8() -> int { int k = 1; auto l = [=]() { return k; }; k = 2; return l(); }
 				function t9() -> int { int k = 1; auto l = [&]() { return k; }; k = 2; return l(); }
-				"" + t1() + "," + t2() + "," + t3() + "," + t4() + "," + t5() + "," + t6() + "," + t7() + "," + t8() + "," + t9();
+				`${t1()},${t2()},${t3()},${t4()},${t5()},${t6()},${t7()},${t8()},${t9()}`;
 			)", "5,6,6,8,8,10,11,1,2");
 		});
 		test("a_top_level_lambda_reads_a_global_when_it_runs", [this]() {
@@ -2913,7 +2904,7 @@ private:
 				var h2 = 1; auto lc = [h2]() { return h2; }; h2 = 2;
 				function make() { return [=]() { return h; }; }
 				auto late = make(); h = 3;
-				"" + lh() + "," + lc() + "," + late();
+				`${lh()},${lc()},${late()}`;
 			)", "3,1,3");
 		});
 		test("an_init_capture_copies_its_expression_at_creation", [this]() {
@@ -2930,7 +2921,7 @@ private:
 					auto d = [cp = arr]() { return cp.size(); };
 					[[warn_mode]] arr.push(2);
 					auto e = [=, w = 5]() { return w + x; };
-					return "" + a() + "," + bz + "," + y + "," + c() + "," + x + "," + d() + "," + e();
+					return `${a()},${bz},${y},${c()},${x},${d()},${e()}`;
 				}
 				run();
 			)", "20,3,100,q!,1,1,6");
@@ -2955,14 +2946,14 @@ private:
 				class O { int f = 1; static int s = 1; int self_add() { this.f += (f = 10); return f; } }
 				namespace ns { int x = 1; }
 				O G = O();
-				O& obj() { LOG += "t" + K; return G; }
-				class H { int f = 1; int _get_g() { LOG += "g" + K; return f; } void _set_g(int v) { LOG += "s" + K; f = v; } }
+				O& obj() { LOG += `t${K}`; return G; }
+				class H { int f = 1; int _get_g() { LOG += `g${K}`; return f; } void _set_g(int v) { LOG += `s${K}`; f = v; } }
 				H hh = H();
 				function t(function f) -> string { LOG = ""; K = 0; f(); return LOG; }
 				function field() -> int { O o = O(); o.f += (o.f = 10); return o.f; }
 				t([]() { obj().f += ++K; }) + "|" + t([]() { hh.g += ++K; }) + "|" +
-				t([]() { O::s += (K = 3); LOG += "" + O::s; }) + "|" + t([]() { ns::x += (K = 4); LOG += "" + ns::x; }) + "|" +
-				field() + "|" + O().self_add();
+				t([]() { O::s += (K = 3); LOG += `${O::s}`; }) + "|" + t([]() { ns::x += (K = 4); LOG += `${ns::x}`; }) + "|" +
+				to_string(field()) + "|" + to_string(O().self_add());
 			)", "t1|g1s1|4|5|20|20", warn_region);
 		});
 		test("a_right_side_error_comes_before_the_targets", [this]() {
@@ -2982,13 +2973,12 @@ private:
 				string LOG = ""; int K = 0;
 				array<int> A = [1, 2, 3];
 				map<string, int> M = {"k": 1};
-				function idx() -> int { LOG += "j" + K; return 1; }
-				function key() -> string { LOG += "k" + K; return "k"; }
+				function idx() -> int { LOG += `j${K}`; return 1; }
+				function key() -> string { LOG += `k${K}`; return "k"; }
 				function t(function f) -> string { LOG = ""; K = 0; f(); return LOG; }
 				function self_write() -> int { array<int> a = [1, 2, 3]; a[1] += (a[1] = 10); return a[1]; }
-				function index_write() -> string { array<int> a = [1, 2, 3]; int i = 0; a[i] += (i = 2); return "" + a[0] + a[2]; }
-				t([]() { A[idx()] += ++K; }) + "|" + t([]() { A[idx()] = ++K; }) + "|" + t([]() { M[key()] += ++K; }) + "|" +
-				self_write() + "|" + index_write();
+				function index_write() -> string { array<int> a = [1, 2, 3]; int i = 0; a[i] += (i = 2); return `${a[0]}${a[2]}`; }
+				`${t([]() { A[idx()] += ++K; })}|${t([]() { A[idx()] = ++K; })}|${t([]() { M[key()] += ++K; })}|${self_write()}|${index_write()}`;
 			)", "j1|j1|k1|20|15", warn_region);
 		});
 		test("a_right_side_error_comes_before_the_subscripts", [this]() {
@@ -3018,7 +3008,7 @@ private:
 				auto z = v; z = "t";
 				auto w = f(); w = 1.5;
 				auto m = c ? 1 : "q"; m = 2.5;
-				type_of(x) + ":" + x + "|" + type_of(y) + ":" + y + "|" + type_of(z) + ":" + z + "|" + type_of(w) + ":" + w + "|" + type_of(m) + ":" + m;
+				`${type_of(x)}:${x}|${type_of(y)}:${y}|${type_of(z)}:${z}|${type_of(w)}:${w}|${type_of(m)}:${m}`;
 			)";
 			const std::string want = "string:s|float:2.5|string:t|float:1.5|float:2.5";
 			expect("auto from var (warn region)", src, want, warn_region);
@@ -3030,10 +3020,10 @@ private:
 				class P { int n = 0; }
 				auto n = 5; n = 1.5;
 				auto e = ai[0]; e = 2.9;
-				auto s = "a"; s = "b" + 5;
+				auto s = "a"; s = `b${5}`;
 				auto p = P();
 				function t(function g) -> string { string r = "none"; try { g(); } catch (err) { r = err; } return r; }
-				type_of(n) + ":" + n + "|" + type_of(e) + ":" + e + "|" + s + "|" + t([]() { auto q = P(); var o = 5; q = o; });
+				`${type_of(n)}:${n}|${type_of(e)}:${e}|${s}|${t([]() { auto q = P(); var o = 5; q = o; })}`;
 			)";
 			expect("auto from known", src, "int:1|int:2|b5|Cannot assign int to 'q' (declared P)", warn_region);
 		});
@@ -3041,12 +3031,12 @@ private:
 			expect("auto in loops", R"(
 				function from_var() -> string {
 					var arr = [1, 2, 3]; string s = "";
-					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += "" + x + " "; }
+					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += `${x} `; }
 					return s;
 				}
 				function from_ints() -> string {
 					array<int> arr = [1, 2, 3]; string s = "";
-					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += "" + x + " "; }
+					for (int i = 0; i < 3; i++) { auto x = arr[i]; x = x + 0.5; s += `${x} `; }
 					return s;
 				}
 				function sum_var() -> float {
@@ -3054,12 +3044,12 @@ private:
 					for (int i = 0; i < 3; i++) { auto x = arr[i]; x += 0.25; total += x; }
 					return total;
 				}
-				from_var() + "|" + from_ints() + "|" + sum_var();
+				`${from_var()}|${from_ints()}|${sum_var()}`;
 			)", "1.5 2.5 3.5 |1 2 3 |6.75", warn_region);
 		});
 		test("a_jaibite_keeps_the_auto_spelling_and_types_it_again_at_load", [this]() {
 			every_config("auto through jaibite", "string:s|int:1", [](engine& e) {
-				auto bite = e.jaibite(spec::in_warn_region("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = 1.5; type_of(x) + \":\" + x + \"|\" + type_of(n) + \":\" + n;"));
+				auto bite = e.jaibite(spec::in_warn_region("var arr = [1]; auto x = arr[0]; x = \"s\"; auto n = 5; n = 1.5; `${type_of(x)}:${x}|${type_of(n)}:${n}`;"));
 				std::string first = spec::render(e.execute(bite));
 				auto loaded = e.jaibite_load_bytes(bite.save_bytes());
 				std::string second = spec::render(e.execute(loaded));
@@ -3086,7 +3076,7 @@ private:
 				array<int> b = [1, 2];
 				function g() -> int { b[1] = 99; return 0; }
 				a[g()] = b[1];
-				string s = "" + a[0];
+				string s = `${a[0]}`;
 				b[1] = 2; a[0] = 0;
 				a[g()] += b[1];
 				s + " " + a[0];
@@ -3108,7 +3098,7 @@ private:
 				class H { V f = V(); void set_many() { for (int i = 0; i < 4; i = i + 1) { f = i; } } }
 				var h = H();
 				h.set_many();
-				"" + assigns + " " + h.f.v;
+				`${assigns} ${h.f.v}`;
 			)", "4 3", warn_region);
 		});
 		test("f7_an_argument_ahead_of_a_class_operator_takes_its_value_when_evaluated", [this]() {
@@ -3135,7 +3125,7 @@ private:
 				var r2 = 0; r2 = (a[0] = 3.9);
 				string r3 = to_string(a[0] = 4.9);
 				var r4 = id(C::s = 5.9);
-				type_of(r1) + ":" + r1 + " " + type_of(r2) + ":" + r2 + " " + r3 + " " + type_of(r4) + ":" + r4;
+				`${type_of(r1)}:${r1} ${type_of(r2)}:${r2} ${r3} ${type_of(r4)}:${r4}`;
 			)", "int:3 int:3 4 int:5", warn_region);
 		});
 		test("f2_a_handle_store_yields_a_value", [this]() {
@@ -3147,7 +3137,7 @@ private:
 				auto r2 = (w = sp);
 				shared_ptr<Foo> s2 = Foo();
 				auto r3 = (s2 = null);
-				"" + (r1 == null) + " " + (r2 != null) + " " + (r3 == null);
+				`${(r1 == null)} ${(r2 != null)} ${(r3 == null)}`;
 			)", "true true true", warn_region);
 		});
 		test("f6_a_coroutine_whose_body_threw_is_completed", [this]() {
@@ -3185,12 +3175,12 @@ private:
 				K GK = K();
 				function i1(Box p) -> int { K k = GK; int t = k + 1; return p.n; }
 				function i2(Box p) -> int { K k = GK; if (k) { return p.n; } return 0; }
-				string s = "" + f(G);
-				G.n = 1; s += " " + f2(G);
-				s += " " + g(GB);
-				s += " " + h(GC);
-				G.n = 1; s += " " + i1(G);
-				G.n = 1; s += " " + i2(G);
+				string s = `${f(G)}`;
+				G.n = 1; s += ` ${f2(G)}`;
+				s += ` ${g(GB)}`;
+				s += ` ${h(GC)}`;
+				G.n = 1; s += ` ${i1(G)}`;
+				G.n = 1; s += ` ${i2(G)}`;
 				s;
 			)", "1 1 31 31 1 1", warn_region);
 		});
@@ -3263,7 +3253,7 @@ private:
 				function d3() -> int { int x = 1; return x + g(++x); }
 				function d4() -> int { int x = 1; return x + g(x += 7); }
 				function d5() -> int { int x = 1; return x + g([x = 5]); }
-				"" + b1() + "," + b2() + "," + b3() + "," + b4() + "," + b5() + "|" + d1() + "," + d2() + "," + d3() + "," + d4() + "," + d5();
+				`${b1()},${b2()},${b3()},${b4()},${b5()}|${d1()},${d2()},${d3()},${d4()},${d5()}`;
 			)", "1,1,1,1,1|1,1,1,1,1");
 		});
 		test("a_throw_runs_the_destructors_of_the_frames_it_unwinds", [this]() {
@@ -3425,7 +3415,7 @@ private:
 				 "function rec7(int n) -> int { if (n <= 0) { int v = leaf(n); return v; } return rec7(n - 1) + 1; }\n"
 				 "function run() -> string { string s = \"\"; for (int k = 250; k <= 258; k++) { try { rec7(k); s += \"+\"; } catch (e) { s += \"-\"; } } return s; } run();", "++++-----"},
 				{"the fuzz seed's shape", "function rec6(int n7) -> int { if (n7 <= 0) { return 0; } return n7 + rec6(n7 - 1); }\n"
-				 "string s = \"\"; try { s += \"\" + rec6(rec6(41)); } catch (e) { s += \"caught\"; } try { s += \"|\" + rec6(9223372036854775807); } catch (e) { s += \"|caught\"; } s;",
+				 "string s = \"\"; try { s += `${rec6(rec6(41))}`; } catch (e) { s += \"caught\"; } try { s += \"|\" + rec6(9223372036854775807); } catch (e) { s += \"|caught\"; } s;",
 				 "caught|caught"},
 			};
 			for (const auto& r : rows) {
@@ -3457,10 +3447,10 @@ private:
 			// docs/site/guide/05-control-flow.html "try / catch / throw": a store through a property reference whose host setter refuses raises natively inside the
 			// statement; the function's own try catches it, else it unwinds to the caller's
 			const std::string src = R"(
-				function f() -> string { Probe a = Probe(); var& r = a.lv; string s = "none"; try { r = 500; } catch (e) { s = "own:" + e; } return s + ":" + a.lv; }
-				Probe b = Probe(); var& rb = b.lv; string top = "none"; try { rb = 700; } catch (e) { top = "top:" + e; }
+				function f() -> string { Probe a = Probe(); var& r = a.lv; string s = "none"; try { r = 500; } catch (e) { s = `own:${e}`; } return `${s}:${a.lv}`; }
+				Probe b = Probe(); var& rb = b.lv; string top = "none"; try { rb = 700; } catch (e) { top = `top:${e}`; }
 				function g() -> string { Probe a = Probe(); var& r = a.lv; r = 900; return "unreached"; }
-				function h() -> string { string s = "none"; try { g(); } catch (e) { s = "caller:" + e; } return s; }
+				function h() -> string { string s = "none"; try { g(); } catch (e) { s = `caller:${e}`; } return s; }
 				f() + "|" + top + "|" + h();
 			)";
 			every_config("own try", "own:lv too big:1|top:lv too big|caller:lv too big",
@@ -3515,9 +3505,9 @@ private:
 				class V { int n = 0; V(int x) { n = x; } int operator<=>(V o) { return n - o.n; } int operator<=>(int k) { return n - k; } }
 				class S { int n = 0; S(int x) { n = x; } int operator<=>(S o) { return n - o.n; } }
 				class Plain { int n = 1; }
-				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
-				string rev = "" + (5 < V(7)) + " " + (5 <= V(5)) + " " + (5 > V(7)) + " " + (9 >= V(7)) + " " + (5 <=> V(7)) + " " + (9 <=> V(7)) + " " + (7 <=> V(7));
-				string fwd = "" + (V(7) > 5) + " " + (V(7) <=> 5);
+				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
+				string rev = `${(5 < V(7))} ${(5 <= V(5))} ${(5 > V(7))} ${(9 >= V(7))} ${(5 <=> V(7))} ${(9 <=> V(7))} ${(7 <=> V(7))}`;
+				string fwd = `${(V(7) > 5)} ${(V(7) <=> 5)}`;
 				string loops = "";
 				for (int i = 0; i < V(3); i += 1) { loops += to_string(i); }
 				rev + "|" + fwd + "|" + loops + "|" + t([]() { return 5 < S(1); }) + "|" + t([]() { Plain p; return p < V(1); }) + "|" + t([]() { return 5 <=> S(1); });
@@ -3535,13 +3525,13 @@ private:
 				class Plain { int n = 1; }
 				class M { int n = 0; M(int x) { n = x; } }
 				var nul = null;
-				string z = "" + (Z(13) == Z(3)) + " " + (Z(13) != Z(3)) + " " + (Z(13) == Z(4)) + " " + (Z(13) != Z(4)) + " " + (Z(1) == nul) + " " + (Z(1) != nul);
-				string declared = "" + (E(1) == E(1)) + " " + (E(1) != E(1));
+				string z = `${(Z(13) == Z(3))} ${(Z(13) != Z(3))} ${(Z(13) == Z(4))} ${(Z(13) != Z(4))} ${(Z(1) == nul)} ${(Z(1) != nul)}`;
+				string declared = `${(E(1) == E(1))} ${(E(1) != E(1))}`;
 				Plain p; Any a; Strict s;
-				string reversed = "" + (p == a) + " " + (p != a) + " " + (a == p) + " " + (p == s) + " " + (s == p);
-				string plain = "" + (M(1) == M(1)) + " " + (M(1) == M(2));
+				string reversed = `${(p == a)} ${(p != a)} ${(a == p)} ${(p == s)} ${(s == p)}`;
+				string plain = `${(M(1) == M(1))} ${(M(1) == M(2))}`;
 				array<var> xs = [Z(13), Z(24)]; array<var> ys = [Z(3), Z(4)];
-				string nested = "" + (xs == ys) + " " + (xs != ys);
+				string nested = `${(xs == ys)} ${(xs != ys)}`;
 				z + "|" + declared + "|" + reversed + "|" + plain + "|" + nested;
 			)", "true false false true false true|false true|true false true false false|true false|true false", warn_region);
 		});
@@ -3557,23 +3547,22 @@ private:
 				class Tagged { int n = 0; Tagged(int x) { n = x; } bool operator==(int k) { return k == 42; } int operator<=>(int k) { return n - k; } }
 				class OnlyEq { int n = 0; bool operator==(var o) { return true; } }
 				class S { int n = 0; S(int x) { n = x; } int operator<=>(S o) { return n - o.n; } }
-				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
 				Money m = Money(500); var nul = null; OnlyEq oe;
-				string money = "" + (m == 500) + " " + (500 == m) + " " + (m != 500) + " " + (500 != m) + " " + (m == 501) + " " + (m < 600) + " " +
-				    (600 > m) + " " + (m >= 500) + " " + (499 < m) + " " + (m <=> 500) + " " + (400 <=> m);
-				string tagged = "" + (Tagged(1) == 42) + " " + (Tagged(1) == 1) + " " + (42 == Tagged(1)) + " " + (Tagged(1) != 42) + " " + (Tagged(3) < 4);
-				string plain = "" + (oe == 5) + " " + (5 == oe);
-				string strict = "" + (S(1) == 1) + " " + (1 == S(1)) + " " + t([]() { return S(1) < 1; }) + " " + t([]() { return 1 < S(1); });
-				string nulls = "" + (m == nul) + " " + (m != nul);
+				string money = `${(m == 500)} ${(500 == m)} ${(m != 500)} ${(500 != m)} ${(m == 501)} ${(m < 600)} ${(600 > m)} ${(m >= 500)} ${(499 < m)} ${(m <=> 500)} ${(400 <=> m)}`;
+				string tagged = `${(Tagged(1) == 42)} ${(Tagged(1) == 1)} ${(42 == Tagged(1))} ${(Tagged(1) != 42)} ${(Tagged(3) < 4)}`;
+				string plain = `${(oe == 5)} ${(5 == oe)}`;
+				string strict = `${(S(1) == 1)} ${(1 == S(1))} ${t([]() { return S(1) < 1; })} ${t([]() { return 1 < S(1); })}`;
+				string nulls = `${(m == nul)} ${(m != nul)}`;
 				class N { int k = 0; float operator<=>(int x) { return math::NAN_VALUE; } }
 				N nn;
-				nulls += " " + (5 <=> nn) + " " + (5 < nn) + " " + (nn == 5);   // the reversed <=> orders like the builtin one: NaN last
+				nulls += ` ${(5 <=> nn)} ${(5 < nn)} ${(nn == 5)}`;   // the reversed <=> orders like the builtin one: NaN last
 				array<var> prices = [Money(300), 100, Money(200)];
-				string found = "" + (prices.contains(100)) + " " + (prices.index_of(200));
+				string found = `${(prices.contains(100))} ${(prices.index_of(200))}`;
 				array<var> ms = [Money(300), Money(100), Money(200)]; ms.sort();
 				array<var> mix = [Money(300), 100, Money(200)]; mix.sort();
-				string sorted = "" + ms[0].cents + ms[1].cents + ms[2].cents + " " + (mix[0] == 100) + " " + (mix[1] == 200) + " " + (mix[2] == 300);
-				money + "|" + tagged + "|" + plain + "|" + strict + "|" + nulls + "|" + found + "|" + sorted;
+				string sorted = `${ms[0].cents}${ms[1].cents}${ms[2].cents} ${(mix[0] == 100)} ${(mix[1] == 200)} ${(mix[2] == 300)}`;
+				`${money}|${tagged}|${plain}|${strict}|${nulls}|${found}|${sorted}`;
 			)", "true true false false false true true true true 0 -1|true false true false true|false false|false false Invalid operands for < operator Invalid operands for < operator|false true -1 false false|true 2|100200300 true true true", warn_region);
 		});
 	}
@@ -3694,8 +3683,7 @@ private:
 					string ran = "no";
 					int triple(int x) { return x * 3; }
 					run0([&]() { ran = "ran"; });
-					"" + apply(x => x * 3, 4) + " " + apply([](int x) { return x * 3; }, 4) + " " + apply(triple, 4) + " " + ran + " " +
-					twice(x => x * 2, 2);
+					`${apply(x => x * 3, 4)} ${apply([](int x) { return x * 3; }, 4)} ${apply(triple, 4)} ${ran} ${twice(x => x * 2, 2)}`;
 				)"));
 			});
 		});
@@ -3704,7 +3692,7 @@ private:
 			every_config("enum parameter", "1 0 1", [&](engine& e) {
 				e.add_function("mood_of", [](mood m) { return static_cast<int64_t>(m); });
 				e.add_function("give_mood", []() { return mood::angry; });
-				return spec::render(e.execute("\"\" + mood_of(1) + \" \" + mood_of(0) + \" \" + give_mood();"));
+				return spec::render(e.execute("`${mood_of(1)} ${mood_of(0)} ${give_mood()}`;"));
 			});
 		});
 	}
@@ -3722,7 +3710,7 @@ private:
 				e.add_global_ref("hp", hp);
 				std::string out;
 				lax("auto& r = hp; r = 5;"); out += std::to_string(hp);
-				hp = 42; out += " " + spec::render(lax("\"\" + hp + \",\" + r;"));
+				hp = 42; out += " " + spec::render(lax("`${hp},${r}`;"));
 				lax("r += 1;"); out += " " + std::to_string(hp);
 				lax("++r;"); out += " " + std::to_string(hp);
 				lax("r++;"); out += " " + std::to_string(hp);
@@ -3800,15 +3788,15 @@ private:
 				class D : V { D(int x) : super(x) {} }
 				class G { float n = 0.0; G(float x) { n = x; } float operator<=>(G o) { return n - o.n; } }
 				V a = V(1); V b = V(2);
-				string rel = "" + (a < b) + " " + (a <= b) + " " + (a > b) + " " + (a >= b) + " " + (b > a) + " " + (a <= V(1)) + " " + (a >= V(1)) + " " + (a < V(1));
-				string sub = "" + (D(3) < D(4)) + " " + (D(3) >= D(4));
-				string fl = "" + (G(0.5) < G(0.75)) + " " + (G(0.75) > G(0.5)) + " " + (G(0.5) >= G(0.5));
+				string rel = `${(a < b)} ${(a <= b)} ${(a > b)} ${(a >= b)} ${(b > a)} ${(a <= V(1))} ${(a >= V(1))} ${(a < V(1))}`;
+				string sub = `${(D(3) < D(4))} ${(D(3) >= D(4))}`;
+				string fl = `${(G(0.5) < G(0.75))} ${(G(0.75) > G(0.5))} ${(G(0.5) >= G(0.5))}`;
 				string branch = "";
 				if (a < b) { branch += "lt"; }
 				if (!(a > b)) { branch += "!gt"; }
 				int k = 0;
 				for (V i = V(0); i < V(3); i = V(i.n + 1)) { k += 1; }
-				rel + "|" + sub + "|" + fl + "|" + branch + " " + k;
+				`${rel}|${sub}|${fl}|${branch} ${k}`;
 			)", "true true false false true true true false|true false|true true true|lt!gt 3");
 		});
 		test("a_declared_relational_operator_wins_over_the_rewrite", [this]() {
@@ -3817,7 +3805,7 @@ private:
 				class W { int n = 0; W(int x) { n = x; } int operator<=>(W o) { return n - o.n; } bool operator<(W o) { return true; } }
 				class B { int n = 0; B(int x) { n = x; } bool operator>=(B o) { return false; } }
 				class C : B { C(int x) : super(x) {} int operator<=>(C o) { return n - o.n; } }
-				"" + (W(5) < W(1)) + " " + (W(5) > W(1)) + " " + (W(1) > W(5)) + " " + (W(1) <= W(5)) + "|" + (C(5) >= C(1)) + " " + (C(5) > C(1));
+				`${(W(5) < W(1))} ${(W(5) > W(1))} ${(W(1) > W(5))} ${(W(1) <= W(5))}|${(C(5) >= C(1))} ${(C(5) > C(1))}`;
 			)", "true true false true|false true");
 		});
 		test("spaceship_equality_replaces_the_memberwise_default", [this]() {
@@ -3825,7 +3813,7 @@ private:
 			// never fieldwise
 			expect("== from <=>", R"(
 				class Z { int n = 0; Z(int x) { n = x; } int operator<=>(Z o) { return 0; } }
-				"" + (Z(1) == Z(2)) + " " + (Z(1) != Z(2)) + " " + (Z(1) <= Z(2)) + " " + (Z(1) >= Z(2)) + " " + (Z(3) == Z(3)) + " " + (Z(1) <=> Z(2));
+				`${(Z(1) == Z(2))} ${(Z(1) != Z(2))} ${(Z(1) <= Z(2))} ${(Z(1) >= Z(2))} ${(Z(3) == Z(3))} ${(Z(1) <=> Z(2))}`;
 			)", "true false true true true 0");
 		});
 		test("inequality_rewrites_from_equality_and_a_declared_inequality_wins", [this]() {
@@ -3836,7 +3824,7 @@ private:
 				class F { int n = 0; F(int x) { n = x; } bool operator==(F o) { return true; } bool operator!=(F o) { return true; } }
 				class H : F { H(int x) : super(x) {} }
 				F f = F(1); var nul = null;
-				"" + (E(1) != E(2)) + " " + (E(1) == E(2)) + " " + (F(1) != F(1)) + " " + (F(1) == F(1)) + " " + (H(1) != H(2)) + " " + (f != nul) + " " + (f != 5);
+				`${(E(1) != E(2))} ${(E(1) == E(2))} ${(F(1) != F(1))} ${(F(1) == F(1))} ${(H(1) != H(2))} ${(f != nul)} ${(f != 5)}`;
 			)", "false true true true true true true", warn_region);
 		});
 		test("a_spaceship_rewrite_raises_what_the_operator_raises", [this]() {
@@ -3845,7 +3833,7 @@ private:
 			expect("rewrite errors", R"(
 				class T { int n = 0; T(int x) { n = x; } int operator<=>(T o) { if (o.n == 0) { throw "zero"; } return n - o.n; } }
 				class S { int n = 0; S(int x) { n = x; } string operator<=>(S o) { return "x"; } }
-				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
 				t([]() { return T(1) < T(0); }) + "|" + t([]() { return T(1) < T(2); }) + "|" + t([]() { return S(1) < S(2); }) + "|" + t([]() { return 1 < T(2); });
 			)", "zero|true|Invalid operands for < operator|Invalid operands for < operator", warn_region);
 		});
@@ -3857,11 +3845,11 @@ private:
 			// (typed, dynamic, mixed int/float, a negated condition, a typed loop head, container equality); <=> with a NaN operand
 			// groups NaNs after numbers; a map keeps its total key order (a NaN key is found again)
 			expect("nan", R"(
-				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
 				float n = math::NAN_VALUE; float one = 1.0; var vn = math::NAN_VALUE; int i = 1;
-				string typed = "" + (n == n) + (n != n) + (n < one) + (n <= one) + (n > one) + (n >= one) + (one < n) + (n == one);
-				string dyn = "" + (vn == vn) + (vn != vn) + (vn < 1) + (vn >= 1) + (1 > vn);
-				string mixed = "" + (n == i) + (i < n) + (n != i) + (i >= n);
+				string typed = `${(n == n)}${(n != n)}${(n < one)}${(n <= one)}${(n > one)}${(n >= one)}${(one < n)}${(n == one)}`;
+				string dyn = `${(vn == vn)}${(vn != vn)}${(vn < 1)}${(vn >= 1)}${(1 > vn)}`;
+				string mixed = `${(n == i)}${(i < n)}${(n != i)}${(i >= n)}`;
 				string br = "";
 				if (n < one) { br += "a"; }
 				if (!(n < one)) { br += "b"; }
@@ -3875,9 +3863,9 @@ private:
 				br += to_string(k);
 				string sp = t([]() { float z = math::NAN_VALUE; return z <=> 1.0; }) + "/" + t([]() { var z = math::NAN_VALUE; return 1 <=> z; });
 				array<float> fa = [math::NAN_VALUE, 1.0]; array<float> fb = fa; var va = [math::NAN_VALUE];
-				string arr = "" + (fa == fb) + (fa != fb) + (va == va);
+				string arr = `${(fa == fb)}${(fa != fb)}${(va == va)}`;
 				map<float, int> m = {}; m[math::NAN_VALUE] = 7; m[math::NAN_VALUE] = 8;
-				string mk = "" + m[math::NAN_VALUE] + " " + m.size();
+				string mk = `${m[math::NAN_VALUE]} ${m.size()}`;
 				typed + "|" + dyn + "|" + mixed + "|" + br + "|" + sp + "|" + arr + "|" + mk;
 			)", "falsetruefalsefalsefalsefalsefalsefalse|falsetruefalsefalsefalse|falsefalsetruefalse|bde3|"
 			    "1/-1|falsetruefalse|8 1", warn_region);
@@ -3890,19 +3878,19 @@ private:
 			// refuses with the direct store's text
 			expect("field reference", R"(
 				class O { int f = 0; float g = 0.0; bool b = false; string s = ""; }
-				function t(function fn) -> string { string r = ""; try { r = "" + fn(); } catch (e) { r = e; } return r; }
+				function t(function fn) -> string { string r = ""; try { r = `${fn()}`; } catch (e) { r = e; } return r; }
 				O a; O d;
 				auto& rf = a.f; rf = true; d.f = true;
 				auto& rg = a.g; rg = 3; d.g = 3;
 				auto& rb = a.b; rb = 5; d.b = 5;
 				auto& rs = a.s; rs = "x"; d.s = "x";
-				string plain = ("" + d.f + " " + d.g + " " + d.b + " " + d.s) == ("" + a.f + " " + a.g + " " + a.b + " " + a.s) ? "match" : "differ";
+				string plain = (`${d.f} ${d.g} ${d.b} ${d.s}`) == (`${a.f} ${a.g} ${a.b} ${a.s}`) ? "match" : "differ";
 				rf += 2.7; d.f += 2.7;
 				rb = 0; d.b = 0;
-				string compound = ("" + d.f + " " + d.b) == ("" + a.f + " " + a.b) ? "match " + a.f : "differ " + a.f + " vs " + d.f;
+				string compound = (`${d.f} ${d.b}`) == (`${a.f} ${a.b}`) ? `match ${a.f}` : `differ ${a.f} vs ${d.f}`;
 				string e1 = t([]() { O o; o.f = "x"; return 1; });
 				string e2 = t([]() { O o; auto& r = o.f; r = "x"; return 1; });
-				plain + "|" + compound + "|" + (e1 == e2 ? "same text" : e1 + " vs " + e2);
+				`${plain}|${compound}|${(e1 == e2 ? "same text" : e1 + " vs " + e2)}`;
 			)", "match|match 3|same text", warn_region);
 		});
 	}
@@ -3914,17 +3902,13 @@ private:
 			// lambda wraps them); reflection ignores the class's access control; c2 = C() copy-assigns into the object the callable holds
 			expect("reflect::bind", R"(
 				class C { int n = 0; void bump() { n += 1; } int add(int k) { n += k; return n; } private: void hidden() {} }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				C c; var b = reflect::bind(c, "bump"); b(); b();
 				var add = reflect::bind(c, "add");
 				shared_ptr<C> h = new C(); var hb = reflect::bind(h, "bump"); hb();
 				C c2; var b2 = reflect::bind(c2, "bump"); c2 = C(); b2();
 				var kept = reflect::bind(C(), "add");
-				"" + c.n + " " + add(5) + " " + h.n + " " + c2.n + " " + kept(3) + "|" +
-				    t([]() { var f = reflect::bind([1], "push"); return 1; }) + "|" +
-				    t([]() { string s = "ab"; var f = reflect::bind(s, "to_upper"); return 1; }) + "|" +
-				    t([]() { C k; var f = reflect::bind(k, "nope"); return 1; }) + "|" +
-				    t([]() { C k; var f = reflect::bind(k, "hidden"); return 1; });
+				`${c.n} ${add(5)} ${h.n} ${c2.n} ${kept(3)}|${t([]() { var f = reflect::bind([1], "push"); return 1; })}|${t([]() { string s = "ab"; var f = reflect::bind(s, "to_upper"); return 1; })}|${t([]() { C k; var f = reflect::bind(k, "nope"); return 1; })}|${t([]() { C k; var f = reflect::bind(k, "hidden"); return 1; })}`;
 			)", "2 7 1 1 3|reflect::bind takes a class instance, a handle or a host object; the methods of array run on the value: wrap the call in a lambda ([&]() { ... })|"
 			    "reflect::bind takes a class instance, a handle or a host object; the methods of string run on the value: wrap the call in a lambda ([&]() { ... })|"
 			    "reflect::bind: 'C' has no method 'nope'|1", warn_region);
@@ -3952,11 +3936,9 @@ private:
 					function cast_ref() { return cast<int&>(heal); }
 					function ref_return() -> int& { return heal; }
 				}
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				Player q;
-				"" + q.call_it() + " " + q.local_wins() + " " + q.param_wins(3) + " " + q.in_lambda() + " " + q.static_value() + "|" +
-				    t([]() { Player p; var f = p.get(); return 1; }) + "|" + t([]() { Player p; return p.ref_decl(); }) + "|" +
-				    t([]() { Player p; return p.var_ref_decl(); }) + "|" + t([]() { Player p; return p.cast_ref(); }) + "|" + t([]() { Player p; return p.ref_return(); });
+				`${q.call_it()} ${q.local_wins()} ${q.param_wins(3)} ${q.in_lambda()} ${q.static_value()}|${t([]() { Player p; var f = p.get(); return 1; })}|${t([]() { Player p; return p.ref_decl(); })}|${t([]() { Player p; return p.var_ref_decl(); })}|${t([]() { Player p; return p.cast_ref(); })}|${t([]() { Player p; return p.ref_return(); })}`;
 			)", "6 7 3 7 8|'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
 			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
 			    "'heal' is a method of Player; call it with heal() or bind it with reflect::bind(this, \"heal\")|"
@@ -3993,19 +3975,11 @@ private:
 				class Q { void a() {} function get() { return this.a; } }
 				class H { var cb = null; }
 				coroutine gen() { yield 1; }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				Player player; player.heal();
 				H hh; hh.cb = []() { return 5; }; var g = hh.cb;
 				var co = gen();
-				"" + player.hp + " " + g() + " " + co.next() + "|" +
-				    t([]() { Player p; var f = p.heal; return 1; }) + "|" +
-				    t([]() { shared_ptr<Player> h = new Player(); var f = h.heal; return 1; }) + "|" +
-				    t([]() { Team team; var f = team.lead.heal; return 1; }) + "|" +
-				    t([]() { Q q; return q.get(); }) + "|" +
-				    t([]() { var a = [1]; var f = a.push; return 1; }) + "|" +
-				    t([]() { string s = "x"; var f = s.to_upper; return 1; }) + "|" +
-				    t([]() { map<string, int> m = {}; var f = m.clear; return 1; }) + "|" +
-				    t([]() { var c = gen(); var f = c.next; return 1; });
+				`${player.hp} ${g()} ${co.next()}|${t([]() { Player p; var f = p.heal; return 1; })}|${t([]() { shared_ptr<Player> h = new Player(); var f = h.heal; return 1; })}|${t([]() { Team team; var f = team.lead.heal; return 1; })}|${t([]() { Q q; return q.get(); })}|${t([]() { var a = [1]; var f = a.push; return 1; })}|${t([]() { string s = "x"; var f = s.to_upper; return 1; })}|${t([]() { map<string, int> m = {}; var f = m.clear; return 1; })}|${t([]() { var c = gen(); var f = c.next; return 1; })}`;
 			)", "6 5 1|'heal' is a method of Player; call it with p.heal() or bind it with reflect::bind(p, \"heal\")|"
 			    "'heal' is a method of Player; call it with h.heal() or bind it with reflect::bind(h, \"heal\")|"
 			    "'heal' is a method of Player; call it with team.lead.heal() or bind it with reflect::bind(team.lead, \"heal\")|"
@@ -4051,17 +4025,16 @@ private:
 				class W : V { W(int x) : super(x) {} }
 				class P { int n = 0; P(int x) { n = x; } int operator%(Probe p) { return n % p.v; } }
 				V a = V(12); V b = V(5);
-				string direct = "" + (a % b).n + " " + (a & b).n + " " + (a | b).n + " " + (a ^ 1).n + " " + (a << 2).n + " " + (a >> 2).n + " " +
-				    (a <=> b) + " " + (-a).n + " " + (+a).n + " " + (~a).n + " " + (a - b).n;
+				string direct = `${(a % b).n} ${(a & b).n} ${(a | b).n} ${(a ^ 1).n} ${(a << 2).n} ${(a >> 2).n} ${(a <=> b)} ${(-a).n} ${(+a).n} ${(~a).n} ${(a - b).n}`;
 				V c = V(12);
-				c %= b; string comp = "" + c.n; c &= V(3); comp += " " + c.n; c |= V(4); comp += " " + c.n; c ^= 3; comp += " " + c.n;
-				c <<= 1; comp += " " + c.n; c >>= 2; comp += " " + c.n;
+				c %= b; string comp = `${c.n}`; c &= V(3); comp += ` ${c.n}`; c |= V(4); comp += ` ${c.n}`; c ^= 3; comp += ` ${c.n}`;
+				c <<= 1; comp += ` ${c.n}`; c >>= 2; comp += ` ${c.n}`;
 				W w = W(12);
-				string inherited = "" + (w % b).n + " " + (-w).n + " " + (~w).n;
+				string inherited = `${(w % b).n} ${(-w).n} ${(~w).n}`;
 				Probe pr = Probe(); pr.v = 5;
-				string mixed = "" + (P(12) % pr);
-				string builtin = "" + (7 % 3) + " " + (6 & 3) + " " + (-4) + " " + (+4) + " " + (+2.5) + " " + !0 + " " + (~0);
-				direct + "|" + comp + "|" + inherited + "|" + mixed + "|" + builtin;
+				string mixed = `${(P(12) % pr)}`;
+				string builtin = `${(7 % 3)} ${(6 & 3)} ${(-4)} ${(+4)} ${(+2.5)} ${!0} ${(~0)}`;
+				`${direct}|${comp}|${inherited}|${mixed}|${builtin}`;
 			)";
 			every_config("script operators", "2 4 13 13 48 3 1 -12 112 -13 7|2 2 6 5 10 2|2 -12 -13|2|1 2 -4 4 2.5 true -1",
 				[&](engine& e) { spec::bind_boundary_probe(e); return spec::render(e.execute(src)); });
@@ -4070,7 +4043,7 @@ private:
 			// a unary operator the class lacks (only the binary form declared) raises the builtin operand text; && || stay short-circuit
 			expect("missing operators", R"(
 				class V { int n = 1; V operator-(V o) { return V(); } }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { V v; var w = -v; return 1; }) + "|" + t([]() { V v; var w = ~v; return 1; }) + "|" + t([]() { V v; var w = v % 2; return 1; });
 			)", "Unary minus requires numeric operand|Bitwise NOT requires integer operand|Invalid operands for % operator", warn_region);
 		});
@@ -4089,7 +4062,7 @@ private:
 				bool b0 = z0; bool b1 = z1;
 				int k = 0;
 				while (!Z(k)) { k += 1; }
-				r + " " + !z0 + " " + !z1 + " " + b0 + " " + b1 + " " + k + " " + (z1 && true) + " " + (z0 || false);
+				`${r} ${!z0} ${!z1} ${b0} ${b1} ${k} ${(z1 && true)} ${(z0 || false)}`;
 			)", "ace true false false true 1 true false");
 			every_config("operator! declaration", "rejected", [&](engine& e) {
 				try {
@@ -4124,8 +4097,7 @@ private:
 					array<Adder> arr = [Adder(20)];
 					shared_ptr<Adder> sp = new Adder(7);
 					Twice t;
-					string r = "" + a(1) + " " + a(1, 2) + " " + a("hi") + " " + a.calls + " " + g(1) + " " + h.f(3) + " " + arr[0](2) + " " +
-					    (make())(4) + " " + sp(1) + " " + sp.calls + " " + t(1);
+					string r = `${a(1)} ${a(1, 2)} ${a("hi")} ${a.calls} ${g(1)} ${h.f(3)} ${arr[0](2)} ${(make())(4)} ${sp(1)} ${sp.calls} ${t(1)}`;
 					return r;
 				}
 				run();
@@ -4138,7 +4110,7 @@ private:
 			expect("not callable", R"(
 				class Plain { int n = 1; }
 				class F { int operator()(int x) { return x * 2; } }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				function apply(function f, int x) -> int { return f(x); }
 				t([]() { Plain p; return p(1); }) + "|" + t([]() { F f; return apply([f](int x) { return f(x); }, 3); });
 			)", "Cannot call 'p': it is a Plain, not a function|6");
@@ -4166,8 +4138,8 @@ private:
 			// this's field, an element, a map entry, a reference), '/' and '/=' raise 'Division by zero', '%' and '%=' 'Modulo by zero'
 			expect("one compound table", R"(
 				class T { string s = "a"; var n = 7; int big = 9007199254740993; float f = 1.0; void half() { n /= 2; } void addc() { s += 'c'; } }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { T o; o.half(); return type_of(o.n) + ":" + o.n; }) + "|" +
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				t([]() { T o; o.half(); return `${type_of(o.n)}:${o.n}`; }) + "|" +
 				t([]() { T o; o.n /= 2; return o.n; }) + "|" +
 				t([]() { T o; o.big /= 1; return o.big; }) + "|" +
 				t([]() { T o; o.s += 'c'; o.addc(); return o.s; }) + "|" +
@@ -4207,7 +4179,7 @@ private:
 				class C : B { C() : super(5) {} }
 				var a = [7];
 				R r = R(a, 0); F f = F(2); D d = D(); C c = C(); B v = B("s");
-				"" + r.got + " " + f.which + " " + d.which + " " + c.which + " " + v.which;
+				`${r.got} ${f.which} ${d.which} ${c.which} ${v.which}`;
 			)", "7 float int int var", warn_region);
 		});
 	}
@@ -4218,13 +4190,13 @@ private:
 			expect("var typed array", R"(
 				array<int> a = [1];
 				var G = a;
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { var v = a; v.push("s"); return v.size(); }) + "|" +
-				t([]() { var v = a; v.push(2); v[0] = 2.9; return "" + v.size() + " " + a.size() + " " + type_of(v[0]) + ":" + v[0]; }) + "|" +
-				t([]() { var v = a; v = "hello"; v = 5; return type_of(v) + ":" + v; }) + "|" +
+				t([]() { var v = a; v.push(2); v[0] = 2.9; return `${v.size()} ${a.size()} ${type_of(v[0])}:${v[0]}`; }) + "|" +
+				t([]() { var v = a; v = "hello"; v = 5; return `${type_of(v)}:${v}`; }) + "|" +
 				t([]() { var v = 1; v = a; v.push("s"); return 1; }) + "|" +
 				t([]() { G.push("s"); return 1; }) + "|" +
-				t([]() { G = "g"; G = a; array<int> c = G; c.push(3); return "" + c.size() + " " + G.size(); }) + "|" +
+				t([]() { G = "g"; G = a; array<int> c = G; c.push(3); return `${c.size()} ${G.size()}`; }) + "|" +
 				t([]() { var e = []; e.push("x"); e.push(1); return e.size(); }) + "|" +
 				t([]() { var v = a; var& r = v; r = "via ref"; return r; });
 			)", "Cannot push 'string' to array<int>|2 1 int:2|int:5|Cannot push 'string' to array<int>|Cannot push 'string' to array<int>|2 1|2|via ref", warn_region);
@@ -4247,7 +4219,7 @@ private:
 				try { throw 1; } catch (e) { var G = 13; rc = g(); }
 				{ var G = 14; { var G = 15; rn = g(); } }
 				{ var H = 3; function h() { return H; } rd = h(); }
-				"" + rb + ri + rf + rr + rc + rn + " " + rd + " " + G;
+				`${rb}${ri}${rf}${rr}${rc}${rn} ${rd} ${G}`;
 			)", "111111 3 1");
 		});
 	}
@@ -4259,7 +4231,7 @@ private:
 				class B { int a = 1; } class D : B { int d = 2; }
 				B b = D(); B c = b; array<B> xs = [D()];
 				function by_value(B p) -> string { return type_of(p); }
-				type_of(b) + " " + type_of(c) + " " + type_of(cast<B>(D())) + " " + cast<D&>(b).d + " " + type_of(xs[0]) + " " + by_value(D());
+				`${type_of(b)} ${type_of(c)} ${type_of(cast<B>(D()))} ${cast<D&>(b).d} ${type_of(xs[0])} ${by_value(D())}`;
 			)", "D D D 2 D D", warn_region);
 		});
 	}
@@ -4271,18 +4243,14 @@ private:
 				class Inv { char grade = 'a'; map<int, string> slots; map<char, int> counts; map<int, string> none; var loose = {1: "x", "k": 2}; }
 				Inv a; a.grade = 'z'; a.slots[3] = "sword"; a.slots[10] = "bow"; a.counts['q'] = 2;
 				var b = from_json(to_json(a));
-				to_json('z') + "|" + to_json({1: "a", 2: "b"}) + "|" + to_json({"s": 'c'}) + "|" +
-				type_of(b.grade) + ":" + b.grade + "|" + b.slots[3] + "," + b.slots[10] + "|" + b.counts['q'] + "|" + b.none.size() + "|" +
-				b.loose[1] + b.loose["k"] + "|" + type_of(from_json("{\"$char\": 300}")) + "|" + type_of(from_json("{\"$map\": [1]}")) + "|" +
-				type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"));
+				`${to_json('z')}|${to_json({1: "a", 2: "b"})}|${to_json({"s": 'c'})}|${type_of(b.grade)}:${b.grade}|${b.slots[3]},${b.slots[10]}|${b.counts['q']}|${b.none.size()}|${b.loose[1]}${b.loose["k"]}|${type_of(from_json("{\"$char\": 300}"))}|${type_of(from_json("{\"$map\": [1]}"))}|${type_of(from_json("{\"$map\": [[1, 2]], \"x\": 1}"))}`;
 			)", "{\"$char\":122}|{\"$map\":[[1,\"a\"],[2,\"b\"]]}|{\"s\":{\"$char\":99}}|char:z|sword,bow|2|0|x2|map|map|map", warn_region);
 			// a float no JSON number spells is {"$float": "inf" | "-inf" | "nan"}: a value, a map key and a vector component alike
 			expect("json float tags", R"(
 				map<float, int> m = {}; m[-math::INF] = 3; m[math::NAN_VALUE] = 4; m[1.0] = 1;
 				var back = from_json(to_json(m));
 				var v = from_json(to_json(math::vec2(math::INF, 1.0)));
-				to_json([math::INF, -math::INF, math::NAN_VALUE]) + "|" + to_json(m) + "|" + back.size() + " " + back[math::NAN_VALUE] + " " + back[-math::INF] +
-				"|" + type_of(v) + " " + v.x + "|" + type_of(from_json("{\"$float\": \"big\"}"));
+				`${to_json([math::INF, -math::INF, math::NAN_VALUE])}|${to_json(m)}|${back.size()} ${back[math::NAN_VALUE]} ${back[-math::INF]}|${type_of(v)} ${v.x}|${type_of(from_json("{\"$float\": \"big\"}"))}`;
 			)", "[{\"$float\":\"inf\"},{\"$float\":\"-inf\"},{\"$float\":\"nan\"}]|{\"$map\":[[{\"$float\":\"-inf\"},3],[1.0,1],[{\"$float\":\"nan\"},4]]}|3 4 3|math::vec2 inf|map", warn_region);
 		});
 	}
@@ -4294,11 +4262,11 @@ private:
 			expect("auto fields", R"(
 				var FLAG = true;
 				class C { auto n = 5; auto v = FLAG ? 1 : "s"; auto f = FLAG ? 1 : 2.5; }
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { C c; c.n = 2.9; return type_of(c.n) + ":" + c.n; }) + "|" +
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				t([]() { C c; c.n = 2.9; return `${type_of(c.n)}:${c.n}`; }) + "|" +
 				t([]() { C c; var s = "s"; c.n = s; return c.n; }) + "|" +
-				t([]() { C c; c.v = 2.5; c.v = "t"; return type_of(c.v) + ":" + c.v; }) + "|" +
-				t([]() { C c; return type_of(c.f) + ":" + c.f; });
+				t([]() { C c; c.v = 2.5; c.v = "t"; return `${type_of(c.v)}:${c.v}`; }) + "|" +
+				t([]() { C c; return `${type_of(c.f)}:${c.f}`; });
 			)", "int:2|Cannot assign string to field 'n' of C (declared int)|string:t|float:1.0", warn_region);
 		});
 	}
@@ -4308,9 +4276,9 @@ private:
 			// C++'s common type of int and float is float: the chosen arm converts; any other mixed ternary has no static type
 			expect("numeric ternary", R"(
 				var FLAG = true;
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { auto x = FLAG ? 1 : 2.5; return type_of(x) + ":" + x; }) + "|" +
-				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return type_of(x) + ":" + x; }) + "|" +
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				t([]() { auto x = FLAG ? 1 : 2.5; return `${type_of(x)}:${x}`; }) + "|" +
+				t([]() { auto x = FLAG ? 2.5 : 1; x = 3; return `${type_of(x)}:${x}`; }) + "|" +
 				t([]() { auto x = FLAG ? 1 : 2.5; var s = "s"; x = s; return x; }) + "|" +
 				t([]() { auto y = FLAG ? 1 : "s"; y = 2.5; return type_of(y); });
 			)", "float:1.0|float:3.0|Cannot assign string to 'x' (declared float)|float", warn_region);
@@ -4329,9 +4297,9 @@ private:
 			expect("from_json ctor", R"(
 				class R { int v = 0; R() { throw "no R"; } }
 				class Ok { int v = 0; }
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { var x = from_json("{\"$type\": \"R\", \"$val\": {\"v\": 3}}"); return "loaded"; }) + "|" +
-				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return type_of(x) + ":" + x.v; });
+				t([]() { var x = from_json("{\"$type\": \"Ok\", \"$val\": {\"v\": 3}}"); return `${type_of(x)}:${x.v}`; });
 			)", "no R|Ok:3", warn_region);
 		});
 	}
@@ -4341,14 +4309,14 @@ private:
 			// by value: T x = element; by reference: an element that holds a T; auto over elements without a static type is a var
 			expect("typed range-for", R"(
 				class A { int v = 1; } class B : A { }
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
-				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
-				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += type_of(v) + ":" + v + " "; } return s; }) + "|" +
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
+				t([]() { var a = [1.5, 2.5]; string s = ""; for (int v : a) { s += `${type_of(v)}:${v} `; } return s; }) + "|" +
+				t([]() { var a = [1, 2]; string s = ""; for (string v : a) { s += `${type_of(v)}:${v} `; } return s; }) + "|" +
 				t([]() { var a = ["x"]; string s = ""; for (int v : a) { s += type_of(v); } return s; }) + "|" +
 				t([]() { var a = [1, 2.5]; int n = 0; for (int& v : a) { v = v + 1; n += 1; } return n; }) + "|" +
 				t([]() { var a = [B(), A()]; int n = 0; for (A& r : a) { r.v = 7; n += r.v; } return n; }) + "|" +
 				t([]() { var a = [1, 2]; string s = ""; for (auto x : a) { x = "s"; s += x; } return s; }) + "|" +
-				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += type_of(x) + ":" + x; } return s; });
+				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += `${type_of(x)}:${x}`; } return s; });
 			)", "int:1 int:2 |Cannot initialize 'v' (declared string) with int|Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
 			    "14|ss|int:2", warn_region);
 			every_config("checker", "1|0", [](engine& e) {
@@ -4362,13 +4330,13 @@ private:
 	void reference_store_types() {
 		test("a_store_through_a_reference_obeys_the_variables_declared_type", [this]() {
 			expect("ref store", R"(
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				function set37(int& a) { a = 3.7; }
 				t([]() { int x = 1; var& r = x; var s = "s"; r = s; return type_of(x); }) + "|" +
-				t([]() { int x = 1; var& r = x; r = 2.9; return type_of(x) + ":" + x; }) + "|" +
-				t([]() { string x = "a"; var& r = x; r = 5; return type_of(x) + ":" + x; }) + "|" +
+				t([]() { int x = 1; var& r = x; r = 2.9; return `${type_of(x)}:${x}`; }) + "|" +
+				t([]() { string x = "a"; var& r = x; r = 5; return `${type_of(x)}:${x}`; }) + "|" +
 				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
-				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
+				t([]() { int u = 1; set37(u); return `${type_of(u)}:${u}`; });
 			)", "Cannot assign string to 'r' (declared int&)|int:2|Cannot assign int to 'r' (declared string&)|string|int:3", warn_region);
 		});
 		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
@@ -4377,7 +4345,7 @@ private:
 				array<int> src = [1, 2]; array<int> dst = [9, 9];
 				function fill(var& r) { r = src; r[0] = 5; }
 				fill(dst);
-				"" + src[0] + " " + dst[0] + " " + dst.size();
+				`${src[0]} ${dst[0]} ${dst.size()}`;
 			)", "1 5 2", warn_region);
 		});
 	}
@@ -4390,11 +4358,11 @@ private:
 				namespace ns { int x = 1; }
 				function bump(int& r) { r = r + 10; }
 				function rename(string& r) { r += "b"; }
-				function run() -> string { bump(S::s); bump(ns::x); rename(S::name); bump(S::s); return "" + S::s + " " + ns::x + " " + S::name; }
+				function run() -> string { bump(S::s); bump(ns::x); rename(S::name); bump(S::s); return `${S::s} ${ns::x} ${S::name}`; }
 				string first = run();
 				S::s = 5; ns::x = 6; bump(S::s); bump(ns::x);
-				string second = "" + S::s + " " + ns::x;
-				function decls() -> string { var& a = S::s; int& b = ns::x; a = 40; b = 41; return "" + S::s + " " + ns::x; }
+				string second = `${S::s} ${ns::x}`;
+				function decls() -> string { var& a = S::s; int& b = ns::x; a = 40; b = 41; return `${S::s} ${ns::x}`; }
 				first + "|" + second + "|" + decls();
 			)", "21 11 ab|15 16|40 41", warn_region);
 		});
@@ -4407,7 +4375,7 @@ private:
 				function set(int& a) { a = 7; }
 				function seta(A& r) { r.v = 9; }
 				function any(var& r) { r = "s"; }
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				var vi = 1; var vf = 1.5;
 				t([]() { set(vf); return vf; }) + "|" + t([]() { set(vi); return vi; }) + "|" + t([]() { B b = B(); seta(b); return b.v; }) + "|" +
 				t([]() { var x = 5; any(x); return x; }) + "|" + t([]() { var s = "x"; seta(s); return 1; });
@@ -4451,7 +4419,7 @@ private:
 	void typed_slice() {
 		test("a_slice_of_a_typed_array_keeps_its_element_type", [this]() {
 			expect("typed slice", R"(
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = "raised:" + e; } return r; }
 				array<int> a = [1, 2, 3];
 				array<string> s = ["x", "y"];
 				var v = [1, "two", 3.0];
@@ -4465,7 +4433,7 @@ private:
 		test("a_compound_on_a_missing_key_raises_its_read", [this]() {
 			// a compound reads its target first, so a missing key raises as a read does, on every map, and nothing is inserted
 			expect("missing key compound", R"(
-				function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
+				function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = "raised:" + e; } return r; }
 				t([]() { map<string, int> m = {}; m["k"] += 5; return m.size(); }) + "|" +
 				t([]() { map<string, int> m = {}; m["j"]++; return m.size(); }) + "|" +
 				t([]() { map<string, float> m = {}; m["k"] -= 1.5; return m.size(); }) + "|" +
@@ -4473,7 +4441,7 @@ private:
 				t([]() { map<int, int> m = {3: 0}; for (int x : [3, 1, 3]) { m[x] += 1; } return m.size(); }) + "|" +
 				t([]() { var m = {}; m["k"] += 1; return m.size(); }) + "|" +
 				t([]() { map<string, int> m = {}; m[5] += 1; return m.size(); }) + "|" +
-				t([]() { map<int, int> m = {}; for (int x : [3, 1, 3]) { m[x] = m.get(x, 0) + 1; } return "" + m[3] + m[1] + m.size(); });
+				t([]() { map<int, int> m = {}; for (int x : [3, 1, 3]) { m[x] = m.get(x, 0) + 1; } return `${m[3]}${m[1]}${m.size()}`; });
 			)", "raised:Key \"k\" not found in map|raised:Key \"j\" not found in map|raised:Key \"k\" not found in map|raised:Key \"k\" not found in map|"
 			    "raised:Key 1 not found in map|raised:Key \"k\" not found in map|raised:Cannot use 'int' as a key of type 'string'|212", warn_region);
 		});
@@ -4496,7 +4464,7 @@ private:
 				map<float, int> t = {}; t[-0.0] = 5; t[0.0] += 1;
 				float nan = math::INF - math::INF; var n = {}; n[nan] = 1; n[nan] = 2;
 				var pz = {}; pz[0.0] = 1; var nz = {}; nz[-0.0] = 1;
-				"" + m.size() + m[0.0] + m[-0.0] + "|" + t.size() + t[0.0] + "|" + n.size() + "|" + m.has(-0.0) + (pz == nz);
+				`${m.size()}${m[0.0]}${m[-0.0]}|${t.size()}${t[0.0]}|${n.size()}|${m.has(-0.0)}${(pz == nz)}`;
 			)", "122|16|1|truetrue", warn_region);
 		});
 	}
@@ -4504,12 +4472,12 @@ private:
 	void to_string_builtin() {
 		test("the_to_string_builtin_uses_a_classs_own_to_string", [this]() {
 			expect("to_string(x)", R"(
-				class T { int n = 3; string to_string() { return "t" + n; } }
+				class T { int n = 3; string to_string() { return `t${n}`; } }
 				class U { int n = 1; }
-				class Bad { string to_string() { int z = 0; return "" + (1 / z); } }
+				class Bad { string to_string() { int z = 0; return `${(1 / z)}`; } }
 				class Thrower { string to_string() { throw "nope"; return ""; } }
-				function t(function f) -> string { string r = "none"; try { r = f(); } catch (e) { r = "raised:" + e; } return r; }
-				to_string(T()) + "|" + (to_string(T()) == ("" + T()) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
+				function t(function f) -> string { string r = "none"; try { r = f(); } catch (e) { r = `raised:${e}`; } return r; }
+				to_string(T()) + "|" + (to_string(T()) == (`${T()}`) ? "same" : "differs") + "|" + t([]() { return to_string(Bad()); }) + "|" +
 				t([]() { return to_string(Thrower()); }) + "|" + to_string(5) + to_string("s");
 			)", "t3|same|raised:Division by zero|raised:nope|5s", warn_region);
 		});
@@ -4520,9 +4488,8 @@ private:
 			every_config("host callback", "raised:Division by zero|raised:boom|7", [](engine& e) {
 				e.add_function("apply", [](script_value cb) -> script_int { return convert_script_function<script_int(script_int)>(cb)(3); });
 				return spec::render(e.execute(spec::in_warn_region(R"(
-					function t(function f) -> string { string r = "none"; try { r = "" + f(); } catch (e) { r = "raised:" + e; } return r; }
-					t([]() { return apply([](int x) { int z = 0; return x / z; }); }) + "|" +
-					t([]() { return apply([](int x) { throw "boom"; return x; }); }) + "|" + apply([](int x) { return x + 4; });
+					function t(function f) -> string { string r = "none"; try { r = `${f()}`; } catch (e) { r = `raised:${e}`; } return r; }
+					`${t([]() { return apply([](int x) { int z = 0; return x / z; }); })}|${t([]() { return apply([](int x) { throw "boom"; return x; }); })}|${apply([](int x) { return x + 4; })}`;
 				)")));
 			});
 		});
@@ -4548,7 +4515,7 @@ private:
 				}
 				C c = C();
 				var inc = c.keep(); inc(); inc();
-				"" + C().by_this() + C().bare() + C().later() + c.v;
+				`${C().by_this()}${C().bare()}${C().later()}${c.v}`;
 			)", "8943", warn_region);
 		});
 	}
@@ -4580,8 +4547,7 @@ private:
 				var ps = [P()];
 				var nums = [1, 2.5, "x", [1, 2]];
 				array<int> ints = [3, 4];
-				string r = "" + es.contains(E(2)) + es.index_of(E(2)) + es.has(E(3)) + "|" + ps.contains(P()) + "|" +
-				           nums.index_of(2.5) + nums.contains(1.0) + nums.index_of([1, 2]) + ints.index_of(4.0) + ints.contains(5);
+				string r = `${es.contains(E(2))}${es.index_of(E(2))}${es.has(E(3))}|${ps.contains(P())}|${nums.index_of(2.5)}${nums.contains(1.0)}${nums.index_of([1, 2])}${ints.index_of(4.0)}${ints.contains(5)}`;
 				string t = "none"; try { [B()].contains(B()); } catch (e) { t = "raised:" + e; }
 				r + "|" + t;
 			)", "true1false|true|1true31false|raised:cmp", warn_region);
@@ -4620,12 +4586,12 @@ private:
 				class P { int a = 0; int b = 0; P(int x, int y) { a = x; b = y; } }
 				function run() -> string {
 					string s = "";
-					GA[1] = 2; s += "" + add2(GA[1], f()) + ",";
-					GA[1] = 2; s += "" + add2t(GA[1], f()) + ",";
-					GA[1] = 2; C c = C(); s += "" + c.m(GA[1], f()) + ",";
-					int t = 0; for (int i = 0; i < 3; i++) { GA[1] = 2; t += add2t(GA[1], f()); } s += "" + t + ",";
-					GA[1] = 2; P p = P(GA[1], f()); s += "" + (p.a + p.b) + ",";
-					s += "" + add2(M["k"], fm()) + "," + add2(GG[0][0], fg());
+					GA[1] = 2; s += `${add2(GA[1], f())},`;
+					GA[1] = 2; s += `${add2t(GA[1], f())},`;
+					GA[1] = 2; C c = C(); s += `${c.m(GA[1], f())},`;
+					int t = 0; for (int i = 0; i < 3; i++) { GA[1] = 2; t += add2t(GA[1], f()); } s += `${t},`;
+					GA[1] = 2; P p = P(GA[1], f()); s += `${(p.a + p.b)},`;
+					s += `${add2(M["k"], fm())},${add2(GG[0][0], fg())}`;
 					return s;
 				}
 				run();
@@ -4647,7 +4613,7 @@ private:
 					void put(var v) { d = v; }
 					void put_this(var v) { this.d = v; }
 				}
-				function t(function f) -> string { string r = ""; try { r = "" + f(); } catch (e) { r = e; } return r; }
+				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
 				t([]() { var v = new E(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
 				t([]() { var v = new D(); H h = H(); h.d = v; return type_of(h.d); }) + "|" +
 				t([]() { var v = new E(); H h = H(); h.b = v; return type_of(h.b); }) + "|" +

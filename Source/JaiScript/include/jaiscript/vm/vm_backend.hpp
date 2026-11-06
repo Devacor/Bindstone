@@ -1597,6 +1597,7 @@ namespace jai::vm {
         struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
         checked_result<script_value> handle_binary_op(token_type op, const script_value& left, const script_value& right);
         checked_result<script_value> handle_add(const script_value& left, const script_value& right);
+        checked_result<script_value> join_text(const script_value& left, const script_value& right);
         checked_result<script_value> handle_subtract(const script_value& left, const script_value& right);
         checked_result<script_value> handle_multiply(const script_value& left, const script_value& right);
         checked_result<script_value> handle_divide(const script_value& left, const script_value& right);
@@ -2646,7 +2647,7 @@ namespace jai::vm {
         template <op_status (vm_backend::*Rows)(frame&, const vm_instruction&)> op_status index_releasing(frame& f, const vm_instruction& ins);
         op_status exec_call_builtin(frame& f, const vm_instruction& ins);
         op_status exec_concat_append(frame& f, const vm_instruction& ins);
-        op_status concat_step(const script_value& right, uint32_t hint, const void* site = nullptr);
+        op_status concat_step(const script_value& right, uint32_t hint, const void* site, bool joins_text);
         // An append site's largest length seen when its string had to grow: the next string built there reserves it at
         // its first growth, so a string rebuilt every pass grows once instead of once per capacity step
         std::unordered_map<const void*, size_t> text_growth_memo_;

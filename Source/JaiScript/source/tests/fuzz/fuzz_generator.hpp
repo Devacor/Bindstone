@@ -295,7 +295,7 @@ namespace jai::fuzz {
 				}
 				default: {
 					operand e = element(c);
-					return {rng_.chance(50) ? "(\"\" + " + e.text + ")" : "cast<string>(" + e.text + ")", K_S, true};
+					return {rng_.chance(50) ? "(`${" + e.text + "}`)" : "cast<string>(" + e.text + ")", K_S, true};
 				}
 			}
 		}
@@ -339,7 +339,7 @@ namespace jai::fuzz {
 				std::string use = p;
 				if ((ty == "int " || ty == "float ") && rng_.chance(30)) use = "(" + p + " + 1)";
 				if (templ) body += "${" + use + "}" + (i + 1 < a.size() ? " " : "");
-				else body += (i ? " + \",\" + " : "") + use;
+				else body += std::string(i ? " + \",\" + " : "") + "`${" + use + "}`";
 			}
 			const std::string text = templ ? "`" + body + ";`" : "\"\" + " + body + " + \";\"";
 			// a template-string key under a compound op or ++/-- (the vm's index-tree landing once raised an internal error for it)
@@ -348,7 +348,7 @@ namespace jai::fuzz {
 				static constexpr const char* const ops[] = {"++", "--", " += 2", " -= 1"};
 				const std::string key = "zh[`" + body + "`]";
 				const uint32_t op = rng_.below(5);
-				keyed = (op == 4 ? "++" + key : key + ops[op]) + "; zout = zout + " + key + " + \";\"; ";
+				keyed = (op == 4 ? "++" + key : key + ops[op]) + "; zout = zout + `${" + key + "};`; ";
 			}
 			if (returns) callees_.push_back(sig + ") -> string { " + keyed + "return " + text + "; }");
 			else callees_.push_back(sig + (rng_.chance(50) ? ") -> void" : ")") + " { " + keyed + "zout = zout + " + text + "; }");
@@ -367,7 +367,7 @@ namespace jai::fuzz {
 				case 2: {
 					std::vector<operand> a = args(c, local, 2, 3);
 					std::string s = "zout = zout";
-					for (const auto& o : a) s += " + " + o.text + " + \",\"";
+					for (const auto& o : a) s += " + `${" + o.text + "},`";
 					return s + ";";
 				}
 				case 3: {
@@ -377,8 +377,8 @@ namespace jai::fuzz {
 				default: {
 					operand x = element(c), y = element(c);
 					if ((x.kinds & ~K_NUM) == 0 && (y.kinds & ~K_NUM) == 0)
-						return std::string("zout = zout + math::") + (rng_.chance(50) ? "max(" : "min(") + x.text + ", " + y.text + ") + \";\";";
-					return "zout = zout + " + x.text + " + " + y.text + ";";
+						return std::string("zout = zout + `${math::") + (rng_.chance(50) ? "max(" : "min(") + x.text + ", " + y.text + ")};`;";
+					return "zout = zout + `${" + x.text + "}${" + y.text + "}`;";
 				}
 			}
 		}

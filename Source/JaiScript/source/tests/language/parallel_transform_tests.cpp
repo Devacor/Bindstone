@@ -549,8 +549,7 @@ public:
 							string h4 = het[4];
 							string s = strs[i % 4];
 							var v = ints[(i + 2) % 4];
-							return to_string(a) + "," + to_string(a2) + "," + to_string(f) + "," + to_string(w) + "," +
-							       to_string(h0) + "," + to_string(h1) + "," + to_string(h2) + "," + h3 + "," + h4 + "," + s + "," + to_string(v);
+							return `${to_string(a)},${to_string(a2)},${to_string(f)},${to_string(w)},${to_string(h0)},${to_string(h1)},${to_string(h2)},${h3},${h4},${s},${to_string(v)}`;
 						}
 						int oob(int i) { int a = ints[i + 4]; return a; }
 						int wrong(int i) { int a = mixed[i % 2]; return a; }
@@ -1041,10 +1040,7 @@ public:
 				Stats t = parallel_reduce(xs, Stats(), fold_in, merge);
 				Stats u = parallel_reduce(xs, Stats(), grow, merge);
 				float lam = parallel_reduce(xs, 0.0, [](float a, float x) { return a + x; }, [](float a, float b) { return a + b; });
-				return format("{:.17f}", parallel_reduce(xs, 0.0, add, add)) + " " + s.count + " " + format("{:.17f}", s.sum) + " " +
-				       to_json(parallel_reduce(xs, [0, 0], tally, both)) + " " + parallel_reduce([], 7, add, add) + " " +
-				       format("{:.17f}", t.sum) + " " + format("{:.17f}", u.sum) + " " + format("{:.17f}", lam) + " " + format("{:.17f}", scaled()) +
-				       " combines " + combine_calls();
+				return `${format("{:.17f}", parallel_reduce(xs, 0.0, add, add))} ${s.count} ${format("{:.17f}", s.sum)} ${to_json(parallel_reduce(xs, [0, 0], tally, both))} ${parallel_reduce([], 7, add, add)} ${format("{:.17f}", t.sum)} ${format("{:.17f}", u.sum)} ${format("{:.17f}", lam)} ${format("{:.17f}", scaled())} combines ${combine_calls()}`;
 			)";
 			std::string first;
 			for (bool vm : {false, true}) {
@@ -2577,7 +2573,7 @@ public:
 				{"parallel_for (int k : order) { out[k] += k; out[k]++; } return sum();", "5625216"},
 				{"array<int> ks = order; parallel_for (auto& o, int k : order, ks) { out[k] = o + 1; } return sum();", "5625216"},
 				{"int run() { array<int> local = [0, 0, 0, 0]; parallel_for (int k : [3, 1, 0, 2]) { local[k] = k + 10; } return local[0] * 1000 + local[3]; } return run();", "10013"},
-				{"try { parallel_for (int k : order) { if (k == 100) { throw \"stop\"; } out[k] = 1; } } catch (err) { } int before = 0; for (int p = 0; p < 256; p++) { if (order[p] == 100) { break; } before += out[order[p]]; } int all = 0; for (int i = 0; i < 256; i++) { all += out[i]; } return before == all ? \"serial\" : \"diverged \" + before + \" \" + all;", "serial"},
+				{"try { parallel_for (int k : order) { if (k == 100) { throw \"stop\"; } out[k] = 1; } } catch (err) { } int before = 0; for (int p = 0; p < 256; p++) { if (order[p] == 100) { break; } before += out[order[p]]; } int all = 0; for (int i = 0; i < 256; i++) { all += out[i]; } return before == all ? \"serial\" : `diverged ${before} ${all}`;", "serial"},
 				{"array<int> dup = [0, 1, 1, 2]; try { parallel_for (int k : dup) { out[k] = 1; } } catch (err) { return err; } return \"ran\";",
 				 "parallel_for: elements 1 and 2 write 'out' at the same index 1"},
 				{"try { parallel_for (int k : order) { out[k] = out[0] + 1; } } catch (err) { return err; } return \"ran\";",
@@ -2591,9 +2587,9 @@ public:
 				{"try { parallel_for (int k : order) { int j = k; out[j] = 1; } } catch (err) { return err; } return \"ran\";",
 				 "parallel_for: body writes enclosing state 'out'"},
 				// an index past the array raises the serial loop's text, and the slots before the failing element land
-				{"array<int> past = [0, 1, 300, 2]; array<int> small = [0, 0, 0]; try { parallel_for (int k : past) { small[k] = 7; } } catch (err) { return err + \"|\" + (small[0] * 100 + small[1] * 10 + small[2]); } return \"ran\";",
+				{"array<int> past = [0, 1, 300, 2]; array<int> small = [0, 0, 0]; try { parallel_for (int k : past) { small[k] = 7; } } catch (err) { return `${err}|${(small[0] * 100 + small[1] * 10 + small[2])}`; } return \"ran\";",
 				 "Array index 300 out of bounds for array of size 3|770"},
-				{"array<int> small = [0, 0, 0]; try { parallel_for (int k = 0; k < 4; k++) { small[k] = 7; } } catch (err) { return err + \"|\" + (small[0] * 100 + small[1] * 10 + small[2]); } return \"ran\";",
+				{"array<int> small = [0, 0, 0]; try { parallel_for (int k = 0; k < 4; k++) { small[k] = 7; } } catch (err) { return `${err}|${(small[0] * 100 + small[1] * 10 + small[2])}`; } return \"ran\";",
 				 "Array index 3 out of bounds for array of size 3|777"},
 			};
 			for (const auto& [body, expected] : cases) {
@@ -2728,7 +2724,7 @@ public:
 				string d = t([&]() { parallel_for (auto& v : vs) { v = -v; } });
 				array<Plain> ps = [Plain(), Plain()];
 				string p = t([&]() { parallel_for (auto& q : ps) { q.v = q.v + 1; } });
-				a + "|" + c + "|" + d + "|" + p + "|" + ps[0].v + "|" + vs[0].v + "|" + vs[1].v;
+				`${a}|${c}|${d}|${p}|${ps[0].v}|${vs[0].v}|${vs[1].v}`;
 			)");
 			check_eq(std::string("none|none|none|none|2|-2|-2"), r.as<std::string>());
 		});
@@ -3003,7 +2999,7 @@ public:
 					Inner(float a, float b) : this(a + b) { w = w + 1.0; }
 					float score() { return w + base_v + name.size(); }
 				}
-				class Plain { float p = SCALE; array<int> list = [1, 2, 3]; string s = LABEL + "!"; }
+				class Plain { float p = SCALE; array<int> list = [1, 2, 3]; string s = `${LABEL}!`; }
 				class Outer {
 					Inner in;
 					Plain pl;
@@ -3020,7 +3016,7 @@ public:
 					float to_float() { return v * 0.5; }
 					char to_char() { return 'a'; }
 					bool to_bool() { return v % 2 == 0; }
-					string to_string() { return "n" + v; }
+					string to_string() { return `n${v}`; }
 				}
 				array<int> xs;
 				for (int i = 0; i < 200; ++i) { xs.push(i); }
@@ -3042,7 +3038,7 @@ public:
 					char nc = nm;
 					bool nb = nm;
 					string ns = nm;
-					string label = "#" + nm;
+					string label = `#${nm}`;
 					out[x] = o.in.score() + o.tally + p.p + p.list.size() + p.s.size() + q.score() + h->score() + Inner(1.0).score() +
 					         bx.n + unbox(x) + rb.n + ni + nf + (nc == 'a' ? 1 : 0) + (nb ? 1 : 0) + ns.size() + label.size();
 				}
@@ -3065,7 +3061,7 @@ public:
 					Num(int a) { v = a; }
 					int to_int() { return v + 100; }
 					bool to_bool() { return v > 4; }
-					string to_string() { return "n" + v; }
+					string to_string() { return `n${v}`; }
 				}
 				class Sub : Num { Sub() { v = 9; } }
 				class Tip { int t = 1; bool to_bool() { return t > 0; } }

@@ -243,6 +243,7 @@ namespace jai::detail {
                 case token_type::boolean_literal: flag(t.bool_value); break;
                 case token_type::char_literal: u8(uint8_t(t.char_value)); break;
                 case token_type::string_literal: str(t.string_value); break;
+                case token_type::plus: flag(t.joins_text); break;
                 default: break;
             }
         }
@@ -1082,6 +1083,7 @@ namespace jai::detail {
                 case token_type::boolean_literal: t.bool_value = flag(); break;
                 case token_type::char_literal: t.char_value = script_char(u8()); break;
                 case token_type::string_literal: t.string_value = str(); break;
+                case token_type::plus: t.joins_text = flag(); break;
                 default: break;
             }
             return t;

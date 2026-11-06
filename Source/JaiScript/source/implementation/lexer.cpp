@@ -642,7 +642,7 @@ void lexer::emit_splice_call(std::vector<token>& out, uint64_t callee, std::vect
 
 void lexer::scan_template_string() {
     // Desugar `hello ${expr} world` into: ("" + "hello " + (expr) + " world")
-    // The leading "" ensures string context so + auto-converts non-strings.
+    // Each '+' is marked joins_text: it makes its splice text, which a plain string '+' refuses for a number, bool, char or null.
     // A splice with a format spec, `${expr:spec}`, becomes a call instead:
     // (... + (format_value((expr), "spec")) + ...) — format_value is an
     // engine-core builtin, so both backends execute the same registered entry.
@@ -662,6 +662,7 @@ void lexer::scan_template_string() {
 
     auto emit_plus = [&]() {
         result.push_back(token(token_type::plus, symbolizer_->intern_with_view("+").second, current_location()));
+        result.back().joins_text = true;
     };
 
     // Opening paren and empty string to establish string context

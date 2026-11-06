@@ -174,7 +174,7 @@ namespace {
 			}
 			out << pre << "concat_protos " << ch.concat_protos.size() << "\n";
 			for (size_t i = 0; i < ch.concat_protos.size(); ++i) {
-				out << pre << " " << i << " hint=" << ch.concat_protos[i].hint << " pieces=[";
+				out << pre << " " << i << " hint=" << ch.concat_protos[i].hint << (ch.concat_protos[i].joins_text ? " joins_text" : "") << " pieces=[";
 				for (const auto& o : ch.concat_protos[i].pieces) { out << operand(ch, o) << " "; }
 				out << "]\n";
 			}

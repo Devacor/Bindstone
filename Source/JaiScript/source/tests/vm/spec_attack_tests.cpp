@@ -100,12 +100,12 @@ private:
 			expect("ternary store arms", R"(
 				function run() -> string {
 					int a = 3; int b = 4; int x = 0; string s = "";
-					for (int i = 0; i < 4; i++) { x = i % 2 == 0 ? a + b * i : a - i; s += "" + x + ","; }
+					for (int i = 0; i < 4; i++) { x = i % 2 == 0 ? a + b * i : a - i; s += `${x},`; }
 					float f = 0.0; float h = 1.5;
-					for (int k = 0; k < 2; k++) { f = k == 0 ? h * 2.0 : h - 1.0; s += "" + f + ","; }
+					for (int k = 0; k < 2; k++) { f = k == 0 ? h * 2.0 : h - 1.0; s += `${f},`; }
 					return s;
 				}
-				function ovf() -> string { int big = 9223372036854775807; int x = 0; string r = "no"; try { x = big > 0 ? big + 1 : 0; } catch (e) { r = e; } return r + "|" + x; }
+				function ovf() -> string { int big = 9223372036854775807; int x = 0; string r = "no"; try { x = big > 0 ? big + 1 : 0; } catch (e) { r = e; } return `${r}|${x}`; }
 				run() + ovf();
 			)", "3,2,11,0,3.0,0.5,Integer overflow in '+'|0");
 		});
@@ -115,9 +115,9 @@ private:
 				function run() -> string {
 					int a = 3; int b = 4; string s = "";
 					for (int i = 0; i < 2; i++) {
-						int y = -(a + b) * 2 + i; s += "" + y + ",";
-						s += "" + neg(-(a * b)) + ",";
-						int z = i == 0 ? -(a - b) : -(b * i); s += "" + z + ",";
+						int y = -(a + b) * 2 + i; s += `${y},`;
+						s += `${neg(-(a * b))},`;
+						int z = i == 0 ? -(a - b) : -(b * i); s += `${z},`;
 					}
 					return s;
 				}
@@ -129,7 +129,7 @@ private:
 				class N { int v = 0; N(int x) { v = x; } function operator+(int k) -> int { return v + k; } }
 				function run() -> string {
 					array<int> a = [10, 20, 30, 40]; array<array<int>> g = [[1, 2], [3, 4]]; N n = N(1); string s = "";
-					for (int i = 0; i < 2; i++) { s += "" + a[n + i] + "," + g[i][n + 0] + ","; }
+					for (int i = 0; i < 2; i++) { s += `${a[n + i]},${g[i][n + 0]},`; }
 					return s;
 				}
 				run();
@@ -137,7 +137,7 @@ private:
 		});
 		test("loop_bodies_without_braces", [this]() {
 			expect("braceless bodies", R"(
-				function run() -> string { string s = ""; for (int i = 0; i < 3; i++) s += "" + i; int k = 0; while (k < 3) k++; for (auto v : [7, 8]) s += "" + v; return s + "|" + k; }
+				function run() -> string { string s = ""; for (int i = 0; i < 3; i++) s += `${i}`; int k = 0; while (k < 3) k++; for (auto v : [7, 8]) s += `${v}`; return `${s}|${k}`; }
 				run();
 			)", "01278|3");
 		});
@@ -150,9 +150,9 @@ private:
 		});
 		test("destructured_names_shared_with_a_closure_live_in_the_environment", [this]() {
 			expect("destructure", R"(
-				function run() -> string { auto [x, y] = [10, 20]; auto f = [&]() { x += 1; }; f(); return "" + x + "," + y; }
+				function run() -> string { auto [x, y] = [10, 20]; auto f = [&]() { x += 1; }; f(); return `${x},${y}`; }
 				auto [p, q] = [1, 2];
-				run() + "|" + (p + q);
+				`${run()}|${(p + q)}`;
 			)", "11,20|3");
 		});
 	}
@@ -164,7 +164,7 @@ private:
 				function run() -> string {
 					array<int> a = [1, 2, 3, 0, 5]; int s = 0; int at = -1; string err = "";
 					try { for (int j = 0; j < 5; j++) { at = j; s += 10 / a[j]; } } catch (e) { err = e; }
-					return "" + s + "|" + at + "|" + to_string(err.starts_with("Division by zero"));
+					return `${s}|${at}|${to_string(err.starts_with("Division by zero"))}`;
 				}
 				run();
 			)", "18|3|true");
@@ -173,20 +173,20 @@ private:
 			expect("caller", R"(
 				var G = 0;
 				function inner(array<int> a) -> int { int s = 0; for (int j = 0; j < a.size(); j++) { s += 100 / a[j]; G = s; } return s; }
-				function outer() -> string { string err = ""; int r = -1; try { r = inner([4, 2, 0, 1]); } catch (e) { err = e; } return "" + r + "|" + G + "|" + to_string(err.starts_with("Division by zero")); }
+				function outer() -> string { string err = ""; int r = -1; try { r = inner([4, 2, 0, 1]); } catch (e) { err = e; } return `${r}|${G}|${to_string(err.starts_with("Division by zero"))}`; }
 				outer();
 			)", "-1|75|true");
 		});
 		test("a_raise_inside_an_inlined_leaf_unwinds_the_loop_with_the_prior_iterations_kept", [this]() {
 			expect("graft raise", R"(
-				function leaf(int x) -> int { if (x == 3) { throw "leaf" + x; } return x * 2; }
+				function leaf(int x) -> int { if (x == 3) { throw `leaf${x}`; } return x * 2; }
 				function tleaf(int x) -> int { if (x == 4) { throw x * 10; } return x; }
 				function run() -> string {
 					int s = 0; int last = -1; string err = "";
 					try { for (int i = 0; i < 6; i++) { s += leaf(i); last = i; } } catch (e) { err = e; }
 					int t = 0; var code = null;
 					try { for (int i = 0; i < 6; i++) { t += tleaf(i); } } catch (e) { code = e.value; }
-					return "" + s + "|" + last + "|" + err + "|" + t + "|" + code + type_of(code);
+					return `${s}|${last}|${err}|${t}|${code}${type_of(code)}`;
 				}
 				run();
 			)", "6|2|leaf3|6|40int");
@@ -196,7 +196,7 @@ private:
 				function run() -> string {
 					int caught = 0; int s = 0;
 					for (int i = 0; i < 10; i++) { try { if (i % 3 == 0) { throw i; } s += i; } catch (e) { caught += e.value; } }
-					return "" + s + "|" + caught;
+					return `${s}|${caught}`;
 				}
 				run();
 			)", "27|18");
@@ -210,8 +210,8 @@ private:
 				function side() -> int { N = N + 1; return 1; }
 				function run() -> string {
 					string out = "";
-					for (int i = 0; i < 2; i++) { try { out += "" + take(bad(), side()); } catch (e) { out += "caught,"; } }
-					return out + N;
+					for (int i = 0; i < 2; i++) { try { out += `${take(bad(), side())}`; } catch (e) { out += "caught,"; } }
+					return out + to_string(N);
 				}
 				run();
 			)", "caught,caught,2");
@@ -225,7 +225,7 @@ private:
 			expect("coroutine leaf", R"(
 				function leaf(int x) -> int { return x * 3 + 1; }
 				coroutine int gen(int n) { int acc = 0; for (int i = 0; i < n; i++) { acc += leaf(i); if (i % 2 == 1) { yield acc; } } yield acc * 10; }
-				function run() -> string { string out = ""; for (auto v : gen(6)) { out += "" + v + ","; } return out; }
+				function run() -> string { string out = ""; for (auto v : gen(6)) { out += `${v},`; } return out; }
 				run();
 			)", "5,22,51,510,");
 		});
@@ -233,7 +233,7 @@ private:
 			expect("resumer write", R"(
 				array<int> xs = [1, 2, 3, 4, 5, 6];
 				coroutine int walk() { int s = 0; for (int i = 0; i < xs.size(); i++) { s += xs[i]; if (i == 2) { yield s; } } yield s; }
-				function run() -> string { var h = walk(); var a = h.next(); xs[4] = 100; var b = h.next(); return "" + a + "|" + b; }
+				function run() -> string { var h = walk(); var a = h.next(); xs[4] = 100; var b = h.next(); return `${a}|${b}`; }
 				run();
 			)", "6|116");
 		});
@@ -242,7 +242,7 @@ private:
 			expect("interleaved", R"(
 				function inner(int n) -> int { int s = 0; int i = 0; while (i < n) { s = s + i; i = i + 1; } return s; }
 				coroutine int gen(int k) { int t = 0; for (int r = 0; r < k; ++r) { int i = 0; while (i < 20) { t = t + inner(i); i = i + 1; } yield t; } return t; }
-				function run() -> string { var a = gen(3); var b = gen(2); string out = ""; for (int round = 0; round < 2; round++) { out += "" + a.next() + "/" + b.next() + ";"; } return out; }
+				function run() -> string { var a = gen(3); var b = gen(2); string out = ""; for (int round = 0; round < 2; round++) { out += `${a.next()}/${b.next()};`; } return out; }
 				run();
 			)", "1140/1140;2280/2280;");
 		});
@@ -265,7 +265,7 @@ private:
 					function r2() -> int { int s = 0; for (int i = 0; i < GB.size(); i++) { shrink(i); s += GB[i]; } return s; }
 					function r3() -> int { int s = 0; for (int i = 0; i < 6; i++) { setk(i); s += K; } return s; }
 					function r4() -> int { int s = 0; for (int i = 0; i < 6; i++) { retype(i); s += KF; } return s; }
-					"" + r1() + "|" + r2() + "|" + r3() + "|" + r4();
+					`${r1()}|${r2()}|${r3()}|${r4()}`;
 				)").as_string();
 			});
 		});
@@ -279,7 +279,7 @@ private:
 					function drain(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { s = s + HP; hurt(); } return s; }
 					function write(int n) -> int { int s = 0; for (int i = 0; i < n; i++) { HP = HP - 2; s = s + peek(); } return s; }
 					function typed(int x) -> int { int a = x - HP; int b = a * 2 + HP; return b; }
-					"" + drain(3) + "," + write(2) + "," + typed(5);
+					`${drain(3)},${write(2)},${typed(5)}`;
 				)").as_string();
 				return r + "|" + std::to_string(*hp);
 			});
@@ -292,7 +292,7 @@ private:
 				return e.execute(R"(
 					function t(int d) -> int { int s = 0; for (int i = 0; i < 3; ++i) { s = s + i; if (d > 0) { s = s + t(d - 1); } } return s; }
 					function t2(int d) -> int { int s = 0; for (int i = 0; i < 3; ++i) { s = s + i; if (d > 0) { s = s + again(d - 1); } } return s; }
-					"" + t(0) + "," + t(1) + "," + t(2) + "|" + t2(0) + "," + t2(1) + "," + t2(2);
+					`${t(0)},${t(1)},${t(2)}|${t2(0)},${t2(1)},${t2(2)}`;
 				)").as_string();
 			});
 		});
@@ -322,7 +322,7 @@ private:
 			expect("rebind var fn", R"(
 				var fn = [](int x) { return x + 1; };
 				function run() -> int { int s = 0; for (int i = 0; i < 6; i++) { if (i == 3) { fn = [](int x) { return x * 100; }; } s += fn(i); } return s; }
-				"" + run();
+				`${run()}`;
 			)", "1206");
 		});
 		test("a_script_function_name_rebound_by_a_callee_mid_loop", [this]() {
@@ -331,16 +331,16 @@ private:
 				function leaf(int a) -> int { return a * 2; }
 				function swap_it(int i) { if (i == 3) { leaf = [](int a) { return a + 1000; }; } }
 				function run() -> int { int s = 0; for (int i = 0; i < 6; i++) { swap_it(i); s = s + leaf(i); } return s; }
-				"" + run();
+				`${run()}`;
 			)", "3018");
 		});
 		test("a_local_or_parameter_named_like_a_math_alias_shadows_it", [this]() {
 			// docs/site/guide/07-classes.html "Name resolution in methods": locals before globals; internal/diagnostics.md family B callee text
 			expect("alias shadow", R"(
 				function f(int x) -> float { var sqrt = [](float v) { return -v; }; return sqrt(x * 1.0) + sqrt(x); }
-				function g(var sqrt) -> string { try { return "" + sqrt(4.0); } catch (e) { return "E:" + e; } }
+				function g(var sqrt) -> string { try { return `${sqrt(4.0)}`; } catch (e) { return `E:${e}`; } }
 				function h() -> float { var abs = [](float v) { return 100.0 + v; }; float s = 0.0; for (int i = 0; i < 3; i++) { s += abs(i * 1.0); } return s; }
-				"" + f(4) + "," + g(2.5) + "," + h() + "," + math::sqrt(16.0);
+				`${f(4)},${g(2.5)},${h()},${math::sqrt(16.0)}`;
 			)", "-8.0,E:Cannot call 'sqrt': it is a float, not a function,303.0,4.0");
 		});
 		test("a_class_reloaded_mid_loop_takes_effect_at_the_member_site", [this]() {
@@ -382,11 +382,11 @@ private:
 					coroutine int gen() { for (int i = 1; i <= 4; i++) { yield leaf(i); } }
 					var h = gen();
 					var out = "";
-					out += "" + h.next() + ",";
-					out += "" + h.next() + ",";
+					out += `${h.next()},`;
+					out += `${h.next()},`;
 				)");
 				e.execute("function leaf(int x) -> int { return x * 100; }");
-				return e.execute("out += \"\" + h.next() + \",\"; out += \"\" + h.next() + \",\"; out;").as_string();
+				return e.execute("out += `${h.next()},`; out += `${h.next()},`; out;").as_string();
 			});
 		});
 	}
@@ -400,7 +400,7 @@ private:
 				function run() -> string {
 					int acc = 0; string err = "";
 					try { for (int i = 0; i < 6; i++) { shrink(i); acc = acc + A[i]; } } catch (e) { err = e; }
-					return "" + acc + "|" + err;
+					return `${acc}|${err}`;
 				}
 				run();
 			)", "6|Array index 3 out of bounds for array of size 3");
@@ -411,7 +411,7 @@ private:
 				var A = [1, 2, 3, 4];
 				function clear_a(int v) { if (v == 2) { A.clear(); } }
 				function run() -> int { int s = 0; for (auto v : A) { clear_a(v); s = s + v; } return s; }
-				"" + run() + "|" + A.size();
+				`${run()}|${A.size()}`;
 			)", "3|0");
 		});
 		test("a_destructor_runs_at_frame_pop_after_a_closed_loop", [this]() {
@@ -431,7 +431,7 @@ private:
 				int CALLS = 0;
 				class V { int v = 0; V(int n) { v = n; } int operator+(int o) { CALLS = CALLS + 1; return v + o; } }
 				var XS = [1, V(10), 2, V(20)];
-				function run() -> string { var acc = 0; for (int i = 0; i < 4; i++) { acc = XS[i] + acc; } return "" + acc + "," + CALLS; }
+				function run() -> string { var acc = 0; for (int i = 0; i < 4; i++) { acc = XS[i] + acc; } return `${acc},${CALLS}`; }
 				run();
 			)", "33,2");
 		});
@@ -441,7 +441,7 @@ private:
 				function mutate(int& v) -> int { v = 20; return 2; }
 				function c1() -> int { int s = 0; for (int i = 0; i < 4; i++) { int x = 3; x += mutate(x); s += x; } return s; }
 				function c2() -> int { int r = 0; for (int i = 0; i < 4; i++) { int x = 3; int y = x + mutate(x); r += y; } return r; }
-				"" + c1() + "," + c2();
+				`${c1()},${c2()}`;
 			)", "88,20");
 		});
 	}
@@ -451,11 +451,11 @@ private:
 	void shifts_and_budget() {
 		test("shift_counts_out_of_range_raise_inside_a_counted_loop", [this]() {
 			expect("shifts", R"(
-				function sh(int a, int s) -> string { try { int r = a << s; return to_string(r); } catch (e) { return "E:" + e; } }
+				function sh(int a, int s) -> string { try { int r = a << s; return to_string(r); } catch (e) { return `E:${e}`; } }
 				function run() -> string {
 					int acc = 0; string err = "";
 					try { for (int i = 60; i < 66; i++) { acc = acc + (1 << i); } } catch (e) { err = e; }
-					return sh(1, 3) + "," + sh(1, 63) + "," + sh(1, 64) + "," + sh(1, -1) + "|" + err + "|" + acc;
+					return `${sh(1, 3)},${sh(1, 63)},${sh(1, 64)},${sh(1, -1)}|${err}|${acc}`;
 				}
 				run();
 			)", "8,-9223372036854775808,E:Shift amount must be between 0 and 63,E:Shift amount must be between 0 and 63|Shift amount must be between 0 and 63|-1152921504606846976");
@@ -557,7 +557,7 @@ private:
 					parallel_for (auto& x : xs) { x = leaf(x) + leaf(x + 1); }
 					for (int i = 0; i < 64; i++) { ys[i] = leaf(ys[i]) + leaf(ys[i] + 1); }
 					int bad = 0; for (int i = 0; i < 64; i++) { if (xs[i] != ys[i]) { bad++; } }
-					return "" + bad + "|" + xs[63];
+					return `${bad}|${xs[63]}`;
 				}
 				run();
 			)", "0|8067");

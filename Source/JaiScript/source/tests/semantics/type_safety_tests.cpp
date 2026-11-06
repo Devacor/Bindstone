@@ -644,11 +644,11 @@ public:
                     }
 
                     function combine(string a, string b) -> string {
-                        return a + "-" + b;
+                        return `${a}-${b}`;
                     }
 
                     function combine(int a, string b) -> string {
-                        return b + ":" + a;
+                        return `${b}:${a}`;
                     }
                 }
             )");
@@ -2359,7 +2359,7 @@ public:
                 }
 
                 auto m = Mage("Gandalf");
-                m.name + " Level:" + m.level + " Mana:" + m.mana
+                `${m.name} Level:${m.level} Mana:${m.mana}`
             )");
             // Check that all fields from C++ and both script levels are accessible
             check_eq(result.as<std::string>(), "Gandalf Level:5 Mana:100");
@@ -2399,7 +2399,7 @@ public:
                 }
 
                 auto a = Archmage("Merlin");
-                a.name + " L:" + a.level + " M:" + a.mana + " SP:" + a.spellPower
+                `${a.name} L:${a.level} M:${a.mana} SP:${a.spellPower}`
             )");
             // All 4 levels should be initialized correctly
             check_eq(result.as<std::string>(), "Merlin L:20 M:500 SP:999");

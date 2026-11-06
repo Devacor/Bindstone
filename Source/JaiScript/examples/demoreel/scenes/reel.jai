@@ -266,7 +266,7 @@ class Reel {
 	void title_text(var& rows, int row) {
 		if (row < 0) { return; }
 		int c = HB_RGB[ui_off + ui_band + 10];
-		string bgc = ESC + "[48;2;" + (c / 65536) + ";" + ((c / 256) % 256) + ";" + (c % 256) + "m";
+		string bgc = `${ESC}[48;2;${(c / 65536)};${((c / 256) % 256)};${(c % 256)}m`;
 		gfx.overlay_center(rows, w, row, cur.handle, bgc + ESC + "[38;2;170;184;240m");
 	}
 
@@ -277,11 +277,7 @@ class Reel {
 		string ms_o = "";
 		if (ms_other > 0.0) { ms_o = " (" + other + " " + gfx.fmt1(ms_other) + ")"; }
 		string flow = paused ? " [FROZEN]" : "";
-		string txt = " JAISCRIPT DEMOREEL " + (cur_idx + 1) + "/" + nscenes + " " + cur.name +
-			" | " + backend + " " + gfx.fmt1(ms_sim + ms_draw) + "ms = sim " + gfx.fmt1(ms_sim) +
-			" + draw " + gfx.fmt1(ms_draw) + ms_o +
-			" | " + gfx.fmt1(fps) + " fps" + flow +
-			" | " + w + "x" + ph + " px | tab r h f n p q";
+		string txt = ` JAISCRIPT DEMOREEL ${(cur_idx + 1)}/${nscenes} ${cur.name} | ${backend} ${gfx.fmt1(ms_sim + ms_draw)}ms = sim ${gfx.fmt1(ms_sim)} + draw ${gfx.fmt1(ms_draw)}${ms_o} | ${gfx.fmt1(fps)} fps${flow} | ${w}x${ph} px | tab r h f n p q`;
 		gfx.overlay_left(rows, w, 0, txt, ESC + "[48;2;24;16;48m" + ESC + "[38;2;235;235;255m");
 	}
 

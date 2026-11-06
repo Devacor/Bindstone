@@ -384,6 +384,7 @@ namespace jai::vm {
     struct concat_proto {
         std::vector<fused_operand> pieces;
         uint32_t hint = 0;
+        bool joins_text = false;   // a template string's run: a scalar piece becomes text (vm_backend::join_text)
     };
 
     // op_binary_fused_decl / op_binary_fused_store: a fused binary whose result lands in

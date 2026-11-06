@@ -686,9 +686,9 @@ public:
                 var a = A();
                 class A { int f = 1; }
                 var out = "";
-                try { for (auto y : a.co()) { out = out + y; } } catch (ex) { out = out + "co[" + ex + "]"; }
-                try { for (auto y2 : a.f) { out = out + y2; } } catch (ex2) { out = out + "|f[" + ex2 + "]"; }
-                out = out + "|" + a.f;
+                try { for (auto y : a.co()) { out = out + y; } } catch (ex) { out = `${out}co[${ex}]`; }
+                try { for (auto y2 : a.f) { out = out + y2; } } catch (ex2) { out = `${out}|f[${ex2}]`; }
+                out = `${out}|${a.f}`;
                 out;
             )";
             std::array<std::string, 2> got;
@@ -1750,7 +1750,7 @@ public:
                 "the callee member is blamed, not the argument's (got: " + i + ")");
             expect_order((std::string(side_prelude) + R"(
                 var v8 = null; var r = v8?.push(side());
-                log + "|" + (r == null);
+                `${log}|${(r == null)}`;
             )").c_str(), "|true", "null-safe call skips the arguments", false);
         });
         test("scalar_receiver_unknown_member_text", [this, expect_order, run_order_both, side_prelude]() {
@@ -1813,18 +1813,18 @@ public:
             )").c_str(), "|O has no member 'nosuch'", "unknown member beats arg side effects", true);
             // a plain field is not callable: the check fires before the arguments
             expect_order((cls + R"(
-                try { obj.x(side()); } catch (e) { caught = "c:" + e; }
+                try { obj.x(side()); } catch (e) { caught = `c:${e}`; }
                 log + "|" + caught;
             )").c_str(), "|c:Cannot call 'x': it is an int, not a function", "field shadow not-callable beats arg side effects", true);
             expect_order((cls + R"(
                 obj.lam = [](int a) { return a * 2; };
                 var r = obj.lam(side());
-                log + "|" + r;
+                `${log}|${r}`;
             )").c_str(), "A|2", "callable field still calls once", true);
             // overload resolution needs the argument values: stays post-args
             expect_order((cls + R"(
                 var r1 = obj.f(side()); var r2 = obj.f(side(), 2);
-                log + "|" + r1 + ":" + r2;
+                `${log}|${r1}:${r2}`;
             )").c_str(), "AA|1:3", "multi-overload method resolves post-args", true);
         });
         test("nested_callee_lookup_order", [this, expect_order, side_prelude]() {
@@ -1856,7 +1856,7 @@ public:
                 string run() {
                     var obj = O(); int local = 2; var arr = [1];
                     arr.push(local);
-                    return "" + obj.f(1, local, "abc") + ":" + arr.length();
+                    return `${obj.f(1, local, "abc")}:${arr.length()}`;
                 }
                 run();
             )", "6:2", "slot-local / literal arguments", false);
@@ -1867,25 +1867,25 @@ public:
                 try { v8.push(side()); } catch (e) { c2 = e; }
                 try { n.nosuch(1); } catch (e) { c3 = e; }
                 try { n.nosuch(side()); } catch (e) { c4 = e; }
-                log + "|" + (c1 == c2) + ":" + (c3 == c4) + "|" + c1 + "|" + c3;
+                `${log}|${(c1 == c2)}:${(c3 == c4)}|${c1}|${c3}`;
             )").c_str(), "|true:true|Cannot call 'push' on null ('v8' is null)|int has no member 'nosuch'",
                 "probed and unprobed shapes raise the same texts", false);
         });
         test("computed_callee_callable_check_before_args", [this, expect_order, side_prelude]() {
             expect_order((std::string(side_prelude) + R"(
                 var arr = [1]; var caught = "none";
-                try { arr[0](side()); } catch (e) { caught = "c:" + e; }
+                try { arr[0](side()); } catch (e) { caught = `c:${e}`; }
                 log + "|" + caught;
             )").c_str(), "|c:Cannot call a value of type int: it is not a function", "non-callable element beats arg side effects", false);
             expect_order((std::string(side_prelude) + R"(
                 var fs = [[](int a) -> int { return a * 2; }];
                 var r = fs[0](side());
-                log + "|" + r;
+                `${log}|${r}`;
             )").c_str(), "A|2", "callable element still calls", false);
             expect_order((std::string(side_prelude) + R"(
                 function mk() -> auto { return [](int a) -> int { return a + 100; }; }
                 var r = mk()(side());
-                log + "|" + r;
+                `${log}|${r}`;
             )").c_str(), "A|101", "call-result callee still calls", false);
         });
         test("operator_overloads_unaffected", [this, expect_order, run_order_both]() {
@@ -1899,7 +1899,7 @@ public:
                 V make() { log += "M"; return V(2); }
                 var a = V(1);
                 var r = a + make();
-                log + "|" + r.v;
+                `${log}|${r.v}`;
             )", "M+|3", "operator overload call", false);
             auto [i, v] = run_order_both(R"(
                 var log = "";
@@ -1928,7 +1928,7 @@ public:
                 var first = h.next();
                 var acc2 = Acc(); var between = acc2.add(2 + 3);
                 var final = h.next();
-                "" + first + ":" + between + ":" + final + ":" + h.done();
+                `${first}:${between}:${final}:${h.done()}`;
             )", "1:5:5:true", "method calls around a yield", false);
             expect_order((std::string(side_prelude) + R"(
                 coroutine int gen() { yield 1; return 2; }
@@ -1955,29 +1955,29 @@ public:
             "P& pk() { log += \"A\"; return shared; }\n";
         test("member_compound_receiver_once_call", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
-                pk().v += 5; string s1 = log + ":" + ("" + shared.v);
-                pk().v -= 2; string s2 = log + ":" + ("" + shared.v);
-                pk().v *= 3; string s3 = log + ":" + ("" + shared.v);
-                pk().v /= 2; string s4 = log + ":" + ("" + shared.v);
+                pk().v += 5; string s1 = log + ":" + (`${shared.v}`);
+                pk().v -= 2; string s2 = log + ":" + (`${shared.v}`);
+                pk().v *= 3; string s3 = log + ":" + (`${shared.v}`);
+                pk().v /= 2; string s4 = log + ":" + (`${shared.v}`);
                 pk().v %= 4;
-                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + shared.v);
+                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + (`${shared.v}`);
             )").c_str(), "A:15|AA:13|AAA:39|AAAA:19|AAAAA:3", "call receiver runs once per compound", false);
             expect_order((std::string(recv_prelude) + R"(
                 var r = (pk().v += 5);
-                log + ":" + ("" + r) + ":" + ("" + shared.v);
+                log + ":" + (`${r}`) + ":" + (`${shared.v}`);
             )").c_str(), "A:15:15", "expression-position compound", false);
         });
         test("member_incdec_receiver_once", [this, expect_order, recv_prelude]() {
             expect_order((std::string(recv_prelude) + R"(
-                pk().v++; string s1 = log + ":" + ("" + shared.v);
-                ++pk().v; string s2 = log + ":" + ("" + shared.v);
-                pk().v--; string s3 = log + ":" + ("" + shared.v);
-                --pk().v; string s4 = log + ":" + ("" + shared.v);
+                pk().v++; string s1 = log + ":" + (`${shared.v}`);
+                ++pk().v; string s2 = log + ":" + (`${shared.v}`);
+                pk().v--; string s3 = log + ":" + (`${shared.v}`);
+                --pk().v; string s4 = log + ":" + (`${shared.v}`);
                 int r = pk().v++;
                 int q = ++pk().v;
                 int t = pk().v--;
                 int u = --pk().v;
-                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + ("" + r) + ":" + ("" + q) + ":" + ("" + t) + ":" + ("" + u) + ":" + ("" + shared.v);
+                s1 + "|" + s2 + "|" + s3 + "|" + s4 + "|" + log + ":" + (`${r}`) + ":" + (`${q}`) + ":" + (`${t}`) + ":" + (`${u}`) + ":" + (`${shared.v}`);
             )").c_str(), "A:11|AA:12|AAA:11|AAAA:10|AAAAAAAA:10:12:12:10:10", "++/-- pre and post on a call receiver", false);
         });
         test("member_compound_receiver_once_index_and_key", [this, expect_order]() {
@@ -1996,7 +1996,7 @@ public:
                 mp[key("d")].v += 1;
                 mp[key("e")].v++;
                 vm[key("f")].v -= 3;
-                log + "|" + ("" + arr[1].v) + ":" + ("" + varr[1].v) + ":" + ("" + mp["k"].v) + ":" + ("" + vm["k"].v);
+                log + "|" + (`${arr[1].v}`) + ":" + (`${varr[1].v}`) + ":" + (`${mp["k"].v}`) + ":" + (`${vm["k"].v}`);
             )", "abcdef|12:11:12:7", "index / key receivers run once", false);
         });
         test("member_compound_receiver_once_nested", [this, expect_order]() {
@@ -2009,10 +2009,10 @@ public:
                 A& ga() { log += "A"; return a0; }
                 class Holder { A a = A(); function getb() -> B& { log += "B"; return this.a.bb; } }
                 Holder h = Holder();
-                ga().bb.cc.c += 1; string s1 = log + ":" + ("" + a0.bb.cc.c);
-                ga().bb.cc.c++; string s2 = log + ":" + ("" + a0.bb.cc.c);
-                h.getb().cc.c += 3; string s3 = log + ":" + ("" + h.a.bb.cc.c);
-                --h.getb().cc.c; string s4 = log + ":" + ("" + h.a.bb.cc.c);
+                ga().bb.cc.c += 1; string s1 = log + ":" + (`${a0.bb.cc.c}`);
+                ga().bb.cc.c++; string s2 = log + ":" + (`${a0.bb.cc.c}`);
+                h.getb().cc.c += 3; string s3 = log + ":" + (`${h.a.bb.cc.c}`);
+                --h.getb().cc.c; string s4 = log + ":" + (`${h.a.bb.cc.c}`);
                 s1 + "|" + s2 + "|" + s3 + "|" + s4;
             )", "A:2|AA:3|AAB:4|AABB:3", "every level of a nested chain runs once", false);
         });
@@ -2023,9 +2023,9 @@ public:
                 class Hold { V v = V(1); }
                 Hold hh = Hold();
                 Hold& gh() { log += "H"; return hh; }
-                gh().v += V(4); string s1 = log + ":" + ("" + hh.v.x);
+                gh().v += V(4); string s1 = log + ":" + (`${hh.v.x}`);
                 var r = (gh().v += V(1));
-                s1 + "|" + log + ":" + ("" + r.x) + ":" + ("" + hh.v.x);
+                s1 + "|" + log + ":" + (`${r.x}`) + ":" + (`${hh.v.x}`);
             )", "H+:5|H+H+:6:6", "operator+ compound evaluates the receiver once", false);
         });
         test("member_compound_receiver_once_hybrid", [this]() {
@@ -2114,7 +2114,7 @@ public:
                 int boom() { log += "R"; throw "boom"; }
                 string caught = "";
                 try { pk().v += boom(); } catch (e) { caught = e; }
-                log + "|" + caught + ":" + ("" + shared.v);
+                log + "|" + caught + ":" + (`${shared.v}`);
             )").c_str(), "R|boom:10", "C++17: the rhs before the receiver; an rhs raise evaluates no target", false);
             expect_order((std::string(recv_prelude) + R"(
                 var n = null;
@@ -2140,7 +2140,7 @@ public:
             expect_order((std::string(recv_prelude) + R"(
                 string caught = "none";
                 try { pk().v += "s"; } catch (e) { caught = e; }
-                log + "|" + caught + ":" + ("" + shared.v);
+                log + "|" + caught + ":" + (`${shared.v}`);
             )").c_str(), "A|Cannot apply '+=' to int and string:10", "operand mismatch after the receiver ran once", true);   // the checker rejects int += string at load; the RUNTIME text is under test
         });
         test("subscript_compound_rvalue_base_once", [this, expect_order]() {
@@ -2152,13 +2152,13 @@ public:
                 try { ga()[1] += 1; } catch (e) { c1 = e; }
                 try { ga()[1]++; } catch (e) { c2 = e; }
                 try { [1, 2][0] += 1; } catch (e) { c3 = e; }
-                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + arr[1]);
+                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + (`${arr[1]}`);
             )", "AA|Cannot assign to rvalue expression|Cannot assign to rvalue expression|Cannot assign to rvalue expression|2",
                 "an rvalue subscript base runs once and raises the vm's text", false);
         });
         test("subscript_compound_string_base_text", [this, expect_order]() {
-            // Pinned alignment (interpreter -> vm): the index runs once per compound store; a non-text
-            // result raises after the arithmetic and leaves the string alone, a text result replaces the char
+            // Pinned alignment (interpreter -> vm): the index runs once per compound store; an int result raises at the store and
+            // text beside the char raises at the +, each leaving the string alone
             expect_order(R"(
                 var log = "";
                 var s = "abc";
@@ -2166,8 +2166,8 @@ public:
                 string c1 = ""; string c2 = "";
                 try { s[idx()] += 1; } catch (e) { c1 = e; }
                 try { s[idx()] += "x"; } catch (e) { c2 = e; }
-                log + "|" + c1 + "|" + c2 + "|" + s;
-            )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
+                `${log}|${c1}|${c2}|${s}`;
+            )", "II|Cannot assign int to a string character (it takes a char or a string)|Cannot apply '+=' to char and string|abc",
                 "a string subscript compound runs the index once", false);
         });
         test("map_compound_missing_key_raises", [this, expect_order]() {
@@ -2182,7 +2182,7 @@ public:
                 try { m[key()] += "s"; } catch (e) { c1 = e; }
                 try { ms[key()] += "s"; } catch (e) { c2 = e; }
                 try { mi[key()] += 1; } catch (e) { c3 = e; }
-                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
+                log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + (`${m.size()}`) + (`${ms.size()}`) + (`${mi.size()}`);
             )", "KKK|Key \"k\" not found in map|Key \"k\" not found in map|Key \"k\" not found in map|000",
                 "a missing key raises on every map", false);
             expect_order(R"(
@@ -2191,14 +2191,14 @@ public:
                 map<string, int> m = {"k": 1};
                 var ms = {"k": "a"};
                 m[key()] += 5; m[key()]++; ms[key()] += "b";
-                log + "|" + ("" + m["k"]) + ms["k"];
+                log + "|" + (`${m["k"]}`) + ms["k"];
             )", "KKK|7ab", "present keys keep working", false);
         });
         test("static_compound_unchanged", [this, expect_order]() {
             expect_order(R"(
                 class Cnt { static int n = 0; }
                 Cnt::n += 5; Cnt::n++; ++Cnt::n; Cnt::n -= 1;
-                ("" + Cnt::n);
+                (`${Cnt::n}`);
             )", "6", "static compounds carry no receiver", false);
         });
 
@@ -3065,73 +3065,73 @@ public:
             };
             const std::string glob = "string s = \"glob\";\n";
             expect(glob + R"(
-                string f() { string s = "loc"; s.insert(0, "x"); s.erase(1, 1); return s + ":" + s.length() + ":" + s.find("o"); }
-                f() + "|" + s
+                string f() { string s = "loc"; s.insert(0, "x"); s.erase(1, 1); return `${s}:${s.length()}:${s.find("o")}`; }
+                `${f()}|${s}`
             )", "xoc:3:1|glob", "local shadow");
             expect(glob + R"(
-                string g(string s) { s.to_upper(); return s + ":" + s.length() + ":" + s.find("A"); }
-                g("par") + "|" + s
+                string g(string s) { s.to_upper(); return `${s}:${s.length()}:${s.find("A")}`; }
+                `${g("par")}|${s}`
             )", "PAR:3:1|glob", "parameter shadow");
             expect(glob + R"(
                 class C {
                     string s = "fld";
-                    string m() { s.insert(0, "x"); return s + ":" + s.length(); }
-                    string t() { this.s.reverse(); return this.s + ":" + this.s.length(); }
+                    string m() { s.insert(0, "x"); return `${s}:${s.length()}`; }
+                    string t() { this.s.reverse(); return `${this.s}:${this.s.length()}`; }
                 }
                 auto c = C();
-                c.m() + "|" + c.t() + "|" + c.s + "|" + s
+                `${c.m()}|${c.t()}|${c.s}|${s}`
             )", "xfld:4|dlfx:4|dlfx|glob", "field shadow, bare and this.s");
             expect(R"(
                 class D {
                     string s = "fld";
-                    string m() { string s = "loc"; s.insert(0, "x"); return s + "/" + this.s + "/" + s.length(); }
-                    string p(string s) { s.to_upper(); return s + "/" + this.s; }
+                    string m() { string s = "loc"; s.insert(0, "x"); return `${s}/${this.s}/${s.length()}`; }
+                    string p(string s) { s.to_upper(); return `${s}/${this.s}`; }
                 }
                 auto d = D();
-                d.m() + "|" + d.p("par") + "|" + d.s
+                `${d.m()}|${d.p("par")}|${d.s}`
             )", "xloc/fld/4|PAR/fld|fld", "method local and parameter shadowing the field");
             expect(glob + R"(
-                string c() { string s = "cap"; auto l = [&s]() { s.insert(0, "y"); return s + ":" + s.length(); }; return l() + "/" + s; }
-                c() + "|" + s
+                string c() { string s = "cap"; auto l = [&s]() { s.insert(0, "y"); return `${s}:${s.length()}`; }; return `${l()}/${s}`; }
+                `${c()}|${s}`
             )", "ycap:4/ycap|glob", "by-reference captured local");
             {
                 auto [i_out, v_out] = run_both(glob + R"(
-                    string c() { string s = "cap"; auto l = [s]() { s.insert(0, "y"); return s + ":" + s.length(); }; return l(); }
-                    c() + "|" + s
+                    string c() { string s = "cap"; auto l = [s]() { s.insert(0, "y"); return `${s}:${s.length()}`; }; return l(); }
+                    `${c()}|${s}`
                 )");
                 check_eq(std::string("ycap:4|glob"), i_out, "by-value captured local (interpreter)");
                 check_eq(i_out, v_out, "by-value captured local parity");
             }
             expect(glob + R"(
-                string q() { string out = ""; for (int i = 0; i < 2; i++) { string s = "it"; s.to_upper(); out = out + s + s.length(); } return out; }
-                q() + "|" + s
+                string q() { string out = ""; for (int i = 0; i < 2; i++) { string s = "it"; s.to_upper(); out = out + s + `${s.length()}`; } return out; }
+                `${q()}|${s}`
             )", "IT2IT2|glob", "loop-scoped local");
             expect(glob + R"(
-                string b() { string out = ""; { string s = "blk"; s.erase(0, 1); out = out + s + s.find("k"); } return out; }
-                b() + "|" + s
+                string b() { string out = ""; { string s = "blk"; s.erase(0, 1); out = out + s + `${s.find("k")}`; } return out; }
+                `${b()}|${s}`
             )", "lk1|glob", "block-scoped local in a function");
             expect(glob + R"(
                 string log = "";
                 { string s = "top"; s.insert(0, "x"); log = log + s; }
                 for (int i = 0; i < 1; i++) { string s = "lp"; s.to_upper(); log = log + s; }
-                log + "|" + s
+                `${log}|${s}`
             )", "xtopLP|glob", "top-level block and loop scopes");
             expect(glob + R"(
-                class S { static string s = "sta"; static string m() { s.insert(0, "x"); return s + ":" + s.length(); } }
-                S::m() + "|" + s
+                class S { static string s = "sta"; static string m() { s.insert(0, "x"); return `${s}:${s.length()}`; } }
+                `${S::m()}|${s}`
             )", "xsta:4|glob", "static field in a static method");
             expect(R"(
                 string e = "glob";
-                string k() { try { throw "err"; } catch (e) { e.to_upper(); return e + ":" + e.length(); } return "no"; }
-                k() + "|" + e
+                string k() { try { throw "err"; } catch (e) { e.to_upper(); return `${e}:${e.length()}`; } return "no"; }
+                `${k()}|${e}`
             )", "ERR:3|glob", "catch variable over a same-named global");
             expect(glob + R"(
-                string z() { string s = "loc"; ::s.insert(0, "g"); return s + ":" + ::s.length(); }
-                z() + "|" + s
+                string z() { string s = "loc"; ::s.insert(0, "g"); return `${s}:` + cast<string>(::s.length()); }
+                `${z()}|${s}`
             )", "loc:5|gglob", "::s still the global");
             expect(R"(
                 class T { int n = 0; void insert(int v) { n = n + v; } int find(int v) { return n; } int size() { return n * 10; } }
-                string w() { T t = T(); t.insert(3); return "" + t.find(0) + "/" + t.size(); }
+                string w() { T t = T(); t.insert(3); return `${t.find(0)}/${t.size()}`; }
                 w()
             )", "3/30", "builtin-colliding class methods keep dispatching");
         });
@@ -3161,7 +3161,7 @@ public:
                 var s = "glob";
                 string f() { s = 5; return "x"; }
                 s.insert(0, f());
-                "" + s
+                `${s}`
             )", "5", "argument retypes the receiver");
             expect(R"(
                 var t = "abc";
@@ -3172,11 +3172,11 @@ public:
             expect(R"(
                 string u = "ab";
                 u.insert(0, "c");
-                u + "/" + u.size()
+                `${u}/${u.size()}`
             )", "cab/3", "pure arguments");
             expect(R"(
                 string p() { return "q"; }
-                string h() { string u = "ab"; u.insert(1, p()); return u + "/" + u.length(); }
+                string h() { string u = "ab"; u.insert(1, p()); return `${u}/${u.length()}`; }
                 h()
             )", "aqb/3", "local receiver with a calling argument");
         });
@@ -4642,13 +4642,13 @@ public:
             // member and an element; a char-declared one refuses it
             jai::stdlib::register_all(e);
             check_eq(std::string("97 99 97 99 97 99 97 99 97 99 98 a"), e->execute(R"(
-                class P { var c = 'b'; string m() { c -= 1; string s = "" + c; c = 'b'; c++; return s + " " + c; } }
-                function slot() -> string { var x = 'b'; x -= 1; var y = 'b'; y++; return "" + x + " " + y; }
+                class P { var c = 'b'; string m() { c -= 1; string s = `${c}`; c = 'b'; c++; return `${s} ${c}`; } }
+                function slot() -> string { var x = 'b'; x -= 1; var y = 'b'; y++; return `${x} ${y}`; }
                 var lx = 'b'; lx -= 1; var ly = 'b'; ly++;
                 P p; P q; q.c = 'b'; q.c -= 1; P r; r.c++;
                 var arr = ['b', 'b']; arr[0] -= 1; arr[1]++;
                 var w = 'a'; var old = w++;
-                "" + lx + " " + ly + " " + slot() + " " + p.m() + " " + q.c + " " + r.c + " " + arr[0] + " " + arr[1] + " " + w + " " + old
+                `${lx} ${ly} ${slot()} ${p.m()} ${q.c} ${r.c} ${arr[0]} ${arr[1]} ${w} ${old}`
             )").as_string());
             check_eq(std::string("Cannot assign int to 'tc' (declared char)"),
                 e->execute("char tc = 'b'; string got = \"\"; try { tc++; } catch (err) { got = err.message; } got").as_string());
@@ -4659,23 +4659,24 @@ public:
                 class H { int x = 9223372036854775807; int y = -9223372036854775807 - 1; }
                 H h; array<int> a = [9223372036854775807]; map<string, int> m; m["k"] = 9223372036854775807; var d = [-9223372036854775807 - 1];
                 string out = "";
-                try { h.x += 1; } catch (err) { out += err.message + ";"; }
-                try { h.x++; } catch (err) { out += err.message + ";"; }
-                try { a[0] *= 2; } catch (err) { out += err.message + ";"; }
-                try { h.y--; } catch (err) { out += err.message + ";"; }
-                try { m["k"] += 1; } catch (err) { out += err.message + ";"; }
-                try { a[0]++; } catch (err) { out += err.message + ";"; }
-                try { ++a[0]; } catch (err) { out += err.message + ";"; }
+                try { h.x += 1; } catch (err) { out += `${err.message};`; }
+                try { h.x++; } catch (err) { out += `${err.message};`; }
+                try { a[0] *= 2; } catch (err) { out += `${err.message};`; }
+                try { h.y--; } catch (err) { out += `${err.message};`; }
+                try { m["k"] += 1; } catch (err) { out += `${err.message};`; }
+                try { a[0]++; } catch (err) { out += `${err.message};`; }
+                try { ++a[0]; } catch (err) { out += `${err.message};`; }
                 try { --d[0]; } catch (err) { out += err.message; }
                 out
             )").as_string());
         });
-        // The additive guarantees: everything that worked before promotion still means
-        // the same thing.
-        test("string_concat_preserved", [this]() {
+        // a char is no text to a string's +, in either order (a load error where the checker sees it); a template makes it text
+        test("a_char_beside_a_string_is_the_plus_error", [this]() {
             auto e = make_engine();
-            check_eq(std::string("prex"), e->execute("\"pre\" + 'x'").as_string());
-            check_eq(std::string("xpost"), e->execute("'x' + \"post\"").as_string());
+            check_eq(std::string("cannot apply '+' to 'char' and 'string': stringify it with to_string(x) or `${x}`"),
+                e->execute("var c = 'x'; string got = \"\"; try { got = c + \"post\"; } catch (err) { got = err.message; } got").as_string());
+            check_throws([&]() { e->execute("\"pre\" + 'x'"); });
+            check_eq(std::string("prex xpost"), e->execute("var c = 'x'; `pre${c} ${c}post`").as_string());
         });
         test("no_implicit_int_to_char", [this]() {
             auto e = make_engine();
@@ -4856,8 +4857,7 @@ public:
                 function run() -> string {
                     int i; float f; bool b; string s; array<int> xs; map<string, int> m; var v; Vec2 p;
                     H h = H();
-                    return "" + i + "|" + f + "|" + b + "|" + s + "|" + xs.size() + "|" + m.size() + "|" + type_of(v) + "|" + p.x + "|" +
-                           (h.xs.size() + 2) + "|" + (h.p.y + 1.0) + "|" + gi + "|" + gv.x;
+                    return `${i}|${f}|${b}|${s}|${xs.size()}|${m.size()}|${type_of(v)}|${p.x}|${(h.xs.size() + 2)}|${(h.p.y + 1.0)}|${gi}|${gv.x}`;
                 }
                 run();
             )").as_string());
@@ -4870,7 +4870,7 @@ public:
                 class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
                 function run() -> string {
                     Vec2 a(3.0, 4.0); Vec2 b(); int i{5}; int z{}; float f(7.0); Vec2 c{};
-                    return "" + a.x + "," + a.y + "|" + b.x + "|" + i + "|" + z + "|" + f + "|" + c.y;
+                    return `${a.x},${a.y}|${b.x}|${i}|${z}|${f}|${c.y}`;
                 }
                 run();
             )").as_string());
@@ -4895,7 +4895,7 @@ public:
                     Bad keep = Bad(3); string err = ""; var fresh = null;
                     try { keep = Bad(0); } catch (ex) { err = ex; }
                     try { fresh = Bad(0); } catch (ex) { err = err + "|" + ex; }
-                    return "" + keep.x + "|" + type_of(fresh) + "|" + err + "|" + to_json(LOG);
+                    return `${keep.x}|${type_of(fresh)}|${err}|${to_json(LOG)}`;
                 }
                 run();
             )").as_string());

@@ -1190,12 +1190,12 @@ public:
             check_eq(std::string("true true true true | false false false false | true false false"), eng->execute(R"(
                 auto s = shared_ptr<LifetimeTracker>(1);
                 weak_ptr<LifetimeTracker> w = s;
-                string out = "" + (s.same_as(w)) + " " + (w.same_as(s)) + " " + (same_object(s, w)) + " " + (same_object(w, s));
+                string out = `${(s.same_as(w))} ${(w.same_as(s))} ${(same_object(s, w))} ${(same_object(w, s))}`;
                 weak_ptr<LifetimeTracker> e1 = shared_ptr<LifetimeTracker>(2);
                 weak_ptr<LifetimeTracker> e2 = shared_ptr<LifetimeTracker>(3);
-                out += " | " + (e1.same_as(e2)) + " " + (same_object(e1, e2)) + " " + (e1.same_as(null)) + " " + (same_object(e1, null));
+                out += ` | ${(e1.same_as(e2))} ${(same_object(e1, e2))} ${(e1.same_as(null))} ${(same_object(e1, null))}`;
                 auto e1_again = e1;
-                out += " | " + (e1.same_as(e1_again)) + " " + (s.same_as(e1)) + " " + (e1.same_as(s));
+                out += ` | ${(e1.same_as(e1_again))} ${(s.same_as(e1))} ${(e1.same_as(s))}`;
                 out;
             )").to_string());
         });

@@ -83,7 +83,7 @@ public:
 			f.write("bump.spider", "${count += 2}|${names[0] = \"q\"}");
 			auto eng = engine_for();
 			check_eq(std::string("7|q 7 q"), run(eng, f,
-				"int count = 5; array<string> names = [\"x\", \"y\"]; string page = template(\"bump.spider\", count, names).to_string(); page + \" \" + count + \" \" + names[0];"));
+				"int count = 5; array<string> names = [\"x\", \"y\"]; string page = template(\"bump.spider\", count, names).to_string(); `${page} ${count} ${names[0]}`;"));
 			f.write("store.spider", "${count = \"text\"}");
 			const std::string wrong = failure(eng, f, "int count = 1; template(\"store.spider\", count);");
 			check(wrong.find("store.spider:1:") != std::string::npos && wrong.find("count") != std::string::npos, "a store the caller's type refuses fails the load at the template's line: " + wrong);
@@ -168,14 +168,14 @@ public:
 			const std::string script = a_setup + " string text = R\"tpl(" + a_text + ")tpl\"; string m = \"<rendered>\"; try { m = scoped_template_text(text, data).to_string(); } catch (e) { m = e; } m;";
 			return eng->execute(script).as_string();
 		};
-		const std::string data = "int secret = 42; int leak() { return secret; } class Pet { string name = \"Rex\"; string speak() { return \"secret \" + secret; } bool operator==(Pet o) { return secret == 42; } } "
+		const std::string data = "int secret = 42; int leak() { return secret; } class Pet { string name = \"Rex\"; string speak() { return \"secret \" + to_string(secret); } bool operator==(Pet o) { return secret == 42; } } "
 			"map<string, var> data = {\"name\": \"<ann>\", \"pet\": Pet(), \"host\": TemplateHostThing(), \"call\": () => secret, \"items\": [\"b\", \"a\"]};";
 
 		test("scoped_template_renders_built_in_values_escaped", [=, this]() {
 			check_eq(std::string("&lt;ann&gt; Rex 002 B,A"),
 				scoped_error(data, "${args[\"name\"]} ${args[\"pet\"].name} ${args[\"items\"].size():03} ${array::map(args[\"items\"], i => string::to_upper(i)).join(\",\")}"));
 			auto eng = engine_for();
-			check_eq(std::string("ab [\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${array::sort(args[\\\"items\\\"])}\", d).to_string() + \" \" + to_json(d[\"items\"]);").as_string(),
+			check_eq(std::string("ab [\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; `${scoped_template_text(\"${array::sort(args[\\\"items\\\"])}\", d).to_string()} ${to_json(d[\"items\"])}`;").as_string(),
 				"the string::, array:: and map:: functions work on copies");
 			check_eq(std::string("sort changes obj in place and returns nothing; array::sort(obj) returns a sorted copy"),
 				eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; string m = \"\"; try { scoped_template_text(\"${args[\\\"items\\\"].sort()}\", d); } catch (e) { m = e; } m;").as_string(),
@@ -233,7 +233,7 @@ public:
 
 		test("scoped_template_caps_its_output", [=, this]() {
 			auto eng = engine_for();
-			check_eq(std::string("1048576 10485760"), eng->execute("to_string(reflect::scoped_template_output_limit()) + \" \" + reflect::template_output_limit();").as_string(),
+			check_eq(std::string("1048576 10485760"), eng->execute("`${to_string(reflect::scoped_template_output_limit())} ${reflect::template_output_limit()}`;").as_string(),
 				"a script reads both limits, at their defaults");
 			eng->scoped_template_output_limit(16);
 			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
@@ -254,7 +254,7 @@ public:
 			eng->template_output_limit(12);
 			check_eq(std::string("template()'s output passed its 12-byte limit: the host raises it with engine::template_output_limit"), run(eng, f,
 				"string text = \"ab\"; string m = \"\"; try { m = template(\"page.spider\", text).to_string(); } catch (e) { m = e; } m;"));
-			check_eq(std::string("12 1048576"), eng->execute("to_string(reflect::template_output_limit()) + \" \" + reflect::scoped_template_output_limit();").as_string());
+			check_eq(std::string("12 1048576"), eng->execute("`${to_string(reflect::template_output_limit())} ${reflect::scoped_template_output_limit()}`;").as_string());
 			eng->template_output_limit(16);
 			check_eq(std::string("<p><i>ab</i></p>"), run(eng, f, "string text = \"ab\"; template(\"page.spider\", text).to_string();"), "the host raises it");
 			eng->template_output_limit(0);
@@ -299,7 +299,7 @@ public:
 			auto render = [&](const std::string& a_call) {
 				return eng->execute("map<string, var> m = {\"who\": \"y\"}; string p = \"card.spider\"; string e = \"\"; try { e = " + a_call + ".to_string(); } catch (err) { e = err; } e;").as_string();
 			};
-			check_eq(std::string("true true"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template)) + \" \" + reflect::is_enabled(\"scoped_template\");").as_string(), "on by default");
+			check_eq(std::string("true true"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template)) + \" \" + to_string(reflect::is_enabled(\"scoped_template\"));").as_string(), "on by default");
 			eng->disable(privilege::filesystem);
 			check_eq(std::string("<b>y</b>"), render("scoped_template(\"card.spider\", m)"), "a literal path with filesystem off");
 			check_eq(std::string("<b>y</b>"), render("scoped_template(p, m)"), "a path known at run time with filesystem off");

@@ -100,7 +100,7 @@ class Monster { int hp = 10; random brain; }                       // or a field
 array&lt;Monster&gt; pack = [];
 for (int i = 1; i &lt;= 3; ++i) { Monster m; m.brain.seed(i); pack.push(m); }
 parallel_for (auto&amp; m : pack) { m.hp -= m.brain.next_int(1, 6); }
-print(to_string(pack[0].hp) + &quot; &quot; + pack[1].hp + &quot; &quot; + pack[2].hp);</code></pre></div>
+print(`${pack[0].hp} ${pack[1].hp} ${pack[2].hp}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">51 17 31 91 93 79 47 67
 61
 5 9 5

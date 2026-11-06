@@ -351,7 +351,7 @@ public:
                 try { var x = make()["u"]; } catch (e) { out += e + "|"; }
                 try { var x = typed_as_var[5]; } catch (e) { out += e + "|"; }
                 try { var [k, v] = loose["pair"]; } catch (e) { out += e + "|"; }
-                out += "" + hp.size() + " " + loose.size() + " " + loose["a"].size();
+                out += `${hp.size()} ${loose.size()} ${loose["a"].size()}`;
                 hp["fresh"] = 1;
                 hp["fresh"] += 1;
                 hp["count"] = hp.get("count", 0) + 1;
@@ -959,14 +959,14 @@ var& r = m[1100];
 for (int i = 0; i < 300; ++i) { m[2000 + i * 7] = i; }
 r = "kept";
 m.erase(1032); m[1032] = "again";
-string out = to_string(m[1028]) + " " + to_string(m[1030]) + " " + to_string(m[1030.0]) + " " + to_string(m["1030"]) + " " + to_string(m[1100]) + " " + to_string(m[1032]) + " " + to_string(m.has(1029)) + " " + to_string(m.get(1031, -1));
+string out = `${to_string(m[1028])} ${to_string(m[1030])} ${to_string(m[1030.0])} ${to_string(m["1030"])} ${to_string(m[1100])} ${to_string(m[1032])} ${to_string(m.has(1029))} ${to_string(m.get(1031, -1))}`;
 string keys = ""; int n = 0;
-for (auto [k, v] : m) { if (n < 6 || n > m.size() - 4) { keys += to_string(k) + ","; } ++n; }
+for (auto [k, v] : m) { if (n < 6 || n > m.size() - 4) { keys += `${to_string(k)},`; } ++n; }
 map<int, int> lump = {};
 for (int i = 0; i < 124; ++i) { lump[1028 + i] = i * 3; }
 int s = 0; for (int i = 1000; i < 1200; ++i) { s += lump.get(i, 0); if (lump.has(i)) { lump[i] = lump[i] + 1; } }
 var copy = lump; copy[1028] = -1;
-out += " " + keys + " " + to_string(n) + " " + to_string(s) + " " + to_string(lump[1028]) + " " + to_string(copy[1028]) + " " + to_json(lump).size();
+out += ` ${keys} ${to_string(n)} ${to_string(s)} ${to_string(lump[1028])} ${to_string(copy[1028])} ${to_json(lump).size()}`;
 out;
 )JAI";
             auto [i_out, v_out] = both_mode(src, true);

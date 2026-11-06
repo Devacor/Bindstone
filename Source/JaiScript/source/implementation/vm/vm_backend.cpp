@@ -2279,6 +2279,7 @@ op_status vm_backend::define_decl_value(frame& f, uint64_t name_id, size_t slot_
 
 struct vm_backend::binary_host {
 	vm_backend& vm;
+	bool joins_text = false;
 	script_value make_int(script_int v) const noexcept { return script_value(v, vm.engine_); }
 	script_value make_float(script_float v) const noexcept { return script_value(v, vm.engine_); }
 	script_value make_bool(bool v) const noexcept { return script_value(v, vm.engine_); }
@@ -2354,6 +2355,14 @@ script_value vm_backend::call_operator_of(const script_value& callee) {
 
 checked_result<script_value> vm_backend::handle_add(const script_value& left, const script_value& right) {
 	binary_host h{*this};
+	return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
+}
+// a template string's `+`: binary_general's, a scalar beside the string becoming text. KEEP BYTE-PARALLEL with interpreter::join_text
+checked_result<script_value> vm_backend::join_text(const script_value& left, const script_value& right) {
+	if (operator_table_ && operator_table_->any()) {
+		if (operator_table_->entry(detail::binary_op_slot(token_type::plus))) { return binary_general(token_type::plus, left, right); }
+	}
+	binary_host h{*this, true};
 	return detail::binary_arithmetic<detail::arith_op::add>(h, ops_.plus, left, right);
 }
 checked_result<script_value> vm_backend::handle_subtract(const script_value& left, const script_value& right) {
@@ -4142,7 +4151,7 @@ op_status vm_backend::exec_binary(frame& f, const vm_instruction& ins) {
 	const script_value& right = right_raw.deref();
 	const token_type op = static_cast<token_type>(ins.a);
 
-	auto result = binary_general(op, left, right);
+	auto result = ins.c ? join_text(left, right) : binary_general(op, left, right);
 	if (!result) {
 		return raise_from(result);
 	}
@@ -5066,22 +5075,12 @@ bool vm_backend::store_this_field_raw(frame& f, const vm_instruction& ins, size_
 	return true;
 }
 
-// The text a string `+` appends for an operand whose text runs no user code (concat_text's rows): a string's bytes, an int's digits,
-// a char, a float or a bool as to_string writes it; false for anything else (an object's to_string, a utf8_string's kind change)
-static bool plain_concat_text(const script_value& v, char (&digits)[24], std::string& scratch, std::string_view& out) {
-	switch (v.raw_storage_index()) {
-	case script_value::TYPEID_STRING: out = v.unchecked_as_string(); return true;
-	case script_value::TYPEID_INT: {
-		const auto res = std::to_chars(digits, digits + sizeof(digits), v.unchecked_as_int());
-		out = std::string_view(digits, static_cast<size_t>(res.ptr - digits));
-		return true;
-	}
-	case script_value::TYPEID_FLOAT: case script_value::TYPEID_BOOL: case script_value::TYPEID_CHAR:
-		scratch = v.to_string();
-		out = scratch;
-		return true;
-	default: return false;
-	}
+// The text a string `+` appends for an operand whose text runs no user code: a string's bytes; false for anything else (a scalar
+// beside a string is the general `+`'s error, an object's to_string user code, a utf8_string a kind change)
+static bool plain_concat_text(const script_value& v, std::string_view& out) {
+	if (v.raw_storage_index() != script_value::TYPEID_STRING) { return false; }
+	out = v.unchecked_as_string();
+	return true;
 }
 
 // `s = s + x;` over a frame slot holding a string, x a constant or a value read that runs no user code: the concatenation's text
@@ -5097,10 +5096,8 @@ JAI_NOINLINE bool vm_backend::self_concat_store(frame& f, const fused_binary_dst
 	if (!slot || slot->raw_storage_index() != script_value::TYPEID_STRING || p.right.is_subscript()) return false;
 	const script_value* rp = fused_cmp_operand(f, p.right, f.ip * 3 + 1);
 	if (!rp) return false;
-	char digits[24];
-	std::string scratch;
 	std::string_view text;
-	if (!plain_concat_text(*rp, digits, scratch, text)) return false;
+	if (!plain_concat_text(*rp, text)) return false;
 	if (!limits_->memory_charge(sizeof(script_value) + slot->unchecked_as_string().size() + text.size())) [[unlikely]] {
 		st = raise_from(detail::raise_memory_cap(*limits_));
 		return true;
@@ -16652,12 +16649,11 @@ op_status vm_backend::exec_push_fused(frame& f, const vm_instruction& ins) {
 // runs as the general call's builtin paths run it (the receiver's dereferenced copy as self, arguments dereferenced in place,
 // the pending site armed for callback builtins, native exceptions converted); size/length/empty compute inline. Any other
 // receiver (null, a reference-wrapped host value, a utf8_string) replays op_call_method.
-// acc + x for a template chain: binary_general's `+`. With no global operator registered, a plain string acc and a string or
-// scalar x take handle_add's string branch in place: the same memory charge (the joined size), the same text for x, an untagged
-// result; the accumulated node is written only when nothing else holds it (copy-on-write).
-// One step of a string chain: the stack's top (the accumulator) + right, appending in place when the accumulator is a string and right
-// a string or scalar (the general `+` otherwise). `hint` > 0 on a chain's first step sizes the accumulator for the chain's text: the copy
-// the write gate makes (and charges) of a shared head, or the unique head's own buffer.
+// One step of a string chain: the stack's top (the accumulator) + right, binary_general's `+` (join_text's for a template string's
+// own `+`). With no global operator registered, a plain string acc and a string x (or a scalar x a template joins) take the string
+// branch in place: the same memory charge (the joined size), the same text for x, an untagged result; the accumulated node is written
+// only when nothing else holds it (copy-on-write). `hint` > 0 on a chain's first step sizes the accumulator for the chain's text: the
+// copy the write gate makes (and charges) of a shared head, or the unique head's own buffer.
 JAI_NOINLINE void vm_backend::grow_text_for_site(std::string& out, size_t add, const void* site) {
 	constexpr size_t k_memo_cap = size_t{1} << 20;
 	size_t& memo = text_growth_memo_[site];
@@ -16666,12 +16662,12 @@ JAI_NOINLINE void vm_backend::grow_text_for_site(std::string& out, size_t add, c
 	if (need > memo) { memo = (std::min)(need, k_memo_cap); }
 }
 
-op_status vm_backend::concat_step(const script_value& right, uint32_t hint, const void* site) {
+op_status vm_backend::concat_step(const script_value& right, uint32_t hint, const void* site, bool joins_text) {
 	script_value& acc = stack_.back();
 	const size_t rk = right.raw_storage_index();
 	if (acc.raw_storage_index() == script_value::TYPEID_STRING && !(operator_table_ && operator_table_->any()) &&
-	    (rk == script_value::TYPEID_STRING || rk == script_value::TYPEID_INT || rk == script_value::TYPEID_FLOAT ||
-	     rk == script_value::TYPEID_BOOL || rk == script_value::TYPEID_CHAR)) {
+	    (rk == script_value::TYPEID_STRING || (joins_text && (rk == script_value::TYPEID_INT || rk == script_value::TYPEID_FLOAT ||
+	     rk == script_value::TYPEID_BOOL || rk == script_value::TYPEID_CHAR)))) {
 		char digits[24];
 		std::string_view text;
 		std::string scratch;
@@ -16704,7 +16700,7 @@ op_status vm_backend::concat_step(const script_value& right, uint32_t hint, cons
 	}
 	script_value left_raw = std::move(acc);
 	stack_.pop_back();
-	auto result = binary_general(token_type::plus, left_raw.deref(), right);
+	auto result = joins_text ? join_text(left_raw.deref(), right) : binary_general(token_type::plus, left_raw.deref(), right);
 	if (!result) { return raise_from(result); }
 	stack_.push_back(std::move(result.value()));
 	return {};
@@ -16714,7 +16710,7 @@ op_status vm_backend::exec_concat_append(frame& f, const vm_instruction& ins) {
 	(void)f;
 	script_value right_raw = std::move(stack_.back());
 	stack_.pop_back();
-	return concat_step(right_raw.deref(), ins.a, &ins);
+	return concat_step(right_raw.deref(), ins.a, &ins, ins.b != 0);
 }
 
 // A chain's run of plain operands (constants, identifiers) joined onto the accumulator: each read at its own step, where the stack form
@@ -16739,11 +16735,11 @@ op_status vm_backend::exec_concat_operands(frame& f, const vm_instruction& ins) 
 		const size_t vk = v->raw_storage_index();
 		if (vk == script_value::TYPEID_STRING || vk == script_value::TYPEID_INT || vk == script_value::TYPEID_CHAR ||
 		    vk == script_value::TYPEID_FLOAT || vk == script_value::TYPEID_BOOL) {
-			VM_TRY(concat_step(*v, hint, &piece));
+			VM_TRY(concat_step(*v, hint, &piece, p.joins_text));
 		} else {
 			// the general `+` may run user code: it reads its own handle on the operand (a constant materialized with the engine)
 			script_value held = piece.const_index != k_invalid_u32 ? materialize_constant(*f.code, piece.const_index) : v->deref();
-			VM_TRY(concat_step(held, hint, &piece));
+			VM_TRY(concat_step(held, hint, &piece, p.joins_text));
 		}
 		if (is_unwinding_) { return {}; }
 		hint = 0;
@@ -16764,10 +16760,8 @@ op_status vm_backend::exec_concat_pending(frame& f, const vm_instruction& ins) {
 	const size_t snapshot_at = first ? stack_.size() - 1 : stack_.size() - 2;
 	const bool pending = stack_[snapshot_at].raw_storage_index() == script_value::TYPEID_STRING;
 	if (pending && !(operator_table_ && operator_table_->any())) {
-		char digits[24];
-		std::string scratch;
 		std::string_view text;
-		if (plain_concat_text(operand, digits, scratch, text)) {
+		if (plain_concat_text(operand, text)) {
 			const size_t tail = first ? 0 : stack_.back().unchecked_as_string().size();
 			if (!limits_->memory_charge(sizeof(script_value) + stack_[snapshot_at].unchecked_as_string().size() + tail + text.size())) [[unlikely]] {
 				return raise_from(detail::raise_memory_cap(*limits_));

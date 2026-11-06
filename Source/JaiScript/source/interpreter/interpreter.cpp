@@ -1252,7 +1252,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
         return {};
     }
 
-    auto result = binary_operator(expr->op.type, left, right);
+    auto result = expr->op.joins_text ? join_text(left, right) : binary_operator(expr->op.type, left, right);
     if (!result) [[unlikely]] {
         return result.error_value();
     }

@@ -72,8 +72,8 @@ public:
 
             // Script: Just access, don't modify yet
             auto result = eng->execute(R"(
-                print("Size: " + owner.my_cats.size());
-                print("First cat: " + owner.my_cats[0].name);
+                print(`Size: ${owner.my_cats.size()}`);
+                print(`First cat: ${owner.my_cats[0].name}`);
                 owner.my_cats.size() == 2 && owner.my_cats[0].name == "Fred"
             )");
 

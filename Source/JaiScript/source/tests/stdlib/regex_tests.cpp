@@ -190,7 +190,7 @@ public:
             expect(caught("regex(\"a\").replace(\"a\", \"${\")"), "regex: '${' at position 0 of the replacement needs a group number or name and '}'", "an open ${");
             expect("regex(R\"(\\d+)\").replace(\"a1b22\", (m) => \"<\" + to_string(m.text().size()) + \">\")", "a<1>b<2>", "a function replacement");
             expect("int n = 0; regex(\"o\").replace(\"foo boo\", (m) => { n += 1; return to_string(n); })", "f12 b34", "the function runs once per match, in order");
-            expect("regex(\"(.)\").replace_first(\"ab\", (m) => m[1].to_upper())", "Ab", "a function with replace_first");
+            expect("regex(\"(.)\").replace_first(\"ab\", (m) => { var c = m[1]; c.to_upper(); return c; })", "Ab", "a function with replace_first");
             expect("string s = \"a1b2\"; regex r = regex(R\"(\\d)\"); string out = r.replace(s, (m) => { s = \"zzzz\"; r = regex(\"q\"); return \"#\"; }); out + \"|\" + s + \"|\" + r.pattern",
                    "a#b#|zzzz|q", "the function may write the text and the regex the call read");
             expect("var keep = []; regex(\"(.)\").replace(\"xy\", (m) => { keep.push(m); return \"\"; }); keep[1][1] + to_string(keep[0].start())", "y0", "a match the function keeps stays whole");

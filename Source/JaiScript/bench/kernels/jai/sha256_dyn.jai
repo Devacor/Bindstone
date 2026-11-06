@@ -77,7 +77,7 @@ function sha256(var& msg) {
 }
 
 for (var i = 0; i < 64; ++i) { W.push(0); }
-var input = ".".repeat(1024);
+var input = string::repeat(".", 1024);
 var result = "";
 profile_it("sha256", []() {
 	for (var i = 0; i < 32; ++i) { result = sha256(input); }

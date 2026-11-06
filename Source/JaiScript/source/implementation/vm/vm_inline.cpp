@@ -639,7 +639,7 @@ expression_ptr clone_expr(const expression_ptr& e, inline_context& c) {
 		auto o = clone_expr(m->object, c);
 		if (!c.ok) return nullptr;
 		auto n = c.make<member_expr>(m->location, o, m->member, m->member_id, m->is_arrow, m->is_static);
-		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant;
+		n->null_safe = m->null_safe; n->getter_id = m->getter_id; n->enum_constant = m->enum_constant; n->call_result_discarded = m->call_result_discarded;
 		return n;
 	}
 	case node_type::ternary_expr: {

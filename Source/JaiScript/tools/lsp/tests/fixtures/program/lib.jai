@@ -24,7 +24,7 @@ class Hero : Actor {
 }
 
 namespace util {
-	string shout(string s) { return s.to_upper(); }
+	string shout(string s) { s.to_upper(); return s; }
 	// Doubles a value.
 	int twice(int v) { return v * 2; }
 }

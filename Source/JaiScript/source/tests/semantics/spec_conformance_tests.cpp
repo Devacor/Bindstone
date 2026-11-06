@@ -349,7 +349,8 @@ public:
 		test("repeat_counts_and_nan_text", [this]() {
 			expect("a negative repeat count", R"(
 				string t(function f) { string r = "ran"; try { f(); } catch (e) { r = e; } return r; }
-				t([]() { string s = "abc"; s.repeat(-1); }) + "|" + t([]() { string::repeat("a", -1); }) + "|" + string::repeat("ab", 0) + "|" + "ab".repeat(0) + "|";
+				string z = "ab"; z.repeat(0);
+				t([]() { string s = "abc"; s.repeat(-1); }) + "|" + t([]() { string::repeat("a", -1); }) + "|" + string::repeat("ab", 0) + "|" + z + "|";
 			)", "string::repeat count cannot be negative|string::repeat count cannot be negative|||");
 			expect("nan text", R"(
 				float inf = 1e308 * 10.0;
@@ -605,6 +606,59 @@ public:
 				to_json(m) + "|" + to_json(f) + "|" + to_json(g);
 			)", "{\"a\":2,\"b\":3}|{\"b\":3}|{\"b\":3}");
 		});
+		// docs/site/guide/09-containers-strings.html "In place or a copy": a builtin that changes its receiver in place returns
+		// nothing, so a call that uses its result raises before it changes anything (a chain included); a statement, a for's
+		// update and a conditional's arms discard it, and a class's method of the same name returns what it declares
+		test("api_consistency_in_place_builtin_results_cannot_be_used", [this]() {
+			expect("on var receivers", R"(
+				class Box { int filter(int x) { return x + 1; } string trim() { return "own"; } }
+				var xs = [3, 1, 2];
+				var s = " a ";
+				var m = {"k": 1};
+				var u = utf8_string("é");
+				string out = "";
+				try { var ys = xs.filter(x => x > 1); } catch (e) { out += e.message + "|"; }
+				try { var t = s.trim().to_upper(); } catch (e) { out += e.message + "|"; }
+				try { var n = m.filter((k, v) => false); } catch (e) { out += e.message + "|"; }
+				try { var w = u.append("x"); } catch (e) { out += e.message + "|"; }
+				try { var p = xs.push(4); } catch (e) { out += e.message + "|"; }
+				for (int i = 0; i < 1; xs.sort()) { i++; }
+				true ? xs.reverse() : xs.sort();
+				var none = null;
+				none?.sort();
+				var b = Box();
+				out + to_json(xs) + "|[" + s + "]|" + to_json(m) + "|" + to_string(u.size()) + "|" + b.filter(1) + "|" + b.trim();
+			)", "filter changes xs in place and returns nothing; array::filter(xs, f) returns a filtered copy|"
+			    "trim changes s in place and returns nothing; string::trim(s) returns a trimmed copy|"
+			    "filter changes m in place and returns nothing; map::filter(m, f) returns a filtered copy|"
+			    "append changes u in place and returns nothing; string::append(u, text) returns a joined copy|"
+			    "push changes xs in place and returns nothing|[3,2,1]|[ a ]|{\"k\":1}|1|2|own");
+			expect("typed receivers raise the load's text in a warn_mode region", R"(
+				class Node { int v = 1; }
+				array<int> xs = [1, 2];
+				string name = "ada";
+				shared_ptr<Node> p = new Node();
+				string out = "";
+				try { auto r = name.to_upper(); } catch (e) { out += e.message + "|"; }
+				try { auto r = xs.map(x => x * 2).size(); } catch (e) { out += e.message + "|"; }
+				try { auto r = p.reset(); } catch (e) { out += e.message + "|"; }
+				out + name + "|" + to_json(xs) + "|" + to_string(p != null);
+			)", "to_upper changes name in place and returns nothing; string::to_upper(name) returns an uppercased copy|"
+			    "map changes xs in place and returns nothing; array::map(xs, f) returns a mapped copy|"
+			    "reset changes p in place and returns nothing|ada|[1,2]|true", warn_region);
+			auto load_error = [](engine& e, const std::string& src) {
+				try { e.execute(src); } catch (const static_check_error& ex) { return std::string(ex.what()); } catch (const std::exception& ex) { return std::string("runtime:") + ex.what(); }
+				return std::string("loaded");
+			};
+			every_config("the checker reports a use on a known receiver at load", "1|1|1|1|1", [&](engine& e) {
+				auto has = [](const std::string& text, const char* want) { return std::to_string(text.find(want) != std::string::npos); };
+				return has(load_error(e, "array<int> xs = [1]; auto ys = xs.slice(0, 1);"), "slice changes xs in place and returns nothing; array::slice(xs, start, end) returns a copy of the range") + "|" +
+				       has(load_error(e, "map<string, int> m = {}; int n = m.filter((k, v) => true).size();"), "filter changes m in place and returns nothing; map::filter(m, f) returns a filtered copy") + "|" +
+				       has(load_error(e, "string s = \"a\"; string t = s.trim_left();"), "trim_left changes s in place and returns nothing") + "|" +
+				       has(load_error(e, "class N {} weak_ptr<N> w; var r = w.reset();"), "reset changes w in place and returns nothing") + "|" +
+				       has(load_error(e, "class Q { string s = \"\"; } Q q = Q(); print(q.s.repeat(2));"), "repeat changes q.s in place and returns nothing; string::repeat(q.s, n) returns a repeated copy");
+			});
+		});
 		test("api_consistency_read_only_inputs_are_not_preemptively_cloned", [this]() {
 			expect("nocopy selection", R"(
 				nocopy class Item { int n = 1; }
@@ -626,8 +680,8 @@ public:
 				class Item { int n = 1; }
 				array<shared_ptr<Item>> a = [new Item(), null];
 				array<shared_ptr<Item>> b = array::filter(a, x => x != null); b[0].n = 7;
-				map<string,shared_ptr<Item>> m = {"x": a[0]}; auto f = m.filter((k,v) => true);
-				to_string(same_object(a[0],b[0])) + "|" + to_string(same_object(a[0],f.get("x"))) + "|" + to_string(a[0].n);
+				map<string,shared_ptr<Item>> m = {"x": a[0]}; m.filter((k,v) => true);
+				to_string(same_object(a[0],b[0])) + "|" + to_string(same_object(a[0],m.get("x"))) + "|" + to_string(a[0].n);
 			)", "true|true|7");
 			expect("remove_if pins the original receiver", R"(
 				var a = [1,2,3];
@@ -2010,7 +2064,7 @@ private:
 				{"pop empty", "var a = [];", "a.pop();", "Cannot pop from empty array", warn_region},
 				{"front empty", "var a = [];", "var z = a.front();", "Cannot get front of empty array", warn_region},
 				{"sort comparator", "var a = [2, 1];", "a.sort(5);", "sort() comparator must be a function", warn_region},
-				{"pad_left fill", "var s = \"x\";", "var z = s.pad_left(3, \"\");", "pad_left() padding character cannot be empty", warn_region},
+				{"pad_left fill", "var s = \"x\";", "s.pad_left(3, \"\");", "pad_left() padding character cannot be empty", warn_region},
 				{"to_int base", "var s = \"1\";", "var z = s.to_int(0, 1);", "to_int() base must be 0 or between 2 and 36", warn_region},
 				{"code", "var s = \"\";", "var z = s.code();", "code() needs a string of exactly one UTF-8 character", warn_region},
 				{"partition", "var s = \"a\";", "var z = s.partition(\"\");", "partition() separator cannot be empty", warn_region},
@@ -2247,7 +2301,7 @@ private:
 			expect_texts({
 				{"array filter", "", "var b = array::filter([1, 2], [](var x) { int z = 0; return x / z > 0; });", div, warn_region},
 				{"array remove_if", "var a = [1, 2];", "a.remove_if([](var x) { int z = 0; return x / z > 0; });", div, warn_region},
-				{"map filter", "var m = {\"a\": 1};", "var r = m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, warn_region},
+				{"map filter", "var m = {\"a\": 1};", "m.filter([](var k, var v) { int z = 0; return v / z > 0; });", div, warn_region},
 				{"map remove_if", "var m = {\"a\": 1};", "m.remove_if([](var k, var v) { int z = 0; return v / z > 0; });", div, warn_region},
 				{"parallel_for body", "array<int> xs = [1, 2, 3, 4];", "parallel_for (auto& x : xs) { int z = 0; x = x / z; }", div},
 			});

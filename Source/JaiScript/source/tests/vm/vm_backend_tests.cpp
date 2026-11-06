@@ -3840,7 +3840,7 @@ public:
 			auto [i1, v1] = run_both_backends_stdlib(R"(
 				class Tally {
 					int hits = 0;
-					int big(array<int> xs, int limit) { return xs.filter([this, limit](int x) -> bool { hits += 1; return x > limit; }).size(); }
+					int big(array<int> xs, int limit) { xs.filter([this, limit](int x) -> bool { hits += 1; return x > limit; }); return xs.size(); }
 				}
 				class Noisy { int id = 0; Noisy(int i) { id = i; } ~Noisy() { log = log + "~" + to_string(id); } }
 				string log = "";

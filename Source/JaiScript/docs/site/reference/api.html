@@ -189,10 +189,10 @@ print(to_json(array::sort(xs)), &quot; &quot;, to_json(xs));</code></pre></div>
 </div>
 </section>
 <section class="api-group"><h2 id="group-array-t">array&lt;T&gt;</h2>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.append(other: array&lt;var&gt; or array&lt;t&gt;) -&gt; array&lt;t&gt; mutate appends the other array in place, retaining input element constraints. same-kind primitive/string/vector buffers avoid per-element boxing. added values copy; handles share. returns the receiver; alias of concat. every engine"><h3 id="api-6332ab31323c"><code>array&lt;T&gt;.append(other: array&lt;var&gt; or array&lt;T&gt;) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends the other array in place, retaining input element constraints. Same-kind primitive/string/vector buffers avoid per-element boxing. Added values copy; handles share. Returns the receiver; alias of concat.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.append(other: array&lt;var&gt; or array&lt;t&gt;) -&gt; void mutate appends the other array in place, retaining input element constraints. same-kind primitive/string/vector buffers avoid per-element boxing. added values copy; handles share. returns nothing; alias of concat; array::append returns a copy. every engine"><h3 id="api-7d6a0fe08c03"><code>array&lt;T&gt;.append(other: array&lt;var&gt; or array&lt;T&gt;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends the other array in place, retaining input element constraints. Same-kind primitive/string/vector buffers avoid per-element boxing. Added values copy; handles share. Returns nothing; alias of concat; array::append returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2];
-xs.append([3, 4]);        // changes xs and returns it
+xs.append([3, 4]);        // changes xs, returns nothing
 print(to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3,4]</code></pre></div>
 </div>
@@ -208,8 +208,8 @@ xs.clear();
 print(xs.size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.concat(other: array&lt;var&gt; or array&lt;t&gt;) -&gt; array&lt;t&gt; mutate appends the other array in place, retaining input element constraints. same-kind primitive/string/vector buffers avoid per-element boxing. added values copy; handles share. returns the receiver; alias of append. every engine"><h3 id="api-a9d705741a2b"><code>array&lt;T&gt;.concat(other: array&lt;var&gt; or array&lt;T&gt;) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends the other array in place, retaining input element constraints. Same-kind primitive/string/vector buffers avoid per-element boxing. Added values copy; handles share. Returns the receiver; alias of append.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.concat(other: array&lt;var&gt; or array&lt;t&gt;) -&gt; void mutate appends the other array in place, retaining input element constraints. same-kind primitive/string/vector buffers avoid per-element boxing. added values copy; handles share. returns nothing; alias of append; array::concat returns a copy. every engine"><h3 id="api-cf51509d2c3f"><code>array&lt;T&gt;.concat(other: array&lt;var&gt; or array&lt;T&gt;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends the other array in place, retaining input element constraints. Same-kind primitive/string/vector buffers avoid per-element boxing. Added values copy; handles share. Returns nothing; alias of append; array::concat returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1];
 print(to_json(array::concat(a, [2, 3])), &quot; &quot;, to_json(a));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3] [1]</code></pre></div>
@@ -234,8 +234,8 @@ print(xs.erase(1), &quot; &quot;, to_json(xs), &quot; &quot;, xs.erase(9));</cod
 print(xs.every(x =&gt; x % 2 == 0));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">false</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.filter(predicate: function(t[, int]) -&gt; bool) -&gt; array&lt;t&gt; mutate; callback filters in place, retaining element constraints and selected values without cloning. reference callback parameters target live elements. returns the receiver; array::filter returns a copy. every engine"><h3 id="api-cec6e46dbff9"><code>array&lt;T&gt;.filter(predicate: function(T[, int]) -&gt; bool) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
-<p>Filters in place, retaining element constraints and selected values without cloning. Reference callback parameters target live elements. Returns the receiver; array::filter returns a copy.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.filter(predicate: function(t[, int]) -&gt; bool) -&gt; void mutate; callback filters in place, retaining element constraints and selected values without cloning. reference callback parameters target live elements. returns nothing; array::filter returns a copy. every engine"><h3 id="api-2a381aec473e"><code>array&lt;T&gt;.filter(predicate: function(T[, int]) -&gt; bool) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
+<p>Filters in place, retaining element constraints and selected values without cloning. Reference callback parameters target live elements. Returns nothing; array::filter returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; hp = [5, 0, 12, 0];
 array&lt;int&gt; alive = array::filter(hp, h =&gt; h &gt; 0);   // a copy
 hp.filter(h =&gt; h &gt; 10);                            // in place
@@ -295,8 +295,8 @@ print(xs.join(&quot;, &quot;));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.length() -&gt; int observe alias of size. every engine"><h3 id="api-448127c1d705"><code>array&lt;T&gt;.length() -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Alias of size.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.map(callback: function(t[, int]) -&gt; var) -&gt; array&lt;t&gt; mutate; callback maps in place, retaining input element constraints; results convert through the usual typed-element rules. reference callback parameters target live elements. returns the receiver; array::map can change result type. every engine"><h3 id="api-ccc1536f4827"><code>array&lt;T&gt;.map(callback: function(T[, int]) -&gt; var) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
-<p>Maps in place, retaining input element constraints; results convert through the usual typed-element rules. Reference callback parameters target live elements. Returns the receiver; array::map can change result type.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.map(callback: function(t[, int]) -&gt; var) -&gt; void mutate; callback maps in place, retaining input element constraints; results convert through the usual typed-element rules. reference callback parameters target live elements. returns nothing; array::map returns a copy and can change the result type. every engine"><h3 id="api-b9398bcaf556"><code>array&lt;T&gt;.map(callback: function(T[, int]) -&gt; var) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
+<p>Maps in place, retaining input element constraints; results convert through the usual typed-element rules. Reference callback parameters target live elements. Returns nothing; array::map returns a copy and can change the result type.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3];
 xs.map(x =&gt; x * 10);       // in place, keeps array&lt;int&gt;
 print(to_json(xs));</code></pre></div>
@@ -341,8 +341,8 @@ print(to_json(xs), &quot; &quot;, to_json(array::reverse(xs)));</code></pre></di
 print(xs.size(), &quot; &quot;, xs.empty());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 false</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.slice(start: int = 0, end: int = size()) -&gt; array&lt;t&gt; mutate retains the selected range in place, end exclusive; defaults 0 and size, negative indices relative to end, bounds clamp. retained elements move without cloning. returns the receiver; array::slice returns a copy. every engine"><h3 id="api-0861831aca13"><code>array&lt;T&gt;.slice(start: int = 0, end: int = size()) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Retains the selected range in place, end exclusive; defaults 0 and size, negative indices relative to end, bounds clamp. Retained elements move without cloning. Returns the receiver; array::slice returns a copy.</p>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.slice(start: int = 0, end: int = size()) -&gt; void mutate retains the selected range in place, end exclusive; defaults 0 and size, negative indices relative to end, bounds clamp. retained elements move without cloning. returns nothing; array::slice returns a copy. every engine"><h3 id="api-bee5409b773b"><code>array&lt;T&gt;.slice(start: int = 0, end: int = size()) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Retains the selected range in place, end exclusive; defaults 0 and size, negative indices relative to end, bounds clamp. Retained elements move without cloning. Returns nothing; array::slice returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [0, 1, 2, 3, 4];
 array&lt;int&gt; part = array::slice(xs, 1, 3);   // a copy
 xs.slice(3);                                 // xs itself becomes [3, 4]
@@ -815,8 +815,8 @@ print(stock.contains(&quot;axe&quot;), &quot; &quot;, stock.contains(&quot;bow&q
 print(stock.erase(&quot;axe&quot;), &quot; &quot;, stock.erase(&quot;axe&quot;), &quot; &quot;, to_json(stock));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true false {&quot;bow&quot;:1}</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.filter(predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; mutate; callback keeps the entries the predicate accepts in place, retaining key/value constraints, and returns the receiver; map::filter returns a copy. callback value references target live entries. every engine"><h3 id="api-b6747dd224f6"><code>map&lt;K,V&gt;.filter(predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
-<p>Keeps the entries the predicate accepts in place, retaining key/value constraints, and returns the receiver; map::filter returns a copy. Callback value references target live entries.</p>
+<div class="api-entry" data-provider="core" data-search="map&lt;k,v&gt;.filter(predicate: function(k, v) -&gt; bool) -&gt; void mutate; callback keeps the entries the predicate accepts in place, retaining key/value constraints, and returns nothing; map::filter returns a copy. callback value references target live entries. every engine"><h3 id="api-86a9709d490f"><code>map&lt;K,V&gt;.filter(predicate: function(K, V) -&gt; bool) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
+<p>Keeps the entries the predicate accepts in place, retaining key/value constraints, and returns nothing; map::filter returns a copy. Callback value references target live entries.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; stock = {&quot;axe&quot;: 2, &quot;bow&quot;: 0, &quot;cup&quot;: 5};
 map&lt;string, int&gt; big = map::filter(stock, (k, v) =&gt; v &gt; 2);   // a copy
 stock.filter((k, v) =&gt; v &gt; 0);                                 // in place
@@ -1400,8 +1400,8 @@ print(reflect::invoke(Orc(), &quot;add&quot;, 2, 3));</code></pre></div>
 <div class="api-entry" data-provider="stdlib" data-search="string::trim(value: text) -&gt; same_text_kind copy returns a copy without the whitespace class (space, tab, lf, vt, ff, cr) at both ends; a utf8_string argument returns a utf8_string. the method form takes a character set. register_all() or area registration"><h3 id="api-d79dc2ac0d63"><code>string::trim(value: text) -&gt; same_text_kind</code></h3><p><strong>register_all() or area registration</strong> &middot; copy</p>
 <p>Returns a copy without the whitespace class (space, tab, LF, VT, FF, CR) at both ends; a utf8_string argument returns a utf8_string. The method form takes a character set.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.append(part: text, parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. every engine"><h3 id="api-35ad44bb9c2e"><code>string.append(part: text, parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends text in place and returns the receiver; retains receiver text kind.</p>
+<div class="api-entry" data-provider="core" data-search="string.append(part: text, parts: text...) -&gt; void mutate appends text in place and returns nothing; retains receiver text kind. string::append returns a copy. every engine"><h3 id="api-38607fd62d34"><code>string.append(part: text, parts: text...) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends text in place and returns nothing; retains receiver text kind. string::append returns a copy.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.at(index: int) -&gt; char observe returns an inline byte char like []; no temporary string allocation. negative indices count from end; out-of-range raises. every engine"><h3 id="api-b5c09b083fa9"><code>string.at(index: int) -&gt; char</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Returns an inline byte char like []; no temporary string allocation. Negative indices count from end; out-of-range raises.</p>
@@ -1431,7 +1431,8 @@ print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pr
 </div>
 <div class="api-entry" data-provider="core" data-search="string.ends_with(suffix: text) -&gt; bool observe  every engine"><h3 id="api-600d8f733684"><code>string.ends_with(suffix: text) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.erase(position: int, count: int = remaining) -&gt; self mutate  every engine"><h3 id="api-aa47e2b3f1e2"><code>string.erase(position: int, count: int = remaining) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.erase(position: int, count: int = remaining) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-98c497dbab13"><code>string.erase(position: int, count: int = remaining) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.explode(separator: text = whitespace, max_splits: int = -1) -&gt; array&lt;string&gt; copy whitespace runs by default; empty separator splits characters. negative limit is unlimited; last piece retains rest. utf-8 receiver yields utf-8 text values. every engine"><h3 id="api-0348285f6fae"><code>string.explode(separator: text = whitespace, max_splits: int = -1) -&gt; array&lt;string&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Whitespace runs by default; empty separator splits characters. Negative limit is unlimited; last piece retains rest. UTF-8 receiver yields UTF-8 text values.</p>
@@ -1456,7 +1457,8 @@ print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pr
 <div class="api-entry" data-provider="core" data-search="string.front() -&gt; char observe returns an inline byte char like []; no temporary string allocation. empty text raises. every engine"><h3 id="api-c546ea7ebeba"><code>string.front() -&gt; char</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Returns an inline byte char like []; no temporary string allocation. Empty text raises.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.insert(position: int, value: text) -&gt; self mutate  every engine"><h3 id="api-2b677f9bafb4"><code>string.insert(position: int, value: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.insert(position: int, value: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-c7db0747ff24"><code>string.insert(position: int, value: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.is_alnum() -&gt; bool observe  every engine"><h3 id="api-4643dad1c6a1"><code>string.is_alnum() -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
@@ -1480,13 +1482,18 @@ print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pr
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(to_json(&quot;one\ntwo&quot;.lines()));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[&quot;one&quot;,&quot;two&quot;]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-dda2fd4c2b33"><code>string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-370de8e0907c"><code>string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-7c90dcfa877b"><code>string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;[&quot;, &quot;7&quot;.pad_left(3, &#x27;0&#x27;), &quot;] [&quot;, &quot;ab&quot;.pad_right(4), &quot;]&quot;);</code></pre></div>
+<div class="api-entry" data-provider="core" data-search="string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate string::pad_left returns a copy. every engine"><h3 id="api-ff1ad660d958"><code>string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>string::pad_left returns a copy.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string id = &quot;7&quot;;
+id.pad_left(3, &#x27;0&#x27;);           // in place
+print(&quot;[&quot;, id, &quot;] [&quot;, string::pad_right(&quot;ab&quot;, 4), &quot;]&quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[007] [ab  ]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-d4ae9476321a"><code>string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate string::pad_right returns a copy. every engine"><h3 id="api-56077aaec6e2"><code>string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>string::pad_right returns a copy.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.partition(separator: text) -&gt; array&lt;self&gt; copy three parts: before, separator, after; absent separator gives text and two empty strings. every engine"><h3 id="api-394041e3f0e8"><code>string.partition(separator: text) -&gt; array&lt;Self&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Three parts: before, separator, after; absent separator gives text and two empty strings.</p>
@@ -1496,27 +1503,34 @@ print(s.at(1), &quot; &quot;, s[2], &quot; &quot;, type_of(s.at(0)));</code></pr
 <div class="api-entry" data-provider="core" data-search="string.reader() -&gt; binary::reader copy creates an independent reader cursor over these bytes. every engine"><h3 id="api-ca2615363139"><code>string.reader() -&gt; binary::reader</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Creates an independent reader cursor over these bytes.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.remove_prefix(count: int) -&gt; self mutate  every engine"><h3 id="api-827745ebe202"><code>string.remove_prefix(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.remove_prefix(count: int) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-cb2efd1f92f4"><code>string.remove_prefix(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.remove_suffix(count: int) -&gt; self mutate  every engine"><h3 id="api-1162467e6b5a"><code>string.remove_suffix(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.remove_suffix(count: int) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-1c8bab8eb1b4"><code>string.remove_suffix(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.repeat(count: int) -&gt; self mutate repeats receiver and returns text for chaining. every engine"><h3 id="api-5394acf46e67"><code>string.repeat(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Repeats receiver and returns text for chaining.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;ab&quot;.repeat(3));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ababab</code></pre></div>
+<div class="api-entry" data-provider="core" data-search="string.repeat(count: int) -&gt; void mutate repeats the receiver in place and returns nothing. string::repeat returns a copy. every engine"><h3 id="api-22f015333985"><code>string.repeat(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Repeats the receiver in place and returns nothing. string::repeat returns a copy.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;ab&quot;;
+s.repeat(3);
+print(s, &quot; &quot;, string::repeat(&quot;-&quot;, 4));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ababab ----</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.replace(from: text, to: text) -&gt; self mutate replaces every occurrence of from, left to right and without overlap. every engine"><h3 id="api-6e803d631187"><code>string.replace(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Replaces every occurrence of from, left to right and without overlap.</p>
+<div class="api-entry" data-provider="core" data-search="string.replace(from: text, to: text) -&gt; void mutate replaces every occurrence of from, left to right and without overlap. string::replace returns a copy. every engine"><h3 id="api-90b7b171b664"><code>string.replace(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Replaces every occurrence of from, left to right and without overlap. string::replace returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;a-b-c&quot;;
 s.replace(&quot;-&quot;, &quot;+&quot;);
 print(s);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a+b+c</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.replace_first(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-2c37cf67e509"><code>string.replace_first(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.replace_first(from: text, to: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-6b0ef3154a35"><code>string.replace_first(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.replace_last(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-7f9e180f9f31"><code>string.replace_last(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.replace_last(from: text, to: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-4b8239b626bf"><code>string.replace_last(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.reverse() -&gt; self mutate  every engine"><h3 id="api-85a0ff7db037"><code>string.reverse() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="string.reverse() -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-0d5f340d105f"><code>string.reverse() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.rfind(needle: text, start: int = end) -&gt; int observe -1 if absent. every engine"><h3 id="api-0127286717ae"><code>string.rfind(needle: text, start: int = end) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>-1 if absent.</p>
@@ -1555,21 +1569,21 @@ print(to_json(&quot;k=v=w&quot;.split(&quot;=&quot;, 1)));</code></pre></div>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(&quot;42&quot;.to_int(), &quot; &quot;, &quot;ff&quot;.to_int(0, 16), &quot; &quot;, &quot;x&quot;.to_int(-1), &quot; &quot;, &quot;2.5&quot;.to_float());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">42 255 -1 2.5</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.to_lower() -&gt; self mutate ascii case conversion; returns text for chaining. every engine"><h3 id="api-77bfa049dc2a"><code>string.to_lower() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>ASCII case conversion; returns text for chaining.</p>
+<div class="api-entry" data-provider="core" data-search="string.to_lower() -&gt; void mutate ascii case conversion in place; returns nothing. string::to_lower returns a copy. every engine"><h3 id="api-e98cc48e5f93"><code>string.to_lower() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>ASCII case conversion in place; returns nothing. string::to_lower returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.to_upper() -&gt; self mutate ascii case conversion; returns text for chaining. every engine"><h3 id="api-c39826ba058d"><code>string.to_upper() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>ASCII case conversion; returns text for chaining.</p>
+<div class="api-entry" data-provider="core" data-search="string.to_upper() -&gt; void mutate ascii case conversion in place; returns nothing. string::to_upper returns a copy. every engine"><h3 id="api-f881471e57a0"><code>string.to_upper() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>ASCII case conversion in place; returns nothing. string::to_upper returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;loud&quot;;
-string t = s.to_upper();     // changes s and returns it
-print(s, &quot; &quot;, t, &quot; &quot;, string::to_lower(t));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">LOUD LOUD loud</code></pre></div>
+s.to_upper();                 // changes s, returns nothing
+print(s, &quot; &quot;, string::to_lower(s));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">LOUD loud</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.to_utf8() -&gt; utf8_string copy same bytes with character indexing. every engine"><h3 id="api-d2d584b93882"><code>string.to_utf8() -&gt; utf8_string</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Same bytes with character indexing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.trim(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-5aa07070cffd"><code>string.trim(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="string.trim(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. string::trim returns a copy. every engine"><h3 id="api-3755493d772c"><code>string.trim(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing. string::trim returns a copy.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = &quot;  hi  &quot;;
 s.trim();                        // in place
 string t = &quot;--x--&quot;;
@@ -1577,11 +1591,11 @@ t.trim(&quot;-&quot;);                     // a chosen character set
 print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;  copy  &quot;), &quot;]&quot;);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[hi] [x] [copy]</code></pre></div>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.trim_left(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-7c3707f5a1a1"><code>string.trim_left(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="string.trim_left(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. every engine"><h3 id="api-1d48202fd7ab"><code>string.trim_left(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="string.trim_right(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-639ab80d5f04"><code>string.trim_right(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="string.trim_right(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. every engine"><h3 id="api-3be34838bfc3"><code>string.trim_right(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="string.utf8_chars() -&gt; array&lt;string&gt; copy  every engine"><h3 id="api-514d3d46d896"><code>string.utf8_chars() -&gt; array&lt;string&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 </div>
@@ -1677,8 +1691,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 </div>
 </section>
 <section class="api-group"><h2 id="group-utf8-string">utf8_string</h2>
-<div class="api-entry" data-provider="core" data-search="utf8_string.append(part: text, parts: text...) -&gt; self mutate appends text in place and returns the receiver; retains receiver text kind. every engine"><h3 id="api-fdf4e971b7ec"><code>utf8_string.append(part: text, parts: text...) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Appends text in place and returns the receiver; retains receiver text kind.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.append(part: text, parts: text...) -&gt; void mutate appends text in place and returns nothing; retains receiver text kind. string::append returns a copy. every engine"><h3 id="api-8addb216dba5"><code>utf8_string.append(part: text, parts: text...) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Appends text in place and returns nothing; retains receiver text kind. string::append returns a copy.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.at(index: int) -&gt; self observe one byte of string text or one utf-8 character; operator [] on string returns char instead. every engine"><h3 id="api-9053f8c1216e"><code>utf8_string.at(index: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>One byte of string text or one UTF-8 character; operator [] on string returns char instead.</p>
@@ -1703,7 +1717,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.ends_with(suffix: text) -&gt; bool observe  every engine"><h3 id="api-df50012ab9bf"><code>utf8_string.ends_with(suffix: text) -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.erase(position: int, count: int = remaining) -&gt; self mutate  every engine"><h3 id="api-b6a101f86bff"><code>utf8_string.erase(position: int, count: int = remaining) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.erase(position: int, count: int = remaining) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-c69de06fa59c"><code>utf8_string.erase(position: int, count: int = remaining) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.explode(separator: text = whitespace, max_splits: int = -1) -&gt; array&lt;var&gt; copy whitespace runs by default; empty separator splits characters. negative limit is unlimited; last piece retains rest. utf-8 receiver yields utf-8 text values. every engine"><h3 id="api-5902b15be408"><code>utf8_string.explode(separator: text = whitespace, max_splits: int = -1) -&gt; array&lt;var&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Whitespace runs by default; empty separator splits characters. Negative limit is unlimited; last piece retains rest. UTF-8 receiver yields UTF-8 text values.</p>
@@ -1726,7 +1741,8 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.front() -&gt; self observe one byte of string text or one utf-8 character; operator [] on string returns char instead. every engine"><h3 id="api-ed48668fbd7c"><code>utf8_string.front() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>One byte of string text or one UTF-8 character; operator [] on string returns char instead.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.insert(position: int, value: text) -&gt; self mutate  every engine"><h3 id="api-6ba1da5e88af"><code>utf8_string.insert(position: int, value: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.insert(position: int, value: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-bcac6166977c"><code>utf8_string.insert(position: int, value: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.is_alnum() -&gt; bool observe  every engine"><h3 id="api-c482922c100a"><code>utf8_string.is_alnum() -&gt; bool</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
@@ -1748,11 +1764,14 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.lines() -&gt; array&lt;var&gt; copy splits line endings. returned text values are utf8_string; array storage remains dynamic. every engine"><h3 id="api-58f071d75c70"><code>utf8_string.lines() -&gt; array&lt;var&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Splits line endings. Returned text values are utf8_string; array storage remains dynamic.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-bf8a95b3b629"><code>utf8_string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-e2d619fcd751"><code>utf8_string.pad_center(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-73bdab3d180d"><code>utf8_string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate string::pad_left returns a copy. every engine"><h3 id="api-09c3aef3a82e"><code>utf8_string.pad_left(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>string::pad_left returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; self mutate  every engine"><h3 id="api-5de203efb093"><code>utf8_string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; void mutate string::pad_right returns a copy. every engine"><h3 id="api-b9d4f0e9f8ff"><code>utf8_string.pad_right(width: int, fill: char or text = &#x27; &#x27;) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>string::pad_right returns a copy.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.partition(separator: text) -&gt; array&lt;var&gt; copy three parts: before, separator, after; absent separator gives text and two empty strings. returned text values are utf8_string; array storage remains dynamic. every engine"><h3 id="api-a019984ef29c"><code>utf8_string.partition(separator: text) -&gt; array&lt;var&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Three parts: before, separator, after; absent separator gives text and two empty strings. Returned text values are utf8_string; array storage remains dynamic.</p>
@@ -1760,21 +1779,26 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.reader() -&gt; binary::reader copy creates an independent reader cursor over these bytes. every engine"><h3 id="api-f19fc13ba128"><code>utf8_string.reader() -&gt; binary::reader</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Creates an independent reader cursor over these bytes.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.remove_prefix(count: int) -&gt; self mutate  every engine"><h3 id="api-b05f99fdd7a6"><code>utf8_string.remove_prefix(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.remove_prefix(count: int) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-2fdd1e4fc4ef"><code>utf8_string.remove_prefix(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.remove_suffix(count: int) -&gt; self mutate  every engine"><h3 id="api-c31495cc9ef8"><code>utf8_string.remove_suffix(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.remove_suffix(count: int) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-81bdade56abe"><code>utf8_string.remove_suffix(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.repeat(count: int) -&gt; self mutate repeats receiver and returns text for chaining. every engine"><h3 id="api-4a7409d0b956"><code>utf8_string.repeat(count: int) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Repeats receiver and returns text for chaining.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.repeat(count: int) -&gt; void mutate repeats the receiver in place and returns nothing. string::repeat returns a copy. every engine"><h3 id="api-2ce1d96b01ba"><code>utf8_string.repeat(count: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Repeats the receiver in place and returns nothing. string::repeat returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.replace(from: text, to: text) -&gt; self mutate replaces every occurrence of from, left to right and without overlap. every engine"><h3 id="api-f6c162b2db60"><code>utf8_string.replace(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Replaces every occurrence of from, left to right and without overlap.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.replace(from: text, to: text) -&gt; void mutate replaces every occurrence of from, left to right and without overlap. string::replace returns a copy. every engine"><h3 id="api-6afbd7b8ed7d"><code>utf8_string.replace(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Replaces every occurrence of from, left to right and without overlap. string::replace returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.replace_first(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-f9feb6fb99f1"><code>utf8_string.replace_first(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.replace_first(from: text, to: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-a1f81c820b51"><code>utf8_string.replace_first(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.replace_last(from: text, to: text) -&gt; self mutate  every engine"><h3 id="api-20dc15854d9e"><code>utf8_string.replace_last(from: text, to: text) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.replace_last(from: text, to: text) -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-8759a9a79455"><code>utf8_string.replace_last(from: text, to: text) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.reverse() -&gt; self mutate  every engine"><h3 id="api-ffeb0dc4f14e"><code>utf8_string.reverse() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.reverse() -&gt; void mutate changes the receiver in place and returns nothing. every engine"><h3 id="api-37e5f7197435"><code>utf8_string.reverse() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Changes the receiver in place and returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.rfind(needle: text, start: int = end) -&gt; int observe -1 if absent. every engine"><h3 id="api-0361f42dea4b"><code>utf8_string.rfind(needle: text, start: int = end) -&gt; int</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>-1 if absent.</p>
@@ -1799,20 +1823,20 @@ print(&quot;[&quot;, s, &quot;] [&quot;, t, &quot;] [&quot;, string::trim(&quot;
 <div class="api-entry" data-provider="core" data-search="utf8_string.to_int(fallback: var = null, base: int = 10) -&gt; int or fallback observe whole trimmed parse; base is 0 or 2..36; parse failure returns fallback. every engine"><h3 id="api-4dc36fba256c"><code>utf8_string.to_int(fallback: var = null, base: int = 10) -&gt; int or fallback</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Whole trimmed parse; base is 0 or 2..36; parse failure returns fallback.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.to_lower() -&gt; self mutate ascii case conversion; returns text for chaining. every engine"><h3 id="api-d527b54f71e9"><code>utf8_string.to_lower() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>ASCII case conversion; returns text for chaining.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.to_lower() -&gt; void mutate ascii case conversion in place; returns nothing. string::to_lower returns a copy. every engine"><h3 id="api-0ffb1eea8664"><code>utf8_string.to_lower() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>ASCII case conversion in place; returns nothing. string::to_lower returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.to_upper() -&gt; self mutate ascii case conversion; returns text for chaining. every engine"><h3 id="api-84c0c75b090a"><code>utf8_string.to_upper() -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>ASCII case conversion; returns text for chaining.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.to_upper() -&gt; void mutate ascii case conversion in place; returns nothing. string::to_upper returns a copy. every engine"><h3 id="api-ce162917d864"><code>utf8_string.to_upper() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>ASCII case conversion in place; returns nothing. string::to_upper returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.trim(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-467e5c0499df"><code>utf8_string.trim(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.trim(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. string::trim returns a copy. every engine"><h3 id="api-0aee38124ffb"><code>utf8_string.trim(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing. string::trim returns a copy.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.trim_left(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-3cdb4f43ccaa"><code>utf8_string.trim_left(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.trim_left(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. every engine"><h3 id="api-5ad54b48b976"><code>utf8_string.trim_left(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="utf8_string.trim_right(characters: text = string::whitespace) -&gt; self mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns the receiver. every engine"><h3 id="api-514965d1f22c"><code>utf8_string.trim_right(characters: text = string::whitespace) -&gt; Self</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
-<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns the receiver.</p>
+<div class="api-entry" data-provider="core" data-search="utf8_string.trim_right(characters: text = string::whitespace) -&gt; void mutate mutates using the shared whitespace set by default: space, tab, lf, vt, ff and cr. returns nothing. every engine"><h3 id="api-fa5ec5b0cd0b"><code>utf8_string.trim_right(characters: text = string::whitespace) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Mutates using the shared whitespace set by default: space, tab, LF, VT, FF and CR. Returns nothing.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="utf8_string.utf8_chars() -&gt; array&lt;var&gt; copy  returned text values are utf8_string; array storage remains dynamic. every engine"><h3 id="api-164acf65e50c"><code>utf8_string.utf8_chars() -&gt; array&lt;var&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p> Returned text values are utf8_string; array storage remains dynamic.</p>

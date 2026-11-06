@@ -28,8 +28,8 @@ namespace jai {
         std::string_view{"unique"}, std::string_view{"cpp_ref_count"}
     };
 
-    // The string builtins that write their receiver in place and return self for chaining
-    // (C++ `string& to_upper()`). ONE list feeds the registry's mutator set and index table;
+    // The string builtins that write their receiver in place and return nothing
+    // (C++ `void to_upper()`). ONE list feeds the registry's mutator set and index table;
     // both backends bind the receiver LVALUE for exactly these names
     // (detail/string_mutator_receiver.hpp) - a name missing here mutates a copy and the
     // write is lost, a name wrongly here costs an observer a receiver resolve.
@@ -41,6 +41,47 @@ namespace jai {
         std::string_view{"erase"}, std::string_view{"remove_prefix"}, std::string_view{"remove_suffix"},
         std::string_view{"reverse"}, std::string_view{"repeat"}
     };
+
+    // The builtins that change their receiver in place and return nothing, each with the namespace function that returns a
+    // copy instead ('@' stands for the receiver as written; empty: none). A call whose result is used raises
+    // (detail/in_place_result.hpp). The string table names the twins of k_string_mutator_method_names, which are all in place.
+    struct in_place_method { std::string_view name; std::string_view twin; };
+    inline constexpr std::array<in_place_method, 10> k_array_in_place_methods = {{
+        {"append", "array::append(@, other) returns a joined copy"}, {"clear", {}},
+        {"concat", "array::concat(@, other) returns a joined copy"}, {"filter", "array::filter(@, f) returns a filtered copy"},
+        {"insert", {}}, {"map", "array::map(@, f) returns a mapped copy"}, {"push", {}},
+        {"reverse", "array::reverse(@) returns a reversed copy"}, {"slice", "array::slice(@, start, end) returns a copy of the range"},
+        {"sort", "array::sort(@) returns a sorted copy"}
+    }};
+    inline constexpr std::array<in_place_method, 2> k_map_in_place_methods = {{
+        {"clear", {}}, {"filter", "map::filter(@, f) returns a filtered copy"}
+    }};
+    inline constexpr std::array<in_place_method, 8> k_string_in_place_twins = {{
+        {"append", "string::append(@, text) returns a joined copy"}, {"pad_left", "string::pad_left(@, width) returns a padded copy"},
+        {"pad_right", "string::pad_right(@, width) returns a padded copy"}, {"repeat", "string::repeat(@, n) returns a repeated copy"},
+        {"replace", "string::replace(@, from, to) returns a replaced copy"}, {"to_lower", "string::to_lower(@) returns a lowercased copy"},
+        {"to_upper", "string::to_upper(@) returns an uppercased copy"}, {"trim", "string::trim(@) returns a trimmed copy"}
+    }};
+    // The twin of the in-place builtin `a_name` of a receiver kind (0 array, 1 map, 2 string or utf8_string; empty: none), or
+    // nullopt when that kind's builtin of the name is not in place
+    inline std::optional<std::string_view> in_place_method_twin(int a_kind, std::string_view a_name) noexcept {
+        if (a_kind == 0) { for (const auto& m : k_array_in_place_methods) { if (m.name == a_name) { return m.twin; } } }
+        if (a_kind == 1) { for (const auto& m : k_map_in_place_methods) { if (m.name == a_name) { return m.twin; } } }
+        if (a_kind == 2) {
+            for (std::string_view m : k_string_mutator_method_names) {
+                if (m != a_name) { continue; }
+                for (const auto& t : k_string_in_place_twins) { if (t.name == a_name) { return t.twin; } }
+                return std::string_view{};
+            }
+        }
+        return std::nullopt;
+    }
+    // a name some receiver kind's in-place builtin answers to (a map's are an array's names; a handle's reset): the compile-time gate
+    inline bool is_in_place_method_name(std::string_view a_name) noexcept {
+        for (const auto& m : k_array_in_place_methods) { if (m.name == a_name) { return true; } }
+        for (std::string_view m : k_string_mutator_method_names) { if (m == a_name) { return true; } }
+        return a_name == "reset";
+    }
 
     // The whitespace the string library classifies (trim, split's no-separator form): string::whitespace spells it, and
     // split/explode read exactly this text as "any run of whitespace" rather than a literal separator
@@ -154,6 +195,13 @@ namespace jai {
         // k_string_mutator_method_names by symbol id and by string_by_index position
         std::unordered_set<uint64_t> string_mutator_ids;
         std::vector<uint8_t> string_mutates_by_index;
+        // the in-place builtins by receiver kind and symbol id, each to its twin text (k_array_in_place_methods ...)
+        struct in_place_ids {
+            std::unordered_map<uint64_t, std::string_view> array;
+            std::unordered_map<uint64_t, std::string_view> map;
+            std::unordered_map<uint64_t, std::string_view> string;
+            uint64_t reset = 0;
+        } in_place;
     };
 
     // ONE implementation shared by every backend (defined in interpreter.cpp)

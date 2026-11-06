@@ -24,6 +24,7 @@
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/in_place_result.hpp>
 #include <jaiscript/detail/builtin_api_arities.hpp>
 #include <jaiscript/detail/arity_diagnostic.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
@@ -2934,6 +2935,21 @@ private:
         diag(diag_level::error, a_call->location, "'" + std::string(a_member->member) + "' on '" + ctype_name(a_receiver) + "' expects " + expected);
     }
 
+    // A call that uses the result of a builtin that changes its known receiver in place and returns nothing (detail/in_place_result.hpp)
+    void in_place_result_used(const ctype& a_receiver, const member_expr* a_member, const call_expr* a_call) {
+        if (a_member->call_result_discarded) { return; }
+        std::optional<std::string_view> twin;
+        switch (a_receiver.kind) {
+            case ctype::array_k: twin = in_place_method_twin(0, a_member->member); break;
+            case ctype::map_k: twin = in_place_method_twin(1, a_member->member); break;
+            case ctype::string_k: case ctype::utf8_k: twin = in_place_method_twin(2, a_member->member); break;
+            case ctype::weak_k: case ctype::object_k: if (a_member->member == "reset") { twin = std::string_view{}; } break;
+            default: break;
+        }
+        if (!twin) { return; }
+        diag(diag_level::error, a_call->location, detail::in_place_result_text(a_member->member, detail::method_value_receiver(a_member), *twin));
+    }
+
     // The return type a callback argument declares: a lambda's spelled one, or the one overload of a named script function
     const type_info* callback_declared_return(const expression* arg) const {
         if (!arg) { return nullptr; }
@@ -4610,6 +4626,7 @@ private:
             if (!recv.tentative && !m->is_static) {
                 check_builtin_member(recv, m);
                 checkBuiltinArity(recv, m, c);
+                in_place_result_used(recv, m, c);
             }
             stamp(c->builtin_receiver, proven, uint8_t(0));
             stamp(c->builtin_receiver_open, uint8_t(!proven && (recv.kind == ctype::unknown || recv.kind == ctype::string_k || recv.kind == ctype::array_k || recv.kind == ctype::map_k)), uint8_t(0));
@@ -4693,6 +4710,7 @@ private:
         if (!want_static) {
             if (ctype t; handle_builtin_result(m->member, t)) {
                 if (m->member == "reset" && !c->arguments.empty()) { check_handle_reset(c, m, recv, args); }
+                if (recv.ti && recv.ti->base_type == script_value_type::jai_shared_ptr_type && !recv.tentative) { in_place_result_used(recv, m, c); }
                 return t;
             }
         }

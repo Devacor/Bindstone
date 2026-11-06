@@ -26,6 +26,7 @@
 #include <jaiscript/detail/operator_table.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/method_value.hpp>
+#include <jaiscript/detail/in_place_result.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/binary_handlers.hpp>   // the general binary operators (interp parity)
 #include <jaiscript/detail/structural_equality.hpp>
@@ -17058,6 +17059,14 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				string_recv_utf8 = true;
 			}
 			maybe_string_builtin = string_recv != nullptr;
+		}
+		// An in-place builtin whose result the call uses raises once its arguments ran (KEEP BYTE-PARALLEL with
+		// interpreter::member_read_on)
+		if (site.in_place_check) [[unlikely]] {
+			const script_value& receiver = string_recv ? string_recv->deref() : stack_[args_base - 1].deref();
+			if (const auto twin = detail::in_place_builtin(builtins_.in_place, receiver, member->member_id)) {
+				return raise_from(detail::in_place_result_error(symbolizer_, member, *twin));
+			}
 		}
 		if (!maybe_string_builtin && member->member_id != same_as_id_ &&
 		    !(member->object && member->object->get_type() == node_type::super_expr)) {

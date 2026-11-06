@@ -77,7 +77,7 @@ string sha256(string& msg) {
 }
 
 for (int i = 0; i < 64; ++i) { W.push(0); }
-string input = ".".repeat(1024);
+string input = string::repeat(".", 1024);
 string result = "";
 profile_it("sha256", []() {
 	for (int i = 0; i < 32; ++i) { result = sha256(input); }

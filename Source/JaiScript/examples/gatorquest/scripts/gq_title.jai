@@ -50,7 +50,7 @@ void recent_load() {
 	if (!file_exists(recent_path())) { return; }
 	array<string> ls = read_file(recent_path()).lines();
 	for (int i = 0; i < ls.size() && RECENT_ADDR.size() < RECENT_MAX; ++i) {
-		array<string> f = ls[i].trim().split(" ");
+		array<string> f = string::trim(ls[i]).split(" ");
 		if (f.size() < 4 || f[0] != "server") { continue; }
 		string name = f[3];
 		for (int k = 4; k < f.size(); ++k) { name = name + " " + f[k]; }
@@ -172,7 +172,8 @@ bool tm_host() {
 }
 
 void tm_connect() {
-	string addr = TM_ADDR.trim();
+	TM_ADDR.trim();
+	string addr = TM_ADDR;
 	int port = TM_JPORT.to_int(0);
 	int colon = addr.find(":");
 	if (colon >= 0) {

@@ -58,7 +58,7 @@ function face_name() -> string {
 
 function meter(int val, int cap, int slots) -> string {
 	int fill = iclamp(val * slots / imax(1, cap), 0, slots);
-	return "#".repeat(fill) + "-".repeat(slots - fill);
+	return string::repeat("#", fill) + string::repeat("-", slots - fill);
 }
 
 function show_msg(string text, string color) -> void {
@@ -73,7 +73,7 @@ function hud_status_row() -> string {
 	string m = G.msg_t > 0 ? G.msg : "";
 	int room = G.w - left.size() - 2;
 	if (m.size() > room) { m = m.substr(0, imax(0, room)); }
-	string body = pad_to(left + " ".repeat(imax(1, G.w - left.size() - m.size() - 1)) + m, G.w);
+	string body = pad_to(left + string::repeat(" ", imax(1, G.w - left.size() - m.size() - 1)) + m, G.w);
 	string strip = ESC + "[48;5;235m" + ESC + "[38;5;250m";
 	if (G.msg_t > 0) {
 		strip = ESC + "[48;5;235m" + ESC + "[" + G.msg_color + "m";
@@ -118,7 +118,7 @@ function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 		string fseg = pad_to(face[r], face_w);
 		int used = left_w + mid_w + face_w + art_w;
 		int fill = imax(0, G.w - used);
-		string aseg = pad_to(" ".repeat(imin(fill > 0 ? bob_shift : 0, 2)) + art[r], art_w + fill);
+		string aseg = pad_to(string::repeat(" ", imin(fill > 0 ? bob_shift : 0, 2)) + art[r], art_w + fill);
 		string hp_col = G.hp > 40 ? "97" : "91";
 		rows.push(ESC + "[48;5;236m" + ESC + "[" + hp_col + "m" + lseg +
 			ESC + "[38;5;179m" + mseg +
@@ -147,7 +147,7 @@ function screen_rows(var& lines, string tint) -> var {
 		string body = "";
 		if (li >= 0 && li < lines.size()) { body = lines[li]; }
 		int padl = imax(0, (G.w - body.size()) / 2);
-		rows.push(ESC + "[48;5;233m" + tint + pad_to(" ".repeat(padl) + body, G.w) + RESET);
+		rows.push(ESC + "[48;5;233m" + tint + pad_to(string::repeat(" ", padl) + body, G.w) + RESET);
 	}
 	return rows;
 }

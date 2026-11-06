@@ -387,7 +387,7 @@ class Session {
 	}
 
 	void apply_frags(string k) {
-		var parts = k.trim().split(" ");
+		var parts = string::trim(k).split(" ");
 		int i = 0;
 		while (i + 1 < parts.size()) {
 			int slot = parts[i].to_int(-1);
@@ -839,7 +839,7 @@ class ClientSession : Session {
 	}
 
 	void apply_roster(string k) {
-		var parts = k.trim().split(" ");
+		var parts = string::trim(k).split(" ");
 		for (int i = 0; i < parts.size(); ++i) {
 			int c = parts[i].find(":");
 			if (c <= 0) { continue; }
@@ -1010,7 +1010,7 @@ function npm_grow(int idx) -> void {
 }
 
 function np_mons_apply(string batch) -> void {
-	var k = batch.trim().split(" ");
+	var k = string::trim(batch).split(" ");
 	int i = 0;
 	while (i + 5 < k.size()) {
 		int idx = k[i].to_int(-1);
@@ -1064,7 +1064,7 @@ function np_sect_batch() -> string {
 }
 
 function np_sect_apply(string batch) -> void {
-	var k = batch.trim().split(" ");
+	var k = string::trim(batch).split(" ");
 	int i = 0;
 	while (i + 2 < k.size()) {
 		int s = k[i].to_int(-1);

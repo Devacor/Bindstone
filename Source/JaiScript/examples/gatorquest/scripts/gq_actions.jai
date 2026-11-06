@@ -964,7 +964,7 @@ void chat_command(int slot, string cmd) {
 	}
 	if (verb == "/invite" && p.size() > 1) {
 		for (int s = 0; s < CHARS.size(); ++s) {
-			if (CHARS[s].active && CHARS[s].name.to_lower() == p[1].to_lower()) { party_invite(slot, s); return; }
+			if (CHARS[s].active && string::to_lower(CHARS[s].name) == string::to_lower(p[1])) { party_invite(slot, s); return; }
 		}
 		say_to(slot, "No gator by that name.", C_GRAY);
 		return;

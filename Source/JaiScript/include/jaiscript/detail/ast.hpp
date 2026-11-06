@@ -378,6 +378,9 @@ namespace jai {
         mutable uint64_t ref_field_methods = 0;
         mutable type_info* ref_field_declared = nullptr;
         mutable uint32_t ref_field_slot = UINT32_MAX;
+        // the call this member is the callee of stands where its result is discarded (a statement, a for's update; mark_result_discarded):
+        // an in-place builtin's nothing may go unused there and nowhere else (detail/in_place_result.hpp)
+        bool call_result_discarded = false;
 
         member_expr(const source_location& loc, expression_ptr obj, std::string_view mem, bool arrow, bool static_access = false)
             : expression(loc, node_type::member_expr), object(obj), member(mem), is_arrow(arrow), is_static(static_access) {}
@@ -595,12 +598,16 @@ namespace jai {
     };
     
     // expression statement
+    // An expression whose value its place discards: a call's member callee learns so, through a conditional's arms and the body of
+    // an immediately called arrow function (the rewrite of a?.b()), so a builtin that returns nothing may stand there
+    inline void mark_result_discarded(expression* e);
+
     class expression_stmt : public statement {
     public:
         expression_ptr expression;
 
         expression_stmt(const source_location& loc, expression_ptr expr)
-            : statement(loc, node_type::expression_stmt), expression(expr) {}    };
+            : statement(loc, node_type::expression_stmt), expression(expr) { mark_result_discarded(expression.get()); }    };
 
     // Block statement
     class block_stmt : public statement {
@@ -641,7 +648,7 @@ namespace jai {
         statement_ptr body;
 
         for_stmt(const source_location& loc, declaration_ptr i, expression_ptr c, expression_ptr u, statement_ptr b)
-            : statement(loc, node_type::for_stmt), initializer(i), condition(c), update(u), body(b) {}    };
+            : statement(loc, node_type::for_stmt), initializer(i), condition(c), update(u), body(b) { mark_result_discarded(update.get()); }    };
 
     // Range-based for statement (C++11 style)
     class range_for_stmt : public statement {
@@ -1036,7 +1043,7 @@ namespace jai {
         bool implicit_return;  // True if this expression should implicitly return its value
 
         expression_decl(const source_location& loc, expression_ptr expr, bool implicit_ret = false)
-            : declaration(loc, node_type::expression_decl), expression(expr), implicit_return(implicit_ret) {}    };
+            : declaration(loc, node_type::expression_decl), expression(expr), implicit_return(implicit_ret) { mark_result_discarded(expression.get()); }    };
 
     // statement as declaration (for top-level statements in scripting context)
     class statement_decl : public declaration {
@@ -1116,6 +1123,31 @@ namespace jai {
         extern_decl(const source_location& loc, type_info_ptr t, bool fn, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::extern_decl), type(std::move(t)), is_function(fn), name(n), name_id(nid) {}
     };
+
+    inline void mark_result_discarded(expression* e) {
+        while (e) {
+            if (e->get_type() == node_type::ternary_expr) {
+                auto* t = static_cast<ternary_expr*>(e);
+                mark_result_discarded(t->then_expression.get());
+                e = t->else_expression.get();
+                continue;
+            }
+            if (e->get_type() != node_type::call_expr) { return; }
+            expression* callee = static_cast<call_expr*>(e)->callee.get();
+            if (callee && callee->get_type() == node_type::member_expr) {
+                static_cast<member_expr*>(callee)->call_result_discarded = true;
+                return;
+            }
+            if (!callee || callee->get_type() != node_type::lambda_expr) { return; }
+            const auto* body = static_cast<const lambda_expr*>(callee)->body.get();
+            if (!body || body->get_type() != node_type::block_stmt) { return; }
+            const auto& decls = static_cast<const block_stmt*>(body)->declarations;
+            if (decls.size() != 1 || decls[0]->get_type() != node_type::statement_decl) { return; }
+            const statement* only = static_cast<const statement_decl*>(decls[0].get())->statement.get();
+            if (!only || only->get_type() != node_type::return_stmt) { return; }
+            e = static_cast<const return_stmt*>(only)->value.get();
+        }
+    }
 
     // Helper function to check if an expression is GUARANTEED to return a boolean
     // This allows skipping is_truthy() type dispatch and using unchecked_as_bool() directly

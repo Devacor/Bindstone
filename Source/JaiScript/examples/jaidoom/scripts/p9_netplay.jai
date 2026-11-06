@@ -346,7 +346,7 @@ function main() -> int {
 	for (int gi = gb_base; gi < GB.size(); ++gi) {
 		var gm = from_json(GB[gi]);
 		if ("" + gm["t"] != "MONS") { continue; }
-		var wparts = ("" + gm["k"]).trim().split(" ");
+		var wparts = string::trim("" + gm["k"]).split(" ");
 		int wi2 = 0;
 		while (wi2 + 5 < wparts.size()) {
 			if (wparts[wi2].to_int(-1) == victim && wparts[wi2 + 4].to_int(-1) == 3) { wire3 = true; }
@@ -469,7 +469,7 @@ function main() -> int {
 		if (sml != null && ("" + sml["k"]).contains(`${dsec2} `)) {
 			sect_hits = sect_hits + 1;
 			// parse the streamed ceil for our sector and compare to live host state
-			var parts = ("" + sml["k"]).trim().split(" ");
+			var parts = string::trim("" + sml["k"]).split(" ");
 			int pi = 0;
 			while (pi + 2 < parts.size()) {
 				if (parts[pi].to_int(-1) == dsec2) {

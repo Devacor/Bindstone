@@ -379,7 +379,7 @@ bool world_from_body(string body, bool keep_players) {
 		if (line.starts_with("m ")) {
 			int m = mob_push();
 			if (line == "m -") { continue; }
-			array<int> f = dec_ints(line.substr(2, line.size() - 2).replace(" ", ","));
+			array<int> f = dec_ints(string::replace(line.substr(2, line.size() - 2), " ", ","));
 			if (f.size() < 33 || f[0] < 0 || f[0] >= MONS.size() || f[2] < 0 || f[2] >= WORLD_COUNT) { continue; }
 			MOB_KIND[m] = f[0];
 			MOB_SER[m] = f[1];

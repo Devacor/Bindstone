@@ -187,10 +187,10 @@ function audio_extract_wad(string path) -> int {
 		string name = LUMP_NAME[i];
 		if (name.starts_with("DS")) {
 			string wav = snd_wav_bytes(name);
-			if (wav != "" && write_file(dir + name.to_lower() + ".wav", wav)) { written++; }
+			if (wav != "" && write_file(dir + string::to_lower(name) + ".wav", wav)) { written++; }
 		} else if (name.starts_with("D_")) {
 			string mid = mus_midi_bytes(name);
-			if (mid != "" && write_file(dir + name.to_lower() + ".mid", mid)) { written++; }
+			if (mid != "" && write_file(dir + string::to_lower(name) + ".mid", mid)) { written++; }
 		}
 		if ((i & 255) == 0) { BOOT_FRACTION = (i + 0.0) / NUM_LUMPS; boot_draw(); }
 	}

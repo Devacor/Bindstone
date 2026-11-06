@@ -77,8 +77,8 @@ public:
             auto eng = make_engine();
             auto result = eng->execute(R"(
                 var m = {"a": 1, "b": 2, "c": 3, "d": 4};
-                var filtered = m.filter([](auto k, auto v) -> auto { return v > 2; });
-                filtered.length();
+                m.filter([](auto k, auto v) -> auto { return v > 2; });
+                m.length();
             )");
             check_eq(result.as<int>(), 2);
         });

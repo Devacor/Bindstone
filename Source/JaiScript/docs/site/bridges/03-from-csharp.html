@@ -199,7 +199,7 @@ caught: Cannot access private member 'secret' of class 'Base'</code></pre></div>
     class Base { private int secret = 7; }
                          ^</code></pre></div>
 <h3 id="no-linq">LINQ is array methods<a class="hlink" href="#no-linq" aria-label="link">&#8203;</a></h3>
-<p><code>filter</code>, <code>map</code>, <code>reduce</code>, <code>find</code>, <code>some</code>, <code>every</code>, <code>sort</code> and <code>slice</code> cover a LINQ chain. There is no deferred query: each step runs when it is called. The <code>array::</code> forms (<code>array::filter(xs, f)</code>, <code>array::map</code>, <code>array::slice</code>, <code>array::sort</code>) return a new array and leave <code>xs</code> alone, like LINQ; the dot forms (<code>xs.filter(f)</code>, <code>map</code>, <code>slice</code>, <code>sort</code>, <code>remove_if</code>) change <code>xs</code> itself, like <code>List&lt;T&gt;.Sort</code> and <code>RemoveAll</code>. A map pairs the same way: <code>map::filter(m, f)</code> returns a new map, <code>m.filter(f)</code> keeps the entries in <code>m</code>.</p>
+<p><code>filter</code>, <code>map</code>, <code>reduce</code>, <code>find</code>, <code>some</code>, <code>every</code>, <code>sort</code> and <code>slice</code> cover a LINQ chain. There is no deferred query: each step runs when it is called. The <code>array::</code> forms (<code>array::filter(xs, f)</code>, <code>array::map</code>, <code>array::slice</code>, <code>array::sort</code>) return a new array and leave <code>xs</code> alone, like LINQ; the dot forms (<code>xs.filter(f)</code>, <code>map</code>, <code>slice</code>, <code>sort</code>, <code>remove_if</code>) change <code>xs</code> itself, like <code>List&lt;T&gt;.Sort</code> and <code>RemoveAll</code>, and the in-place ones return nothing, as <code>Sort</code> does, so a dot chain is an error. A map pairs the same way: <code>map::filter(m, f)</code> returns a new map, <code>m.filter(f)</code> keeps the entries in <code>m</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; scores = [72, 95, 40, 88, 61];
 // scores.Where(s =&gt; s &gt;= 60).OrderByDescending(s =&gt; s).Take(3).Sum()
 auto passed = array::filter(scores, s =&gt; s &gt;= 60);
@@ -233,12 +233,12 @@ print(Plain());</code></pre></div>
 (1, 2) (1, 2) at (1, 2)
 Plain{x: 1}</code></pre></div>
 <h3 id="strings-change-in-place">Strings change in place<a class="hlink" href="#strings-change-in-place" aria-label="link">&#8203;</a></h3>
-<p>A string is a value, so a copy never sees a later change, but the mutating methods change the string they are called on and return it. The <code>string::</code> functions return a new string instead:</p>
+<p>A string is a value, so a copy never sees a later change, but the mutating methods change the string they are called on and return nothing, so <code>string upper = name.to_upper();</code> is an error. The <code>string::</code> functions return a new string instead:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string name = "ada";
 string copy = name;
-string upper = name.to_upper();       // changes name and returns it
-print(name, " ", copy, " ", upper, " ", string::to_lower(upper), " ", upper);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA ada ADA ada ADA</code></pre></div>
+name.to_upper();                      // changes name, returns nothing
+print(name, " ", copy, " ", string::to_lower(name), " ", name);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA ada ada ADA</code></pre></div>
 <h3 id="statics">Statics use ::<a class="hlink" href="#statics" aria-label="link">&#8203;</a></h3>
 <p><code>Config::volume</code> reaches a static. <code>Config.volume</code> is an error that names the right spelling: the checker reports it at load, and in a <code>[[warn_mode]]</code> region it raises the same text when it runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Config { static int volume = 7; }

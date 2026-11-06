@@ -47,7 +47,7 @@ function col(string code, string text) -> string {
 // pad/truncate plain text to n columns
 function pad_to(string s, int n) -> string {
 	if (s.size() > n) { return s.substr(0, n); }
-	return s + " ".repeat(n - s.size());
+	return s + string::repeat(" ", n - s.size());
 }
 
 // smallest signed angle from a to b, in (-pi, pi]

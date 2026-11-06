@@ -23,8 +23,8 @@ function present(var lines) -> string {
 function bar(int cur, int cap, int width, string color_on) -> string {
 	if (cap <= 0) { cap = 1; }
 	var filled = iclamp((cur * width) / cap, 0, width);
-	var out = col(color_on, "#".repeat(filled));
-	return out + col("90", "-".repeat(width - filled));
+	var out = col(color_on, string::repeat("#", filled));
+	return out + col("90", string::repeat("-", width - filled));
 }
 
 // --------------------------------------------------------------- frames ----
@@ -218,7 +218,7 @@ function fit_width(string s, int w) -> string {
 	int e = s.find(ESC);
 	if (e < 0) {
 		if (s.size() > w) { return s.substr(0, w); }
-		return s + " ".repeat(w - s.size());
+		return s + string::repeat(" ", w - s.size());
 	}
 	string out = "";
 	int n = 0;
@@ -238,7 +238,7 @@ function fit_width(string s, int w) -> string {
 		n = n + take;
 		i = i + take;
 	}
-	return out + VRESET + " ".repeat(w - n);
+	return out + VRESET + string::repeat(" ", w - n);
 }
 
 function plain_text(string s) -> string {
@@ -309,9 +309,9 @@ function wrap_text(string s, int w) -> array<string> {
 	return lines;
 }
 
-function pad_to(string s, int w) -> string { return s + " ".repeat(imax(1, w - vis_len(s))); }
+function pad_to(string s, int w) -> string { return s + string::repeat(" ", imax(1, w - vis_len(s))); }
 
-function center_cells(string s, int w) -> string { return " ".repeat(imax(0, (w - vis_len(s)) / 2)) + s; }
+function center_cells(string s, int w) -> string { return string::repeat(" ", imax(0, (w - vis_len(s)) / 2)) + s; }
 
 // the newest messages at the bottom, as many as fit; those from before your
 // last move are dimmed
@@ -442,7 +442,7 @@ function sighting_rows(array<string> names, array<string> colors, array<int> xs,
 		string name = names[i];
 		int room = w - 1 - where.size();
 		if (name.size() > room) { name = name.substr(0, imax(0, room)); }
-		out.push(col(colors[i], name) + " ".repeat(imax(1, w - name.size() - where.size())) + col("96", where));
+		out.push(col(colors[i], name) + string::repeat(" ", imax(1, w - name.size() - where.size())) + col("96", where));
 	}
 	return out;
 }

@@ -369,7 +369,7 @@ print("plus() = {}", plus());</code></pre></div>
 <p><code>(params) =&gt; expr</code> and <code>(params) =&gt; { body }</code> are function expressions, JavaScript's and C#'s arrow functions. The expression form returns its value; one untyped parameter may drop its parentheses (<code>x =&gt; x * 2</code>), and parameters may be typed (<code>(int a, int b) =&gt; a + b</code>, <code>(Unit&amp; u) =&gt; ...</code>). An arrow function closes over its scope by reference, as <code>function(...)</code> does: it is a <code>[&amp;]</code> lambda, so it reads and writes the locals around it and they outlive the function that made it.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto twice = (x) =&gt; x * 2;
 auto add = (int a, int b) =&gt; a + b;
-auto shout = name =&gt; { string s = name; return s.to_upper() + "!"; };
+auto shout = name =&gt; string::to_upper(name) + "!";
 function make_counter() {
     int count = 0;
     return () =&gt; { count += 1; return count; };   // shares count, as function(...) does

@@ -1371,7 +1371,13 @@ checked_result<void> interpreter::increment_variable(unary_expr* expr) {
     }
     auto* identifier = static_cast<identifier_expr*>(expr->operand.get());
     const bool increment = expr->op.type == token_type::plus_plus;
+    const detail::incdec_form form = expr->is_postfix ? detail::incdec_form::postfix : detail::incdec_form::prefix;
     if (script_value* varPtr = variable_cell(identifier)) {
+        if (auto in_place = object_operator_in_place(varPtr->deref(), increment ? ops_.plus : ops_.minus, make_value(), form)) {
+            if (!*in_place) { return in_place->error_value(); }
+            push_value(std::move(in_place->value()));
+            return {};
+        }
         if (const uint8_t kind = identifier->declared_ref_kind && varPtr->is_reference() ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
             kind && kind != detail::ref_declared_current(*varPtr).raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table
             auto stepped = detail::ref_target_assign(*varPtr, make_value(static_cast<script_int>(1)), increment ? token_type::plus : token_type::minus,
@@ -1422,6 +1428,11 @@ checked_result<void> interpreter::increment_variable(unary_expr* expr) {
         JAISCRIPT_TRY_ASSIGN(current, detail::read_bare_cpp_property(this_val, instance.get(), instance->get_method(prop_getter, false), prop_getter, identifier->symbol_id));
     } else {
         current = instance->get_field(identifier->symbol_id);
+    }
+    if (auto in_place = object_operator_in_place(current, increment ? ops_.plus : ops_.minus, make_value(), form)) {
+        if (!*in_place) { return in_place->error_value(); }
+        push_value(std::move(in_place->value()));
+        return {};
     }
     JAISCRIPT_TRY_ASSIGN(script_value stepped, detail::incdec_step(current, increment, engine_));
     script_value old = expr->is_postfix ? detail::incdec_old_value(current, engine_) : make_value();
@@ -1544,6 +1555,11 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
                     return {};
                 }
                 script_value rightValue = pop_value();
+                if (auto in_place = compound_in_place(varPtr->deref(), expr, rightValue)) {
+                    if (!*in_place) { return in_place->error_value(); }
+                    push_value(std::move(in_place->value()));
+                    return {};
+                }
                 const token_type op = detail::compound_base(expr->op.type);
                 const char* opName = detail::binary_op_name(op);
                 auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
@@ -1630,7 +1646,7 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             uint64_t op_symbol_id = 0;
             op_symbol_id = compound_op_symbol(expr->op.type);
             if (op_symbol_id != 0) {
-                auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
+                auto custom_outcome = object_compound_through_binary(target, rightValue, op_symbol_id);
                 if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
                 std::optional<script_value> custom_result;
                 if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -1723,6 +1739,11 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
             auto alive = detail::ref_checked_deref(*varPtr);
             if (!alive) [[unlikely]] { return alive.error_value(); }
         }
+        if (auto in_place = compound_in_place(varPtr->deref(), expr, rightValue)) {
+            if (!*in_place) { return in_place->error_value(); }
+            push_value(std::move(in_place->value()));
+            return {};
+        }
         // `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP
         // BYTE-PARALLEL with the vm's compound store)
         if (const uint8_t kind = !varPtr->is_reference() ? uint8_t{0} : identifier->declared_ref_kind ? identifier->declared_ref_kind : detail::ref_declared_kind(*varPtr);
@@ -1786,12 +1807,17 @@ checked_result<void> interpreter::assign_compound_identifier(assignment_expr* ex
         } else {
             currentValue = instance->get_field(identifier->symbol_id);
         }
+        if (auto in_place = compound_in_place(currentValue, expr, rightValue)) {
+            if (!*in_place) { return in_place->error_value(); }
+            push_value(std::move(in_place->value()));
+            return {};
+        }
 
-        // Check for custom arithmetic operators on class instances
+        // a op= b through the binary operator on class instances
         if (!expr->incdec_desugar && currentValue.is_object()) {
             const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
             if (op_symbol_id != 0) {
-                auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+                auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
                 if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
                 std::optional<script_value> custom_result;
                 if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -1896,12 +1922,17 @@ checked_result<void> interpreter::assign_compound_member(assignment_expr* expr, 
         return {};
     }
     postfix_old = expr->postfix_old_result ? currentValue : make_value();
+    if (auto in_place = compound_in_place(currentValue, expr, rightValue)) {
+        if (!*in_place) { return in_place->error_value(); }
+        push_value(std::move(in_place->value()));
+        return {};
+    }
 
-    // Check for custom arithmetic operators on class instances
+    // a op= b through the binary operator on class instances
     if (!expr->incdec_desugar && currentValue.is_object()) {
         const uint64_t op_symbol_id = compound_op_symbol(expr->op.type);
         if (op_symbol_id != 0) {
-            auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+            auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
             if (custom_outcome.has_value() && !*custom_outcome) { return custom_outcome->error_value(); }
             std::optional<script_value> custom_result;
             if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -2013,6 +2044,11 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
     script_value currentValue = pop_value();
     if (is_unwinding_) {
         push_value(make_value());
+        return {};
+    }
+    if (auto in_place = compound_in_place(currentValue, expr, rightValue)) {
+        if (!*in_place) { return in_place->error_value(); }
+        push_value(std::move(in_place->value()));
         return {};
     }
     script_value postfix_old = expr->postfix_old_result ? script_value(currentValue.deref()) : make_value();
@@ -2414,6 +2450,15 @@ checked_result<void> interpreter::visit_assignment_expr_t(assignment_expr* expr,
             return non_lvalue_target(expr->target.get());
         }
         const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
+        if (op != token_type::equal) {
+            if (auto current = detail::ref_checked_deref(target_ref); current) {
+                if (auto in_place = compound_in_place(current.value(), expr, rightValue)) {
+                    if (!*in_place) { return in_place->error_value(); }
+                    push_value(expr->yields_reference ? std::move(target_ref) : std::move(in_place->value()));
+                    return {};
+                }
+            }
+        }
         auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
             expression_result_needed_ && !expr->yields_reference, operator_table_, engine_, string_symbolizer_,
             [this](const script_value& l, token_type o, const script_value& r) {
@@ -3086,7 +3131,7 @@ checked_result<void> interpreter::visit_variable_decl_t(variable_decl* decl) {
             // Only copy if initializing from an lvalue (existing object); temporaries
             // move. The kernel deep-copies values and shares shared_ptr handles; a proven
             // read-only local binds the object itself (KEEP BYTE-PARALLEL with vm_backend::exec_decl_var)
-            if (reference_init || is_lvalue_expression(decl->initializer.get())) {
+            if ((reference_init || is_lvalue_expression(decl->initializer.get())) && !detail::slot_converts_object(value, decl->type.get())) {
                 if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !engine_->parallel_region_active())) {
                     if (!parallel_worker_) { engine_->note_local_alias_bind(); }
                 } else {
@@ -7080,7 +7125,8 @@ checked_result<void> interpreter::visit_return_stmt_t(return_stmt* stmt) {
             }
         }
         if (!moved) {
-            detail::materialize_return_value(*out, detail::return_operand_copies(operand_class, *out));
+            const script_defined_function* fn = call_stack_.back().function;
+            detail::materialize_return_value(*out, detail::return_operand_copies(operand_class, *out), fn ? fn->return_type.get() : nullptr);
         }
     }
 

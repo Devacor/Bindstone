@@ -63,13 +63,24 @@ std::optional<checked_result<script_value>> interpreter::object_compound_operand
     binary_host h{*this};
     return detail::object_compound_operand(h, left, op, right);
 }
-std::optional<checked_result<script_value>> interpreter::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<script_value>> interpreter::object_compound_through_binary(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
     binary_host h{*this};
-    return detail::object_compound_via_method(h, target, right, op_symbol_id);
+    return detail::object_arithmetic_via_method(h, target, right, op_symbol_id);
+}
+std::optional<checked_result<script_value>> interpreter::object_operator_in_place(const script_value& target, uint64_t base_id, const script_value& right, detail::incdec_form form) {
+    binary_host h{*this};
+    return detail::object_operator_in_place(h, target, base_id, right, form);
 }
 std::optional<checked_result<script_value>> interpreter::object_unary_via_method(const script_value& operand, token_type op) {
     binary_host h{*this};
     return detail::object_unary_via_method(h, operand, op);
+}
+// a op= b, or a desugared ++/--, on an object through its class's in-place operator (detail::object_operator_in_place)
+std::optional<checked_result<script_value>> interpreter::compound_in_place(const script_value& target, const assignment_expr* expr, const script_value& right) {
+    if (target.deref().raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+    const detail::incdec_form form = !expr->incdec_desugar ? detail::incdec_form::none
+                                     : expr->postfix_old_result ? detail::incdec_form::postfix : detail::incdec_form::prefix;
+    return object_operator_in_place(target.deref(), compound_op_symbol(expr->op.type), right, form);
 }
 script_value interpreter::call_operator_of(const script_value& callee) {
     binary_host h{*this};

@@ -28,6 +28,14 @@ namespace bound_operator_hosts {
 		meter() = default;
 		explicit meter(int64_t a_n) : n(a_n) {}
 	};
+	// std::atomic's shape: not copyable, operators that return a value or the object, a conversion to its value
+	struct tally {
+		int64_t n = 0;
+		int64_t calls = 0;
+		tally() = default;
+		tally(const tally&) = delete;
+		tally& operator=(const tally&) = delete;
+	};
 }
 
 namespace jai::foundry::tests {
@@ -72,6 +80,25 @@ public:
 			.method("add", [](meter& a_self, const meter& a_other) { a_self.n += a_other.n; })
 			.method("+=", [](meter& a_self, const meter& a_other) -> meter& { a_self.n += 100 * a_other.n; return a_self; })
 			.build();
+		return eng;
+	}
+
+	static std::shared_ptr<engine> make_tally_engine(bound_operator_hosts::tally& a_hits) {
+		using bound_operator_hosts::tally;
+		auto eng = make_engine();
+		stdlib::register_all(eng);
+		dynamic_binder<tally>(*eng, "Tally")
+			.method("++", [](tally& a_self) -> tally& { ++a_self.calls; ++a_self.n; return a_self; })
+			.method("++", [](tally& a_self, int64_t) { ++a_self.calls; return a_self.n++; })
+			.method("--", [](tally& a_self) { ++a_self.calls; return --a_self.n; })
+			.method("--", [](tally& a_self, int64_t) { ++a_self.calls; return a_self.n--; })
+			.method("+=", [](tally& a_self, int64_t a_by) -> tally& { ++a_self.calls; a_self.n += a_by; return a_self; })
+			.method("-=", [](tally& a_self, int64_t a_by) { ++a_self.calls; return a_self.n -= a_by; })
+			.method("=", [](tally& a_self, int64_t a_to) -> tally& { ++a_self.calls; a_self.n = a_to; return a_self; })
+			.method("to_int", [](const tally& a_self) { return a_self.n; })
+			.method("count", [](const tally& a_self) { return a_self.n; })
+			.build();
+		eng->add_global_ref("hits", a_hits);
 		return eng;
 	}
 
@@ -176,6 +203,51 @@ public:
 			check_eq((int64_t)401, eng->execute("(m += Meter(1)).n").as_int());
 			auto money = make_bound_engine();
 			check_eq((int64_t)3, money->execute("Money a = Money(1); a += Money(2); a.cents").as_int());
+		});
+
+		test("a_bound_increment_and_compound_run_once_and_yield_what_they_return", [this]() {
+			bound_operator_hosts::tally hits;
+			auto eng = make_tally_engine(hits);
+			check_eq((int64_t)1, eng->execute("(++hits).count()").as_int());
+			check_eq((int64_t)1, eng->execute("hits++").as_int());
+			check_eq((int64_t)1, eng->execute("--hits").as_int());
+			check_eq((int64_t)1, eng->execute("hits--").as_int());
+			check_eq((int64_t)0, hits.n);
+			check_eq((int64_t)4, hits.calls);
+			check_eq((int64_t)5, eng->execute("(hits += 5).count()").as_int());
+			check_eq((int64_t)3, eng->execute("hits -= 2").as_int());
+			check_eq((int64_t)6, hits.calls);
+			eng->execute(R"(
+				Tally& alias = hits;
+				alias += 10; ++alias; alias++; alias -= 1; --alias; alias--;
+				class Holder { void bump() { hits += 100; hits++; } }
+				Holder().bump();
+			)");
+			check_eq((int64_t)113, hits.n);
+			check_eq((int64_t)14, hits.calls);
+		});
+
+		test("a_reference_parameter_binds_a_bound_object_without_a_copy", [this]() {
+			bound_operator_hosts::tally hits;
+			auto eng = make_tally_engine(hits);
+			eng->execute("void bump(Tally& t) { t += 5; ++t; } bump(hits); bump(hits);");
+			check_eq((int64_t)12, hits.n);
+			check_eq((int64_t)4, hits.calls);
+		});
+
+		test("a_typed_slot_converts_a_bound_object_through_its_conversion", [this]() {
+			bound_operator_hosts::tally hits;
+			hits.n = 7;
+			auto eng = make_tally_engine(hits);
+			check_eq((int64_t)7, eng->execute("int n = hits; n").as_int());
+			check_eq((int64_t)9, eng->execute("int add(int a_k) { return a_k + 2; } add(hits)").as_int());
+			check_eq((int64_t)7, eng->execute("int give() { return hits; } give()").as_int());
+			check_eq((int64_t)14, eng->execute("class Keep { int k = 0; static int s = 0; } Keep kept; kept.k = hits; Keep::s = hits; kept.k + Keep::s").as_int());
+			check_eq((int64_t)7, eng->execute("Tally& r = hits; int z = r; z").as_int());
+			check_eq((int64_t)0, hits.calls);
+			std::string copied;
+			try { eng->execute("auto c = hits;"); } catch (const std::exception& e) { copied = e.what(); }
+			check_true(copied.find("Cannot copy C++ object of type 'Tally'") != std::string::npos, copied);
 		});
 
 		test("the_checker_warns_where_a_reflected_binding_is_missing", [this]() {

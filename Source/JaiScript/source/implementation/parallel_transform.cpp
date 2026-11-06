@@ -1940,7 +1940,7 @@ namespace {
 		std::vector<parallel_method_pin_table::operator_refusal> operator_refusals;   // a script operator whose walk refused, with its violation
 		std::vector<uint64_t> operator_names() {
 			std::vector<uint64_t> ids;
-			for (const char* op : { "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "<=>", "~", "[]", "=", "()",
+			for (const char* op : { "+", "-", "*", "/", "%", "&", "|", "^", "<<", ">>", "==", "!=", "<", "<=", ">", ">=", "<=>", "~", "++", "--", "[]", "=", "()",
 			                        "to_string", "to_bool", "to_int", "to_float", "to_char" }) {
 				const uint64_t id = sym->intern(op);
 				ids.push_back(id);

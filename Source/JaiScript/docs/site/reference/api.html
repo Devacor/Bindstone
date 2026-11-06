@@ -366,6 +366,69 @@ print(to_json(xs));</code></pre></div>
 [3,2,1]</code></pre></div>
 </div>
 </section>
+<section class="api-group"><h2 id="group-atomic-bool">atomic&lt;bool&gt;</h2>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.compare_exchange(expected: bool&amp;, desired: bool) -&gt; bool mutate c++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false. register_atomics()"><h3 id="api-90b2f2684905"><code>atomic&lt;bool&gt;.compare_exchange(expected: bool&amp;, desired: bool) -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>C++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.exchange(value: bool) -&gt; bool mutate writes the value and yields the one before, in one step. register_atomics()"><h3 id="api-52927151db27"><code>atomic&lt;bool&gt;.exchange(value: bool) -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value and yields the one before, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.load() -&gt; bool observe the value, read in one atomic step; a typed slot (bool v = a;) reads the same. register_atomics()"><h3 id="api-9bd01c0d43c3"><code>atomic&lt;bool&gt;.load() -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, read in one atomic step; a typed slot (bool v = a;) reads the same.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;bool&gt;.store(value: bool) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-7d305608531f"><code>atomic&lt;bool&gt;.store(value: bool) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value in one atomic step; a = value is the same store.</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-atomic-float">atomic&lt;float&gt;</h2>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.compare_exchange(expected: float&amp;, desired: float) -&gt; bool mutate c++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false. register_atomics()"><h3 id="api-e3e5fb82c64a"><code>atomic&lt;float&gt;.compare_exchange(expected: float&amp;, desired: float) -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>C++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.exchange(value: float) -&gt; float mutate writes the value and yields the one before, in one step. register_atomics()"><h3 id="api-0290c145078d"><code>atomic&lt;float&gt;.exchange(value: float) -&gt; float</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value and yields the one before, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.fetch_add(n: float) -&gt; float mutate adds n and yields the value before, in one step. register_atomics()"><h3 id="api-a0e6b6cc89b4"><code>atomic&lt;float&gt;.fetch_add(n: float) -&gt; float</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Adds n and yields the value before, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.fetch_sub(n: float) -&gt; float mutate subtracts n and yields the value before, in one step. register_atomics()"><h3 id="api-a8cc3a9f994b"><code>atomic&lt;float&gt;.fetch_sub(n: float) -&gt; float</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Subtracts n and yields the value before, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.load() -&gt; float observe the value, read in one atomic step; a typed slot (float v = a;) reads the same. register_atomics()"><h3 id="api-fb3983de295f"><code>atomic&lt;float&gt;.load() -&gt; float</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, read in one atomic step; a typed slot (float v = a;) reads the same.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;float&gt;.store(value: float) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-90516b3dd01d"><code>atomic&lt;float&gt;.store(value: float) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value in one atomic step; a = value is the same store.</p>
+</div>
+</section>
+<section class="api-group"><h2 id="group-atomic-int">atomic&lt;int&gt;</h2>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.compare_exchange(expected: int&amp;, desired: int) -&gt; bool mutate c++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false. register_atomics()"><h3 id="api-f9a7c42bc2b6"><code>atomic&lt;int&gt;.compare_exchange(expected: int&amp;, desired: int) -&gt; bool</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>C++&#x27;s compare_exchange_strong: stores desired and yields true when the value equals expected, else writes the value into expected and yields false.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.exchange(value: int) -&gt; int mutate writes the value and yields the one before, in one step. register_atomics()"><h3 id="api-bdb27f01463a"><code>atomic&lt;int&gt;.exchange(value: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value and yields the one before, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.fetch_add(n: int) -&gt; int mutate adds n and yields the value before, in one step (an overflow raises and leaves the value). register_atomics()"><h3 id="api-48f85bda5987"><code>atomic&lt;int&gt;.fetch_add(n: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Adds n and yields the value before, in one step (an overflow raises and leaves the value).</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.fetch_and(bits: int) -&gt; int mutate the value &amp; bits stored, the value before yielded, in one step. register_atomics()"><h3 id="api-8784b395d7e5"><code>atomic&lt;int&gt;.fetch_and(bits: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>The value &amp; bits stored, the value before yielded, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.fetch_or(bits: int) -&gt; int mutate the value | bits stored, the value before yielded, in one step. register_atomics()"><h3 id="api-f839741b32c3"><code>atomic&lt;int&gt;.fetch_or(bits: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>The value | bits stored, the value before yielded, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.fetch_sub(n: int) -&gt; int mutate subtracts n and yields the value before, in one step (an overflow raises and leaves the value). register_atomics()"><h3 id="api-417522817dca"><code>atomic&lt;int&gt;.fetch_sub(n: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Subtracts n and yields the value before, in one step (an overflow raises and leaves the value).</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.fetch_xor(bits: int) -&gt; int mutate the value ^ bits stored, the value before yielded, in one step. register_atomics()"><h3 id="api-4560bac252f9"><code>atomic&lt;int&gt;.fetch_xor(bits: int) -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>The value ^ bits stored, the value before yielded, in one step.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.load() -&gt; int observe the value, read in one atomic step; a typed slot (int v = a;) reads the same. register_atomics()"><h3 id="api-debb8c34958f"><code>atomic&lt;int&gt;.load() -&gt; int</code></h3><p><strong>register_atomics()</strong> &middot; observe</p>
+<p>The value, read in one atomic step; a typed slot (int v = a;) reads the same.</p>
+</div>
+<div class="api-entry" data-provider="stdlib" data-search="atomic&lt;int&gt;.store(value: int) -&gt; void mutate writes the value in one atomic step; a = value is the same store. register_atomics()"><h3 id="api-d06dd6f13ac2"><code>atomic&lt;int&gt;.store(value: int) -&gt; void</code></h3><p><strong>register_atomics()</strong> &middot; mutate</p>
+<p>Writes the value in one atomic step; a = value is the same store.</p>
+</div>
+</section>
 <section class="api-group"><h2 id="group-binary">binary</h2>
 <div class="api-entry" data-provider="core" data-search="binary::bytes(count: int) -&gt; binary::width construct fixed byte count for a layout byte-buffer field. every engine"><h3 id="api-4b9bbf5e9933"><code>binary::bytes(count: int) -&gt; binary::width</code></h3><p><strong>Every engine</strong> &middot; construct</p>
 <p>Fixed byte count for a layout byte-buffer field.</p>

@@ -1,4 +1,4 @@
-// Host-call cost cases: each row's 200000-iteration typed loop timed against the bare loop's on both backends (the ratio and
+// Host-call cost cases: each row's typed loop (k_iterations) timed against the bare loop's on both backends (the ratio and
 // the medians' ns per call over the loop).
 // The rows split a host call into its parts: a plain script_function global (the call mechanics), the binder's
 // conversions without an overload set, a typed add_function (one overload), a real overload set, a statement-position
@@ -51,36 +51,43 @@ public:
 		return e;
 	}
 
-	void forge_tests() override {
-		test("host_call_costs", [this]() {
-			const std::pair<const char*, const char*> rows[] = {
-				{"loop", "s += k;"},
-				{"plain_fn", "s += fraw(k);"},
-				{"binder_only", "s += fbound(k);"},
-				{"typed_one_overload", "s += fs(k);"},
-				{"typed_two_args", "s += fs2(k, k);"},
-				{"typed_overload_set", "s += fset(k);"},
-				{"typed_statement", "fs(k);"},
-				{"bound_method", "s += c.add(k);"},
-				{"vec_arg", "s += fv(p);"},
-				{"vec_result", "s += vf(k).x;"},
-				{"script_fn", "s += sfs(k);"},
-			};
-			auto source_of = [](const char* body) {
-				return std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); var c = Counter(); float s = 0.0; float k = 1.5; "
-				                   "for (int i = 0; i < n; i++) { ") + body + " } return s; } f(200000);";
-			};
+	// The iterations of each loop: a Release reading needs no more, and a row's test stays seconds in Debug
+	static constexpr int k_iterations = 20000;
+
+	// A row is a test of its own, timed on the interpreter and then the VM, so no one test runs every row
+	void row_test(const char* name, std::string reference, std::string src) {
+		test(name, [name, reference, src]() {
 			for (bool use_vm : {false, true}) {
 				auto e = host(use_vm);
-				auto timed = [&e](std::string src) { return [&e, src] { return time_seconds([&] { e->execute(src); }); }; };
+				auto timed = [&e](const std::string& script) { return [&e, script] { return time_seconds([&] { e->execute(script); }); }; };
 				const char* backend = use_vm ? "vm    " : "interp";
-				for (const auto& [name, body] : rows) {
-					const speed_ratio speed = compare_speed(std::string("HOSTCALL ") + backend + " " + name + " against the bare loop", timed(source_of(rows[0].second)), timed(source_of(body)));
-					std::printf("HOSTCALL %s %-20s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / 200000.0,
-					            (speed.measured_seconds - speed.reference_seconds) * 1e9 / 200000.0);
-				}
+				const speed_ratio speed = compare_speed(std::string("HOSTCALL ") + backend + " " + name + " against the bare loop", timed(reference), timed(src));
+				std::printf("HOSTCALL %s %-20s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / k_iterations,
+				            (speed.measured_seconds - speed.reference_seconds) * 1e9 / k_iterations);
 			}
 		});
+	}
+
+	void forge_tests() override {
+		const std::pair<const char*, const char*> rows[] = {
+			{"loop", "s += k;"},
+			{"plain_fn", "s += fraw(k);"},
+			{"binder_only", "s += fbound(k);"},
+			{"typed_one_overload", "s += fs(k);"},
+			{"typed_two_args", "s += fs2(k, k);"},
+			{"typed_overload_set", "s += fset(k);"},
+			{"typed_statement", "fs(k);"},
+			{"bound_method", "s += c.add(k);"},
+			{"vec_arg", "s += fv(p);"},
+			{"vec_result", "s += vf(k).x;"},
+			{"script_fn", "s += sfs(k);"},
+		};
+		const std::string n = std::to_string(k_iterations);
+		auto source_of = [&n](const char* body) {
+			return std::string("function f(int n) -> float { math::vec3 p = math::vec3(1, 2, 3); var c = Counter(); float s = 0.0; float k = 1.5; "
+			                   "for (int i = 0; i < n; i++) { ") + body + " } return s; } f(" + n + ");";
+		};
+		for (const auto& [name, body] : rows) { row_test(name, source_of(rows[0].second), source_of(body)); }
 	}
 };
 

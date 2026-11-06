@@ -954,6 +954,7 @@ public:
 
         test("a_scope_declares_a_name_once", [this]() {
             auto e = make_engine();
+            const std::string placeholder = "'_' is declared more than once in this scope, so it names none of them: give the variable you use its own name";
             for (const auto& [source, text] : std::vector<std::pair<std::string, std::string>>{
                 {"int f(int a, int a) { return a; }", "redeclaration of 'a' in the same scope"},
                 {"auto g = [](int a, string a) { return a; };", "redeclaration of 'a' in the same scope"},
@@ -961,7 +962,12 @@ public:
                 {"{ int y = 1; int y = 2; }", "redeclaration of 'y' in the same scope"},
                 {"void f() { auto [a, b] = [1, 2]; int a = 3; }", "redeclaration of 'a' in the same scope"},
                 {"class C { int x; string x; }", "redeclaration of member 'x' in class 'C'"},
-                {"class C { int x; void x() {} }", "redeclaration of member 'x' in class 'C'"}
+                {"class C { int x; void x() {} }", "redeclaration of member 'x' in class 'C'"},
+                {"void f(int _, int _) { }", "redeclaration of '_' in the same scope"},   // a parameter is never a placeholder (C++26)
+                {"void f() { auto _ = 1; auto _ = 2; print(_); }", placeholder},
+                {"void f() { auto _ = 1; auto [_, b] = [1, 2]; _ = b; }", placeholder},
+                {"void f(int _) { auto _ = 2; { print(_); } }", placeholder},
+                {"auto _ = 1; auto _ = 2; print(_);", placeholder}
             }) {
                 auto report = e->check(source);
                 check_true(has_diag(report, dlevel::error, text), source + "\n" + report.format(source));
@@ -970,11 +976,19 @@ public:
                 "void f() { int y = 1; { string y = \"s\"; } }",       // a nested block's own name shadows (a warning)
                 "int y = 1; string y = \"s\";",                          // a program's top level declares again, as a re-run does
                 "class C { void f() {} void f(int a) {} }",              // overloads
-                "void f(int a) { for (int i = 0; i < 1; i++) {} for (int i = 0; i < 1; i++) {} }"
+                "void f(int a) { for (int i = 0; i < 1; i++) {} for (int i = 0; i < 1; i++) {} }",
+                "void f(int _) { auto _ = 1; auto _ = 2; auto [_, _] = [3, 4]; { auto _ = 5; print(_); } }",   // C++26's placeholder
+                "void f() { auto _ = 1; print(_); }"                                                             // one '_' is a variable
             }) {
                 auto report = e->check(source);
                 check_eq(std::size_t(0), report.error_count(), std::string(source) + "\n" + report.format(source));
+                if (std::string(source).find('_') != std::string::npos) { check_eq(std::size_t(0), report.diagnostics.size(), report.format(source)); }
             }
+            // every placeholder lives to the end of its scope and dies in reverse order, as a C++ local does
+            auto run = make_engine();
+            check_eq(std::string("open a,open b,close b,close a,"), run->execute(
+                "string log = \"\";\nclass G { string n = \"\"; G(string a) { n = a; log += \"open \" + n + \",\"; } ~G() { log += \"close \" + n + \",\"; } }\n"
+                "void f() { auto _ = G(\"a\"); auto _ = G(\"b\"); }\nf();\nlog;").as_string());
         });
 
 		test("lambda_capture_lists_are_exhaustive", [this]() {
@@ -3322,8 +3336,8 @@ public:
                                       "[[nodiscard]] coroutine int gen() { yield 1; }\n"
                                       "W w = W();\nbool flag = true;\n";
             const std::pair<const char*, const char*> dropped[] = {
-                {"add(1, 2);", "the result of 'add' is discarded, but 'add' is [[nodiscard]]: use it, or keep it in a variable (auto kept = add(...);)"},
-                {"w.spend(1);", "the result of 'W.spend' is discarded, but 'W.spend' is [[nodiscard]]: use it, or keep it in a variable (auto kept = w.spend(...);)"},
+                {"add(1, 2);", "the result of 'add' is discarded, but 'add' is [[nodiscard]]: use it, or keep it in the placeholder (auto _ = add(...);)"},
+                {"w.spend(1);", "the result of 'W.spend' is discarded, but 'W.spend' is [[nodiscard]]: use it, or keep it in the placeholder (auto _ = w.spend(...);)"},
                 {"W::make();", "the result of 'W.make' is discarded"},
                 {"ns::pick();", "the result of 'ns::pick' is discarded"},
                 {"over(1);", "the result of 'over' is discarded"},
@@ -3337,7 +3351,7 @@ public:
                 check_eq((size_t)1, error_count(r), r.format());
                 check_true(has_diag(r, dlevel::error, text), r.format());
             }
-            const char* kept[] = {"auto k = add(1, 2);", "print(add(1, 2));", "if (w.spend(1)) { }", "over(1, 2);", "auto h = gen();",
+            const char* kept[] = {"auto k = add(1, 2);", "auto _ = add(1, 2);\nauto _ = w.spend(1);", "void g() { auto _ = add(1, 2); auto _ = ns::pick(); }", "print(add(1, 2));", "if (w.spend(1)) { }", "over(1, 2);", "auto h = gen();",
                                   "int sum = add(1, 2) + ns::pick();", "function f = add; f(1, 2);", "var d = w; d.spend(1);"};
             for (const char* stmt : kept) {
                 auto r = e->check(decls + stmt + "\nprint(1);");

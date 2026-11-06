@@ -592,6 +592,7 @@ private:
         std::string const_text;
         int lw = -1;                      // its lost-write candidate (lw_cands_), -1 for none
         bool lw_handle = false;           // a class-typed slot that may hold a handle (an auto from one, a by-value class parameter)
+        bool placeholders = false;        // this scope declares '_' more than once: naming it is ambiguous (C++26 [basic.scope.scope])
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -808,10 +809,17 @@ private:
     }
 
     // C++ [basic.scope]: a block or a parameter list declares a name once; a program's top level may declare one again, the later
-    // declaration standing for the earlier as a re-run's does
-    void declare_local(std::string_view name, var_entry entry, const source_location& at) {
-        auto [held, fresh] = scopes_.back().emplace(name, std::move(entry));
-        if (!fresh && scopes_.size() > 1) {
+    // declaration standing for the earlier as a re-run's does. C++26's placeholder: a later '_' that names a local variable or a
+    // structured binding (name_independent) redeclares freely, and the name then names none of them
+    void declare_local(std::string_view name, var_entry entry, const source_location& at, bool name_independent = false) {
+        auto [held, fresh] = scopes_.back().emplace(name, entry);
+        if (fresh) { return; }
+        if (name == "_" && (name_independent || scopes_.size() == 1)) {
+            held->second = std::move(entry);
+            held->second.placeholders = true;
+            return;
+        }
+        if (scopes_.size() > 1) {
             diag(diag_level::error, at, "redeclaration of '" + std::string(name) + "' in the same scope", held->second.line, held->second.column);
         }
     }
@@ -962,6 +970,10 @@ private:
             var_entry* local = find_local(id->name, &at);
             if (local && member_hides_program_name(id->name, at)) { return nullptr; }
             if (scope_index) { *scope_index = at; }
+            if (local && local->placeholders) {
+                diag(diag_level::error, id->location, "'_' is declared more than once in this scope, so it names none of them: give the variable you use its own name");
+                return local;
+            }
             if (local && local->lw >= 0 && collect_diagnostics_) { lw_ident_[id] = local->lw; }
             return local;
         }
@@ -1323,6 +1335,7 @@ private:
                      bool allow_field_shape = true) {
         if (fn_stack_.empty()) { return; }   // top-level decls ARE the globals
         if (name.find('#') != std::string_view::npos) { return; }   // a desugaring's own variable (parser::hidden_name): no script spells it
+        if (name == "_") { return; }   // a placeholder (C++26) is never read by its name, so hiding one hides nothing
         // The dangerous shape: shadows a field of the enclosing class (only where the
         // body can actually reach fields - methods/ctors and [this] lambdas)
         if (allow_field_shape && class_ctx_ && fn_stack_.back().sees_fields) {
@@ -2956,7 +2969,7 @@ private:
                 }
             }
             diag(diag_level::error, at, "the result of '" + hit.name + "' is discarded, but '" + hit.name +
-                 "' is [[nodiscard]]: use it, or keep it in a variable (auto kept = " + spelled + "(...);)");
+                 "' is [[nodiscard]]: use it, or keep it in the placeholder (auto _ = " + spelled + "(...);)");
             return;
         }
         std::string receiver = "x";
@@ -6858,7 +6871,7 @@ private:
             entry.is_const = dd->is_const;
             entry.line = dd->location.line; entry.column = dd->location.column;
             warn_shadow("local", name, dd->location);
-            declare_local(name, std::move(entry), dd->location);
+            declare_local(name, std::move(entry), dd->location, /*name_independent=*/true);
         }
     }
 
@@ -7070,7 +7083,7 @@ private:
             check_const_bind(decl, entry);
             warn_shadow("local", decl->name, decl->location);
             if (lw_on()) { lw_opaque_locals_.insert(decl); }
-            declare_local(decl->name, std::move(entry), decl->location);
+            declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
             return;
         }
         if (decl->function_spelling) {
@@ -7154,7 +7167,7 @@ private:
             lw_register(entry, entry.dynamic ? ctype{} : entry.type, decl, decl->name, lw_origin::local, spelled ? entry.display : "auto",
                         !decl->is_const && !decl->function_spelling && !entry.lw_handle);
         }
-        declare_local(decl->name, std::move(entry), decl->location);
+        declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
     }
 
     JAI_NOINLINE void walk_function(const function_decl* fn) {

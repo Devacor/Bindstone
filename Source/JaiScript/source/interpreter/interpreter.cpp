@@ -1299,6 +1299,11 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
         operand = operand.bound_decoded_temp();
         oi = operand.raw_storage_index();
     }
+    // a char promotes to its int under - and ~ as under + (KEEP BYTE-PARALLEL with vm_backend::exec_unary)
+    if (oi == script_value::TYPEID_CHAR && (expr->op.type == token_type::minus || expr->op.type == token_type::tilde)) {
+        operand = detail::char_promoted(operand, engine_);
+        oi = script_value::TYPEID_INT;
+    }
     switch (expr->op.type) {
         case token_type::minus: {
             if (oi == script_value::TYPEID_INT) {
@@ -8158,7 +8163,11 @@ checked_result<void> interpreter::evaluate_field_initializers(strong_ptr<class_i
             return result.error_value();
         }
         script_value field_value = initializer_store_value(pop_value(), initializer_ast.get());
-        instance->set_field(field_id, field_value);
+        if (is_unwinding_) {   // a throw left the initializer: its placeholder lands unchecked, the throw goes on as raised
+            instance->set_field(field_id, field_value);
+            return {};
+        }
+        instance->set_initialized_field(field_id, field_value);
         return {};
     };
 

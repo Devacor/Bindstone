@@ -237,6 +237,16 @@ public:
         }
         return nullptr;
     }
+    // A null initializer the stamp passes may store untouched: the field's slot holds null (an int's refuses it, a bool's reads it false)
+    bool null_initializer_stored_as_is(uint64_t field_id) const {
+        const type_info_ptr declared = get_field_declared_type(field_id);
+        if (!declared) { return true; }
+        switch (declared->base_type) {
+            case script_value_type::jai_any_type: case script_value_type::jai_object_type: case script_value_type::jai_shared_ptr_type:
+            case script_value_type::jai_weak_ptr_type: case script_value_type::jai_function_type: return true;
+            default: return false;
+        }
+    }
     bool chain_initializers_all_literal() const {
         if (literal_memo_epoch_ != method_epoch() || literal_memo_count_ != field_initializer_asts_.size()) {
             assert(!(get_engine() && detail::engine_access::parallel_region_active(*get_engine())) && "a parallel worker writes the class's literal-chain memo (prime it at region start)");
@@ -255,7 +265,7 @@ public:
                 const size_t li = static_cast<const literal_expr*>(ast.get())->value.raw_storage_index();
                 all = li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
                       li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
-                      li == script_value::TYPEID_NULL;
+                      (li == script_value::TYPEID_NULL && null_initializer_stored_as_is(field_initializer_asts_[i].first));
             }
             literal_memo_ = all;
             literal_memo_epoch_ = method_epoch();

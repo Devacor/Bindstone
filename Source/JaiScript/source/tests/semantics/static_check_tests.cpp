@@ -1758,6 +1758,53 @@ public:
             check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "no member 'sqroot' in namespace 'math'"));
         });
 
+        test("a_namespace_is_not_a_value", [this]() {
+            // C++ [basic.namespace]: a namespace's name alone is no expression; the run time finds no variable of the name
+            const auto message = [this](const std::string& source) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                try { e->execute(source); } catch (const static_check_error& err) { return std::string(err.what()); } catch (const std::exception& err) { return std::string("raised: ") + err.what(); }
+                return std::string("loaded");
+            };
+            for (const char* ns : {"math", "time", "reflect", "crypto", "binary", "string", "geo"}) {
+                const std::string text = std::string("'") + ns + "' is a namespace, not a value; name one of its members (" + ns + "::name)";
+                const std::string field = "namespace geo { int k = 1; } class Gator { int spd = " + std::string(ns) + "; }";
+                check_true(message(field).find("error: " + text) != std::string::npos, field + " -> " + message(field));
+                const std::string warned = "namespace geo { int k = 1; } [[warn_mode]]; var v = " + std::string(ns) + ";";
+                check_eq(std::string("raised: Undefined variable '") + ns + "'", message(warned), warned);
+            }
+            // a class's name is its constructor, a value an int slot refuses; a namespace's members and an enum's value table stay values
+            check_true(message("int spd = random;").find("error: cannot initialize 'spd' declared 'int' with 'class random'") != std::string::npos, message("int spd = random;"));
+            check_true(message("class C {} int c = C;").find("error: cannot initialize 'c' declared 'int' with 'class C'") != std::string::npos, message("class C {} int c = C;"));
+            check_eq(std::string("loaded"), message("var r = random; var c = r(3); enum E { A } var e = E; namespace math { int twice(int x) { return 2 * x; } } math::twice(math::PI > 3.0 ? 1 : 0);"));
+        });
+
+        test("a_unary_operator_takes_only_the_operands_its_rows_or_a_class_operator_take", [this]() {
+            const auto message = [this](const std::string& source) {
+                auto e = make_engine();
+                jai::stdlib::register_all(*e);
+                try { return e->execute(source).to_string(); } catch (const static_check_error& err) { return std::string(err.what()); } catch (const std::exception& err) { return std::string("raised: ") + err.what(); }
+            };
+            const std::pair<const char*, const char*> refusals[] = {
+                {"int spd = -true;", "Unary minus requires numeric operand"},
+                {"string s = \"a\"; var z = -s;", "Unary minus requires numeric operand"},
+                {"array<int> a = [1]; var z = -a;", "Unary minus requires numeric operand"},
+                {"class A {} A a; var z = -a;", "Unary minus requires numeric operand"},
+                {"var z = +\"s\";", "Unary plus requires numeric operand"},
+                {"using math::vec2; vec2 v = vec2(1.0, 2.0); var z = +v;", "Unary plus requires numeric operand"},
+                {"float f = 1.5; var z = ~f;", "Bitwise NOT requires integer operand"},
+                {"var z = ~false;", "Bitwise NOT requires integer operand"},
+            };
+            for (const auto& [source, text] : refusals) {
+                check_true(message(source).find(std::string("error: ") + text) != std::string::npos, std::string(source) + " -> " + message(source));
+                check_eq(std::string("raised: ") + text, message(std::string("[[warn_mode]]; ") + source), source);
+            }
+            // a char promotes to its int under each, a math value negates, a class operator answers, a var waits for the run
+            check_eq(std::string("[-97, -98, 97, -1.0, 7]"), message(
+                "char c = 'a'; using math::vec2; class A { int operator-() { return 7; } } A a; var t = true; try { var z = -t; } catch (e) { } "
+                "[-c, ~c, +c, (-vec2(1.0, 2.0)).x, -a];"));
+        });
+
         test("cast_value_is_a_proof_source_reference_is_not", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             const std::string prelude =

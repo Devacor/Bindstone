@@ -132,6 +132,9 @@ public:
     // (typed-null placeholders: create_instance defaults, uninitialized fields).
     // Defined out-of-line (needs class_definition + the conversion kernel).
     inline void set_field(uint64_t id, const script_value& value);
+    // A field initializer's value lands as the declaration `T f = e;` would: null included (an int field refuses it, a
+    // bool field reads it false), and the refusal throws as set_field's does
+    inline void set_initialized_field(uint64_t id, const script_value& value);
 
     inline void set_field_unchecked(uint64_t id, const script_value& value);
     // create_instance's plan landing: fresh instance, no references, no overflow - one

@@ -36,7 +36,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 54;
+    inline constexpr uint32_t k_jaibite_version = 55;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -46,7 +46,7 @@ namespace jai::detail {
     // BUMP THIS whenever the static checker's rules change (a new diagnostic, a rule that rejects more): a checked-clean
     // stamp records the revision that checked it (flag bits 8..31), and a bite stamped under another revision is checked
     // again on load instead of trusted. A parse change bumps k_jaibite_version instead, which re-parses as well.
-    inline constexpr uint32_t k_jaibite_checker_revision = 4;
+    inline constexpr uint32_t k_jaibite_checker_revision = 5;
     inline constexpr uint32_t jaibite_checked_clean_flags() { return k_jaibite_flag_checked_clean | (k_jaibite_checker_revision << 8); }
     // The stamp is trusted only from this checker revision
     inline constexpr bool jaibite_stamped_clean(uint32_t flags) {

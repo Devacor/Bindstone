@@ -77,6 +77,27 @@ public:
 			        "Undefined variable 'count_in'", "a lambda's body");
 		});
 
+		test("a_field_initializer_reads_only_the_fields_declared_above_it", [this]() {
+			// C++ [class.base.init]: fields initialize in declaration order, so a read of the field itself or a later one is a load error
+			const std::string later = "field initializer of 'spd' reads 'slices' before its initialization: fields initialize in declaration order; declare 'slices' above 'spd'";
+			refused("class Gator { int spd = slices; int slices = 0; } Gator().spd;", later, "Cannot assign null to field 'spd' of Gator (declared int)", "a bare read");
+			refused("class Gator { int spd = this.slices + 1; int slices = 0; } Gator().spd;", later, "Invalid operands for + operator", "a read through this");
+			refused("class G { int x = x; G() {} } G().x;", "field initializer of 'x' reads 'x' before its initialization: fields initialize in declaration order",
+			        "Cannot assign null to field 'x' of G (declared int)", "its own field");
+			both("class B { int s = 4; } class G : B { int spd = s; int t = 0; var f = [this]() { return t; }; static int k = 2; int u = k; } auto g = G(); [g.spd, g.f(), g.u];",
+			     "[4, 0, 2]", "a base's field, a lambda that runs later, a static");
+		});
+
+		test("a_field_initializer_hands_its_field_only_a_value_of_its_type", [this]() {
+			// null lands in a typed field as `T f = e;` would: an int refuses it, a bool reads it false, a class value or a handle holds it
+			both("var n = null; class G { int x = 1; int y = n; } G().y;", "throw:Cannot assign null to field 'y' of G (declared int)", "an int field", true);
+			both("class G { int spd = get(); int slices = 4; var get() { return slices; } } G().spd;", "throw:Cannot assign null to field 'spd' of G (declared int)",
+			     "a method that reads a later field");
+			both("class G { string s = null; } G().s;", "throw:Cannot assign null to field 's' of G (declared string)", "a null literal", true);
+			both("var n = null; class F {} class G { bool b = n; bool c = null; shared_ptr<F> p = n; F f = null; var v = n; } G g; [g.b, g.c, g.p == null, g.f == null, g.v];",
+			     "[false, false, true, true, null]", "the slots that take null");
+		});
+
 		test("a_lambda_in_a_field_initializer_captures_in_the_class", [this]() {
 			both("int n = 40; class F { var g = [n](int q) { return q + n; }; F(int n) {} } F(5).g(1);", "41", "a global a parameter shadows");
 			both("class G { int m = 3; var g = [this](int q) { return q + m; }; G(int m) {} } G(10).g(1);", "4", "a member a parameter shadows");

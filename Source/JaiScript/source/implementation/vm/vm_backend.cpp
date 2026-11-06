@@ -4035,6 +4035,11 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 		operand = operand.bound_decoded_temp();
 		oi = operand.raw_storage_index();
 	}
+	// a char promotes to its int under - and ~ as under + (KEEP BYTE-PARALLEL with the interpreter's unary)
+	if (oi == script_value::TYPEID_CHAR && (static_cast<token_type>(ins.a) == token_type::minus || static_cast<token_type>(ins.a) == token_type::tilde)) {
+		operand = detail::char_promoted(operand, engine_);
+		oi = script_value::TYPEID_INT;
+	}
 	switch (static_cast<token_type>(ins.a)) {
 		case token_type::minus: {
 			if (oi == script_value::TYPEID_INT) {
@@ -14213,11 +14218,11 @@ op_status vm_backend::exec_field_init(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::this_outside_method), "'this' can only be used inside methods");
 	}
 	if (!f.code->level_initializers) {   // a constructor's prologue: a throwing store is the frame's exception
-		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
+		instance->set_initialized_field(field_id, initializer_store_value(std::move(value), initializer));
 		return {};
 	}
 	try {
-		instance->set_field(field_id, initializer_store_value(std::move(value), initializer));
+		instance->set_initialized_field(field_id, initializer_store_value(std::move(value), initializer));
 	} catch (...) {
 		construction().field_init_exception = std::current_exception();   // the store throws natively, as the per-field evaluation's does
 		return raise_(make_error_code(runtime_error_code::constructor_failed), "field initializer store");
@@ -18294,14 +18299,14 @@ checked_result<void> vm_backend::evaluate_field_initializers(strong_ptr<class_in
 			if (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT ||
 			    li == script_value::TYPEID_BOOL || li == script_value::TYPEID_CHAR ||
 			    li == script_value::TYPEID_NULL || li == script_value::TYPEID_STRING) {   // a string shares the constant's node as op_const's push does
-				instance->set_field(field_id, materialize_constant(lit->value));
+				instance->set_initialized_field(field_id, materialize_constant(lit->value));
 				return {};
 			}
 		}
 		auto result = eval_expression(initializer_ast, init_env);
 		if (!result) { return result.error_value(); }   // KEEP BYTE-PARALLEL with the interpreter: the initializer's own error
 		script_value field_value = initializer_store_value(std::move(result.value()), initializer_ast.get());
-		instance->set_field(field_id, field_value);
+		instance->set_initialized_field(field_id, field_value);
 		return {};
 	};
 

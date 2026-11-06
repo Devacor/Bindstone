@@ -350,6 +350,7 @@ public:
         program_globals_ = opts.program_globals;
         program_enums_ = opts.program_enums;
         deferred_out_ = opts.deferred_classes;
+        reload_dependent_ = opts.reload_dependent;
         observer_ = opts.observer;
         outside_out_ = opts.outside;
     }
@@ -498,6 +499,7 @@ private:
     // runs (migrate hooks read retired fields, probes expect the runtime error), so member
     // misses on those receivers stay silent (stale_shape_receiver).
     std::unordered_set<std::string_view> open_classes_;
+    bool reload_dependent_ = false;   // check_options::reload_dependent: no class is open
     // extend(x, Class) re-classes x IN PLACE: every name passed to extend anywhere in the unit
     // reads as unknown from then on (flow-insensitive, by name).
     std::unordered_set<std::string_view> extended_names_;
@@ -1011,6 +1013,7 @@ private:
     // The engine already holds a script class of this name with a different instance/static
     // field set: this unit hot-reloads it (an identical re-execution keeps the same set).
     bool unit_redefines(const class_decl* cd) {
+        if (reload_dependent_) { return false; }
         auto def = eng_.find_script_class(std::string(cd->name));
         if (!def) { return false; }
         size_t own_fields = 0;

@@ -302,12 +302,10 @@ gate. Rules:
   `vm_backend::exec_call_method`'s builtin-direct branch): a popped reference (subscript
   read, ref alias) derefs to its storage, a member-final receiver (`obj.s`, `this.s`,
   `kv.first`) resolves through `resolve_ref_lvalue` exactly like `f(obj.s)` binds a
-  `string&` parameter, and a chain (`t.trim().to_upper()`) redirects to its root when the
-  root's node IS the node the inner call handed back (identifier roots ride
-  `call_site::chain_root_symbol/slot` in the vm, `string_receiver_cell` in the
-  interpreter; ref-bindable roots ride the kernel). Anything else is a temporary and its
-  mutation stays there (`s.substr(1).to_upper()`, a by-value method result, a computed
-  property, an escaped bound method).
+  `string&` parameter. Anything else is a temporary and its mutation stays there (a call
+  result such as `s.substr(1).to_upper();`, a computed property, an escaped bound method).
+  A mutator returns nothing, so a chain never hands one a receiver that names storage
+  (`t.trim().to_upper()` raises at the `trim`, detail/in_place_result.hpp).
 - Scratch-backed receivers (typed `array<string>` elements, PROPERTY refs such as
   `kv.first`) must `commit_scratch()` after the mutator, on every path that passes the
   deref'd scratch as self (identifier fast paths included) - the unshare lands in the

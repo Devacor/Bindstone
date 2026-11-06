@@ -119,7 +119,7 @@ namespace {
 				out << "] staged=[";
 				for (uint32_t slot : s.staged_argument_slots) { out << slot << " "; }
 				out << "] member=" << u(s.member_node) << " call=" << u(s.call_node) << " recv=" << id(s.receiver_symbol) << "/" << u(s.receiver_slot)
-				    << " root=" << id(s.chain_root_symbol) << "/" << u(s.chain_root_slot) << " bi=" << s.bi_array << "," << s.bi_map << "," << s.bi_string
+				    << " bi=" << s.bi_array << "," << s.bi_map << "," << s.bi_string
 				    << (s.in_place_check ? " in_place" : "")
 				    << " callee=" << operand(ch, s.callee) << "\n";
 			}

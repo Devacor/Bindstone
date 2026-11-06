@@ -8776,11 +8776,6 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 				auto* recv_ident = static_cast<identifier_expr*>(member->object.get());
 				site->receiver_symbol = recv_ident->symbol_id;
 				site->receiver_slot = identifier_slot_operand(recv_ident);   // the receiver's own op_load slot
-			} else if (const expression* root = detail::string_mutator_chain_root(member->object.get());
-			           root && root->get_type() == node_type::identifier_expr) {
-				auto* root_ident = static_cast<identifier_expr*>(const_cast<expression*>(root));
-				site->chain_root_symbol = root_ident->symbol_id;
-				site->chain_root_slot = identifier_slot_operand(root_ident);
 			}
 			if (builtins_ && !reference_) {
 				auto builtin_index_for = [&](const std::unordered_map<uint64_t, uint16_t>& index) -> uint16_t {

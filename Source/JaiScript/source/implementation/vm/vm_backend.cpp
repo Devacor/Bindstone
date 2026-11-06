@@ -17491,10 +17491,8 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 				} restore_pending{this, saved_pending};
 				if (string_mutator) {
 					// A string MUTATOR binds the receiver LVALUE (detail/string_mutator_receiver.hpp;
-					// C++ `string& to_upper()`): the popped reference, the resolved field /
-					// property, or the chain root whose node the receiver still is (an
-					// identifier root through the baked chain_root cell, the identifier
-					// ladder). Unbound = a temporary: the builtin mutates the copy alone. The
+					// C++ `void to_upper()`): the popped reference or the resolved field /
+					// property. Unbound = a temporary: the builtin mutates the copy alone. The
 					// spare copies are dropped first - alive, they would only make the write
 					// gate copy the node. (KEEP BYTE-PARALLEL with interpreter::member_read_on)
 					if (!object.is_reference()) {
@@ -17503,13 +17501,7 @@ JAI_NOINLINE op_status vm_backend::exec_call_method_general(frame& f, const vm_i
 					detail::string_mutator_binding binding = detail::bind_string_mutator_receiver(
 						object, member->object.get(), caller_view(&f), environment_.get(), engine_, symbolizer_);
 					return guarded_native_call([&] {
-						script_value* root_cell = nullptr;
-						if (binding.root_ident) {
-							root_cell = binding.root_ident->global_qualified
-								? engine_->get_global_environment()->get_value_ptr(site.chain_root_symbol)
-								: resolve_local_or_env(f, site.chain_root_slot, site.chain_root_symbol);
-						}
-						script_value* self = detail::string_mutator_self(binding, root_cell, objv);
+						script_value* self = detail::string_mutator_self(binding, objv);
 						object = make_null();   // a reference moved into the pin; a copy only inflates the count
 						if (self) {
 							objv = make_null();

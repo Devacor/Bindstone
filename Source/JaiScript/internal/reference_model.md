@@ -171,9 +171,9 @@ any other holder shares is replaced by a private copy first (copy-on-write, memo
 charged deferred), so the write lands in the storage the script named and nowhere else.
 Mutators therefore bind their receiver LVALUE like a `string&` parameter
 (`detail/string_mutator_receiver.hpp`: an identifier's cell, a subscript read's reference,
-a field / C++ property through the ref-lvalue kernel, or the root of a mutator chain -
-`t.trim().to_upper()` keeps writing to `t`); a call result or computed property is a
-temporary and its mutation stays in the temporary. Map keys follow from this: `kv.first`
+or a field / C++ property through the ref-lvalue kernel); a call result or computed
+property is a temporary and its mutation stays in the temporary. A mutator returns nothing,
+so a chain such as `t.trim().to_upper()` raises at the `trim` (`detail/in_place_result.hpp`). Map keys follow from this: `kv.first`
 (by value or by reference), `keys()`, `to_array()`, predicate arguments and the variable a
 key was inserted through all share the key's node - no per-iteration copy - and the first
 write through any of them detaches, so the key itself is never written; the static checker

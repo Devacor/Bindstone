@@ -4514,10 +4514,8 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
     }
 
     // A string MUTATOR called on a non-identifier receiver binds the receiver LVALUE
-    // (detail/string_mutator_receiver.hpp; C++ `string& to_upper()`): the popped reference,
-    // the resolved field / property, or the chain root whose node the receiver still is.
-    // An identifier chain root re-resolves at call time, after the arguments, like the
-    // identifier fast path. Unbound = a temporary: the builtin mutates the copy alone.
+    // (detail/string_mutator_receiver.hpp; C++ `void to_upper()`): the popped reference or
+    // the resolved field / property. Unbound = a temporary: the builtin mutates the copy alone.
     // (KEEP BYTE-PARALLEL with vm_backend::exec_call_method's builtin-direct string branch)
     if (as_callee && (objectValue.deref().raw_storage_index() == script_value::TYPEID_STRING ||
                       objectValue.deref().raw_storage_index() == script_value::TYPEID_UTF8_STRING) &&
@@ -4531,8 +4529,7 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
         script_function boundMethod = [this, ctx = builtin_ctx(), method,
                                        binding = std::move(binding), copy = std::move(copy)]
                                       (const std::vector<script_value>& args) mutable -> checked_result<script_value> {
-            script_value* root_cell = binding.root_ident ? string_receiver_cell(binding.root_ident) : nullptr;
-            script_value* self = detail::string_mutator_self(binding, root_cell, copy);
+            script_value* self = detail::string_mutator_self(binding, copy);
             if (self) {
                 copy = script_value(std::monostate{}, engine_);   // the copy's count would make the gate copy the node
             } else {

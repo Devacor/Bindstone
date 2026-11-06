@@ -60,6 +60,70 @@
     },
     {
       "owner": "array<T>",
+      "name": "resize",
+      "signature": "resize(size: int, value: T = omitted) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "std::vector::resize: grows with copies of value, or with value-initialized elements (0, false, an empty text or container, null, a default-constructed object); shrinks from the end. A failed grow leaves the array as it was. array<T>(size, value) builds the same array.",
+      "source": "source/implementation/builtin_methods.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "array<T>.resize(size: int, value: T = omitted) -> void",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nxs.resize(5);\nprint(to_json(xs));\nxs.resize(2);\nxs.resize(4, 9);\nprint(to_json(xs));",
+        "output": "[1,2,3,0,0]\n[1,2,9,9]"
+      }
+    },
+    {
+      "owner": "array<T>",
+      "name": "assign",
+      "signature": "assign(size: int, value: T) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "std::vector::assign: size elements equal to value; the elements kept are assigned as xs[i] = value assigns (operator=), the rest copy-constructed or destroyed.",
+      "source": "source/implementation/builtin_methods.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "array<T>.assign(size: int, value: T) -> void",
+      "example": {
+        "code": "array<int> xs = [1, 2, 3];\nxs.assign(2, 7);\nprint(to_json(xs));",
+        "output": "[7,7]"
+      }
+    },
+    {
+      "owner": "array<T>",
+      "name": "fill",
+      "signature": "fill(value: T) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "Every element is assigned value as xs[i] = value assigns (operator=); the size stays.",
+      "source": "source/implementation/builtin_methods.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "array<T>.fill(value: T) -> void",
+      "example": {
+        "code": "array<string> xs = [\"a\", \"b\"];\nxs.fill(\"z\");\nprint(to_json(xs));",
+        "output": "[\"z\",\"z\"]"
+      }
+    },
+    {
+      "owner": "array<T>",
+      "name": "reserve",
+      "signature": "reserve(size: int) -> void",
+      "provider": "core",
+      "effect": "mutate",
+      "notes": "std::vector::reserve: room for size elements, so pushes up to it never reallocate. Changes no element and no size.",
+      "source": "source/implementation/builtin_methods.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "array<T>.reserve(size: int) -> void",
+      "example": {
+        "code": "array<int> xs;\nxs.reserve(100);\nxs.push(1);\nprint(xs.size());",
+        "output": "1"
+      }
+    },
+    {
+      "owner": "array<T>",
       "name": "pop",
       "signature": "pop() -> T",
       "provider": "core",
@@ -6540,6 +6604,38 @@
       "example": {
         "code": "array<int> xs = [3, 1, 2];\nprint(to_json(array::sort(xs)), \" \", to_json(xs));",
         "output": "[1,2,3] [3,1,2]"
+      }
+    },
+    {
+      "owner": "array",
+      "name": "resize",
+      "signature": "resize(values: array<T>, size: int, value: T = omitted) -> array<T>",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "Returns a resized copy with input constraints, as values.resize(size, value) would leave values.",
+      "source": "include/jaiscript/detail/array_namespace.hpp",
+      "form": "namespace",
+      "availability": "Every engine",
+      "display": "array::resize(values: array<T>, size: int, value: T = omitted) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [1, 2];\nprint(to_json(array::resize(xs, 4, 3)), \" \", to_json(xs));",
+        "output": "[1,2,3,3] [1,2]"
+      }
+    },
+    {
+      "owner": "array",
+      "name": "fill",
+      "signature": "fill(values: array<T>, value: T) -> array<T>",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "Returns a copy whose every element is value.",
+      "source": "include/jaiscript/detail/array_namespace.hpp",
+      "form": "namespace",
+      "availability": "Every engine",
+      "display": "array::fill(values: array<T>, value: T) -> array<T>",
+      "example": {
+        "code": "array<int> xs = [1, 2];\nprint(to_json(array::fill(xs, 0)), \" \", to_json(xs));",
+        "output": "[0,0] [1,2]"
       }
     },
     {

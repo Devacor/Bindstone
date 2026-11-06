@@ -14,8 +14,9 @@ namespace jai::detail {
 		uint8_t maximum;
 	};
 
-	inline constexpr std::array<BuiltinArity, 156> BUILTIN_ARITIES{{
+	inline constexpr std::array<BuiltinArity, 160> BUILTIN_ARITIES{{
 		{0, "append", 1, 1},
+		{0, "assign", 2, 2},
 		{0, "back", 0, 0},
 		{0, "clear", 0, 0},
 		{0, "concat", 1, 1},
@@ -23,6 +24,7 @@ namespace jai::detail {
 		{0, "empty", 0, 0},
 		{0, "erase", 1, 1},
 		{0, "every", 1, 1},
+		{0, "fill", 1, 1},
 		{0, "filter", 1, 1},
 		{0, "find", 1, 1},
 		{0, "find_index", 1, 1},
@@ -41,6 +43,8 @@ namespace jai::detail {
 		{0, "reduce", 1, 2},
 		{0, "remove", 1, 1},
 		{0, "remove_if", 1, 1},
+		{0, "reserve", 1, 1},
+		{0, "resize", 1, 2},
 		{0, "reverse", 0, 0},
 		{0, "size", 0, 0},
 		{0, "slice", 0, 2},
@@ -188,8 +192,9 @@ namespace jai::detail {
 		BuiltinReceiverEffect effect;
 	};
 
-	inline constexpr std::array<BuiltinEffect, 87> BUILTIN_RECEIVER_EFFECTS{{
+	inline constexpr std::array<BuiltinEffect, 91> BUILTIN_RECEIVER_EFFECTS{{
 		{"append", BuiltinReceiverEffect::writes},
+		{"assign", BuiltinReceiverEffect::writes},
 		{"at", BuiltinReceiverEffect::reads},
 		{"back", BuiltinReceiverEffect::reads},
 		{"byte_size", BuiltinReceiverEffect::reads},
@@ -206,6 +211,7 @@ namespace jai::detail {
 		{"every", BuiltinReceiverEffect::element_callback},
 		{"expired", BuiltinReceiverEffect::reads},
 		{"explode", BuiltinReceiverEffect::reads},
+		{"fill", BuiltinReceiverEffect::writes},
 		{"filter", BuiltinReceiverEffect::writes},
 		{"find", BuiltinReceiverEffect::element_callback},
 		{"find_first_not_of", BuiltinReceiverEffect::reads},
@@ -250,7 +256,9 @@ namespace jai::detail {
 		{"replace", BuiltinReceiverEffect::writes},
 		{"replace_first", BuiltinReceiverEffect::writes},
 		{"replace_last", BuiltinReceiverEffect::writes},
+		{"reserve", BuiltinReceiverEffect::writes},
 		{"reset", BuiltinReceiverEffect::writes},
+		{"resize", BuiltinReceiverEffect::writes},
 		{"reverse", BuiltinReceiverEffect::writes},
 		{"rfind", BuiltinReceiverEffect::reads},
 		{"same_as", BuiltinReceiverEffect::reads},

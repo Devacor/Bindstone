@@ -2569,6 +2569,21 @@ private:
         return found == literal_element_types_.end() ? ctype{} : found->second;
     }
 
+    // resize(size, value), assign(size, value), reserve(size) and fill(value) on an array (array<T>(size, value) is array::resize):
+    // the size is an int and the value fits the element type, as push's argument does
+    void check_array_sizing_arguments(std::string_view a_method, const ctype& a_array, const ctype* a_args, size_t a_count, const source_location& a_at) {
+        const bool sized = a_method == "resize" || a_method == "assign" || a_method == "reserve";
+        if (!sized && a_method != "fill") { return; }
+        const std::string method(a_method);
+        if (sized && a_count >= 1 && !a_args[0].is_unknown() && a_args[0].kind != ctype::int_k) {
+            diag(diag_level::error, a_at, method + "() size must be an int, got '" + ctype_name(a_args[0]) + "'");
+        }
+        const size_t value_at = a_method == "fill" ? 0 : 1;
+        if (!a_array.ti || a_method == "reserve" || a_count <= value_at) { return; }
+        const auto issue = container_element_issue(a_args[value_at], a_array.ti->element_type().get());
+        if (!issue.empty()) { diag(diag_level::error, a_at, method + "() cannot store into '" + ctype_name(a_array) + "': " + issue); }
+    }
+
     std::string container_element_issue(const ctype& src, const type_info* target, int depth = 0) {
         const ctype dst = ctype_from_type_info(target);
         if (src.is_unknown() || dst.is_unknown() || depth > 512) { return {}; }
@@ -2982,6 +2997,9 @@ private:
                      ctype_name(args[i]) + "' where " + namespace_param_spelling(sig.params[i]) + " is expected");
                 return {};
             }
+        }
+        if (path == "array" && !args.empty() && args[0].kind == ctype::array_k) {
+            check_array_sizing_arguments(m->member, args[0], args.data() + 1, args.size() - 1, loc);
         }
         ctype t;
         if (sig.result_follows_first && !args.empty() && (args[0].kind == ctype::string_k || args[0].kind == ctype::utf8_k || args[0].kind == ctype::array_k)) { t = args[0]; }
@@ -4914,6 +4932,7 @@ private:
                     diag(diag_level::error, c->location, "cannot push into '" + ctype_name(recv) + "': " + issue);
                 }
             }
+            if (recv.kind == ctype::array_k && !m->is_static) { check_array_sizing_arguments(m->member, recv, args.data(), args.size(), c->location); }
             if (recv.const_key && string_mutator_name(m->member)) { map_key_mutation(m->location, m->object.get()); }
             if (class_dot_receiver(m, recv)) { return {}; }
             if (recv.kind == ctype::object_k || recv.kind == ctype::class_ref_k) { return class_member_call(c, m, recv, args, &ov); }

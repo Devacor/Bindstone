@@ -215,8 +215,8 @@ in-place <code>&amp;</code> params are ~1.35&times; faster than the shared_ptr r
 shape (that delta is the shape, not a per-access penalty), and both are ~3.5&times; faster than naive
 by-value, which deep-copies subtrees at every recursion level.</p>
 <h3 id="the-comparison-story">Against Lua, Squirrel, and ChaiScript<a class="hlink" href="#the-comparison-story" aria-label="link">&#8203;</a></h3>
-<p>All three rivals are measured in one comparison harness, same machine, same protocol: the reference-machine run of
-2026-11-04, each suite run five times pinned to one P core, each cell the fastest of the five.
+<p>All three rivals are measured in one comparison harness, same machine, same protocol: the reference-machine run:
+each suite run five times pinned to one P core, each cell the fastest of the five.
 Headline rows, µs/iteration (a plain function call rounds to 0 or 1 µs everywhere but ChaiScript, so that row is omitted; the cost sheet above has it in nanoseconds):</p>
 <div class="tablewrap"><table><thead><tr><th>benchmark</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel</th><th>ChaiScript</th></tr></thead><tbody>
 <tr><td>Method invocation</td><td>0</td><td>1</td><td>2</td><td>13</td></tr>
@@ -256,7 +256,7 @@ at 0.01–0.73&times; Lua&#x27;s time.</p>
 language and hash-checked: Richards (an OS scheduler simulation: polymorphic methods over linked objects), DeltaBlue
 (a constraint solver: a deep class hierarchy and virtual dispatch), a bytecode VM written in the script (a dispatch loop
 over integer arrays) and a spatial hash over 100,000 entities. Each cell is the median of seven processes, the
-implementations interleaved, on one P core, 2026-11-04; each program times its own workload, so start-up and compilation
+implementations interleaved, on one P core; each program times its own workload, so start-up and compilation
 stay out.</p>
 <div class="tablewrap"><table><thead><tr><th>app</th><th>Jai VM</th><th>Lua 5.4</th><th>Squirrel 3.2</th><th>VM / Lua</th><th>VM / Squirrel</th></tr></thead><tbody>
 <tr><td>Richards</td><td>788 ms</td><td>334 ms</td><td>609 ms</td><td>2.36</td><td>1.29</td></tr>

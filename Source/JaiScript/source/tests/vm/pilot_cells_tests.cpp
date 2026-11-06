@@ -2314,7 +2314,8 @@ function nwrites(int n) -> string { for (int i = 0; i < n; ++i) { G = G + i; F =
 		test("a_graft_keeps_the_calls_its_body_makes", [this]() {
 			// a callee within the graft budget grafts even when its body calls: the call stays a call made from the grafted body (a door call
 			// in a block), its frame one level below the grafted one; values, errors with their traces, the call-depth cap and the block's
-			// entries agree with the interpreter and with the middle end off
+			// entries agree with the interpreter and with the middle end off, the grafts a trace counts past its cap included (a rethrow at
+			// every level of a deep stack, a coroutine resumed over other frames)
 			const char* defs = R"JAI(
 array<int> T = [1, 2, 3, 4, 5, 6, 7, 8];
 int LOG = 0;
@@ -2330,6 +2331,16 @@ int deep(int d) { if (d <= 0) { return 0; } return step(d) + 1; }
 int step(int d) { if (d < 0) { return 0; } return deep(d - 1); }
 string trace(int n, int bad) { string out = ""; try { out = to_string(run(n, bad)); } catch (e) { out = to_string(e) + " @"; for (auto& fr : e.stack) { out = out + " " + fr; } } return out + " log " + to_string(LOG); }
 string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } catch (e) { out = to_string(e) + " @"; for (auto& fr : e.stack) { out = out + " " + fr; } } return out; }
+int rr(int d) { if (d <= 0) { throw "bottom"; } try { return rh(d) + 1; } catch (e) { if (d == 30) { throw to_string(e.stack.size()) + " " + e.stack[64]; } throw e; } }
+int rh(int d) { if (d < 0) { return 0; } return rr(d - 1); }
+string traced_rethrow(int d) { string out = ""; try { out = to_string(rr(d)); } catch (e) { out = to_string(e); } return out; }
+int down(int d) { if (d <= 0) { throw "down"; } return down(d - 1) + 1; }
+array<string> SEEN = [];
+coroutine tracer() -> int { try { for (int i = 0; i < 2; i++) { try { down(70); } catch (e) { SEEN.push(e.stack[64]); } yield i; } } catch (e) { } }
+var H = null;
+int rz(int d) { if (d <= 0) { H.next(); return 0; } return rw(d) + 1; }
+int rw(int d) { if (d < 0) { return 0; } return rz(d - 1); }
+string fiber_traces() { H = tracer(); rz(5); rz(0); return to_json(SEEN); }
 )JAI";
 			enum class mode { interp, vm, vm_off };
 			auto run_with = [&](mode m, const std::string& call, unsigned long long* entries, size_t depth_cap = 0) -> std::string {
@@ -2347,7 +2358,8 @@ string traced_rec(int d) { string out = ""; try { out = to_string(rec(d)); } cat
 			struct probe { const char* call; size_t cap; bool block; };
 			const probe probes[] = {
 				{ "to_string(run(40, -1));", 0, true }, { "trace(40, -1);", 0, false }, { "trace(20, 7);", 0, false }, { "to_string(straight(3)) + \" \" + to_string(straight(9));", 0, false },
-				{ "straight(300);", 0, false }, { "traced_rec(3);", 0, false }, { "traced_rec(90);", 0, false },
+				{ "straight(300);", 0, false }, { "traced_rec(3);", 0, false }, { "traced_rec(90);", 0, false }, { "traced_rethrow(100);", 0, false },
+				{ "fiber_traces();", 0, false },
 				{ "to_string(deep(15));", 40, false }, { "to_string(deep(19));", 40, false }, { "to_string(deep(20));", 40, false }, { "to_string(deep(60));", 40, false },
 			};
 			for (const probe& p : probes) {

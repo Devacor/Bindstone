@@ -59,6 +59,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static size_t parallel_spin_wait_us(const engine& a_engine) { return a_engine.parallel_spin_wait_us(); }
         JAI_FORCEINLINE static size_t hot_reload_field_migrations(const engine& a_engine) { return a_engine.hot_reload_field_migrations(); }
         JAI_FORCEINLINE static void count_hot_reload_field_migration(engine& a_engine) { return a_engine.count_hot_reload_field_migration(); }
+        JAI_FORCEINLINE static uint64_t trace_graft_frame_reads(const engine& a_engine) { return a_engine.trace_graft_frame_reads(); }
+        JAI_FORCEINLINE static void count_trace_graft_frame_reads(engine& a_engine, uint64_t frames) { return a_engine.count_trace_graft_frame_reads(frames); }
         JAI_FORCEINLINE static void record_field_migration(engine& a_engine, std::string_view class_name, uint64_t field_id, field_migration_outcome outcome, const script_value* before, const script_value* after) { return a_engine.record_field_migration(class_name, field_id, outcome, before, after); }
         JAI_FORCEINLINE static std::mutex& parallel_compile_mutex(engine& a_engine) { return a_engine.parallel_compile_mutex(); }
         JAI_FORCEINLINE static const std::vector<size_t>& last_parallel_chunk_bounds(const engine& a_engine) { return a_engine.last_parallel_chunk_bounds(); }

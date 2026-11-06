@@ -972,6 +972,9 @@ namespace jai {
         // fields-unchanged reload proves itself by migrating zero instances).
         size_t hot_reload_field_migrations() const { return hot_reload_field_migrations_; }
         void count_hot_reload_field_migration() { ++hot_reload_field_migrations_; }
+        // Frames a trace capture reads to count the grafts in the frames past the ones it shows (the trace-cost tests' work counter)
+        uint64_t trace_graft_frame_reads() const { return trace_graft_frame_reads_; }
+        void count_trace_graft_frame_reads(uint64_t frames) { trace_graft_frame_reads_ += frames; }
         void record_field_migration(std::string_view class_name, uint64_t field_id, field_migration_outcome outcome,
                                     const script_value* before, const script_value* after);
 
@@ -1586,6 +1589,7 @@ namespace jai {
         std::unique_ptr<implementation> impl;
 
         size_t hot_reload_field_migrations_ = 0;
+        uint64_t trace_graft_frame_reads_ = 0;
         bool hot_reload_reporting_ = false;
         bool parallel_region_active_ = false;
         bool construction_access_waived_ = false;

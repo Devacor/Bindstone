@@ -55,4 +55,5 @@
 #include "implementation/stdlib/spider.cpp"
 #include "implementation/stdlib/random.cpp"
 #include "implementation/stdlib/crypto.cpp"
+#include "implementation/stdlib/atomic.cpp"
 #include "implementation/stdlib/stdlib.cpp"

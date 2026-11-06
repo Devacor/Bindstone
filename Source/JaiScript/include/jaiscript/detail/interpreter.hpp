@@ -1052,7 +1052,9 @@ namespace jai {
         // User operator methods (==, <, <=, >, >=, + - * / %): nullopt when the operand defines none (or the method's result
         // does not answer the question), else the method's result or the runtime error it raised
         bool object_defines_custom_equality(const script_value& v) const;
-        std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_through_binary(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_operator_in_place(const script_value& target, uint64_t base_id, const script_value& right, detail::incdec_form form);
+        std::optional<checked_result<script_value>> compound_in_place(const script_value& target, const assignment_expr* expr, const script_value& right);
         std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null

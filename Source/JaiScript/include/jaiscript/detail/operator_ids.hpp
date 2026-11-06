@@ -8,6 +8,9 @@
 
 namespace jai::detail {
 
+	// How a class's in-place operator is asked: a op= b, or ++/-- in prefix or postfix form (operator++() and operator++(int))
+	enum class incdec_form : uint8_t { none, prefix, postfix };
+
 	// A class's operator method names, interned once per backend at construction (a parallel worker never interns)
 	struct operator_ids {
 		uint64_t plus = 0, minus = 0, star = 0, slash = 0, percent = 0;
@@ -15,6 +18,7 @@ namespace jai::detail {
 		uint64_t equal_equal = 0, bang_equal = 0, spaceship = 0;
 		uint64_t ampersand = 0, pipe = 0, caret = 0, left_shift = 0, right_shift = 0;
 		uint64_t tilde = 0, call = 0;
+		uint64_t plus_plus = 0, minus_minus = 0;
 
 		void intern(string_symbolizer& symbols) {
 			plus = symbols.intern("+");
@@ -36,6 +40,8 @@ namespace jai::detail {
 			right_shift = symbols.intern(">>");
 			tilde = symbols.intern("~");
 			call = symbols.intern("()");
+			plus_plus = symbols.intern("++");
+			minus_minus = symbols.intern("--");
 		}
 	};
 

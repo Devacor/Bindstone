@@ -704,29 +704,40 @@ namespace jai::detail {
 		return checked_result<script_value>(std::move(result.value()));
 	}
 
-	// a op= b on an object: a bound compound operator (C++'s operator+=) that takes b changes a in place and the expression is a;
-	// without one it is a = a op b through the binary operator
+	// a op= b, ++a, a++, --a and a-- on an object whose class binds that operator, as C++ calls operator+=, operator++() and
+	// operator++(int): it runs on the object once, in place, and the expression is what it returns, never stored back. base_id is
+	// the binary operator's id (+ for ++). nullopt when no overload takes the operation: a op= b is then a = a op b, ++ and -- raise
 	template <class Host>
-	std::optional<checked_result<script_value>> object_compound_via_method(Host& h, const script_value& target, const script_value& right, uint64_t op_symbol_id) {
-		if (const uint64_t compound_id = engine_access::compound_operator_id(*h.engine(), op_symbol_id)) {
-			if (h.parallel_worker() && !h.worker_operators_pinned(target, { compound_id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, target, { compound_id }); }
-			if (auto owner = h.resolve_member_target(target)) {
-				script_value method_val = h.operator_value(owner, compound_id);
-				if (method_val.is_function() && host_operator_accepts(method_val, right)) {
-					auto result = h.operator_call(target, method_val, compound_id, { right });
-					if (!result) {
-						if (h.unwinding()) { return checked_result<script_value>(h.make_null()); }
-						return checked_result<script_value>(result.error_value());
-					}
-					return checked_result<script_value>(target.deref());
-				}
-			}
+	std::optional<checked_result<script_value>> object_operator_in_place(Host& h, const script_value& target, uint64_t base_id, const script_value& right,
+	                                                                     incdec_form form) {
+		if (target.deref().raw_storage_index() != script_value::TYPEID_OBJECT) { return std::nullopt; }
+		const operator_ids& ids = h.ids();
+		const uint64_t id = form == incdec_form::none ? engine_access::compound_operator_id(*h.engine(), base_id)
+		                    : base_id == ids.plus ? ids.plus_plus : ids.minus_minus;
+		if (!id) { return std::nullopt; }
+		if (h.parallel_worker() && !h.worker_operators_pinned(target, { id })) [[unlikely]] { return parallel_operator_refused<script_value>(h, target, { id }); }
+		auto owner = h.resolve_member_target(target);
+		if (!owner) { return std::nullopt; }
+		script_value method_val = h.operator_value(owner, id);
+		if (!method_val.is_function()) { return std::nullopt; }
+		std::vector<script_value> args;
+		if (form == incdec_form::prefix) {
+			const auto* dispatch = host_operator_dispatch(method_val);
+			if (dispatch && dispatch->overloads->find(0) == dispatch->overloads->end()) { return std::nullopt; }
+		} else {
+			args.push_back(form == incdec_form::postfix ? h.make_int(0) : right);
+			if (!host_operator_accepts(method_val, args.back())) { return std::nullopt; }
 		}
-		return object_arithmetic_via_method(h, target, right, op_symbol_id);
+		auto result = h.operator_call(target, method_val, id, std::move(args));
+		if (!result) {
+			if (h.unwinding()) { return checked_result<script_value>(h.make_null()); }
+			return checked_result<script_value>(result.error_value());
+		}
+		return checked_result<script_value>(std::move(result.value()));
 	}
 
-	// A compound whose target or operand is an object (an element's, a reference's, a map value's): the target class's compound or
-	// binary operator, else the operand's reflected one; nullopt keeps the compound's text
+	// A compound whose target or operand is an object (an element's, a reference's, a map value's), past object_operator_in_place:
+	// the target class's binary operator, else the operand's reflected one; nullopt keeps the compound's text
 	template <class Host>
 	std::optional<checked_result<script_value>> object_compound_operand(Host& h, const script_value& left, token_type op, const script_value& right) {
 		const operator_ids& ids = h.ids();
@@ -745,7 +756,7 @@ namespace jai::detail {
 			default: return std::nullopt;
 		}
 		if (left.is_object()) {
-			if (auto custom = object_compound_via_method(h, left, right, id)) { return custom; }
+			if (auto custom = object_arithmetic_via_method(h, left, right, id)) { return custom; }
 		}
 		if (right.is_object()) { return object_reflected_via_method(h, left, right, id); }
 		return std::nullopt;

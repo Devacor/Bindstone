@@ -147,9 +147,14 @@ namespace jai::detail {
     }
 
     // In place: a reference copies its target; a heavy lvalue read and a host object a T& result lends deep-copy (bound
-    // values decode); a heavy temporary and every plain value stay as they are.
-    inline void materialize_return_value(script_value& v, bool lvalue_read) {
+    // values decode); a heavy temporary and every plain value stay as they are. An object a scalar return type converts is
+    // read in place (slot_converts_object).
+    inline void materialize_return_value(script_value& v, bool lvalue_read, const type_info* declared = nullptr) {
         if (return_value_plain(v)) return;
+        if (slot_converts_object(v.deref(), declared)) [[unlikely]] {
+            if (v.is_reference()) { v = script_value(v.deref()); }
+            return;
+        }
         if (!v.is_reference()) {
             const type_info* tag = v.type_info_raw();
             if (tag && tag->base_type == script_value_type::jai_shared_ptr_type) return;   // a shared handle's copy is itself (clone_for_assignment shares it)

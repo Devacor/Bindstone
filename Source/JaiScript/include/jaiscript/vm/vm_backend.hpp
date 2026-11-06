@@ -1122,6 +1122,14 @@ namespace jai::vm {
                 default: return ops_.plus;
             }
         }
+        // a op= b, or a desugared ++/-- (the compound's kind and flags), on an object through its class's in-place operator
+        // (detail::object_operator_in_place); nullopt for any other target
+        std::optional<checked_result<script_value>> compound_in_place(const script_value& target, uint32_t kind, const script_value& right) {
+            if (target.deref().raw_storage_index() != script_value::TYPEID_OBJECT) [[likely]] { return std::nullopt; }
+            const detail::incdec_form form = !(kind & compound_flag_incdec) ? detail::incdec_form::none
+                                             : (kind & compound_flag_old_result) ? detail::incdec_form::postfix : detail::incdec_form::prefix;
+            return object_operator_in_place(target.deref(), compound_kind_symbol(kind), right, form);
+        }
         uint64_t this_id_ = 0;
         uint64_t subscript_op_id_ = 0;
         uint64_t assign_operator_id_ = 0;
@@ -1443,7 +1451,8 @@ namespace jai::vm {
         }
         bool object_defines_custom_equality(const script_value& v) const;
         // user operator methods: nullopt when the operand defines none, else the method's result or the runtime error it raised
-        std::optional<checked_result<script_value>> object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_compound_through_binary(const script_value& target, const script_value& right, uint64_t op_symbol_id);
+        std::optional<checked_result<script_value>> object_operator_in_place(const script_value& target, uint64_t base_id, const script_value& right, detail::incdec_form form);
         std::optional<checked_result<script_value>> object_compound_operand(const script_value& left, token_type op, const script_value& right);
         std::optional<checked_result<script_value>> object_unary_via_method(const script_value& operand, token_type op);   // a class's unary - + ~
         script_value call_operator_of(const script_value& callee);   // the instance's operator() bound to it, else null

@@ -15,6 +15,7 @@
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/script_run.hpp>
 
+#include <atomic>
 #include <chrono>
 #include <cstdlib>
 #include <filesystem>
@@ -924,6 +925,28 @@ public:
 			expect_script("embedding/02-dynamic-binder.html", "binder-sprite", eng);
 		});
 
+		test("binder_atomics", [this]() {
+			expect_cpp("embedding/02-dynamic-binder.html", "binder-atomics", [] {
+				// [sample binder-atomics]
+				std::atomic<int64_t> page_views{0};                // the host's: it outlives both engines
+
+				auto front = jai::engine::make();
+				auto back = jai::engine::make();
+				for (jai::engine* eng : {front.get(), back.get()}) {
+				    jai::stdlib::register_all(*eng);
+				    jai::stdlib::register_atomics(*eng);
+				    eng->add_global_ref("page_views", page_views);    // a reference: no engine copies it
+				}
+				front->execute("page_views += 1; ++page_views;");
+				back->execute(R"(
+				    int before = page_views.fetch_add(10);
+				    print("back saw {} and left {}", before, page_views.load());
+				)");
+				std::cout << "the host reads " << page_views.load() << "\n";
+				// [/sample]
+			});
+		});
+
 		test("binder_meter", [this]() {
 			using namespace doc_binder_meter;
 			auto eng = make_engine();
@@ -1002,6 +1025,21 @@ public:
 			// [/sample]
 			host.finish();
 			expect_script("guide/03-value-semantics.html", "values-turret", eng);
+		});
+
+		test("values_atomics", [this]() {
+			// [sample values-atomics-host]
+			std::atomic<int64_t> page_views{0};          // the host's: it outlives the engine
+			// [/sample]
+			auto eng = make_engine();
+			jai::stdlib::register_all(eng);
+			cpp_sample host(*this, "guide/03-value-semantics.html", "values-atomics-host");
+			// [sample values-atomics-host]
+			jai::stdlib::register_atomics(eng);
+			eng->add_global_ref("page_views", page_views);
+			// [/sample]
+			host.finish();
+			expect_script("guide/03-value-semantics.html", "values-atomics", eng);
 		});
 
 		test("signals_door_and_observable", [this]() {

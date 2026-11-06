@@ -3045,6 +3045,7 @@ inline checked_result<script_value> class_instance::field_store(uint64_t id, con
         const script_value* kept = find_field_value(id);
         return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
     }
+    if (class_def_ && detail::slot_converts_object(source.deref(), class_def_->get_field_declared_type(id).get())) { return enforce_field_write(id, source.deref()); }
     return enforce_field_write(id, copy());
 }
 
@@ -3069,7 +3070,8 @@ inline checked_result<script_value> class_instance::field_store_at(uint32_t slot
             return kept ? script_value(kept->deref()) : script_value(std::monostate{}, owner_);
         }
     }
-    return detail::declared_slot_write(declared, [&] { return const_cast<class_instance*>(this)->field_slot_value(slot); }, copy(), owner_, id, class_def_, false);
+    script_value stored = detail::slot_converts_object(source.deref(), declared.get()) ? script_value(source.deref()) : copy();
+    return detail::declared_slot_write(declared, [&] { return const_cast<class_instance*>(this)->field_slot_value(slot); }, std::move(stored), owner_, id, class_def_, false);
 }
 
 template <class Copy>
@@ -3091,6 +3093,7 @@ inline checked_result<script_value> class_definition::static_store(uint64_t id, 
             }
         }
     }
+    if (it != static_declared_types_.end() && detail::slot_converts_object(source.deref(), it->second.get())) { return enforce_static_write(id, source.deref()); }
     return enforce_static_write(id, copy());
 }
 

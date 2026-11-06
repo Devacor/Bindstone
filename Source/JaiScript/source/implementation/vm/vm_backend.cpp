@@ -2291,9 +2291,13 @@ std::optional<checked_result<script_value>> vm_backend::object_compound_operand(
 	binary_host h{*this};
 	return detail::object_compound_operand(h, left, op, right);
 }
-std::optional<checked_result<script_value>> vm_backend::object_compound_via_method(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
+std::optional<checked_result<script_value>> vm_backend::object_compound_through_binary(const script_value& target, const script_value& right, uint64_t op_symbol_id) {
 	binary_host h{*this};
-	return detail::object_compound_via_method(h, target, right, op_symbol_id);
+	return detail::object_arithmetic_via_method(h, target, right, op_symbol_id);
+}
+std::optional<checked_result<script_value>> vm_backend::object_operator_in_place(const script_value& target, uint64_t base_id, const script_value& right, detail::incdec_form form) {
+	binary_host h{*this};
+	return detail::object_operator_in_place(h, target, base_id, right, form);
 }
 std::optional<checked_result<script_value>> vm_backend::object_unary_via_method(const script_value& operand, token_type op) {
 	binary_host h{*this};
@@ -3381,6 +3385,11 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			const auto* refHolder = varPtr->get_reference_holder();
 			declared_kind = !(ins.c & compound_flag_global_only) && slot_declared_kind(f, ins.b) ? slot_declared_kind(f, ins.b) : detail::ref_declared_kind(*varPtr);
 			if (refHolder && (refHolder->container_element_type || refHolder->property_ref() || refHolder->component_element())) {
+				if (auto in_place = compound_in_place(varPtr->deref(), ins.c, rightValue)) {
+					if (!*in_place) { return raise_from(*in_place); }
+					if (!no_result) { stack_.push_back(std::move(in_place->value())); }
+					return {};
+				}
 				const token_type op = compound_kind_token(kind);
 				const char* opName = detail::binary_op_name(op);
 				auto result = detail::ref_compound_store_constrained(*varPtr, rightValue, op, opName,
@@ -3410,6 +3419,11 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 			rightValue = std::move(decoded);
 		}
 		script_value& derefRight = rightValue.deref();
+		if (auto in_place = compound_in_place(target, ins.c, rightValue)) [[unlikely]] {
+			if (!*in_place) { return raise_from(*in_place); }
+			if (!no_result) { stack_.push_back(std::move(in_place->value())); }
+			return {};
+		}
 		if (declared_kind && !detail::ref_declared_compound_keeps(declared_kind, target, derefRight, compound_kind_token(kind))) [[unlikely]] {
 			// `int& r` over storage of another kind, or a result leaving T's kind: the declared type's table (KEEP BYTE-PARALLEL
 			// with the interpreter's compound assignment)
@@ -3452,7 +3466,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 		if (leftType == script_value_type::jai_object_type) {
 			const uint64_t op_symbol_id = compound_kind_symbol(kind);
 			if (op_symbol_id != 0) {
-				auto custom_outcome = object_compound_via_method(target, rightValue, op_symbol_id);
+				auto custom_outcome = object_compound_through_binary(target, rightValue, op_symbol_id);
 				if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 				std::optional<script_value> custom_result;
 				if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -3752,11 +3766,16 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 	} else {
 		currentValue = instance->get_field(sym);
 	}
+	if (auto in_place = compound_in_place(currentValue, ins.c, rightValue)) {
+		if (!*in_place) { return raise_from(*in_place); }
+		if (!no_result) { stack_.push_back(std::move(in_place->value())); }
+		return {};
+	}
 
 	if (currentValue.is_object()) {
 		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
-			auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -3823,6 +3842,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 	const uint64_t sym = f.code->symbols[ins.a];
 	const bool postfix = (ins.c & incdec_flag_postfix) != 0;
 	const bool isIncrement = (ins.c & incdec_flag_increment) != 0;
+	const detail::incdec_form form = postfix ? detail::incdec_form::postfix : detail::incdec_form::prefix;
 
 	if (!(ins.c & incdec_flag_global_only)) {
 		// a plain int or float steps in place whoever owns it (a local or a field of this): the step keeps its kind, so no declared
@@ -3850,6 +3870,13 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		// a scratch-backed reference (a typed element, a C++ property) commits what the step wrote into its scratch
 		auto* scratch_ref = varPtr->scratch_ref_holder();
 		script_value& target = varPtr->deref();
+		if (target.raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+			if (auto in_place = object_operator_in_place(target, isIncrement ? ops_.plus : ops_.minus, make_null(), form)) {
+				if (!*in_place) { return raise_from(*in_place); }
+				stack_.push_back(std::move(in_place->value()));
+				return {};
+			}
+		}
 		const bool slot_named = !(ins.c & incdec_flag_global_only) && varPtr->is_reference();
 		if (const uint8_t declared_kind = slot_named && slot_declared_kind(f, ins.b) ? slot_declared_kind(f, ins.b) : detail::ref_declared_kind(*varPtr);
 		    declared_kind && declared_kind != target.raw_storage_index()) [[unlikely]] {   // `int& r` over another kind: the declared type's table
@@ -3899,6 +3926,11 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		VM_TRY_ASSIGN(current, detail::read_bare_cpp_property(this_val, instance.get(), instance->get_method(prop_getter, false), prop_getter, sym));
 	} else {
 		current = instance->get_field(sym);
+	}
+	if (auto in_place = object_operator_in_place(current, isIncrement ? ops_.plus : ops_.minus, make_null(), form)) {
+		if (!*in_place) { return raise_from(*in_place); }
+		stack_.push_back(std::move(in_place->value()));
+		return {};
 	}
 	VM_TRY_ASSIGN(script_value stepped, detail::incdec_step(current, isIncrement, engine_));
 	script_value old = postfix ? detail::incdec_old_value(current, engine_) : make_null();
@@ -5856,6 +5888,11 @@ op_status vm_backend::exec_index_compound(frame& f, const uint32_t compound) {
 	script_value postfix_old = old_result ? script_value(currentValue.deref()) : make_null();
 	const bool incdec = (compound & compound_flag_incdec) != 0;
 	const token_type op = compound_kind_token(compound);
+	if (auto in_place = compound_in_place(currentValue, compound, rightValue)) {
+		if (!*in_place) { return raise_from(*in_place); }
+		stack_.push_back(std::move(in_place->value()));
+		return {};
+	}
 
 	script_value resultValue = make_null();
 	// a global operator answers first (the flat table; KEEP BYTE-PARALLEL with the interpreter's element compound); ++ and --
@@ -11335,7 +11372,7 @@ JAI_NOINLINE op_status vm_backend::exec_decl_var_full(frame& f, const vm_instruc
 		// Lvalue-read initializers copy through the kernel (values deep-copy,
 		// shared_ptr handles share); temporaries move; a proven read-only local binds the
 		// object itself (KEEP BYTE-PARALLEL with interpreter::visit_variable_decl)
-		if (lvalue_init || reference_init) {
+		if ((lvalue_init || reference_init) && !detail::slot_converts_object(value, decl->type.get())) {
 			if (decl->alias_home && detail::local_alias_binds(*engine_, *decl, value, !engine_->parallel_region_active())) {
 				JAI_CENSUS_F(move_hit, 5);
 				if (!parallel_worker_) { engine_->note_local_alias_bind(); }
@@ -16225,11 +16262,16 @@ op_status vm_backend::exec_member_compound(frame& f, const vm_instruction& ins, 
 	}
 	script_value postfix_old = old_result ? currentValue : make_null();
 	const bool incdec = (ins.c & compound_flag_incdec) != 0;
+	if (auto in_place = compound_in_place(currentValue, ins.c, rightValue)) {
+		if (!*in_place) { return raise_from(*in_place); }
+		stack_.push_back(std::move(in_place->value()));
+		return {};
+	}
 
 	if (!incdec && currentValue.is_object()) {
 		const uint64_t op_symbol_id = compound_kind_symbol(kind);
 		if (op_symbol_id != 0) {
-			auto custom_outcome = object_compound_via_method(currentValue, rightValue, op_symbol_id);
+			auto custom_outcome = object_compound_through_binary(currentValue, rightValue, op_symbol_id);
 			if (custom_outcome.has_value() && !*custom_outcome) { return raise_from(*custom_outcome); }
 			std::optional<script_value> custom_result;
 			if (custom_outcome.has_value()) { custom_result = std::move(custom_outcome->value()); }
@@ -19763,6 +19805,17 @@ op_status vm_backend::exec_ref_target_store(frame& f, const vm_instruction& ins)
 		return non_lvalue_target(expr->target.get());
 	}
 	const token_type op = expr->op.type == token_type::equal ? token_type::equal : detail::compound_base(expr->op.type);
+	if (op != token_type::equal) {
+		if (auto current = detail::ref_checked_deref(target_ref); current && current.value().raw_storage_index() == script_value::TYPEID_OBJECT) [[unlikely]] {
+			const detail::incdec_form form = !expr->incdec_desugar ? detail::incdec_form::none
+			                                 : expr->postfix_old_result ? detail::incdec_form::postfix : detail::incdec_form::prefix;
+			if (auto in_place = object_operator_in_place(current.value(), compound_kind_symbol(compound_kind_for_token(expr->op.type)), rightValue, form)) {
+				if (!*in_place) { return raise_from(*in_place); }
+				stack_.push_back(expr->yields_reference ? std::move(target_ref) : std::move(in_place->value()));
+				return {};
+			}
+		}
+	}
 	auto stored = detail::ref_target_assign(target_ref, rightValue, op, expr->incdec_desugar, expr->postfix_old_result,
 		assignment_result_used(f) && !expr->yields_reference, operator_table_, engine_, symbolizer_,
 		[this](const script_value& l, token_type o, const script_value& r) {
@@ -21909,7 +21962,11 @@ void vm_backend::materialize_return(frame& f, script_value& result, uint32_t ope
 #ifdef JAISCRIPT_VM_COVERAGE
 	if (operand_class == detail::return_operand_temporary && !result.is_reference()) { census::hit(census::site::move_hit, 2); }
 #endif
-	detail::materialize_return_value(result, detail::return_operand_copies(static_cast<uint8_t>(operand_class), result));
+	const type_info* declared = f.return_type.get();
+	if (call_records_top_ > 0) {
+		if (call_record& rec = *call_records_[call_records_top_ - 1]; &rec.f == &f) { declared = rec.return_type.get(); }
+	}
+	detail::materialize_return_value(result, detail::return_operand_copies(static_cast<uint8_t>(operand_class), result), declared);
 }
 
 op_status vm_backend::return_from_script_frame(frame*& fp, const vm_instruction& ins) {
@@ -22276,7 +22333,7 @@ op_status vm_backend::exec_yield_convert(frame& f) {
 op_status vm_backend::entry_return_finish(frame& f, script_value result, uint32_t mode) {
 	if (result.is_reference() && !f.top_level &&
 	    !(f.return_type && f.return_type->base_type == script_value_type::jai_reference_type)) [[unlikely]] {
-		copy_reference_result(result);   // a reference result copies its target
+		detail::materialize_return_value(result, false, f.return_type.get());   // a reference result copies its target
 	}
 	if (mode != return_mode_converted && f.return_conv_class != 0) {
 		auto converted = convert_return_at_site(std::move(result), f.return_type,
@@ -22303,8 +22360,8 @@ checked_result<script_value> vm_backend::convert_return_value(script_value resul
 		return detail::ref_return_pass_through(std::move(result), return_type, symbolizer_, engine_);
 	}
 	if (result.is_reference()) {
-		// Value returns flatten: a plain function's result is a copy, never an alias
-		copy_reference_result(result);
+		// Value returns flatten: a plain function's result is a copy, never an alias (an object a scalar return converts is read in place)
+		detail::materialize_return_value(result, false, return_type.get());
 	}
 	// base_type first: the common any/auto return rejects on one enum compare
 	// instead of three string compares (same conjunction, reordered)

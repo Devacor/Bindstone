@@ -30,6 +30,19 @@ namespace jai::detail {
         return clone_for_assignment(value);
     }
 
+    // A slot declared a scalar kind takes an object through its conversion (to_int(), to_string(), ...), which reads the object itself
+    // as C++'s conversion operator does: the store never copies the object first (a non-copyable one converts too)
+    inline bool slot_converts_object(const script_value& value, const type_info* declared) noexcept {
+        if (!declared || value.raw_storage_index() != script_value::TYPEID_OBJECT) { return false; }
+        switch (declared->base_type) {
+        case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
+        case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+            return true;
+        default:
+            return false;
+        }
+    }
+
 }
 
 #endif

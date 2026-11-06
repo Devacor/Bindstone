@@ -164,7 +164,7 @@ Release pass.
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server (`jaiscript_lsp`) |
-| `JAISCRIPT_BUILD_SPIDER` | top-level | The web application host `jai_spider` and the SQLite it compiles |
+| `JAISCRIPT_BUILD_SPIDER` | top-level | The web application host `jai_spider` and its SQLite (the system's, else a pinned download) |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
 | `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter (the suite, the fuzzer, the runner and `jai_spider` link it) |
 | `JAISCRIPT_INSTALL` | top-level | Install rules and the `find_package(JaiScript)` package |
@@ -179,8 +179,8 @@ pulls it in with `add_subdirectory`; [`docs/BUILD.md`](docs/BUILD.md) has every 
 consumption routes (`add_subdirectory` and `find_package(JaiScript)`).
 
 Two third-party sources ship: [minicoro](source/third_party/minicoro) (public domain or
-MIT-0), which the library compiles, with its AddressSanitizer fiber-switch annotations corrected, and the [SQLite amalgamation](tools/jai_spider/third_party/sqlite)
-(public domain), which only `jai_spider` compiles. The cross-language comparison benchmarks are a
+MIT-0), which the library compiles, with its AddressSanitizer fiber-switch annotations corrected, and the SQLite amalgamation
+(public domain), which `jai_spider` uses from the system or downloads at configure time, hash-pinned (see [`tools/jai_spider/README.md`](tools/jai_spider/README.md)). The cross-language comparison benchmarks are a
 separate harness, not part of this repository. Integer
 arithmetic raises a catchable error on overflow by default; define `JAISCRIPT_WRAP_ON_OVERFLOW`
 for the whole build to opt into silent two's-complement wrap instead.

@@ -15,7 +15,7 @@
 // Each {} takes the next argument too, which must be sql_choose(value, ["created", "title"]): one of the constant choices,
 // for what a parameter cannot be (a column to sort by). One map argument binds :name, @name or $name instead. A row maps
 // column names to int, float, string (TEXT, and BLOB as its bytes) or null.
-#include "third_party/sqlite/sqlite3.h"
+#include <sqlite3.h>
 #include <jaiscript/jaiscript.hpp>
 
 #include <cctype>

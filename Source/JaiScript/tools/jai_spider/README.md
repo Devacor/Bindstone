@@ -2,11 +2,26 @@
 
 `jai_spider app.jai` spins a JaiScript app over HTTP/1.1. The app is a set of modules; every request reaches their
 imports first, so an edit applies to the next request with no restart, and an edit that does not check is reported
-in the console while the app keeps serving the code it had. SQLite is built in, files under the app's `public/`
+in the console while the app keeps serving the code it had. SQLite is built in (compiled into jai_spider), files under the app's `public/`
 folder are served as they are, and the `spider::` client reaches other servers from the same program.
 
 Built by the `jai_spider` CMake target (on by default, `JAISCRIPT_BUILD_SPIDER`); the binary lands in the build
 directory's `bin/` next to `jai_spider_lib/`, the script library apps import.
+
+SQLite is not in the repository. The build uses a system SQLite 3.37 or newer when CMake finds one (vcpkg, apt
+`libsqlite3-dev`, brew); otherwise it downloads the official amalgamation zip (3.54.1, `sqlite-amalgamation-3540100.zip`
+from sqlite.org) at configure time into the build tree, checks it against the pinned SHA3-256
+`92281c86e2957f9b9305890f9ac04204caa7b677cc868dc326d942689df28e30` (the hash sqlite.org publishes) and compiles it with
+`SQLITE_OMIT_LOAD_EXTENSION`, `SQLITE_DQS=0` and `SQLITE_THREADSAFE=1`. The configure output says which source was used.
+Offline, or to pick the source yourself:
+
+- `-DJAI_SPIDER_SQLITE_ZIP=<path>` uses a local copy of that zip (hash-checked);
+- `-DJAI_SPIDER_SQLITE_DIR=<dir>` compiles an unpacked amalgamation (`sqlite3.c`, `sqlite3.h`) as it is;
+- `-DJAI_SPIDER_SQLITE_FETCH=OFF` turns the download into a configure error.
+
+A configure with no system SQLite, no network and neither path set fails with a message; it never builds a
+`jai_spider` without a database. To update the pin, change the version, zip name and hash at the top of
+`CMakeLists.txt`.
 
 ```
 jai_spider examples/guestbook/app.jai
@@ -107,7 +122,7 @@ and the requests behind it, until its answer arrives.
 `to_string()`). The host adds `parse_cookies`, `parse_multipart`, `http_date(unix_seconds)` and
 `content_type_for(path)`; session ids are `crypto::random_hex(32)`, the system's secure random source.
 
-**Database** (SQLite 3.54, compiled into jai_spider), injection-proof by construction:
+**Database** (SQLite 3.37 or newer: the system's, else the pinned 3.54.1 amalgamation fetched at configure time), injection-proof by construction:
 
 ```cpp
 Database db = open_database("app.db");          // ":memory:" for a scratch database
@@ -177,6 +192,5 @@ lib/spider.jai      Request, Upload, the response helpers, Router, spin
 lib/session.jai     SessionStore and Session
 examples/guestbook  a guestbook: templates, a form, a session, SQLite, a JSON API, a stylesheet
 tests/              spider_test.py, the app it drives and the client checks (tools/ci/gates.sh spider)
-third_party/sqlite  the SQLite amalgamation
 ```
 The client's transport is `../jaiscript/http_transport.hpp`, shared with the runner.

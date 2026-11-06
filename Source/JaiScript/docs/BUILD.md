@@ -50,7 +50,7 @@ build/bin/jaiscript_tests
 ```
 
 That builds everything: the library, the test suite, the differential fuzzer, the runner, the
-language server, the web application host `jai_spider` (which compiles the bundled SQLite), the gate
+language server, the web application host `jai_spider` (which uses a system SQLite or downloads a pinned one at configure time), the gate
 watchdog `jai_gate_run`, the three example games and the embedding quickstart's host
 (`embed_quickstart`). Binaries land in `build/bin/`, the library in `build/lib/`.
 
@@ -132,7 +132,7 @@ ON when JaiScript is the top-level project and OFF when it is added to another p
 | `JAISCRIPT_BUILD_TESTS` | top-level | The Foundry test suite (`jaiscript_tests`) and the fuzzer (`jaiscript_fuzz`) |
 | `JAISCRIPT_BUILD_RUNNER` | top-level | The standalone runner / REPL (`jaiscript_runner`, binary `jaiscript`) |
 | `JAISCRIPT_BUILD_LSP` | top-level | The language server `jaiscript_lsp` the VS Code extension launches |
-| `JAISCRIPT_BUILD_SPIDER` | top-level | `jai_spider`, the web application host, and the SQLite amalgamation it compiles (`tools/jai_spider/third_party/sqlite`) |
+| `JAISCRIPT_BUILD_SPIDER` | top-level | `jai_spider`, the web application host, and its SQLite: a system SQLite 3.37+ if CMake finds one, else the pinned amalgamation downloaded at configure time (`JAI_SPIDER_SQLITE_ZIP` / `JAI_SPIDER_SQLITE_DIR` for offline builds; `tools/jai_spider/README.md`) |
 | `JAISCRIPT_BUILD_EXAMPLES` | top-level | `jai_gloom`, `jai_crawler`, `jai_demoreel`, and in a top-level build `embed_quickstart` (the embedding quickstart's host) |
 | `JAISCRIPT_INTERPRETER` | top-level | `jaiscript_interpreter`, the library plus the tree-walking interpreter, which the suite, the fuzzer, the runner and `jai_spider` link. OFF: they link `jaiscript`, and the interpreter is not compiled at all |
 | `JAISCRIPT_INSTALL` | top-level | The install rules and the `JaiScript` CMake package (`find_package(JaiScript)`) |

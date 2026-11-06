@@ -37,7 +37,7 @@ CPP_EXT = (".cpp", ".hpp", ".h", ".c", ".cc", ".inl")
 BINARY_OK_EXT = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".ttf", ".otf")
 SIZE_LIMIT = 1024 * 1024
 SIZE_EXCEPTIONS = ("docs/site/assets/search-index.js", "docs/site/reference/api-catalog.json",
-                   "source/implementation/vm/vm_backend.cpp", "tools/jai_spider/third_party/sqlite/sqlite3.c")
+                   "source/implementation/vm/vm_backend.cpp")
 LEAK_SCAN_SKIP = re.compile(r"^(?:.*/)?third_party/")    # vendored upstream sources ship exactly as their authors wrote them
 INTERNAL_BLOCK = re.compile(r"[ \t]*<!-- internal-only -->.*?<!-- /internal-only -->[ \t]*\r?\n", re.S)
 

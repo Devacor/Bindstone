@@ -164,7 +164,7 @@ if(JAISCRIPT_BUILD_RUNNER)
 endif()
 # --- end jaiscript runner ---
 
-# --- jai_spider (tools/jai_spider): the web application host (HTTP/1.1, hot-reloading app modules, bundled SQLite) ---
+# --- jai_spider (tools/jai_spider): the web application host (HTTP/1.1, hot-reloading app modules, SQLite from the system or a pinned download) ---
 option(JAISCRIPT_BUILD_SPIDER "Build the jai_spider web application host" ${JAISCRIPT_IS_TOP_LEVEL})
 if(JAISCRIPT_BUILD_SPIDER)
     add_subdirectory(tools/jai_spider)

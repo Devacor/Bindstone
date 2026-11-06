@@ -9,15 +9,27 @@ builds as a static library plus headers.
 
 ## Get JaiScript
 
-You need a C++20 compiler, CMake 3.25+ and Ninja (on Windows, a Visual Studio developer prompt
-has all three). Clone, build the runner with one command, and play Gator Quest on it:
+You need git, CMake 3.25+ and a C++20 compiler: Visual Studio 2022 or newer on Windows, the Xcode
+command line tools on macOS, GCC 11 or Clang 14 on Linux. The installer clones JaiScript, builds the
+runner in Release and puts it on your PATH (read [install.sh](docs/site/install.sh),
+[install.ps1](docs/site/install.ps1) and [install.cmd](docs/site/install.cmd) first if you like):
 
 ```bash
-git clone https://github.com/Devacor/jaiscript.git
-cd jaiscript
-cmake --workflow --preset runner
-build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+curl -fsSL https://jaiscript.com/install.sh | sh                                                 # macOS, Linux, WSL
+irm https://jaiscript.com/install.ps1 | iex                                                      # Windows PowerShell
+curl -fsSL https://jaiscript.com/install.cmd -o install.cmd && install.cmd && del install.cmd    # Windows CMD
 ```
+
+Then open a new terminal and run `jaiscript --version`. Without the installer, this one line clones the
+repository, builds the runner with CMake's default generator (Visual Studio on Windows, Makefiles elsewhere) and
+plays Gator Quest; it runs unchanged in bash, zsh, PowerShell 7 and CMD, with no developer prompt and no Ninja:
+
+```bash
+git clone --depth 1 https://github.com/Devacor/jaiscript.git && cmake -P jaiscript/tools/install/build_runner.cmake && cmake -E chdir jaiscript build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+```
+
+`CMakePresets.json` names a preset per toolchain (`windows-msvc`, `windows-clang`, `macos`, `macos-xcode`,
+`linux-gcc`, `linux-clang`); [docs/BUILD.md](docs/BUILD.md) has them and everything else.
 
 The documentation — an 18-chapter language guide, a 19-chapter embedding guide, language bridges
 and code migrations, the examples and a reference — is a static site in [`docs/site/`](docs/site/), published at
@@ -143,9 +155,10 @@ integer overflow.
 
 ## Build
 
-You need a C++20 compiler and CMake 3.20+ (3.25+ for the presets); Ninja is recommended. Verified — the full suite on
+You need a C++20 compiler and CMake 3.20+ (3.25+ for the presets and `tools/install/build_runner.cmake`). Verified — the full suite on
 both backends — with MSVC 19.51 (Visual Studio 18, toolset 14.51), Clang 20 and GCC 16; the
-CI workflow targets MSVC, GCC 14 and Clang on Ubuntu 24.04. Older compilers may work and are
+CI workflow targets MSVC and clang-cl on Windows, GCC 14 and Clang on Ubuntu 24.04, and AppleClang on
+macOS with Makefiles and Xcode. Older compilers may work and are
 untested.
 
 ```bash

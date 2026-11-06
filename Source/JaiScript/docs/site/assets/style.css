@@ -398,6 +398,26 @@ article.chapter details p { margin: .45rem 0; }
 .tk-kw { color: var(--kw); } .tk-ty { color: var(--ty); } .tk-str { color: var(--str); }
 .tk-num { color: var(--num); } .tk-com { color: var(--com); font-style: italic; } .tk-fn { color: var(--fn); }
 
+/* ---------- tabs: site.js shows the strip; without script every panel shows, stacked ---------- */
+.tabs { margin: 1.2rem 0; }
+.tab-list { display: flex; flex-wrap: wrap; gap: .25rem; border-bottom: 1px solid var(--border); }
+.tab-list[hidden] { display: none; }
+.tab-list [role="tab"] {
+  margin-bottom: -1px; padding: .55rem 1rem; cursor: pointer;
+  font: 600 .78rem/1.3 var(--mono); letter-spacing: .06em; color: var(--fg-dim);
+  background: none; border: 1px solid transparent; border-radius: 7px 7px 0 0;
+}
+.tab-list [role="tab"]:hover { color: var(--head); background: var(--mark); }
+.tab-list [role="tab"][aria-selected="true"] {
+  color: var(--head); background: var(--bg); border-color: var(--border); border-bottom-color: var(--bg);
+  box-shadow: inset 0 2px 0 var(--accent);
+}
+.tab-list [role="tab"]:focus-visible { outline-offset: -3px; }
+.tab-panel:focus-visible { outline-offset: 4px; }
+.tab-panel > p { max-width: 70ch; }
+.tab-panel > h3 { margin: 1.4rem 0 .5rem; font-size: 1.05rem; }
+.tab-panel > h3 + .codeblock { margin-top: .5rem; }
+
 /* ---------- tables ---------- */
 .tablewrap { overflow-x: auto; margin: 1.2rem 0; border: 1px solid var(--border); border-radius: 8px; background: var(--panel); }
 table { border-collapse: collapse; width: 100%; font-size: .94rem; line-height: 1.5; }

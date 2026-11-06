@@ -8,8 +8,8 @@ headers, and everything else in this repository — the test suite, the runner, 
 
 - **A C++20 compiler.** Verified — the full suite on both backends — with MSVC 19.51 (Visual
   Studio 18, toolset 14.51), Clang 20 and GCC 16 (MinGW-w64); the CI workflow in
-  `.github/workflows/ci.yml` targets MSVC, GCC 14 and Clang on Ubuntu 24.04. Older compilers
-  may work; they are untested. The library uses `std::to_chars` for doubles and
+  `.github/workflows/ci.yml` targets MSVC and clang-cl on Windows, GCC 14 and Clang on Ubuntu 24.04, and
+  AppleClang on macOS with Makefiles and Xcode. Older compilers may work; they are untested. The library uses `std::to_chars` for doubles and
   `std::strong_order`, so a standard library without those will not get far.
 - **libc++ and 32-bit hosts.** The Android NDK (r27c: Clang 18 and libc++, the standard library Apple
   platforms use too) builds every target for arm64-v8a, armeabi-v7a, x86_64 and x86, and a 32-bit
@@ -17,9 +17,9 @@ headers, and everything else in this repository — the test suite, the runner, 
   library and the suite with the NDK it finds (`ANDROID_NDK_ROOT`, or the newest under the SDK).
   An NDK under a path with spaces needs `-DCMAKE_CXX_FLAGS=--driver-mode=g++`: CMake hands
   clang++ its short 8.3 name, which no longer selects the C++ driver, and libc++ goes unlinked.
-- **CMake 3.20+**, or 3.25+ for the presets in `CMakePresets.json` (`cmake --preset`, `cmake --workflow`).
-- **Ninja**, optional but recommended. It gives single-configuration build directories, which
-  makes the output paths predictable.
+- **CMake 3.20+**, or 3.25+ for the presets in `CMakePresets.json` and for `tools/install/build_runner.cmake`.
+- **Ninja**, optional. CMake's default generator (Visual Studio on Windows, Makefiles elsewhere) builds
+  everything; Ninja gives fast incremental single-configuration trees, and the `windows-clang` preset uses it.
 
 Two platform differences are worth knowing:
 
@@ -34,12 +34,32 @@ Two platform differences are worth knowing:
 
 ## The short version
 
-One command configures a Release tree in `build/` with Ninja and builds the runner:
+The installer clones JaiScript into a folder of its own (`~/.jaiscript`, or `%LOCALAPPDATA%\jaiscript` on
+Windows), builds the runner in Release and puts the folder's `bin` on your PATH. Running it again updates and
+rebuilds. The scripts are `docs/site/install.sh`, `install.ps1` and `install.cmd`, served from the site:
 
 ```bash
-cmake --workflow --preset runner
-build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+curl -fsSL https://jaiscript.com/install.sh | sh                                                 # macOS, Linux, WSL
+irm https://jaiscript.com/install.ps1 | iex                                                      # Windows PowerShell
+curl -fsSL https://jaiscript.com/install.cmd -o install.cmd && install.cmd && del install.cmd    # Windows CMD
 ```
+
+Their options, each with an environment variable: `--dir` (`JAISCRIPT_HOME`), `--ref` (`JAISCRIPT_REF`, a tag
+or branch; the newest release tag by default), `--repo` (`JAISCRIPT_REPO`), `--generator` (`CMAKE_GENERATOR`),
+`--cxx` (`CXX`) and `--no-modify-path` (`JAISCRIPT_NO_MODIFY_PATH=1`). After `| sh`, pass them as
+`sh -s -- --no-modify-path`; in PowerShell, as `& ([scriptblock]::Create((irm https://jaiscript.com/install.ps1))) --no-modify-path`.
+
+In a clone, one command configures a Release tree in `build/` with CMake's default generator and builds the
+runner, in parallel, with no developer prompt and no Ninja; it runs the same in bash, zsh, PowerShell 7 and CMD:
+
+```bash
+cmake -P tools/install/build_runner.cmake
+cmake -E chdir . build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
+```
+
+`cmake -E chdir` runs the runner the same way in every shell; in bash or zsh, `build/bin/jaiscript ...` does too. The
+script's `-D` options (given before `-P`) name another tree, a generator, a compiler or a job count; its header
+lists them.
 
 Everything, by hand:
 
@@ -62,9 +82,31 @@ programs that compare the backends link it: the test suite, the fuzzer, the runn
 `set_backend(backend_type::interpreter)` throws.
 
 `CMakePresets.json` names the same two trees, both with Ninja: `cmake --preset release` / `cmake --build --preset release`
-configure and build `build/`, `debug` does the same in `build-debug/`, and `cmake --workflow --preset runner` configures
-`build/` and builds the runner in one step. Visual Studio's Open Folder lists the
+configure and build `build/`, and `debug` does the same in `build-debug/`. Visual Studio's Open Folder lists the
 `x64-*` presets, which build under `out/build/<name>/`.
+
+## Toolchain presets
+
+One preset per toolchain configures a Release tree in `build-<preset>/` and builds everything, with the
+binaries in `build-<preset>/bin/`:
+
+```bash
+cmake --preset linux-gcc
+cmake --build --preset linux-gcc -j 8
+build-linux-gcc/bin/jaiscript_tests
+```
+
+| Preset | Toolchain | Needs |
+|---|---|---|
+| `windows-msvc` | MSVC, CMake's default Visual Studio generator | Visual Studio 2022 or newer with the C++ workload; any shell |
+| `windows-clang` | clang-cl against the MSVC STL, Ninja | A Visual Studio developer prompt with the C++ Clang tools component (or LLVM) installed |
+| `macos` | AppleClang, Makefiles | The Xcode command line tools (`xcode-select --install`) |
+| `macos-xcode` | AppleClang, the Xcode generator | Xcode |
+| `linux-gcc` | GCC, Makefiles | g++ 11 or newer and make |
+| `linux-clang` | Clang, Makefiles | clang++ 14 or newer and make |
+
+Makefiles build one file at a time unless the build gets `-j <jobs>`; Visual Studio, Xcode and Ninja run in
+parallel by themselves. `--target jaiscript_runner` builds the runner alone.
 
 ## Picking targets
 

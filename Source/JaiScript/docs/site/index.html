@@ -74,12 +74,62 @@ Gator gator;  <span class="tk-com">// kept by every reload</span>
 
 <div class="home-section">
 <h2 id="get-jaiscript">Get JaiScript</h2>
-<p>Clone the repository, build the runner with one command, and play Gator Quest on it. The build needs a C++20
-compiler, CMake 3.25+ and Ninja; on Windows, run it from a Visual Studio developer prompt.</p>
-<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">git clone https://github.com/Devacor/jaiscript.git
-cd jaiscript
-cmake --workflow --preset runner
-build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai</code></pre></div>
+<p>JaiScript builds from source in a few minutes. It needs git, CMake 3.25+ and a C++20 compiler: Visual Studio 2022
+or newer with the C++ workload on Windows, the Xcode command line tools on macOS, GCC 11 or Clang 14 on Linux.</p>
+<div class="tabs" id="get-tabs">
+<div class="tab-list" role="tablist" aria-label="Ways to get JaiScript" hidden>
+<button type="button" role="tab" id="get-tab-script" aria-controls="get-script" aria-selected="true">Install script (recommended)</button>
+<button type="button" role="tab" id="get-tab-source" aria-controls="get-source" aria-selected="false" tabindex="-1">Build from source</button>
+</div>
+<div class="tab-panel" id="get-script" role="tabpanel" aria-labelledby="get-tab-script" tabindex="0">
+<p>The installer clones JaiScript into a folder of your own, builds the runner in Release and puts its
+<code>bin</code> folder on your PATH. Running it again updates and rebuilds.</p>
+<h3 id="install-macos-linux">macOS, Linux, WSL</h3>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">curl -fsSL https://jaiscript.com/install.sh | sh</code></pre></div>
+<h3 id="install-powershell">Windows PowerShell</h3>
+<div class="codeblock cb-shell"><span class="cb-label">PowerShell</span><pre><code class="lang-shell">irm https://jaiscript.com/install.ps1 | iex</code></pre></div>
+<h3 id="install-cmd">Windows CMD</h3>
+<div class="codeblock cb-shell"><span class="cb-label">CMD</span><pre><code class="lang-shell">curl -fsSL https://jaiscript.com/install.cmd -o install.cmd &amp;&amp; install.cmd &amp;&amp; del install.cmd</code></pre></div>
+<p>On Windows, your prompt shows <code>PS C:\</code> in PowerShell and <code>C:\</code> in CMD.</p>
+<p>When the installer finishes, open a new terminal and run <code>jaiscript --version</code>. If the command isn&#x27;t
+found, the install folder isn&#x27;t on your PATH yet: see <a href="#fix-your-path">Fix your PATH</a>. The installer
+prints the line that starts Gator Quest, an open-world terminal RPG written in JaiScript.</p>
+<p>Read the scripts before you run them: <a href="install.sh">install.sh</a>, <a href="install.ps1">install.ps1</a>
+and <a href="install.cmd">install.cmd</a>. Their options pick the folder (<code>~/.jaiscript</code>, or
+<code>%LOCALAPPDATA%\jaiscript</code> on Windows), a release, a compiler or a generator, and
+<code>--no-modify-path</code> leaves your PATH alone: <code>curl -fsSL https://jaiscript.com/install.sh | sh -s -- --no-modify-path</code>.
+None of them asks for <code>sudo</code> or administrator rights.</p>
+<h3 id="fix-your-path">Fix your PATH</h3>
+<div class="tablewrap"><table><thead><tr><th>System</th><th>Add the runner&#x27;s folder to your PATH</th></tr></thead><tbody>
+<tr><td>macOS, Linux, WSL</td><td>Add <code>export PATH=&quot;$HOME/.jaiscript/bin:$PATH&quot;</code> to <code>~/.zshrc</code>, <code>~/.bashrc</code> or <code>~/.profile</code>, whichever your shell reads, then open a new terminal.</td></tr>
+<tr><td>Windows</td><td>Open Start, search for <em>environment variables</em>, choose <em>Edit environment variables for your account</em>, select <code>Path</code>, then Edit, New, and enter <code>%LOCALAPPDATA%\jaiscript\bin</code>. Then open a new terminal.</td></tr>
+</tbody></table></div>
+</div>
+<div class="tab-panel" id="get-source" role="tabpanel" aria-labelledby="get-tab-source" tabindex="0">
+<h3 id="build-one-line">One line with git and CMake</h3>
+<p>This line clones the repository, builds the runner in Release with CMake&#x27;s default generator (Visual Studio on
+Windows, Makefiles elsewhere) in parallel, and starts Gator Quest. It runs unchanged in bash, zsh, PowerShell 7 and CMD,
+with no developer prompt and no Ninja.</p>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">git clone --depth 1 https://github.com/Devacor/jaiscript.git &amp;&amp; cmake -P jaiscript/tools/install/build_runner.cmake &amp;&amp; cmake -E chdir jaiscript build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai</code></pre></div>
+<p>The runner is <code>jaiscript/build/bin/jaiscript</code>. Building again is the middle command alone.</p>
+<h3 id="build-toolchains">Pick a toolchain</h3>
+<p>Each preset configures a Release tree in <code>build-&lt;preset&gt;</code> and builds everything: the library,
+the runner, the test suite and the examples, with the binaries in <code>build-&lt;preset&gt;/bin</code>. Run
+<code>cmake --preset &lt;preset&gt;</code>, then <code>cmake --build --preset &lt;preset&gt;</code>; add
+<code>-j 8</code> on Makefiles, which otherwise build one file at a time, and <code>--target jaiscript_runner</code> for the
+runner alone.</p>
+<div class="tablewrap"><table><thead><tr><th>Preset</th><th>Toolchain</th><th>Needs</th></tr></thead><tbody>
+<tr><td><code>windows-msvc</code></td><td>MSVC with the Visual Studio generator</td><td>Visual Studio 2022 or newer with the C++ workload; any shell</td></tr>
+<tr><td><code>windows-clang</code></td><td>clang-cl against the MSVC STL, with Ninja</td><td>A Visual Studio developer prompt, with the C++ Clang tools component or LLVM installed</td></tr>
+<tr><td><code>macos</code></td><td>AppleClang with Makefiles</td><td>The Xcode command line tools (<code>xcode-select --install</code>)</td></tr>
+<tr><td><code>macos-xcode</code></td><td>AppleClang with the Xcode generator</td><td>Xcode</td></tr>
+<tr><td><code>linux-gcc</code></td><td>GCC with Makefiles</td><td>g++ 11 or newer and make</td></tr>
+<tr><td><code>linux-clang</code></td><td>Clang with Makefiles</td><td>clang++ 14 or newer and make</td></tr>
+</tbody></table></div>
+<p><a href="https://github.com/Devacor/jaiscript/blob/master/docs/BUILD.md">docs/BUILD.md</a> has the rest: targets,
+options, Debug trees and the Visual Studio Open Folder presets.</p>
+</div>
+</div>
 <p>To embed it, add the folder as a CMake subproject, fetch it with <code>FetchContent</code>, install it as a
 package, or drop the sources into a Visual Studio or Xcode project: <a href="embedding/18-build-integration.html">Building
 JaiScript into a Host</a> has each route in full.</p>

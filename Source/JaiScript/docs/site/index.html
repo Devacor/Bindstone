@@ -57,10 +57,10 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <pre><span class="tk-com">// drag spd or slices, pick what it says: it reloads live</span>
 <span class="tk-kw">class</span> Gator : Mob {
     <span class="tk-ty">int</span> spd = <span class="val tk-num" id="demo-spd-val">1</span>;
-    <span class="tk-ty">int</span> slices = <span class="val tk-num" id="demo-slices-val">0</span>;
+    <span class="tk-ty">int</span> slices = <span class="val tk-num" id="demo-slices-val">3</span>;
     <span class="tk-ty">void</span> <span class="tk-fn">tick</span>() {
         <span class="tk-fn">step_toward</span>(cake, spd);
-        <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices++; <span class="tk-fn">say</span>(<span class="val tk-str" id="demo-say-val">"Nom."</span>); }
+        <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices--; <span class="tk-fn">say</span>(<span class="val tk-str" id="demo-say-val">"Nom."</span>); }
     }
 }
 Gator gator;  <span class="tk-com">// kept by every reload</span>
@@ -69,14 +69,14 @@ Gator gator;  <span class="tk-com">// kept by every reload</span>
 }</pre>
     <div class="demo-controls">
       <label class="demo-slider"><span>spd</span><input type="range" id="demo-spd" min="0" max="6" step="1" value="1"></label>
-      <label class="demo-slider"><span>slices</span><input type="range" id="demo-slices" min="0" max="3" step="1" value="0"></label>
+      <label class="demo-slider"><span>slices</span><input type="range" id="demo-slices" min="1" max="6" step="1" value="3"></label>
       <div class="demo-say" role="radiogroup" aria-label="what the gator says">
         <label><input type="radio" name="demo-say" value="Nom." checked><span>Nom.</span></label>
         <label><input type="radio" name="demo-say" value="Yum."><span>Yum.</span></label>
         <label><input type="radio" name="demo-say" value="Chomp."><span>Chomp.</span></label>
       </div>
     </div>
-    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake at the speed spd gives it, eats a slice and says what the script tells it to"></canvas><span class="scene-label" id="demo-label">gator at spd 1 &middot; slices 0</span></div>
+    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake at the speed spd gives it, eats a slice and says what the script tells it to; the cake refills after its last slice"></canvas><span class="scene-label" id="demo-label">gator at spd 1 &middot; slices 3</span></div>
     <p class="demo-live" id="demo-live" role="status"></p>
   </div>
 </section>

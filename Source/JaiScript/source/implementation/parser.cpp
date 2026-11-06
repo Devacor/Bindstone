@@ -1833,12 +1833,12 @@ JAI_NOINLINE checked_result<expression_ptr> parser::identifier_expression() {
                 // This is a brace-initialized constructor like array<int>{}
                 advance(); // consume '{'
                 JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(true));
-                return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
+                return construction(type, std::move(arguments), true, identToken.location);
             } else if (type && check(token_type::left_paren)) {
                 // Parentheses constructor for user-defined template types
                 advance(); // consume '('
                 JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(false));
-                return std::make_shared<new_expr>(identToken.location, type, std::move(arguments));
+                return construction(type, std::move(arguments), false, identToken.location);
             }
         }
         current_ = savedPos + 1;
@@ -1874,7 +1874,7 @@ JAI_NOINLINE std::optional<checked_result<expression_ptr>> parser::type_construc
                     const bool is_brace = check(token_type::left_brace);
                     advance(); // consume '{' or '('
                     JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(is_brace));
-                    return std::make_shared<new_expr>(typeToken.location, type, std::move(arguments));
+                    return construction(type, std::move(arguments), is_brace, typeToken.location);
                 }
 
                 // Otherwise return identifier with type name
@@ -5862,7 +5862,32 @@ expression_ptr parser::math_constructor_call(script_value_type kind, std::vector
     return std::make_shared<call_expr>(loc, callee, std::move(arguments));
 }
 
-checked_result<expression_ptr> parser::initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, const source_location& loc) {
+// array<T>(size) and array<T>(size, value) are std::vector's sized constructors, array::resize over an empty array<T>; array<T>{a, b}
+// is its list, array::concat over an empty array<T>. Every other typed construction is a new_expr
+checked_result<expression_ptr> parser::construction(const type_info_ptr& type, std::vector<expression_ptr> arguments, bool brace, const source_location& loc) {
+    if (!type || type->base_type != script_value_type::jai_array_type || arguments.empty()) {
+        return expression_ptr(std::make_shared<new_expr>(loc, type, std::move(arguments)));
+    }
+    if (!brace && arguments.size() > 2) {
+        report_error("array<T>(...) takes a size and an optional value, not " + std::to_string(arguments.size()) + " arguments", previous());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    auto [array_id, array_view] = symbolizer_->intern_with_view("array");
+    auto array_ident = std::make_shared<identifier_expr>(loc, array_view, array_id);
+    array_ident->slot_index = lookup_slot(array_id);
+    auto [function_id, function_view] = symbolizer_->intern_with_view(brace ? "concat" : "resize");
+    auto callee = std::make_shared<member_expr>(loc, array_ident, function_view, function_id, false, true);
+    std::vector<expression_ptr> call_arguments;
+    call_arguments.push_back(std::make_shared<new_expr>(loc, type, std::vector<expression_ptr>()));
+    if (brace) {
+        call_arguments.push_back(std::make_shared<array_literal_expr>(loc, std::move(arguments)));
+    } else {
+        for (auto& argument : arguments) { call_arguments.push_back(std::move(argument)); }
+    }
+    return expression_ptr(std::make_shared<call_expr>(loc, callee, std::move(call_arguments)));
+}
+
+checked_result<expression_ptr> parser::initializer_from_arguments(const type_info_ptr& type, std::vector<expression_ptr> arguments, bool brace, const source_location& loc) {
     switch (type ? type->base_type : script_value_type::jai_any_type) {
     case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type: case script_value_type::jai_color_type:
     case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type:
@@ -5875,7 +5900,7 @@ checked_result<expression_ptr> parser::initializer_from_arguments(const type_inf
         report_error("a '" + type->canonical_name() + "' is initialized by one value, not " + std::to_string(arguments.size()), previous());
         return make_error_code(parse_error_code::syntax_error);
     default:
-        return expression_ptr(std::make_shared<new_expr>(loc, type, std::move(arguments)));
+        return construction(type, std::move(arguments), brace, loc);
     }
 }
 
@@ -5919,7 +5944,7 @@ checked_result<declaration_ptr> parser::variable_declaration() {
         const bool brace = check(token_type::left_brace);
         advance();
         JAISCRIPT_TRY_ASSIGN(auto arguments, construction_arguments(brace, "expected closing bracket after constructor arguments"));
-        JAISCRIPT_TRY_ASSIGN(initializer, initializer_from_arguments(type, std::move(arguments), name.location));
+        JAISCRIPT_TRY_ASSIGN(initializer, initializer_from_arguments(type, std::move(arguments), brace, name.location));
     } else if (check(token_type::left_brace)) {
         // Auto type with brace initializer - parse as expression
         JAISCRIPT_TRY_ASSIGN(initializer, expression());

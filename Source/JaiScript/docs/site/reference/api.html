@@ -162,6 +162,12 @@ print(to_json(values));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="array::concat(values: array&lt;t&gt;, other: array&lt;t&gt; or array&lt;var&gt;) -&gt; array&lt;t&gt; copy copying alias of array::append; inputs do not mutate. every engine"><h3 id="api-2396e4a9ec0b"><code>array::concat(values: array&lt;T&gt;, other: array&lt;T&gt; or array&lt;var&gt;) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Copying alias of array::append; inputs do not mutate.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="array::fill(values: array&lt;t&gt;, value: t) -&gt; array&lt;t&gt; copy returns a copy whose every element is value. every engine"><h3 id="api-7e434162965c"><code>array::fill(values: array&lt;T&gt;, value: T) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>Returns a copy whose every element is value.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2];
+print(to_json(array::fill(xs, 0)), &quot; &quot;, to_json(xs));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[0,0] [1,2]</code></pre></div>
+</div>
 <div class="api-entry" data-provider="core" data-search="array::filter(values: array&lt;t&gt;, predicate: function(t[, int]) -&gt; bool) -&gt; array&lt;t&gt; copy; callback preserves element constraints and copies selected values only. reference callback parameters still target live input elements. every engine"><h3 id="api-ba490ec8a9c9"><code>array::filter(values: array&lt;T&gt;, predicate: function(T[, int]) -&gt; bool) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy; callback</p>
 <p>Preserves element constraints and copies selected values only. Reference callback parameters still target live input elements.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3, 4];
@@ -174,6 +180,12 @@ print(to_json(array::filter(xs, x =&gt; x &gt; 2)), &quot; &quot;, to_json(xs));
 auto labels = array::map(xs, [](int x) -&gt; string { return &quot;#&quot; + to_string(x); });
 print(to_json(labels), &quot; &quot;, to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[&quot;#1&quot;,&quot;#2&quot;,&quot;#3&quot;] [1,2,3]</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="array::resize(values: array&lt;t&gt;, size: int, value: t = omitted) -&gt; array&lt;t&gt; copy returns a resized copy with input constraints, as values.resize(size, value) would leave values. every engine"><h3 id="api-d8e332afb62c"><code>array::resize(values: array&lt;T&gt;, size: int, value: T = omitted) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
+<p>Returns a resized copy with input constraints, as values.resize(size, value) would leave values.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2];
+print(to_json(array::resize(xs, 4, 3)), &quot; &quot;, to_json(xs));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3,3] [1,2]</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="array::reverse(values: array&lt;t&gt;) -&gt; array&lt;t&gt; copy returns a reversed value copy with input constraints; handles retain identity. every engine"><h3 id="api-ae3ea4c42f78"><code>array::reverse(values: array&lt;T&gt;) -&gt; array&lt;T&gt;</code></h3><p><strong>Every engine</strong> &middot; copy</p>
 <p>Returns a reversed value copy with input constraints; handles retain identity.</p>
@@ -195,6 +207,13 @@ print(to_json(array::sort(xs)), &quot; &quot;, to_json(xs));</code></pre></div>
 xs.append([3, 4]);        // changes xs, returns nothing
 print(to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3,4]</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.assign(size: int, value: t) -&gt; void mutate std::vector::assign: size elements equal to value; the elements kept are assigned as xs[i] = value assigns (operator=), the rest copy-constructed or destroyed. every engine"><h3 id="api-8c6e2707e83b"><code>array&lt;T&gt;.assign(size: int, value: T) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>std::vector::assign: size elements equal to value; the elements kept are assigned as xs[i] = value assigns (operator=), the rest copy-constructed or destroyed.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3];
+xs.assign(2, 7);
+print(to_json(xs));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[7,7]</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.back() -&gt; t observe empty array raises. an object, array or map element comes back as a reference to it, like a c++ reference return: binding the result to var, auto or t copies the element, while var&amp;, t&amp; and a member call on the result reach the stored element. every engine"><h3 id="api-bb691742ebe2"><code>array&lt;T&gt;.back() -&gt; T</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Empty array raises. An object, array or map element comes back as a reference to it, like a C++ reference return: binding the result to var, auto or T copies the element, while var&amp;, T&amp; and a member call on the result reach the stored element.</p>
@@ -233,6 +252,13 @@ print(xs.erase(1), &quot; &quot;, to_json(xs), &quot; &quot;, xs.erase(9));</cod
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [2, 4, 7];
 print(xs.every(x =&gt; x % 2 == 0));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">false</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.fill(value: t) -&gt; void mutate every element is assigned value as xs[i] = value assigns (operator=); the size stays. every engine"><h3 id="api-6958b3c7d879"><code>array&lt;T&gt;.fill(value: T) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>Every element is assigned value as xs[i] = value assigns (operator=); the size stays.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; xs = [&quot;a&quot;, &quot;b&quot;];
+xs.fill(&quot;z&quot;);
+print(to_json(xs));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[&quot;z&quot;,&quot;z&quot;]</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.filter(predicate: function(t[, int]) -&gt; bool) -&gt; void mutate; callback filters in place, retaining element constraints and selected values without cloning. reference callback parameters target live elements. returns nothing; array::filter returns a copy. every engine"><h3 id="api-2a381aec473e"><code>array&lt;T&gt;.filter(predicate: function(T[, int]) -&gt; bool) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate; callback</p>
 <p>Filters in place, retaining element constraints and selected values without cloning. Reference callback parameters target live elements. Returns nothing; array::filter returns a copy.</p>
@@ -329,6 +355,25 @@ print(xs.reduce((sum, x) =&gt; sum + x), &quot; &quot;, xs.reduce((sum, x) =&gt;
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3, 4, 5];
 print(xs.remove_if(x =&gt; x % 2 == 0), &quot; &quot;, to_json(xs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 [1,3,5]</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.reserve(size: int) -&gt; void mutate std::vector::reserve: room for size elements, so pushes up to it never reallocate. changes no element and no size. every engine"><h3 id="api-837fb77e1655"><code>array&lt;T&gt;.reserve(size: int) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>std::vector::reserve: room for size elements, so pushes up to it never reallocate. Changes no element and no size.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs;
+xs.reserve(100);
+xs.push(1);
+print(xs.size());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.resize(size: int, value: t = omitted) -&gt; void mutate std::vector::resize: grows with copies of value, or with value-initialized elements (0, false, an empty text or container, null, a default-constructed object); shrinks from the end. a failed grow leaves the array as it was. array&lt;t&gt;(size, value) builds the same array. every engine"><h3 id="api-3709bd9ff3a4"><code>array&lt;T&gt;.resize(size: int, value: T = omitted) -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
+<p>std::vector::resize: grows with copies of value, or with value-initialized elements (0, false, an empty text or container, null, a default-constructed object); shrinks from the end. A failed grow leaves the array as it was. array&lt;T&gt;(size, value) builds the same array.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3];
+xs.resize(5);
+print(to_json(xs));
+xs.resize(2);
+xs.resize(4, 9);
+print(to_json(xs));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1,2,3,0,0]
+[1,2,9,9]</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="array&lt;t&gt;.reverse() -&gt; void mutate  every engine"><h3 id="api-c503303db5a8"><code>array&lt;T&gt;.reverse() -&gt; void</code></h3><p><strong>Every engine</strong> &middot; mutate</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; xs = [1, 2, 3];

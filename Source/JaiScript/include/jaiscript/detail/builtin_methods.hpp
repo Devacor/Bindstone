@@ -46,10 +46,12 @@ namespace jai {
     // copy instead ('@' stands for the receiver as written; empty: none). A call whose result is used raises
     // (detail/in_place_result.hpp). The string table names the twins of k_string_mutator_method_names, which are all in place.
     struct in_place_method { std::string_view name; std::string_view twin; };
-    inline constexpr std::array<in_place_method, 10> k_array_in_place_methods = {{
-        {"append", "array::append(@, other) returns a joined copy"}, {"clear", {}},
-        {"concat", "array::concat(@, other) returns a joined copy"}, {"filter", "array::filter(@, f) returns a filtered copy"},
-        {"insert", {}}, {"map", "array::map(@, f) returns a mapped copy"}, {"push", {}},
+    inline constexpr std::array<in_place_method, 14> k_array_in_place_methods = {{
+        {"append", "array::append(@, other) returns a joined copy"}, {"assign", {}}, {"clear", {}},
+        {"concat", "array::concat(@, other) returns a joined copy"}, {"fill", "array::fill(@, value) returns a filled copy"},
+        {"filter", "array::filter(@, f) returns a filtered copy"},
+        {"insert", {}}, {"map", "array::map(@, f) returns a mapped copy"}, {"push", {}}, {"reserve", {}},
+        {"resize", "array::resize(@, n) returns a resized copy"},
         {"reverse", "array::reverse(@) returns a reversed copy"}, {"slice", "array::slice(@, start, end) returns a copy of the range"},
         {"sort", "array::sort(@) returns a sorted copy"}
     }};

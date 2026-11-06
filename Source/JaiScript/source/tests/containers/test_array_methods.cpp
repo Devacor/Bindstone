@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <sstream>
 
 namespace jai::foundry::tests {
 
@@ -175,6 +176,66 @@ public:
                 arr.has(src[1]) && arr.index_of(src[1]) == 1 && dst[0] == 5;
             )");
             check_eq(result.as<bool>(), true);
+        });
+
+        // std::vector's sizing: vector<T>(n) value-initializes n elements, vector<T>(n, v) copies v n times, vector<T>{a, b} is
+        // the list; resize, assign and fill run the same constructors a C++ vector runs, and reserve changes nothing observable
+        test("sized_construction_and_resize_follow_std_vector", [this]() {
+            const std::string prelude =
+                "class C { int n = 1; C() { print(\"ctor\"); } C(const C& o) { n = o.n + 10; print(\"copy\"); } }\n"
+                "class D { int n = 1; void operator=(const D& o) { n = o.n + 100; print(\"assign\"); } }\n";
+            const std::pair<const char*, const char*> cases[] = {
+                {"print(array<int>(3));", "[0, 0, 0]"},
+                {"print(array<int>(3, 7));", "[7, 7, 7]"},
+                {"array<int> a(2, 5); print(a);", "[5, 5]"},
+                {"array<string> a(2, \"x\"); print(a);", "[\"x\", \"x\"]"},
+                {"auto a = array<bool>(2); print(a);", "[false, false]"},
+                {"print(array<array<int>>(2));", "[[], []]"},
+                {"print(array<int>{3}, \" \", array<int>{1, 2});", "[3] [1, 2]"},
+                {"array<int> a{4, 5}; print(a);", "[4, 5]"},
+                {"print(array<int>(), \" \", array<int>{});", "[] []"},
+                {"array<int> xs = [1, 2, 3]; xs.resize(5); print(xs); xs.resize(1); print(xs); xs.resize(3, 9); print(xs);",
+                 "[1, 2, 3, 0, 0]\n[1]\n[1, 9, 9]"},
+                {"array<int> xs = [1, 2, 3]; xs.assign(2, 4); print(xs); xs.fill(6); print(xs);", "[4, 4]\n[6, 6]"},
+                {"array<int> xs = [1, 2]; xs.reserve(1000); print(xs.size(), \" \", xs);", "2 [1, 2]"},
+                {"array<int> xs = [1, 2]; auto ys = array::resize(xs, 4, 3); auto zs = array::fill(xs, 0); print(xs, ys, zs);",
+                 "[1, 2][1, 2, 3, 3][0, 0]"},
+                {"var v = [1, \"a\"]; v.resize(3); print(v);", "[1, \"a\", null]"},
+                {"array<C> a(2); print(a[0].n, a[1].n);", "ctor\nctor\n11"},
+                {"C c; c.n = 5; array<C> a(2, c); print(a[0].n, a[1].n);", "ctor\ncopy\ncopy\n1515"},
+                {"array<C> a; a.resize(1); C c; a.resize(3, c); a.fill(c); print(a.size());", "ctor\nctor\ncopy\ncopy\n3"},
+                {"D d; d.n = 4; array<D> a(2); a.fill(d); print(a[0].n, a[1].n);", "assign\nassign\n104104"},
+                {"D d; array<D> a(1); a.assign(3, d); print(a.size(), a[0].n, a[2].n);", "assign\n31011"},
+                {"array<int> xs; xs.resize(-1);", "ERROR array size cannot be negative"},
+                {"auto a = array<int>(-2);", "ERROR array size cannot be negative"},
+                {"var count = \"3\"; array<int> xs; xs.resize(count);", "ERROR resize() size must be an int"},
+                {"var s = \"x\"; auto a = array<int>(2, s);", "ERROR Cannot push 'string' to array<int>"},
+                {"array<uint8> b; var big = 300; b.resize(2, big);", "ERROR Cannot store 300 in array<uint8> (0..255)"},
+                {"array<int> xs = [1]; var s = \"x\"; xs.fill(s);", "ERROR Cannot push 'string' to array<int>"},
+                {"array<int> xs; xs.fill(\"s\");", "ERROR error: fill() cannot store into 'array<int>': expected 'int', got 'string'"},
+                {"auto a = array<int>(2, \"s\");", "ERROR error: resize() cannot store into 'array<int>': expected 'int', got 'string'"},
+                {"array<int> xs; xs.resize(\"2\");", "ERROR error: resize() size must be an int, got 'string'"},
+                {"array<int> a(1, 2, 3);", "ERROR array<T>(...) takes a size and an optional value, not 3 arguments"},
+            };
+            std::string failures;
+            for (const auto& [code, expected] : cases) {
+                auto e = make_engine();
+                auto out = std::make_shared<std::ostringstream>();
+                e->set_output_stream(out);
+                std::string got;
+                try {
+                    e->execute(prelude + code);
+                    got = out->str();
+                    while (!got.empty() && got.back() == '\n') { got.pop_back(); }
+                } catch (const std::exception& ex) {
+                    got = std::string("ERROR ") + ex.what();
+                }
+                const std::string want = expected;
+                const bool error_case = want.rfind("ERROR ", 0) == 0;
+                const bool ok = error_case ? got.rfind("ERROR ", 0) == 0 && got.find(want.substr(6)) != std::string::npos : got == want;
+                if (!ok) { failures += std::string(code) + "\n  got: " + got + "\n"; }
+            }
+            check_true(failures.empty(), failures);
         });
     }
 };

@@ -273,6 +273,113 @@ namespace {
                             : it->second };
         return callback(call_args);
     }
+
+    // The size argument of resize, assign, reserve and array<T>(n, v): a non-negative int
+    checked_result<size_t> array_size_argument(const script_value& a_value, const char* a_not_an_int) {
+        const script_value& v = a_value.deref();
+        if (!v.is_int()) {
+            return checked_result<size_t>(make_error_code(runtime_error_code::type_mismatch), a_not_an_int);
+        }
+        if (v.unchecked_as_int() < 0) {
+            return checked_result<size_t>(make_error_code(runtime_error_code::invalid_operation), "array size cannot be negative");
+        }
+        return detail::saturating_count(v.unchecked_as_int());
+    }
+
+    // The element std::vector<T>(n) and resize(n) append: T's zero, an empty container, a null handle, or a T its default
+    // constructor builds
+    checked_result<script_value> value_initialized_element(engine* a_engine, const type_info_ptr& a_element_type) {
+        script_value made(std::monostate{}, a_engine);
+        if (a_element_type) {
+            switch (a_element_type->base_type) {
+                case script_value_type::jai_int_type: made = script_value(script_int(0), a_engine); break;
+                case script_value_type::jai_float_type: made = script_value(script_float(0.0), a_engine); break;
+                case script_value_type::jai_bool_type: made = script_value(script_bool(false), a_engine); break;
+                case script_value_type::jai_char_type: made = script_value(script_char(0), a_engine); break;
+                case script_value_type::jai_string_type: made = script_value(script_string(), a_engine); break;
+                case script_value_type::jai_utf8_string_type: made = script_value::make_utf8(std::string(), a_engine); break;
+                case script_value_type::jai_array_type: made = script_value::make_array(a_element_type->element_type(), a_engine); break;
+                case script_value_type::jai_map_type: made = script_value::make_map(a_element_type->key_type(), a_element_type->value_type(), a_engine); break;
+                case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+                case script_value_type::jai_color_type: case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type: {
+                    const uint32_t zero[4]{};
+                    made = script_value::make_vec(a_element_type->base_type, zero, a_engine);
+                    break;
+                }
+                case script_value_type::jai_object_type: {
+                    auto global = detail::engine_access::get_global_environment(a_engine);
+                    auto constructor = global ? global->get(std::string(a_element_type->type_name)) : checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable));
+                    if (!constructor || !constructor.value().is_function()) {
+                        return checked_result<script_value>(make_error_code(runtime_error_code::undefined_variable), "No constructor found for class '{0}'", a_element_type->id);
+                    }
+                    auto constructed = constructor.value().as_function()({});
+                    if (!constructed) { return constructed.error_value(); }
+                    made = std::move(constructed.value());
+                    break;
+                }
+                default: break;
+            }
+        }
+        return detail::convert_container_element_taking(a_engine, made, a_element_type);
+    }
+
+    // Grows or shrinks an array to a_size as std::vector::resize does: new elements are copies of *a_fill, or value-initialized
+    checked_result<script_value> resize_array(const builtin_method_context& a_context, script_value& a_self, size_t a_size, const script_value* a_fill) {
+        engine* eng = a_context.get_engine();
+        const strong_ptr<script_array> storage = a_self.unchecked_get_array_storage();
+        const size_t old_size = storage->size();
+        if (a_size <= old_size) {
+            storage->truncate(a_size);
+            return a_context.make_value();
+        }
+        if (!detail::builtin_memory_charge(eng, a_size - old_size, sizeof(script_value))) [[unlikely]] { return detail::builtin_memory_cap(eng); }
+        const auto array_type = a_self.get_type_info();
+        const type_info_ptr element_type = array_type ? array_type->element_type() : nullptr;
+        script_value fill(std::monostate{}, eng);
+        if (a_fill) {
+            fill = a_fill->deref();
+            if (!detail::container_element_compatible(fill, element_type, eng)) {
+                return detail::element_type_error(a_context.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", fill, element_type);
+            }
+        }
+        storage->reserve(a_size);
+        for (size_t i = old_size; i < a_size; ++i) {
+            auto element = a_fill ? detail::convert_container_element(eng, fill, element_type) : value_initialized_element(eng, element_type);
+            if (!element || a_context.unwinding()) {
+                storage->truncate(old_size);   // std::vector::resize's strong guarantee: a failed grow changes nothing
+                if (!element) { return element.error_value(); }
+                return a_context.make_value();
+            }
+            storage->push(std::move(element.value()));
+        }
+        return a_context.make_value();
+    }
+
+    // The first a_count elements take a_fill as `xs[i] = a_fill` does (std::fill): a class element runs its operator= or the
+    // implicit copy assignment in place, any other element is replaced by a converted copy
+    checked_result<script_value> assign_elements(const builtin_method_context& a_context, script_value& a_self, size_t a_count, const script_value& a_fill) {
+        engine* eng = a_context.get_engine();
+        const strong_ptr<script_array> storage = a_self.unchecked_get_array_storage();
+        const auto array_type = a_self.get_type_info();
+        const type_info_ptr element_type = array_type ? array_type->element_type() : nullptr;
+        const script_value& fill = a_fill.deref();
+        if (!detail::container_element_compatible(fill, element_type, eng)) {
+            return detail::element_type_error(a_context.get_string_symbolizer(), runtime_error_code::array_element_type_mismatch, "Cannot push '{0}' to array<{1}>", fill, element_type);
+        }
+        for (size_t i = 0; i < a_count && i < storage->size(); ++i) {
+            script_value current = storage->get(i, eng);
+            auto in_place = element_type ? detail::user_assign_operator(current, fill, eng, element_type.get()) : detail::var_slot_assign_in_place(current, fill, eng);
+            if (in_place) {
+                if (!*in_place) { return in_place->error_value(); }
+            } else {
+                auto element = detail::convert_container_element(eng, fill, element_type);
+                if (!element) { return element.error_value(); }
+                storage->set(i, std::move(element.value()));
+            }
+            if (a_context.unwinding()) { return a_context.make_value(); }
+        }
+        return a_context.make_value();
+    }
 }
 
 // Initialize built-in method registries with interned method names for O(1) lookup
@@ -315,6 +422,62 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }
 
         self.unchecked_get_array_storage()->push(std::move(converted));
+        return ctx.make_value();
+    }},
+
+        {symbolizer->intern("resize"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.empty() || args.size() > 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "resize() takes one or two arguments");
+        }
+        auto size = array_size_argument(args[0], "resize() size must be an int");
+        if (!size) { return size.error_value(); }
+        if (ctx.copy_array_result) {
+            script_value result = self.clone();
+            auto done = resize_array(ctx, result, size.value(), args.size() == 2 ? &args[1] : nullptr);
+            if (!done) { return done.error_value(); }
+            return result;
+        }
+        return resize_array(ctx, self, size.value(), args.size() == 2 ? &args[1] : nullptr);
+    }},
+
+        {symbolizer->intern("assign"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 2) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "assign() takes exactly two arguments");
+        }
+        auto size = array_size_argument(args[0], "assign() size must be an int");
+        if (!size) { return size.error_value(); }
+        auto assigned = assign_elements(ctx, self, size.value(), args[1]);
+        if (!assigned || ctx.unwinding()) { return assigned; }
+        return resize_array(ctx, self, size.value(), &args[1]);
+    }},
+
+        {symbolizer->intern("fill"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "fill() takes exactly one argument");
+        }
+        script_value target = ctx.copy_array_result ? self.clone() : script_value(self);
+        auto done = assign_elements(ctx, target, target.unchecked_array_node()->size(), args[0]);
+        if (!done) { return done.error_value(); }
+        return ctx.copy_array_result ? target : ctx.make_value();
+    }},
+
+        {symbolizer->intern("reserve"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
+        if (args.size() != 1) {
+            return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "reserve() takes exactly one argument");
+        }
+        auto size = array_size_argument(args[0], "reserve() size must be an int");
+        if (!size) { return size.error_value(); }
+        const strong_ptr<script_array> storage = self.unchecked_get_array_storage();
+        if (size.value() <= storage->size()) { return ctx.make_value(); }
+        if (engine* eng = ctx.get_engine()) {
+            // capacity is charged when elements arrive; a reserve past the cap is denied without charging
+            const auto& limits = detail::engine_access::execution_limits(*eng);
+            const size_t extra = size.value() - storage->size();
+            if (limits.memory_limit != SIZE_MAX && extra > (limits.memory_limit - std::min(limits.memory_used, limits.memory_limit)) / sizeof(script_value)) [[unlikely]] {
+                return detail::builtin_memory_cap(eng);
+            }
+        }
+        storage->reserve(size.value());
         return ctx.make_value();
     }},
 

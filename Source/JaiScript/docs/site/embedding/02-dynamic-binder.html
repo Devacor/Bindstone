@@ -36,9 +36,14 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>02</nav>
 <article class="chapter"><h1 id="dynamic-binder-binding-c-classes"><code>dynamic_binder</code>: Binding C++ Classes<a class="hlink" href="#dynamic-binder-binding-c-classes" aria-label="link">&#8203;</a></h1>
 <p><strong>One declaration, three jobs.</strong> Declare a field once with <code>JAI_PROPERTY</code> and it is
-simultaneously <em>reflected</em> (C++ code can enumerate and edit it by name), <em>script-visible</em>
-(<code>obj.field</code> just works), and <em>serialized</em> (JSON and binary, from the same declaration,
-including polymorphic pointers and signal connections). This chapter walks one game class through all three,
+simultaneously:</p>
+<ul>
+<li><em>reflected</em>: C++ code can enumerate and edit it by name;</li>
+<li><em>script-visible</em>: <code>obj.field</code> just works;</li>
+<li><em>serialized</em>: JSON and binary, from the same declaration, including polymorphic pointers and signal
+connections.</li>
+</ul>
+<p>This chapter walks one game class through all three,
 then documents the fluent binder chain that makes it go. Every C++ signature below is taken from
 <code>include/jaiscript/core/dynamic_binder.hpp</code> and friends; every snippet was compiled against the real
 library and run on <strong>both backends</strong>, with byte-identical output.</p>
@@ -99,7 +104,7 @@ C++ sees east.ammo = 14
 99</code></pre></div>
 <ul><li><strong>Constructors</strong> are listed by parameter types; scripts pick one by argument count and types. <code>Turret(...)</code> in script makes a value, and <code>new Turret(...)</code> makes a <code>shared_ptr</code> handle. A value copies like a script class&#x27;s, through the C++ copy constructor; copies of a handle share one object (<a href="#copies-and-handles">copies and handles</a>, below).</li>
 <li><strong>Properties</strong> read and write the C++ member directly; a getter-only property (<code>nullptr</code> setter) rejects stores with <code>Cannot assign to 'x': it is read-only</code>.</li>
-<li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy as a handle, like <code>add_global(name, shared_ptr)</code>, so script writes land in C++ (<code>east.ammo</code> is 14) and <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
+<li><strong>Objects cross by identity.</strong> <code>make_object(shared_ptr)</code> wraps the pointer without a copy as a handle, like <code>add_global(name, shared_ptr)</code>, so script writes land in C++ (<code>east.ammo</code> is 14). And <code>as&lt;std::shared_ptr&lt;T&gt;&gt;()</code> returns the script's object to C++ shared, not copied.</li>
 <li><strong>Lifetime</strong> follows the <code>shared_ptr</code>: the object lives while either side holds it. <code>add_global_ref</code> instead binds a C++ object or variable you keep alive yourself.</li>
 <li><strong>Handles and null.</strong> A <code>std::shared_ptr&lt;T&gt;</code> or <code>std::weak_ptr&lt;T&gt;</code> parameter (by value or <code>const&amp;</code>) takes a script <code>null</code> as an empty handle, as C++ takes <code>nullptr</code>, so <code>pick(null)</code> resolves to the handle overload of an overload set. A <code>weak_ptr&lt;T&gt;</code> parameter also takes a handle or a script <code>weak_ptr&lt;T&gt;</code>, watching the same object; an expired one arrives empty. Returning a <code>std::weak_ptr&lt;T&gt;</code> to script is not supported (a script <code>weak_ptr</code> watches a script handle, and a host one has none): return <code>shared_ptr&lt;T&gt;</code>, and script takes its own <code>weak_ptr&lt;T&gt;</code> of it.</li>
 <li><strong>Errors.</strong> A C++ exception thrown by a bound method reaches the script as a catchable error carrying its <code>what()</code> text (<code>throw std::runtime_error("jammed")</code> is caught as <code>jammed</code>); <a href="17-host-api.html#error-surfaces">Error surfaces</a> lists how each call reports failures.</li></ul>
@@ -112,9 +117,13 @@ C++ sees east.ammo = 14
 <li><strong>Serialization</strong>: save files need to write those same fields out and read them back.</li>
 </ul>
 <p>Three systems, three registration sites, one class. Every new field is a three-stop tour. Miss a stop
-and you get the classic bugs: the field that saves but doesn't show in the editor, the script-visible field
-that silently never persists, the renamed member that still loads under its old name in one system and not the
-other. The systems don't fail loudly; they <em>drift</em>.</p>
+and you get the classic bugs:</p>
+<ul>
+<li>the field that saves but doesn't show in the editor;</li>
+<li>the script-visible field that silently never persists;</li>
+<li>the renamed member that still loads under its old name in one system and not the other.</li>
+</ul>
+<p>The systems don't fail loudly; they <em>drift</em>.</p>
 <p>JaiScript's answer is to make the declaration itself the registration. A field declared through
 <code>JAI_PROPERTY</code> lives in a per-instance <code>property_manager</code> and a per-type schema; reflection
 walks the manager, the binder reads the schema, and the archives serialize the manager. There is nothing to
@@ -193,7 +202,7 @@ every engine the host hands to <code>bind_registrar</code> knows it. Engines tha
 curated name and engine-specific methods.</li>
 </ul>
 <p>Whichever door a type enters, its <code>property_owner</code> bases follow it inside that engine
-(<a href="#inheritance-and-polymorphism">inheritance</a>, below), and it carries one name everywhere:
+(<a href="#inheritance-and-polymorphism">inheritance</a>, below). It carries one name everywhere:
 the in-class pin when declared, else the bare class name, always matching the serialization
 <code>$type</code>. Registration is the reachability boundary: <code>engine::make()</code> binds nothing
 on its own, which is exactly what makes an empty engine a sandbox
@@ -280,12 +289,12 @@ locks, because nothing is global.</p>
 copy. Once the object is in script, it follows the language&#x27;s value rules, exactly as a script class
 instance does:</p>
 <ul>
-<li>A copy of a value from a variable, a field or an element (<code>Turret b = a;</code>, <code>var c = b;</code>), a
-by-value parameter or return, a container literal&#x27;s element (<code>[a]</code> as an array) and a by-value lambda capture
-(<code>[a]() { ... }</code>, <code>[=]</code>) make a separate C++ object
-through the class&#x27;s copy constructor. Writes to the copy do not reach the original.</li>
+<li>A copy of a value makes a separate C++ object through the class&#x27;s copy constructor. Copies come from a
+variable, a field or an element (<code>Turret b = a;</code>, <code>var c = b;</code>), a by-value parameter or return, a
+container literal&#x27;s element (<code>[a]</code> as an array) and a by-value lambda capture
+(<code>[a]() { ... }</code>, <code>[=]</code>). Writes to the copy do not reach the original.</li>
 <li>A variable, a by-value parameter or a by-value return that takes a call&#x27;s <code>T&amp;</code> result copies it, as
-C++ <code>auto</code> drops the reference: <code>var c = owner.child();</code>, <code>auto c</code> and
+C++ <code>auto</code> drops the reference. <code>var c = owner.child();</code>, <code>auto c</code> and
 <code>Turret c</code> are each a new <code>Turret</code>. A script function the host calls receives a <code>T&amp;</code>
 argument the same way: a <code>var p</code> or <code>Turret p</code> parameter is a copy, a <code>var&amp; p</code> parameter
 names the host&#x27;s object.</li>
@@ -293,21 +302,21 @@ names the host&#x27;s object.</li>
 parameter) names the same object.</li>
 <li>A class whose copy constructor is deleted (<code>std::atomic</code>, <code>std::mutex</code>) is never copied: each copy
 above raises <code>Cannot copy C++ object of type &#x27;T&#x27;: the type is not copy-constructible. Hold it by reference
-(auto&amp;/var&amp;) or share it (shared_ptr&lt;T&gt;).</code>, and a reference names it. A typed slot the object converts
-into reads the object itself, as a C++ conversion operator does: <code>int n = obj;</code> (a declaration, an assignment, a
-parameter, a return or a field) calls its bound <code>to_int</code>, and a <code>float</code>, <code>bool</code>,
-<code>char</code> or <code>string</code> slot its <code>to_float</code>, <code>to_bool</code>, <code>to_char</code> or
-<code>to_string</code>, with no copy first.</li>
-<li>A handle shares the object with every copy of the handle, in a variable, a parameter or a lambda capture:
+(auto&amp;/var&amp;) or share it (shared_ptr&lt;T&gt;).</code>, and a reference names it.</li>
+<li>A typed slot the object converts into reads the object itself, as a C++ conversion operator does, with no copy
+first. <code>int n = obj;</code> (a declaration, an assignment, a parameter, a return or a field) calls its bound
+<code>to_int</code>. A <code>float</code>, <code>bool</code>, <code>char</code> or <code>string</code> slot calls its
+<code>to_float</code>, <code>to_bool</code>, <code>to_char</code> or <code>to_string</code>.</li>
+<li>A handle shares the object with every copy of the handle, in a variable, a parameter or a lambda capture. Handles are
 <code>new Turret(...)</code>, a <code>shared_ptr&lt;Turret&gt;</code> variable, and a <code>std::shared_ptr&lt;Turret&gt;</code>
 that a host function, method or property returns, that a host passes to a script callback, or that <code>add_global</code>
-or <code>make_object</code> takes: <code>var g = gate;</code> names the host&#x27;s <code>gate</code>.</li>
+or <code>make_object</code> takes. <code>var g = gate;</code> names the host&#x27;s <code>gate</code>.</li>
 </ul>
 <p>So to keep working on the host&#x27;s object, use the global itself, a reference or a <code>&amp;</code> parameter.
 The guide&#x27;s <a href="../guide/03-value-semantics.html#bound-cpp-objects">Bound C++ objects</a> walks through
 each case with one class.</p>
-<p>Passing a bound property by reference follows the spelling: <code>gate.level</code> or, inside a method of
-a script class that derives <code>Spawner</code>, <code>this.level</code> handed to a <code>&amp;</code>
+<p>Passing a bound property by reference follows the spelling. <code>gate.level</code>, or <code>this.level</code>
+inside a method of a script class that derives <code>Spawner</code>, handed to a <code>&amp;</code>
 parameter binds the property itself, so the callee's writes land in the C++ member. Inside such a method a
 bare <code>level</code> is the same property: it reads and stores through the accessors like
 <code>this.level</code>, and <code>f(level)</code> into a <code>&amp;</code> parameter writes back into it. A
@@ -494,38 +503,51 @@ Without a bound <code>"="</code>, the assignment replaces the held object with o
 If you register none, <code>build()</code> adds a default constructor for default-constructible types.</li>
 <li><code>.method(name, &amp;T::fn)</code>: member function pointer, const or not.</li>
 <li><code>.method(name, lambda)</code>: a lambda whose first parameter is <code>T&amp;</code> or
-<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>); any other lambda is a method that
-ignores its receiver (<code>.method("twice", [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>). Same-arity overloads of one name resolve by C++ parameter signature: registering
+<code>const T&amp;</code> becomes a method (that parameter is <code>self</code>). Any other lambda is a method that
+ignores its receiver (<code>.method("twice", [](int64_t k) { return k * 2; })</code> answers <code>obj.twice(4)</code>).
+<ul>
+<li>Same-arity overloads of one name resolve by C++ parameter signature: registering
 <code>set(double, double)</code> after <code>set(int64_t, int64_t)</code> adds an overload rather than
-clobbering it. Passing a member <em>data</em> pointer here is a compile error that tells you to use
-<code>.property()</code>. The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
+clobbering it.</li>
+<li>Passing a member <em>data</em> pointer here is a compile error that tells you to use
+<code>.property()</code>.</li>
+<li>The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
 stateful functor keeps one state.</li>
+</ul></li>
 <li>A non-const <code>T&amp;</code> parameter of a method, a static method or a constructor writes the callee&#x27;s
 final value back into the script argument, exactly as for <code>add_function</code> (see
-<a href="17-host-api.html#the-exact-width-as-aliasing-rules">the quickstart</a>): <code>gate.add(total, 5)</code>
+<a href="17-host-api.html#the-exact-width-as-aliasing-rules">the quickstart</a>). <code>gate.add(total, 5)</code>
 with <code>void add(int64_t&amp; target, int64_t by)</code> leaves the sum in <code>total</code>.</li>
-<li><code>.method("+", ...)</code>: operator overloading by token, the same set a script class declares:
+<li><code>.method("+", ...)</code>: operator overloading by token. The tokens are the same set a script class declares:
 <code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; == != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code>, unary <code>- + ~</code> (a lambda
 taking only the object), <code>[]</code>, <code>()</code> and <code>=</code>, with <code>to_bool</code> for
-<code>!v</code> and <code>if (v)</code>. A binding also takes <code>++</code> and <code>--</code>, which a script class
-does not declare, in C++&#x27;s two forms: <code>operator++()</code> is a lambda taking only the object and answers
-<code>++v</code>, <code>operator++(int)</code> takes the object and an <code>int64_t</code> it ignores (the call passes 0) and
+<code>!v</code> and <code>if (v)</code>.
+<ul>
+<li><strong>Increment and decrement.</strong> A binding also takes <code>++</code> and <code>--</code>, which a script class
+does not declare, in C++&#x27;s two forms. <code>operator++()</code> is a lambda taking only the object and answers
+<code>++v</code>. <code>operator++(int)</code> takes the object and an <code>int64_t</code> it ignores (the call passes 0) and
 answers <code>v++</code>. A form the binding lacks raises <code>Cannot apply &#x27;++&#x27; to T</code>, as C++ refuses
-<code>v++</code> on a class that declares only <code>operator++()</code>. The bound operators follow the script rules of the
+<code>v++</code> on a class that declares only <code>operator++()</code>.</li>
+<li><strong>Supplied operators.</strong> The bound operators follow the script rules of the
 <a href="../guide/04-operators.html">operators chapter</a>: <code>&lt;=&gt;</code> supplies <code>&lt; &lt;= &gt; &gt;=</code>
-and <code>==</code>, <code>==</code> supplies <code>!=</code>, and <code>5 == m</code> asks <code>m</code>'s <code>==</code> taking an int. A bound
+and <code>==</code>, <code>==</code> supplies <code>!=</code>, and <code>5 == m</code> asks <code>m</code>'s <code>==</code> taking an int.</li>
+<li><strong>Compound operators.</strong> A bound
 compound operator, <code>++</code> and <code>--</code> run on the object once, in place, as C++ calls them, and nothing is stored
-back: <code>.method("+=", [](Money&amp; self, const Money&amp; o) -&gt; Money&amp; { ... })</code> answers
-<code>m += o</code> for a variable, a field, an element, a map value or a reference, and the expression is what the operator
+back. <code>.method("+=", [](Money&amp; self, const Money&amp; o) -&gt; Money&amp; { ... })</code> answers
+<code>m += o</code> for a variable, a field, an element, a map value or a reference. The expression is what the operator
 returns (<code>m</code> here; <code>std::atomic</code>&#x27;s <code>+=</code> returns the new value). With none bound,
-<code>m += o</code> is <code>m = m + o</code>. A lambda whose first parameter is another type and whose second is the class binds the reflected
-form, C++'s free <code>operator-(int64_t, const Money&amp;)</code>: <code>.method("-", [](int64_t l, const Money&amp; r) { ... })</code> answers
-<code>5 - m</code> where 5 has no <code>-</code> for a Money. Arithmetic never reverses on its own.
-An operator counts for an operand only when one of its overloads takes it: with <code>operator&lt;(const Money&amp;)</code>
-and <code>operator&lt;=&gt;(int64_t)</code> bound, <code>m &lt; 5</code> runs the <code>&lt;=&gt;</code>, and with only
-<code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation of <code>m</code>&#x27;s text. When no bound overload takes the operands, the error names the binding to add:
-<code>No bound 'Money * int': bind operator "*" taking int on Money, or convert the operand</code>, and the checker warns where it sees
-a number left of a bound class's operator that has no reflected form.
+<code>m += o</code> is <code>m = m + o</code>.</li>
+<li><strong>Reflected forms.</strong> A lambda whose first parameter is another type and whose second is the class binds the reflected
+form, C++'s free <code>operator-(int64_t, const Money&amp;)</code>. <code>.method("-", [](int64_t l, const Money&amp; r) { ... })</code> answers
+<code>5 - m</code> where 5 has no <code>-</code> for a Money. Arithmetic never reverses on its own.</li>
+<li><strong>Which overload applies.</strong> An operator counts for an operand only when one of its overloads takes it. With
+<code>operator&lt;(const Money&amp;)</code> and <code>operator&lt;=&gt;(int64_t)</code> bound, <code>m &lt; 5</code> runs the
+<code>&lt;=&gt;</code>. With only <code>operator+(const Money&amp;)</code>, <code>m + "!"</code> is the builtin concatenation
+of <code>m</code>&#x27;s text.</li>
+<li><strong>Errors.</strong> When no bound overload takes the operands, the error names the binding to add:
+<code>No bound 'Money * int': bind operator "*" taking int on Money, or convert the operand</code>. The checker warns where it sees
+a number left of a bound class's operator that has no reflected form.</li>
+</ul>
 Script classes can overload operators from the other side, so a type can start in script and graduate to C++ without
 call sites changing.</li>
 <li><code>.static_method(name, fn)</code>: free function or lambda (stateful lambdas included), called as
@@ -554,8 +576,8 @@ callable on the derived, virtual dispatch preserved, and the polymorphic-load ty
 <code>[](T&amp; self, int version)</code>, which a script-side load (<code>from_json</code>, <code>from_binary</code>,
 <code>from_base64</code>) runs after it has written the object&#x27;s fields.</li>
 <li><code>.version(n)</code>: the number (1 by default) the engine&#x27;s serialization registry keeps for the class.
-Only the binary writer of script values reads it: <code>to_binary</code> / <code>to_base64</code> write it beside each
-bound object a script value holds, and <code>from_binary</code> / <code>from_base64</code> pass it to the post-load hook
+Only the binary writer of script values reads it. <code>to_binary</code> / <code>to_base64</code> write it beside each
+bound object a script value holds. <code>from_binary</code> / <code>from_base64</code> pass it to the post-load hook
 when the class also has a <code>.deserialization_factory</code> (otherwise the hook receives 1). <code>from_json</code>
 passes the object&#x27;s <code>"$version"</code> key, or 1. The C++ archives never read it, and
 <a href="08-serialization.html#versions-and-missing-fields">Serialization</a> recommends a format property
@@ -586,12 +608,16 @@ movable, non-copyable.</li>
 <h3 id="serial-only-constructors">Serial-only constructors<a class="hlink" href="#serial-only-constructors" aria-label="link">&#8203;</a></h3>
 <p>A <code>parallel_for</code> body may construct bound classes, and script classes over them (see
 <a href="../guide/16-parallel.html#constructing-objects">parallel loops</a>). The constructor and the
-destructor then run on a worker thread, and the binder takes them to be safe there: a constructor that only builds
+destructor then run on a worker thread, and the binder takes them to be safe there. A constructor that only builds
 its own members is. One that touches state other objects share is not: it adds the object to a registry, takes a
-handle from a cache, looks up a service, connects to a signal hub, or attaches itself to another object. Mark such a
-class with <code>.serial_only_constructor()</code>, and a body that constructs it, or a script class over it, is
-refused when the statement is reached, before any element runs. One mark covers the constructor and the destructor
-alike: the object a worker makes is the one that dies there. An object of a marked class that loses its last reference on a worker anyway is not destroyed there: the statement releases it when its workers are done, on the calling thread, in the order of the elements that dropped it, then the order they dropped. Construction outside a parallel body is unaffected.</p>
+handle from a cache, looks up a service, connects to a signal hub, or attaches itself to another object.</p>
+<p>Mark such a class with <code>.serial_only_constructor()</code>. A body that constructs it, or a script class over it, is
+then refused when the statement is reached, before any element runs. Construction outside a parallel body is
+unaffected.</p>
+<p>One mark covers the constructor and the destructor
+alike: the object a worker makes is the one that dies there. An object of a marked class that loses its last reference
+on a worker anyway is not destroyed there. The statement releases it when its workers are done, on the calling thread,
+in the order of the elements that dropped it, then the order they dropped.</p>
 <div class="codeblock cb-cpp" data-sample="binder-sprite-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Sprite {
     static std::vector&lt;Sprite*&gt;&amp; registry() { static std::vector&lt;Sprite*&gt; all; return all; }
     double alpha = 1.0;
@@ -615,26 +641,35 @@ parallel_for: class 'Glowing' has a C++ base 'Sprite' marked serial_only_constru
 1.0 0.5</code></pre></div>
 
 <h3 id="parallel-calls">Calls from parallel bodies<a class="hlink" href="#parallel-calls" aria-label="link">&#8203;</a></h3>
-<p>A <code>parallel_for</code> body, and the class code it reaches, calls bound C++ on its worker thread: free functions,
+<p>A <code>parallel_for</code> body, and the class code it reaches, calls bound C++ on its worker thread. Free functions,
 static methods and methods are all parallel unless registered serial. Mark a call serial when it touches state other
 objects share (an audio or texture manager, a registry, a service lookup, the scene graph beyond the object itself, a
-network connection, a log): <code>.serial_method("name")</code> on the binder for a method&#x27;s non-const overloads (a const
-getter of the same name stays parallel; <code>.serial_method("name", jai::serial_overloads::every)</code> takes the const ones
-too, for a const overload that still touches shared state),
-<code>.serial_static_method("name")</code> for a static method, and <code>engine::serial_function("name")</code> after
-registering a free function. A body that names a serial free function or static method is refused when the statement
-is reached; a serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
+network connection, a log):</p>
+<ul>
+<li><code>.serial_method("name")</code> on the binder for a method&#x27;s non-const overloads. A const
+getter of the same name stays parallel. <code>.serial_method("name", jai::serial_overloads::every)</code> takes the const ones
+too, for a const overload that still touches shared state.</li>
+<li><code>.serial_static_method("name")</code> for a static method.</li>
+<li><code>engine::serial_function("name")</code> after registering a free function.</li>
+</ul>
+<p>A body that names a serial free function or static method is refused when the statement
+is reached. A serial method is refused when it is called, since the receiver&#x27;s class is known only then. The
 library&#x27;s own builtins are serial (<code>print</code>, I/O, JSON, reflection, the clock) apart from pure math,
-<code>to_string</code>, the <code>web::</code> text functions and the <code>crypto::</code> functions other than <code>crypto::sha256_file</code>.
-Leaving a method unmarked declares it safe to call from any worker at once, so a binding whose method changes state
+<code>to_string</code>, the <code>web::</code> text functions and the <code>crypto::</code> functions other than <code>crypto::sha256_file</code>.</p>
+<p>Leaving a method unmarked declares it safe to call from any worker at once. So a binding whose method changes state
 that other objects or threads share must register it serial: that is the whole contract a parallel body checks.</p>
-<p>The receiver follows the signature. A non-const member function (a <code>T&amp;</code> self in a lambda, a property
-store) runs only on an object the calling worker owns: the element it is running (a range or zipped element, or a
+<p>The receiver follows the signature:</p>
+<ul>
+<li>A non-const member function (a <code>T&amp;</code> self in a lambda, a property
+store) runs only on an object the calling worker owns. That is the element it is running (a range or zipped element, or a
 <code>parallel_reduce</code> accumulator, which the statement proves the only element of its object), or one it constructed
-or copied. A const member function
-also runs on an object the worker did not make, such as one a C++ function hands back or one the body reads from the
-enclosing scope (a captured object: every worker reaches the same C++ object through a view of its own), because C++
-constness says it does not change the object. A non-const call on such an object is refused when it runs. Arguments follow the rules a script
+or copied.</li>
+<li>A const member function also runs on an object the worker did not make, because C++
+constness says it does not change the object. Such objects include one a C++ function hands back, or one the body reads
+from the enclosing scope (a captured object: every worker reaches the same C++ object through a view of its own).</li>
+<li>A non-const call on an object the worker did not make is refused when it runs.</li>
+</ul>
+<p>Arguments follow the rules a script
 call follows: a non-const <code>T&amp;</code> parameter, which writes back into its argument, cannot take enclosing
 state.</p>
 <div class="codeblock cb-cpp" data-sample="binder-meter-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Meter {
@@ -678,17 +713,18 @@ or <code>signal_emitter&lt;Sig&gt;</code> member is exposed by one <code>.proper
 s.onWave.connect("logger", "print(\"wave logged\");");     // named script-text receiver
 s.onWave.connected("hud");                                 // true
 s.onWave.disconnect("hud");</code></pre></div>
-<p>Script sees one generic <code>Signal</code> view for every signature (one class, not one per signature),
-and the lookup walks the whole inheritance chain, so a signal declared on a <em>base</em> class connects
-through a <em>derived</em> registration in either registration order: a <code>Pickup</code> base declares a
+<p>Script sees one generic <code>Signal</code> view for every signature (one class, not one per signature).
+The lookup walks the whole inheritance chain, so a signal declared on a <em>base</em> class connects
+through a <em>derived</em> registration in either registration order. For example, a <code>Pickup</code> base declares a
 signal, <code>HealthPickup</code> registers with <code>base_class</code> + <code>auto_bind</code>, and script
 connects on the derived object. Script-text receivers work the same way whether the object was constructed in
 script, made in C++, or loaded from a save.</p>
 <details><summary>How the view is built</summary>
 <p>Reading a signal member hands script an engine-wide <code>Signal</code> view over a type-erased operations
-table (<code>signal_script_ops</code>, <code>include/jaiscript/signals/signal_view.hpp</code>): three function
+table (<code>signal_script_ops</code>, <code>include/jaiscript/signals/signal_view.hpp</code>). The table is three function
 pointers (connect, disconnect, connected) whose thunks instantiate at the binding site, where the emitter's
-concrete type is known. On the <code>auto_bind</code> path, <code>JAI_SIGNAL_PROPERTY</code> stamps its schema
+concrete type is known.</p>
+<p>On the <code>auto_bind</code> path, <code>JAI_SIGNAL_PROPERTY</code> stamps its schema
 entry <code>is_signal</code> (<code>properties/property_schema.hpp</code>), and the binder turns that entry
 into a read-only property whose getter asks the live signal property for its erased table
 (<code>property_base::signal_ops</code>). That lookup is <code>find_reflected_property</code>: virtual, whole
@@ -772,25 +808,32 @@ print("inherited method: {}", h.kind());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">upcast: elixir heals 40
 inherited method: pickup:elixir</code></pre></div>
 <p>There is no registration-order rule. <strong>The <code>property_owner</code> declaration is the
-inheritance truth, and registration projects it completely</strong>: a derived registration
+inheritance truth, and registration projects it completely</strong>:</p>
+<ul>
+<li>A derived registration
 materializes an unregistered <code>property_owner</code> base on the spot (methods from its
-<code>jai_auto_bind</code>, schema properties, signal views, all recursively up the chain), and an explicit
+<code>jai_auto_bind</code>, schema properties, signal views, all recursively up the chain).</li>
+<li>An explicit
 registration arriving later <em>adopts</em> that same definition and gives it its curated script name.
-Existing bindings and derived instances follow, because it is the same definition. Methods and
+Existing bindings and derived instances follow, because it is the same definition.</li>
+<li>Methods and
 <code>JAI_PROPERTY</code> fields both inherit through the chain, and base-level declarations need no
-re-exposure on the derived binder. Auto-materialized bases are named by the shared ladder: a
+re-exposure on the derived binder.</li>
+<li>Auto-materialized bases are named by the shared ladder: a
 <code>JAI_PROPERTY_OWNER(Name)</code> / <code>JAI_PROPERTY_OWNER_AS(Class, "Name")</code> pin when the
-class declares one, else the bare C++ class name, the same name serialization uses for
-<code>$type</code>, so a type carries one identity everywhere. (Plain non-<code>property_owner</code>
+class declares one, else the bare C++ class name. That is the same name serialization uses for
+<code>$type</code>, so a type carries one identity everywhere.</li>
+</ul>
+<p>Plain non-<code>property_owner</code>
 bases keep the explicit <code>.base_class&lt;B&gt;()</code> spelling, and a base whose name is already
-taken by a different type simply waits for its own registration.)</p>
+taken by a different type simply waits for its own registration.</p>
 <p>Script classes extending C++ classes (<code>class SmartSpawner : Spawner</code>, with
 <code>super(...)</code> calling the bound constructor) were demonstrated in the hot-reload section. That
 direction works with zero extra registration.</p>
 
 <h2 id="plain-structs-and-templates-static-binders">Plain structs and templates: static binders<a class="hlink" href="#plain-structs-and-templates-static-binders" aria-label="link">&#8203;</a></h2>
 <p>A plain struct or a class template can carry its binding as a compile-time declaration beside the type, at
-namespace scope outside any namespace: <code>JAI_STATIC_BINDER(Type, "Name", ...)</code> for a type,
+namespace scope outside any namespace. Use <code>JAI_STATIC_BINDER(Type, "Name", ...)</code> for a type, and
 <code>JAI_TEMPLATE_BINDER(Template, "Name", ...)</code> for every instantiation of a one-parameter template
 (<code>JAI_TEMPLATE_BINDER_2</code> for two). The chain inside takes <code>.property</code> and
 <code>.method</code>, written against <code>T</code> in a template binder. Nothing reaches an engine until the
@@ -828,19 +871,20 @@ print(type_of(b), " ", type_of(f), " ", type_of(w));</code></pre></div>
 4 2.5 0
 Box&lt;int&gt; Box&lt;float&gt; Box&lt;int32&gt;</code></pre></div>
 <p>An instantiation is named the way a script spells it, so <code>Box&lt;int64_t&gt;</code> is
-<code>Box&lt;int&gt;</code> and <code>Box&lt;double&gt;</code> is <code>Box&lt;float&gt;</code>; binding one width
+<code>Box&lt;int&gt;</code> and <code>Box&lt;double&gt;</code> is <code>Box&lt;float&gt;</code>. Binding one width
 of a numeric argument binds its 32/64-bit sibling as well (<code>Box&lt;int32&gt;</code> above). The naming rules
-are the last two items of the next section. The type gets a default constructor; for constructor overloads,
+are the last two items of the next section. The type gets a default constructor. For constructor overloads,
 operators, base classes or signals use <code>dynamic_binder</code>.</p>
 <h2 id="atomics">Atomics: one value that every engine shares<a class="hlink" href="#atomics" aria-label="link">&#8203;</a></h2>
 <p><code>jai::stdlib::register_atomics(eng)</code> (<code>&lt;jaiscript/stdlib/atomic.hpp&gt;</code>; <code>register_all</code>
 leaves it out) binds <code>std::atomic&lt;int64_t&gt;</code>, <code>std::atomic&lt;double&gt;</code> and
 <code>std::atomic&lt;bool&gt;</code> as <code>atomic&lt;int&gt;</code>, <code>atomic&lt;float&gt;</code> and
 <code>atomic&lt;bool&gt;</code>. The host owns the atomic and binds it into each engine by reference with
-<code>add_global_ref</code>. Every engine then reads and writes the one C++ object, on whatever thread it runs, because each
-operation on it is one atomic step: a counter, a flag or a gauge that requests, workers or game sessions share with no lock
-and no copy. The value each engine holds is that engine&#x27;s own, made and dropped on its thread; only the
-<code>std::atomic</code> it names is shared.</p>
+<code>add_global_ref</code>.</p>
+<p>Every engine then reads and writes the one C++ object, on whatever thread it runs, because each
+operation on it is one atomic step. That makes it a counter, a flag or a gauge that requests, workers or game sessions
+share with no lock and no copy. The value each engine holds is that engine&#x27;s own, made and dropped on its thread. Only
+the <code>std::atomic</code> it names is shared.</p>
 <div class="codeblock cb-cpp" data-sample="binder-atomics"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::atomic&lt;int64_t&gt; page_views{0};                // the host&#x27;s: it outlives both engines
 
 auto front = jai::engine::make();
@@ -875,13 +919,13 @@ the host reads 12</code></pre></div>
 <li>As in C++, <code>a = a + 1</code> is a load and then a store, two steps another engine can come between; <code>a += 1</code>,
 <code>++a</code> and <code>a.fetch_add(1)</code> are one. Two atomics written one after the other are two separate facts:
 state that must change together belongs in a transaction.</li>
-<li>An int step keeps the language&#x27;s overflow rule: at the largest int, <code>a += 1</code> raises
-<code>Integer overflow in &#x27;+=&#x27;</code> (<code>&#x27;++&#x27;</code>, and <code>&#x27;+&#x27;</code> for
-<code>fetch_add</code>) and leaves the value as it was, where a C++ <code>std::atomic</code> wraps.</li>
+<li>An int step keeps the language&#x27;s overflow rule, where a C++ <code>std::atomic</code> wraps. At the largest int,
+<code>a += 1</code> raises <code>Integer overflow in &#x27;+=&#x27;</code> (<code>&#x27;++&#x27;</code>, and
+<code>&#x27;+&#x27;</code> for <code>fetch_add</code>) and leaves the value as it was.</li>
 <li><code>atomic&lt;float&gt;</code> has no <code>++</code> or <code>--</code>, and <code>atomic&lt;bool&gt;</code> no arithmetic, as
 in C++: <code>load_avg++</code> raises <code>Cannot apply &#x27;++&#x27; to atomic&lt;float&gt;</code>.</li>
 <li>An atomic is not copyable: <code>auto c = page_views;</code>, <code>var v = page_views;</code> and a by-value parameter
-raise <code>Cannot copy C++ object of type &#x27;atomic&lt;int&gt;&#x27;</code>, while <code>atomic&lt;int&gt;&amp; views = page_views;</code>
+raise <code>Cannot copy C++ object of type &#x27;atomic&lt;int&gt;&#x27;</code>. <code>atomic&lt;int&gt;&amp; views = page_views;</code>
 and an <code>atomic&lt;int&gt;&amp;</code> parameter name it.</li>
 <li>A host may bind its atomic under different names in different engines, and an engine may construct a local
 <code>atomic&lt;int&gt;</code> of its own (<code>atomic&lt;int&gt; local(5);</code>), which nothing else shares.</li>
@@ -898,7 +942,7 @@ reflect and serialize from the one declaration, but script access needs an expli
 <code>.property()</code> on a <code>std::vector</code> gets you the zero-copy live view.</li>
 <li><strong>Inherited properties resolve through derived registrations.</strong> Every schema-generated
 accessor (value, observable, and signal alike) looks the property up over the whole inheritance chain
-(the virtual <code>find_reflected_property</code>), so a base-declared <code>JAI_PROPERTY</code> or
+(the virtual <code>find_reflected_property</code>). So a base-declared <code>JAI_PROPERTY</code> or
 <code>JAI_SIGNAL_PROPERTY</code> reads, writes, and connects through a derived registration in either
 registration order. This matches serialization, which saves and loads every level's properties the same
 chain-walking way.</li>
@@ -919,32 +963,41 @@ Their property managers hold pointers into the object, so the types are delibera
 unwraps transparently (<code>gate.threat + 2</code> works, and <code>print(gate.threat)</code> shows the value).
 Assign it to a typed local when you want the value itself.</li>
 <li><strong>No cross-thread object sharing.</strong> An engine, the objects registered into it and every value it makes belong to
-one thread at a time: another thread uses or drops them only while the engine is idle, with the hand-off synchronized. The zero-global-state design means the alternative is cheap: one engine per thread,
-values copy cleanly, and nothing needs a lock. There is no binder flag that makes a single bound object
-thread-shared. The library&#x27;s <a href="#atomics">atomic types</a> are the bound types built to be shared: every
+one thread at a time. Another thread uses or drops them only while the engine is idle, with the hand-off
+synchronized. The zero-global-state design means the alternative is cheap: one engine per thread, values copy cleanly,
+and nothing needs a lock. There is no binder flag that makes a single bound object thread-shared.
+The library&#x27;s <a href="#atomics">atomic types</a> are the bound types built to be shared. Every
 operation on one is a single atomic step, so one <code>std::atomic</code> may be bound into engines on many threads.</li>
 <li><strong>Auto-named registrars can't name template instantiations.</strong>
 <code>jai::registrar&lt;Point&lt;int&gt;, Ctx&gt;</code> without an explicit name is a compile error pointing
 you at the named constructor. Pass <code>"Pointi"</code> (or any script-legal name) yourself. Template-syntax
 names like <code>"Point&lt;int&gt;"</code> register the base template name with the parser
-automatically; the base name stays an ordinary identifier, so a variable or script class may still be called
+automatically. The base name stays an ordinary identifier, so a variable or script class may still be called
 <code>Point</code>, and only <code>Point&lt;</code> followed by a type reads as the template.</li>
 <li><strong><code>JAI_TEMPLATE_BINDER</code> names an instantiation the way a script spells it.</strong>
-Each argument takes its script type's name: script <code>int</code> and <code>float</code> are 64-bit, so
+Each argument takes its script type's name:
+<ul>
+<li>Script <code>int</code> and <code>float</code> are 64-bit, so
 <code>int64_t</code> spells <code>int</code> and <code>double</code> spells <code>float</code> (a script
-<code>double</code> is the same type), while narrower widths carry their size: <code>int32_t</code> is
-<code>int32</code>, <code>uint8_t</code> is <code>uint8</code>, C++ <code>float</code> is <code>float32</code>.
-<code>std::vector&lt;E&gt;</code> is <code>array&lt;E&gt;</code>, <code>std::map&lt;K, V&gt;</code> is
-<code>map&lt;K,V&gt;</code>, <code>std::shared_ptr&lt;T&gt;</code> is <code>shared_ptr&lt;T&gt;</code>, and a
-class argument takes its <code>JAI_STATIC_BINDER</code> or template-binder name. So
-<code>Point&lt;double&gt;</code> registers <code>"Point&lt;float&gt;"</code>, and a script's
-<code>Point&lt;double&gt;</code> and <code>Point&lt;float&gt;</code> both reach it; <code>Point&lt;float32&gt;</code>
+<code>double</code> is the same type).</li>
+<li>Narrower widths carry their size: <code>int32_t</code> is
+<code>int32</code>, <code>uint8_t</code> is <code>uint8</code>, C++ <code>float</code> is <code>float32</code>.</li>
+<li><code>std::vector&lt;E&gt;</code> is <code>array&lt;E&gt;</code>, <code>std::map&lt;K, V&gt;</code> is
+<code>map&lt;K,V&gt;</code>, <code>std::shared_ptr&lt;T&gt;</code> is <code>shared_ptr&lt;T&gt;</code>.</li>
+<li>A class argument takes its <code>JAI_STATIC_BINDER</code> or template-binder name.</li>
+</ul>
+So <code>Point&lt;double&gt;</code> registers <code>"Point&lt;float&gt;"</code>, and a script's
+<code>Point&lt;double&gt;</code> and <code>Point&lt;float&gt;</code> both reach it. <code>Point&lt;float32&gt;</code>
 reaches the C++ <code>float</code> one. <code>bind_static_type</code> binds a 32/64-bit sibling with either width
 (<code>Point&lt;int32&gt;</code> with <code>Point&lt;int&gt;</code>, <code>Point&lt;float32&gt;</code> with
-<code>Point&lt;float&gt;</code>). An argument with no script spelling is a compile error: specialize
-<code>jai::type_name_helper&lt;T&gt;</code> with the name scripts write for it. Two C++ types the script spells
-alike (<code>int</code> and <code>long</code> on MSVC) cannot both bind; the second
+<code>Point&lt;float&gt;</code>).
+<ul>
+<li>An argument with no script spelling is a compile error: specialize
+<code>jai::type_name_helper&lt;T&gt;</code> with the name scripts write for it.</li>
+<li>Two C++ types the script spells
+alike (<code>int</code> and <code>long</code> on MSVC) cannot both bind: the second
 <code>bind_static_type</code> throws.</li>
+</ul></li>
 </ul>
 <nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../embedding/01-embedding-quickstart.html"><span>&larr; previous</span>Embedding Quickstart</a><a class="next" rel="next" href="../embedding/03-backends.html"><span>next &rarr;</span>Backends: Interpreter vs VM</a></nav></article>
 </main>

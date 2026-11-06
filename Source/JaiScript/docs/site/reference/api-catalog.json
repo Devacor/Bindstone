@@ -7681,6 +7681,70 @@
       "form": "namespace",
       "availability": "register_all() or area registration",
       "display": "crypto::password_verify(password: text, hash: string) -> bool"
+    },
+    {
+      "owner": "language",
+      "name": "template",
+      "signature": "template(path: string, names: variable names...) -> web::html",
+      "provider": "core",
+      "effect": "execute",
+      "notes": "Renders the template file at path, seeing each passed name by reference with its declared type, and the program; every splice HTML-escaped. A literal path compiles and checks at load; another path at its first render.",
+      "source": "source/implementation/parser.cpp",
+      "form": "function",
+      "availability": "Every engine (reads the file under the filesystem privilege)",
+      "display": "template(path: string, names: variable names...) -> web::html"
+    },
+    {
+      "owner": "language",
+      "name": "scoped_template",
+      "signature": "scoped_template(path: string, args: map) -> web::html",
+      "provider": "core",
+      "effect": "execute",
+      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values, always escapes, and writes at most engine::template_output_limit bytes.",
+      "source": "source/implementation/parser.cpp",
+      "form": "function",
+      "availability": "Every engine (reads the file under the filesystem privilege)",
+      "display": "scoped_template(path: string, args: map) -> web::html"
+    },
+    {
+      "owner": "language",
+      "name": "scoped_template_text",
+      "signature": "scoped_template_text(text: string, args: map) -> web::html",
+      "provider": "core",
+      "effect": "execute",
+      "notes": "scoped_template over template text instead of a file.",
+      "source": "source/implementation/parser.cpp",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "scoped_template_text(text: string, args: map) -> web::html",
+      "example": {
+        "code": "print(scoped_template_text(\"<b>${args.name}</b>\", {\"name\": \"<i>\"}));",
+        "output": "<b>&lt;i&gt;</b>"
+      }
+    },
+    {
+      "owner": "language",
+      "name": "raw",
+      "signature": "raw(text: var) -> web::html",
+      "provider": "core",
+      "effect": "copy",
+      "notes": "Inside a template(...) only: the text spliced unescaped. A scoped template refuses it.",
+      "source": "source/implementation/templates.cpp",
+      "form": "function",
+      "availability": "Inside a template",
+      "display": "raw(text: var) -> web::html"
+    },
+    {
+      "owner": "web::html",
+      "name": "to_string",
+      "signature": "to_string() -> string",
+      "provider": "core",
+      "effect": "observe",
+      "notes": "The HTML text; a web::html splices into a template as it is.",
+      "source": "source/implementation/templates.cpp",
+      "form": "method",
+      "availability": "Every engine",
+      "display": "web::html.to_string() -> string"
     }
   ],
   "fields": [

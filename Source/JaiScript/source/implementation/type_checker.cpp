@@ -39,6 +39,7 @@
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
 #include <jaiscript/detail/regex_library.hpp>
+#include <jaiscript/detail/template_library.hpp>
 
 #include <algorithm>
 #include <optional>
@@ -65,7 +66,7 @@ std::string check_report::format(std::string_view source, std::string_view scrip
 
     std::string out;
     for (const auto& d : diagnostics) {
-        out.append(script_name);
+        out.append(d.file.empty() ? script_name : std::string_view(d.file));
         out += ':';
         out += std::to_string(d.line);
         out += ':';
@@ -76,7 +77,7 @@ std::string check_report::format(std::string_view source, std::string_view scrip
             out += " (declared at " + std::to_string(d.related_line) + ":" + std::to_string(d.related_column) + ")";
         }
         out += '\n';
-        if (d.line >= 1 && d.line <= lines.size()) {
+        if (d.file.empty() && d.line >= 1 && d.line <= lines.size()) {
             std::string_view line = lines[d.line - 1];
             out += "    ";
             out.append(line);
@@ -416,7 +417,8 @@ private:
     check_observer* observer_ = nullptr;
 
     std::vector<check_diagnostic> diags_;
-    std::unordered_set<std::string> seen_;   // "line:col:message" dedupe keys
+    std::unordered_set<std::string> seen_;   // "file:line:col:message" dedupe keys
+    int template_files_ = 0;   // inside a template(...) body: diagnostics name the template's file (check_diagnostic::file)
     bool capped_ = false;
     bool has_includes_ = false;           // include/import present (any form): proof gates stay shut
     bool has_dynamic_includes_ = false;   // a path the closure cannot read: undeclared identifiers downgrade to warnings
@@ -737,11 +739,12 @@ private:
             capped_ = true;
             return;
         }
-        std::string key = std::to_string(loc.line) + ":" + std::to_string(loc.column) + ":" + message;
+        std::string file = template_files_ > 0 ? loc.filename : std::string();
+        std::string key = file + ":" + std::to_string(loc.line) + ":" + std::to_string(loc.column) + ":" + message;
         if (!seen_.insert(std::move(key)).second) {
             return;
         }
-        diags_.push_back({severity, loc.line, loc.column, std::move(message), related_line, related_column});
+        diags_.push_back({severity, loc.line, loc.column, std::move(message), file.empty() ? related_line : 0, file.empty() ? related_column : 0, std::move(file)});
     }
 
     // C++ [basic.scope]: a block or a parameter list declares a name once; a program's top level may declare one again, the later
@@ -4286,6 +4289,9 @@ private:
         const std::string_view callee_name = c->callee && c->callee->get_type() == node_type::identifier_expr
             ? std::string_view(static_cast<const identifier_expr*>(c->callee.get())->name) : std::string_view{};
         const bool parallel_callee = callee_name == "parallel_transform" || callee_name == "parallel_reduce";
+        const bool template_body = callee_name == detail::template_library::k_joiner;
+        template_files_ += template_body;
+        struct template_scope { int& depth; bool on; ~template_scope() { depth -= on; } } in_template{template_files_, template_body};
         for (size_t k = 0; k < c->arguments.size(); ++k) {
             auto& a = c->arguments[k];
             const bool combine = callee_name == "parallel_reduce" && k == 3;   // runs serially after the join

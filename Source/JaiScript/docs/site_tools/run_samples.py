@@ -2,7 +2,8 @@
 """Extract every jaiscript sample on the site and run it on both backends under strict.
 
 Each <div class="codeblock cb-jai"> is a sample. Two conventions turn a block into a support
-file instead (written next to the samples of its page, never run on its own):
+file instead (written next to the samples of its page, never run on its own); a template file (a
+<div class="codeblock cb-spider"> labeled "template &mdash; name.spider" that a sample renders) is always one:
 
   * its introducing paragraph reads "with <code>name.jai</code>:" / "and <code>name.jai</code>:"
   * its label reads "jaiscript &mdash; name.jai" AND another block on the page imports or
@@ -37,11 +38,11 @@ RUNNER_DIRS = [REPO / "build" / "bin", REPO / "out" / "build" / "x64-Release" / 
 DEFAULT_RUNNER = next((d / "jaiscript" for d in RUNNER_DIRS if any((d / n).exists() for n in ("jaiscript", "jaiscript.exe"))),
                       RUNNER_DIRS[0] / "jaiscript")
 
-INTRO_SUPPORT_RE = re.compile(r"^\s*(?:with|and|plus|then)\s+`([A-Za-z0-9_./-]+\.jai)`\s*:?\s*$", re.I)
-INTRO_SUPPORT_RE2 = re.compile(r"`([A-Za-z0-9_./-]+\.jai)`\s*:\s*$")
-LABEL_FILE_RE = re.compile(r"jaiscript\s*[—–·-]+\s*([A-Za-z0-9_./-]+\.jai)\s*$")
+INTRO_SUPPORT_RE = re.compile(r"^\s*(?:with|and|plus|then)\s+`([A-Za-z0-9_./-]+\.(?:jai|spider))`\s*:?\s*$", re.I)
+INTRO_SUPPORT_RE2 = re.compile(r"`([A-Za-z0-9_./-]+\.(?:jai|spider))`\s*:\s*$")
+LABEL_FILE_RE = re.compile(r"(?:jaiscript|template)\s*[—–·-]+\s*([A-Za-z0-9_./-]+\.(?:jai|spider))\s*$")
 HOST_LABEL_RE = re.compile(r"host|sketch|cap above|registration|needs the", re.I)
-REF_RE = re.compile(r'\b(?:import|include)\s*\(?\s*"([^"]+)"')
+REF_RE = re.compile(r'\b(?:import|include|template|scoped_template)\s*\(?\s*"([^"]+)"')
 
 
 class Extractor(HTMLParser):
@@ -114,7 +115,7 @@ def plan_page(page):
     ex.feed(page.read_text(encoding="utf-8"))
     ex.close()
     blocks = ex.blocks
-    jai = [b for b in blocks if b["kind"] == "cb-jai"]
+    jai = [b for b in blocks if b["kind"] in ("cb-jai", "cb-spider")]   # a cb-spider block is a template file, never a sample
     referenced = set()
     for b in jai:
         referenced.update(REF_RE.findall(b["code"]))
@@ -189,7 +190,7 @@ def expected_shows_error(expected):
         or ("at <script>" in e) or e.startswith("  at ")
 
 
-LISTING_PREFIX_RE = re.compile(r"^(?:jaiscript: )?(?:[\w./<>\\-]+\.jai|script|<script>|<sample>[\\/][\w.]+):(\d+:\d+)")
+LISTING_PREFIX_RE = re.compile(r"^(?:jaiscript: )?(?:[\w./<>\\-]+\.(?:jai|spider)|script|<script>|<sample>[\\/][\w.]+):(\d+:\d+)")
 FRAME_RE = re.compile(r"\((?:[^()]*\.jai|<script>):(\d+)\)")
 
 

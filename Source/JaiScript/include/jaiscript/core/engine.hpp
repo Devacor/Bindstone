@@ -450,6 +450,12 @@ namespace jai {
         void binary_scan_limit(size_t bytes);
         size_t binary_scan_limit() const;
 
+        // The most bytes one scoped_template or scoped_template_text render writes; a render that would write past it raises a
+        // catchable error naming the limit, so an untrusted template cannot build an unbounded page. Default 1 MiB (1048576);
+        // zero is no limit. Scripts cannot change it.
+        void template_output_limit(size_t bytes);
+        size_t template_output_limit() const;
+
         // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).
         // 0 = auto (hardware concurrency). The calling thread runs one chunk; the pool
@@ -1135,6 +1141,11 @@ namespace jai {
         // A transient error text's symbol (string_symbolizer::park): it rides an error's {0} without growing the
         // interned table. While frozen it is the text's interned id when one exists, else 0 (the caller's slot-less text)
         uint64_t park_error_text(std::string_view text) const;
+        // template(path, ...) with a path known at run time (detail/template_library.hpp): the unit `source` (a lambda over the
+        // template) run under `unit`, its parse or check failure as the error; and whether that unit's parse still stands for
+        // every file it read
+        checked_result<script_value> run_template_unit(const std::string& unit, const std::string& source);
+        bool template_unit_current(const std::string& unit, const std::string& source);
 
         // Get class definition by type index
         std::shared_ptr<class_definition> get_class_definition_by_type(const std::type_index& type) const;

@@ -72,6 +72,8 @@ GUIDE = [
      "The opt-in web:: library: HTML escaping and unescaping, RFC 3986 and form percent-encoding, query strings parsed and built, and URLs split into a web::url and joined back."),
     ("18-random.html", "Random Numbers &amp; Crypto",
      "The random type: a generator you own, seeded streams that replay bit for bit on every platform, copies and save files for rollback, draws in parallel loops; and crypto:: for secrets: secure random bytes, SHA-2, HMAC and PHP-compatible bcrypt passwords."),
+    ("19-templates.html", "HTML Templates",
+     "template(path, names...) renders an HTML file with escaped ${...} splices, seeing the names it is given by reference and the program, checked at load and reloaded on edit; scoped_template renders untrusted templates over a copy of a map."),
 ]
 
 EMBEDDING = [

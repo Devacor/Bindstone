@@ -2838,6 +2838,28 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (bool proofs : { true, false }) {
 				check_eq(run_on(false, rebind, proofs), run_on(true, rebind, proofs), std::string("a field rebound by a callee agrees (the landing resolves it again)") + (proofs ? "" : " (proofs off)"));
 			}
+			// a member of a program global (`canvas.px[i] = ...` in a frame loop): the entry resolves the global through its lookup cache, then the field
+			const char* gfn = "class Chunk { array<float> odist = []; array<float> out = []; } Chunk G;"
+			                  " var gf = function(int cols, float vh) -> float {"
+			                  " float acc = 0.0;"
+			                  " for (int ci = 0; ci < cols; ++ci) { float lineh = vh / G.odist[ci]; G.out[ci] = lineh; acc = acc + lineh; }"
+			                  " return acc; };";
+			const std::string glisting = listing_of(gfn);
+			check_true(glisting.find("CELLS_") != std::string::npos && glisting.find("C_LOAD") != std::string::npos && glisting.find("C_INDEX_STORE") != std::string::npos, "a global's member containers close the loop: " + glisting);
+			const std::string gcall = std::string(gfn) + " G.odist = [2.0, 4.0, 8.0, 0.5]; G.out = [0.0, 0.0, 0.0, 0.0];"
+			                          " float r = gf(4, 16.0); to_string(r) + \" \" + to_string(G.out[1]) + \" \" + to_string(G.out[3]);";
+			const std::string gswap = "class Chunk { array<float> odist = []; array<float> out = []; } Chunk G;"
+			                          " function swap_global() { Chunk fresh; fresh.odist = [10.0, 20.0, 30.0, 40.0]; fresh.out = [0.0, 0.0, 0.0, 0.0]; G = fresh; }"
+			                          " function swap_field() { G.odist = [100.0, 200.0, 300.0, 400.0]; }"
+			                          " var gh = function(int cols) -> float { float acc = 0.0;"
+			                          " for (int ci = 0; ci < cols; ++ci) { acc = acc + G.odist[ci]; G.out[ci] = acc; if (ci == 0) { swap_global(); } if (ci == 2) { swap_field(); } } return acc; };"
+			                          " G.odist = [1.0, 2.0, 3.0, 4.0]; G.out = [0.0, 0.0, 0.0, 0.0]; float r = gh(4); to_string(r) + \" \" + to_string(G.out);";
+			for (bool proofs : { true, false }) {
+				const std::string vm = run_on(true, gcall, proofs), in = run_on(false, gcall, proofs);
+				check_eq(in, vm, std::string("a global's members: both backends agree") + (proofs ? "" : " (proofs off)"));
+				check_true(vm.find("throw") == std::string::npos, "the call completes: " + vm);
+				check_eq(run_on(false, gswap, proofs), run_on(true, gswap, proofs), std::string("a global or its field replaced by a callee agrees (the landing resolves it again)") + (proofs ? "" : " (proofs off)"));
+			}
 		});
 		test("a_float_compound_store_takes_the_float_row", [this]() {
 			// `x += y` on floats took the int row (a fallback at every execution; inside a loop a representation refusal): the

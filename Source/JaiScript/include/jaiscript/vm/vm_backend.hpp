@@ -2490,7 +2490,7 @@ namespace jai::vm {
         op_status exec_cells_resume(frame& f, const vm_instruction& ins);
         bool cells_resolve_sites(frame& f, const chunk::cell_loop& loop);   // the load and store sites' containers; false = a site the block cannot hold
         op_status exec_c_push(frame& f, const vm_instruction& ins, const cell_regs& cr);   // recv.push(v) inside a block by the push kernel's rows; a declined kind or a refused charge misses
-        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off = SIZE_MAX);
+        const script_value* cells_member_container(frame& f, const fused_operand& container, const script_array*& pin, size_t site, size_t off = SIZE_MAX, size_t env_cache = SIZE_MAX);
         class_instance* cells_member_prefix(frame& f, class_instance* inst, const member_expr* expr, size_t off);   // a nested member site's prefix instance (`p.pos` of `p.pos.x`); inst itself for a direct site; nullptr = the general form
         const script_value* cells_member_field(frame& f, class_instance* inst, uint32_t member_node, size_t site, size_t off, bool reprobe, bool prefixed = false, uint32_t* slot_out = nullptr);   // a member site's scalar field of an instance, the slot through a class-keyed cache per site   // a member of a frame-slot instance: its plain field, read once at the entry; pin = the table an element-reference base names (no store site may write it); nullptr = the general form
         bool cells_sites_hold(frame& f, const chunk::cell_loop& loop, bool env_ok, const std::vector<uint32_t>& land_sites);

@@ -1,244 +1,41 @@
-/* Landing-page hot-reload demo: an edit to gator.jai re-runs it once JaiScript's lexer and checker rules accept it (the
-   error texts are the engine's own), and the file's reload hook copies the new spd onto the live gator. */
+/* Landing-page hot-reload demo: the sliders and the say toggle edit gator.jai, the shown file reloads, and its
+   hot_reload_migrate hook copies the edited field onto the live gator. */
 (function () {
   "use strict";
   var demo = document.getElementById("hero-demo");
   if (!demo) return;
-  var code = demo.querySelector("pre");
   var spdIn = document.getElementById("demo-spd");
-  var sayIn = document.getElementById("demo-say");
+  var slicesIn = document.getElementById("demo-slices");
+  var sayIns = demo.querySelectorAll('input[name="demo-say"]');
+  var spdVal = document.getElementById("demo-spd-val");
+  var slicesVal = document.getElementById("demo-slices-val");
+  var sayVal = document.getElementById("demo-say-val");
   var hookEl = document.getElementById("demo-hook");
   var status = document.getElementById("demo-status");
   var label = document.getElementById("demo-label");
-  var checkEl = document.getElementById("demo-check");
   var live = document.getElementById("demo-live");
   var cv = document.getElementById("demo-scene");
-  var g = cv.getContext && cv.getContext("2d");
-  if (!g || !code || !spdIn || !sayIn) return;
+  var g = cv && cv.getContext && cv.getContext("2d");
+  if (!g || !spdIn || !slicesIn || !sayIns.length) return;
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
   var still = !!(reduce && reduce.matches);
-  var TICK = 1000 / 60, START = 30, DEBOUNCE = 400;
-  var gator = { spd: 1, slices: 0, x: START, says: "" };
-  var applied = { spd: spdIn.value, say: sayIn.value };
+  var TICK = 1000 / 60, START = 30, DEBOUNCE = 250, CAKE_SLICES = 3;
+  var gator = { spd: Number(spdIn.value), slices: Number(slicesIn.value), x: START, says: checkedSay() };
   var frameNo = 0, nom = 0, lastTs = 0, acc = 0;
-  var visible = true, running = false, statusTimer = 0, editTimer = 0, editsItself = true;
+  var visible = true, running = false, statusTimer = 0, editTimer = 0;
   var colors = {};
   var GATOR = "#3fae5a", GATOR_DARK = "#2a7a3d", BELLY = "#c9e7a1";
+  var HOOKS = {
+    spd: 'gator.spd = <span class="tk-fn">Gator</span>().spd;',
+    slices: 'gator.slices = <span class="tk-fn">Gator</span>().slices;'
+  };
 
-  // Names the shown program, the standard library or the keywords declare: what one would do here is not the demo's to say.
-  var DECLARED = ("spd slices gator cake Gator Mob tick say step_toward beside hot_reload_migrate print sleep to_string " +
-    "format read_file write_file math random time reflect crypto binary class const continue else float for function if " +
-    "int map array namespace nullptr override private public return static string this void while auto var let super " +
-    "weak_ptr shared_ptr try catch throw switch case default fallthrough include import coroutine yield enum new " +
-    "protected parallel_for nocopy cast extern inline true false null").split(" ");
-  var NAMESPACES = ["math", "time", "reflect", "crypto", "binary", "string"];
-  var ESCAPES = { n: "\n", r: "\r", t: "\t", "\\": "\\", '"': '"', "'": "'" };
-
-  function isDigit(c) { return c >= "0" && c <= "9"; }
-  function hexValue(c) { return c ? "0123456789abcdef".indexOf(c.toLowerCase()) : -1; }
-  function isWordStart(c) { return !!c && /[A-Za-z_]/.test(c); }
-  function startsToken(c) { return !!c && /[\w"'`]/.test(c); }
-  function skipSpace(t, i) { while (i < t.length && /\s/.test(t[i])) i++; return i; }
-
-  // The lexer's scan_string, run over the rest of the line: an unclosed quote runs on to the line's end.
-  function lexString(t, i) {
-    var value = "";
-    for (var j = i + 1; j < t.length; j++) {
-      var c = t[j];
-      if (c === '"') return { end: j + 1, value: value };
-      if (c !== "\\") { value += c; continue; }
-      if (++j >= t.length) return { err: "unterminated string literal" };
-      var e = t[j];
-      if (ESCAPES.hasOwnProperty(e)) { value += ESCAPES[e]; continue; }
-      if (e !== "x") return { err: "invalid escape sequence" };
-      if (j + 1 >= t.length) return { err: "unterminated string literal" };
-      var hi = hexValue(t[j + 1]), lo = hexValue(t[j + 2]);
-      if (hi < 0 || lo < 0) return { err: "invalid \\x escape: expected two hex digits" };
-      value += String.fromCharCode(hi * 16 + lo);
-      j += 2;
+  function checkedSay() {
+    for (var i = 0; i < sayIns.length; i++) {
+      if (sayIns[i].checked) return sayIns[i].value;
     }
-    return { err: "unterminated string literal" };
-  }
-
-  // The lexer's scan_number: 0x and 0b prefixes, C octal, C++'s fraction (1.5, 1., 1.e5; a '.' before a name stays a member
-  // access), an exponent that needs digits.
-  function lexNumber(t, i) {
-    var j = i, isFloat = false, isHex = false, isBinary = false;
-    if (t[j] === "0") {
-      j++;
-      if (t[j] === "x" || t[j] === "X") { isHex = true; j++; while (hexValue(t[j]) >= 0) j++; }
-      else if (t[j] === "b" || t[j] === "B") { isBinary = true; j++; while (t[j] === "0" || t[j] === "1") j++; }
-      else while (isDigit(t[j])) j++;
-    } else {
-      while (isDigit(t[j])) j++;
-    }
-    if (!isHex && !isBinary) {
-      if (t[j] === "." && t[j + 1] !== "." && (!isWordStart(t[j + 1]) || t[j + 1] === "e" || t[j + 1] === "E")) {
-        isFloat = true; j++; while (isDigit(t[j])) j++;
-      }
-      if (t[j] === "e" || t[j] === "E") {
-        isFloat = true; j++;
-        if (t[j] === "+" || t[j] === "-") j++;
-        if (!isDigit(t[j])) return { err: "invalid number literal: exponent has no digits in '" + t.slice(i, j) + "'" };
-        while (isDigit(t[j])) j++;
-      }
-    }
-    var lexeme = t.slice(i, j), value;
-    if (isFloat) {
-      value = Number(lexeme);
-      if (!isFinite(value) || (value === 0 && /[1-9]/.test(lexeme.split(/[eE]/)[0]))) {
-        return { err: "number literal out of range: '" + lexeme + "'" };
-      }
-    } else if (isHex || isBinary) {
-      if (lexeme.length < 3) return { err: "invalid number literal: '" + lexeme + "'" };
-      value = parseInt(lexeme.slice(2), isHex ? 16 : 2);
-    } else if (lexeme.length > 1 && lexeme[0] === "0") {
-      if (/[89]/.test(lexeme)) return { err: "invalid octal literal (digits 8/9 not allowed): '" + lexeme + "'" };
-      value = parseInt(lexeme, 8);
-    } else {
-      value = parseInt(lexeme, 10);
-    }
-    return { end: j, value: value, isFloat: isFloat };
-  }
-
-  // Where an input sits in the shown file: its 1-based line and column, and the text of that line around it.
-  function locate(input) {
-    var before = "", after = "", found = false;
-    (function walk(node) {
-      for (var n = node.firstChild; n; n = n.nextSibling) {
-        if (n === input) { found = true; continue; }
-        var text = n.nodeType === 3 ? n.nodeValue : n.tagName === "INPUT" ? n.value : null;
-        if (text === null) { walk(n); continue; }
-        if (found) after += text; else before += text;
-      }
-    }(code));
-    var lines = before.split("\n"), prefix = lines[lines.length - 1];
-    return { input: input, line: lines.length, col: prefix.length + 1, prefix: prefix, suffix: after.split("\n")[0] };
-  }
-
-  function diag(stage, at, offset, message) { return { stage: stage, at: at, col: at.col + offset, message: message }; }
-
-  // int spd = <text>;  the int it initializes, or the first diagnostic the engine gives.
-  function checkSpd() {
-    var t = spdIn.value, at = locate(spdIn), field = at.prefix.indexOf("spd") + 1 - at.col;
-    var demoNote = diag("demo", at, 0, "this demo applies a literal here: a number, true or false");
-    var i = skipSpace(t, 0), sign = 1, token, word;
-    if (i === t.length) return diag("parse", at, t.length, "expected expression");
-    if (t[i] === "+" || t[i] === "-") {
-      if (t[i + 1] === t[i]) return demoNote;
-      sign = t[i] === "-" ? -1 : 1;
-      var op = i;
-      i = skipSpace(t, i + 1);
-      var operand = /^\w+/.exec(t.slice(i));
-      if (operand && (operand[0] === "true" || operand[0] === "false") && skipSpace(t, i + operand[0].length) === t.length) {
-        return diag("check", at, op, sign < 0 ? "Unary minus requires numeric operand" : "Unary plus requires numeric operand");
-      }
-      if (!isDigit(t[i])) return demoNote;
-    }
-    var start = i;
-    if (isDigit(t[i])) {
-      token = lexNumber(t, i);
-    } else if (t[i] === '"') {
-      token = lexString(t + at.suffix, i);
-      token.check = "cannot initialize field 'spd' declared 'int' with 'string'";
-    } else if (/^'[^'\\]'/.test(t.slice(i))) {
-      token = { end: i + 3, check: "cannot initialize field 'spd' declared 'int' with 'char'" };
-    } else if (isWordStart(t[i])) {
-      word = /^\w+/.exec(t.slice(i))[0];
-      token = { end: i + word.length, value: word === "true" ? 1 : 0 };
-      if (word === "null") token.check = "cannot initialize field 'spd' declared 'int' with 'null'";
-      else if (word === "random") token.check = "cannot initialize field 'spd' declared 'int' with 'class random'";
-      else if (NAMESPACES.indexOf(word) >= 0) token.atStart = "'" + word + "' is a namespace, not a value; name one of its members (" + word + "::name)";
-      else if (word === "spd" || word === "slices") {
-        token.atStart = "field initializer of 'spd' reads '" + word + "' before its initialization: fields initialize in declaration order" +
-          (word === "spd" ? "" : "; declare 'slices' above 'spd'");
-      } else if (word !== "true" && word !== "false") token[DECLARED.indexOf(word) >= 0 ? "demo" : "undeclared"] = word;
-    } else {
-      return demoNote;
-    }
-    if (token.err) return diag("parse", at, i, token.err);
-    var j = skipSpace(t, token.end);
-    if (j < t.length) {
-      if (startsToken(t[j])) return diag("parse", at, j, "expected ';' after field declaration");
-      if (t[j] !== "." || !isDigit(t[start])) return demoNote;
-      var k = skipSpace(t, j + 1);
-      return isWordStart(t[k]) ? demoNote : diag("parse", at, k, "expected member name");
-    }
-    if (token.demo) return demoNote;
-    if (token.undeclared) return diag("check", at, start, "use of undeclared identifier '" + token.undeclared + "'");
-    if (token.atStart) return diag("check", at, start, token.atStart);
-    if (token.check) return diag("check", at, field, token.check);
-    var value = sign * token.value;
-    if (token.isFloat && !(Math.abs(value) < 9223372036854775808)) {
-      return diag("check", at, field, "cannot initialize field 'spd' declared 'int' with 'float': float literal is outside the int range");
-    }
-    return { value: Math.trunc(value) || 0 };
-  }
-
-  // say(<text>);  the string the gator says, or the first diagnostic.
-  function checkSay() {
-    var t = sayIn.value, at = locate(sayIn);
-    var demoNote = diag("demo", at, 0, 'this demo applies a string literal here: keep the "quotes"');
-    var i = skipSpace(t, 0), token, word;
-    if (t[i] === '"') {
-      token = lexString(t + at.suffix, i);
-    } else if (isDigit(t[i])) {
-      token = lexNumber(t, i);
-      token.demo = true;
-    } else if (isWordStart(t[i])) {
-      word = /^\w+/.exec(t.slice(i))[0];
-      token = { end: i + word.length };
-      token[DECLARED.indexOf(word) >= 0 ? "demo" : "undeclared"] = word;
-    } else {
-      return demoNote;
-    }
-    if (token.err) return diag("parse", at, i, token.err);
-    var j = skipSpace(t, token.end);
-    if (j < t.length) return startsToken(t[j]) ? diag("parse", at, j, "expected ')' after arguments") : demoNote;
-    if (token.demo) return demoNote;
-    if (token.undeclared) return diag("check", at, i, "use of undeclared identifier '" + token.undeclared + "'");
-    return { value: token.value };
-  }
-
-  // A parse error reports before any check error, and the demo's own notes come last.
-  function firstProblem(results) {
-    var stages = ["parse", "check", "demo"];
-    for (var s = 0; s < stages.length; s++) {
-      for (var r = 0; r < results.length; r++) {
-        if (results[r].stage === stages[s]) return results[r];
-      }
-    }
-    return null;
-  }
-
-  function problemText(problem) {
-    if (problem.stage === "demo") return problem.message;
-    return "gator.jai:" + problem.at.line + ":" + problem.col + ": error: " + problem.message;
-  }
-
-  function showProblem(problem) {
-    spdIn.removeAttribute("aria-invalid");
-    sayIn.removeAttribute("aria-invalid");
-    checkEl.textContent = "";
-    checkEl.className = "demo-check";
-    checkEl.hidden = !problem;
-    if (!problem) return;
-    var msg = document.createElement("div");
-    msg.textContent = problemText(problem);
-    checkEl.appendChild(msg);
-    if (problem.stage === "demo") {
-      checkEl.className += " note";
-      return;
-    }
-    problem.at.input.setAttribute("aria-invalid", "true");
-    var src = document.createElement("div");
-    src.className = "src";
-    src.setAttribute("aria-hidden", "true");
-    var line = "    " + problem.at.prefix + problem.at.input.value + problem.at.suffix;
-    src.textContent = line + "\n" + new Array(problem.col + 4).join(" ") + "^";
-    checkEl.appendChild(src);
-    src.scrollLeft = (problem.col + 3) / line.length * src.scrollWidth - src.clientWidth / 2;
+    return sayIns[0].value;
   }
 
   function readColors() {
@@ -279,10 +76,8 @@
   }
 
   function bubble(headX, headY, words) {
-    var text = words.replace(/[\x00-\x1f\x7f]+/g, " ").trim();
-    if (!text) return;
     g.font = '600 15px "JetBrains Mono", Consolas, monospace';
-    var w = Math.ceil(g.measureText(text).width) + 16, h = 24;
+    var w = Math.ceil(g.measureText(words).width) + 16, h = 24;
     var x = Math.max(4, Math.min(cv.width - w - 4, headX - 12)), y = headY - h - 12;
     var tail = Math.max(x + 6, Math.min(x + w - 14, headX - 4));
     g.fillStyle = colors.bubble; g.strokeStyle = colors.bubbleEdge; g.lineWidth = 2;
@@ -291,7 +86,7 @@
     g.fillRect(x, y, w, h); g.strokeRect(x, y, w, h);
     g.fillRect(tail + 1, y + h - 2, 6, 3);
     g.fillStyle = colors.words; g.textBaseline = "middle";
-    g.fillText(text, x + 8, y + h / 2 + 1);
+    g.fillText(words, x + 8, y + h / 2 + 1);
   }
 
   function setLabel() {
@@ -315,9 +110,8 @@
     if (nom > 0) {
       if (--nom === 0) {
         gator.x = START;
-        if (gator.slices >= 3) gator.slices = 0;
+        if (gator.slices >= CAKE_SLICES) gator.slices = 0;
         setLabel();
-        if (editsItself) editByItself();
       }
       return;
     }
@@ -341,81 +135,73 @@
   }
 
   function flash(el) {
-    if (!el) return;
+    el.classList.remove("flash");
+    void el.offsetWidth;
     el.classList.add("flash");
     setTimeout(function () { el.classList.remove("flash"); }, 900);
   }
 
-  function fit(input) { input.style.width = Math.max(1, input.value.length) + "ch"; }
-
-  function setStatus(text, state) {
+  function setStatus(text) {
     clearTimeout(statusTimer);
     status.textContent = text;
-    status.classList.toggle("idle", state === "idle");
-    status.classList.toggle("bad", state === "bad");
-    if (state === "ok") statusTimer = setTimeout(function () { setStatus("running", "idle"); }, 1800);
+    status.classList.remove("idle");
+    statusTimer = setTimeout(function () { status.textContent = "running"; status.classList.add("idle"); }, 1800);
   }
 
-  // Check the shown file and, when it passes, re-run it: the class takes the new say, the file's hook the new spd.
-  function reload(fromVisitor, force) {
-    clearTimeout(editTimer);
-    var spd = checkSpd(), say = checkSay(), problem = firstProblem([spd, say]);
-    showProblem(problem);
-    if (problem) {
-      var verdict = { parse: "parse failed", check: "static check failed", demo: "not applied" }[problem.stage];
-      setStatus(verdict + " · old code running", "bad");
-      if (fromVisitor) live.textContent = verdict + ", the old code keeps running: " + problemText(problem);
-      return;
+  // The file as the controls show it, reloaded: a field edit goes through the hook, a say edit changes tick() itself.
+  function reload(field, fromVisitor) {
+    var message;
+    if (field === "say") {
+      gator.says = checkedSay();
+      message = "reloaded · tick() updated, slices kept";
+    } else {
+      hookEl.innerHTML = HOOKS[field];
+      flash(hookEl);
+      if (field === "spd") {
+        gator.spd = Number(spdIn.value);
+        message = "reloaded · slices kept";
+      } else {
+        gator.slices = Number(slicesIn.value);
+        message = "reloaded · live gator took slices " + gator.slices;
+      }
     }
-    if (!force && spdIn.value === applied.spd && sayIn.value === applied.say) {
-      if (status.classList.contains("bad")) setStatus("running", "idle");
-      return;
-    }
-    applied.spd = spdIn.value;
-    applied.say = sayIn.value;
-    gator.spd = spd.value;
-    gator.says = say.value;
-    flash(hookEl);
-    setStatus("reloaded · slices kept", "ok");
+    setStatus(message);
     setLabel();
-    if (fromVisitor) live.textContent = "Reloaded: spd " + gator.spd + ", slices kept.";
+    if (fromVisitor) live.textContent = "Reloaded: spd " + gator.spd + ", slices " + gator.slices + ", says " + gator.says;
     if (!running) draw();
   }
 
-  // Until a visitor edits, the demo edits itself once per slice, as a save in an editor would.
-  function editByItself() {
-    spdIn.value = gator.spd === 1 ? "4" : "1";
-    fit(spdIn);
-    flash(spdIn);
-    reload(false, true);
+  function showSpd() { spdVal.textContent = spdIn.value; }
+  function showSlices() { slicesVal.textContent = slicesIn.value; }
+  function showSay() { sayVal.textContent = '"' + checkedSay() + '"'; }
+
+  function onSlider(input, field, show, valEl) {
+    input.addEventListener("input", function () {
+      show();
+      flash(valEl);
+      clearTimeout(editTimer);
+      editTimer = setTimeout(function () { reload(field, true); }, DEBOUNCE);
+    });
+    input.addEventListener("change", function () {
+      clearTimeout(editTimer);
+      reload(field, true);
+    });
   }
 
-  [spdIn, sayIn].forEach(function (input) {
-    fit(input);
-    input.addEventListener("focus", function () { editsItself = false; });
-    input.addEventListener("input", function () {
-      editsItself = false;
-      fit(input);
-      clearTimeout(editTimer);
-      editTimer = setTimeout(function () { reload(true, false); }, DEBOUNCE);
+  onSlider(spdIn, "spd", showSpd, spdVal);
+  onSlider(slicesIn, "slices", showSlices, slicesVal);
+  for (var i = 0; i < sayIns.length; i++) {
+    sayIns[i].addEventListener("change", function () {
+      showSay();
+      flash(sayVal);
+      reload("say", true);
     });
-    input.addEventListener("keydown", function (e) {
-      var save = (e.ctrlKey || e.metaKey) && (e.key === "s" || e.key === "S");
-      if (e.key === "Enter" || save) {
-        e.preventDefault();
-        reload(true, true);
-      } else if (e.key === "Escape") {
-        e.preventDefault();
-        input.value = input === spdIn ? applied.spd : applied.say;
-        fit(input);
-        reload(true, false);
-      }
-    });
-  });
+  }
 
+  showSpd();
+  showSlices();
+  showSay();
   readColors();
-  gator.spd = checkSpd().value;
-  gator.says = checkSay().value;
   setLabel();
   draw();
   new MutationObserver(function () { readColors(); if (!running) draw(); })

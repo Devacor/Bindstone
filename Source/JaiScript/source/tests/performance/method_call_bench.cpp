@@ -1,4 +1,4 @@
-// Method-call cost cases: each row's 200000-iteration typed loop timed against the bare loop's on both backends (the ratio
+// Method-call cost cases: each row's typed loop (k_iterations) timed against the bare loop's on both backends (the ratio
 // and the medians' ns per call over the loop).
 // The rows split a method call by receiver and callee: a script class's method through a var, a typed local, a handle, an
 // inherited and an overridden method, a method that touches no field, a sibling call and this.m() inside a method, a static
@@ -52,44 +52,50 @@ public:
 		return e;
 	}
 
-	void forge_tests() override {
-		test("method_call_costs", [this]() {
-			struct row { const char* name; const char* decl; const char* body; };
-			const row rows[] = {
-				{"loop", "", "s += k;"},
-				{"script_fn", "", "s += sfs(k);"},
-				{"script_method_var", "var o = S();", "s += o.idf(k);"},
-				{"script_method_typed", "S o = S();", "s += o.idf(k);"},
-				{"script_method_field", "S o = S();", "s += o.add(k);"},
-				{"script_method_handle", "shared_ptr<S> o = new S();", "s += o.idf(k);"},
-				{"script_inherited", "D o = D();", "s += o.idf(k);"},
-				{"script_overridden", "S o = D();", "s += o.twice(k);"},
-				{"script_static", "", "s += S::sadd(k);"},
-				{"host_method_var", "var o = Tally();", "s += o.add(k);"},
-				{"host_method_typed", "Tally o = Tally();", "s += o.add(k);"},
-				{"host_method_noargs", "Tally o = Tally();", "s += o.get();"},
-			};
-			// rows whose loop runs inside a method (the call is a sibling call or this.m())
-			const row in_method[] = {
-				{"in_method_loop", "", "run_loop"},
-				{"sibling_call", "", "run_sibling"},
-				{"this_call", "", "run_this"},
-			};
+	// The iterations of each loop: a Release reading needs no more, and a row's test stays seconds in Debug
+	static constexpr int k_iterations = 20000;
+
+	// A row is a test of its own, timed on the interpreter and then the VM, so no one test runs every row
+	void row_test(const char* name, std::string reference, std::string src) {
+		test(name, [name, reference, src]() {
 			for (bool use_vm : {false, true}) {
 				auto e = host(use_vm);
-				auto timed = [&e](std::string src) { return [&e, src] { return time_seconds([&] { e->execute(src); }); }; };
+				auto timed = [&e](const std::string& script) { return [&e, script] { return time_seconds([&] { e->execute(script); }); }; };
 				const char* backend = use_vm ? "vm    " : "interp";
-				auto report = [&](const char* name, const std::string& reference, const std::string& src) {
-					const speed_ratio speed = compare_speed(std::string("METHODCALL ") + backend + " " + name + " against its loop", timed(reference), timed(src));
-					std::printf("METHODCALL %s %-22s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / 200000.0,
-					            (speed.measured_seconds - speed.reference_seconds) * 1e9 / 200000.0);
-				};
-				auto free_loop = [](const row& r) { return std::string("function f(int n) -> float { ") + r.decl + " float s = 0.0; float k = 1.5; for (int i = 0; i < n; i++) { " + r.body + " } return s; } f(200000);"; };
-				auto method_loop = [](const row& r) { return std::string("S o = S(); o.") + r.body + "(200000, 1.5);"; };
-				for (const auto& r : rows) { report(r.name, free_loop(rows[0]), free_loop(r)); }
-				for (const auto& r : in_method) { report(r.name, method_loop(in_method[0]), method_loop(r)); }
+				const speed_ratio speed = compare_speed(std::string("METHODCALL ") + backend + " " + name + " against its loop", timed(reference), timed(src));
+				std::printf("METHODCALL %s %-22s %7.1f ns/iter %7.1f over the loop\n", backend, name, speed.measured_seconds * 1e9 / k_iterations,
+				            (speed.measured_seconds - speed.reference_seconds) * 1e9 / k_iterations);
 			}
 		});
+	}
+
+	void forge_tests() override {
+		struct row { const char* name; const char* decl; const char* body; };
+		const row rows[] = {
+			{"loop", "", "s += k;"},
+			{"script_fn", "", "s += sfs(k);"},
+			{"script_method_var", "var o = S();", "s += o.idf(k);"},
+			{"script_method_typed", "S o = S();", "s += o.idf(k);"},
+			{"script_method_field", "S o = S();", "s += o.add(k);"},
+			{"script_method_handle", "shared_ptr<S> o = new S();", "s += o.idf(k);"},
+			{"script_inherited", "D o = D();", "s += o.idf(k);"},
+			{"script_overridden", "S o = D();", "s += o.twice(k);"},
+			{"script_static", "", "s += S::sadd(k);"},
+			{"host_method_var", "var o = Tally();", "s += o.add(k);"},
+			{"host_method_typed", "Tally o = Tally();", "s += o.add(k);"},
+			{"host_method_noargs", "Tally o = Tally();", "s += o.get();"},
+		};
+		// rows whose loop runs inside a method (the call is a sibling call or this.m())
+		const row in_method[] = {
+			{"in_method_loop", "", "run_loop"},
+			{"sibling_call", "", "run_sibling"},
+			{"this_call", "", "run_this"},
+		};
+		const std::string n = std::to_string(k_iterations);
+		auto free_loop = [&n](const row& r) { return std::string("function f(int n) -> float { ") + r.decl + " float s = 0.0; float k = 1.5; for (int i = 0; i < n; i++) { " + r.body + " } return s; } f(" + n + ");"; };
+		auto method_loop = [&n](const row& r) { return std::string("S o = S(); o.") + r.body + "(" + n + ", 1.5);"; };
+		for (const auto& r : rows) { row_test(r.name, free_loop(rows[0]), free_loop(r)); }
+		for (const auto& r : in_method) { row_test(r.name, method_loop(in_method[0]), method_loop(r)); }
 	}
 };
 

@@ -1295,64 +1295,70 @@ public:
     std::shared_ptr<jai::engine> eng;
     void pre_test() override { eng = make_engine(); jai::stdlib::register_all(eng); }
 
+    // The iterations each loop runs (the scripts' OPS): a Release reading needs no more, and the suite stays seconds in Debug
+    static constexpr int k_ops = 20000;
+
     // Per-op ns as (body - overhead) / ops: both scripts share their shape save the measured op, so the array build and the
     // loop cancel
-    void row(const char* label, const char* body, const char* overhead, double ops) {
+    void row(const char* label, std::string body, std::string overhead) {
+        for (std::string* script : {&body, &overhead}) {
+            script->replace(script->find("OPS"), 3, std::to_string(k_ops));
+        }
         auto body_bite = eng->jaibite(body);
         auto overhead_bite = eng->jaibite(overhead);
         auto timed = [](jai::jaibite& bite) { return [&bite] { return time_seconds([&bite] { bite.execute(); }); }; };
         const speed_ratio speed = compare_speed(std::string("[ns-harness] ") + label + " against its overhead loop", timed(overhead_bite), timed(body_bite), 9);
-        std::cout << "  [ns-harness] " << label << ": " << (speed.measured_seconds - speed.reference_seconds) * 1e9 / ops << " ns/op\n";
+        std::cout << "  [ns-harness] " << label << ": " << (speed.measured_seconds - speed.reference_seconds) * 1e9 / k_ops << " ns/op\n";
     }
 
     void forge_tests() override {
-        // 200k-iteration inner loops over a 1024-int array; index masked to stay in
+        // OPS-iteration inner loops over a 1024-int array; index masked to stay in
         // range and defeat const-fold. Build the array the same way in both scripts.
         const char* build = "array<int> a = []; int j = 0; while (j < 1024) { a.push(j); j = j + 1; } ";
 
         test("element_read", [this, build]() {
             std::string body = std::string(build) +
-                "int s = 0; int i = 0; while (i < 200000) { s = s + a[i & 1023]; i = i + 1; } s;";
+                "int s = 0; int i = 0; while (i < OPS) { s = s + a[i & 1023]; i = i + 1; } s;";
             std::string ovh = std::string(build) +
-                "int s = 0; int i = 0; while (i < 200000) { s = s + (i & 1023); i = i + 1; } s;";
-            row("array element read  s += a[i&1023]", body.c_str(), ovh.c_str(), 200000.0);
+                "int s = 0; int i = 0; while (i < OPS) { s = s + (i & 1023); i = i + 1; } s;";
+            row("array element read  s += a[i&1023]", body, ovh);
             check_true(true);
         });
 
         test("element_compound_store", [this, build]() {
             std::string body = std::string(build) +
-                "int i = 0; while (i < 200000) { a[i & 1023] += 1; i = i + 1; } a[0];";
+                "int i = 0; while (i < OPS) { a[i & 1023] += 1; i = i + 1; } a[0];";
             std::string ovh = std::string(build) +
-                "int i = 0; int t = 0; while (i < 200000) { t += 1; i = i + 1; } t;";
-            row("compound element store  a[i&1023] += 1", body.c_str(), ovh.c_str(), 200000.0);
+                "int i = 0; int t = 0; while (i < OPS) { t += 1; i = i + 1; } t;";
+            row("compound element store  a[i&1023] += 1", body, ovh);
             check_true(true);
         });
 
         test("element_read_write_store", [this, build]() {
             std::string body = std::string(build) +
-                "int i = 0; while (i < 200000) { a[i & 1023] = a[i & 1023] + 1; i = i + 1; } a[0];";
+                "int i = 0; while (i < OPS) { a[i & 1023] = a[i & 1023] + 1; i = i + 1; } a[0];";
             std::string ovh = std::string(build) +
-                "int i = 0; int t = 0; while (i < 200000) { t = t + 1; i = i + 1; } t;";
-            row("read+write element store  a[i]=a[i]+1", body.c_str(), ovh.c_str(), 200000.0);
+                "int i = 0; int t = 0; while (i < OPS) { t = t + 1; i = i + 1; } t;";
+            row("read+write element store  a[i]=a[i]+1", body, ovh);
             check_true(true);
         });
 
         test("element_read_ident_index", [this, build]() {
             // Plain-ident index (the fusable operand shape; a[i&1023] above defeats fusion)
             std::string body = std::string(build) +
-                "int s = 0; int i = 0; int k = 0; while (i < 200000) { s = s + a[k]; k = (k + 1) & 1023; i = i + 1; } s;";
+                "int s = 0; int i = 0; int k = 0; while (i < OPS) { s = s + a[k]; k = (k + 1) & 1023; i = i + 1; } s;";
             std::string ovh = std::string(build) +
-                "int s = 0; int i = 0; int k = 0; while (i < 200000) { s = s + k; k = (k + 1) & 1023; i = i + 1; } s;";
-            row("element read ident idx  s += a[k]", body.c_str(), ovh.c_str(), 200000.0);
+                "int s = 0; int i = 0; int k = 0; while (i < OPS) { s = s + k; k = (k + 1) & 1023; i = i + 1; } s;";
+            row("element read ident idx  s += a[k]", body, ovh);
             check_true(true);
         });
 
         test("element_compound_ident_index", [this, build]() {
             std::string body = std::string(build) +
-                "int i = 0; int k = 0; while (i < 200000) { a[k] += 1; k = (k + 1) & 1023; i = i + 1; } a[0];";
+                "int i = 0; int k = 0; while (i < OPS) { a[k] += 1; k = (k + 1) & 1023; i = i + 1; } a[0];";
             std::string ovh = std::string(build) +
-                "int i = 0; int k = 0; int t = 0; while (i < 200000) { t += 1; k = (k + 1) & 1023; i = i + 1; } t;";
-            row("compound ident idx  a[k] += 1", body.c_str(), ovh.c_str(), 200000.0);
+                "int i = 0; int k = 0; int t = 0; while (i < OPS) { t += 1; k = (k + 1) & 1023; i = i + 1; } t;";
+            row("compound ident idx  a[k] += 1", body, ovh);
             check_true(true);
         });
 
@@ -1363,11 +1369,11 @@ public:
                                  "array<int> pix = []; int p = 0; while (p < 4096) { pix.push(0); p = p + 1; } ";
             std::string body = std::string(strips) +
                 "int tacc = 0; int tstep = 137; int gi = 0; int vw = 1; int y = 0; "
-                "while (y < 200000) { pix[gi & 4095] = strip[(tacc >> 11) & 2047]; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } pix[0];";
+                "while (y < OPS) { pix[gi & 4095] = strip[(tacc >> 11) & 2047]; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } pix[0];";
             std::string ovh = std::string(strips) +
                 "int tacc = 0; int tstep = 137; int gi = 0; int vw = 1; int y = 0; int t = 0; "
-                "while (y < 200000) { t = (tacc >> 11) & 2047; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } t;";
-            row("render inner loop (per iter)", body.c_str(), ovh.c_str(), 200000.0);
+                "while (y < OPS) { t = (tacc >> 11) & 2047; tacc = tacc + tstep; gi = gi + vw; y = y + 1; } t;";
+            row("render inner loop (per iter)", body, ovh);
             check_true(true);
         });
     }

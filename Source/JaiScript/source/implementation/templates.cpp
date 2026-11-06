@@ -100,6 +100,11 @@ namespace {
 
 	JAI_NOINLINE R refusal(const library& a_lib, std::string a_text) { return a_lib.refused(a_text); }
 
+	// a map key reads with [], never a dot: the text the checker and both backends raise
+	std::string map_member_text(std::string_view a_member) {
+		return "map has no member '" + std::string(a_member) + "'; read the key as [\"" + std::string(a_member) + "\"]";
+	}
+
 	const char* kind_name(const script_value& v) {
 		switch (v.raw_storage_index()) {
 			case script_value::TYPEID_NULL: return "null";
@@ -270,6 +275,10 @@ namespace {
 					const auto* m = static_cast<const member_expr*>(e);
 					if (m->is_static && ids_.builtin_namespace(m)) { return; }
 					if (m->is_static) { refuse(e, "a scoped template sees only args: '::" + std::string(m->member) + "' is not available"); return; }
+					if (m->object && m->object->get_type() == node_type::identifier_expr && args_shadowed_ == 0) {
+						const auto* base = static_cast<const identifier_expr*>(m->object.get());
+						if (!base->global_qualified && base->symbol_id == ids_.args) { refuse(e, map_member_text(m->member)); return; }
+					}
 					walk(m->object.get());
 					return;
 				}
@@ -317,7 +326,10 @@ namespace {
 					if (!l->captures.empty()) { refuse(e, "a scoped template's lambda takes plain parameter names"); return; }
 					const expression* value = lambda_value(*l);
 					if (!value) { refuse(e, "a scoped template's lambda is one expression (x => expr)"); return; }
+					const bool shadows = std::any_of(l->parameters.begin(), l->parameters.end(), [](const parameter& p) { return p.name == "args"; });
+					args_shadowed_ += shadows;
 					walk(value);
+					args_shadowed_ -= shadows;
 					return;
 				}
 				default:
@@ -328,6 +340,7 @@ namespace {
 
 	private:
 		library_view_ids ids_;
+		int args_shadowed_ = 0;   // inside a lambda with a parameter named args: that name is not the template's map
 		std::vector<violation>& out_;
 		native_stack_mark stack_;
 
@@ -756,8 +769,7 @@ namespace {
 		if (v.raw_storage_index() == script_value::TYPEID_MAP) {
 			const auto& map = v.as_map();
 			auto found = map.find(script_value(std::string(name), eng_));
-			if (found == map.end()) { return refusal(lib_, "map has no member or key '" + std::string(name) + "'"); }
-			return script_value(found->second.deref());
+			return refusal(lib_, map_member_text(name));
 		}
 		if (v.is_math()) {
 			const int i = math::component_of(math::kind_of(v), name);
@@ -911,12 +923,6 @@ namespace {
 		const std::string_view name = a_callee->member;
 		const uint64_t id = a_callee->member_id != UINT64_MAX ? a_callee->member_id : symbols().intern(name);
 		if (object_like(a_receiver)) { return refuse_object("call a method of"); }
-		if (a_receiver.raw_storage_index() == script_value::TYPEID_MAP) {
-			const auto& map = a_receiver.as_map();
-			if (auto held = map.find(script_value(std::string(name), eng_)); held != map.end() && held->second.deref().is_function()) {
-				return refusal(lib_, "a scoped template does not call function values: '" + std::string(name) + "(...)' is not allowed");
-			}
-		}
 		if (data_has_objects_) {
 			if (holds_object(a_receiver)) { return refuse_object("call a built-in method over"); }
 			for (const auto& a : a_args) { if (holds_object(a)) { return refuse_object("pass a built-in method"); } }
@@ -942,6 +948,7 @@ namespace {
 		}
 		auto found = table ? table->find(id) : decltype(table->end()){};
 		if (!table || found == table->end()) {
+			if (a_receiver.raw_storage_index() == script_value::TYPEID_MAP) { return refusal(lib_, map_member_text(name)); }
 			return refusal(lib_, std::string(kind_name(a_receiver)) + " has no member '" + std::string(name) + "'");
 		}
 		builtin_method_context ctx;

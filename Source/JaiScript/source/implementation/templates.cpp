@@ -27,6 +27,9 @@
 #include <jaiscript/detail/execution_limits.hpp>
 #include <jaiscript/detail/web_kernels.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/in_place_result.hpp>
+#include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/detail/environment.hpp>
 
 #include <filesystem>
 #include <fstream>
@@ -189,9 +192,17 @@ namespace {
 	// The ids the rules name
 	struct library_view_ids {
 		uint64_t joiner = 0, splice = 0, format_value = 0, args = 0, raw = 0;
+		uint64_t string_ns = 0, array_ns = 0, map_ns = 0;
 		explicit library_view_ids(string_symbolizer& a_symbols)
 			: joiner(a_symbols.intern(k_joiner)), splice(a_symbols.intern(k_splice)), format_value(a_symbols.intern("format_value")),
-			  args(a_symbols.intern("args")), raw(a_symbols.intern("raw")) {}
+			  args(a_symbols.intern("args")), raw(a_symbols.intern("raw")), string_ns(a_symbols.intern("string")), array_ns(a_symbols.intern("array")),
+			  map_ns(a_symbols.intern("map")) {}
+		// string::f, array::f, map::f: the engine's builtins over copies, the only names past args a scoped template reaches
+		bool builtin_namespace(const member_expr* a_member) const {
+			if (!a_member->is_static || !a_member->object || a_member->object->get_type() != node_type::identifier_expr) { return false; }
+			const auto* base = static_cast<const identifier_expr*>(a_member->object.get());
+			return base->global_qualified && (base->symbol_id == string_ns || base->symbol_id == array_ns || base->symbol_id == map_ns);
+		}
 	};
 
 	bool internal_callee(const library_view_ids& a_ids, uint64_t a_id) {
@@ -257,6 +268,7 @@ namespace {
 					return;
 				case node_type::member_expr: {
 					const auto* m = static_cast<const member_expr*>(e);
+					if (m->is_static && ids_.builtin_namespace(m)) { return; }
 					if (m->is_static) { refuse(e, "a scoped template sees only args: '::" + std::string(m->member) + "' is not available"); return; }
 					walk(m->object.get());
 					return;
@@ -272,7 +284,7 @@ namespace {
 						}
 						if (id->symbol_id == ids_.raw && id->global_qualified) { refuse(e, "raw() is not allowed in a scoped template: its output is always escaped"); return; }
 						if (id->global_qualified) {
-							refuse(e, "a scoped template calls only the built-in methods of built-in values: '" + std::string(id->name) + "(...)' is not allowed");
+							refuse(e, "a scoped template calls only built-in methods and the string::, array:: and map:: functions: '" + std::string(id->name) + "(...)' is not allowed");
 							return;
 						}
 						refuse(e, "a scoped template does not call function values: '" + std::string(id->name) + "(...)' is not allowed");
@@ -283,8 +295,12 @@ namespace {
 						for (const auto& a : c->arguments) { walk(a.get()); }
 						return;
 					}
+					if (callee->get_type() == node_type::member_expr && ids_.builtin_namespace(static_cast<const member_expr*>(callee))) {
+						for (const auto& a : c->arguments) { walk(a.get()); }
+						return;
+					}
 					if (callee->get_type() == node_type::member_expr) {
-						refuse(e, "a scoped template calls only the built-in methods of built-in values: '" + std::string(static_cast<const member_expr*>(callee)->member) + "(...)' is not allowed");
+						refuse(e, "a scoped template calls only built-in methods and the string::, array:: and map:: functions: '" + std::string(static_cast<const member_expr*>(callee)->member) + "(...)' is not allowed");
 						return;
 					}
 					refuse(e, "a scoped template does not call function values");
@@ -451,6 +467,8 @@ namespace {
 		R arithmetic(token_type a_op, const script_value& a_left, const script_value& a_right);
 		R compare(token_type a_op, const script_value& a_left, const script_value& a_right);
 		R method(const script_value& a_receiver, const member_expr* a_callee, std::vector<script_value> a_args);
+		R namespace_call(const call_expr* c, const member_expr* a_callee);
+		const script_value* builtin_namespace_value(const member_expr* a_member) const;
 		checked_result<std::string> plain_text(const script_value& v, const std::string* a_spec);
 		bool counts(size_t a_bytes) {
 			output_ += a_bytes;
@@ -725,6 +743,11 @@ namespace {
 	}
 
 	R scoped_render::eval_member(const member_expr* m) {
+		if (m->is_static) {
+			const script_value* held = builtin_namespace_value(m);
+			if (!held || held->is_function()) { return refusal(lib_, "a scoped template sees only args: '::" + std::string(m->member) + "' is not available"); }
+			return script_value(held->deref());
+		}
 		auto object = eval(m->object.get());
 		if (!object) { return object; }
 		script_value v = object.value().deref();
@@ -815,9 +838,12 @@ namespace {
 				if (!text) { return text.error_value(); }
 				return script_value(std::move(text.value()), eng_);
 			}
-			return refusal(lib_, "a scoped template calls only the built-in methods of built-in values");
+			return refusal(lib_, "a scoped template calls only built-in methods and the string::, array:: and map:: functions");
 		}
-		if (callee->get_type() != node_type::member_expr || static_cast<const member_expr*>(callee)->is_static) {
+		if (callee->get_type() == node_type::member_expr && static_cast<const member_expr*>(callee)->is_static) {
+			return namespace_call(c, static_cast<const member_expr*>(callee));
+		}
+		if (callee->get_type() != node_type::member_expr) {
 			return refusal(lib_, "a scoped template does not call function values");
 		}
 		const auto* m = static_cast<const member_expr*>(callee);
@@ -832,6 +858,48 @@ namespace {
 		}
 		if (m->null_safe && receiver.value().deref().is_null()) { return null_value(); }
 		return method(receiver.value().deref(), m, std::move(args));
+	}
+
+	// The engine's own function or value in string::, array:: or map::; null for anything else, a script's own function there included
+	const script_value* scoped_render::builtin_namespace_value(const member_expr* a_member) const {
+		if (!ids_.builtin_namespace(a_member)) { return nullptr; }
+		const auto* base = static_cast<const identifier_expr*>(a_member->object.get());
+		auto& spaces = engine_access::script_namespaces(*eng_);
+		auto space = spaces.find(base->symbol_id);
+		if (space == spaces.end() || !space->second) { return nullptr; }
+		const uint64_t id = a_member->member_id != UINT64_MAX ? a_member->member_id : symbols().intern(a_member->member);
+		auto held = space->second->variables.find(id);
+		if (held == space->second->variables.end()) { return nullptr; }
+		const script_value& v = held->second;
+		if (v.is_function()) {
+			const script_function& fn = v.unchecked_as_function();
+			if (fn.target<script_callable_thunk>() || fn.target<script_method_dispatch>() || fn.target<script_static_method_dispatch>() || fn.target<bound_method_fn>()) { return nullptr; }
+		}
+		return &v;
+	}
+
+	R scoped_render::namespace_call(const call_expr* c, const member_expr* a_callee) {
+		const script_value* held = builtin_namespace_value(a_callee);
+		if (!held || !held->is_function()) {
+			return refusal(lib_, "a scoped template calls only built-in methods and the string::, array:: and map:: functions: '" + std::string(a_callee->member) + "(...)' is not allowed");
+		}
+		const script_value fn = *held;
+		std::vector<script_value> args;
+		args.reserve(c->arguments.size());
+		for (const auto& a : c->arguments) {
+			auto v = eval(a.get());
+			if (!v) { return v; }
+			args.push_back(v.value().deref());
+		}
+		for (const auto& a : args) {
+			if (object_like(a) || (data_has_objects_ && holds_object(a))) { return refuse_object("pass a built-in function"); }
+		}
+		R result = fn.unchecked_as_function()(args);
+		if (result && limit_ != 0) {
+			const script_value& made = result.value().deref();
+			if (made.raw_storage_index() == script_value::TYPEID_STRING && made.unchecked_as_string().size() > limit_) { return output_limit(); }
+		}
+		return result;
 	}
 
 	checked_result<bool> sandbox_equal(void*, const script_value& a, const script_value& b) {
@@ -862,6 +930,8 @@ namespace {
 			lib_.methods = std::make_unique<builtin_method_registries>();
 			init_builtin_method_registries(&symbols(), *lib_.methods);
 		}
+		// a template uses every value it computes, and an in-place builtin returns nothing: the language's error, with its copy twin
+		if (auto twin = in_place_builtin(lib_.methods->in_place, a_receiver, id)) { return in_place_result_error(&symbols(), a_callee, *twin); }
 		const std::unordered_map<uint64_t, builtin_method>* table = nullptr;
 		switch (a_receiver.raw_storage_index()) {
 			case script_value::TYPEID_STRING: table = &lib_.methods->string_methods; break;

@@ -629,6 +629,14 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
   .demo-bar .dot { display: none; }
   .demo-bar .file { margin-left: 0; }
   .scene-label { position: static; display: block; padding: .2rem .8rem .35rem; font-size: .66rem; }
+  /* a two-column table stacks each row (label over its text); wider tables keep scrolling sideways */
+  .tablewrap table:not(:has(tr > :nth-child(3))) { min-width: 0; }
+  .tablewrap table:not(:has(tr > :nth-child(3))) :is(thead, tbody, tr, th, td) { display: block; }
+  .tablewrap table:not(:has(tr > :nth-child(3))) :is(th, td):first-child { padding-bottom: .1rem; border-bottom: none; }
+  .tablewrap table:not(:has(tr > :nth-child(3))) td:first-child { font-weight: 700; }
+  .tablewrap table:not(:has(tr > :nth-child(3))) tr:last-child td:last-child { border-bottom: none; }
+  .tablewrap table:not(:has(tr > :nth-child(3))) thead tr { display: flex; border-bottom: 1px solid var(--border); background: var(--panel2); }
+  .tablewrap table:not(:has(tr > :nth-child(3))) thead th { border-bottom: none; padding-bottom: .55rem; }
 }
 /* iOS zooms into a focused field under 16px */
 @media (pointer: coarse) {

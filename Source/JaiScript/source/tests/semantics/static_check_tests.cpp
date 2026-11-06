@@ -163,6 +163,27 @@ public:
             check_eq((size_t)0, quiet.diagnostics.size());
         });
 
+        test("a_handle_builtin_shadow_warns_where_a_handle_holds_the_class", [this]() {
+            auto e = make_engine();
+            std::vector<std::string> run_time;
+            e->set_script_warning_handler([&](const std::string& m) { run_time.push_back(m); });
+            const std::string shadow = "shadows the builtin shared_ptr";
+            auto by_value = e->check("class World { int n = 0; void reset() { n = 1; } }\nWorld w;\nw.reset();");
+            check_false(has_diag(by_value, dlevel::warning, shadow), by_value.format());
+            auto held = e->check("class Pool { int n = 0; void reset() { n = 1; } }\nvar p = new Pool();");
+            check_true(has_diag(held, dlevel::warning, "class method 'reset' shadows the builtin shared_ptr reset() - the builtin is unreachable on Pool instances"), held.format());
+            check_eq((size_t)1, held.diagnostics.size());
+            check_eq((size_t)1, held.diagnostics[0].line);
+            auto inherited = e->check("class Base { int use_count() { return 1; } }\nclass Sub : Base { }\nshared_ptr<Sub> s;");
+            check_true(has_diag(inherited, dlevel::warning, "class method 'use_count' shadows the builtin shared_ptr use_count() - the builtin is unreachable on Base instances"), inherited.format());
+            check_eq((size_t)1, inherited.diagnostics[0].line);
+            e->execute("class Prior { int n = 0; void reset() { n = 1; } }\nPrior v;\nv.reset();");
+            auto later = e->check("int x = 1;\nvar q = make_shared<Prior>();");
+            check_true(has_diag(later, dlevel::warning, "unreachable on Prior instances"), later.format());
+            check_eq((size_t)2, later.diagnostics[0].line);
+            check_eq((size_t)0, run_time.size());
+        });
+
         test("warn_region_leaves_the_runtime_alone_battery", [this]() {
             // In a [[warn_mode]] unit the runtime alone decides: conversions run, a typed mismatch
             // raises the runtime's own error at the store, and no diagnostic is an error.

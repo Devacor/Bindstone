@@ -208,12 +208,6 @@ namespace jai {
     void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_method_registries& out);
 
     namespace detail {
-        // Emits ONE warning per class-defined method (local, not inherited) that shadows a
-        // shared_ptr handle builtin (k_shadowable_handle_method_names). Called at class-
-        // definition time by BOTH backends after register_script_class - always-on
-        // (independent of static checking), parity-by-construction. Defined in interpreter.cpp.
-        void warn_shadowed_handle_builtins(engine& eng, const class_definition& def);
-
         // v.same_as(other) bound to v: one argument; nulls, scalars and strings compare by value (a bound value decoded),
         // objects by identity, anything else is false. Both backends mint it.
         script_value same_as_method(const script_value& self, engine* eng);

@@ -2290,23 +2290,6 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
 namespace detail {
 
-void warn_shadowed_handle_builtins(engine& eng, const class_definition& def) {
-    auto* sym = engine_access::get_symbolizer(eng);
-    if (!sym) { return; }
-    // LOCAL methods only (has_method, not defines_method): warn where the shadow is
-    // introduced, once per colliding method per class definition - subclasses that merely
-    // inherit it don't re-warn.
-    for (std::string_view name : k_shadowable_handle_method_names) {
-        if (def.has_method(sym->intern(name))) {
-            std::string m(name);
-            engine_access::report_script_warning(eng, 
-                "class method '" + m + "' shadows the builtin shared_ptr " + m +
-                "() - the builtin is unreachable on " + def.get_name() +
-                " instances; rename the class method to reach it");
-        }
-    }
-}
-
 script_value same_as_method(const script_value& self, engine* eng) {
     script_function same_as = [eng, captured = self](const std::vector<script_value>& args) -> checked_result<script_value> {
         if (args.size() != 1) {

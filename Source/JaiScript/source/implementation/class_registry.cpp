@@ -1290,7 +1290,6 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         return register_result;
     }
     engine_access::bump_class_definition_epoch(*eng);
-    warn_shadowed_handle_builtins(*eng, *class_def);
 
     global_env->define(class_var_id, script_value::make_object("class_definition", host.class_definition_type_id, class_def, eng));
     return {};

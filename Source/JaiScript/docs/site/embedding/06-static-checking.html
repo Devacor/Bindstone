@@ -300,7 +300,8 @@ then globals, the order the run time takes, so the member is checked and <code>:
 in enum 'Direction'</code>.</li>
 <li><strong>Lenient by design:</strong> builtin container/string/map methods, subscripts, and the handle builtins a <code>shared_ptr</code> answers (<code>use_count</code>, <code>cpp_ref_count</code>,
 <code>unique</code>, <code>same_as</code>, <code>reset</code>). A class method of the same name wins
-first. Any ancestor the checker cannot resolve opens the whole class: silence.</li>
+first; where the program holds that class (or a subclass) by a <code>shared_ptr</code>, the method warns that the
+builtin is unreachable on its handles, and a class held by value alone keeps its <code>reset()</code> unwarned. Any ancestor the checker cannot resolve opens the whole class: silence.</li>
 </ul>
 <h3 id="casts">Casts<a class="hlink" href="#casts" aria-label="link">&#8203;</a></h3>
 <p><code>cast&lt;T&gt;(e)</code> types as a certain <code>T</code>; <code>cast&lt;T&amp;&gt;(e)</code> as

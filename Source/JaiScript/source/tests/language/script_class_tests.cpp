@@ -1785,13 +1785,11 @@ public:
             // A user class method takes PRIORITY over a same-named
             // builtin shared_ptr handle method (reset/use_count/unique/cpp_ref_count)
             // (otherwise gloom's fx.reset() would silently no-op the builtin reset()): the
-            // class method wins on shared_ptr<T> instances, the builtin stays reachable where NO class method shadows it, and
-            // a shadow emits ONE warning per colliding method per class definition.
+            // class method wins on shared_ptr<T> instances and the builtin stays reachable where NO class method shadows it
+            // (the checker's warning: Static Type Checking's a_handle_builtin_shadow_warns_where_a_handle_holds_the_class).
             for (bool use_vm : {false, true}) {
                 auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                std::vector<std::string> warnings;
-                e->set_script_warning_handler([&](const std::string& m) { warnings.push_back(m); });
 
                 // class reset() defined -> user method WINS (builtin would have no-op'd)
                 e->execute("class Pool { int n = 0; void reset() { n = 99; } }");
@@ -1804,20 +1802,8 @@ public:
                 e->execute("class Counter { int use_count() { return 7; } }");
                 check_eq((int64_t)7, e->execute("var c = new Counter(); c.use_count()").as_int());
 
-                // the shadow fired a warning (both backends, byte-identical message)
-                bool saw_reset_warn = false, saw_uc_warn = false;
-                for (const auto& w : warnings) {
-                    if (w.find("class method 'reset' shadows the builtin shared_ptr reset()") != std::string::npos &&
-                        w.find("unreachable on Pool instances") != std::string::npos) { saw_reset_warn = true; }
-                    if (w.find("class method 'use_count' shadows the builtin shared_ptr use_count()") != std::string::npos) { saw_uc_warn = true; }
-                }
-                check_true(saw_reset_warn, "reset shadow warning fired");
-                check_true(saw_uc_warn, "use_count shadow warning fired");
-
-                // NO collision -> builtin stays reachable AND no warning for that class
-                size_t warn_count_before = warnings.size();
+                // NO collision -> builtin stays reachable
                 e->execute("class Bare { int x = 5; }");
-                check_eq(warn_count_before, warnings.size(), "no warning for a class without a collision");
                 check_ge(e->execute("shared_ptr<Bare> b = new Bare(); b.use_count()").as_int(), (int64_t)1,
                          "builtin use_count still reachable when unshadowed");
             }

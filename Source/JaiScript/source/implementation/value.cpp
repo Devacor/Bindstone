@@ -2373,7 +2373,7 @@ bool script_value::operator==(const script_value& other) const {
     const script_value& rhs = other.deref();
 
     if (lhs.type() != rhs.type()) {
-        return false;
+        return lhs.char_beside_string(rhs) && lhs.key_text() == rhs.key_text();
     }
 
     switch (lhs.type()) {
@@ -2408,16 +2408,22 @@ bool script_value::operator==(const script_value& other) const {
 // first (a probe ranks as jai_string_type), then string content (std::string <=>
 // string_view is the same lexicographic order as string <=> string).
 bool script_value_map_less::operator()(const script_value& a, const map_string_key_probe& p) const {
-    if (auto cmp = a.type() <=> script_value_type::jai_string_type; cmp != 0) { return cmp < 0; }
+    if (auto cmp = a.type() <=> script_value_type::jai_string_type; cmp != 0) {
+        return a.type() == script_value_type::jai_char_type ? a.key_text() < p.text : cmp < 0;
+    }
     return a.unchecked_as_string() < p.text;
 }
 bool script_value_map_less::operator()(const map_string_key_probe& p, const script_value& b) const {
-    if (auto cmp = script_value_type::jai_string_type <=> b.type(); cmp != 0) { return cmp < 0; }
+    if (auto cmp = script_value_type::jai_string_type <=> b.type(); cmp != 0) {
+        return b.type() == script_value_type::jai_char_type ? p.text < b.key_text() : cmp < 0;
+    }
     return p.text < b.unchecked_as_string();
 }
 
 std::strong_ordering script_value::operator<=>(const script_value& other) const {
     if (auto cmp = type() <=> other.type(); cmp != 0) {
+        // a char key is its one-character string (the two ranks are adjacent, so no other kind sorts between them)
+        if (char_beside_string(other)) { return key_text() <=> other.key_text(); }
         return cmp;
     }
     switch (type()) {
@@ -2474,7 +2480,7 @@ std::strong_ordering script_value::operator<=>(const script_value& other) const 
 
 
 // The map-key hash (core/script_map.hpp): keys operator<=> calls equivalent hash alike. The type rank seeds it, then the payload
-// operator<=> compares: ints and chars by value, floats by their canonical key (every NaN one, both zeros one), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
+// operator<=> compares: ints by value, a char as its one-character string, floats by their canonical key (every NaN one, both zeros one), strings and utf8_strings by bytes, bools, and every heavy kind by the identity operator<=> orders by.
 uint64_t script_value::map_key_hash() const noexcept {
     const script_value_type t = type();
     const uint64_t seed = static_cast<uint64_t>(t) * 0x9E3779B97F4A7C15ull;
@@ -2489,7 +2495,7 @@ uint64_t script_value::map_key_hash() const noexcept {
         }
         case script_value_type::jai_string_type: return map_string_key_hash(unchecked_as_string());
         case script_value_type::jai_utf8_string_type: return detail::text_hash(unchecked_as_utf8().bytes) ^ seed;
-        case script_value_type::jai_char_type: return mix(static_cast<unsigned char>(unchecked_as_char()));
+        case script_value_type::jai_char_type: return map_string_key_hash(key_text());
         case script_value_type::jai_bool_type: return mix(unchecked_as_bool() ? 1 : 0);
         case script_value_type::jai_vec2_type:
         case script_value_type::jai_vec3_type:

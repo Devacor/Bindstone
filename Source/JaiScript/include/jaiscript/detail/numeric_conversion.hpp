@@ -3,6 +3,7 @@
 #include <jaiscript/core/types.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
+#include <string_view>
 #include <type_traits>
 
 namespace jai::detail {
@@ -34,6 +35,17 @@ inline checked_result<Integer> checked_float_to_integer(script_float value) noex
 // which raises the kernel's error.
 inline bool float_fits_script_int(script_float value) noexcept {
 	return value >= -0x1p63 && value < 0x1p63;
+}
+
+// A char slot takes a string of exactly one character (its byte); any other length is the one text the checker gives a literal
+inline constexpr std::string_view char_of_text_refused =
+	"Cannot convert 'string' to 'char': a char takes a string of exactly one character";
+
+inline checked_result<script_char> char_of_text(std::string_view text) noexcept {
+	if (text.size() != 1) {
+		return checked_result<script_char>(make_error_code(runtime_error_code::type_mismatch), char_of_text_refused);
+	}
+	return text[0];
 }
 
 } // namespace jai::detail

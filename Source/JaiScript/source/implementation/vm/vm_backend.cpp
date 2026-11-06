@@ -5722,12 +5722,15 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 		if (lvalue_shape && lvalue_write) {
 			// Auto-insert so the assignment has somewhere to write through
 			script_value key = right;
-			// Declared key type: keys never coerce, checked BEFORE the auto-insert
+			// Declared key type: keys never coerce numerically, checked BEFORE the auto-insert
 			if (auto map_tag = left.get_type_info()) {
 				if (type_info_ptr key_type = map_tag->key_type();
 				    key_type && key_type->base_type != script_value_type::jai_any_type &&
 				    key.deref().type() != key_type->base_type) {
-					return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
+					if (!detail::map_key_kind_admits(key.deref().type(), key_type->base_type)) {
+						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
+					}
+					VM_TRY_ASSIGN(key, detail::map_key_in_kind(key.deref(), key_type->base_type, engine_));
 				}
 			}
 			const size_t prior_map_size = map.size();
@@ -10584,13 +10587,17 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 		}
 	}
 	handled = true;
-	const script_value& key = key_in;
 	if (map_tag) {
 		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
-		    key_type && key_type->base_type != script_value_type::jai_any_type && key.type() != key_type->base_type) {
-			return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key, key_type));
+		    key_type && key_type->base_type != script_value_type::jai_any_type && key_in.type() != key_type->base_type) [[unlikely]] {
+			if (!detail::map_key_kind_admits(key_in.type(), key_type->base_type)) {
+				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key_in, key_type));
+			}
+			VM_TRY_ASSIGN(script_value converted_key, detail::map_key_in_kind(key_in, key_type->base_type, engine_));
+			return map_scalar_store(container, converted_key, value, handled, stored);
 		}
 	}
+	const script_value& key = key_in;
 	auto& map = const_cast<script_map&>(container.as_map());
 	const size_t prior_map_size = map.size();
 	script_value& value_ref = map_lane_slot(map, key);

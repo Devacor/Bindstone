@@ -78,15 +78,30 @@ converts (a reference keeps its referent's type). Round trips are exact —
 (`char c = cast<char>(65);`). `to_char(n)` remains the stdlib function form of the same
 range-checked int→char rule.
 
-## What promotion leaves alone
+## A char beside a string is text
 
-- **`char + string` / `string + char` concatenate as text.** Promotion only fires when
-  *both* operands are numeric-or-char.
-- **`'a' == "a"` is false** — promotion never crosses into the string domain.
-- **Object custom operators receive the raw char** — promotion never rewrites an operand
-  that flows to a user-defined operator.
-- Serialization, `print` and JSON render a char as a char. Map keys keep type-rank
-  ordering (char keys never interleave with int keys).
+Promotion fires only when *both* operands are numeric-or-char. A char beside a string is
+its one-character string instead (`char_beside_string` / `char_as_text` in the kernel, run
+by the general handlers of both backends after the promotion check):
+
+| form | result |
+|---|---|
+| `==  !=  <  <=  >  >=  <=>` | text comparison: `s[i] == "x"` is true for that byte; `'a' == "ab"` is false, `'a' < "ab"` true, `""` sorts first |
+| `s + 'c'`, `'c' + s` | the joined string, as `s += 'c'` appends |
+| a `char` slot (declaration, store, parameter, field, element, return, `map<char, V>` key) | takes a string of exactly one character; any other length raises `Cannot convert 'string' to 'char': a char takes a string of exactly one character` (`detail::char_of_text`), and a literal fails the load with the same reason |
+| a `string` / `utf8_string` slot | takes a char as its one-character text |
+| `switch` | runs the language `==`, so a char subject matches `case "a":` and a one-character string `case 'a':` |
+
+Map keys follow the same rule: `script_value::operator==`, `operator<=>` and
+`map_key_hash` treat a char as its one-character string (the char and string type ranks are
+adjacent, so no other kind sorts between them), so `m['a']` and `m["a"]` are one entry,
+which keeps the kind of the key that made it. A typed map stores the declared kind
+(`map_key_kind_admits` / `map_key_in_kind`, container_enforce.hpp). The string key paths do
+no extra work: a char is answered on the non-string branches only.
+
+What stays apart: `'a' + 1` is the int 98, `"a" + 1` is the string + number error, object
+custom operators receive the raw char, and serialization, `print` and JSON render a char as
+a char.
 
 ## Iterating a string
 
@@ -130,7 +145,8 @@ ref_lvalue.hpp parity-by-construction pattern:
 - vm: `vm_backend.cpp` twin handlers, the bitwise cases of `handle_binary_op`,
   `vm_backend::evaluate_arithmetic`, and `exec_compound_store`'s in-place ladder.
 - value ordering: `script_value::operator<=>`'s char row compares via `unsigned char`
-  (value.cpp) so map ordering agrees with script-level comparisons.
+  (value.cpp) so map ordering agrees with script-level comparisons; a char beside a string
+  orders, equals and hashes as its one-character string (value.cpp, core/script_map.hpp).
 - lexer: `\xNN` in `scan_string`/`scan_char` (`hex_digit_value`, exactly two digits);
   a parse change bumps `k_jaibite_version` (`detail/ast_serializer.hpp`).
 - stdlib: `to_char` registered beside `type_of` (stdlib/io.hpp).
@@ -138,8 +154,10 @@ ref_lvalue.hpp parity-by-construction pattern:
   `cast_char_value`), consumed verbatim by `interpreter::visit_cast_expr` and
   `vm_backend::exec_cast` ahead of the assignment table; rows in the Strong Types cast
   tests (`cast_char_rules`, `strong_types_tests.cpp`).
-- static checker: `binary_result` types char as numeric under arithmetic/bitwise/spaceship.
-- tests: `"Char Promotion"` suite (19 tests) in
+- static checker: `binary_result` types char as numeric under arithmetic/bitwise/spaceship;
+  `char_beside_text` admits a char compared with text, `char_text_slot` the slot rows, and
+  `literal_char_text_refused` a string literal of another length into a char slot.
+- tests: `"Char Promotion"` suite (22 tests) in
   `source/tests/language/review_regression_tests.cpp`; char ordering (char against char, and
   char against int by code point) is pinned in `gloom_feedback_tests.cpp::char_ordering_comparisons`;
   the Strong Types `string += int` raise is pinned in `strong_types_tests.cpp`.

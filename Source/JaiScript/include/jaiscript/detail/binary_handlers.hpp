@@ -223,8 +223,9 @@ namespace jai::detail {
 		if (utf8_operands(li, ri)) [[unlikely]] {
 			return utf8_rewrapped(binary_ordering<Op>(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine())), h.engine());
 		}
-		if (char_operands_promote(li, ri)) [[unlikely]] {
-			return binary_ordering<Op>(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()));
+		if (char_operand(li, ri)) [[unlikely]] {
+			if (char_operands_promote(li, ri)) { return binary_ordering<Op>(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine())); }
+			if (char_beside_string(li, ri)) { return binary_ordering<Op>(h, method_id, char_as_text(left, h.engine()), char_as_text(right, h.engine())); }
 		}
 		if (auto fast = ordering_on_values<Op>(h, left, right, li, ri)) { return std::move(*fast); }
 		if (auto builtin = builtin_order(h, left, right, nullptr)) {
@@ -321,8 +322,9 @@ namespace jai::detail {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
 			return utf8_rewrapped(equal_operands(h, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine()), walk), h.engine());
 		}
-		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return equal_operands(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk);
+		if (const size_t li = left.raw_storage_index(), ri = right.raw_storage_index(); char_operand(li, ri)) [[unlikely]] {
+			if (char_operands_promote(li, ri)) { return equal_operands(h, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk); }
+			if (char_beside_string(li, ri)) { return equal_operands(h, char_as_text(left, h.engine()), char_as_text(right, h.engine()), walk); }
 		}
 		if (auto expired = weak_equals_null(left, right)) { return h.make_bool(*expired); }
 		if (auto identity = builtin_identity_equal(left, right)) { return h.make_bool(*identity); }
@@ -424,8 +426,9 @@ namespace jai::detail {
 		if (utf8_operands(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
 			return utf8_rewrapped(spaceship_operands(h, method_id, utf8_unwrapped(left, h.engine()), utf8_unwrapped(right, h.engine()), walk), h.engine());
 		}
-		if (char_operands_promote(left.raw_storage_index(), right.raw_storage_index())) [[unlikely]] {
-			return spaceship_operands(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk);
+		if (const size_t li = left.raw_storage_index(), ri = right.raw_storage_index(); char_operand(li, ri)) [[unlikely]] {
+			if (char_operands_promote(li, ri)) { return spaceship_operands(h, method_id, char_promoted(left, h.engine()), char_promoted(right, h.engine()), walk); }
+			if (char_beside_string(li, ri)) { return spaceship_operands(h, method_id, char_as_text(left, h.engine()), char_as_text(right, h.engine()), walk); }
 		}
 		auto sign = [&h](auto cmp) { return h.make_int(cmp < 0 ? script_int(-1) : (cmp > 0 ? script_int(1) : script_int(0))); };
 		if (left.raw_storage_index() == script_value::TYPEID_INT && right.raw_storage_index() == script_value::TYPEID_INT) {
@@ -846,7 +849,7 @@ namespace jai::detail {
 			return evaluate_arithmetic(h, char_promoted(left, h.engine()), op, char_promoted(right, h.engine()), compound);
 		}
 		if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
-			if (!h.joins_text && string_beside_scalar(li, ri) && !(compound >= 0 && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_CHAR)) [[unlikely]] {   // string += char appends
+			if (!h.joins_text && string_beside_scalar(li, ri)) [[unlikely]] {
 				return compound >= 0 ? compound_mismatch(static_cast<size_t>(compound), left, right, h.engine()) : string_plus_refused(li, ri);
 			}
 			return h.concat(left, right);

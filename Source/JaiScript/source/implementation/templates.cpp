@@ -721,6 +721,7 @@ namespace {
 		script_value l = utf8_operands(a_left.raw_storage_index(), a_right.raw_storage_index()) ? utf8_unwrapped(a_left, eng_) : a_left;
 		script_value r = utf8_operands(a_left.raw_storage_index(), a_right.raw_storage_index()) ? utf8_unwrapped(a_right, eng_) : a_right;
 		if (char_operands_promote(l.raw_storage_index(), r.raw_storage_index())) { l = char_promoted(l, eng_); r = char_promoted(r, eng_); }
+		if (char_beside_string(l.raw_storage_index(), r.raw_storage_index())) { l = char_as_text(l, eng_); r = char_as_text(r, eng_); }
 		const size_t li = l.raw_storage_index(), ri = r.raw_storage_index();
 		const bool numeric = (li == script_value::TYPEID_INT || li == script_value::TYPEID_FLOAT) && (ri == script_value::TYPEID_INT || ri == script_value::TYPEID_FLOAT);
 		if (a_op == token_type::equal_equal || a_op == token_type::bang_equal) {

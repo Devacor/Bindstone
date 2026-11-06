@@ -1108,7 +1108,12 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     if (type_info_ptr key_type = map_tag->key_type();
                         key_type && key_type->base_type != script_value_type::jai_any_type &&
                         key.deref().type() != key_type->base_type) {
-                        return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
+                        if (!detail::map_key_kind_admits(key.deref().type(), key_type->base_type)) {
+                            return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
+                        }
+                        auto converted_key = detail::map_key_in_kind(key.deref(), key_type->base_type, engine_);
+                        if (!converted_key) { return converted_key.error_value(); }
+                        key = std::move(converted_key.value());
                     }
                 }
                 const size_t prior_map_size = map.size();

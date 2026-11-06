@@ -66,6 +66,21 @@ namespace jai::detail {
 		return info ? info->canonical_name() : "unknown";
 	}
 
+	// A typed map's key boundary: the declared kind, or a char for a string key and a string for a char key (one key either way,
+	// stored as the declared kind); any other kind refuses, since a numeric conversion could merge distinct entries
+	inline bool map_key_kind_admits(script_value_type key, script_value_type declared) noexcept {
+		return key == declared || (key == script_value_type::jai_char_type && declared == script_value_type::jai_string_type) ||
+		       (key == script_value_type::jai_string_type && declared == script_value_type::jai_char_type);
+	}
+	// the key in the declared kind once map_key_kind_admits holds: a string of other than one character raises the char slot's text
+	inline checked_result<script_value> map_key_in_kind(const script_value& key, script_value_type declared, engine* eng) {
+		if (key.type() == declared) { return key; }
+		if (declared == script_value_type::jai_string_type) { return script_value(std::string(1, key.unchecked_as_char()), eng); }
+		auto converted = key.raw_storage_index() == script_value::TYPEID_STRING ? char_of_text(key.unchecked_as_string()) : char_of_text(key.to_string());
+		if (!converted) { return converted.error_value(); }
+		return script_value(converted.value(), eng);
+	}
+
 	inline bool container_element_compatible(const script_value& element, const type_info_ptr& element_type, engine* eng = nullptr) {
 		const script_value& actual_element = element.is_reference() ? element.deref() : element;
 
@@ -118,7 +133,7 @@ namespace jai::detail {
 			return true;
 		}
 		// Bool and int convert both ways at the element boundary, like the
-		// scalar slots (a string element still takes only a string: to_string / cast<string> spell it)
+		// scalar slots (a number never becomes a string element: to_string / cast<string> spell it)
 		if ((target_type == script_value_type::jai_int_type && elem_type == script_value_type::jai_bool_type) ||
 		    (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type)) {
 			return true;
@@ -126,6 +141,11 @@ namespace jai::detail {
 		// math kinds: the other precision of the same dimensions converts, as at a typed slot
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
 			return math::converts(elem_type, target_type);
+		}
+		// a char element takes a string (of one character: the conversion raises for any other) and a string element a char
+		if ((target_type == script_value_type::jai_char_type && elem_type == script_value_type::jai_string_type) ||
+		    (target_type == script_value_type::jai_string_type && elem_type == script_value_type::jai_char_type)) {
+			return true;
 		}
 
 		// A shared_ptr-tagged instance stores into an object-typed element slot exactly
@@ -339,6 +359,15 @@ namespace jai::detail {
 		}
 		if (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type) {
 			return script_value(actual_element.unchecked_as_int() != 0, eng);
+		}
+		if (target_type == script_value_type::jai_char_type && elem_type == script_value_type::jai_string_type) {
+			auto converted = actual_element.raw_storage_index() == script_value::TYPEID_STRING ? char_of_text(actual_element.unchecked_as_string())
+			                                                                                    : char_of_text(actual_element.to_string());
+			if (!converted) { return converted.error_value(); }
+			return script_value(converted.value(), eng);
+		}
+		if (target_type == script_value_type::jai_string_type && elem_type == script_value_type::jai_char_type) {
+			return script_value(std::string(1, actual_element.unchecked_as_char()), eng);
 		}
 		if (target_type == script_value_type::jai_shared_ptr_type && elem_type == script_value_type::jai_object_type) {
 			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
@@ -671,7 +700,9 @@ namespace jai::detail {
 				const bool bool_int_pair = (src_elem == script_value_type::jai_bool_type && target_elem_base == script_value_type::jai_int_type) ||
 				                           (src_elem == script_value_type::jai_int_type && target_elem_base == script_value_type::jai_bool_type);
 				const bool math_pair = is_math_type(src_elem) && is_math_type(target_elem_base) && math::converts(src_elem, target_elem_base);
-				if (!numeric_pair && !bool_int_pair && !math_pair && src_elem != target_elem_base) {
+				const bool text_pair = (src_elem == script_value_type::jai_string_type && target_elem_base == script_value_type::jai_char_type) ||
+				                       (src_elem == script_value_type::jai_char_type && target_elem_base == script_value_type::jai_string_type);
+				if (!numeric_pair && !bool_int_pair && !math_pair && !text_pair && src_elem != target_elem_base) {
 					out.offending = container_base_type_name(src_elem);
 					out.expected = target_type->canonical_name();
 					return out;
@@ -747,10 +778,10 @@ namespace jai::detail {
 			}
 			const auto& entries = value.unchecked_as_map();
 			bool needs_conversion = false;
-			// the offending key or value, else null; keys never coerce (converting 1.5 -> 1 could merge entries)
+			// the offending key or value, else null; keys never coerce numerically (converting 1.5 -> 1 could merge entries)
 			auto mismatch = [&](const script_map::value_type& entry) -> const script_value* {
 				const script_value& actual_key = entry.first.is_reference() ? entry.first.deref() : entry.first;
-				if (!key_open && actual_key.type() != key_type->base_type) { return &actual_key; }
+				if (!key_open && !map_key_kind_admits(actual_key.type(), key_type->base_type)) { return &actual_key; }
 				const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
 				if (!value_open && !container_element_compatible(actual, value_type, eng)) { return &actual; }
 				return nullptr;
@@ -768,13 +799,17 @@ namespace jai::detail {
 				}
 			}
 			entries.for_each_unordered([&](const script_map::value_type& entry) {
+				if (!key_open && (entry.first.is_reference() ? entry.first.deref() : entry.first).type() != key_type->base_type) {
+					needs_conversion = true;   // a char key of a string map, or the reverse, stores in the declared kind
+				}
 				if (!value_open) {
 					const script_value& actual = entry.second.is_reference() ? entry.second.deref() : entry.second;
 					const auto value_base = value_type->base_type;
 					if (actual.type() != value_base &&
 					    (value_base == script_value_type::jai_int_type ||
 					     value_base == script_value_type::jai_float_type ||
-					     value_base == script_value_type::jai_bool_type || is_math_type(value_base))) {
+					     value_base == script_value_type::jai_bool_type || value_base == script_value_type::jai_char_type ||
+					     value_base == script_value_type::jai_string_type || is_math_type(value_base))) {
 						needs_conversion = true;
 					}
 					if ((value_base == script_value_type::jai_weak_ptr_type || value_base == script_value_type::jai_object_type) &&
@@ -800,6 +835,15 @@ namespace jai::detail {
 				if (!converted) {
 					out.error = converted.error_value();
 					return out;
+				}
+				if (!key_open && actual_key.type() != key_type->base_type) {
+					auto key = map_key_in_kind(actual_key, key_type->base_type, eng);
+					if (!key) {
+						out.error = key.error_value();
+						return out;
+					}
+					dest->emplace(std::move(key.value()), std::move(converted.value()));
+					continue;
 				}
 				dest->emplace(actual_key.clone(), std::move(converted.value()));
 			}

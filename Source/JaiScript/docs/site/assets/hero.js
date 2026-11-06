@@ -20,7 +20,7 @@
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
   var still = !!(reduce && reduce.matches);
-  var TICK = 1000 / 60, START = 30, DEBOUNCE = 250, CAKE_SLICES = 6, SLICE_W = 10, CHEW = [0, 3, 6, 3];
+  var TICK = 1000 / 60, START = 30, DEBOUNCE = 250, CAKE_SLICES = 6, SLICE_W = 10, CHEW = [0, 5, 10, 5];
   var gator = { spd: Number(spdIn.value), slices: Number(slicesIn.value), x: START, says: checkedSay() };
   var frameNo = 0, nom = 0, lastTs = 0, acc = 0;
   var visible = true, running = false, statusTimer = 0, editTimer = 0;
@@ -51,27 +51,30 @@
   // The gator stops at the cake's left edge, which moves right as slices go.
   function goal() { return cakeX() + (CAKE_SLICES - Math.max(gator.slices, 1)) * SLICE_W - 50; }
 
-  // open lifts the upper jaw that many pixels off the lower one, showing the mouth and both rows of teeth.
+  // The upper jaw hinges at the back of the snout: open is how far its tip rises, so the mouth opens as a "<".
   function drawGator(px, py, open) {
-    var leg = (((px - START) / 20 | 0) % 2) * 3;
+    var leg = (((px - START) / 20 | 0) % 2) * 3, jaw = px + 18, JAW_W = 30, STRIP = 3;
+    function lift(x) { return Math.round(open * (x - jaw + STRIP) / JAW_W); }
     g.fillStyle = GATOR_DARK;
     g.fillRect(px - 34, py + 10, 14, 6); g.fillRect(px - 44, py + 12, 12, 4); g.fillRect(px - 52, py + 13, 10, 3);
     g.fillStyle = GATOR; g.fillRect(px - 22, py, 44, 18);
     g.fillStyle = BELLY; g.fillRect(px - 18, py + 13, 36, 5);
     g.fillStyle = GATOR_DARK; for (var b = 0; b < 4; b++) g.fillRect(px - 16 + b * 10, py - 4, 6, 4);
-    if (open > 0) {
-      g.fillStyle = MOUTH; g.fillRect(px + 18, py + 10 - open, 28, open);
+    for (var s = jaw; s < jaw + JAW_W; s += STRIP) {
+      var up = lift(s);
+      if (up > 0) { g.fillStyle = MOUTH; g.fillRect(s, py + 10 - up, STRIP, up); }
+      g.fillStyle = GATOR; g.fillRect(s, py + 2 - up, STRIP, 8);
     }
-    g.fillStyle = GATOR; g.fillRect(px + 18, py + 2 - open, 30, 8);
-    g.fillStyle = GATOR_DARK; g.fillRect(px + 18, py + 10, 30, 3);
+    g.fillStyle = GATOR_DARK; g.fillRect(jaw, py + 10, JAW_W, 3);
     g.fillStyle = "#ffffff";
     for (var t = 0; t < 4; t++) {
-      g.fillRect(px + 22 + t * 7, py + 9 - open, 3, 3);
-      if (open > 0) g.fillRect(px + 25 + t * 7, py + 8, 3, 2);
+      var tooth = px + 22 + t * 7;
+      g.fillRect(tooth, py + 9 - lift(tooth), 3, 3);
+      if (lift(tooth + 3) >= 3) g.fillRect(tooth + 3, py + 8, 3, 2);
     }
-    g.fillStyle = GATOR; g.fillRect(px + 14, py - 6 - open, 10, 8);
-    g.fillStyle = "#f5f2e8"; g.fillRect(px + 18, py - 4 - open, 4, 4);
-    g.fillStyle = "#111111"; g.fillRect(px + 20, py - 3 - open, 2, 2);
+    g.fillStyle = GATOR; g.fillRect(px + 14, py - 6, 10, 8);
+    g.fillStyle = "#f5f2e8"; g.fillRect(px + 18, py - 4, 4, 4);
+    g.fillStyle = "#111111"; g.fillRect(px + 20, py - 3, 2, 2);
     g.fillStyle = GATOR_DARK;
     g.fillRect(px - 16, py + 18, 6, 6 - leg); g.fillRect(px + 8, py + 18, 6, 3 + leg);
   }

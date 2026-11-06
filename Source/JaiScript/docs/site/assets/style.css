@@ -479,15 +479,29 @@ tr:last-child td { border-bottom: none; }
   color: var(--output-fg);
 }
 .demo-status.idle { color: var(--fg-dim); }
-.demo-save {
-  flex: none; font: 600 .66rem/1 var(--mono); letter-spacing: .1em; text-transform: uppercase;
-  color: var(--link); background: none; border: 1px solid var(--border-strong); border-radius: 4px;
-  padding: .32rem .45rem; cursor: pointer;
-}
-.demo-save:hover { color: var(--head); border-color: var(--accent); }
+.demo-status.bad { color: var(--kw); }
 .demo pre { margin: 0; padding: .9rem 1rem; overflow-x: auto; font: .84rem/1.6 var(--mono); color: var(--fg); background: var(--code-bg); }
 .demo .edit { border-radius: 3px; padding: 0 .15rem; transition: background-color .5s; }
 .demo .edit.flash { background: var(--glow); }
+.demo .val {
+  box-sizing: content-box; height: 1.25em; margin: 0; padding: 0 .1em; vertical-align: baseline;
+  font: inherit; line-height: 1.25; font-variant-ligatures: none; font-feature-settings: "liga" 0, "calt" 0;
+  background: var(--mark); border: 0; border-bottom: 1px dashed var(--border-strong); border-radius: 3px 3px 0 0;
+  caret-color: var(--accent); transition: background-color .5s;
+}
+.demo .val:hover { border-bottom-color: var(--accent); }
+.demo .val:focus { outline: 1px solid var(--accent); outline-offset: 1px; border-bottom-style: solid; }
+.demo .val[aria-invalid="true"] { border-bottom: 1px solid var(--kw); }
+.demo .val.flash { background: var(--glow); }
+.demo-check {
+  position: absolute; top: 0; left: 0; right: 0; max-height: 100%; overflow: auto; padding: .45rem .8rem;
+  font: .72rem/1.45 var(--mono); color: var(--capture-fg);
+  background: color-mix(in srgb, var(--capture-bg) 92%, transparent); border-left: 3px solid var(--r1);
+}
+.demo-check[hidden] { display: none; }
+.demo-check.note { border-left-color: var(--r3); }
+.demo-check .src { white-space: pre; overflow-x: auto; opacity: .75; }
+.demo-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .scene {
   position: relative; border-top: 1px solid var(--border);
   background: repeating-linear-gradient(0deg, var(--scan) 0 2px, transparent 2px 4px), var(--bg2);
@@ -595,12 +609,16 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
   .demo-bar .file { margin-left: 0; }
   .scene-label { position: static; display: block; padding: .2rem .8rem .35rem; font-size: .66rem; }
 }
+/* iOS zooms into a focused field under 16px */
+@media (pointer: coarse) {
+  .demo .val { font-size: 16px; padding: 0 .2em; }
+}
 
 /* ---------- motion ---------- */
 @media (prefers-reduced-motion: reduce) {
   .rainbow, .site-header::before { animation: none; }
   html { scroll-behavior: auto; }
-  .demo .edit, .prevnext a, .toc > li, .pillar { transition: none; }
+  .demo .edit, .demo .val, .prevnext a, .toc > li, .pillar { transition: none; }
 }
 
 /* ---------- print / save-as-PDF ---------- */

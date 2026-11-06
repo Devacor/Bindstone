@@ -64,8 +64,36 @@ spider::spin(routes);
 
 `spider::spin(handler[, options])` (also spelled `spider::serve`) hands the server a `spider::Router` or any function
 of a `spider::Request`; it answers every request that is not a file under the static root. A handler may answer a
-`spider::Response`, a string (an HTML page), `null` (204) or any other value (JSON). Options: `budget` (seconds a
+`spider::Response`, a string or a `web::html` (an HTML page), `null` (204) or any other value (JSON). Options: `budget` (seconds a
 request may run, over `--budget`) and `max_body` (bytes, over `--max-body`).
+
+## Pages from templates
+
+A page is a template file, HTML with `${...}` splices (docs/site/guide/19-templates.html). `template(path, a, b, ...)`
+renders it, seeing `a`, `b`, ... by name (the caller's variables, by reference) and the program's functions and globals;
+every splice is HTML-escaped, and what it returns is a `web::html`, which splices into another template as it is. The
+guestbook's views are `examples/guestbook/views/*.spider`:
+
+```
+<article>
+<p class="message">${entry["message"]}</p>
+<p class="byline"><a href="/entries/${entry["id"]}">${entry["name"]}, ${when(entry["created"])}</a></p>
+</article>
+```
+
+```cpp
+web::html home_page(array<map<string, var>> entries, string name, string flash, int views) {
+	string title = "Guestbook";
+	web::html body = template("views/home.spider", entries, name, flash, views);
+	return template("views/layout.spider", title, body);
+}
+```
+
+A template with a literal path is checked when the module that calls it loads, at the template's own line, and it is part
+of that module: an edit to it re-runs the module on the next request, and an edit that does not check is reported in the
+console while the app keeps serving the version that did. A list is `${array::map(entries, entry => template("card.spider", entry))}`.
+`scoped_template(path, map)` renders a template a visitor or a customer wrote: it sees only a copy of the map and calls only
+built-in methods, so it cannot reach the app.
 
 ## Options
 
@@ -158,7 +186,7 @@ Every file function of the runner (`read_file`, `write_file`, `list_dir`, ...), 
 ## Hot reload
 
 The host runs `import("app.jai")` before each request, with the engine's import check on every reach. A module
-whose file changed is parsed and checked together with what it imports before any of it runs; then its functions
+whose file changed (or a template it renders) is parsed and checked together with what it imports before any of it runs; then its functions
 and classes replace the old ones and its top-level statements run again: a `spider::Router` built with an
 initializer is rebuilt from the new code and the closing `spider::spin` hands it over, and a variable declared
 without an initializer (`int requests;`, `map<string, var> cache;`) keeps its value. A rejected edit prints its
@@ -190,7 +218,7 @@ http_text.hpp       percent-decoding, cookies, multipart, dates, content types
 database.hpp        the Database binding
 lib/spider.jai      Request, Upload, the response helpers, Router, spin
 lib/session.jai     SessionStore and Session
-examples/guestbook  a guestbook: templates, a form, a session, SQLite, a JSON API, a stylesheet
+examples/guestbook  a guestbook: .spider templates, a form, a session, SQLite, a JSON API, a stylesheet
 tests/              spider_test.py, the app it drives and the client checks (tools/ci/gates.sh spider)
 ```
 The client's transport is `../jaiscript/http_transport.hpp`, shared with the runner.

@@ -830,6 +830,33 @@ public:
             check_eq(static_cast<script_int>(4), e->execute("2 + 2").as<script_int>(), "engine stays usable after the rejection");
         });
 
+        // A coroutine runs on after its call returns: a reference parameter, in every spelling and position, is a parse error
+        test("coroutine_spellings_reject_reference_parameters", [this, both_backends]() {
+            const char* srcs[] = {
+                "coroutine int g(int& n) { yield n; }",
+                "coroutine g(const int& n) -> int { yield n; }",
+                "coroutine function g(var& n) { yield n; }",
+                "coroutine g(auto& n) { yield n; }",
+                "class C { coroutine int g(int& n) { yield n; } }",
+                "class C { static coroutine int g(int a, int& n) { yield n; } }",
+                "namespace ns { coroutine int g(int& n) { yield n; } }",
+                "int x = 1; coroutine int g(int& n = x) { yield n; }",
+            };
+            for (const char* src : srcs) {
+                auto [i_out, v_out] = both_backends(src);
+                check_true(i_out.find("cannot take 'n' by reference: it runs on after the call returns, past the argument's lifetime; take it by value (") != std::string::npos,
+                           std::string("interp: ") + src + " -> " + i_out);
+                check_eq(i_out, v_out, std::string("parity: ") + src);
+            }
+            auto [i_out, v_out] = both_backends("coroutine int count_up(int& n) { n += 1; yield n; }");
+            check_true(i_out.find("coroutine 'count_up' cannot take 'n' by reference: it runs on after the call returns, past the argument's lifetime; "
+                                  "take it by value (int n), or pass a shared_ptr to share an object") != std::string::npos, i_out);
+            check_eq(i_out, v_out, "parity: the full text");
+            check_eq(std::string("2|3"), both_backends("class Counter { int n = 1; }\ncoroutine int count_up(shared_ptr<Counter> c) { c.n += 1; yield c.n; }\n"
+                "auto c = new Counter(); auto h = count_up(c); auto first = h.next(); c.n += 1; to_string(first) + \"|\" + to_string(c.n)").first,
+                "a shared_ptr parameter is the shared spelling");
+        });
+
         // No coroutine lambda / anonymous form exists: the keyword is only a declaration prefix
         test("coroutine_bare_spelling_is_not_an_expression", [this, both_backends]() {
             const char* srcs[] = {
@@ -1163,8 +1190,8 @@ public:
                 "11|15|0", "[=] snapshots and [&] shares a local across yields");
             both_drained("coroutine int g() { int v = 1; auto bump = [&]() { v += 1; return v; }; yield bump(); yield bump(); return v; }\nauto h = g(); drain(h)",
                 "2|3|3", "a [&] lambda mutating a local between yields");
-            both_drained("int shared = 0;\ncoroutine int g(int& r) { r += 1; shared += 1; yield r; r += 1; shared += 1; return r; }\nint x = 5; auto h = g(x); string s = drain(h); s + \"|\" + to_string(x) + \"|\" + to_string(shared)",
-                "6|7|5|2", "a by-reference parameter binds by value at creation; globals stay live");
+            both_drained("int shared = 0;\ncoroutine int g(int r) { r += 1; shared += 1; yield r; r += 1; shared += 1; return r; }\nint x = 5; auto h = g(x); string s = drain(h); s + \"|\" + to_string(x) + \"|\" + to_string(shared)",
+                "6|7|5|2", "a by-value parameter is the coroutine's own; globals stay live");
         });
 
         test("typed_completion_values", [this, both_drained]() {

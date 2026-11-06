@@ -2310,7 +2310,7 @@ public:
             check_quad(q("array<K> ks = [K(1), K(2)]; ks.push(K(3)); to_string(ks.size()) + \":\" + to_string(ks[2].a)").c_str(), "3:3", "push");
             check_quad(q("array<K> ks = [K(1), K(2)]; auto c = ks; c[0].a = 42; to_string(ks[0].a) + \",\" + to_string(c[0].a)").c_str(), "1,42", "copy is a deep copy");
             check_quad(q("array<K> ks = [K(1), K(2)]; int s = 0; for (auto k : ks) { s += k.a; } to_string(s)").c_str(), "3", "range-for by value reads");
-            check_quad(q("array<K> ks = [K(1), K(2)]; for (auto k : ks) { k.a = 77; } to_string(ks[0].a + ks[1].a)").c_str(), "3", "range-for by value mutates copies");
+            check_quad(q("array<K> ks = [K(1), K(2)]; for (auto k : ks) { [[warn_mode]] k.a = 77; } to_string(ks[0].a + ks[1].a)").c_str(), "3", "range-for by value mutates copies");
             check_quad(q("array<K> ks = [K(1), K(2)]; for (auto& k : ks) { k.a = k.a * 10; } to_string(ks[0].a + ks[1].a)").c_str(), "30", "range-for by reference writes through");
             check_quad(q("array<K> ks = [K(1), K(2)]; ks.reverse(); to_string(ks[0].a)").c_str(), "2", "reverse");
             check_quad(q("array<K> ks = [K(1), K(2)]; ks[1].f()").c_str(), "k2", "method call on an element");
@@ -2370,7 +2370,7 @@ public:
             check_quad("map<float,int> m = {1.5: 1, 0.5: 2}; string s = \"\"; for (auto kv : m) { s += to_string(kv.second); } s", "21", "float keys order by value");
             check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; for (auto& kv : m) { kv.second = kv.second * 10; } to_string(m[\"a\"] + m[\"b\"])", "30", "reference range-for writes values");
             check_quad("map<string,int> m = {}; to_string(m.size()) + \",\" + to_string(m.empty())", "0,true", "empty");
-            check_quad("function total(map<string,int> mm) -> int { int s = 0; for (auto kv : mm) { s += kv.second; } mm[\"z\"] = 100; return s; } map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(total(m)) + \",\" + to_string(m.size())", "3,2", "by-value parameter");
+            check_quad("function total(map<string,int> mm) -> int { int s = 0; for (auto kv : mm) { s += kv.second; } [[warn_mode]] mm[\"z\"] = 100; return s; } map<string,int> m = {\"a\": 1, \"b\": 2}; to_string(total(m)) + \",\" + to_string(m.size())", "3,2", "by-value parameter");
             check_quad("function grow(map<string,int>& mm) { mm[\"z\"] = 100; } map<string,int> m = {\"a\": 1}; grow(m); to_string(m.size()) + \",\" + to_string(m[\"z\"])", "2,100", "by-reference parameter");
 			check_quad("map<string,int> m = {\"a\": 1}; var v = m; bool rejected = false; try { v[5] = 2; } catch (e) { rejected = true; } string before = to_string(rejected) + \",\" + to_string(v.size()) + \",\" + type_of(v); v = 7; before + \"|\" + to_string(v)", "true,1,map|7", "var map keeps content constraints but permits rebinding");
             check_quad("var v = {\"a\": 1, \"b\": 2}; map<string,int> m = v; v[\"a\"] = 50; to_string(m[\"a\"]) + \",\" + to_string(m.size())", "1,2", "typed map from a dynamic map copies");

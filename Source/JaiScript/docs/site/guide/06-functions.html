@@ -147,6 +147,31 @@ caught in parse_level: Cannot return string from &#x27;parse_level&#x27; (declar
 0
 caught by the caller: Cannot return string from &#x27;strict_level&#x27; (declared -&gt; int)</code></pre></div>
 <p>Returning a value from a <code>void</code> function is a load error; so is a function whose result holds no null (<code>int</code>, <code>float</code>, <code>bool</code>, <code>char</code>, <code>string</code>, a reference) that can fall off the end of its body (<code>'f' declared to return 'int' may reach the end of its body without returning</code>) or <code>return;</code> without a value, and a lambda with a declared return type follows the same rule; a class, handle or container result draws only a warning there (such a call yields <code>null</code>). The rule is the strict checker&#x27;s (<a href="13-strict-checking.html">Chapter 13</a>): it runs at load and adds nothing at run time. Coroutines are the exception to all of this: calling one yields a handle, and their yield and return types are not checked (see <a href="../guide/08-coroutines.html#rules-and-edges">Coroutines</a>).</p>
+<h2 id="nodiscard">[[nodiscard]]: a result the caller must use<a class="hlink" href="#nodiscard" aria-label="link">&#8203;</a></h2>
+<p><code>[[nodiscard]]</code> before a function or a method declares, as in C++, that calling it only for its effects is a mistake. An expression statement that drops the result of a call to one fails the load, and so does either arm of a conditional written as a statement. Use the result, or keep it in a variable:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
+class Wallet {
+    int gold = 3;
+    [[nodiscard]] bool spend(int n) {
+        if (n &gt; gold) { return false; }
+        gold -= n;
+        return true;
+    }
+}
+Wallet w;
+auto paid = w.spend(5);          // kept: the caller looks at it
+print("{} {}", checked_add(2, 3), paid);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 false</code></pre></div>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
+checked_add(2, 3);               // the sum goes nowhere
+print("never printed");</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+&lt;script&gt;:2:1: error: the result of &#x27;checked_add&#x27; is discarded, but &#x27;checked_add&#x27; is [[nodiscard]]: use it, or keep it in a variable (auto kept = checked_add(...);)
+    checked_add(2, 3);               // the sum goes nowhere
+    ^</code></pre></div>
+<p>The attribute leads the declaration of a function, a method (a static one too), a coroutine or a namespace member. On anything else it is a parse error (<code>[[nodiscard]] applies to a function or a method</code>), and so is a <code>void</code> function, which has no result to keep (<code>[[nodiscard]] function 'f' returns void: there is no result to keep</code>). A call to an overloaded name fails when every overload it can reach is <code>[[nodiscard]]</code>. JaiScript has no cast to <code>void</code>: <code>auto kept = f();</code> is the spelling for keeping a result on purpose, and the variable may stay unread. A program&#x27;s last expression is not discarded, because it is the value <code>execute()</code> returns.</p>
+<p>The check is static. It covers every call whose callee the checker resolves at load: a function of the program, a method of a class it knows, a namespace member, a builtin and a host function or method the host marked with <code>engine::nodiscard_function</code> (<a href="../embedding/17-host-api.html#nodiscard-host">Host API</a>). A call through a function value, a <code>var</code> receiver or anything else resolved only at run time is not checked: a result dropped at run time changes nothing, so there is no run-time error to raise.</p>
+<p>The library&#x27;s copying twins of the in-place methods are <code>[[nodiscard]]</code>, because a dropped copy leaves its argument as it was and the statement does nothing: <code>string::to_lower</code>, <code>to_upper</code>, <code>trim</code>, <code>replace</code>, <code>repeat</code>, <code>pad_left</code>, <code>pad_right</code> and <code>append</code>; <code>array::append</code>, <code>concat</code>, <code>slice</code>, <code>filter</code>, <code>map</code>, <code>sort</code> and <code>reverse</code>; <code>map::filter</code>. The text names the in-place method that does what the statement meant: <code>string::to_upper(name);</code> fails with <code>the result of 'string::to_upper' is discarded: it returns a new value and leaves its argument unchanged, so the statement does nothing; keep the result, or call the in-place method (name.to_upper(...))</code>.</p>
 <h2 id="parameters-defaults">Parameters and defaults<a class="hlink" href="#parameters-defaults" aria-label="link">&#8203;</a></h2>
 <p>Four parameter spellings: classic <code>int x</code> / <code>Creature&amp; c</code> (typed, enforced + converted like any typed target), bare <code>x</code> (dynamic), the typed shorthand <code>int: n</code>, and the auto shorthand <code>:x</code>, an auto-like parameter, the same as writing <code>auto x</code>. The shorthands exist for terse lambdas; <code>int x</code> and bare <code>x</code> are what you will write most. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = "hello") {

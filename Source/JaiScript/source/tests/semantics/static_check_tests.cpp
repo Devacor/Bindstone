@@ -128,7 +128,7 @@ public:
 				check_true(has_diag(result, dlevel::error, "expects"), result.format(source));
 			}
 			for (const auto& source : {
-				"array<int> values = [1]; array::slice(values); array::slice(values, 0); array::slice(values, 0, 1); values.erase(0);",
+				"array<int> values = [1]; auto s1 = array::slice(values); auto s2 = array::slice(values, 0); auto s3 = array::slice(values, 0, 1); values.erase(0);",
 				"string value = \"7\"; value.to_int(); value.to_int(0); value.to_int(0, 10); value.split(); value.split(\",\", 2);",
 				"string value = \" x \"; value.trim(); value.trim(\" \");",
 				"map<string,int> values = {\"a\": 1}; values.get(\"a\"); values.get(\"a\", 0);"
@@ -1482,7 +1482,8 @@ public:
                     }
                     if (report.has_errors()) {
                         for (const auto& d : report.diagnostics) {
-                            if (d.severity == check_diagnostic::level::error) {
+                            // a lost write judges intent, not types: the generator writes copies freely (the harness runs a warn region)
+                            if (d.severity == check_diagnostic::level::error && d.message.find("so the write is lost") == std::string::npos) {
                                 flagged.push_back(std::to_string(d.line) + ":" + std::to_string(d.column) +
                                                   " " + d.message);
                             }
@@ -2041,7 +2042,6 @@ public:
                 check_eq((size_t)0, error_count(e->check(log + "class Loud : Log { void say(string& m) override {\n\tm = m + \"!\";\n} }\nLog l = Log();\nl.say(\"hi\");")), "string literal admission is independent of overrides");
                 check_eq((size_t)0, error_count(e->check(decl + "array<string> names = [\"a\"];\nindex_of_name(names, \"a\", 0);")));
                 check_eq((size_t)0, error_count(e->check("void inc(int& x) { x = x + 1; }\nvoid inc(int x, int y) { }\nint v = 1;\ninc(v);")));
-                check_eq((size_t)0, error_count(e->check("coroutine int gen(int& x) { yield x + 1; }\nauto g = gen(6);")), "a coroutine binds a copy of the argument");
 
                 check_eq(std::string("x"), run("string set_name(string& name) { name = \"x\"; return name; }\nstring g() { return \"a\"; }\nset_name(g());"));
                 check_eq(std::string("3"), run("auto lf = [](string& s) { return s.size(); };\nlf(\"abc\");"));
@@ -2075,10 +2075,6 @@ public:
                 off->execute("[[warn_mode]]; int peek(int& p = 5) { return p; }\nvar msg = \"\";\ntry { peek(); } catch (err) { msg = err; }\nmsg;").to_string());
             check_eq(std::string("Cannot bind non-lvalue default to reference parameter 'q'"),
                 off->execute("[[warn_mode]]; auto lf = [](int& q = 2 + 3) { return q; };\nvar msg = \"\";\ntry { lf(); } catch (err) { msg = err; }\nmsg;").to_string());
-            check_eq((size_t)0, error_count(e->check("coroutine int gen(int& p = 5) { yield p; }\nauto g = gen();")), "a coroutine binds a copy of its default");
-            check_eq(std::string("5 1"),
-                off->execute("[[warn_mode]]; int g = 1;\ncoroutine int lit(int& p = 5) { yield p; }\ncoroutine int named(int& p = g) { p = 9; yield p; }\n"
-                             "auto a = lit();\nauto b = named();\nint first = a.next();\nb.next();\n\"\" + first + \" \" + g;").to_string());
             check_eq(std::string("7 5 11"),
                 off->execute("[[warn_mode]]; int peek(int& p = 5) { return p; }\nint v = 7;\nint k(const int& p = 5) { return p; }\nint g = 1;\nvoid bump(int& p = g) { p += 10; }\nbump();\n"
                              "\"\" + peek(v) + \" \" + k() + \" \" + g;").to_string());
@@ -3188,6 +3184,179 @@ public:
             auto quiet = e->check(nullable);
             check_eq((size_t)0, error_count(quiet), quiet.format(nullable));
             check_eq((int64_t)7, e->execute(nullable).as_int());
+        });
+
+        // [[nodiscard]] (guide/06-functions.html#nodiscard): an expression statement that drops the result of a call the checker
+        // resolves to a [[nodiscard]] callee fails the load; the library's copying twins of the in-place methods are marked
+        test("a_discarded_nodiscard_result_fails_the_load", [this]() {
+            auto e = make_engine();
+            const std::string decls = "[[nodiscard]] int add(int a, int b) { return a + b; }\n"
+                                      "class W { int g = 1; [[nodiscard]] bool spend(int n) { g -= n; return true; } [[nodiscard]] static int make() { return 2; } }\n"
+                                      "namespace ns { [[nodiscard]] int pick() { return 3; } }\n"
+                                      "[[nodiscard]] int over(int a) { return a; }\nint over(int a, int b) { return 0; }\n"
+                                      "[[nodiscard]] coroutine int gen() { yield 1; }\n"
+                                      "W w = W();\nbool flag = true;\n";
+            const std::pair<const char*, const char*> dropped[] = {
+                {"add(1, 2);", "the result of 'add' is discarded, but 'add' is [[nodiscard]]: use it, or keep it in a variable (auto kept = add(...);)"},
+                {"w.spend(1);", "the result of 'W.spend' is discarded, but 'W.spend' is [[nodiscard]]: use it, or keep it in a variable (auto kept = w.spend(...);)"},
+                {"W::make();", "the result of 'W.make' is discarded"},
+                {"ns::pick();", "the result of 'ns::pick' is discarded"},
+                {"over(1);", "the result of 'over' is discarded"},
+                {"gen();", "the result of 'gen' is discarded"},
+                {"flag ? add(1, 2) : 0;", "the result of 'add' is discarded"},
+                {"void f() { add(1, 2); }", "the result of 'add' is discarded"},
+                {"auto l = [&]() { w.spend(1); };", "the result of 'W.spend' is discarded"},
+            };
+            for (const auto& [stmt, text] : dropped) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)1, error_count(r), r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            const char* kept[] = {"auto k = add(1, 2);", "print(add(1, 2));", "if (w.spend(1)) { }", "over(1, 2);", "auto h = gen();",
+                                  "int sum = add(1, 2) + ns::pick();", "function f = add; f(1, 2);", "var d = w; d.spend(1);"};
+            for (const char* stmt : kept) {
+                auto r = e->check(decls + stmt + "\nprint(1);");
+                check_eq((size_t)0, error_count(r), std::string(stmt) + "\n" + r.format());
+            }
+            check_eq((size_t)0, error_count(e->check(decls + "add(1, 2)")), "the program's last expression is its result");
+            auto w = e->check("[[warn_mode]]; " + decls + "add(1, 2);\nprint(1);");
+            check_eq((size_t)0, error_count(w), w.format());
+            check_true(has_diag(w, dlevel::warning, "the result of 'add' is discarded"), w.format());
+
+            const std::pair<const char*, const char*> twins[] = {
+                {"string name = \"ab\";\nstring::to_upper(name);", "the result of 'string::to_upper' is discarded: it returns a new value and leaves its argument unchanged, so the statement does nothing; keep the result, or call the in-place method (name.to_upper(...))"},
+                {"string s = \" a \";\nstring::trim(s);", "(s.trim(...))"},
+                {"string s = \"a\";\nstring::append(s, \"b\");", "(s.append(...))"},
+                {"array<int> xs = [2, 1];\narray::sort(xs);", "(xs.sort(...))"},
+                {"array<int> xs = [2, 1];\narray::filter(xs, [](int x) { return x > 1; });", "(xs.filter(...))"},
+                {"array<int> xs = [2, 1];\narray::map(xs, [](int x) { return x; });", "(xs.map(...))"},
+                {"map<string, int> m = {\"a\": 1};\nmap::filter(m, [](k, v) { return v > 0; });", "(m.filter(...))"},
+            };
+            jai::stdlib::register_all(*e);
+            for (const auto& [src, text] : twins) {
+                auto r = e->check(std::string(src) + "\nprint(1);");
+                check_eq((size_t)1, error_count(r), std::string(src) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            check_eq((size_t)0, error_count(e->check("string n = \"a\";\nprint(string::to_upper(n));\nstring::join([\"a\"], \",\");")));
+
+            auto host = make_engine();
+            host->add_function("try_open", [](script_int n) -> bool { return n > 0; });
+            host->add_function("plain_open", [](script_int n) -> bool { return n > 0; });
+            dynamic_binder<probe_object>(*host, "ProbeObject").constructor<>().method("doubled", &probe_object::doubled).build();
+            host->nodiscard_function("try_open");
+            host->nodiscard_function("ProbeObject.doubled");
+            check_true(host->is_nodiscard_function("try_open") && !host->is_nodiscard_function("plain_open"));
+            auto hr = host->check("try_open(1);\nplain_open(1);\nProbeObject p = ProbeObject();\np.doubled();\nprint(1);");
+            check_eq((size_t)2, error_count(hr), hr.format());
+            check_true(has_diag(hr, dlevel::error, "the result of 'try_open' is discarded, but 'try_open' is [[nodiscard]]"), hr.format());
+            check_true(has_diag(hr, dlevel::error, "the result of 'ProbeObject.doubled' is discarded"), hr.format());
+
+            const std::pair<const char*, const char*> misplaced[] = {
+                {"[[nodiscard]] int x = 1;", "[[nodiscard]] applies to a function or a method"},
+                {"class C { [[nodiscard]] int f = 1; }", "[[nodiscard]] applies to a function or a method"},
+                {"class C { [[nodiscard]] C() { } }", "[[nodiscard]] applies to a function or a method"},
+                {"[[nodiscard]] void v() { }", "[[nodiscard]] function 'v' returns void: there is no result to keep"},
+                {"namespace ns { [[nodiscard]] int x = 1; }", "[[nodiscard]] applies to a function or a method"},
+            };
+            for (const auto& [src, text] : misplaced) {
+                for (bool use_vm : {false, true}) {
+                    auto p = make_engine();
+                    p->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+                    std::string got;
+                    try { p->execute(src); } catch (const std::exception& ex) { got = ex.what(); }
+                    check_true(got.find(text) != std::string::npos, std::string(src) + " -> " + got);
+                }
+            }
+        });
+
+        // A lost write (guide/03-value-semantics.html#lost-writes): a store into a by-value copy that no path reads again, and that
+        // nothing else can observe, fails the load; every way the write could be seen keeps the program legal
+        test("a_lost_write_to_a_copy_fails_the_load", [this]() {
+            auto e = make_engine();
+            const std::string decls = "class E { int hp = 10; string name = \"e\"; array<int> marks = []; }\n"
+                                      "array<E> es = [E(), E()];\narray<string> names = [\"a\"];\narray<int> xs = [1, 2];\nint total = 0;\n";
+            const std::pair<const char*, const char*> lost[] = {
+                {"for (auto e : es) e.hp -= 1;", "'e.hp' writes to 'e', a copy of the element that is never read afterwards, so the write is lost; iterate with 'auto& e' to change the element"},
+                {"for (E e : es) { e.hp = 0; }", "iterate with 'E& e' to change the element"},
+                {"for (auto s : names) { s.to_upper(); }", "'s.to_upper()' writes to 's'"},
+                {"for (auto x : xs) { x *= 2; }", "'x' writes to 'x'"},
+                {"for (auto e : es) { e.marks.push(1); }", "'e.marks.push(...)' writes to 'e'"},
+                {"for (auto e : es) { e.hp -= 1; total += 1; }", "'e.hp' writes to 'e'"},
+                {"void hurt(map<string, int> m) { m[\"a\"] = 5; }", "'m[...]' writes to parameter 'm', a copy of the argument that is never read afterwards, so the write is lost; take 'map<string,int>& m' to change the caller's value"},
+                {"void shout(string s) { s.to_upper(); }", "take 'string& s' to change the caller's value"},
+                {"auto l = [](int n) { n += 1; };", "writes to parameter 'n'"},
+                {"void f() { E first = es[0]; first.hp = 1; }", "'first.hp' writes to 'first', a copy that is never read afterwards, so the write is lost; declare 'E& first' to change the original"},
+                {"void f() { auto k = es[0].hp; k++; }", "declare 'auto& k' to change the original"},
+                {"int f(int n) { int r = 0; if (n > 0) { r = n; } else { r = 1; return r; } return 0; }", "'r' writes to 'r'"},
+                {"void f() { int r = 0; try { r = 5; } catch (err) { print(r); } }", "'r' writes to 'r'"},
+            };
+            for (const auto& [stmt, text] : lost) {
+                auto r = e->check(decls + stmt + "\nprint(total);");
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            const char* legal[] = {
+                "for (auto& e : es) { e.hp -= 1; }",
+                "for (auto e : es) { e.hp -= 1; print(e.hp); }",
+                "for (auto e : es) { auto c = e; c.hp -= 3; print(c.hp); }",
+                "for (auto e : es) { e.hp -= 1; print(\"hit\"); }",                    // a call may observe it (reflect::instances)
+                "for (auto e : es) { e.hp -= 1; E other = E(); }",                    // a construction runs code
+                "for (auto x : xs) { x *= 2; total += x; }",
+                "int f(int n) { while (n > 0) { n--; } return n; }",
+                "int f(int n) { for (int i = 0; i < 3; i++) { n += i; } return n; }",
+                "int f(int n) { int r = 0; for (auto x : xs) { if (x > n) { r = x; break; } } return r; }",
+                "int f() { int r = 0; try { r = 5; throw \"x\"; } catch (err) { return r; } return 0; }",
+                "void f(int n) { auto& r = n; n = 3; print(r); }",                     // a reference reads it later
+                "void f(array<int> a) { for (auto& x : a) { x = 1; } }",               // writes through a reference: not judged
+                "void f(int n) { auto g = [&]() { return n; }; n = 4; print(g()); }",  // a lambda keeps it
+                "void f(int n) { auto g = [n]() { return n; }; n = 4; print(g()); }",
+                "void f(var v) { v = 5; }",                                            // var: not judged
+                "void f(E e) { e.hp = 5; }",                                           // a by-value class parameter may share a handle's object
+                "void f(shared_ptr<E> p) { p.hp = 5; }",
+                "for (auto h : [new E()]) { h.hp = 1; }",                              // handles share their object
+                "void f() { auto h = new E(); auto g = h; g.hp = 1; }",
+                "array<shared_ptr<E>> hs = [new E()];\nfor (E e : hs) { e.hp = 0; }",   // a class-typed variable over handles shares
+                "void bump(int& x) { x += 1; } void f(int n) { bump(n); n = 2; bump(n); }",
+                "int f(int n) { switch (n) { case 1: n = 5; fallthrough; default: return n; } return 0; }",
+                "for (auto e : es) { e.hp -= 1; if (e.hp > 0) { continue; } }",
+                "void f(int n) { n = 1; include(\"no_such_file.jai\"); }",            // an include may name it
+                "void f(array<int> a) { try { a[5] = 1; } catch (err) { print(err); } }",   // an element store may raise
+                "void f(array<uint8> b, int v) { b.push(v); }",                       // a narrow element range-checks
+                "void f(map<int, int> m, var k) { try { m[k] = 1; } catch (err) { print(err); } }",   // the key converts
+                "void f(string s) { try { s.repeat(-1); } catch (err) { print(err); } }",
+            };
+            for (const char* stmt : legal) {
+                auto r = e->check(decls + stmt + "\nprint(total);");
+                bool lost_write = false;
+                for (const auto& d : r.diagnostics) { if (d.message.find("so the write is lost") != std::string::npos) { lost_write = true; } }
+                check_true(!lost_write, std::string(stmt) + "\n" + r.format());
+            }
+            // a class that runs code of its own when written or destroyed, or has a subclass that does, is not judged
+            const char* observing[] = {
+                "class D { int hp = 1; ~D() { print(hp); } }",
+                "class D { int v = 1; int _get_hp() { return v; } void _set_hp(int x) { v = x; print(x); } }",
+                "class D { int hp = 1; } class Boss : D { ~Boss() { print(hp); } }",
+                "class D { int hp = 1; var held; }",
+            };
+            for (const char* cls : observing) {
+                auto r = e->check(std::string(cls) + "\narray<D> ds = [D()];\nfor (auto d : ds) { d.hp = 5; }");
+                bool lost_write = false;
+                for (const auto& d : r.diagnostics) { if (d.message.find("so the write is lost") != std::string::npos) { lost_write = true; } }
+                check_true(!lost_write, std::string(cls) + "\n" + r.format());
+            }
+            // the observable cases run identically on both backends: the destructor sees the copy's write
+            for (bool use_vm : {false, true}) {
+                auto x = make_engine();
+                x->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
+                check_eq(std::string("5|1"), x->execute("string log = \"\";\nclass D { int hp = 1; ~D() { if (log == \"\") { log = \"\" + hp; } } }\n"
+                    "array<D> ds = [D()];\nfor (auto d : ds) { d.hp = 5; }\nlog + \"|\" + ds[0].hp").to_string(), use_vm ? "vm" : "interp");
+            }
+            auto w = e->check("[[warn_mode]];\n" + decls + "for (auto e : es) { e.hp -= 1; }");
+            check_eq((size_t)0, error_count(w), w.format());
+            check_true(has_diag(w, dlevel::warning, "so the write is lost"), w.format());
+            auto region = e->check(decls + "for (auto e : es) {\n\t[[warn_mode]] e.hp -= 1;\n}");
+            check_eq((size_t)0, error_count(region), region.format());
         });
 
         test("comparisons_that_exist_stay_clean", [this]() {

@@ -350,7 +350,7 @@ public:
 			expect("a negative repeat count", R"(
 				string t(function f) { string r = "ran"; try { f(); } catch (e) { r = e; } return r; }
 				string z = "ab"; z.repeat(0);
-				t([]() { string s = "abc"; s.repeat(-1); }) + "|" + t([]() { string::repeat("a", -1); }) + "|" + string::repeat("ab", 0) + "|" + z + "|";
+				t([]() { string s = "abc"; s.repeat(-1); }) + "|" + t([]() { auto r = string::repeat("a", -1); }) + "|" + string::repeat("ab", 0) + "|" + z + "|";
 			)", "string::repeat count cannot be negative|string::repeat count cannot be negative|||");
 			expect("nan text", R"(
 				float inf = 1e308 * 10.0;
@@ -1183,7 +1183,7 @@ private:
 				for (array<int> row : grid) { cells += row.size(); row.push(9); }
 				for (array<int>& row : grid) { row.push(7); }
 				array<map<string, int>> ms = [{"a": 1}];
-				for (map<string, int> m : ms) { m["a"] = 50; }
+				for (map<string, int> m : ms) { [[warn_mode]] m["a"] = 50; }
 				return "" + h.x + " " + alive + " " + cells + " " + grid[0].size() + " " + ms[0]["a"];
 			)", "6 1 3 3 1");
 		});
@@ -1778,7 +1778,7 @@ private:
 				function run() -> string {
 					auto& r = f(); r = 5;
 					var A = [1, 2]; two(A[i1()], A[i2()]);
-					int a = 1; auto& ra = a; int x = 0; x = ra; x = 5;
+					int a = 1; auto& ra = a; int x = 0; [[warn_mode]] x = ra; [[warn_mode]] x = 5;
 					var arr = [1]; auto& re = arr[0]; var m = {}; m["k"] = re; m["k"] = 9; re = 3;
 					map<string, int> mm = {"k": 1}; var s = "x"; string d = ""; string o = "";
 					try { mm["k"] = s; } catch (e) { d = e; }
@@ -2925,10 +2925,10 @@ private:
 					int bz = b();
 					string s = "q";
 					auto c = [s2 = s + "!"]() { return s2; };
-					s = "changed";
+					[[warn_mode]] s = "changed";
 					array<int> arr = [1];
 					auto d = [cp = arr]() { return cp.size(); };
-					arr.push(2);
+					[[warn_mode]] arr.push(2);
 					auto e = [=, w = 5]() { return w + x; };
 					return "" + a() + "," + bz + "," + y + "," + c() + "," + x + "," + d() + "," + e();
 				}

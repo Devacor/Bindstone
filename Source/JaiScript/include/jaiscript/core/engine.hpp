@@ -358,6 +358,11 @@ namespace jai {
         // a unit that was never gathered, is refused: the host raises the refusal).
         void constant_argument(const std::string& callable, size_t index, std::string refusal);
         bool constant_argument_admits(const std::string& callable, size_t index, std::string_view text) const;
+        // [[nodiscard]] for a host function ("name") or a bound method ("Class.method"), as a script declares it on its own: an
+        // expression statement that drops the result of a call the checker resolves to it fails the load. Register before
+        // loading scripts.
+        void nodiscard_function(const std::string& callable);
+        bool is_nodiscard_function(const std::string& callable) const;
 
         // Global registration
         void add_global(const std::string& name, script_value value, bool is_serializable = true);

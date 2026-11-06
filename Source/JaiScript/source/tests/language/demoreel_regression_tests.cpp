@@ -100,7 +100,7 @@ public:
 						int rows = 0;
 						for (int y = 0; y < h; ++y) {
 							int prev = -1;
-							for (int x = 0; x < w; ++x) { prev = x; }
+							for (int x = 0; x < w; ++x) { [[warn_mode]] prev = x; }
 							rows = rows + 1;
 						}
 						return rows;
@@ -120,7 +120,7 @@ public:
 						int rows = 0;
 						for (int y = 0; y < h; ++y) {
 							int clamp = 0;
-							if (y > 1) { clamp = y; }
+							if (y > 1) { [[warn_mode]] clamp = y; }
 							rows = rows + 1;
 						}
 						return rows;

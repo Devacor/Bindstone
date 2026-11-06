@@ -350,7 +350,7 @@ public:
 				e->memory_cap(1024 * 1024);
 				std::string caught;
 				try {
-					auto r = e->execute(std::string("string msg = \"none\"; try { ") + growth + " } catch (err) { msg = err; } msg");
+					auto r = e->execute(std::string("string msg = \"none\"; try { [[warn_mode]]; ") + growth + " } catch (err) { msg = err; } msg");
 					caught = r.as<std::string>();
 				} catch (const std::exception& ex) {
 					caught = std::string("escaped: ") + ex.what();

@@ -523,6 +523,28 @@ conversions). Enforced by `static_check_tests.cpp::fuzz_corpus_false_positive_ga
 differential-fuzzer generator seeds; any program that executes cleanly must check clean.
 Grow that seed count before loosening any lenient rule.
 
+Two rules judge a program's intent rather than its types, and so reject code that runs clean: a lost write
+(below) and a dropped `[[nodiscard]]` result. The gate counts neither: the generator writes copies freely (the fuzz
+harness runs its programs in a `[[warn_mode]]` region) and calls no `[[nodiscard]]` callee as a statement.
+
+### Lost writes
+
+`lw_*` in `type_checker.cpp`. Candidates are by-value locals, parameters and range-for variables whose static type is
+a value the walk knows: scalars, text, math values, typed containers of them, and script classes held by value whose
+whole tree is quiet (no destructor, user accessor, `operator=` or host base, in any field's class or any subclass the
+unit, the program tables or the engine knows). A by-value class parameter, an `auto` made from a handle and a class
+variable over handle elements may share an object, so they are never candidates. Each function, lambda and the unit's
+top level is one region: the walk records every resolved identifier (`lw_ident_`) and every expression's type
+(`lw_types_`), and the region's close runs a backward liveness pass over the structured AST (loops to a fixpoint,
+`break`/`continue` targets, a `try`'s handler live at every statement of its body, candidates masked outside their
+scope). A store is judged only when it cannot raise or run code itself: member paths through quiet values, a final map
+insert whose key needs no conversion, a conversion-free right side, `++`/`--`, and the in-place builtins that take no
+count or index. A candidate that a reference binds, a cast to a reference names or a name the walk did not resolve
+names is never judged; one whose tree holds class instances, or that a lambda names or a call takes as receiver or
+argument, is "sensitive": any node that may run code (a call, a construction, an operator on a class, the death of a
+local whose type is not plain) reads it, because `reflect::instances` can observe it there. An include or import in
+the region gives the region up. The memory cap and the execution budget are not observations.
+
 ### Precision map
 
 Where static information remains incomplete. These paths can defer a type mistake

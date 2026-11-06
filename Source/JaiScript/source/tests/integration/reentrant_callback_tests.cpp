@@ -266,7 +266,7 @@ public:
 				got += "|";
 				try { var p = reflect::bind(leaf, "peek"); p(leaf); got += "allowed"; } catch (e) { got += "refused"; }
 				got += "|";
-				try { array::map([1], [&](int v) -> int { return leaf.peek(leaf); }); got += "allowed"; } catch (e) { got += "refused"; }
+				try { auto mapped = array::map([1], [&](int v) -> int { return leaf.peek(leaf); }); got += "allowed"; } catch (e) { got += "refused"; }
 				got += "|" + to_string(leaf.own()) + "|";
 				Maker m;
 				array<var> scaled = array::map([1, 2, 3], reflect::bind(m, "scaled"));

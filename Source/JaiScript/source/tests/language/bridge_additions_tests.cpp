@@ -134,7 +134,7 @@ public:
                 array<int> a = [1, 2];
                 auto both = array::concat(a, [3, 4]);
                 print(to_json(both), " ", to_json(a));
-                try { array::concat(a, ["s"]); } catch (e) { print("caught: ", e); }
+                try { auto joined = array::concat(a, ["s"]); } catch (e) { print("caught: ", e); }
                 array<int> b = [1, 2, 3];
                 b.insert(0, 0);
                 b.insert(2, 9);
@@ -150,7 +150,7 @@ public:
         test("array_helper_callback_throw_propagates", [this]() {
             check_eq(std::string("caught: boom at 2\n[1,2,3]\n"), run_output(R"JS(
                 var a = [1, 2, 3];
-                try { array::map(a, x => { if (x == 2) { throw "boom at " + x; } return x; }); } catch (e) { print("caught: ", e); }
+                try { auto mapped = array::map(a, x => { if (x == 2) { throw "boom at " + x; } return x; }); } catch (e) { print("caught: ", e); }
                 print(to_json(a));
             )JS"));
         });

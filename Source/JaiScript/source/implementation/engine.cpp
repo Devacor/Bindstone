@@ -519,6 +519,7 @@ struct engine::implementation {
     // pointer stored in _cpp_object (internal/script_extensible.md D3).
     std::unordered_map<const void*, weaker_ptr<class_instance>> script_layers_;
     std::unordered_set<std::string> serial_functions_;
+    std::unordered_set<std::string> nodiscard_callables_;
     std::unordered_set<std::string> host_function_names_;
     std::unordered_set<std::string> host_global_names_;
     int library_registration_depth_ = 0;
@@ -1996,13 +1997,15 @@ struct engine::implementation {
                 if (auto c = ns.classes.find(*member); c != ns.classes.end() && c->second) { fold(mix_key(0xC2, ran_unit_key(c->second->unit().id))); }
                 if (auto h = ns.signatures.find(*member); h != ns.signatures.end()) {
                     const host_entry_signature& sig = h->second;
-                    fold(mix_key(uint64_t(sig.min_args) | uint64_t(sig.max_args) << 8 | uint64_t(sig.result_follows_first) << 16, uint64_t(sig.result)));
+                    fold(mix_key(uint64_t(sig.min_args) | uint64_t(sig.max_args) << 8 | uint64_t(sig.result_follows_first) << 16 |
+                                 uint64_t(sig.nodiscard) << 17 | uint64_t(sig.in_place_twin) << 18, uint64_t(sig.result)));
                     for (const auto p : sig.params) { fold(uint64_t(p) + 1); }
                     fold(detail::jaibite_identity_of(sig.result_class).hash);
                 }
             }
         }
         for (const auto& [index, refusal] : self.constant_argument_indexes(name)) { fold(mix_key(0xA1, index)); }
+        if (nodiscard_callables_.count(name)) { fold(0xD1); }
         if (name == detail::k_outside_constants) {
             std::vector<const std::pair<const std::string, std::vector<std::string>>*> texts;
             for (const auto& entry : self.constant_texts_by_name()) { texts.push_back(&entry); }
@@ -4312,6 +4315,10 @@ bool engine::host_function_result(const std::string& name, script_value_type& ou
 }
 
 void engine::serial_function(const std::string& name) { impl->serial_functions_.insert(name); }
+
+void engine::nodiscard_function(const std::string& callable) { impl->nodiscard_callables_.insert(callable); }
+
+bool engine::is_nodiscard_function(const std::string& callable) const { return impl->nodiscard_callables_.count(callable) != 0; }
 
 bool engine::host_function_serial(const std::string& name) const { return impl->serial_functions_.count(name) != 0; }
 

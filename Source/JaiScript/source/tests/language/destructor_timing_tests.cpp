@@ -1537,7 +1537,7 @@ public:
                     b.t = new P(); w = b.t; take(b.t == null, clear_check(b, w)); note("args:" + to_string(w.expired()));
                     b.t = new P(); w = b.t; shared_ptr<P> c = true ? b.t : null; c = null; b.t = null; note("arm:" + to_string(w.expired()));
                     b.t = new P(); w = b.t; switch (b.t.v) { case 3: b.t = null; note("case:" + to_string(w.expired())); break; default: break; }
-                    b.t = new P(); z = b.t == null; note("count:" + to_string(b.t.use_count()));
+                    b.t = new P(); [[warn_mode]] z = b.t == null; note("count:" + to_string(b.t.use_count()));
                     b.u = new P(); w = b.u; var q = b.u; q = null; b.u = null; note("untyped:" + to_string(w.expired()));
                     weak_ptr<P> made = null;
                     bool m = mk(made) == null; note("call:" + to_string(made.expired()));
@@ -1553,7 +1553,7 @@ public:
                     }
                     note("subject:" + to_string(w.expired()));
                     b.t = new P(); w = b.t; int k = g(b.t); b.t = null; note("param:" + to_string(w.expired()));
-                    b.t = new P(); w = b.t; k = h(b.t); b.t = null; note("local:" + to_string(w.expired()));
+                    b.t = new P(); w = b.t; [[warn_mode]] k = h(b.t); b.t = null; note("local:" + to_string(w.expired()));
                 }
                 locals(); reads(); OUT;
             )"}, "block:true loop:true var:true held:false lambda:true decl:true cmp:true cond:true in:true full:true in:true args:true arm:true "

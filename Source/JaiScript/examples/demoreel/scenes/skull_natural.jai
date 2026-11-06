@@ -334,7 +334,7 @@ function sk_material(float x, float y, float z, float dw, array<int>& cand, int 
 	if (math::sqrt(ox * ox + oy * oy + oz * oz) - SK_CRB < de) { de = sk_crown(x, y, z, de); }
 	if (de < best) { best = de; m = 3; }
 	float dgm = sk_gem(x, y, z);
-	if (dgm < best) { best = dgm; m = 5; }
+	if (dgm < best) { m = 5; }
 	if (m == 2 && chit == db) {
 		float ax = x - SK_AX; float ay = y - SK_AY; float az = z - SK_AZ;
 		float au = ax * SK_PUX + ay * SK_PUY + az * SK_PUZ;

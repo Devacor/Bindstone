@@ -36,6 +36,12 @@ namespace stdlib {
         sign("repeat", {2, 2, {text, integer}, any, true});
         sign("pad_left", {2, 3, {text, integer, any}, any, true});
         sign("pad_right", {2, 3, {text, integer, any}, any, true});
+        sign("append", {2, 255, {text, text}, any, true});
+        for (const char* twin : {"to_lower", "to_upper", "trim", "replace", "repeat", "pad_left", "pad_right", "append"}) {
+            auto& signature = ns->signatures[detail::engine_access::symbolize(eng_ref, twin)];
+            signature.nodiscard = true;
+            signature.in_place_twin = true;
+        }
 
         // the rest of the namespace's free functions: each checks its arguments and returns a new value
         using R = checked_result<script_value>;
@@ -82,7 +88,6 @@ namespace stdlib {
             return a[0]->is_utf8_string() ? script_value::make_utf8(std::move(out), e) : script_value(std::move(out), e);
         });
 
-		sign("append", {2, 255, {text, text}, any, true});
 		def("append", [=](engine* a_engine, args_view a_args) -> R {
 			if (a_args.size() < 2) { return count_error("string::append expects at least 2 text arguments"); }
 			size_t size = 0;

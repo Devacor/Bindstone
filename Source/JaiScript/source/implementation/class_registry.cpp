@@ -755,7 +755,7 @@ bool class_definition::flat_field_type(const type_info_ptr& t, std::vector<const
     }
 }
 
-checked_result<void> class_registry::register_script_class(std::shared_ptr<script_class_definition> class_def) {
+checked_result<void> class_registry::register_script_class(std::shared_ptr<script_class_definition> class_def, const class_decl* a_declaration) {
     if (!class_def) {
         return checked_result<void>(make_error_code(runtime_error_code::class_not_found));
     }
@@ -768,7 +768,7 @@ checked_result<void> class_registry::register_script_class(std::shared_ptr<scrip
     validate_class_hierarchy(class_def->get_name());
 
     if (first_definition) {
-        if (engine* eng = class_def->get_engine()) { detail::engine_access::note_class_shape_change(*eng); }
+        if (engine* eng = class_def->get_engine()) { detail::engine_access::note_class_defined(*eng, class_def->get_name(), a_declaration); }
     }
     return {};
 }
@@ -1285,7 +1285,7 @@ checked_result<void> declare_script_class(class_decl* decl, const class_declarat
         }
     }
 
-    auto register_result = engine_access::get_class_registry(*eng).register_script_class(class_def);
+    auto register_result = engine_access::get_class_registry(*eng).register_script_class(class_def, decl);
     if (!register_result) {
         return register_result;
     }

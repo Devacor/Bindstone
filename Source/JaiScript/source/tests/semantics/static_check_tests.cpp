@@ -2248,6 +2248,32 @@ public:
             std::filesystem::remove_all(dir);
         });
 
+        test("program_executed_again_unchanged_reads_and_checks_nothing", [this]() {
+            // a load reads each file once, a unit an import runs keeps the verdict the root's gather gave it, and the program's
+            // own classes becoming defined as it runs move nothing the checker read
+            auto dir = closure_dir("again");
+            write_unit(dir, "again_app.jai", "import \"again_store.jai\";\nimport \"again_views.jai\";\nfunction page() -> string { return render(Store()); }\n");
+            write_unit(dir, "again_store.jai", "class Store { int rows = 3; }\n");
+            write_unit(dir, "again_views.jai", "import \"again_store.jai\";\nfunction render(Store s) -> string { return \"rows \" + to_string(s.rows); }\n");
+            auto e = program_engine(dir);
+            jai::stdlib::register_all(*e);
+            const std::string root = "import(\"again_app.jai\");";
+            e->execute(root);
+            check_eq((uint64_t)3, detail::engine_access::source_read_count(*e), "one read per file");
+            check_eq((uint64_t)4, detail::engine_access::check_walk_count(*e), "the root and each unit checked once");
+            e->execute(root);
+            e->execute(root);
+            check_eq((uint64_t)3, detail::engine_access::source_read_count(*e), "an unchanged program reads nothing again");
+            check_eq((uint64_t)4, detail::engine_access::check_walk_count(*e), "an unchanged program checks nothing again");
+            check_eq(std::string("rows 3"), e->execute("page()").to_string());
+            write_unit(dir, "again_store.jai", "class Store { int rows = 3; int cols = 4; }\n");
+            check_eq(std::string("rows 3"), e->execute(root + "\npage()").to_string());
+            write_unit(dir, "again_store.jai", "class Store { int rows = \"three\"; }\n");
+            check_throws([&]() { e->execute(root); }, "a broken edit is rejected");
+            check_eq(std::string("rows 3"), e->execute("page()").to_string(), "the program keeps the code it had");
+            std::filesystem::remove_all(dir);
+        });
+
         test("program_closure_stamps_proofs_in_units", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             auto dir = closure_dir("proofs");
@@ -2395,10 +2421,12 @@ public:
             auto one = make_engine();
             check_eq((size_t)0, error_count(one->check("class A { int hp = 3; }\nclass B : A { int tick() { int x = hp; return hp; } }\nB().tick()")));
             check_ge(one->last_proof_stats().returns, (uint32_t)1, "same-unit first check proves the return");
-            // once the units have run, the re-check sees registered classes: proofs land like a same-unit second check
-            check_eq((int64_t)3, e->execute(root).as_int());
-            check_eq((int64_t)3, e->execute(root).as_int());
-            check_ge(e->last_proof_stats().returns, (uint32_t)1, "registered: return proof");
+            // once pf_a's import has defined A, pf_b's deferred proofs re-stamp with the registered class in view: the return
+            // proves as in the same-unit check (no entry of this engine names B, so pf_b's re-stamp is the last pass)
+            auto run = program_engine(dir);
+            run->execute("import \"pf_a.jai\";\nimport \"pf_b.jai\";\n");
+            check_ge(run->last_proof_stats().returns, (uint32_t)1, "registered: return proof");
+            check_eq((int64_t)3, run->execute(root).as_int());
             std::filesystem::remove_all(dir);
         });
 

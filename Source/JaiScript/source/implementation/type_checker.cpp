@@ -6373,16 +6373,21 @@ void collect_unit_enums(const std::vector<declaration_ptr>& decls, const std::st
 }
 
 // a namespace's class is named by its qualified spelling (ns::Name)
-void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
+bool collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out) {
+    bool result = false;
     for (const auto& d : decls) {
         if (!d) { continue; }
         if (d->get_type() == node_type::class_decl) {
-            auto cd = std::static_pointer_cast<class_decl>(d);
-            out[std::string(cd->name)] = std::move(cd);
+            auto& slot = out[std::string(static_cast<const class_decl*>(d.get())->name)];
+            if (slot != d) {
+                slot = std::static_pointer_cast<class_decl>(d);
+                result = true;
+            }
         } else if (d->get_type() == node_type::namespace_decl) {
-            collect_unit_classes(static_cast<const namespace_decl*>(d.get())->declarations, out);
+            result = collect_unit_classes(static_cast<const namespace_decl*>(d.get())->declarations, out) || result;
         }
     }
+    return result;
 }
 
 } // namespace detail

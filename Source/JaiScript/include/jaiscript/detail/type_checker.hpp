@@ -172,8 +172,8 @@ namespace jai {
         // names, classes, enums and their values, namespaces with every `::` prefix, namespace
         // members flattened) - the unit's contribution to a program closure.
         void collect_unit_names(const std::vector<declaration_ptr>& decls, std::unordered_set<std::string>& out);
-        // Every top-level class `decls` declares (namespace members flattened), newest wins.
-        void collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out);
+        // Every top-level class `decls` declares (namespace members flattened), newest wins; true when an entry changed.
+        bool collect_unit_classes(const std::vector<declaration_ptr>& decls, program_class_map& out);
         // Every top-level free function `decls` declares, under the unit's path (its earlier entry replaced).
         void collect_unit_functions(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_function_map& out);
         void collect_unit_globals(const std::vector<declaration_ptr>& decls, const std::string& unit_path, program_global_map& out);

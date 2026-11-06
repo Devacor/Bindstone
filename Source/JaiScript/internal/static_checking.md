@@ -381,9 +381,11 @@ other file). A parent found nowhere — not this unit, not the program, not regi
 dynamic-path import, an `extern` name used as a base) — can define anything: bare names in
 that class's methods type as unknown and are never `undeclared`. Class knowledge that comes
 from the program table alone is for diagnostics: a cross-unit member types as tentative
-(checked, never a proof source) until its declaring unit has run; that run moves the surface
-epoch, the unit re-checks with the registered definitions in view, and proofs land on that
-second check — the same second-check rule as a unit that declares its own classes.
+(checked, never a proof source) until its declaring unit has run: the proof pass records the
+class as deferred, and once an import completes with it defined the unit re-stamps its proofs
+with the registered definition in view (`restamp_deferred`). The definition moves no surface
+epoch: every check that read the pools modeled that very declaration, so no verdict
+re-derives (`engine::note_class_defined`; a first definition the pools do not model moves it).
 
 Under strict, an error anywhere in the program fails the root's `execute()` before any unit
 runs. `what()` lists the root's diagnostics first, then each erroring unit's own listing,
@@ -655,11 +657,18 @@ checked-once.
 
 ## Cost
 
-One AST walk per unique source per surface epoch, cached beside the parse (the proof pass
-rides it). Re-run only
-when the registration surface epoch moves (`add_function`/`add_global`/`add_class`/
-`register_template_type`, script-class first definition and non-identical redefinition) or
-the proof switch flips. A `.jaibite` stamped checked-clean under a matching fingerprint and context skips
+One AST walk per unique source per surface epoch and program union, cached beside the parse
+(the proof pass rides it). Re-run only when the registration surface epoch moves
+(`add_function`/`add_global`/`add_class`/`register_template_type`, a script class's
+non-identical redefinition, and a first definition the program pools do not model), or when the
+proof switch flips. The program union (`program_union_epoch_`: a pool gained a name, a class
+model changed or a unit was pooled with other declarations; putting the pools back after a
+failed reload moves it too) re-derives a gather's root and any failing verdict, whose missing
+names may be there now; a clean unit a sibling's edit breaks is the reload's dependents check.
+A program executed again unchanged is not checked again: its closure is gathered only when a
+stamp moved, the surface moved or the program is failing. A unit an import runs re-gathers its
+own closure through the texts its load already read and keeps the verdict the root's gather
+gave it. A `.jaibite` stamped checked-clean under a matching fingerprint and context skips
 the diagnostics walk. Executes with host instance variables check fresh per call (the name
 set is per-call; that per-call walk never touches the cached stamps). Walk cost is
 parse-order (same tree, no allocation-heavy state).

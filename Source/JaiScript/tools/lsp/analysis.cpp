@@ -120,7 +120,7 @@ void surface_of(const std::vector<jai::declaration_ptr>& decls, std::string& out
 			case jai::node_type::enum_decl: {
 				auto* e = static_cast<const jai::enum_decl*>(d.get());
 				out += "e " + std::string(e->name) + "{";
-				for (const auto& [n, _] : e->values) { out += std::string(n) + ","; }
+				for (size_t i = 0; i < e->values.size(); ++i) { out += std::string(e->values[i].first) + "=" + std::to_string(e->numbers[i]) + ","; }
 				out += "}";
 				break;
 			}

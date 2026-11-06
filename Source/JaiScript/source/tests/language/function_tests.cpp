@@ -330,6 +330,13 @@ public:
                 Direction.east;
             )");
             check_eq(result.as<int64_t>(), int64_t(2));
+            // C++ enumerators: an initializer is a constant integer over literals and earlier values, the rest count on by one
+            auto values = eng->execute(R"(
+                enum Flag { none, read = 1 << 0, write = 1 << 1, exec = 1 << 2, all = read | write | exec, next }
+                enum Level { low = -2, mid, high = Level::mid + 10, letter = 'A', twin = letter }
+                to_string([Flag.none, Flag.read, Flag.write, Flag.exec, Flag.all, Flag.next]) + " " + to_string([Level.low, Level.mid, Level.high, Level.letter, Level.twin]);
+            )");
+            check_eq(std::string("[0, 1, 2, 4, 7, 8] [-2, -1, 9, 65, 65]"), values.as<std::string>());
         });
 
         test("enum_comparison", [this]() {

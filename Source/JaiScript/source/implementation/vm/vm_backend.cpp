@@ -17918,7 +17918,7 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 
 	for (size_t i = 0; i < decl->values.size(); ++i) {
 		auto key = script_value(std::string(decl->values[i].first), engine_);
-		map_ref[std::move(key)] = script_value(static_cast<script_int>(i), engine_);
+		map_ref[std::move(key)] = script_value(static_cast<script_int>(decl->numbers[i]), engine_);
 	}
 
 	environment_->define(decl->name_id, std::move(enum_map));

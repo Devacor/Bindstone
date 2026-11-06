@@ -491,7 +491,7 @@ std::vector<completion_item> workspace::completion(unit& u, text_pos pos) {
 			}
 		} else if (kind == "enum") {
 			if (const jai::enum_decl* e = view.find_enum(recv)) {
-				for (size_t i = 0; i < e->values.size(); ++i) { items.add(std::string(e->values[i].first), 20, recv + "." + std::string(e->values[i].first) + " = " + std::to_string(i), 1); }
+				for (size_t i = 0; i < e->values.size(); ++i) { items.add(std::string(e->values[i].first), 20, recv + "." + std::string(e->values[i].first) + " = " + std::to_string(e->numbers[i]), 1); }
 			}
 		} else if (kind == "namespace") {
 			add_namespace_members(view, items, recv);

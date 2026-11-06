@@ -301,6 +301,8 @@ public:
     }
     bool host_function_signatures(const std::string& name, std::vector<engine::host_overload_signature>& out) const { note(name); return engine_.host_function_signatures(name, out); }
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
+    bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
+    std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
     std::vector<std::pair<size_t, const std::string*>> constant_argument_indexes(const std::string& callable) const { note(callable); return engine_access::constant_argument_indexes(engine_, callable); }
     const std::unordered_map<std::string, std::vector<std::string>>& constant_texts_by_name() const { note(k_outside_constants); return engine_access::constant_texts_by_name(engine_); }
     script_namespace_data* find_namespace(const std::string& path) const {
@@ -389,9 +391,11 @@ public:
             scopes_.emplace_back();
             mode_guard unit(mode_stack_, leading_mode(decls_), /*scoped=*/true);
             warn_duplicate_top_level_functions();   // under the unit's [[warn_mode]] / [[strict_mode]]
+            lw_open_region();
             for (const auto& d : decls_) {
                 walk_decl(d.get());
             }
+            lw_close_region(nullptr, &decls_, nullptr);
             scopes_.pop_back();
         } catch (const nesting_exhausted& e) {
             // an error under [[warn_mode]] and with diagnostics off as well: the walk stopped, so nothing past it was checked
@@ -488,6 +492,12 @@ private:
     std::unordered_set<std::string_view> namespaces_;
     std::unordered_set<std::string> namespace_members_;   // this unit's namespace members and paths (collect_namespace_members)
     std::unordered_map<std::string, const variable_decl*> namespace_vars_;   // "path::name" -> its declaration (null: two spellings)
+    std::unordered_map<std::string, std::vector<const function_decl*>> namespace_fns_;   // "path::name" -> the unit's declarations of it
+    // [[nodiscard]] (docs/site/guide/06-functions.html): what resolving the call being inferred found, and every such call the walk met;
+    // twin names the in-place method a builtin namespace copy pairs with (empty for everything else)
+    struct nodiscard_callee { std::string name; std::string twin; };
+    nodiscard_callee nodiscard_hit_;
+    std::unordered_map<const call_expr*, nodiscard_callee> nodiscard_calls_;
     // Every name the program scope declares (top level and namespace bodies, any order): a function reads a global declared
     // after it, so "undeclared" fires for names absent from this set AND the engine surface. A name a block, function, lambda
     // or class declares is visible only in its own scope, which the walk's scopes and member lookups resolve.
@@ -572,6 +582,8 @@ private:
         ctype referent;                   // the class (or typed container) a reference or an auto range-for variable holds: member diagnostics only
         bool has_const_text = false;      // a const declared with a literal text (a + of them): a regex pattern the load can check
         std::string const_text;
+        int lw = -1;                      // its lost-write candidate (lw_cands_), -1 for none
+        bool lw_handle = false;           // a class-typed slot that may hold a handle (an auto from one, a by-value class parameter)
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -930,6 +942,7 @@ private:
             var_entry* local = find_local(id->name, &at);
             if (local && member_hides_program_name(id->name, at)) { return nullptr; }
             if (scope_index) { *scope_index = at; }
+            if (local && local->lw >= 0 && collect_diagnostics_) { lw_ident_[id] = local->lw; }
             return local;
         }
         if (scope_index) { *scope_index = 0; }
@@ -1006,6 +1019,9 @@ private:
                 auto* v = static_cast<const variable_decl*>(d.get());
                 auto [it, fresh] = namespace_vars_.try_emplace(path + "::" + std::string(v->name), v);
                 if (!fresh && it->second && it->second->type.get() != v->type.get()) { it->second = nullptr; }   // a reopening that retypes it: lenient
+            } else if (d->get_type() == node_type::function_decl) {
+                auto* f = static_cast<const function_decl*>(d.get());
+                namespace_fns_[path + "::" + std::string(f->name)].push_back(f);
             } else if (d->get_type() == node_type::namespace_decl) {
                 collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), path);
             }
@@ -2815,6 +2831,49 @@ private:
         return false;
     }
 
+    void note_host_nodiscard(const std::string& callable) {
+        if (eng_.host_nodiscard(callable)) { nodiscard_hit_ = {callable, {}}; }
+    }
+    void check_namespace_function_nodiscard(const std::string& qualified, const std::vector<const function_decl*>& decls) {
+        if (decls.empty()) { return; }
+        for (const auto* d : decls) { if (!d->is_nodiscard) { return; } }
+        nodiscard_hit_ = {qualified, {}};
+    }
+
+    // An expression statement drops its value: a call to a [[nodiscard]] callee there (or in either arm of a ternary there) fails the load
+    void check_discarded(const expression* e) {
+        if (!e || nodiscard_calls_.empty()) { return; }
+        if (e->get_type() == node_type::ternary_expr) {
+            check_discarded(static_cast<const ternary_expr*>(e)->then_expression.get());
+            check_discarded(static_cast<const ternary_expr*>(e)->else_expression.get());
+            return;
+        }
+        if (e->get_type() != node_type::call_expr) { return; }
+        auto* c = static_cast<const call_expr*>(e);
+        auto it = nodiscard_calls_.find(c);
+        if (it == nodiscard_calls_.end()) { return; }
+        const nodiscard_callee& hit = it->second;
+        const source_location& at = c->callee ? c->callee->location : c->location;
+        if (hit.twin.empty()) {
+            std::string spelled = hit.name;
+            if (c->callee && c->callee->get_type() == node_type::member_expr) {
+                auto* m = static_cast<const member_expr*>(c->callee.get());
+                if (!m->is_static && m->object && m->object->get_type() == node_type::identifier_expr) {
+                    spelled = std::string(static_cast<const identifier_expr*>(m->object.get())->name) + "." + std::string(m->member);
+                }
+            }
+            diag(diag_level::error, at, "the result of '" + hit.name + "' is discarded, but '" + hit.name +
+                 "' is [[nodiscard]]: use it, or keep it in a variable (auto kept = " + spelled + "(...);)");
+            return;
+        }
+        std::string receiver = "x";
+        if (!c->arguments.empty() && c->arguments[0]->get_type() == node_type::identifier_expr) {
+            receiver = std::string(static_cast<const identifier_expr*>(c->arguments[0].get())->name);
+        }
+        diag(diag_level::error, at, "the result of '" + hit.name + "' is discarded: it returns a new value and leaves its argument "
+             "unchanged, so the statement does nothing; keep the result, or call the in-place method (" + receiver + "." + hit.twin + "(...))");
+    }
+
     // A host namespace entry with a declared signature (script_namespace_data::signatures): arity and argument kinds are
     // certainties the entry's own run-time check would raise; a unit that declares the namespace, or a script function of
     // the name, keeps the call lenient
@@ -2828,16 +2887,25 @@ private:
         if (!e || e->get_type() != node_type::identifier_expr) { return {}; }
         std::string path(static_cast<const identifier_expr*>(e)->name);
         for (size_t i = segments.size(); i-- > 0;) { path += "::"; path += segments[i]; }
-        if (namespaces_.count(std::string_view(path))) { return {}; }
+        const std::string qualified = path + "::" + std::string(m->member);
+        if (namespaces_.count(std::string_view(path))) {
+            if (auto fit = namespace_fns_.find(qualified); fit != namespace_fns_.end()) { check_namespace_function_nodiscard(qualified, fit->second); }
+            return {};
+        }
         script_namespace_data* space = eng_.find_namespace(path);
         if (!space) { return {}; }
-        eng_.note(path + "::" + std::string(m->member));
+        eng_.note(qualified);
         const uint64_t member_id = eng_.symbolize(m->member);
-        if (space->functions.count(member_id)) { return {}; }
+        if (auto fit = space->functions.find(member_id); fit != space->functions.end()) {
+            std::vector<const function_decl*> decls;
+            for (const auto& d : fit->second) { if (d) { decls.push_back(d.get()); } }
+            check_namespace_function_nodiscard(qualified, decls);
+            return {};
+        }
         auto sit = space->signatures.find(member_id);
         if (sit == space->signatures.end()) { return {}; }
         const host_entry_signature& sig = sit->second;
-        const std::string qualified = path + "::" + std::string(m->member);
+        if (sig.nodiscard) { nodiscard_hit_ = {qualified, sig.in_place_twin ? std::string(m->member) : std::string()}; }
         if (args.size() < sig.min_args || args.size() > sig.max_args) {
             const std::string expected = sig.min_args == sig.max_args ? std::to_string(sig.min_args)
                 : std::to_string(sig.min_args) + " to " + std::to_string(sig.max_args);
@@ -3410,12 +3478,15 @@ private:
                                       bool scored = true) {
         const function_decl* only_viable = nullptr;
         int viable_count = 0;
+        int nodiscard_viable = 0;
         for (const auto* fn : overloads) {
             if (script_fn_viable(fn, args, scored && arity_rivals(overloads, args.size()))) {
                 ++viable_count;
+                nodiscard_viable += fn->is_nodiscard;
                 only_viable = fn;
             }
         }
+        if (viable_count > 0 && nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
         call_check out;
         out.checked = true;
         if (viable_count == 0) {
@@ -3888,6 +3959,7 @@ private:
         ctype result = infer_impl(e);
         result.origin = e;
         if (observer_ && e) { observe(e, result); }
+        if (e && lw_on()) { lw_types_[e] = result; }
         return result;
     }
 
@@ -4414,8 +4486,12 @@ private:
         }
         const std::vector<const function_decl*>* ov = nullptr;   // the statically resolved same-script overload set
         ov_class_ = {};
+        nodiscard_hit_ = {};
         ctype t = infer_call_impl(c, args, ov);
-        return check_call(c, args, ov, std::move(t));
+        t = check_call(c, args, ov, std::move(t));
+        if (!nodiscard_hit_.name.empty() && collect_diagnostics_) { nodiscard_calls_[c] = std::move(nodiscard_hit_); }
+        nodiscard_hit_ = {};
+        return t;
     }
 
     JAI_NOINLINE ctype check_call(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>* ov, ctype t) {
@@ -4436,6 +4512,7 @@ private:
                 eng_.note(name);
                 auto pit = program_functions_->find(std::string(name));
                 if (pit != program_functions_->end() && pit->second.size() == 1 && pit->second.begin()->second.size() == 1) { program_ov.push_back(pit->second.begin()->second[0].get()); }
+                if (program_ov.size() == 1 && program_ov[0]->is_nodiscard) { nodiscard_hit_ = {std::string(name), {}}; }
             }
             // the proof pass alone types the call by that declaration's scalar return (the consumers guard it; a graft re-checks the
             // callee's declared return per definition epoch, call_expr::k_proof_function)
@@ -4628,6 +4705,7 @@ private:
                     if (hit.methods) {
                         if (hit.provable) { ov = hit.methods; ov_class_ = class_ctx_name_; }
                         ctype r = check_script_overloads(id->name, *hit.methods, args, c->location, hit.foreign).result;
+                        if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(class_ctx_name_) + "." + nodiscard_hit_.name; }
                         if (!hit.provable) { r.tentative = true; }
                         return r;
                     }
@@ -4657,6 +4735,7 @@ private:
             }
             if (eng_.has_function(name)) {
                 note_global_use(id->name);
+                note_host_nodiscard(name);
                 check_constant_arguments(name, name, c);
                 if (name == "sleep" && core_sleep_bound()) {
                     check_sleep_call(args, c->location);
@@ -4825,9 +4904,11 @@ private:
             if (hit.methods) {
                 if (hit.provable && ov) { *ov = hit.methods; ov_class_ = recv.cls; }
                 ctype result = check_script_overloads(m->member, *hit.methods, args, c->location, hit.foreign).result;
+                if (!nodiscard_hit_.name.empty()) { nodiscard_hit_.name = std::string(recv.cls) + "." + nodiscard_hit_.name; }
                 if (!hit.provable) { result.tentative = true; }
                 return result;
             }
+            note_host_nodiscard(std::string(recv.cls) + "." + std::string(m->member));
             if (!want_static) { return check_strict_host_method(recv.cls, m->member, args, c->location); }
             check_host_static_arity(recv.cls, m->member, args.size(), c->location);
             return {};
@@ -5296,6 +5377,1028 @@ private:
         return ctype_from_type_info(taken->return_type.get());
     }
 
+    // -------------------------------------------------------------- lost writes
+
+    // A store into a by-value copy that nothing reads afterwards on any path is a load error (docs/site/guide/03-value-semantics.html
+    // "Lost writes"). Candidates are the by-value locals, parameters and range-for variables of a statically known value type; each
+    // function, lambda and the unit's top level is one region, analysed backward once the walk has typed its expressions. A copy
+    // whose value tree holds script class instances is "sensitive": any code that may run before it dies (a call, an operator on a
+    // class, a destructor of something else) may observe it (reflect::instances), so it counts as a read there.
+    enum class lw_origin : uint8_t { local, parameter, range_for };
+    struct lw_candidate {
+        std::string_view name;
+        lw_origin origin = lw_origin::local;
+        bool class_holding = false;
+        std::string type_text;
+        ctype type;
+    };
+    using lw_set = std::vector<uint64_t>;
+    struct lw_jump { lw_set brk, cont; };
+    struct lw_report { int cand; const expression* target; source_location at; uint8_t mode; };
+    struct lw_region_state {
+        std::vector<int> cands;            // global candidate indices, by region index
+        std::unordered_map<std::string_view, std::vector<int>> by_name;
+        std::vector<uint8_t> escaped, sensitive;
+        lw_set sensitive_set;
+        size_t words = 0;
+        bool disabled = false;
+        bool reporting = false;
+        int opaque_exit = 0;
+        std::vector<lw_jump> jumps;
+        lw_set catch_live;
+        lw_set in_scope;   // the candidates whose scope encloses the point being analysed: nothing reads one past its death
+        std::vector<lw_report> reports;
+    };
+    std::vector<lw_candidate> lw_cands_;
+    std::vector<std::vector<int>> lw_regions_;
+    std::vector<int> lw_local_;   // global candidate -> index in the region being analysed
+    std::unordered_map<const identifier_expr*, int> lw_ident_;
+    std::unordered_map<const expression*, ctype> lw_types_;
+    std::unordered_map<const void*, uint8_t> lw_modes_;
+    std::unordered_set<const void*> lw_opaque_locals_;   // locals whose death may run code (a destructor, a dying handle)
+    std::unordered_map<std::string_view, uint8_t> lw_quiet_memo_;   // 1 quiet, 2 not, 3 in progress
+    lw_region_state* lw_ = nullptr;
+
+    bool lw_on() const { return collect_diagnostics_ && !lw_regions_.empty(); }
+
+    // A script class whose instances run no code when a field is stored or the instance dies, and no subclass the program or the
+    // engine knows does either: no destructor, no user accessor, no operator=, no host base, fields of such types only
+    bool lw_quiet_class(std::string_view cls) {
+        if (auto it = lw_quiet_memo_.find(cls); it != lw_quiet_memo_.end()) { return it->second != 2; }
+        lw_quiet_memo_[cls] = 3;
+        bool quiet = lw_quiet_level(cls, 0);
+        if (quiet) {
+            auto derives = [&](const class_decl* cd) { return lw_derives(cd, cls, 0); };
+            std::unordered_set<std::string_view> modeled;
+            for (const auto& [name, c] : classes_) {
+                modeled.insert(name);
+                if (quiet && name != cls && derives(c.decl) && !lw_quiet_class(name)) { quiet = false; }
+            }
+            if (quiet && program_classes_) {
+                for (const auto& [name, cd] : *program_classes_) {
+                    if (!cd || modeled.count(cd->name)) { continue; }
+                    modeled.insert(cd->name);
+                    if (cd->name != cls && derives(cd.get()) && !lw_quiet_class(cd->name)) { quiet = false; break; }
+                }
+            }
+            if (quiet) {
+                if (auto def = engine_class(cls)) {
+                    for (const auto& name : eng_.registered_class_names()) {
+                        if (modeled.count(name)) { continue; }
+                        auto other = engine_class(name);
+                        if (other && other.get() != def.get() && other->derives_from(def.get())) { quiet = false; break; }
+                    }
+                }
+            }
+        }
+        lw_quiet_memo_[cls] = quiet ? 1 : 2;
+        return quiet;
+    }
+    bool lw_derives(const class_decl* cd, std::string_view base, int depth) {
+        if (!cd || depth > 32) { return false; }
+        for (const auto& b : cd->base_classes) {
+            if (b == base) { return true; }
+            const sclass* c = find_sclass(b);
+            if (c && lw_derives(c->decl, base, depth + 1)) { return true; }
+        }
+        return false;
+    }
+    bool lw_quiet_level(std::string_view cls, int depth) {
+        const sclass* c = depth < 32 ? find_sclass(cls) : nullptr;
+        if (!c) { return false; }   // a host class, or a class the walk cannot see
+        for (const auto& [name, overloads] : c->methods) {
+            if (name.starts_with("~") || name.starts_with("_get_") || name.starts_with("_set_") || name == "operator=") { return false; }
+        }
+        for (const auto& m : c->decl->members) {
+            if (m.declaration && m.declaration->get_type() == node_type::function_decl &&
+                static_cast<const function_decl*>(m.declaration.get())->name.starts_with("~")) { return false; }
+        }
+        for (const auto& [name, f] : c->fields) {
+            if (f->function_spelling || lw_type_kind(f->type.get()) == 0) { return false; }
+        }
+        for (const auto& base : c->decl->base_classes) {
+            if (!lw_quiet_level(base, depth + 1)) { return false; }
+        }
+        return true;
+    }
+    // 0: not a value a store can be judged on; 1: plain data (scalars, text, math values, containers of them); 2: holds quiet class values
+    uint8_t lw_type_kind(const type_info* ti, int depth = 0) {
+        if (!ti || depth > 16) { return 0; }
+        switch (ti->base_type) {
+            case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_string_type:
+            case script_value_type::jai_char_type: case script_value_type::jai_bool_type: case script_value_type::jai_utf8_string_type:
+            case script_value_type::jai_vec2_type: case script_value_type::jai_vec3_type: case script_value_type::jai_vec4_type:
+            case script_value_type::jai_ivec2_type: case script_value_type::jai_ivec3_type: case script_value_type::jai_color_type:
+            case script_value_type::jai_weak_ptr_type:
+                return 1;
+            case script_value_type::jai_array_type:
+                return lw_type_kind(ti->element_type().get(), depth + 1);
+            case script_value_type::jai_map_type: {
+                if (ti->type_params.size() != 2) { return 0; }
+                const uint8_t k = lw_type_kind(ti->type_params[0].get(), depth + 1);
+                const uint8_t v = lw_type_kind(ti->type_params[1].get(), depth + 1);
+                return k == 1 && v != 0 ? v : 0;   // a class key runs its comparison on every lookup
+            }
+            case script_value_type::jai_object_type:
+                if (ti->type_name.empty()) { return 0; }
+                if (auto it = lw_quiet_memo_.find(std::string_view(ti->type_name)); it != lw_quiet_memo_.end() && it->second == 3) { return 2; }   // a class holding its own kind
+                return lw_quiet_class(ti->type_name) ? 2 : 0;
+            default:
+                return 0;
+        }
+    }
+    uint8_t lw_value_kind(const ctype& t) {
+        if (t.tentative && !t.element_proof && !t.alias_proof) { return 0; }
+        switch (t.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
+            case ctype::math_k:
+                return 1;
+            case ctype::array_k: case ctype::map_k: case ctype::object_k:
+                return t.ti && t.ti->base_type != script_value_type::jai_shared_ptr_type ? lw_type_kind(t.ti) : 0;
+            default:
+                return 0;
+        }
+    }
+    // A value no code runs for: a scalar, text, a math value or a container of those (what an operator, a copy or a death of it runs)
+    bool lw_plain(const ctype& t) { return t.kind == ctype::null_k || lw_value_kind(t) == 1; }
+    bool lw_scalar(const ctype& t) {
+        if (t.tentative && !t.element_proof && !t.alias_proof) { return false; }
+        switch (t.kind) {
+            case ctype::null_k: case ctype::int_k: case ctype::float_k: case ctype::bool_k: case ctype::char_k: case ctype::string_k:
+            case ctype::utf8_k: case ctype::math_k:
+                return true;
+            default:
+                return false;
+        }
+    }
+    // An expression's static type for the pass: a chain rooted at a candidate is typed from the candidate's own type (a range-for
+    // auto variable reads as a var to the walk), anything else as the walk recorded it
+    std::optional<ctype> lw_type(const expression* e) {
+        if (!e) { return std::nullopt; }
+        if (const identifier_expr* root = lw_root(e)) {
+            if (auto it = lw_ident_.find(root); it != lw_ident_.end()) {
+                ctype t;
+                if (lw_chain_type(e, lw_cands_[size_t(it->second)].type, t)) { return t; }
+                return std::nullopt;
+            }
+        }
+        auto it = lw_types_.find(e);
+        if (it == lw_types_.end()) { return std::nullopt; }
+        return it->second;
+    }
+    // what an assignment stores into: the target's own type, else the walk's verdict on the assignment (the target's type)
+    std::optional<ctype> lw_target_type(const assignment_expr* a) {
+        if (auto t = lw_type(a->target.get())) { return t; }
+        return lw_root(a->target.get()) && lw_ident_.count(lw_root(a->target.get())) ? std::nullopt : lw_type(a);
+    }
+    bool lw_chain_type(const expression* e, const ctype& root, ctype& out, int depth = 0) {
+        if (!e || depth > 64) { return false; }
+        switch (e->get_type()) {
+            case node_type::identifier_expr:
+                out = root;
+                return true;
+            case node_type::cast_expr:
+                return lw_chain_type(static_cast<const cast_expr*>(e)->operand.get(), root, out, depth + 1);
+            case node_type::member_expr: {
+                auto* m = static_cast<const member_expr*>(e);
+                ctype o;
+                if (!lw_chain_type(m->object.get(), root, o, depth + 1) || o.kind != ctype::object_k || o.cls.empty() || !o.ti ||
+                    o.ti->base_type != script_value_type::jai_object_type) { return false; }
+                const member_hit hit = lookup_member(o.cls, m->member, /*want_static=*/false);
+                if (!hit.found || !hit.field || !hit.field->type || hit.field->is_static || hit.methods) { return false; }
+                out = ctype_from_type_info(hit.field->type.get());
+                return !out.is_unknown();
+            }
+            case node_type::binary_expr: {
+                auto* b = static_cast<const binary_expr*>(e);
+                ctype c;
+                if (b->op.type != token_type::left_bracket || !lw_chain_type(b->left.get(), root, c, depth + 1)) { return false; }
+                if (c.kind == ctype::string_k || c.kind == ctype::utf8_k) { out = ctype::make(c.kind == ctype::string_k ? ctype::char_k : ctype::utf8_k); return true; }
+                if (!c.ti) { return false; }
+                if (c.kind == ctype::array_k) { out = ctype_from_type_info(c.ti->element_type().get()); }
+                else if (c.kind == ctype::map_k && c.ti->type_params.size() == 2) { out = ctype_from_type_info(c.ti->type_params[1].get()); }
+                else { return false; }
+                return !out.is_unknown();
+            }
+            default:
+                return false;
+        }
+    }
+
+    // A by-value copy of a judged type becomes a candidate of the open region (judged = false: a const, or a slot that may hold a
+    // handle); a local of any other type marks its block, whose exits may then run code (its destructor, a dying handle's)
+    void lw_register(var_entry& entry, const ctype& t, const void* node, std::string_view name, lw_origin origin, std::string type_text, bool judged) {
+        if (!lw_on() || scopes_.size() < 2 || (!namespace_scopes_.empty() && namespace_scopes_.back() == scopes_.size() - 1)) { return; }
+        const uint8_t kind = lw_value_kind(t);
+        if (kind == 0 && node) { lw_opaque_locals_.insert(node); }
+        if (!judged || kind == 0) { return; }
+        entry.lw = static_cast<int>(lw_cands_.size());
+        lw_cands_.push_back({name, origin, kind == 2, std::move(type_text), t});
+        lw_regions_.back().push_back(entry.lw);
+        if (node) { lw_local_decls_[node] = entry.lw; }
+    }
+
+    // the identifier an lvalue chain (x, x.f, x[i], x.f[i].g) is rooted at
+    static const identifier_expr* lw_root(const expression* e) {
+        for (int guard = 0; e && guard < 256; ++guard) {
+            switch (e->get_type()) {
+                case node_type::identifier_expr: {
+                    auto* id = static_cast<const identifier_expr*>(e);
+                    return id->global_qualified ? nullptr : id;
+                }
+                case node_type::member_expr: {
+                    auto* m = static_cast<const member_expr*>(e);
+                    if (m->is_static || m->is_arrow || m->null_safe) { return nullptr; }
+                    e = m->object.get();
+                    break;
+                }
+                case node_type::binary_expr: {
+                    auto* b = static_cast<const binary_expr*>(e);
+                    if (b->op.type != token_type::left_bracket) { return nullptr; }
+                    e = b->left.get();
+                    break;
+                }
+                case node_type::cast_expr: {
+                    auto* c = static_cast<const cast_expr*>(e);
+                    if (!c->implicit_ref) { return nullptr; }
+                    e = c->operand.get();
+                    break;
+                }
+                default:
+                    return nullptr;
+            }
+        }
+        return nullptr;
+    }
+    int lw_candidate_of(const identifier_expr* id) const {
+        if (!id) { return -1; }
+        auto it = lw_ident_.find(id);
+        return it == lw_ident_.end() || it->second >= static_cast<int>(lw_local_.size()) ? -1 : lw_local_[it->second];
+    }
+    // Every step from the target down to the root stores into a value the copy owns and none of them can raise or run code: fields
+    // of value classes (no accessor, no host property, no handle in between), and at the end at most one map insert whose key needs
+    // no conversion. An element or a character store is never judged: its index may be out of range, and the raise is observable.
+    bool lw_value_path(const expression* e) {
+        bool last = true;
+        for (int guard = 0; e && guard < 256; ++guard) {
+            switch (e->get_type()) {
+                case node_type::identifier_expr:
+                    return true;
+                case node_type::member_expr: {
+                    auto* m = static_cast<const member_expr*>(e);
+                    const auto t = lw_type(m->object.get());
+                    if (!t || t->kind != ctype::object_k || lw_value_kind(*t) != 2 || chain_has_user_accessor(t->cls, m->member)) { return false; }
+                    e = m->object.get();
+                    break;
+                }
+                case node_type::binary_expr: {
+                    auto* b = static_cast<const binary_expr*>(e);
+                    const auto t = lw_type(b->left.get());
+                    const auto k = lw_type(b->right.get());
+                    if (!last || !t || !k || t->kind != ctype::map_k || !t->ti || t->ti->type_params.size() != 2 || lw_value_kind(*t) == 0 ||
+                        !lw_store_certain(ctype_from_type_info(t->ti->type_params[0].get()), *k)) { return false; }
+                    e = b->left.get();
+                    break;
+                }
+                case node_type::cast_expr:
+                    e = static_cast<const cast_expr*>(e)->operand.get();
+                    continue;
+                default:
+                    return false;
+            }
+            last = false;
+        }
+        return false;
+    }
+    // A store of v into a slot of type t that converts nothing that could raise: the same scalar (an int into a float widens), the
+    // same container type, a value of the same quiet class; a narrow integer element (uint8, int16, ...) range-checks every store
+    static bool lw_wide_int(const type_info* ti) {
+        return !ti || ti->type_name.empty() || ti->type_name == "int" || ti->type_name == "int64";
+    }
+    bool lw_store_certain(const ctype& t, const ctype& v) {
+        if ((v.tentative && !v.element_proof && !v.alias_proof) || (t.tentative && !t.element_proof && !t.alias_proof)) { return false; }
+        switch (t.kind) {
+            case ctype::int_k:
+                return v.kind == ctype::int_k && lw_wide_int(t.ti);
+            case ctype::float_k:
+                return v.kind == ctype::float_k || v.kind == ctype::int_k;
+            case ctype::bool_k: case ctype::char_k: case ctype::string_k: case ctype::utf8_k:
+                return v.kind == t.kind;
+            case ctype::math_k:
+                return v.kind == ctype::math_k && v.cls == t.cls;
+            case ctype::array_k: case ctype::map_k:
+                return t.ti && v.ti == t.ti && lw_value_kind(t) != 0;
+            case ctype::object_k:
+                return v.kind == ctype::object_k && v.cls == t.cls && v.ti && v.ti->base_type == script_value_type::jai_object_type && lw_value_kind(t) == 2;
+            default:
+                return false;
+        }
+    }
+    // A builtin method that changes its receiver in place and cannot raise for these arguments (a count, an index or a conversion
+    // could: those methods are never judged)
+    bool lw_mutator(const ctype& receiver, std::string_view name, const call_expr* c) {
+        static constexpr std::string_view k_bare[] = {"to_lower", "to_upper", "trim", "trim_left", "trim_right", "reverse", "clear"};
+        for (auto m : k_bare) { if (m == name) { return c->arguments.empty(); } }
+        if (receiver.kind == ctype::string_k || receiver.kind == ctype::utf8_k) {
+            static constexpr std::string_view k_text[] = {"append", "replace", "replace_first", "replace_last", "remove_prefix", "remove_suffix"};
+            for (auto m : k_text) {
+                if (m != name) { continue; }
+                for (const auto& a : c->arguments) {
+                    const auto at = lw_type(a.get());
+                    if (!at || (at->kind != ctype::string_k && at->kind != ctype::utf8_k) || at->tentative) { return false; }
+                }
+                return !c->arguments.empty();
+            }
+            return false;
+        }
+        if (receiver.kind != ctype::array_k || !receiver.ti) { return false; }
+        if (name == "sort") { return c->arguments.empty() && lw_value_kind(receiver) == 1; }
+        if (name == "push" && c->arguments.size() == 1) {
+            const auto at = lw_type(c->arguments[0].get());
+            return at && lw_store_certain(ctype_from_type_info(receiver.ti->element_type().get()), *at);
+        }
+        if ((name == "append" || name == "concat") && c->arguments.size() == 1) {
+            const auto at = lw_type(c->arguments[0].get());
+            return at && lw_store_certain(receiver, *at);
+        }
+        return false;
+    }
+
+    struct lw_store {
+        int local = -1;
+        bool whole = false;   // the variable itself is replaced (x = v)
+        bool reads = false;   // the store reads the old value first (x += v, ++x, a mutating method)
+        const expression* target = nullptr;
+        const identifier_expr* root = nullptr;
+    };
+    lw_store lw_store_of(const expression* e) {
+        lw_store st;
+        if (!e) { return st; }
+        if (e->get_type() == node_type::assignment_expr) {
+            auto* a = static_cast<const assignment_expr*>(e);
+            const auto t = lw_target_type(a);
+            const bool compound = a->op.type != token_type::equal;
+            const auto v = lw_type(a->value.get());
+            if (!t || !v || !(compound ? lw_scalar(*t) && lw_scalar(*v) && t->kind != ctype::math_k : lw_store_certain(*t, *v))) { return st; }
+            if (compound && t->kind == ctype::int_k && !lw_wide_int(t->ti)) { return st; }   // a narrow integer range-checks
+            st.root = lw_root(a->target.get());
+            if (!st.root || !lw_value_path(a->target.get())) { return st; }
+            st.target = a->target.get();
+            st.whole = st.root == lw_strip(a->target.get()) && !compound;
+            st.reads = compound;
+        } else if (e->get_type() == node_type::unary_expr) {
+            auto* u = static_cast<const unary_expr*>(e);
+            if (u->op.type != token_type::plus_plus && u->op.type != token_type::minus_minus) { return st; }
+            const auto t = lw_type(u->operand.get());
+            if (!t || (t->kind != ctype::int_k && t->kind != ctype::float_k) || (t->kind == ctype::int_k && !lw_wide_int(t->ti))) { return st; }
+            st.root = lw_root(u->operand.get());
+            if (!st.root || !lw_value_path(u->operand.get())) { return st; }
+            st.target = u->operand.get();
+            st.reads = true;
+        } else if (e->get_type() == node_type::call_expr) {
+            auto* c = static_cast<const call_expr*>(e);
+            if (!c->callee || c->callee->get_type() != node_type::member_expr) { return st; }
+            auto* m = static_cast<const member_expr*>(c->callee.get());
+            if (m->is_static || m->is_arrow || m->null_safe) { return st; }
+            const auto r = lw_type(m->object.get());
+            if (!r || (r->kind != ctype::array_k && r->kind != ctype::map_k && r->kind != ctype::string_k && r->kind != ctype::utf8_k) ||
+                !lw_value_kind(*r) || !lw_mutator(*r, m->member, c)) { return st; }
+            st.root = lw_root(m->object.get());
+            if (!st.root || !lw_value_path(m->object.get())) { return st; }
+            st.target = e;
+            st.reads = true;
+        }
+        if (st.root) { st.local = lw_candidate_of(st.root); }
+        return st;
+    }
+    // An auto local of class type copies its initializer's value only when that names a value: a field, an element, a by-value
+    // result, or a local that holds a value (a handle in an auto or a class-typed parameter shares its object)
+    bool lw_value_initializer(const expression* e, int depth = 0) {
+        if (!e || depth > 16) { return false; }
+        switch (e->get_type()) {
+            case node_type::member_expr: return !static_cast<const member_expr*>(e)->is_static;
+            case node_type::call_expr: return true;
+            case node_type::binary_expr: return static_cast<const binary_expr*>(e)->op.type == token_type::left_bracket;
+            case node_type::ternary_expr: {
+                auto* t = static_cast<const ternary_expr*>(e);
+                return lw_value_initializer(t->then_expression.get(), depth + 1) && lw_value_initializer(t->else_expression.get(), depth + 1);
+            }
+            case node_type::identifier_expr: {
+                const var_entry* v = find_named(static_cast<const identifier_expr*>(e));
+                return v && !v->dynamic && !v->is_handle && !v->lw_handle && !v->is_reference;
+            }
+            default: return false;
+        }
+    }
+    static const expression* lw_strip(const expression* e) {
+        while (e && e->get_type() == node_type::cast_expr && static_cast<const cast_expr*>(e)->implicit_ref) { e = static_cast<const cast_expr*>(e)->operand.get(); }
+        return e;
+    }
+
+    // Whether evaluating the node itself may run code (user or host): its children are judged on their own
+    bool lw_node_opaque(const expression* e) {
+        switch (e->get_type()) {
+            case node_type::literal_expr: case node_type::identifier_expr: case node_type::this_expr: case node_type::super_expr:
+            case node_type::ternary_expr:
+                return false;
+            case node_type::member_expr: {
+                auto* m = static_cast<const member_expr*>(e);
+                if (m->is_static) { return false; }
+                const auto t = lw_type(m->object.get());
+                if (!t) { return true; }
+                if (t->kind == ctype::math_k) { return false; }
+                return !(t->kind == ctype::object_k && !t->tentative && !t->cls.empty() && lw_quiet_class(t->cls));
+            }
+            case node_type::binary_expr: {
+                auto* b = static_cast<const binary_expr*>(e);
+                const auto l = lw_type(b->left.get());
+                const auto r = lw_type(b->right.get());
+                if (!l || !r) { return true; }
+                if (b->op.type == token_type::left_bracket) {
+                    if (l->kind == ctype::array_k || l->kind == ctype::string_k || l->kind == ctype::utf8_k) { return !lw_scalar(*r); }
+                    return !(l->kind == ctype::map_k && lw_scalar(*r));
+                }
+                return !lw_scalar(*l) || !lw_scalar(*r);
+            }
+            case node_type::unary_expr: {
+                const auto t = lw_type(static_cast<const unary_expr*>(e)->operand.get());
+                return !t || !lw_scalar(*t);
+            }
+            case node_type::assignment_expr: {
+                auto* a = static_cast<const assignment_expr*>(e);
+                const auto t = lw_target_type(a);
+                const auto v = lw_type(a->value.get());
+                return !t || !v || !lw_plain(*t) || !lw_plain(*v);
+            }
+            case node_type::call_expr: {
+                auto* c = static_cast<const call_expr*>(e);
+                if (!c->callee || c->callee->get_type() != node_type::member_expr) { return true; }
+                auto* m = static_cast<const member_expr*>(c->callee.get());
+                for (const auto& a : c->arguments) {
+                    const auto at = lw_type(a.get());
+                    if (!at || !lw_plain(*at)) { return true; }
+                }
+                if (m->is_static) { return math_intrinsic_for_call(m) == math_fn::none; }
+                const auto r = lw_type(m->object.get());
+                if (!r || !lw_plain(*r)) { return true; }
+                return !(r->kind == ctype::array_k || r->kind == ctype::map_k || r->kind == ctype::string_k || r->kind == ctype::utf8_k ||
+                         r->kind == ctype::math_k);
+            }
+            case node_type::array_literal_expr:
+            case node_type::map_literal_expr:
+            case node_type::cast_expr: {
+                const auto t = lw_type(e);
+                bool children_plain = true;
+                for_each_child_expression(e, [&](const expression* k) {
+                    const auto kt = lw_type(k);
+                    if (!kt || !lw_plain(*kt)) { children_plain = false; }
+                });
+                return !t || !lw_plain(*t) || !children_plain;
+            }
+            default:
+                return true;   // a lambda (its captures copy), new, throw, yield, include, import
+        }
+    }
+
+    void lw_set_bit(lw_set& s, int i) const { s[size_t(i) / 64] |= uint64_t(1) << (size_t(i) % 64); }
+    void lw_reset_bit(lw_set& s, int i) const { s[size_t(i) / 64] &= ~(uint64_t(1) << (size_t(i) % 64)); }
+    static bool lw_test(const lw_set& s, int i) { return (s[size_t(i) / 64] >> (size_t(i) % 64)) & 1; }
+    static void lw_union(lw_set& into, const lw_set& from) { for (size_t i = 0; i < into.size(); ++i) { into[i] |= from[i]; } }
+
+    // A mention the walk did not resolve, by the name of a candidate: whatever it is, that candidate is never judged
+    void lw_unresolved(std::string_view name) {
+        if (auto it = lw_->by_name.find(name); it != lw_->by_name.end()) {
+            for (int i : it->second) { lw_->escaped[size_t(i)] = 1; }
+        }
+    }
+    void lw_mark_mentions(const expression* e, std::vector<uint8_t>& flags) {
+        if (!e) { return; }
+        stack_.guard(e->location);
+        if (e->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<const identifier_expr*>(e);
+            const int i = lw_candidate_of(id);
+            if (i >= 0) { flags[size_t(i)] = 1; } else if (!lw_ident_.count(id)) { lw_unresolved(id->name); }
+            return;
+        }
+        if (e->get_type() == node_type::lambda_expr) { lw_lambda(static_cast<const lambda_expr*>(e), &flags, nullptr); return; }
+        for_each_child_expression(e, [&](const expression* k) { lw_mark_mentions(k, flags); });
+    }
+    // A lambda body names candidates of the enclosing region: a capture copies them at creation (a read there), a reference capture
+    // keeps them, so every later call may read them
+    void lw_lambda(const lambda_expr* l, std::vector<uint8_t>* flags, lw_set* uses) {
+        for (const auto& cap : l->captures) {
+            if (cap.initializer) { if (flags) { lw_mark_mentions(cap.initializer.get(), *flags); } continue; }
+            if (auto it = lw_->by_name.find(cap.name); it != lw_->by_name.end()) {
+                for (int i : it->second) {
+                    lw_->sensitive[size_t(i)] = 1;
+                    if (uses) { lw_set_bit(*uses, i); }
+                }
+            }
+        }
+        std::vector<const expression*> found;
+        lw_collect_identifiers(l->body.get(), found);
+        for (auto* e : found) {
+            auto* id = static_cast<const identifier_expr*>(e);
+            const int i = lw_candidate_of(id);
+            if (i >= 0) {
+                lw_->sensitive[size_t(i)] = 1;
+                if (uses) { lw_set_bit(*uses, i); }
+            } else if (!lw_ident_.count(id)) {
+                lw_unresolved(id->name);
+            }
+        }
+    }
+    // every identifier a statement subtree names, nested lambdas and bodies included
+    void lw_collect_identifiers(const ast_node* n, std::vector<const expression*>& out) {
+        if (!n) { return; }
+        stack_.guard(n->location);
+        const node_type t = n->get_type();
+        if (t < node_type::expression_stmt) {
+            auto* e = static_cast<const expression*>(n);
+            if (t == node_type::identifier_expr) { out.push_back(e); return; }
+            if (t == node_type::lambda_expr) {
+                auto* l = static_cast<const lambda_expr*>(e);
+                for (const auto& cap : l->captures) { if (cap.initializer) { lw_collect_identifiers(cap.initializer.get(), out); } else { lw_unresolved_capture(cap.name); } }
+                lw_collect_identifiers(l->body.get(), out);
+                return;
+            }
+            for_each_child_expression(e, [&](const expression* k) { lw_collect_identifiers(k, out); });
+            return;
+        }
+        lw_each_child(n, [&](const ast_node* k) { lw_collect_identifiers(k, out); });
+    }
+    void lw_unresolved_capture(std::string_view name) {
+        if (auto it = lw_->by_name.find(name); it != lw_->by_name.end()) {
+            for (int i : it->second) { lw_->sensitive[size_t(i)] = 1; }
+        }
+    }
+    // every direct child of a statement or declaration: statements, declarations and expressions
+    template <typename F>
+    void lw_each_child(const ast_node* n, F&& f) {
+        auto st = [&](const auto& p) { if (p) { f(p.get()); } };
+        switch (n->get_type()) {
+            case node_type::expression_stmt: st(static_cast<const expression_stmt*>(n)->expression); return;
+            case node_type::block_stmt: for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { st(d); } return;
+            case node_type::if_stmt: { auto* i = static_cast<const if_stmt*>(n); st(i->condition); st(i->then_statement); st(i->else_statement); return; }
+            case node_type::while_stmt: { auto* w = static_cast<const while_stmt*>(n); st(w->condition); st(w->body); return; }
+            case node_type::for_stmt: { auto* f2 = static_cast<const for_stmt*>(n); st(f2->initializer); st(f2->condition); st(f2->update); st(f2->body); return; }
+            case node_type::range_for_stmt: { auto* r = static_cast<const range_for_stmt*>(n); st(r->container); st(r->body); return; }
+            case node_type::parallel_for_stmt: {
+                auto* p = static_cast<const parallel_for_stmt*>(n);
+                st(p->container);
+                for (const auto& c : p->extra_containers) { st(c); }
+                st(p->body);
+                return;
+            }
+            case node_type::return_stmt: st(static_cast<const return_stmt*>(n)->value); return;
+            case node_type::try_stmt: { auto* t = static_cast<const try_stmt*>(n); st(t->try_block); st(t->catch_block); return; }
+            case node_type::switch_stmt: {
+                auto* s = static_cast<const switch_stmt*>(n);
+                st(s->condition);
+                for (const auto& c : s->cases) { st(c); }
+                st(s->default_case);
+                return;
+            }
+            case node_type::case_stmt: { auto* c = static_cast<const case_stmt*>(n); st(c->value); for (const auto& b : c->body) { st(b); } return; }
+            case node_type::default_stmt: for (const auto& b : static_cast<const default_stmt*>(n)->body) { st(b); } return;
+            case node_type::variable_decl: st(static_cast<const variable_decl*>(n)->initializer); return;
+            case node_type::expression_decl: st(static_cast<const expression_decl*>(n)->expression); return;
+            case node_type::statement_decl: st(static_cast<const statement_decl*>(n)->statement); return;
+            case node_type::destructuring_decl: st(static_cast<const destructuring_decl*>(n)->initializer); return;
+            case node_type::function_decl: {
+                auto* fn = static_cast<const function_decl*>(n);
+                for (const auto& p : fn->parameters) { st(p.default_value); }
+                for (const auto& init : fn->initializers) { for (const auto& a : init.arguments) { st(a); } }
+                st(fn->body);
+                return;
+            }
+            default:
+                return;   // break, continue, fallthrough; a class, enum or namespace declares nothing a body names
+        }
+    }
+
+    // The pre-pass: which candidates escape (a reference binds them, a name the walk did not resolve) and which become sensitive
+    // (a lambda names them, a call binds them by reference or as a receiver); an include or import gives the region up
+    void lw_prepass(const ast_node* n) {
+        if (!n || lw_->disabled) { return; }
+        stack_.guard(n->location);
+        const node_type t = n->get_type();
+        if (t == node_type::include_decl || t == node_type::import_decl) { lw_->disabled = true; return; }
+        if (t < node_type::expression_stmt) { lw_prepass_expr(static_cast<const expression*>(n)); return; }
+        if (t == node_type::function_decl || t == node_type::class_decl || t == node_type::namespace_decl) { return; }   // their own regions
+        if (t == node_type::variable_decl) {
+            auto* d = static_cast<const variable_decl*>(n);
+            if (d->type && d->type->base_type == script_value_type::jai_reference_type && d->initializer) { lw_mark_mentions(d->initializer.get(), lw_->escaped); }
+        } else if (t == node_type::range_for_stmt) {
+            auto* r = static_cast<const range_for_stmt*>(n);
+            if (r->is_reference) { lw_mark_mentions(r->container.get(), lw_->escaped); }
+        } else if (t == node_type::parallel_for_stmt) {
+            auto* p = static_cast<const parallel_for_stmt*>(n);
+            lw_mark_mentions(p->container.get(), lw_->escaped);
+            for (const auto& c : p->extra_containers) { lw_mark_mentions(c.get(), lw_->escaped); }
+        } else if (t == node_type::return_stmt) {
+            auto* r = static_cast<const return_stmt*>(n);
+            if (r->binds_reference && r->value) { lw_mark_mentions(r->value.get(), lw_->escaped); }
+        }
+        lw_each_child(n, [&](const ast_node* k) { lw_prepass(k); });
+    }
+    void lw_prepass_expr(const expression* e) {
+        if (!e) { return; }
+        stack_.guard(e->location);
+        switch (e->get_type()) {
+            case node_type::identifier_expr: {
+                auto* id = static_cast<const identifier_expr*>(e);
+                if (lw_candidate_of(id) < 0 && !lw_ident_.count(id)) { lw_unresolved(id->name); }
+                return;
+            }
+            case node_type::lambda_expr:
+                lw_lambda(static_cast<const lambda_expr*>(e), nullptr, nullptr);
+                return;
+            case node_type::include_expr: case node_type::import_expr:
+                lw_->disabled = true;
+                return;
+            case node_type::cast_expr: {
+                auto* c = static_cast<const cast_expr*>(e);
+                if (c->by_reference && !c->implicit_ref) { lw_mark_mentions(c->operand.get(), lw_->escaped); }
+                break;
+            }
+            case node_type::call_expr: {
+                auto* c = static_cast<const call_expr*>(e);
+                const bool builtin = !lw_node_opaque(e);
+                if (!builtin) {
+                    for (const auto& a : c->arguments) {
+                        if (const int i = lw_candidate_of(lw_root(a.get())); i >= 0) { lw_->sensitive[size_t(i)] = 1; }
+                    }
+                    if (c->callee && c->callee->get_type() == node_type::member_expr) {
+                        if (const int i = lw_candidate_of(lw_root(static_cast<const member_expr*>(c->callee.get())->object.get())); i >= 0) { lw_->sensitive[size_t(i)] = 1; }
+                    }
+                }
+                break;
+            }
+            case node_type::new_expr:
+                for (const auto& a : static_cast<const new_expr*>(e)->arguments) {
+                    if (const int i = lw_candidate_of(lw_root(a.get())); i >= 0) { lw_->sensitive[size_t(i)] = 1; }
+                }
+                break;
+            default:
+                break;
+        }
+        for_each_child_expression(e, [&](const expression* k) { lw_prepass_expr(k); });
+    }
+
+    // The candidates an expression reads and whether any of its nodes may run code; skip is a store target's root the store does
+    // not read
+    void lw_scan(const expression* e, lw_set& uses, bool& opaque, const identifier_expr* skip = nullptr) {
+        if (!e) { return; }
+        stack_.guard(e->location);
+        if (e->get_type() == node_type::identifier_expr) {
+            const int i = e == skip ? -1 : lw_candidate_of(static_cast<const identifier_expr*>(e));
+            if (i >= 0) { lw_set_bit(uses, i); }
+            return;
+        }
+        if (lw_node_opaque(e)) { opaque = true; }
+        if (e->get_type() == node_type::lambda_expr) { lw_lambda(static_cast<const lambda_expr*>(e), nullptr, &uses); return; }
+        if (e->get_type() == node_type::call_expr) {   // a method's name is not a member read: the call judged it
+            auto* c = static_cast<const call_expr*>(e);
+            const bool method = c->callee && c->callee->get_type() == node_type::member_expr;
+            lw_scan(method ? static_cast<const member_expr*>(c->callee.get())->object.get() : c->callee.get(), uses, opaque, skip);
+            for (const auto& a : c->arguments) { lw_scan(a.get(), uses, opaque, skip); }
+            return;
+        }
+        for_each_child_expression(e, [&](const expression* k) { lw_scan(k, uses, opaque, skip); });
+    }
+    lw_set lw_empty() const { return lw_set(lw_->words, 0); }
+    void lw_jump_extra(lw_set& s) const {
+        if (lw_->opaque_exit > 0) { lw_union(s, lw_->sensitive_set); }
+    }
+    lw_set lw_reads(const expression* e, lw_set in) {
+        if (!e) { return in; }
+        lw_set uses = lw_empty();
+        bool opaque = false;
+        lw_scan(e, uses, opaque);
+        lw_union(in, uses);
+        if (opaque) { lw_union(in, lw_->sensitive_set); }
+        return in;
+    }
+
+    // An expression whose value nothing uses: a store into a candidate is judged against what is live after it
+    lw_set lw_effect(const expression* e, lw_set out, const void* mode_key) {
+        const lw_store st = lw_store_of(e);
+        lw_set uses = lw_empty();
+        bool opaque = false;
+        lw_scan(e, uses, opaque, st.local >= 0 && !st.reads ? st.root : nullptr);
+        if (st.local >= 0 && lw_->reporting && !lw_test(out, st.local) && !lw_->escaped[size_t(st.local)] &&
+            !(opaque && lw_->sensitive[size_t(st.local)])) {
+            auto mit = lw_modes_.find(mode_key);
+            lw_->reports.push_back({lw_->cands[size_t(st.local)], st.target, st.root->location, mit == lw_modes_.end() ? uint8_t(check_mode_attr_none) : mit->second});
+        }
+        lw_set in = std::move(out);
+        if (st.local >= 0 && st.whole) { lw_reset_bit(in, st.local); }
+        lw_union(in, uses);
+        if (opaque) { lw_union(in, lw_->sensitive_set); }
+        return in;
+    }
+
+    void lw_mask(lw_set& s) const { for (size_t i = 0; i < s.size(); ++i) { s[i] &= lw_->in_scope[i]; } }
+    lw_set lw_block(const std::vector<declaration_ptr>& decls, lw_set out) {
+        bool opaque_locals = false;
+        lw_set own = lw_empty();
+        for (const auto& d : decls) {
+            if (!d) { continue; }
+            if (lw_opaque_locals_.count(d.get()) || d->get_type() == node_type::destructuring_decl) { opaque_locals = true; }
+            if (const int c = lw_declared(d.get()); c >= 0) { lw_set_bit(own, c); }
+        }
+        const lw_set outer_scope = lw_->in_scope;
+        lw_union(lw_->in_scope, own);
+        if (opaque_locals) { lw_union(out, lw_->sensitive_set); ++lw_->opaque_exit; }
+        lw_mask(out);
+        for (size_t k = decls.size(); k-- > 0;) { out = lw_decl(decls[k].get(), std::move(out)); }
+        if (opaque_locals) { --lw_->opaque_exit; }
+        lw_->in_scope = outer_scope;
+        lw_mask(out);
+        return out;
+    }
+    lw_set lw_decl(const declaration* d, lw_set out) {
+        lw_set in = lw_decl_in(d, std::move(out));
+        lw_mask(in);
+        return in;
+    }
+    lw_set lw_decl_in(const declaration* d, lw_set out) {
+        if (!d) { return out; }
+        stack_.guard(d->location);
+        switch (d->get_type()) {
+            case node_type::variable_decl: {
+                auto* v = static_cast<const variable_decl*>(d);
+                lw_set in = std::move(out);
+                if (const int own = lw_declared(v); own >= 0) { lw_reset_bit(in, own); }
+                in = lw_reads(v->initializer.get(), std::move(in));
+                lw_union(in, lw_->catch_live);
+                return in;
+            }
+            case node_type::expression_decl: {
+                lw_set in = lw_effect(static_cast<const expression_decl*>(d)->expression.get(), std::move(out), d);
+                lw_union(in, lw_->catch_live);
+                return in;
+            }
+            case node_type::statement_decl:
+                return lw_stmt(static_cast<const statement_decl*>(d)->statement.get(), std::move(out));
+            case node_type::destructuring_decl: {
+                lw_set in = lw_reads(static_cast<const destructuring_decl*>(d)->initializer.get(), std::move(out));
+                lw_union(in, lw_->catch_live);
+                return in;
+            }
+            default:
+                return out;
+        }
+    }
+    lw_set lw_loop(const expression* cond, const statement* body, const expression* update, const void* update_key, lw_set out,
+                   int loop_var, bool exit_opaque) {
+        if (exit_opaque) { lw_union(out, lw_->sensitive_set); }
+        lw_mask(out);
+        const lw_set outer_scope = lw_->in_scope;
+        if (loop_var >= 0) { lw_set_bit(lw_->in_scope, loop_var); }
+        struct restore_scope { lw_region_state& r; const lw_set& was; ~restore_scope() { r.in_scope = was; } } restore{*lw_, outer_scope};
+        const bool reporting = lw_->reporting;
+        lw_->reporting = false;
+        lw_set head = lw_reads(cond, out);
+        for (int round = 0;; ++round) {
+            lw_set cont = update ? lw_effect(update, head, update_key) : head;
+            lw_->jumps.push_back({out, cont});
+            lw_set body_in = lw_stmt(body, cont);
+            lw_->jumps.pop_back();
+            if (loop_var >= 0) { lw_reset_bit(body_in, loop_var); }
+            lw_union(body_in, out);
+            lw_set next = lw_reads(cond, std::move(body_in));
+            if (next == head || round > 64) {
+                lw_->reporting = reporting;
+                if (reporting) {
+                    lw_set final_cont = update ? lw_effect(update, head, update_key) : head;
+                    lw_->jumps.push_back({out, final_cont});
+                    lw_stmt(body, final_cont);
+                    lw_->jumps.pop_back();
+                }
+                return head;
+            }
+            lw_union(head, next);
+        }
+    }
+    lw_set lw_stmt(const statement* s, lw_set out) {
+        if (!s) { return out; }
+        stack_.guard(s->location);
+        lw_set in;
+        switch (s->get_type()) {
+            case node_type::expression_stmt:
+                in = lw_effect(static_cast<const expression_stmt*>(s)->expression.get(), std::move(out), s);
+                break;
+            case node_type::block_stmt:
+                in = lw_block(static_cast<const block_stmt*>(s)->declarations, std::move(out));
+                break;
+            case node_type::if_stmt: {
+                auto* i = static_cast<const if_stmt*>(s);
+                in = lw_stmt(i->then_statement.get(), out);
+                lw_union(in, i->else_statement ? lw_stmt(i->else_statement.get(), out) : out);
+                in = lw_reads(i->condition.get(), std::move(in));
+                break;
+            }
+            case node_type::while_stmt: {
+                auto* w = static_cast<const while_stmt*>(s);
+                in = lw_loop(w->condition.get(), w->body.get(), nullptr, nullptr, std::move(out), -1, false);
+                break;
+            }
+            case node_type::for_stmt: {
+                auto* f = static_cast<const for_stmt*>(s);
+                const bool opaque_init = f->initializer && lw_opaque_locals_.count(f->initializer.get());
+                const int init_var = f->initializer ? lw_declared(f->initializer.get()) : -1;
+                const lw_set outer_scope = lw_->in_scope;
+                if (init_var >= 0) { lw_set_bit(lw_->in_scope, init_var); }
+                if (opaque_init) { ++lw_->opaque_exit; }
+                in = lw_loop(f->condition.get(), f->body.get(), f->update.get(), f, std::move(out), -1, opaque_init);
+                if (opaque_init) { --lw_->opaque_exit; }
+                in = lw_decl(f->initializer.get(), std::move(in));
+                lw_->in_scope = outer_scope;
+                break;
+            }
+            case node_type::range_for_stmt: {
+                auto* r = static_cast<const range_for_stmt*>(s);
+                const int loop_var = lw_declared(r);
+                lw_set probe = lw_empty();
+                bool container_opaque = false;
+                lw_scan(r->container.get(), probe, container_opaque);
+                const bool var_opaque = lw_opaque_locals_.count(r) != 0;
+                if (var_opaque) { ++lw_->opaque_exit; }
+                in = lw_loop(nullptr, r->body.get(), nullptr, nullptr, std::move(out), loop_var, container_opaque || var_opaque);
+                if (var_opaque) { --lw_->opaque_exit; }
+                in = lw_reads(r->container.get(), std::move(in));
+                break;
+            }
+            case node_type::parallel_for_stmt: {
+                auto* p = static_cast<const parallel_for_stmt*>(s);
+                in = lw_loop(nullptr, p->body.get(), nullptr, nullptr, std::move(out), -1, true);
+                in = lw_reads(p->container.get(), std::move(in));
+                for (const auto& c : p->extra_containers) { in = lw_reads(c.get(), std::move(in)); }
+                break;
+            }
+            case node_type::return_stmt: {
+                in = lw_empty();
+                lw_jump_extra(in);
+                in = lw_reads(static_cast<const return_stmt*>(s)->value.get(), std::move(in));
+                break;
+            }
+            case node_type::break_stmt:
+                in = lw_->jumps.empty() ? lw_empty() : lw_->jumps.back().brk;
+                lw_jump_extra(in);
+                break;
+            case node_type::continue_stmt:
+                in = lw_->jumps.empty() ? lw_empty() : lw_->jumps.back().cont;
+                lw_jump_extra(in);
+                break;
+            case node_type::fallthrough_stmt:
+                in = std::move(out);
+                break;
+            case node_type::try_stmt: {
+                auto* t = static_cast<const try_stmt*>(s);
+                ++lw_->opaque_exit;   // a caught value dies at the handler's end
+                lw_set handler = lw_stmt(t->catch_block.get(), out);
+                --lw_->opaque_exit;
+                lw_union(handler, lw_->sensitive_set);
+                lw_set saved = lw_->catch_live;
+                lw_union(lw_->catch_live, handler);
+                in = lw_stmt(t->try_block.get(), std::move(out));
+                lw_->catch_live = std::move(saved);
+                break;
+            }
+            case node_type::switch_stmt: {
+                auto* sw = static_cast<const switch_stmt*>(s);
+                lw_->jumps.push_back({out, lw_->jumps.empty() ? lw_empty() : lw_->jumps.back().cont});
+                lw_set all = out;
+                lw_set next = out;
+                std::vector<const std::vector<statement_ptr>*> bodies;
+                for (const auto& c : sw->cases) { if (c) { bodies.push_back(&c->body); } }
+                if (sw->default_case) { bodies.push_back(&sw->default_case->body); }
+                for (size_t k = bodies.size(); k-- > 0;) {
+                    lw_set case_out = out;
+                    lw_union(case_out, next);
+                    for (size_t j = bodies[k]->size(); j-- > 0;) { case_out = lw_stmt((*bodies[k])[j].get(), std::move(case_out)); }
+                    lw_union(all, case_out);
+                    next = std::move(case_out);
+                }
+                lw_->jumps.pop_back();
+                for (const auto& c : sw->cases) { if (c) { all = lw_reads(c->value.get(), std::move(all)); } }
+                in = lw_reads(sw->condition.get(), std::move(all));
+                break;
+            }
+            default:
+                in = s->get_type() >= node_type::variable_decl ? lw_decl(static_cast<const declaration*>(s), std::move(out)) : std::move(out);
+                break;
+        }
+        lw_union(in, lw_->catch_live);
+        lw_mask(in);
+        return in;
+    }
+
+    std::unordered_map<const void*, int> lw_local_decls_;   // a declaring node (variable_decl, range_for_stmt) -> its candidate
+    int lw_declared(const void* node) const {
+        auto it = lw_local_decls_.find(node);
+        return it == lw_local_decls_.end() || it->second >= static_cast<int>(lw_local_.size()) ? -1 : lw_local_[size_t(it->second)];
+    }
+
+    void lw_open_region() { if (collect_diagnostics_) { lw_regions_.emplace_back(); } }
+    // Analyse the region just walked: body is a function body, a lambda body or the unit's top level
+    void lw_close_region(const std::vector<parameter>* params, const std::vector<declaration_ptr>* decls, const statement* body) {
+        if (!collect_diagnostics_ || lw_regions_.empty()) { return; }
+        std::vector<int> cands = std::move(lw_regions_.back());
+        lw_regions_.pop_back();
+        if (cands.empty()) { return; }
+        lw_region_state state;
+        state.cands = cands;
+        state.words = (cands.size() + 63) / 64;
+        state.escaped.assign(cands.size(), 0);
+        state.sensitive.assign(cands.size(), 0);
+        state.catch_live.assign(state.words, 0);
+        state.in_scope.assign(state.words, 0);
+        if (lw_local_.size() < lw_cands_.size()) { lw_local_.resize(lw_cands_.size(), -1); }
+        for (size_t i = 0; i < cands.size(); ++i) {
+            lw_local_[size_t(cands[i])] = static_cast<int>(i);
+            state.by_name[lw_cands_[size_t(cands[i])].name].push_back(static_cast<int>(i));
+        }
+        lw_region_state* outer = std::exchange(lw_, &state);
+        if (decls) { for (const auto& d : *decls) { lw_prepass(d.get()); } }
+        if (body) { lw_prepass(body); }
+        if (params) { for (const auto& p : *params) { if (p.default_value) { lw_prepass_expr(p.default_value.get()); } } }
+        if (!state.disabled) {
+            state.sensitive_set.assign(state.words, 0);
+            for (size_t i = 0; i < cands.size(); ++i) {
+                if (lw_cands_[size_t(cands[i])].class_holding) { state.sensitive[i] = 1; }
+                if (state.sensitive[i]) { lw_set_bit(state.sensitive_set, static_cast<int>(i)); }
+            }
+            bool opaque_params = false;
+            if (params) {
+                for (const auto& p : *params) {
+                    if (lw_opaque_locals_.count(&p)) { opaque_params = true; }
+                    if (const int c = lw_declared(&p); c >= 0) { lw_set_bit(state.in_scope, c); }
+                }
+            }
+            state.reporting = true;
+            lw_set end = lw_empty();
+            if (opaque_params) { lw_union(end, state.sensitive_set); ++state.opaque_exit; }
+            if (decls) {
+                std::vector<declaration_ptr> top;
+                for (const auto& d : *decls) {
+                    if (d && d->get_type() != node_type::function_decl && d->get_type() != node_type::class_decl && d->get_type() != node_type::namespace_decl) { top.push_back(d); }
+                }
+                lw_block(top, std::move(end));
+            } else if (body) {
+                lw_stmt(body, std::move(end));
+            }
+            for (const auto& r : state.reports) { lw_report_lost(r); }
+        }
+        lw_ = outer;
+        for (int c : cands) { lw_local_[size_t(c)] = -1; }
+        if (outer) {
+            for (size_t i = 0; i < outer->cands.size(); ++i) { lw_local_[size_t(outer->cands[i])] = static_cast<int>(i); }
+        }
+    }
+
+    std::string lw_text(const expression* e, int depth = 0) {
+        if (!e || depth > 16) { return "..."; }
+        switch (e->get_type()) {
+            case node_type::identifier_expr: return std::string(static_cast<const identifier_expr*>(e)->name);
+            case node_type::member_expr: {
+                auto* m = static_cast<const member_expr*>(e);
+                return lw_text(m->object.get(), depth + 1) + "." + std::string(m->member);
+            }
+            case node_type::binary_expr: return lw_text(static_cast<const binary_expr*>(e)->left.get(), depth + 1) + "[...]";
+            case node_type::cast_expr: return lw_text(static_cast<const cast_expr*>(e)->operand.get(), depth + 1);
+            case node_type::call_expr: {
+                auto* c = static_cast<const call_expr*>(e);
+                return lw_text(c->callee.get(), depth + 1) + "(" + (c->arguments.empty() ? "" : "...") + ")";
+            }
+            default: return "...";
+        }
+    }
+    void lw_report_lost(const lw_report& r) {
+        const lw_candidate& c = lw_cands_[size_t(r.cand)];
+        const std::string name(c.name);
+        const std::string target = lw_text(r.target);
+        std::string text;
+        switch (c.origin) {
+            case lw_origin::range_for:
+                text = "'" + target + "' writes to '" + name + "', a copy of the element that is never read afterwards, so the write is lost; "
+                       "iterate with '" + c.type_text + "& " + name + "' to change the element";
+                break;
+            case lw_origin::parameter:
+                text = "'" + target + "' writes to parameter '" + name + "', a copy of the argument that is never read afterwards, so the write "
+                       "is lost; take '" + c.type_text + "& " + name + "' to change the caller's value";
+                break;
+            case lw_origin::local:
+                text = "'" + target + "' writes to '" + name + "', a copy that is never read afterwards, so the write is lost; declare '" +
+                       c.type_text + "& " + name + "' to change the original";
+                break;
+        }
+        mode_guard region(mode_stack_, r.mode, /*scoped=*/false, /*always=*/true);
+        diag(diag_level::error, r.at, std::move(text));
+    }
+
     // -------------------------------------------------------------- statements
 
     JAI_NOINLINE void walk_stmt(statement* s) {
@@ -5304,7 +6407,9 @@ private:
         mode_guard region(mode_stack_, s->check_mode_attr, /*scoped=*/false);
         switch (s->get_type()) {
             case node_type::expression_stmt:
+                if (lw_on()) { lw_modes_[s] = region_mode(); }
                 infer(static_cast<expression_stmt*>(s)->expression.get());
+                check_discarded(static_cast<expression_stmt*>(s)->expression.get());
                 break;
             case node_type::block_stmt: {
                 auto* b = static_cast<block_stmt*>(s);
@@ -5359,6 +6464,7 @@ private:
 
     JAI_NOINLINE void walk_for(for_stmt* f) {
         scopes_.emplace_back();
+        if (lw_on()) { lw_modes_[f] = region_mode(); }
         if (f->initializer) { walk_decl(f->initializer.get()); }
         if (f->condition) { infer(f->condition.get()); }
         if (f->update) { infer(f->update.get()); }
@@ -5435,6 +6541,15 @@ private:
         entry.display = f->element_type ? f->element_type->canonical_name() : "auto";
         entry.line = f->location.line;
         entry.column = f->location.column;
+        if (!f->is_reference && !entry.map_pair) {
+            // a class-typed variable copies only a value element (a handle element shares its object, whatever the spelling)
+            const bool spelled = f->element_type && !f->auto_spelled && f->element_type->base_type != script_value_type::jai_any_type;
+            const bool var_spelled = f->element_type && !f->auto_spelled && !spelled;   // a var takes any later value: never judged
+            const ctype judged = var_spelled ? ctype{} : spelled && entry.type.kind != ctype::object_k ? entry.type : elem;
+            entry.lw_handle = judged.kind == ctype::object_k && elem.kind != ctype::object_k;
+            lw_register(entry, judged, f, f->variable_name, lw_origin::range_for, spelled ? f->element_type->canonical_name() : "auto",
+                        !loop_const && !entry.lw_handle);
+        }
         warn_shadow("range-for variable", f->variable_name, f->location);
         scopes_.back().emplace(f->variable_name, std::move(entry));
         walk_stmt(f->body.get());
@@ -5649,9 +6764,13 @@ private:
                 scopes_.pop_back();
                 break;
             }
-            case node_type::expression_decl:
-                infer(static_cast<expression_decl*>(d)->expression.get());
+            case node_type::expression_decl: {
+                auto* ed = static_cast<expression_decl*>(d);
+                if (lw_on()) { lw_modes_[d] = region_mode(); }
+                infer(ed->expression.get());
+                if (!ed->implicit_return) { check_discarded(ed->expression.get()); }   // the program's last expression is its result
                 break;
+            }
             case node_type::statement_decl:
                 walk_stmt(static_cast<statement_decl*>(d)->statement.get());
                 break;
@@ -5789,6 +6908,7 @@ private:
             }
             check_const_bind(decl, entry);
             warn_shadow("local", decl->name, decl->location);
+            if (lw_on()) { lw_opaque_locals_.insert(decl); }
             declare_local(decl->name, std::move(entry), decl->location);
             return;
         }
@@ -5867,6 +6987,12 @@ private:
         }
         check_const_bind(decl, entry);
         warn_shadow("local", decl->name, decl->location);
+        if (!is_reference_decl && !decl->is_static && lw_on()) {
+            const bool spelled = decl->type && !decl->auto_spelled;
+            entry.lw_handle = !spelled && entry.type.kind == ctype::object_k && !lw_value_initializer(decl->initializer.get());
+            lw_register(entry, entry.dynamic ? ctype{} : entry.type, decl, decl->name, lw_origin::local, spelled ? entry.display : "auto",
+                        !decl->is_const && !decl->function_spelling && !entry.lw_handle);
+        }
         declare_local(decl->name, std::move(entry), decl->location);
     }
 
@@ -5889,7 +7015,8 @@ private:
         fn_stack_.push_back(std::move(ctx));
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         check_spelled_type(fn->return_type.get(), fn->location);
-        define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor, /*binds_copies=*/fn->is_coroutine);
+        lw_open_region();
+        define_params(fn->parameters, fn->location, /*warn_field_shadows=*/!is_ctor);
         fn_stack_.back().in_ctor_initializers = true;
         for (const auto& init : fn->initializers) {
             for (const auto& arg : init.arguments) { infer(arg.get()); }
@@ -5902,6 +7029,7 @@ private:
             for (auto& d : fn->body->declarations) { walk_decl(d.get()); }
         }
         check_falls_off_end(fn);
+        lw_close_region(&fn->parameters, nullptr, fn->body.get());
         fn_stack_.pop_back();
         scopes_.pop_back();
         capture_stack_.swap(saved_captures);
@@ -5928,8 +7056,7 @@ private:
         }
     }
 
-    void define_params(const std::vector<parameter>& params, const source_location& fn_loc,
-                       bool warn_field_shadows = true, bool binds_copies = false) {
+    void define_params(const std::vector<parameter>& params, const source_location& fn_loc, bool warn_field_shadows = true) {
         for (const auto& p : params) {
             check_spelled_type(p.type.get(), fn_loc);
             ctype pt = ctype_from_type_info(p.type.get());
@@ -5940,7 +7067,7 @@ private:
                          "default value of '" + p.name + "' declared '" +
                          (p.type ? p.type->canonical_name() : "auto") + "' has type '" + ctype_name(dv) + "'");
                 }
-                if (p.is_reference && !p.is_const && !binds_copies) {   // a coroutine binds a copy
+                if (p.is_reference && !p.is_const) {
                     if (default_never_names_storage(p.default_value.get())) {
                         diag(diag_level::error, p.default_value->location, "cannot bind non-lvalue default to reference parameter '" + p.name + "'");
                     }
@@ -5959,6 +7086,10 @@ private:
             entry.line = fn_loc.line;
             entry.column = fn_loc.column;
             entry.is_const = p.is_const;
+            if (!p.is_reference) {
+                entry.lw_handle = pt.kind == ctype::object_k;   // a by-value class parameter shares a handle argument's object
+                lw_register(entry, entry.dynamic ? ctype{} : pt, &p, p.name, lw_origin::parameter, entry.display, !p.is_const && !entry.lw_handle);
+            }
             declare_local(p.name, std::move(entry), fn_loc);
         }
     }
@@ -6100,8 +7231,10 @@ private:
         open_lambda_scope(l);
         mode_guard enclosing(mode_stack_, scoped_region_mode(), /*scoped=*/true, /*always=*/true);
         check_spelled_type(l->return_type.get(), l->location);
+        lw_open_region();
         define_lambda_names(l);
         walk_stmt(l->body.get());
+        lw_close_region(&l->parameters, nullptr, l->body.get());
         close_lambda_scope(l);
     }
 

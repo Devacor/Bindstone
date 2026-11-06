@@ -230,7 +230,7 @@
         },
         {
           "name": "meta.attribute.jaiscript",
-          "match": "\\[\\[\\s*(warn_mode|strict_mode)\\s*\\]\\]",
+          "match": "\\[\\[\\s*(warn_mode|strict_mode|nodiscard)\\s*\\]\\]",
           "captures": {
             "1": { "name": "storage.modifier.attribute.jaiscript" }
           }

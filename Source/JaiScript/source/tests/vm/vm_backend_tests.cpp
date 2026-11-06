@@ -2235,7 +2235,7 @@ public:
 		test("value_params_do_not_mutate_caller", [this]() {
 			auto e = vm_engine();
 			check_eq((int64_t)1, e->execute(R"(
-				function tweak(int copy) { copy = copy + 10; }
+				function tweak(int copy) { [[warn_mode]] copy = copy + 10; }
 				var original = 1;
 				tweak(original);
 				original;
@@ -2774,44 +2774,13 @@ public:
 			check_eq(std::string("10215252"), v_out, "vm: global tier1 refs across resumes");
 		});
 
-		// Coroutine parameters always bind by VALUE (both backends): resume runs far from
-		// the creation-site lvalues, so int& behaves as a value param here
-		test("coroutine_ref_param_lvalue_binds_by_value", [this, run_both_backends]() {
-			const char* src = R"(
-				class Box { int v = 7; }
-				var box = Box();
-				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
-				auto g = gen(box.v);
-				auto r1 = g.next();
-				auto r2 = g.next();
-				r1 * 1000 + r2 * 10 + box.v;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("8097"), i_out, "interp: coroutine int& binds the creation-time value");
-			check_eq(std::string("8097"), v_out, "vm: coroutine int& binds the creation-time value");
-		});
-
-		test("coroutine_ref_param_identifier_binds_by_value", [this, run_both_backends]() {
-			const char* src = R"(
-				var y = 7;
-				coroutine int gen(int& x) { x = x + 1; yield x; x = x + 1; return x; }
-				auto g = gen(y);
-				auto r1 = g.next();
-				auto r2 = g.next();
-				r1 * 1000 + r2 * 10 + y;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("8097"), i_out, "interp: coroutine int& binds the identifier's value");
-			check_eq(std::string("8097"), v_out, "vm: coroutine int& binds the identifier's value");
-		});
-
 		test("stale_metadata_first_resume_lvalue", [this, run_both_backends]() {
 			// resume() during argument evaluation of an enclosing call: the enclosing
 			// call's arg metadata must NOT leak into the coroutine's first-resume bind
 			const char* src = R"(
 				class Box { int v = 7; }
 				var box = Box();
-				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
+				coroutine int gen(int x) { x = 99; yield x; return 2; }
 				function take(var a, var b) -> int { return a + b; }
 				auto g = gen(555);
 				take(box.v, g.next());
@@ -2825,7 +2794,7 @@ public:
 		test("stale_metadata_first_resume_identifier", [this, run_both_backends]() {
 			const char* src = R"(
 				var y = 7;
-				coroutine int gen(int& x) { x = 99; yield 1; return 2; }
+				coroutine int gen(int x) { x = 99; yield x; return 2; }
 				function take(var a, var b) -> int { return a + b; }
 				auto g = gen(555);
 				take(y, g.next());
@@ -4564,7 +4533,7 @@ public:
 				log = log + "|" + to_string(c1.x) + "," + to_string(c2.x);
 				var x1 = new O(); var x2 = new O(); var xh = x1;
 				function set_xh() { xh = x2; return "s"; }
-				class Mixer { void mix(int& r, string n) { log = log + "A"; r = 33; } void mix(int r, int n) { log = log + "B"; r = 44; } }
+				class Mixer { void mix(int& r, string n) { log = log + "A"; r = 33; } void mix(int r, int n) { log = log + "B"; [[warn_mode]] r = 44; } }
 				var mx = Mixer();
 				mx.mix(xh.x, set_xh());
 				log = log + "|" + to_string(x1.x) + "," + to_string(x2.x);
@@ -4984,7 +4953,7 @@ public:
 				"  int f = 10; string tag = \"q\"; bool alive = true;\n"
 				"  int tick(int d) {\n"
 				"    f = f - d; this.f = this.f + 1; int local = f;\n"
-				"    tag = tag + \"!\"; string out = tag; out = out + \"?\";\n"
+				"    tag = tag + \"!\"; string out = tag; out = out + \"?\"; if (out == \"\") { local = 0; }\n"
 				"    bool ok = alive; ok = !ok; alive = ok;\n"
 				"    return sum(local, f); }\n"
 				"  int sum(int a, int b) { return a + b; }\n"

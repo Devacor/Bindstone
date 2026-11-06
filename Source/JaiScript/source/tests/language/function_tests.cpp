@@ -617,7 +617,7 @@ public:
                 void write_ref(int& x) { x = 66; }
                 int mutates() { Def d = G; d.atk = 9; return d.atk * 10 + G.atk; }
                 int pushes() { Def d = G; d.vals.push(2); return d.vals.size() * 10 + G.vals.size(); }
-                int rebinds() { Def d = G; d = Def(); d.atk = 4; return G.atk; }
+                int rebinds() { Def d = G; d = Def(); [[warn_mode]] d.atk = 4; return G.atk; }
                 int aliases() { Def d = G; var& a = d; a.atk = 55; return G.atk; }
                 int captures() { Def d = G; auto f = [d]() { return d.atk; }; G.atk = 4; int c = f(); G.atk = 3; return c; }
                 Def returns() { Def d = G; return d; }
@@ -625,7 +625,7 @@ public:
                 int compares() { Def d = G; return d == G ? 1 : 0; }
                 int identity() { Def d = G; return same_object(d, G) ? 1 : 0; }
                 int callee_writes() { Def d = G; bump(); int c = d.atk; G.atk = 3; return c; }
-                int local_source_written() { Def a = Def(); Def b = a; a.atk = 8; return b.atk; }
+                int local_source_written() { Def a = Def(); Def b = a; [[warn_mode]] a.atk = 8; return b.atk; }
                 int handle_alias() { shared_ptr<Def> hp = G; Def d = G; hp.atk = 77; int c = d.atk; G.atk = 3; return c; }
                 int ref_arg_write() { Def d = G; write_ref(G.atk); int c = d.atk; G.atk = 3; return c; }
                 int ref_param_write(Def& q) { Def d = G; q.atk = 44; int c = d.atk; return c; }

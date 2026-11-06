@@ -97,6 +97,31 @@ stock_ref().push(4);
 print("after stock_ref().push(4): {}", stock.size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after get_stock().push(4): 3
 after stock_ref().push(4): 4</code></pre></div>
+<h2 id="lost-writes">Lost writes fail the load<a class="hlink" href="#lost-writes" aria-label="link">&#8203;</a></h2>
+<p>A write into a copy that nothing reads afterwards changes nothing anyone can see, and it is nearly always a loop variable or a parameter that was meant to be a reference. The checker refuses it at load. The write is an assignment, a compound assignment, <code>++</code> or <code>--</code>, or a mutating builtin method (<code>push</code>, <code>to_upper</code>, <code>sort</code>, ...); its target is a by-value range-for variable, parameter or local, or a field or element of one; and no path from the write reads that variable again before it dies:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
+array&lt;Enemy&gt; enemies = [Enemy(), Enemy()];
+for (auto e : enemies) {
+    e.hp -= 1;
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
+&lt;script&gt;:4:5: error: &#x27;e.hp&#x27; writes to &#x27;e&#x27;, a copy of the element that is never read afterwards, so the write is lost; iterate with &#x27;auto&amp; e&#x27; to change the element
+        e.hp -= 1;
+        ^</code></pre></div>
+<p>The fix is the reference the code meant: <code>for (auto&amp; e : enemies)</code>, <code>void hurt(Enemy&amp; e)</code>, <code>auto&amp; first = enemies[0];</code>. A parameter&#x27;s text says <code>take 'string&amp; s' to change the caller's value</code>, a local&#x27;s <code>declare 'auto&amp; x' to change the original</code>. To change a copy on purpose, make the copy and read it after the write; a later read keeps the code legal:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
+array&lt;Enemy&gt; enemies = [Enemy(), Enemy()];
+for (auto e : enemies) {
+    auto preview = e;            // the copy this loop works on
+    preview.hp -= 3;
+    print("a hit would leave {}", preview.hp);
+}
+print("still {}", enemies[0].hp);</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a hit would leave 7
+a hit would leave 7
+still 10</code></pre></div>
+<p>The rule judges only a copy the checker knows to be a value and only a write nothing can observe; everything else loads as before:</p>
+<ul><li>The judged types are scalars, strings, math values, typed containers of them, and script classes held by value. A <code>var</code> or untyped variable, a <code>shared_ptr</code>, an <code>auto</code> made from a handle and a by-value class parameter are not judged, since they may share an object (a by-value parameter shares a handle argument&#x27;s object).</li><li>A variable a reference binds (<code>auto&amp; r = e;</code>, <code>for (auto&amp; x : e.items)</code>, <code>cast&lt;T&amp;&gt;(e)</code>, a reference return) is never judged: the reference may read it later.</li><li>A copy that holds class instances is read by any code that can run before it dies, since <code>reflect::instances</code> sees every live instance: a call, an operator on a class, a construction, a destructor at a scope&#x27;s exit. So <code>for (auto e : enemies) { e.hp -= 1; log_hit(); }</code> loads. A class whose instances run code of their own when written or destroyed (a destructor, a user accessor, an <code>operator=</code>, a host base, any of these in a subclass or a field&#x27;s class) is not judged at all. A copy a lambda names, or a call takes as its receiver or as an argument, is treated the same way from then on.</li><li>A write that can raise by itself is observable through the raise, so it is not judged: an array element or a character store (its index may be out of range), a store whose value needs a conversion that can fail (a <code>var</code> into an <code>int</code>, an <code>int</code> into a <code>uint8</code> element), and a builtin method that takes a count or an index (<code>repeat</code>, <code>pad_left</code>, <code>insert</code>, <code>erase</code>, <code>pop</code>). The memory cap and the execution budget are resource rails, not observations: a write that can fail only by exhausting them is judged.</li><li>A write inside a <code>try</code> is read by its <code>catch</code> when the handler reads the variable, and a write before a loop&#x27;s next iteration by the iteration that reads it.</li></ul>
 <h2 id="escape-hatch-1-reference-parameters">Escape hatch 1: <code>&amp;</code> reference parameters<a class="hlink" href="#escape-hatch-1-reference-parameters" aria-label="link">&#8203;</a></h2>
 <p>Declare a parameter with <code>&amp;</code> and the callee binds the <em>caller&#x27;s</em> variable. Works with explicit types (<code>int&amp; x</code>) and with <code>auto&amp;</code> (any type):</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }         // typed by-ref parameter

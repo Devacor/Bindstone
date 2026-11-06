@@ -164,6 +164,9 @@ namespace jai {
         bool untyped_member_declaration_ahead() const;   // the same, or a keyword other than a type naming a class or namespace member
         bool check_mode_attribute_ahead() const;
         checked_result<uint8_t> check_mode_attribute();
+        bool nodiscard_attribute_ahead() const;
+        bool mark_nodiscard(const declaration_ptr& decl, const source_location& at, std::string_view class_name = {});
+        bool reject_coroutine_reference_parameter(const function_decl& coroutine);
         std::optional<std::string> parse_operator_method_symbol();
         
         // statement parsing

@@ -4304,7 +4304,7 @@ public:
             auto r = e->execute(R"(
                 auto f() -> auto {
                     float v = 0.0;
-                    v = 2.5;
+                    [[warn_mode]] v = 2.5;
                     v = 3;
                     return v / 2;
                 }
@@ -5551,7 +5551,6 @@ public:
             expect(ga + "coroutine function co(a) { yield a; } var h = co(GA[1]); GA[1] = 100; to_string(h.next())", "2", "an element");
             expect("var arr = [1, 2, 3]; coroutine function co(a) { yield a.size(); } var h = co(arr); arr.push(4); to_string(h.next())", "3", "a heavy value");
             expect(ga + "class K { coroutine function gen(a) { yield a; } } var k = K(); var h = k.gen(GA[1]); GA[1] = 100; to_string(h.next())", "2", "a method coroutine");
-            expect(ga + "coroutine function cr(int& a) { yield a; } var h = cr(GA[1]); GA[1] = 100; to_string(h.next())", "100", "a reference parameter still aliases");
         });
 
         test("a_grafted_call_keeps_the_arguments_ahead_of_it", [expect]() {

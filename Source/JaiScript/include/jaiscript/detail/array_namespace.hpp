@@ -11,7 +11,7 @@ namespace jai::detail {
 		for (const auto transform : {Transform{"append", 2, 2}, Transform{"concat", 2, 2}, Transform{"slice", 1, 3},
 			Transform{"filter", 2, 2}, Transform{"map", 2, 2}, Transform{"sort", 1, 2}, Transform{"reverse", 1, 1}}) {
 			const uint64_t member = engine_access::symbolize(a_engine, transform.name);
-			ns->signatures[member] = {transform.minimum, transform.maximum, {script_value_type::jai_array_type}, script_value_type::jai_array_type, std::string_view(transform.name) != "map"};
+			ns->signatures[member] = {transform.minimum, transform.maximum, {script_value_type::jai_array_type}, script_value_type::jai_array_type, std::string_view(transform.name) != "map", {}, true, true};
 			ns->variables[member] = script_value::make_function([engine = &a_engine, member, transform](const std::vector<script_value>& a_args) -> checked_result<script_value> {
 				if (a_args.size() < transform.minimum || a_args.size() > transform.maximum) {
 					return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "Incorrect argument count for array namespace transform");
@@ -31,7 +31,7 @@ namespace jai::detail {
 		auto& ns = engine_access::script_namespaces(a_engine)[engine_access::symbolize(a_engine, "map")];
 		if (!ns) { ns = std::make_shared<script_namespace_data>(); }
 		const uint64_t member = engine_access::symbolize(a_engine, "filter");
-		ns->signatures[member] = {2, 2, {script_value_type::jai_map_type}, script_value_type::jai_map_type, true};
+		ns->signatures[member] = {2, 2, {script_value_type::jai_map_type}, script_value_type::jai_map_type, true, {}, true, true};
 		ns->variables[member] = script_value::make_function([engine = &a_engine, member](const std::vector<script_value>& a_args) -> checked_result<script_value> {
 			if (a_args.size() != 2) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "Incorrect argument count for map namespace transform");

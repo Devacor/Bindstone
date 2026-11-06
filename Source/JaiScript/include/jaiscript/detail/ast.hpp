@@ -974,6 +974,7 @@ namespace jai {
         bool is_override = false; // For override keyword in derived classes
         bool is_static = false;   // For static methods
         bool is_coroutine = false;
+        bool is_nodiscard = false;   // [[nodiscard]]: a call whose result an expression statement drops fails the load
         size_t local_count = 0;   // Total slots needed (params + locals) for stack allocation
 
         // Enclosing-frame slot locals a nested COROUTINE body references, as

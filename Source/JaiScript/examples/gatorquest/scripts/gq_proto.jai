@@ -265,7 +265,6 @@ void cv_log(ClientView& v, string text, int col) {
 
 void cv_apply(ClientView& v, string snap) {
 	array<string> lines = snap.lines();
-	bool mobs_reset = false;
 	for (int li = 0; li < lines.size(); ++li) {
 		string line = lines[li];
 		if (line.size() < 1) { continue; }
@@ -308,7 +307,6 @@ void cv_apply(ClientView& v, string snap) {
 			v.i_x = [];
 			v.i_y = [];
 			v.i_qty = [];
-			mobs_reset = true;
 		} else if (k == "Y" && f.size() >= 9) {
 			v.hp = f[1].to_int(0);
 			v.hpmax = imax(1, f[2].to_int(1));

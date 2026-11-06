@@ -131,7 +131,7 @@ public:
 				try { s = s + "a" + boom() + "b"; } catch (e) { caught = e; }
 				string local_case() {
 					string l = "keep";
-					try { l = l + "a" + boom(); } catch (e) { return l; }
+					try { [[warn_mode]] l = l + "a" + boom(); } catch (e) { return l; }
 					return "no";
 				}
 				s + " " + caught + " " + local_case()

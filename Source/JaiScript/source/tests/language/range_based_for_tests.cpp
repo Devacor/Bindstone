@@ -304,7 +304,7 @@ public:
             stdlib::register_all(engine);
             auto result = engine->execute(R"(
                 string s = "abc";
-                for (auto c : s) { c = 'z'; }
+                for (auto c : s) { [[warn_mode]] c = 'z'; }
                 s
             )");
             check_eq(std::string("abc"), result.as<std::string>());

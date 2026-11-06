@@ -140,7 +140,7 @@ public:
 				int run() {
 					P p = P();
 					auto y = p;
-					y.x = 9;
+					[[warn_mode]] y.x = 9;
 					return p.x;
 				}
 				run()

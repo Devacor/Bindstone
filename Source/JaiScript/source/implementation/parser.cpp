@@ -3076,6 +3076,13 @@ checked_result<declaration_ptr> parser::declaration() {
 }
 
 JAI_NOINLINE checked_result<declaration_ptr> parser::attributed_declaration() {
+    if (nodiscard_attribute_ahead()) {
+        const source_location at = peek().location;
+        current_ += 5;
+        JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration());
+        if (!mark_nodiscard(decl, at)) { return make_error_code(parse_error_code::syntax_error); }
+        return decl;
+    }
     JAISCRIPT_TRY_ASSIGN(uint8_t mode, check_mode_attribute());
     if (is_at_end() || check(token_type::right_brace)) {
         // nothing follows: the attribute covers an empty block
@@ -3084,7 +3091,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::attributed_declaration() {
         wrapped->check_mode_attr = mode;
         return wrapped;
     }
-    JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, declaration_body());
+    JAISCRIPT_TRY_ASSIGN(declaration_ptr decl, nodiscard_attribute_ahead() ? declaration() : declaration_body());
     if (decl) { decl->check_mode_attr = mode; }
     return decl;
 }
@@ -3209,6 +3216,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
             report_error("coroutines cannot return references", previous());
             return make_error_code(parse_error_code::syntax_error);
         }
+        if (reject_coroutine_reference_parameter(*func)) { return make_error_code(parse_error_code::syntax_error); }
         match(token_type::semicolon);
         return result;
     }
@@ -4615,6 +4623,13 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
             continue;
         }
 
+        source_location nodiscard_at{};
+        const bool member_nodiscard = nodiscard_attribute_ahead();
+        if (member_nodiscard) {
+            nodiscard_at = peek().location;
+            current_ += 5;
+        }
+
         // const T NAME = e; (also static const / const static): a class-level constant (internal/const.md)
         bool member_const = false;
         bool const_static = false;
@@ -4644,7 +4659,7 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 auto var_decl = std::make_shared<variable_decl>(name.location, type_info_ptr{}, name.lexeme, get_symbol_id(name), init);
                 var_decl->default_initialized = !init;
                 var_decl->is_static = true;
-                if (!finish_const(var_decl, const_at, true)) {
+                if (!finish_const(var_decl, const_at, true) || (member_nodiscard && !mark_nodiscard(var_decl, nodiscard_at, class_name_view))) {
                     synchronize_class_member(class_open_index);
                     continue;
                 }
@@ -4977,6 +4992,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 synchronize_class_member(class_open_index);
                 continue;
             }
+            if (reject_coroutine_reference_parameter(*func_member)) {
+                synchronize_class_member(class_open_index);
+                continue;
+            }
             func_member->is_coroutine = true;
         }
         if (member_const) {
@@ -4985,6 +5004,10 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                 continue;
             }
             static_cast<variable_decl*>(member.get())->is_static = true;
+        }
+        if (member_nodiscard && !mark_nodiscard(member, nodiscard_at, class_name_view)) {
+            synchronize_class_member(class_open_index);
+            continue;
         }
         classDecl->members.push_back({visibility, member});
     }
@@ -5070,6 +5093,12 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             report_error("import is a statement, not a member: it is not allowed directly in a class or a namespace body", peek());
             return make_error_code(parse_error_code::syntax_error);
         }
+        source_location nodiscard_at{};
+        const bool nodiscard_member = nodiscard_attribute_ahead();
+        if (nodiscard_member) {
+            nodiscard_at = peek().location;
+            current_ += 5;
+        }
         // Parse any declaration (class, function, variable)
         declaration_ptr member_decl = nullptr;
 
@@ -5104,6 +5133,7 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 report_error("coroutines cannot return references", previous());
                 continue;
             }
+            if (reject_coroutine_reference_parameter(*func)) { continue; }
             member_decl = std::move(parsed.value());
             match(token_type::semicolon);
         } else if (match(token_type::namespace_keyword)) {
@@ -5252,6 +5282,9 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
             var_decl->is_inline = true;
         }
         if (const_member && member_decl && !finish_const(member_decl, member_start, false)) {
+            continue;
+        }
+        if (nodiscard_member && member_decl && !mark_nodiscard(member_decl, nodiscard_at)) {
             continue;
         }
 
@@ -5587,6 +5620,38 @@ checked_result<uint8_t> parser::check_mode_attribute() {
     current_ += 5;
     match(token_type::semicolon);
     return mode;
+}
+
+bool parser::nodiscard_attribute_ahead() const {
+    return check_mode_attribute_ahead() && (*stream_)[current_ + 2].lexeme == "nodiscard";
+}
+
+// [[nodiscard]] marks a function or a method that returns a value; false (an error reported) for anything else
+bool parser::mark_nodiscard(const declaration_ptr& decl, const source_location& at, std::string_view class_name) {
+    auto* fn = decl && decl->get_type() == node_type::function_decl ? static_cast<function_decl*>(decl.get()) : nullptr;
+    if (!fn || (!class_name.empty() && (fn->name == class_name || (fn->name.size() > 1 && fn->name[0] == '~')))) {
+        report_error_at("[[nodiscard]] applies to a function or a method", at);
+        return false;
+    }
+    if (fn->return_type && fn->return_type->base_type == script_value_type::jai_null_type && fn->return_type->type_name == "void") {
+        report_error_at("[[nodiscard]] function '" + std::string(fn->name) + "' returns void: there is no result to keep", at);
+        return false;
+    }
+    fn->is_nodiscard = true;
+    return true;
+}
+
+// A coroutine runs on after its call returns, so a reference parameter would outlive the storage it names
+bool parser::reject_coroutine_reference_parameter(const function_decl& coroutine) {
+    for (const auto& p : coroutine.parameters) {
+        if (!p.is_reference) { continue; }
+        const std::string spelled = p.type ? p.type->canonical_name() : std::string("auto");
+        report_error_at("coroutine '" + std::string(coroutine.name) + "' cannot take '" + p.name + "' by reference: it runs on after the call "
+                        "returns, past the argument's lifetime; take it by value (" + spelled + " " + p.name +
+                        "), or pass a shared_ptr to share an object", coroutine.location);
+        return true;
+    }
+    return false;
 }
 
 // `& name(` / `& operator..` after a member's type: a reference-returning method (a class has no reference fields)

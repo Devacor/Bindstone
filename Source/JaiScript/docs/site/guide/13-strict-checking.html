@@ -278,6 +278,14 @@ tick_rate = "fast";</code></pre></div>
     tick_rate = &quot;fast&quot;;
               ^</code></pre></div>
 <p>At run time an <code>extern</code> declares nothing. The name resolves when it is used, so the extern may run before the file or the host that defines it; a declaration in any file, a host <code>add_global</code> or a host function is the definition. A use while nothing defines the name raises <code>'tick_rate' is declared extern but never defined (an 'inline' declaration creates it)</code> (for <code>extern function</code>: <code>'net_relay' is declared extern but never defined</code>), a catchable error. If the same program does define the name, the definition wins, which makes <code>extern</code> the right spelling for a shared file that calls into a module only some programs import (<a href="10-modules.html#three-escape-valves">Modules</a> has that shape).</p>
+<p>A qualified name must name something its namespace declares, so a namespace member the host registers after load needs the same declaration: <code>extern ns::name;</code> (any depth, <code>extern a::b::c;</code>) in each strength. Inside a namespace an <code>extern</code> names the namespace&#x27;s member, read bare by the namespace&#x27;s own blocks:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function physics::raycast;   // the host registers physics:: after the script loads
+namespace ai { extern int depth; int budget() { return depth * 2; } }
+function probe() -> var { return physics::raycast(0, 0); }
+try { probe(); } catch (e) { print(e); }
+try { ai::budget(); } catch (e) { print(e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">'physics::raycast' is declared extern but never defined
+'depth' is declared extern but never defined (an 'inline' declaration creates it)</code></pre></div>
 <h3 id="inline"><code>inline</code>: one variable every file shares<a class="hlink" href="#inline" aria-label="link">&#8203;</a></h3>
 <p><code>inline</code> on a variable means what it means in C++17: one variable shared by every file that declares it. The first declaration to run creates it, from its initializer or its type&#x27;s default (<code>int</code> 0, <code>string</code> &quot;&quot;, a class default-constructed, <code>var</code> null); every later one, in any file or a re-run of the same file, adopts the existing variable and runs no initializer. It is allowed at program scope and in a namespace, and the checker sees an ordinary declaration of that type:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags;                   // hud.jai: exists whether or not netplay.jai runs

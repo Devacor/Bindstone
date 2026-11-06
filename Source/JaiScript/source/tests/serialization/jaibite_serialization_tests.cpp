@@ -455,12 +455,15 @@ public:
                 [[strict_mode]] y = y * 2;
                 function bump() { [[warn_mode]] y = y + 1; }
                 bump();
-                caught + "|" + c2 + "|" + to_string(y) + "|" + shared_text;
+                namespace cfg { extern int limit; int lim() { return limit; } }
+                var c3 = "";
+                try { cfg::lim(); } catch (e) { c3 = e; }
+                caught + "|" + c2 + "|" + c3 + "|" + to_string(y) + "|" + shared_text;
             )");
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)55, (int)bytes[4], "jaibite format version");
+            check_eq((int)56, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

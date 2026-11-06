@@ -27,6 +27,7 @@ namespace jai::detail {
 	                                                                                    const class_definition* access_context) {
 		using result = checked_result<std::shared_ptr<class_definition>>;
 		if (member->object->get_type() != node_type::identifier_expr) {
+			if (auto declared = qualified_extern_missing(env, member, symbols)) { return *declared; }
 			return result(make_error_code(runtime_error_code::type_mismatch),
 				"Static member assignment requires a class name");
 		}
@@ -34,6 +35,7 @@ namespace jai::detail {
 		auto [class_var_id, class_var_name] = symbols.get_class_var_id_with_view(class_name_id);
 		auto class_result = env.get(class_var_id);
 		if (!class_result) {
+			if (auto declared = qualified_extern_missing(env, member, symbols)) { return *declared; }
 			return result(make_error_code(runtime_error_code::undefined_variable),
 				"Class '{0}' not found", class_name_id);
 		}

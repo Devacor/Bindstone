@@ -87,8 +87,25 @@ namespace jai::detail {
 		return namespace_store_target{nullptr, true};
 	}
 
+	// `path::member` naming nothing that an extern declares: the extern's own text (environment::undefined_text), else nullopt
+	JAI_NOINLINE inline std::optional<error_propagator> qualified_extern_missing(const environment& env, std::string_view path, std::string_view member,
+	                                                                           const string_symbolizer& symbols) {
+		const auto id = symbols.find(std::string(path) + "::" + std::string(member));
+		if (!id) { return std::nullopt; }
+		const std::string_view text = env.undefined_text(*id, {});
+		if (text.empty()) { return std::nullopt; }
+		return error_propagator{make_error_code(runtime_error_code::undefined_variable), text, *id, 0};
+	}
+
+	JAI_NOINLINE inline std::optional<error_propagator> qualified_extern_missing(const environment& env, const member_expr* member, const string_symbolizer& symbols) {
+		const std::string path = static_path_of(member->object.get());
+		if (path.empty()) { return std::nullopt; }
+		return qualified_extern_missing(env, path, member->member, symbols);
+	}
+
 	// `ns::x = v` where ns declares no x: the text a read of ns::x raises
-	JAI_NOINLINE inline error_propagator namespace_member_missing(const member_expr* member, string_symbolizer& symbols) {
+	JAI_NOINLINE inline error_propagator namespace_member_missing(const environment& env, const member_expr* member, string_symbolizer& symbols) {
+		if (auto declared = qualified_extern_missing(env, member, symbols)) { return *declared; }
 		if (symbols.frozen()) {
 			return error_propagator{make_error_code(runtime_error_code::undefined_variable), "Undefined variable", 0, 0};
 		}

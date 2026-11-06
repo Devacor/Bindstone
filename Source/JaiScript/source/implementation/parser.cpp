@@ -5145,6 +5145,13 @@ checked_result<declaration_ptr> parser::namespace_declaration() {
                 continue;
             }
             member_decl = std::move(namespace_result.value());
+        } else if (!inline_member && !const_member && match(token_type::extern_keyword)) {
+            auto extern_result = extern_declaration();
+            if (!extern_result) {
+                synchronize();
+                continue;
+            }
+            member_decl = std::move(extern_result.value());
         } else {
             // Function or variable declaration
             const bool function_spelling = check(token_type::function_keyword);
@@ -5476,22 +5483,40 @@ checked_result<declaration_ptr> parser::import_declaration() {
 }
 
 checked_result<declaration_ptr> parser::extern_declaration() {
-    // extern function name; | extern name; | extern <type> name;
+    // extern function name; | extern name; | extern <type> name; where name may be qualified (ns::name, a::b::c)
     source_location loc = previous().location;
     type_info_ptr type;
     bool is_function = false;
     const bool is_const = match(token_type::const_keyword);
+    const auto untyped_name_ahead = [this]() {
+        size_t at = current_;
+        while (at + 1 < stream_->size() && (*stream_)[at].type == token_type::identifier) {
+            if ((*stream_)[at + 1].type == token_type::semicolon) { return true; }
+            if ((*stream_)[at + 1].type != token_type::colon_colon) { return false; }
+            at += 2;
+        }
+        return false;
+    };
     if (!is_const && match(token_type::function_keyword)) {
         is_function = true;
-    } else if (!(check(token_type::identifier) && current_ + 1 < stream_->size() &&
-                 (*stream_)[current_ + 1].type == token_type::semicolon)) {
+    } else if (!untyped_name_ahead()) {
         JAISCRIPT_TRY_ASSIGN(type, parse_type());
     }
+    std::string qualified;
+    for (const auto& part : current_namespace_path_) { qualified += part + "::"; }
+    const auto written_at = static_cast<uint32_t>(qualified.size());
     JAISCRIPT_TRY_ASSIGN(token name, consume(token_type::identifier, "expected name after 'extern'"));
+    qualified += name.lexeme;
+    while (match(token_type::colon_colon)) {
+        JAISCRIPT_TRY_ASSIGN(token part, consume(token_type::identifier, "expected name after '::' in extern declaration"));
+        qualified += "::";
+        qualified += part.lexeme;
+    }
     JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after extern declaration"));
-    auto [name_id, name_view] = symbolizer_->intern_with_view(name.lexeme);
+    auto [name_id, name_view] = symbolizer_->intern_with_view(qualified);
     auto decl = std::make_shared<extern_decl>(loc, type, is_function, name_view, name_id);
     decl->is_const = is_const;
+    decl->written_at = written_at;
     return decl;
 }
 

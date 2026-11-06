@@ -52,22 +52,31 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
     </div>
     <ul class="chips" aria-label="Highlights"><li>C++ value semantics</li><li>strict checker at load</li><li>coroutines</li><li>parallel_for</li><li>safety rails</li><li>guides from JS / C++ / C#</li></ul>
   </div>
-  <div class="demo" id="hero-demo" role="group" aria-label="Hot reload demo: edit the script while it runs">
+  <div class="demo" id="hero-demo" role="group" aria-label="Hot reload demo: drag spd or slices, or pick what the gator says, and the script reloads while it runs">
     <div class="demo-bar"><span class="dot"></span><span class="dot"></span><span class="dot"></span><span class="file">gator.jai</span><span class="demo-status idle" id="demo-status">running</span></div>
-<pre><span class="tk-com">// edit spd or what it says: it reloads live</span>
+<pre><span class="tk-com">// drag spd or slices, pick what it says: it reloads live</span>
 <span class="tk-kw">class</span> Gator : Mob {
-    <span class="tk-ty">int</span> spd = <input class="val tk-num" id="demo-spd" value="1" maxlength="6" size="1" aria-label="spd, the gator's speed: an int" aria-describedby="demo-check" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">;
-    <span class="tk-ty">int</span> slices = <span class="tk-num">0</span>;
+    <span class="tk-ty">int</span> spd = <span class="val tk-num" id="demo-spd-val">1</span>;
+    <span class="tk-ty">int</span> slices = <span class="val tk-num" id="demo-slices-val">0</span>;
     <span class="tk-ty">void</span> <span class="tk-fn">tick</span>() {
         <span class="tk-fn">step_toward</span>(cake, spd);
-        <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices++; <span class="tk-fn">say</span>(<input class="val tk-str" id="demo-say" value="&quot;Nom.&quot;" maxlength="12" size="1" aria-label="what the gator says: a string literal in quotes" aria-describedby="demo-check" autocomplete="off" autocapitalize="off" spellcheck="false" enterkeyhint="done">); }
+        <span class="tk-kw">if</span> (<span class="tk-fn">beside</span>(cake)) { slices++; <span class="tk-fn">say</span>(<span class="val tk-str" id="demo-say-val">"Nom."</span>); }
     }
 }
 Gator gator;  <span class="tk-com">// kept by every reload</span>
 <span class="tk-ty">void</span> <span class="tk-fn">hot_reload_migrate</span>(map&lt;<span class="tk-ty">string</span>, <span class="tk-ty">var</span>&gt; previous) {
     <span class="edit" id="demo-hook">gator.spd = <span class="tk-fn">Gator</span>().spd;</span>  <span class="tk-com">// live gator takes the edit</span>
 }</pre>
-    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake at the speed spd gives it, eats a slice and says what the script tells it to"></canvas><span class="scene-label" id="demo-label">gator at spd 1 &middot; slices 0</span><div class="demo-check" id="demo-check" hidden></div></div>
+    <div class="demo-controls">
+      <label class="demo-slider"><span>spd</span><input type="range" id="demo-spd" min="0" max="6" step="1" value="1"></label>
+      <label class="demo-slider"><span>slices</span><input type="range" id="demo-slices" min="0" max="3" step="1" value="0"></label>
+      <div class="demo-say" role="radiogroup" aria-label="what the gator says">
+        <label><input type="radio" name="demo-say" value="Nom." checked><span>Nom.</span></label>
+        <label><input type="radio" name="demo-say" value="Yum."><span>Yum.</span></label>
+        <label><input type="radio" name="demo-say" value="Chomp."><span>Chomp.</span></label>
+      </div>
+    </div>
+    <div class="scene"><canvas id="demo-scene" width="640" height="150" role="img" aria-label="A pixel gator walks toward a cake at the speed spd gives it, eats a slice and says what the script tells it to"></canvas><span class="scene-label" id="demo-label">gator at spd 1 &middot; slices 0</span></div>
     <p class="demo-live" id="demo-live" role="status"></p>
   </div>
 </section>

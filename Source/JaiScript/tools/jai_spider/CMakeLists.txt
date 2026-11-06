@@ -66,8 +66,25 @@ else()
 		set(zip "${JAI_SPIDER_SQLITE_BUILD_DIR}/${JAI_SPIDER_SQLITE_ZIP_NAME}")
 		if(NOT EXISTS "${zip}")
 			message(STATUS "jai_spider: downloading ${JAI_SPIDER_SQLITE_URL}")
-			file(DOWNLOAD "${JAI_SPIDER_SQLITE_URL}" "${zip}" EXPECTED_HASH SHA3_256=${JAI_SPIDER_SQLITE_SHA3_256} TLS_VERIFY ON STATUS download_status)
+			file(DOWNLOAD "${JAI_SPIDER_SQLITE_URL}" "${zip}" TLS_VERIFY ON STATUS download_status)
 			list(GET download_status 0 download_code)
+			# a CMake built without a CA bundle (MinGW, some distros) fails with 60; retry with one the machine already has
+			if(download_code EQUAL 60 AND NOT CMAKE_TLS_CAINFO AND NOT DEFINED ENV{CMAKE_TLS_CAINFO})
+				foreach(bundle "$ENV{SSL_CERT_FILE}" "$ENV{CURL_CA_BUNDLE}" "$ENV{ProgramFiles}/Git/mingw64/etc/ssl/certs/ca-bundle.crt"
+						"$ENV{ProgramFiles}/Git/usr/ssl/certs/ca-bundle.crt" "/etc/ssl/certs/ca-certificates.crt" "/etc/pki/tls/certs/ca-bundle.crt"
+						"/etc/ssl/cert.pem")
+					if(bundle AND EXISTS "${bundle}")
+						file(REMOVE "${zip}")
+						message(STATUS "jai_spider: retrying the download with the CA bundle ${bundle}")
+						file(DOWNLOAD "${JAI_SPIDER_SQLITE_URL}" "${zip}" TLS_VERIFY ON
+							TLS_CAINFO "${bundle}" STATUS download_status)
+						list(GET download_status 0 download_code)
+						if(download_code EQUAL 0)
+							break()
+						endif()
+					endif()
+				endforeach()
+			endif()
 			if(NOT download_code EQUAL 0)
 				file(REMOVE "${zip}")
 				message(FATAL_ERROR "jai_spider needs SQLite ${JAI_SPIDER_SQLITE_VERSION} and could not get it (${download_status}).\n"
@@ -76,6 +93,11 @@ else()
 					"  - download ${JAI_SPIDER_SQLITE_ZIP_NAME} from https://www.sqlite.org/download.html (SHA3-256 ${JAI_SPIDER_SQLITE_SHA3_256})\n"
 					"    and configure with -DJAI_SPIDER_SQLITE_ZIP=<path to the zip>, or an unpacked copy with -DJAI_SPIDER_SQLITE_DIR=<directory>.\n"
 					"A certificate error (60) means this CMake has no CA bundle: set the CMAKE_TLS_CAINFO environment variable to one, or use a CMake that ships one.")
+			endif()
+			file(SHA3_256 "${zip}" downloaded_hash)
+			if(NOT downloaded_hash STREQUAL JAI_SPIDER_SQLITE_SHA3_256)
+				file(REMOVE "${zip}")
+				message(FATAL_ERROR "jai_spider: the download of ${JAI_SPIDER_SQLITE_URL} has SHA3-256 ${downloaded_hash}, expected ${JAI_SPIDER_SQLITE_SHA3_256}; it was deleted")
 			endif()
 		endif()
 		jai_spider_sqlite_unpack("${zip}" "${JAI_SPIDER_SQLITE_BUILD_DIR}/downloaded")

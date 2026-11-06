@@ -2937,9 +2937,7 @@ private:
     }
 
     // A method call on a declared container or string: the name must be one the builtin registry dispatches (the runtime's
-    // family-B text otherwise). A map answers a missing method through its key instead - `m.f(x)` calls the value stored
-    // at "f" - so a map is certain only when that value cannot be called (its declared value type is a primitive, a string
-    // or a container)
+    // family-B text otherwise; a map's own text names the key spelling, m["f"](x))
     void check_builtin_member(const ctype& recv, const member_expr* m) {
         int kind = -1;
         switch (recv.kind) {
@@ -2949,20 +2947,9 @@ private:
             case ctype::utf8_k: kind = 3; break;
             default: return;
         }
-        if (kind == 1) {
-            const type_info* value = recv.ti ? recv.ti->value_type().get() : nullptr;
-            if (!value) { return; }
-            switch (value->base_type) {
-                case script_value_type::jai_int_type: case script_value_type::jai_float_type: case script_value_type::jai_bool_type:
-                case script_value_type::jai_char_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
-                case script_value_type::jai_array_type: case script_value_type::jai_map_type:
-                    break;
-                default:
-                    return;
-            }
-        }
         const auto& ids = eng_.builtin_method_ids(kind);
         if (ids.count(eng_.symbolize(m->member))) { return; }
+        if (kind == 1) { map_dot_key(m); return; }
         std::string best;
         size_t best_distance = 3;
         for (const uint64_t id : ids) {
@@ -3118,8 +3105,15 @@ private:
             case ctype::utf8_k: kind = 3; owner = "utf8_string"; break;
             default: return;
         }
-        if (!eng_.builtin_method_ids(kind).count(eng_.symbolize(m->member))) { return; }
+        if (!eng_.builtin_method_ids(kind).count(eng_.symbolize(m->member))) {
+            if (kind == 1) { map_dot_key(m); }
+            return;
+        }
         diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
+    }
+    // a map's key is read with [] (only an enum's value table reads its keys with a dot, and an enum's name is no map here): the run time's text
+    void map_dot_key(const member_expr* m) {
+        diag(diag_level::error, m->location, "map has no member '" + std::string(m->member) + "'; read the key as [\"" + std::string(m->member) + "\"]");
     }
     static size_t edit_distance(std::string_view a, std::string_view b) {
         std::vector<size_t> row(b.size() + 1);

@@ -665,7 +665,7 @@ m[utf8_string("ab")] = 100;
 m[utf8_string("abcdefgh")] = 101;
 string out = to_string(m.size());
 for (int i = 0; i < ks.size(); ++i) { out += " " + to_string(m[ks[i]]); }
-out += " " + to_string(m[utf8_string("ab")]) + " " + to_string(m[utf8_string("abcdefgh")]) + " " + to_string(m.hp);
+out += " " + to_string(m[utf8_string("ab")]) + " " + to_string(m[utf8_string("abcdefgh")]) + " " + to_string(m["hp"]);
 string copy = "abcdefg";
 copy += "h";
 out += " " + to_string(m[copy]) + " " + to_string(m.has("abcdefgh\x00")) + " " + to_string(m.has("a"));

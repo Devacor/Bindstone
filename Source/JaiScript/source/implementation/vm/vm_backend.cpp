@@ -7718,7 +7718,7 @@ const script_value* vm_backend::env_operand_value(frame& f, const chunk::cell_lo
 	}
 	if (er.member_node == k_invalid_u32 || !v) return v;
 	const script_value& base = v->deref();
-	if (base.raw_storage_index() != script_value::TYPEID_MAP || er.member_node >= f.code->nodes.size()) return nullptr;
+	if (base.raw_storage_index() != script_value::TYPEID_MAP || er.member_node >= f.code->nodes.size() || !base.as_map().enum_values()) return nullptr;
 	// an enum's map is const (internal/const.md 11): while the name holds the same map node, the entry found last time answers
 	const strong_ptr<script_map>& node = base.unchecked_get_map_storage();
 	if (er.enum_map && er.enum_map == node && !parallel_worker_) { return er.enum_entry; }
@@ -12428,10 +12428,9 @@ op_status vm_backend::exec_probe_member(frame& f, const vm_instruction& ins) {
 			: builtins_.map_methods.find(member_id) != builtins_.map_methods.end();
 		if (known) { return {}; }
 		auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
-		if (map_storage) {
-			auto found = map_storage->find(script_value(std::string(member->member), engine_));
-			if (found != map_storage->end()) { return callable(found->second); }
-		}
+		if (!map_storage || !map_storage->enum_values()) { return raise_map_dot_key(member_id); }
+		auto found = map_storage->find(script_value(std::string(member->member), engine_));
+		if (found != map_storage->end()) { return callable(found->second); }
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			"map has no member or key '{0}'", member_id);
 	}
@@ -14540,14 +14539,12 @@ op_status vm_backend::member_access_value(frame& f, const script_value& raw_obje
 			out = script_value::make_function(boundMethod, engine_);
 			return {};
 		}
-		auto key = script_value(std::string(expr->member), engine_);
 		auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
-		if (map_storage) {
-			auto found = map_storage->find(key);
-			if (found != map_storage->end()) {
-				out = found->second;
-				return {};
-			}
+		if (!map_storage || !map_storage->enum_values()) { return raise_map_dot_key(expr->member_id); }
+		auto found = map_storage->find(script_value(std::string(expr->member), engine_));
+		if (found != map_storage->end()) {
+			out = found->second;
+			return {};
 		}
 		return raise_(make_error_code(runtime_error_code::member_not_found),
 			"map has no member or key '{0}'", expr->member_id);
@@ -17998,6 +17995,7 @@ op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 		auto key = script_value(std::string(decl->values[i].first), engine_);
 		map_ref[std::move(key)] = script_value(static_cast<script_int>(decl->numbers[i]), engine_);
 	}
+	map_ref.mark_enum_values();
 
 	environment_->define(decl->name_id, std::move(enum_map));
 	engine_->note_enum_name(decl->name_id);

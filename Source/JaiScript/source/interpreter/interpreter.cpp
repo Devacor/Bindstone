@@ -63,6 +63,11 @@
 
 namespace jai {
 
+// a dot read of a plain map's key (only an enum's value table reads its keys with a dot): KEEP BYTE-PARALLEL with the vm
+static JAI_NOINLINE checked_result<void> map_dot_key_error(uint64_t member_id) {
+    return checked_result<void>(make_error_code(runtime_error_code::member_not_found), "map has no member '{0}'; read the key as [\"{1}\"]", member_id, member_id);
+}
+
 namespace {
     using detail::capture_call_argument;
 
@@ -4854,15 +4859,13 @@ checked_result<void> interpreter::member_read_on(member_expr* expr, script_value
             return {};
         }
         else {
-            // No built-in method found - try member name as a map key (for enums: Direction.north)
-            auto key = script_value(std::string(expr->member), engine_);
+            // an enum's value table reads its keys with a dot (Direction.north); any other map's key is read with []
             auto& map_storage = const_cast<script_value&>(objectValue).get_map_storage();
-            if (map_storage) {
-                auto it = map_storage->find(key);
-                if (it != map_storage->end()) {
-                    push_value(it->second);
-                    return {};
-                }
+            if (!map_storage || !map_storage->enum_values()) { return map_dot_key_error(expr->member_id); }
+            auto it = map_storage->find(script_value(std::string(expr->member), engine_));
+            if (it != map_storage->end()) {
+                push_value(it->second);
+                return {};
             }
             return checked_result<void>(make_error_code(runtime_error_code::member_not_found),
                 "map has no member or key '{0}'", expr->member_id);
@@ -10135,6 +10138,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
         auto key = script_value(std::string(decl->values[i].first), engine_);
         map_ref[std::move(key)] = make_value(static_cast<script_int>(decl->numbers[i]));
     }
+    map_ref.mark_enum_values();
 
     environment_->define(decl->name_id, std::move(enum_map));
     engine_->note_enum_name(decl->name_id);

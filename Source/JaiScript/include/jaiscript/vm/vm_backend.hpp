@@ -1623,6 +1623,10 @@ namespace jai::vm {
         void raise_script_exception(const std::string& message, const source_location& location);
         // the member paths' composed texts, built out of line (no string temporaries in the handlers)
         void raise_no_member(std::string_view kind, std::string_view member, const source_location& location);
+        // a dot read of a plain map's key (only an enum's value table reads its keys with a dot): KEEP BYTE-PARALLEL with the interpreter
+        JAI_NOINLINE op_status raise_map_dot_key(uint64_t member_id) {
+            return raise_(make_error_code(runtime_error_code::member_not_found), "map has no member '{0}'; read the key as [\"{1}\"]", member_id, member_id);
+        }
 
         // Runs a standalone expression chunk (node-keyed cache) in the given environment
         checked_result<script_value> eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env);

@@ -191,6 +191,7 @@ namespace jai {
         std::vector<slot> slots_;                   // empty, or a power of two
         size_t size_ = 0;
         unsigned shift_ = 64;                       // 64 - log2(capacity): the home slot is the top bits of hash * golden ratio
+        bool enum_values_ = false;                  // an enum's own value table: its keys read with a dot (Direction.north); never copied
         uint64_t gen_ = 1;                          // moves on every insert, erase or clear
         mutable std::vector<value_type*> order_;    // the entries by key, valid while order_gen_ == gen_
         mutable uint64_t order_gen_ = 0;
@@ -495,6 +496,8 @@ namespace jai {
         script_map(const script_map& o) : owner(o.owner) { copy_from(o); }
         script_map(script_map&& o) noexcept : owner(o.owner) { take_from(o); o.changed(); }
         bool has_class_keys() const noexcept { return class_keys_ != nullptr; }
+        void mark_enum_values() noexcept { enum_values_ = true; }
+        bool enum_values() const noexcept { return enum_values_; }
         script_map& operator=(const script_map& o) {
             if (this != &o) {
                 script_map fresh(o);

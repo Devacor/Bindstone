@@ -397,6 +397,7 @@ public:
             }
             lw_close_region(nullptr, &decls_, nullptr);
             scopes_.pop_back();
+            warn_handle_shadowed_builtins();
         } catch (const nesting_exhausted& e) {
             // an error under [[warn_mode]] and with diagnostics off as well: the walk stopped, so nothing past it was checked
             diags_.push_back({diag_level::error, e.location().line, e.location().column, std::string(k_nesting_too_deep_listing)});
@@ -2172,7 +2173,51 @@ private:
             diag(has_dynamic_includes_ ? diag_level::warning : diag_level::error, loc, "unknown type '" + name + "'" + hint);
             return;
         }
+        if (ti->base_type == script_value_type::jai_shared_ptr_type && !ti->type_params.empty() && ti->type_params[0] &&
+            ti->type_params[0]->base_type == script_value_type::jai_object_type) {
+            note_handle_held(ti->type_params[0]->type_name, loc);
+        }
         for (const auto& param : ti->type_params) { check_spelled_type(param.get(), loc); }
+    }
+
+    // A class method named like a shared_ptr builtin (reset, use_count, ...) wins on that class's handles, so the builtin is
+    // lost only where the program holds the class by a handle: a class held by value alone keeps its reset() unwarned
+    std::vector<std::pair<std::string, source_location>> handle_held_classes_;   // first handle spelling of each class, in walk order
+    std::unordered_set<std::string> handle_held_names_;
+    void note_handle_held(std::string_view cls, const source_location& at) {
+        if (!cls.empty() && handle_held_names_.emplace(cls).second) { handle_held_classes_.emplace_back(std::string(cls), at); }
+    }
+
+    void warn_handle_shadowed_builtins() {
+        std::unordered_set<std::string> warned;
+        for (const auto& [cls, at] : handle_held_classes_) { warn_handle_shadows_along(cls, at, warned, 0); }
+    }
+
+    // The warning stands at the shadowing method when this unit declares the class, else at the unit's first handle of it
+    void warn_handle_shadows_along(std::string_view cls, const source_location& held_at, std::unordered_set<std::string>& warned, int depth) {
+        if (depth > 32) { return; }
+        auto warn = [&](std::string_view method, const source_location& at) {
+            if (!warned.insert(std::string(cls) + "::" + std::string(method)).second) { return; }
+            const std::string m(method);
+            diag(diag_level::warning, at, "class method '" + m + "' shadows the builtin shared_ptr " + m +
+                 "() - the builtin is unreachable on " + std::string(cls) + " instances; rename the class method to reach it");
+        };
+        if (const sclass* c = find_sclass(cls)) {
+            for (std::string_view b : k_shadowable_handle_method_names) {
+                auto m = c->methods.find(b);
+                if (m != c->methods.end() && !m->second.empty()) { warn(b, c->foreign ? held_at : m->second.front()->location); }
+            }
+            for (const auto& base : c->decl->base_classes) { warn_handle_shadows_along(base, held_at, warned, depth + 1); }
+            return;
+        }
+        auto def = engine_class(cls);
+        if (!def || !def->is_script_class()) { return; }
+        for (std::string_view b : k_shadowable_handle_method_names) {
+            if (def->has_method(eng_.symbolize(b))) { warn(b, held_at); }
+        }
+        for (const auto& parent : def->get_parent_classes()) {
+            if (parent) { warn_handle_shadows_along(parent->get_name(), held_at, warned, depth + 1); }
+        }
     }
 
     // cast<C>(h) on a handle or reference operand deep-copies (C++ value semantics - the
@@ -4118,6 +4163,7 @@ private:
         for (auto& a : n->arguments) { args.push_back(infer(a.get())); }
         ctype t = ctype_from_type_info(n->type.get());
         if (t.kind == ctype::object_k) {
+            if (n->type && n->type->base_type == script_value_type::jai_shared_ptr_type) { note_handle_held(t.cls, n->location); }
             if (const sclass* c = find_sclass(t.cls)) {
                 check_ctor_call(t.cls, *c, args, n->location);
             } else {
@@ -7190,18 +7236,6 @@ private:
                 if (fn->name != cd->name) {   // ctors carry the class name by construction
                     warn_member_shadows_global(fn->is_static ? "static method" : "method",
                                                fn->name, cd->name, fn->location);
-                }
-                // A class method that shadows a builtin shared_ptr handle method WINS over
-                // the builtin - point at the now-unreachable builtin.
-                for (std::string_view b : k_shadowable_handle_method_names) {
-                    if (fn->name == b) {
-                        std::string m2(b);
-                        diag(diag_level::warning, fn->location,
-                             "class method '" + m2 + "' shadows the builtin shared_ptr " + m2 +
-                             "() - the builtin is unreachable on " + std::string(cd->name) +
-                             " instances; rename the class method to reach it");
-                        break;
-                    }
                 }
                 walk_function(fn);
             } else {

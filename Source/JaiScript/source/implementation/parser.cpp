@@ -1733,25 +1733,26 @@ JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool te
     std::string content = source;
     std::string label(detail::template_library::k_text_label);
     if (!text_form) {
-        if (!engine_->is_enabled(privilege::filesystem)) {   // the render raises the privilege error, as include does
+        if (!engine_->is_enabled(privilege::scoped_template)) {   // the render raises the privilege error, as include does
             call.push_back(std::move(arguments[0]));
             call.push_back(literal_text(at.filename));
             call.push_back(std::move(arguments[1]));
             return template_builtin(detail::template_library::k_scoped_file, at, std::move(call));
         }
-        auto resolved = resolve_include_path(source, engine_, at.filename);
-        if (!resolved) {
-            report_error("template file '" + source + "' not found", name);
+        const auto found = detail::template_library::resolve_scoped_file(*engine_, source, at.filename);
+        if (!found.error.empty()) {
+            report_error(found.error, name);
             return reported();
         }
-        std::ifstream file(resolved.value(), std::ios::binary);
+        const std::string& resolved_path = found.resolved;
+        std::ifstream file(resolved_path, std::ios::binary);
         if (!file) {
             report_error("template file '" + source + "' cannot be read", name);
             return reported();
         }
         content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-        spliced_files_.push_back(resolved.value());
-        label = resolved.value();
+        spliced_files_.push_back(resolved_path);
+        label = resolved_path;
     }
     template_barrier barrier;
     barrier.scope_count = function_scope_stack_.size();

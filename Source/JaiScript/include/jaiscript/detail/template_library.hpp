@@ -36,6 +36,14 @@ namespace jai {
 		};
 		void scoped_violations(const expression& body, string_symbolizer& symbols, std::vector<violation>& out);
 
+		// A scoped_template file's path, checked and resolved before any file opens (engine::scoped_template_dirs): its canonical
+		// path, or the error text that refuses it. `from` is the file of the script that calls.
+		struct scoped_file {
+			std::string resolved;
+			std::string error;
+		};
+		scoped_file resolve_scoped_file(engine& eng, const std::string& path, const std::string& from);
+
 		void register_library(engine& eng);
 
 	} // namespace detail::template_library

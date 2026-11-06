@@ -136,7 +136,8 @@ namespace jai {
         token scan_identifier();
         void scan_template_string();
         bool scan_splice(std::vector<token>& out, std::vector<token>& expr_tokens, std::string& spec_text, bool& has_spec);
-        void emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec);
+        void emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec,
+                              const std::string* description = nullptr);
 
         // Pending token queue for template string desugaring
         std::vector<token> pending_tokens_;

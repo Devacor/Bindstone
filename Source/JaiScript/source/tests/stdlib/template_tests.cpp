@@ -31,6 +31,8 @@ public:
 			}
 			~folder() { std::error_code ec; std::filesystem::remove_all(dir, ec); }
 			std::string write(const std::string& a_file, const std::string& a_text) const {
+				std::error_code ec;
+				std::filesystem::create_directories((dir / a_file).parent_path(), ec);
 				std::ofstream out(dir / a_file, std::ios::binary | std::ios::trunc);
 				out << a_text;
 				return (dir / a_file).string();
@@ -270,8 +272,6 @@ public:
 			};
 			check_eq(std::string("Insufficient privilege: filesystem."), caught("template(\"" + page + "\", who)"), "a literal path");
 			check_eq(std::string("Insufficient privilege: filesystem."), caught("template(p, who)"), "a path known at run time");
-			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(\"" + page + "\", m)"), "a scoped file");
-			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(p, m)"), "a scoped file known at run time");
 			check_eq(std::string("<b>y</b>"), eng->execute("map<string, var> m = {\"who\": \"y\"}; scoped_template_text(\"<b>${args[\\\"who\\\"]}</b>\", m).to_string();").as_string(), "template text needs no file");
 			eng->enable(privilege::filesystem);
 			check_eq(std::string("<rendered>"), caught("template(\"" + page + "\", who)"), "granted again, the same call renders");
@@ -291,10 +291,105 @@ public:
 				"brackets read, and a lambda parameter named args is its own");
 		});
 
+		test("scoped_template_runs_on_its_own_privilege", [=, this]() {
+			folder f("scoped_privilege");
+			f.write("template/card.spider", "<b>${args[\"who\"]}</b>");
+			auto eng = engine_for();
+			eng->set_scoped_template_dirs({(f.dir / "template").string()});
+			auto render = [&](const std::string& a_call) {
+				return eng->execute("map<string, var> m = {\"who\": \"y\"}; string p = \"card.spider\"; string e = \"\"; try { e = " + a_call + ".to_string(); } catch (err) { e = err; } e;").as_string();
+			};
+			check_eq(std::string("true true"), eng->execute("to_string(reflect::is_enabled(jai::scoped_template)) + \" \" + reflect::is_enabled(\"scoped_template\");").as_string(), "on by default");
+			eng->disable(privilege::filesystem);
+			check_eq(std::string("<b>y</b>"), render("scoped_template(\"card.spider\", m)"), "a literal path with filesystem off");
+			check_eq(std::string("<b>y</b>"), render("scoped_template(p, m)"), "a path known at run time with filesystem off");
+			eng->disable(privilege::scoped_template);
+			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template(\"card.spider\", m)"), "a literal path");
+			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template(p, m)"), "a path known at run time");
+			check_eq(std::string("Insufficient privilege: scoped_template."), render("scoped_template_text(\"<i>${args[\\\"who\\\"]}</i>\", m)"), "template text");
+			check_eq(std::string("false"), eng->execute("to_string(reflect::is_enabled(\"scoped_template\"));").as_string());
+			eng->enable(privilege::scoped_template);
+			check_eq(std::string("<i>y</i>"), render("scoped_template_text(\"<i>${args[\\\"who\\\"]}</i>\", m)"), "granted again");
+		});
+
+		test("scoped_template_reads_its_template_dirs_in_order", [=, this]() {
+			folder f("scoped_dirs");
+			f.write("template/card.spider", "default ${args[\"who\"]}");
+			f.write("a/card.spider", "from a");
+			f.write("b/card.spider", "from b");
+			f.write("b/only.spider", "only b");
+			f.write("loose.spider", "beside the script");
+			auto eng = engine_for();
+			check_eq(std::string("[\"template\"]"), eng->execute("to_json(reflect::scoped_template_dirs());").as_string(), "the default list");
+			const std::string call = "map<string, var> m = {\"who\": \"x\"}; string e = \"\"; try { e = scoped_template(p, m).to_string(); } catch (err) { e = err; } e;";
+			auto render = [&](const std::string& a_path) { return run(eng, f, "string p = \"" + a_path + "\"; " + call); };
+			check_eq(std::string("default x"), render("card.spider"), "./template beside the calling script");
+			check_eq(std::string("template file 'loose.spider' not found in the scoped template directories"), render("loose.spider"), "the script's own folder is not a template folder");
+			eng->set_scoped_template_dirs({"a", "b"});
+			check_eq(std::string("from a"), render("card.spider"), "the first folder that holds the file wins");
+			check_eq(std::string("only b"), render("only.spider"), "a later folder answers what an earlier one lacks");
+			eng->remove_scoped_template_dir("a");
+			check_eq(std::string("from b"), render("card.spider"));
+			eng->add_scoped_template_dir("template");
+			check_eq(std::string("[\"b\",\"template\"]"), eng->execute("to_json(reflect::scoped_template_dirs());").as_string());
+			eng->set_scoped_template_dirs({"missing"});
+			check_eq(std::string("template file 'card.spider' not found in the scoped template directories"), render("card.spider"), "a folder that does not exist holds nothing");
+		});
+
+		test("scoped_template_refuses_a_path_that_leaves_its_dirs", [=, this]() {
+			folder f("scoped_escape");
+			f.write("template/inner/x.spider", "inner");
+			f.write("secret.spider", "secret");
+			auto eng = engine_for();
+			const std::string call = "map<string, var> m; string e = \"\"; try { e = scoped_template(p, m).to_string(); } catch (err) { e = err; } e;";
+			auto render = [&](const std::string& a_path) { return run(eng, f, "string p = R\"q(" + a_path + ")q\"; " + call); };
+			check_eq(std::string("inner"), render("inner/x.spider"));
+			check_eq(std::string("scoped_template: '../secret.spider' names a parent directory (..)"), render("../secret.spider"));
+			check_eq(std::string("scoped_template: 'inner/../inner/x.spider' names a parent directory (..)"), render("inner/../inner/x.spider"), "even one that stays inside");
+			check_eq(std::string("scoped_template: 'inner\\..\\x.spider' names a parent directory (..)"), render("inner\\..\\x.spider"));
+			check_eq(std::string("scoped_template: '/secret.spider' is not a path relative to its template directories"), render("/secret.spider"));
+			check_eq(std::string("scoped_template: '\\secret.spider' is not a path relative to its template directories"), render("\\secret.spider"));
+			check_eq(std::string("scoped_template: 'C:/secret.spider' is not a path relative to its template directories"), render("C:/secret.spider"));
+			check_eq(std::string("scoped_template: '//server/share/secret.spider' is not a path relative to its template directories"), render("//server/share/secret.spider"));
+			const std::string absolute = (f.dir / "secret.spider").string();
+			check_eq("scoped_template: '" + absolute + "' is not a path relative to its template directories", render(absolute));
+			const std::string load = failure(eng, f, "map<string, var> m; scoped_template(\"../secret.spider\", m);");
+			check(load.find("scoped_template: '../secret.spider' names a parent directory (..)") != std::string::npos, "a literal path fails the load: " + load);
+			std::error_code ec;
+			std::filesystem::create_directories(f.dir / "outside");
+			f.write("outside/leak.spider", "leaked");
+			std::filesystem::create_directory_symlink(f.dir / "outside", f.dir / "template" / "link", ec);
+#if defined(_WIN32)
+			if (ec) {
+				const std::string junction = "cmd /c mklink /J \"" + (f.dir / "template" / "link").string() + "\" \"" + (f.dir / "outside").string() + "\" > nul 2>&1";
+				ec = std::error_code(std::system(junction.c_str()), std::generic_category());
+			}
+#endif
+			if (!ec && std::filesystem::exists(f.dir / "template" / "link" / "leak.spider")) {
+				check_eq(std::string("scoped_template: 'link/leak.spider' leaves its template directory through a link"), render("link/leak.spider"), "a link out of the folder");
+			}
+		});
+
+		test("a_null_splice_is_an_error", [=, this]() {
+			folder f("null_splice");
+			f.write("page.spider", "<p>\n${title}</p>${title ?? \"\"}");
+			f.write("literal.spider", "${null}");
+			auto eng = engine_for();
+			const std::string null_title = run(eng, f, "var title = null; string e = \"\"; try { e = template(\"page.spider\", title).to_string(); } catch (err) { e = err; } e;");
+			check(null_title.rfind("a template splice is null: ${title} at ", 0) == 0 && null_title.size() > 13 && null_title.substr(null_title.size() - 13) == "page.spider:2", "a null splice names itself and its line: " + null_title);
+			check_eq(std::string("<p>\nhi</p>hi"), run(eng, f, "var title = \"hi\"; template(\"page.spider\", title).to_string();"), "?? stays the way out");
+			const std::string load = failure(eng, f, "template(\"literal.spider\");");
+			check(load.find("literal.spider:1:3: error: a template splice is null: ${null} at ") != std::string::npos, "a splice the checker sees is null fails the load: " + load);
+			check_eq(std::string("a template splice is null: ${args[\"x\"]} at <scoped_template_text>:1"), eng->execute(
+				"map<string, var> m = {\"x\": null}; string e = \"\"; try { scoped_template_text(\"${args[\\\"x\\\"]}\", m); } catch (err) { e = err; } e;").as_string());
+			check_eq(std::string("-"), eng->execute("map<string, var> m = {\"x\": null}; scoped_template_text(\"${args[\\\"x\\\"] ?? \\\"-\\\"}\", m).to_string();").as_string());
+			check_eq(std::string("x null"), eng->execute("var n = null; `x ${n}`;").as_string(), "a backtick string outside a template is unchanged");
+		});
+
 		test("scoped_template_reads_a_file_checked_at_load", [=, this]() {
 			folder f("scoped");
-			f.write("card.spider", "<b>${args[\"name\"]}</b>");
-			f.write("bad.spider", "\n${secret}");
+			f.write("template/card.spider", "<b>${args[\"name\"]}</b>");
+			f.write("template/bad.spider", "\n${secret}");
 			auto eng = engine_for();
 			check_eq(std::string("<b>&lt;i&gt;</b>"), run(eng, f, "map<string, var> m = {\"name\": \"<i>\"}; scoped_template(\"card.spider\", m).to_string();"));
 			const std::string bad = failure(eng, f, "int secret = 1; map<string, var> m; scoped_template(\"bad.spider\", m);");

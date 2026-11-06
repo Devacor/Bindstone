@@ -464,6 +464,15 @@ namespace jai {
         size_t template_output_limit() const;
         void scoped_template_output_limit(size_t bytes);
         size_t scoped_template_output_limit() const;
+        // The folders a scoped_template(path, map) file is read from, under the scoped_template privilege alone. The path is
+        // relative with no .. segment; it is tried in each folder in list order, and the first file that exists and canonically lies
+        // inside its folder (links resolved) is the template. A relative folder is relative to the directory of the script that
+        // calls; the default is {"template"}, and a folder that does not exist holds nothing. Scripts read the list with
+        // reflect::scoped_template_dirs() and cannot change it; a change follows the privilege rules.
+        void add_scoped_template_dir(const std::string& dir);
+        void remove_scoped_template_dir(const std::string& dir);
+        void set_scoped_template_dirs(std::vector<std::string> dirs);
+        const std::vector<std::string>& scoped_template_dirs() const;
 
         // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).
@@ -1685,6 +1694,11 @@ namespace jai {
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file,
                                                      bool for_import = false);
     checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr);   // from the executing file
+    namespace detail {
+        // The same ladder without the filesystem privilege's gate: a scoped template folder resolves as an import's file does,
+        // under the scoped_template privilege (detail/template_library.hpp)
+        checked_result<std::string> resolve_on_import_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file);
+    }
 
     // A bound catch variable's handler, ended when this dies (both backends hold one per handler that bound a variable)
     class caught_error_scope {

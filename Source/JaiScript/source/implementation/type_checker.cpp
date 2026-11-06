@@ -4520,6 +4520,12 @@ private:
             ? std::string_view(static_cast<const identifier_expr*>(c->callee.get())->name) : std::string_view{};
         const bool parallel_callee = callee_name == "parallel_transform" || callee_name == "parallel_reduce";
         const bool template_body = callee_name == detail::template_library::k_joiner;
+        if (callee_name == detail::template_library::k_splice && c->arguments.size() == 3 && c->arguments[0]->get_type() == node_type::literal_expr &&
+            c->arguments[2]->get_type() == node_type::literal_expr &&
+            static_cast<const literal_expr*>(c->arguments[0].get())->value.raw_storage_index() == script_value::TYPEID_NULL) {
+            diag(diag_level::error, c->arguments[0]->location, "a template splice is null: " +
+                std::string(static_cast<const literal_expr*>(c->arguments[2].get())->value.unchecked_as_string()));
+        }
         template_files_ += template_body;
         struct template_scope { int& depth; bool on; ~template_scope() { depth -= on; } } in_template{template_files_, template_body};
         for (size_t k = 0; k < c->arguments.size(); ++k) {

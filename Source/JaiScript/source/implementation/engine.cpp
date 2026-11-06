@@ -459,7 +459,8 @@ static int compute_param_match_cost(
 struct engine::implementation {
     // Engine-thread state. A C++ callback may change grants before returning to
     // script; parallel regions keep them immutable until their workers join.
-    uint64_t privileges_ = static_cast<uint64_t>(privilege::filesystem);
+    uint64_t privileges_ = static_cast<uint64_t>(privilege::filesystem) | static_cast<uint64_t>(privilege::scoped_template);
+    std::vector<std::string> scoped_template_dirs_{"template"};   // engine::scoped_template_dirs, relative ones from the calling script's directory
     // Per-engine reference_holder block pool, type-erased (value.cpp owns the type).
     // Before other owning members so it is destroyed LAST - members releasing reference
     // values on teardown returns its blocks to a live pool. The teardown orphans the
@@ -5220,7 +5221,7 @@ void engine::check_privilege_mutation() const {
 void engine::register_privilege(std::string_view name) {
     check_privilege_mutation();
     if (name.empty()) { throw runtime_error("Privilege name must not be empty"); }
-    if (name == "filesystem") { return; }
+    if (name == "filesystem" || name == "scoped_template") { return; }
     const auto name_id = impl->string_symbolizer_.intern(name);
     if (!impl->custom_privileges_) {
         impl->custom_privileges_ = std::make_unique<implementation::custom_privilege_state>();
@@ -5253,6 +5254,7 @@ engine::resolved_privileges engine::resolve_privileges(std::span<const std::stri
     resolved_privileges result;
     for (const auto name : names) {
         if (name == "filesystem") { result.builtins = result.builtins | privilege::filesystem; }
+        else if (name == "scoped_template") { result.builtins = result.builtins | privilege::scoped_template; }
         else {
             const auto slot = find_custom_privilege(name);
             if (!slot) { throw runtime_error("Unknown privilege name"); }
@@ -5289,6 +5291,7 @@ checked_result<void> engine::require_privilege(std::span<const std::string_view>
     std::optional<uint64_t> missing;
     for (const auto name : names) {
         if (name == "filesystem") { flags = flags | privilege::filesystem; }
+        else if (name == "scoped_template") { flags = flags | privilege::scoped_template; }
         else {
             const auto slot = find_custom_privilege(name);
             if (!slot) {
@@ -5325,8 +5328,11 @@ checked_result<void> engine::require_privilege(privilege flags) const noexcept {
         return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), "Invalid privilege flags");
     }
     if (is_enabled(flags)) { return {}; }
+    if ((flags & privilege::filesystem) == privilege::filesystem && !is_enabled(privilege::filesystem)) {
+        return checked_result<void>(make_error_code(runtime_error_code::insufficient_privilege), "Insufficient privilege: filesystem.");
+    }
     return checked_result<void>(make_error_code(runtime_error_code::insufficient_privilege),
-        "Insufficient privilege: filesystem.");
+        "Insufficient privilege: scoped_template.");
 }
 
 script_function engine::guard_function(script_function function, privilege required) {
@@ -5354,6 +5360,7 @@ void engine::register_privilege_builtins() {
     auto& jai_namespace = script_namespaces()[symbolize("jai")];
     if (!jai_namespace) { jai_namespace = std::make_shared<script_namespace_data>(); }
     jai_namespace->variables[symbolize("filesystem")] = script_value(static_cast<script_int>(privilege::filesystem), this);
+    jai_namespace->variables[symbolize("scoped_template")] = script_value(static_cast<script_int>(privilege::scoped_template), this);
     jai_namespace->variables[symbolize("force")] = script_value(std::string("jai::force"), this);   // the import directive (import("m.jai", jai::force)), visible as a value
     auto& reflect_namespace = script_namespaces()[symbolize("reflect")];
     if (!reflect_namespace) { reflect_namespace = std::make_shared<script_namespace_data>(); }
@@ -5461,6 +5468,27 @@ void engine::template_output_limit(size_t bytes) {
 
 size_t engine::template_output_limit() const {
     return impl->limits_.template_output_limit;
+}
+
+void engine::add_scoped_template_dir(const std::string& dir) {
+    check_privilege_mutation();
+    auto& dirs = impl->scoped_template_dirs_;
+    if (std::find(dirs.begin(), dirs.end(), dir) == dirs.end()) { dirs.push_back(dir); }
+}
+
+void engine::remove_scoped_template_dir(const std::string& dir) {
+    check_privilege_mutation();
+    auto& dirs = impl->scoped_template_dirs_;
+    dirs.erase(std::remove(dirs.begin(), dirs.end(), dir), dirs.end());
+}
+
+void engine::set_scoped_template_dirs(std::vector<std::string> dirs) {
+    check_privilege_mutation();
+    impl->scoped_template_dirs_ = std::move(dirs);
+}
+
+const std::vector<std::string>& engine::scoped_template_dirs() const {
+    return impl->scoped_template_dirs_;
 }
 
 void engine::scoped_template_output_limit(size_t bytes) {
@@ -6717,11 +6745,24 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
 // tried against the folder of the file doing the asking (from_file), then each include path
 // in order, then the working directory. The answer is the canonical spelling, which is the
 // key the unit caches and executes under.
+namespace {
+checked_result<std::string> resolve_on_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import);
+}
+
 checked_result<std::string> resolve_include_path(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import) {
     if (engine_ptr) {
         auto allowed = engine_ptr->require_privilege(privilege::filesystem);
         if (!allowed) { return allowed.error_value(); }
     }
+    return resolve_on_ladder(path, engine_ptr, from_file, for_import);
+}
+
+checked_result<std::string> detail::resolve_on_import_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file) {
+    return resolve_on_ladder(path, engine_ptr, from_file, true);
+}
+
+namespace {
+checked_result<std::string> resolve_on_ladder(const std::string& path, engine* engine_ptr, const std::string& from_file, bool for_import) {
     namespace fs = std::filesystem;
     auto found = [](const fs::path& candidate, std::string& out) {
         std::error_code ec;
@@ -6770,6 +6811,7 @@ checked_result<std::string> resolve_include_path(const std::string& path, engine
     return checked_result<std::string>(make_error_code(runtime_error_code::file_not_found),
         for_import ? "Failed to open import file: {0}" : "Failed to open include file: {0}",
         engine_ptr ? detail::engine_access::symbolize(*engine_ptr, path) : 0);
+}
 }
 
 // The statement forms ask from the file whose code is executing

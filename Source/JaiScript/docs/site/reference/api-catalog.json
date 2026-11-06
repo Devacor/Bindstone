@@ -7716,10 +7716,10 @@
       "signature": "scoped_template(path: string, args: map) -> web::html",
       "provider": "core",
       "effect": "execute",
-      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values and the string::, array:: and map:: functions, always escapes, and writes at most engine::scoped_template_output_limit bytes.",
+      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values and the string::, array:: and map:: functions, always escapes, and writes at most engine::scoped_template_output_limit bytes. The file is read only from engine::scoped_template_dirs(): a relative path with no .., the first folder in order that holds it, never through a link out.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
-      "availability": "Every engine (reads the file under the filesystem privilege)",
+      "availability": "The scoped_template privilege (on by default)",
       "display": "scoped_template(path: string, args: map) -> web::html"
     },
     {
@@ -7731,7 +7731,7 @@
       "notes": "scoped_template over template text instead of a file.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
-      "availability": "Every engine",
+      "availability": "The scoped_template privilege (on by default)",
       "display": "scoped_template_text(text: string, args: map) -> web::html",
       "example": {
         "code": "print(scoped_template_text(\"<b>${args[\\\"name\\\"]}</b>\", {\"name\": \"<i>\"}));",
@@ -7785,6 +7785,18 @@
       "form": "function",
       "availability": "Every engine",
       "display": "reflect::scoped_template_output_limit() -> int"
+    },
+    {
+      "owner": "reflect",
+      "name": "scoped_template_dirs",
+      "signature": "scoped_template_dirs() -> array<string>",
+      "provider": "core",
+      "effect": "observe",
+      "source": "source/implementation/templates.cpp",
+      "notes": "The folders a scoped_template file is read from, in the order they are tried, as the host set them (default [\"template\"]); scripts read the list, hosts change it.",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "reflect::scoped_template_dirs() -> array<string>"
     }
   ],
   "fields": [

@@ -139,6 +139,16 @@ namespace {
 		return true;
 	}
 
+	// a lies inside dir: both canonical, dir's components a prefix of a's
+	bool lies_inside(const std::filesystem::path& a_file, const std::filesystem::path& a_dir) {
+		auto f = a_file.begin();
+		for (auto d = a_dir.begin(); d != a_dir.end(); ++d, ++f) {
+			if (d->empty()) { continue; }   // a trailing separator
+			if (f == a_file.end() || *f != *d) { return false; }
+		}
+		return f != a_file.end();
+	}
+
 	// A path's re-check is due once the import window (engine::import_recheck_interval) has passed since the last
 	bool check_due(engine& a_engine, int64_t& a_next) {
 		const execution_limits& limits = engine_access::execution_limits(a_engine);
@@ -167,9 +177,15 @@ namespace {
 
 	// One splice appended to out: a web::html as it is (escaped too when `escape_html`), an array element by element, anything
 	// else as its text, escaped
+	JAI_NOINLINE checked_result<void> null_splice(const library& a_lib, const std::string& a_description) {
+		return checked_result<void>(make_error_code(runtime_error_code::invalid_operation), "{0}", engine_access::park_error_text(*a_lib.eng, "a template splice is null: " + a_description));
+	}
+
 	template <class TextOf>
-	checked_result<void> append_splice(const library& a_lib, const script_value& a_value, const std::string* a_spec, bool a_escape_html, std::string& a_out, TextOf&& a_text_of) {
+	checked_result<void> append_splice(const library& a_lib, const script_value& a_value, const std::string* a_spec, bool a_escape_html, std::string& a_out,
+	                                   const std::string& a_description, TextOf&& a_text_of) {
 		const script_value& v = a_value.deref();
+		if (v.is_null()) { return null_splice(a_lib, a_description); }
 		if (const html_text* h = a_lib.as_html(v)) {
 			std::string text = h->text;
 			if (a_spec) {
@@ -181,7 +197,7 @@ namespace {
 		}
 		if (v.raw_storage_index() == script_value::TYPEID_ARRAY) {
 			for (const script_value& element : v.unchecked_array_node()->materialize_values(a_lib.eng)) {
-				auto appended = append_splice(a_lib, element, a_spec, a_escape_html, a_out, a_text_of);
+				auto appended = append_splice(a_lib, element, a_spec, a_escape_html, a_out, a_description, a_text_of);
 				if (!appended) { return appended; }
 			}
 			return {};
@@ -288,6 +304,12 @@ namespace {
 					if (callee->get_type() == node_type::identifier_expr) {
 						const auto* id = static_cast<const identifier_expr*>(callee);
 						if (id->global_qualified && internal_callee(ids_, id->symbol_id)) {
+							if (id->symbol_id == ids_.splice && c->arguments.size() == 3 && c->arguments[0]->get_type() == node_type::literal_expr &&
+								static_cast<const literal_expr*>(c->arguments[0].get())->value.raw_storage_index() == script_value::TYPEID_NULL &&
+								c->arguments[2]->get_type() == node_type::literal_expr) {
+								refuse(c->arguments[0].get(), "a template splice is null: " + std::string(static_cast<const literal_expr*>(c->arguments[2].get())->value.unchecked_as_string()));
+								return;
+							}
 							for (const auto& a : c->arguments) { walk(a.get()); }
 							return;
 						}
@@ -816,14 +838,17 @@ namespace {
 	R scoped_render::splice(const call_expr* c) {
 		auto v = eval(c->arguments[0].get());
 		if (!v) { return v; }
-		std::string spec_text;
+		std::string spec_text, description;
 		const std::string* spec = nullptr;
 		if (c->arguments.size() > 1 && c->arguments[1]->get_type() == node_type::literal_expr) {
 			spec_text = static_cast<const literal_expr*>(c->arguments[1].get())->value.unchecked_as_string();
-			spec = &spec_text;
+			if (!spec_text.empty()) { spec = &spec_text; }
+		}
+		if (c->arguments.size() > 2 && c->arguments[2]->get_type() == node_type::literal_expr) {
+			description = static_cast<const literal_expr*>(c->arguments[2].get())->value.unchecked_as_string();
 		}
 		std::string out;
-		auto appended = append_splice(lib_, v.value(), spec, true, out, [this](const script_value& a_value, const std::string* a_spec) { return plain_text(a_value, a_spec); });
+		auto appended = append_splice(lib_, v.value(), spec, true, out, description, [this](const script_value& a_value, const std::string* a_spec) { return plain_text(a_value, a_spec); });
 		if (!appended) { return appended.error_value(); }
 		if (!counts(out.size())) { return output_limit(); }
 		if (!limits_.memory_charge(out.size())) [[unlikely]] { return raise_memory_cap(limits_); }
@@ -1006,6 +1031,43 @@ void scoped_violations(const expression& body, string_symbolizer& symbols, std::
 	}
 }
 
+scoped_file resolve_scoped_file(engine& eng, const std::string& path, const std::string& from) {
+	namespace fs = std::filesystem;
+	scoped_file result;
+	const fs::path asked = fs::path(path);
+	if (path.empty() || path.front() == '/' || path.front() == '\\' || asked.has_root_name() || asked.has_root_directory()) {
+		result.error = "scoped_template: '" + path + "' is not a path relative to its template directories";
+		return result;
+	}
+	size_t start = 0;
+	while (start <= path.size()) {
+		const size_t end = path.find_first_of("/\\", start);
+		const std::string segment = path.substr(start, end == std::string::npos ? std::string::npos : end - start);
+		if (segment == "..") {
+			result.error = "scoped_template: '" + path + "' names a parent directory (..)";
+			return result;
+		}
+		if (end == std::string::npos) { break; }
+		start = end + 1;
+	}
+	std::error_code ec;
+	bool escaped = false;
+	for (const std::string& listed : eng.scoped_template_dirs()) {
+		auto located = resolve_on_import_ladder(listed, &eng, from);   // a relative folder resolves as an import's file does
+		if (!located) { continue; }
+		const fs::path folder = fs::weakly_canonical(fs::path(located.value()), ec);
+		if (ec || !fs::is_directory(folder, ec)) { ec.clear(); continue; }
+		const fs::path candidate = fs::weakly_canonical(folder / asked, ec);
+		if (ec || !fs::is_regular_file(candidate, ec)) { ec.clear(); continue; }
+		if (!lies_inside(candidate, folder)) { escaped = true; continue; }
+		result.resolved = candidate.string();
+		return result;
+	}
+	result.error = escaped ? "scoped_template: '" + path + "' leaves its template directory through a link"
+	                       : "template file '" + path + "' not found in the scoped template directories";
+	return result;
+}
+
 void register_library(engine& eng) {
 	dynamic_binder<html_text>(eng, "web::html")
 		.constructor<>()
@@ -1021,6 +1083,15 @@ void register_library(engine& eng) {
 	lib->raw = engine_access::symbolize(eng, k_raw);
 	lib->format_value = engine_access::symbolize(eng, "format_value");
 	lib->args = engine_access::symbolize(eng, "args");
+
+	auto& reflect_space = engine_access::script_namespaces(eng)[engine_access::symbolize(eng, "reflect")];
+	if (!reflect_space) { reflect_space = std::make_shared<script_namespace_data>(); }
+	reflect_space->variables[engine_access::symbolize(eng, "scoped_template_dirs")] = script_value::make_function([lib](const std::vector<script_value>& a_args) -> R {
+		if (!a_args.empty()) { return R(make_error_code(runtime_error_code::argument_count_mismatch), "reflect::scoped_template_dirs takes no arguments"); }
+		script_value dirs = script_value::make_array(engine_access::get_type_info_string(*lib->eng), lib->eng);
+		for (const auto& dir : lib->eng->scoped_template_dirs()) { dirs.unchecked_get_array_storage()->push(script_value(dir, lib->eng)); }
+		return dirs;
+	}, &eng);
 
 	eng.add_variadic_function(std::string(k_joiner), [lib](const std::vector<script_value>& a_args) -> R {
 		size_t total = 0;
@@ -1038,16 +1109,12 @@ void register_library(engine& eng) {
 	});
 
 	eng.add_variadic_function(std::string(k_splice), [lib](const std::vector<script_value>& a_args) -> R {
-		if (a_args.empty() || a_args.size() > 2) { return lib->refused("a template splice takes a value and a format spec"); }
-		std::string spec_text;
-		const std::string* spec = nullptr;
-		if (a_args.size() == 2) {
-			if (!a_args[1].deref().is_string()) { return lib->refused("format_value expects (value, spec_string)"); }
-			spec_text = a_args[1].deref().as_string();
-			spec = &spec_text;
-		}
+		if (a_args.size() != 3 || !a_args[1].deref().is_string() || !a_args[2].deref().is_string()) { return lib->refused("a template splice takes a value, a format spec and its spelling"); }
+		const std::string spec_text = a_args[1].deref().as_string();
+		const std::string* spec = spec_text.empty() ? nullptr : &spec_text;
 		std::string out;
-		auto appended = append_splice(*lib, a_args[0], spec, false, out, [&lib](const script_value& a_value, const std::string* a_spec) { return trusted_text(*lib, a_value, a_spec); });
+		auto appended = append_splice(*lib, a_args[0], spec, false, out, a_args[2].deref().as_string(),
+			[&lib](const script_value& a_value, const std::string* a_spec) { return trusted_text(*lib, a_value, a_spec); });
 		if (!appended) { return appended.error_value(); }
 		if (engine_access::backend_unwinding(*lib->eng)) { return script_value(std::monostate{}, lib->eng); }
 		if (const size_t limit = engine_access::execution_limits(*lib->eng).template_output_limit; limit != 0 && out.size() > limit) { return trusted_output_limit(*lib, limit); }
@@ -1065,6 +1132,7 @@ void register_library(engine& eng) {
 
 	eng.add_variadic_function(std::string(k_scoped), [lib](const std::vector<script_value>& a_args) -> R {
 		if (a_args.size() != 3 || !a_args[0].deref().is_string() || !a_args[1].deref().is_string()) { return lib->refused("scoped_template_text(text, map) takes a text and a map"); }
+		if (auto allowed = lib->eng->require_privilege(privilege::scoped_template); !allowed) { return allowed.error_value(); }
 		std::string error;
 		auto program = compile_scoped(*lib, a_args[0].deref().as_string(), a_args[1].deref().as_string(), error);
 		if (!program) { return lib->refused(error); }
@@ -1074,22 +1142,23 @@ void register_library(engine& eng) {
 	eng.add_variadic_function(std::string(k_scoped_file), [lib](const std::vector<script_value>& a_args) -> R {
 		if (a_args.size() != 3 || !a_args[0].deref().is_string() || !a_args[1].deref().is_string()) { return lib->refused("scoped_template(path, map) takes a path and a map"); }
 		engine& e = *lib->eng;
-		if (auto allowed = e.require_privilege(privilege::filesystem); !allowed) { return allowed.error_value(); }
-		auto resolved = resolve_include_path(a_args[0].deref().as_string(), &e, a_args[1].deref().as_string());
-		if (!resolved) { return lib->refused("template file '" + a_args[0].deref().as_string() + "' not found"); }
-		scoped_file_entry& file = lib->scoped_files[resolved.value()];
+		if (auto allowed = e.require_privilege(privilege::scoped_template); !allowed) { return allowed.error_value(); }
+		const scoped_file found = resolve_scoped_file(e, a_args[0].deref().as_string(), a_args[1].deref().as_string());
+		if (!found.error.empty()) { return lib->refused(found.error); }
+		const std::string& resolved_path = found.resolved;
+		scoped_file_entry& file = lib->scoped_files[resolved_path];
 		if (!file.loaded || check_due(e, file.next_check)) {
 			uint64_t mtime = 0, size = 0;
-			const bool stamped = stat_file(resolved.value(), mtime, size);
+			const bool stamped = stat_file(resolved_path, mtime, size);
 			const bool moved = !file.loaded || !stamped || mtime != file.mtime || size != file.size;
 			const bool held = file.loaded && file.failed && stamped && mtime == file.failed_mtime && size == file.failed_size;
 			if (moved && !held) {
 				std::string content;
-				if (!read_whole_file(resolved.value(), content)) {
+				if (!read_whole_file(resolved_path, content)) {
 					if (!file.loaded) { return lib->refused("template file '" + a_args[0].deref().as_string() + "' cannot be read"); }
 				} else {
 					std::string error;
-					if (!compile_scoped(*lib, content, resolved.value(), error)) {
+					if (!compile_scoped(*lib, content, resolved_path, error)) {
 						if (!file.loaded) { return lib->refused(error); }
 						file.failed = true;
 						file.failed_mtime = mtime;
@@ -1105,7 +1174,7 @@ void register_library(engine& eng) {
 			}
 		}
 		std::string error;
-		auto program = compile_scoped(*lib, file.content, resolved.value(), error);
+		auto program = compile_scoped(*lib, file.content, resolved_path, error);
 		if (!program) { return lib->refused(error); }
 		return render_scoped(*lib, program, a_args[2]);
 	});

@@ -13,7 +13,8 @@
 // A write through parameter p (or a reference alias of it: `auto& r = p.items;`,
 // `for (auto& x : p)`): an assignment, compound assignment or ++/-- whose target is rooted
 // at p; a method call on a p-rooted receiver unless p is an array, map or string and the
-// method is a reading builtin (size, find, keys, ...); passing a p-rooted lvalue to a script
+// method is a reading builtin (size, keys, ...) or hands the elements to a callback that writes
+// none (for_each, find, reduce, ...); passing a p-rooted lvalue to a script
 // function's reference parameter that writes (transitively), to a handle parameter, to a
 // constructor, or to a callee the kernel cannot see (a function value, a host function, a
 // user method) - the printing and conversion builtins, the math:: and string:: functions
@@ -21,6 +22,7 @@
 // lambdas the body creates. Recursion assumes read-only until a write is found.
 
 #include <jaiscript/detail/ast.hpp>
+#include <jaiscript/detail/builtin_api_arities.hpp>
 #include <functional>
 #include <string>
 #include <string_view>
@@ -46,28 +48,25 @@ namespace jai::detail {
 	// false = not visible (the callee-unknown rule applies)
 	using ref_write_resolver = std::function<bool(const identifier_expr&, std::vector<ref_write_callee>&)>;
 
+	// A builtin method that reads its receiver whatever its arguments (size, find on a string, keys, ...): the catalog's effect
 	inline bool ref_write_reading_method(std::string_view name) {
-		static constexpr std::string_view k_reading[] = {
-			"size", "empty", "length", "front", "back", "first", "last", "at", "get", "has", "contains", "index_of",
-			"slice", "join", "keys", "values", "to_array", "substr", "find", "rfind", "find_first_of", "find_last_of",
-			"find_first_not_of", "find_last_not_of", "starts_with", "ends_with", "split", "explode", "lines", "partition",
-			"compare", "to_int", "to_float", "is_digit", "is_alpha", "is_alnum", "is_space", "is_upper", "is_lower",
-			"byte_size", "utf8_length", "utf8_chars", "to_utf8", "code", "count", "lock", "expired", "use_count",
-		};
-		for (auto m : k_reading) { if (name == m) { return true; } }
-		return false;
+		const BuiltinEffect* effect = findBuiltinEffect(name);
+		return effect && effect->effect == BuiltinReceiverEffect::reads;
 	}
 
 	inline bool ref_write_writing_builtin(std::string_view name) {
-		static constexpr std::string_view k_writing[] = {
-			"push", "push_back", "push_front", "pop", "pop_back", "pop_front", "insert", "erase", "remove", "remove_at",
-			"clear", "sort", "reverse", "resize", "set", "swap", "fill", "shuffle", "append", "extend", "reserve",
-			"to_lower", "to_upper", "trim", "trim_left", "trim_right", "pad_left", "pad_right", "pad_center",
-			"replace_first", "replace_last", "replace", "remove_prefix", "remove_suffix", "repeat", "reset",
-		};
-		for (auto m : k_writing) { if (name == m) { return true; } }
-		return false;
+		const BuiltinEffect* effect = findBuiltinEffect(name);
+		return effect && effect->effect == BuiltinReceiverEffect::writes;
 	}
+
+	// A builtin that hands the receiver's elements to its callback (for_each, find, reduce, ...): it writes them exactly when the
+	// callback writes through the reference parameter an element binds (element_callback_writes)
+	inline bool ref_write_element_callback(std::string_view name) {
+		const BuiltinEffect* effect = findBuiltinEffect(name);
+		return effect && effect->effect == BuiltinReceiverEffect::element_callback;
+	}
+
+	inline bool ref_write_builtin_method(std::string_view name) { return findBuiltinEffect(name) != nullptr; }
 
 	// The core builtins that take their arguments as copies (printing, conversion, identity)
 	inline bool ref_write_copying_builtin(std::string_view name) {
@@ -75,6 +74,10 @@ namespace jai::detail {
 		       name == "same_object" || name == "format" || name == "vformat" || name == "to_char" || name == "int" || name == "float" ||
 		       name == "string" || name == "bool" || name == "char" || name == "double" || name == "int64";
 	}
+
+	enum class callback_write : uint8_t { reads, writes, unseen };
+	inline callback_write element_callback_writes(const call_expr* c, std::string_view name, const ref_write_resolver& resolver);
+	inline bool builtin_call_reads(const call_expr* c, std::string_view name, const ref_write_resolver& resolver);
 
 	class ref_write_analysis {
 	public:
@@ -175,6 +178,11 @@ namespace jai::detail {
 				}
 			}
 
+			bool builtin_reads_receiver(const call_expr* c, std::string_view name) const {
+				if (ref_write_element_callback(name) && param_type && param_type->base_type != script_value_type::jai_array_type) { return true; }   // a string's find takes no callback
+				return builtin_call_reads(c, name, owner.resolver_);
+			}
+
 			void argument_passed(const call_expr* c, size_t i, const expression* arg) {
 				if (found.writes || !rooted(arg)) { return; }
 				const expression* callee = c->callee.get();
@@ -209,7 +217,7 @@ namespace jai::detail {
 					}
 					// a container builtin stores a copy of its argument (a user method of the same name on a class receiver is
 					// the one shape this cannot tell apart)
-					if (!m->is_static && (ref_write_reading_method(m->member) || ref_write_writing_builtin(m->member))) { return; }
+					if (!m->is_static && ref_write_builtin_method(m->member)) { return; }
 				}
 				write_at(arg);
 			}
@@ -237,7 +245,7 @@ namespace jai::detail {
 						auto* c = static_cast<const call_expr*>(e);
 						if (c->callee && c->callee->get_type() == node_type::member_expr) {
 							auto* m = static_cast<const member_expr*>(c->callee.get());
-							if (!m->is_static && rooted(m->object.get()) && !(library_receiver() && ref_write_reading_method(m->member))) {
+							if (!m->is_static && rooted(m->object.get()) && !(library_receiver() && builtin_reads_receiver(c, m->member))) {
 								write_at(c);
 								return;
 							}
@@ -389,6 +397,35 @@ namespace jai::detail {
 			}
 		};
 	};
+
+	// reduce binds the element as its callback's second parameter (the accumulator is the first), every other one as the first. A
+	// lambda or a named script function is read; any other callable is unseen. A literal argument is no callable (a string's find).
+	inline callback_write element_callback_writes(const call_expr* c, std::string_view name, const ref_write_resolver& resolver) {
+		const size_t position = name == "reduce" ? 1 : 0;
+		const expression* callback = c && !c->arguments.empty() ? c->arguments[0].get() : nullptr;
+		if (!callback || callback->get_type() == node_type::literal_expr) { return callback_write::reads; }
+		const auto writes_element = [&](const ref_write_callee& callee) {
+			if (!callee.params || position >= callee.params->size()) { return false; }
+			const parameter& element = (*callee.params)[position];
+			return element.is_reference && !element.is_const && ref_write_analysis(resolver).analyze(callee, position).writes;
+		};
+		if (callback->get_type() == node_type::lambda_expr) {
+			const auto* l = static_cast<const lambda_expr*>(callback);
+			return writes_element(ref_write_callee{&l->parameters, l->body.get(), {}, false, false}) ? callback_write::writes : callback_write::reads;
+		}
+		if (callback->get_type() != node_type::identifier_expr) { return callback_write::unseen; }
+		std::vector<ref_write_callee> overloads;
+		if (!resolver || !resolver(*static_cast<const identifier_expr*>(callback), overloads)) { return callback_write::unseen; }
+		for (const auto& o : overloads) {
+			if (writes_element(o)) { return callback_write::writes; }
+		}
+		return callback_write::reads;
+	}
+
+	// A builtin call that leaves its receiver as it was: a reading method, or an element callback that writes no element
+	inline bool builtin_call_reads(const call_expr* c, std::string_view name, const ref_write_resolver& resolver) {
+		return ref_write_reading_method(name) || (ref_write_element_callback(name) && element_callback_writes(c, name, resolver) == callback_write::reads);
+	}
 
 } // namespace jai::detail
 

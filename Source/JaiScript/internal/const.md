@@ -145,10 +145,14 @@ A method call on a const-rooted receiver is an error exactly when the method wri
 
   At run time (a `const_runtime` site) the class of the receiver that is actually there decides. The checker reports an error only when it is certain: the
   receiver's class is exact (a by-value const) or every override it can see writes.
-- **Builtin methods** on strings, arrays and maps. Mutators are writes, and the registry's reading methods
-  (`ref_write_reading_method`) are not. Dot transforms that have a copying namespace twin say so in the error
-  (`array::filter(xs, f)` returns a filtered copy). A builtin whose callback takes the element by `T&` (`for_each`,
-  `find`, ...) is a reading builtin; a callback that writes through that parameter is not caught (9.3).
+- **Builtin methods** on strings, arrays, maps and handles. The API catalog's effect column decides
+  (`builtin_api_arities.hpp`'s `BUILTIN_RECEIVER_EFFECTS`, generated from `api-catalog.json`): a `mutate` method writes,
+  an `observe` or `copy` one (`ref_write_reading_method`) reads. Dot transforms that have a copying namespace twin say
+  so in the error (`array::filter(xs, f)` returns a filtered copy). A method that hands the elements to a callback
+  (`for_each`, `find`, `find_index`, `some`, `every`, `reduce`: `element_callback_writes`) reads unless the callback
+  writes through the `T&` parameter an element binds: a lambda or a named script function is decided at load, any other
+  callable when the call runs (a named one: a script function by the same analysis, a host one by whether it binds the
+  element by reference).
 - **Host methods** run: the binder could tell a `const` member function from its signature, which it does not record
   (9.3). A host property's setter is a store, and a store through a const raises.
 - Constructors and destructors of a const object run normally.
@@ -414,8 +418,8 @@ Known places where a write through a const runs without an error:
   or a call result. The checker reports such a path when it can type it; otherwise the write runs.
 - **A write checked before its const existed.** A unit checked before the unit that declares the const ran (no literal
   import or include connects them) sees no const; the write is caught when that unit is checked again.
-- **Callbacks**: a builtin's callback that writes through its `T&` element parameter (`xs.for_each((int& x) => x = 1)`
-  over a const `xs`) writes the element.
+- **Callbacks** the run time can only reach by running code (a call result passed as `xs.for_each(make_writer())`) write
+  the elements they bind by reference.
 - **`reflect::`**: `reflect::fields` rows have no `const` key; `reflect::set` raises only for a class constant, and
   `reflect::bind` of a writing method on a const runs.
 - **Tooling**: the debugger's `setVariable` does not refuse a const, and the language server has no const hover or

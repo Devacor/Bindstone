@@ -14,6 +14,7 @@
 #include <jaiscript/detail/lvalue_shape.hpp>
 #include <jaiscript/detail/ref_param_writes.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
+#include <jaiscript/detail/arg_capture.hpp>
 #include <functional>
 #include <optional>
 #include <string>
@@ -308,14 +309,16 @@ namespace jai::detail {
 				const type_info* rt = receiver_type(recv);
 				if (rt) {
 					switch (rt->base_type) {
-						case script_value_type::jai_array_type: case script_value_type::jai_map_type:
-						case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
-							if (!ref_write_reading_method(name)) { note(c, p == 1); }
+						case script_value_type::jai_array_type:
+							if (!builtin_call_reads(c, name, owner.view_.functions)) { note(c, p == 1); }
+							return;
+						case script_value_type::jai_map_type: case script_value_type::jai_string_type: case script_value_type::jai_utf8_string_type:
+							if (!ref_write_reading_method(name) && !ref_write_element_callback(name)) { note(c, p == 1); }   // a string's find takes no callback
 							return;
 						default: break;
 					}
 				}
-				if (!ref_write_reading_method(name)) { note(c, false); }
+				if (!builtin_call_reads(c, name, owner.view_.functions)) { note(c, false); }
 			}
 
 			void argument_passed(const call_expr* c, size_t i, const expression* arg) {
@@ -347,7 +350,7 @@ namespace jai::detail {
 						const std::string_view ns = static_cast<const identifier_expr*>(m->object.get())->name;
 						if (ns == "math" || ns == "string" || ns == "array" || ns == "map") { return; }
 					}
-					if (!m->is_static && (ref_write_reading_method(m->member) || ref_write_writing_builtin(m->member))) { return; }
+					if (!m->is_static && ref_write_builtin_method(m->member)) { return; }
 				}
 				note(arg, false);
 			}
@@ -661,15 +664,41 @@ namespace jai::detail {
 		return v;
 	}
 
-	// Whether calling `name` on the receiver value writes it: a builtin's mutators on a string, array or map, a script method
-	// whose body certainly writes its receiver (receiver_write_analysis); anything else runs
-	inline std::optional<size_t> const_call_writes(const script_value& receiver_in, std::string_view name, engine* eng, string_symbolizer* symbolizer,
-	                                               bool& builtin) {
+	// The callback a builtin call names, as the run time holds it (no code runs): a script function writes an element when it
+	// writes through the reference parameter the element binds, any other callable when it binds the element by reference
+	inline bool named_callback_writes_element(const call_expr* call, std::string_view name, const caller_frame_view& caller, environment* env,
+	                                          engine* eng, string_symbolizer* symbolizer) {
+		const expression* callback = call && !call->arguments.empty() ? call->arguments[0].get() : nullptr;
+		if (!callback || callback->get_type() != node_type::identifier_expr) { return false; }
+		std::optional<checked_result<void>> err;
+		const script_value* held = ref_identifier_storage(static_cast<const identifier_expr*>(callback), caller, env, eng, symbolizer, err);
+		if (!held || err) { return false; }
+		const script_value& fn = held->deref();
+		if (fn.raw_storage_index() != script_value::TYPEID_FUNCTION) { return false; }
+		const size_t position = name == "reduce" ? 1 : 0;
+		if (const auto* thunk = fn.unchecked_as_function().target<script_callable_thunk>();
+		    thunk && thunk->payload.kind == script_callable::kind_type::function && thunk->payload.fn && thunk->payload.fn->shared_parameters) {
+			const script_defined_function& f = *thunk->payload.fn;
+			if (position >= f.shared_parameters->size()) { return false; }
+			const parameter& element = (*f.shared_parameters)[position];
+			return element.is_reference && !element.is_const &&
+			       ref_write_analysis(nullptr).analyze(ref_write_callee{f.shared_parameters.get(), f.body.get(), {}, false, false}, position).writes;
+		}
+		return (static_cast<uint8_t>(callee_binding(fn, position)) & static_cast<uint8_t>(arg_binding::reference)) != 0;
+	}
+
+	// Whether calling `name` on the receiver value writes it: a builtin's mutators on a string, array or map and an array's element
+	// callback that writes an element, a script method whose body certainly writes its receiver (receiver_write_analysis); anything
+	// else runs
+	inline std::optional<size_t> const_call_writes(const script_value& receiver_in, const call_expr* call, std::string_view name, const caller_frame_view& caller,
+	                                               environment* env, engine* eng, string_symbolizer* symbolizer, bool& builtin) {
 		const script_value& receiver = receiver_in.deref();
 		builtin = false;
 		if (receiver.is_array() || receiver.is_map() || receiver.is_string() || receiver.current_type() == script_value_type::jai_utf8_string_type) {
 			builtin = true;
-			if (!ref_write_reading_method(name)) { return size_t(0); }
+			if (ref_write_reading_method(name)) { return std::nullopt; }
+			if (!ref_write_element_callback(name)) { return size_t(0); }
+			if (receiver.is_array() && named_callback_writes_element(call, name, caller, env, eng, symbolizer)) { return size_t(0); }
 			return std::nullopt;
 		}
 		if (!receiver.is_object() || receiver.is_null()) { return std::nullopt; }
@@ -743,7 +772,7 @@ namespace jai::detail {
 				}
 			}
 			bool builtin = false;
-			const std::optional<size_t> line = const_call_writes(value, m->member, eng, symbolizer, builtin);
+			const std::optional<size_t> line = const_call_writes(value, call, m->member, caller, env, eng, symbolizer, builtin);
 			if (!line) { return {}; }
 			return raise(site.text ? *site.text : const_call_text(recv, "", m->member, builtin, *line));
 		}

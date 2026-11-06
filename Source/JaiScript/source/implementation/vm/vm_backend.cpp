@@ -1023,7 +1023,10 @@ checked_result<script_value> vm_backend::run_fiber(coroutine_handle& handle, vm_
 	struct fiber_stacks_swap {
 		vm_backend* vm;
 		vm_coroutine_state* st;
-		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) { flip(); }
+		fiber_stacks_swap(vm_backend* v, vm_coroutine_state* c) : vm(v), st(c) {
+			flip();
+			for (try_record& rec : vm->try_records_) { rec.trace_grafts_below = SIZE_MAX; }   // the fiber's frame resumes over other frames
+		}
 		~fiber_stacks_swap() { flip(); st->note_parked(); }
 		void flip() {
 			vm->stack_.swap_payload(st->stack_storage);
@@ -1346,12 +1349,7 @@ void vm_backend::capture_stack_trace() {
 		}
 		if (captured_trace_.size() >= k_stack_trace_frames) {   // the frames above the innermost top-level one, counted, not walked
 			const size_t first = top_frame_mark_ == SIZE_MAX ? 0 : top_frame_mark_ + 1;
-			size_t grafted = 0;   // a frame stopped at a call a graft makes counts the grafts around it, as their frames would
-			for (auto rest = it; rest != frames_.rend(); ++rest) {
-				if ((*rest)->code->graft_calls) { grafted += graft_frames_at(*(*rest)->code, (*rest)->ip, nullptr, captured_trace_); }
-				if ((*rest)->top_level) { break; }
-			}
-			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + grafted);
+			cap_stack_trace(captured_trace_, frames_.size() - first - walked + 1 + trace_grafts_through(frames_.size() - 1 - walked));
 			trace_captured_ = true;
 			return;
 		}
@@ -1361,6 +1359,52 @@ void vm_backend::capture_stack_trace() {
 	captured_trace_.push_back(trace_frame_at("<script>", location_of(top_node)));
 	cap_stack_trace(captured_trace_);
 	trace_captured_ = true;
+}
+
+// The grafts a trace counts from frame cut down through the innermost top-level frame (a frame stopped at a call a graft makes counts the
+// grafts around it, as their frames would). The frames under a live try record's frame cannot change while it lives, so the walk down from
+// the top stops at the first frame whose record holds their sum and leaves the sum in every record it passed
+size_t vm_backend::trace_grafts_through(size_t cut) {
+	size_t record = try_records_.size();   // the records of the frames not walked yet: [0, record)
+	size_t passed = record;                // [passed, size()): the records the walk passed, holding the grafts from their frame up
+	size_t above = 0;                      // the grafts of the frames walked
+	size_t above_cut = 0;
+	size_t total = SIZE_MAX;
+	size_t reads = 0;
+	for (size_t k = frames_.size(); k-- > 0;) {
+		if (k == cut) { above_cut = above; }
+		if (total != SIZE_MAX && k <= cut) { break; }
+		const frame& fr = *frames_[k];
+		++reads;
+		const size_t own = fr.code->graft_calls ? graft_frames_at(*fr.code, fr.ip, nullptr, captured_trace_) : 0;
+		if (total == SIZE_MAX) {
+			if (fr.top_level) {
+				total = above + own;
+				passed = record;
+			} else {
+				size_t first = record;
+				size_t below = SIZE_MAX;
+				while (first > 0 && try_records_[first - 1].owner == &fr) {
+					--first;
+					if (try_records_[first].trace_grafts_below != SIZE_MAX) { below = try_records_[first].trace_grafts_below; }
+				}
+				for (size_t j = first; j < record; ++j) { try_records_[j].trace_grafts_below = below != SIZE_MAX ? below : above + own; }
+				if (below != SIZE_MAX) {
+					total = below + above + own;
+					passed = record;
+				}
+				record = first;
+			}
+		}
+		above += own;
+	}
+	if (total == SIZE_MAX) {
+		total = above;
+		passed = record;
+	}
+	for (size_t j = passed; j < try_records_.size(); ++j) { try_records_[j].trace_grafts_below = total - try_records_[j].trace_grafts_below; }
+	if (engine_) { detail::engine_access::count_trace_graft_frame_reads(*engine_, reads); }
+	return total - above_cut;
 }
 
 // capture_stack_trace's walk, uncapped, with the top level only while a top-level frame is live; slot_frames names the

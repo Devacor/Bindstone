@@ -1028,6 +1028,7 @@ namespace jai::vm {
             int call_depth = 0;                    // the depth at the try (no graft encloses a try): the handler restores it
             std::shared_ptr<environment> entry_env;
             std::shared_ptr<caught_error_scope> caught_scope;   // the handler's bound error: its thrown value dies with the record
+            size_t trace_grafts_below = SIZE_MAX;   // trace_grafts_through's sum under the owner frame, which cannot change while the record lives
         };
         std::vector<try_record> try_records_;
         void release_catch_variable(frame& f, const try_record& rec);
@@ -1392,6 +1393,7 @@ namespace jai::vm {
                                                             return_conv conv, std::string_view callee = {});
 
         void capture_stack_trace();
+        size_t trace_grafts_through(size_t cut);
         static size_t graft_frames_at(const chunk& code, size_t ip, const ast_node** node, std::vector<stack_frame>& out);
         static const ast_node* frame_statement(const frame& fr);
         static std::string frame_function_name(const frame& fr);

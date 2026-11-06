@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <chrono>
@@ -63,24 +64,35 @@ public:
             check_true(trace.find("  ... 38 more frames") != std::string::npos, trace);
         });
 
+        // A throw past the cap counts the frames it does not show without reading each one: a catch and rethrow at every level of a
+        // deep stack reads frames in proportion to the depth (twice as deep, twice the reads), never its square
         test("vm_deep_catch_and_rethrow_is_linear", [this]() {
+            auto reads_for = [this](int depth) {
+                auto engine = jai::foundry::make_default_engine();
+                engine->set_backend(backend_type::vm);
+                engine->execution_budget(0);
+                const uint64_t before = detail::engine_access::trace_graft_frame_reads(*engine);
+                check_eq(script_int(depth), engine->execute(R"(
+                    int hops = 0;
+                    int rethrow(int n) { if (n == 0) { throw "deep"; } try { return rethrow(n - 1); } catch (e) { hops += 1; throw e; } }
+                    try { rethrow()" + std::to_string(depth) + R"(); } catch (e) { }
+                    hops;
+                )").as_int());
+                return detail::engine_access::trace_graft_frame_reads(*engine) - before;
+            };
+            const uint64_t reads = reads_for(1000), doubled = reads_for(2000);
+            check_true(reads > 0 && doubled * 2 < reads * 5, "reads at depth 1000: " + std::to_string(reads) + ", at 2000: " + std::to_string(doubled));
             auto engine = jai::foundry::make_default_engine();
             engine->set_backend(backend_type::vm);
             engine->execution_budget(0);
-            check_eq(script_int(20000), engine->execute(R"(
-                int hops = 0;
-                int rethrow(int n) { if (n == 0) { throw "deep"; } try { return rethrow(n - 1); } catch (e) { hops += 1; throw e; } }
-                try { rethrow(20000); } catch (e) { }
-                hops;
-            )").as_int());
             auto lines = engine->execute(R"(
                 var st = [];
                 int d(int n) { if (n == 0) { try { throw "x"; } catch (e) { st = e.stack; } return 0; } return d(n - 1) + 1; }
-                d(50000);
+                d(2000);
                 st;
             )");
             check_eq(size_t(65), lines.as<std::vector<std::string>>().size());
-            check_eq(std::string("... 49938 more frames"), lines.as<std::vector<std::string>>()[64]);
+            check_eq(std::string("... 1938 more frames"), lines.as<std::vector<std::string>>()[64]);
         });
 
         test("throw_unwinding_out_of_condition_positions", [this]() {

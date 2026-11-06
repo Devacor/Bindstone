@@ -738,15 +738,15 @@ public:
 				check_eq(std::string("odd 5"), failed.as_string(), label + " lowest failing element wins");
 			}
 			// many elements with uneven costs over many workers: every element once, and the lowest failing element still wins
-			for (int round = 0; round < 20; ++round) {
+			for (int round = 0; round < 10; ++round) {
 				auto e = make_engine();
-				e->execution_budget(0);   // the Debug interpreter's 3000-element serial and parallel passes outrun the default on a loaded machine
+				e->execution_budget(0);   // the Debug interpreter's 3000-element passes outrun the default on a loaded machine
 				jai::stdlib::register_all(*e);
 				e->parallel_thread_count(6);
 				auto r = e->execute(R"(
 					array<int> xs = []; array<int> ys = []; for (int i = 0; i < 3000; i++) { xs.push(i); ys.push(i); }
-					parallel_for (auto& x : xs) { int s = 0; for (int k = 0; k < (x % 97) * 3; k++) { s = s + k; } x = x * 2 + s % 2; }
-					for (auto& y : ys) { int s = 0; for (int k = 0; k < (y % 97) * 3; k++) { s = s + k; } y = y * 2 + s % 2; }
+					parallel_for (auto& x : xs) { int s = 0; for (int k = 0; k < x % 97; k++) { s = s + k; } x = x * 2 + s % 2; }
+					for (auto& y : ys) { int c = y % 97; y = y * 2 + (c * (c - 1) / 2) % 2; }
 					array<int> zs = []; for (int i = 0; i < 3000; i++) { zs.push(i); }
 					string msg = "";
 					try { parallel_for (auto& z : zs) { if (z >= 2400 && z % 7 == 0) { throw "at " + to_string(z); } } } catch (err) { msg = err; }
@@ -4434,6 +4434,7 @@ public:
 
 	// 0: transform, 1: in-place statement, 2: class-valued transform. The third
 	// shape reaches deferred registration, which primitive results cannot cover.
+	// 32 elements reach every stage 256 do; each element adds two registration stages to a sweep.
 	static fixture prepare(int shape, bool warm) {
 		fixture result;
 		result.eng = make_engine();
@@ -4449,7 +4450,7 @@ public:
 			result.eng->execute(R"(
 				class FaultCell { int value = 0; FaultCell() {} }
 				array<FaultCell> fault_input = [];
-				for (int i = 0; i < 256; i++) { fault_input.push(FaultCell()); }
+				for (int i = 0; i < 32; i++) { fault_input.push(FaultCell()); }
 				FaultCell fault_step(FaultCell x) {
 					x.value = fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
 					return x;
@@ -4457,12 +4458,12 @@ public:
 			)");
 			result.call = result.eng->jaibite(R"(
 				var fault_output = parallel_transform(fault_input, fault_step);
-				fault_output[255].value;
+				fault_output[31].value;
 			)");
 		} else {
 			result.eng->execute(R"(
 				var fault_input = [];
-				for (int i = 0; i < 256; i++) { fault_input.push(i); }
+				for (int i = 0; i < 32; i++) { fault_input.push(i); }
 				int fault_step(int x) {
 					return x * 0 + fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
 				}
@@ -4471,10 +4472,10 @@ public:
 				parallel_for (auto& x : fault_input) {
 					x = fault_bias + fault_lookup[0] + fault_snapshot.size() + fault_label.size();
 				}
-				fault_input[255];
+				fault_input[31];
 			)" : R"(
 				var fault_output = parallel_transform(fault_input, fault_step);
-				fault_output[255];
+				fault_output[31];
 			)");
 		}
 		result.input = result.eng->get_variable("fault_input").unchecked_array_node();

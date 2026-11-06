@@ -20,12 +20,12 @@
 
   var reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)");
   var still = !!(reduce && reduce.matches);
-  var TICK = 1000 / 60, START = 30, DEBOUNCE = 250, CAKE_SLICES = 3;
+  var TICK = 1000 / 60, START = 30, DEBOUNCE = 250, CAKE_SLICES = 6, SLICE_W = 10, CHEW = [0, 3, 6, 3];
   var gator = { spd: Number(spdIn.value), slices: Number(slicesIn.value), x: START, says: checkedSay() };
   var frameNo = 0, nom = 0, lastTs = 0, acc = 0;
   var visible = true, running = false, statusTimer = 0, editTimer = 0;
   var colors = {};
-  var GATOR = "#3fae5a", GATOR_DARK = "#2a7a3d", BELLY = "#c9e7a1";
+  var GATOR = "#3fae5a", GATOR_DARK = "#2a7a3d", BELLY = "#c9e7a1", MOUTH = "#7a2430";
   var HOOKS = {
     spd: 'gator.spd = <span class="tk-fn">Gator</span>().spd;',
     slices: 'gator.slices = <span class="tk-fn">Gator</span>().slices;'
@@ -47,32 +47,44 @@
     colors.words = token("--head", "#f1f3f8");
   }
 
-  function goal() { return cv.width - 150; }
+  function cakeX() { return cv.width - 110; }
+  // The gator stops at the cake's left edge, which moves right as slices go.
+  function goal() { return cakeX() + (CAKE_SLICES - Math.max(gator.slices, 1)) * SLICE_W - 50; }
 
-  function drawGator(px, py) {
+  // open lifts the upper jaw that many pixels off the lower one, showing the mouth and both rows of teeth.
+  function drawGator(px, py, open) {
     var leg = (((px - START) / 20 | 0) % 2) * 3;
     g.fillStyle = GATOR_DARK;
     g.fillRect(px - 34, py + 10, 14, 6); g.fillRect(px - 44, py + 12, 12, 4); g.fillRect(px - 52, py + 13, 10, 3);
     g.fillStyle = GATOR; g.fillRect(px - 22, py, 44, 18);
     g.fillStyle = BELLY; g.fillRect(px - 18, py + 13, 36, 5);
     g.fillStyle = GATOR_DARK; for (var b = 0; b < 4; b++) g.fillRect(px - 16 + b * 10, py - 4, 6, 4);
-    g.fillStyle = GATOR; g.fillRect(px + 18, py + 2, 30, 10);
+    if (open > 0) {
+      g.fillStyle = MOUTH; g.fillRect(px + 18, py + 10 - open, 28, open);
+    }
+    g.fillStyle = GATOR; g.fillRect(px + 18, py + 2 - open, 30, 8);
     g.fillStyle = GATOR_DARK; g.fillRect(px + 18, py + 10, 30, 3);
-    g.fillStyle = "#ffffff"; for (var t = 0; t < 4; t++) g.fillRect(px + 22 + t * 7, py + 9, 3, 3);
-    g.fillStyle = GATOR; g.fillRect(px + 14, py - 6, 10, 8);
-    g.fillStyle = "#f5f2e8"; g.fillRect(px + 18, py - 4, 4, 4);
-    g.fillStyle = "#111111"; g.fillRect(px + 20, py - 3, 2, 2);
+    g.fillStyle = "#ffffff";
+    for (var t = 0; t < 4; t++) {
+      g.fillRect(px + 22 + t * 7, py + 9 - open, 3, 3);
+      if (open > 0) g.fillRect(px + 25 + t * 7, py + 8, 3, 2);
+    }
+    g.fillStyle = GATOR; g.fillRect(px + 14, py - 6 - open, 10, 8);
+    g.fillStyle = "#f5f2e8"; g.fillRect(px + 18, py - 4 - open, 4, 4);
+    g.fillStyle = "#111111"; g.fillRect(px + 20, py - 3 - open, 2, 2);
     g.fillStyle = GATOR_DARK;
     g.fillRect(px - 16, py + 18, 6, 6 - leg); g.fillRect(px + 8, py + 18, 6, 3 + leg);
   }
 
-  function cake(cx, cy, eaten) {
-    var flick = (frameNo >> 3) % 2, wdt = 44 - eaten;
-    g.fillStyle = "#8b5a2b"; g.fillRect(cx + eaten, cy + 14, wdt, 16);
-    g.fillStyle = "#f6d3e0"; g.fillRect(cx + eaten, cy + 6, wdt, 10);
-    g.fillStyle = "#ffffff"; for (var d = eaten; d < 44; d += 8) g.fillRect(cx + d, cy + 15, 5, 4);
-    g.fillStyle = "#e94b6a"; g.fillRect(cx + 30, cy - 8, 4, 14);
-    g.fillStyle = flick ? "#ffd84a" : "#ff9f1a"; g.fillRect(cx + 29, cy - 15 - flick, 6, 7);
+  // The cake has room for CAKE_SLICES slices; the gator eats from the left, and the candle sits on the last slice.
+  function cake(cx, cy, left) {
+    if (left <= 0) return;
+    var flick = (frameNo >> 3) % 2, full = CAKE_SLICES * SLICE_W, from = cx + full - left * SLICE_W;
+    g.fillStyle = "#8b5a2b"; g.fillRect(from, cy + 14, left * SLICE_W, 16);
+    g.fillStyle = "#f6d3e0"; g.fillRect(from, cy + 6, left * SLICE_W, 10);
+    g.fillStyle = "#ffffff"; for (var d = from; d < cx + full; d += SLICE_W) g.fillRect(d + 3, cy + 15, 5, 4);
+    g.fillStyle = "#e94b6a"; g.fillRect(cx + full - 7, cy - 8, 4, 14);
+    g.fillStyle = flick ? "#ffd84a" : "#ff9f1a"; g.fillRect(cx + full - 8, cy - 15 - flick, 6, 7);
   }
 
   function bubble(headX, headY, words) {
@@ -100,8 +112,8 @@
     g.clearRect(0, 0, w, cv.height);
     g.fillStyle = colors.ground;
     for (var i = 0; i < w; i += 32) g.fillRect(i, 118, 28, 6);
-    cake(w - 96, 88, Math.min(18, gator.slices * 6));
-    drawGator(x, 92);
+    cake(cakeX(), 88, gator.slices);
+    drawGator(x, 92, nom > 0 ? CHEW[(frameNo >> 2) % CHEW.length] : 0);
     if (nom > 0 || still) bubble(x + 18, 86, gator.says);
   }
 
@@ -110,13 +122,13 @@
     if (nom > 0) {
       if (--nom === 0) {
         gator.x = START;
-        if (gator.slices >= CAKE_SLICES) gator.slices = 0;
+        if (gator.slices <= 0) gator.slices = Number(slicesIn.value);
         setLabel();
       }
       return;
     }
     gator.x = Math.max(START, Math.min(goal(), gator.x + gator.spd));
-    if (gator.x >= goal()) { gator.slices++; nom = 50; setLabel(); }
+    if (gator.x >= goal()) { gator.slices--; nom = 50; setLabel(); }
   }
 
   function frame(ts) {

@@ -401,7 +401,7 @@ public:
             // initializer-list argument stand at their line, a level constructing its base at the base's argument or its own line
             const std::string chain =
                 "int boom(int v) {\n"
-                "    if (at == v) { throw \"boom \" + v; }\n"
+                "    if (at == v) { throw `boom ${v}`; }\n"
                 "    return v;\n"
                 "}\n"
                 "class A {\n"
@@ -431,7 +431,7 @@ public:
             }
             const std::string shapes =
                 "int boom(int v) {\n"
-                "    if (at == v) { throw \"boom \" + v; }\n"
+                "    if (at == v) { throw `boom ${v}`; }\n"
                 "    return v;\n"
                 "}\n"
                 "class K {\n"
@@ -490,7 +490,7 @@ public:
             // the fields an aggregate leaves to their initializers run in a frame of the class, as a class without a constructor does
             const std::string aggregate =
                 "int boom(int v) {\n"
-                "    throw \"boom \" + v;\n"
+                "    throw `boom ${v}`;\n"
                 "}\n"
                 "class K {\n"
                 "    int v = 1;\n"

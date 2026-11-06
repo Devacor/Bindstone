@@ -458,7 +458,7 @@ public:
                 namespace cfg { extern int limit; int lim() { return limit; } }
                 var c3 = "";
                 try { cfg::lim(); } catch (e) { c3 = e; }
-                caught + "|" + c2 + "|" + c3 + "|" + to_string(y) + "|" + shared_text;
+                caught + "|" + c2 + "|" + c3 + "|" + to_string(y) + "|" + shared_text + `|${y}`;
             )");
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;

@@ -296,7 +296,7 @@ namespace jai::fuzz {
 					}
 				}
 				case 3: return t.text + " = " + mexpr(k, ivar) + ";";
-				case 4: return "uout = uout + " + mexpr(k, ivar) + " + \";\";";
+				case 4: return "uout = uout + `${" + mexpr(k, ivar) + "};`;";
 				case 5: {
 					const value* o = pick_value(rng_.chance(50) ? k : other_precision(k));
 					const std::string rhs = o ? o->text : ctor(k);
@@ -304,44 +304,44 @@ namespace jai::fuzz {
 						case 0: return "if (" + t.text + " == " + rhs + ") { uout = uout + \"=\"; } else { uout = uout + \"!\"; }";
 						case 1: return "if (" + t.text + ") { uout = uout + \"t\"; }";
 						case 2: return "if (!" + t.text + ") { uout = uout + \"f\"; }";
-						default: return "uout = uout + (" + t.text + " != " + rhs + ") + \";\";";
+						default: return "uout = uout + `${(" + t.text + " != " + rhs + ")};`;";
 					}
 				}
-				case 6: return "uout = uout + (" + t.text + "." + component(k) + " + " + scalar(k, ivar) + ") + \";\";";
+				case 6: return "uout = uout + `${(" + t.text + "." + component(k) + " + " + scalar(k, ivar) + ")};`;";
 				case 7: return rng_.chance(50) ? t.text + " = " + by_value_call(k) + "(" + t.text + ");"
-				                               : "uout = uout + " + by_value_call(k) + "(" + t.text + ") + \";\";";
+				                               : "uout = uout + `${" + by_value_call(k) + "(" + t.text + ")};`;";
 				case 8:   // a static or a namespace variable does not bind a reference parameter yet (any type)
 					if (t.text.find("::") != std::string::npos) return t.text + "." + component(k) + " += 1;";
 					return by_ref_call(k) + "(" + t.text + ");";
 				case 9: {
 					const value* l = any_local();
-					if (!l) return "uout = uout + " + t.text + " + \";\";";
+					if (!l) return "uout = uout + `${" + t.text + "};`;";
 					const std::string f = fresh("ul");
 					if (rng_.chance(50)) return "var " + f + " = [&]() { " + l->text + "." + component(l->k) + " += 1; }; " + f + "(); " + f + "();";
-					return "var " + f + " = [=]() { return " + l->text + " * 2; }; " + l->text + "." + component(l->k) + " = 5; uout = uout + " + f + "() + \";\";";
+					return "var " + f + " = [=]() { return " + l->text + " * 2; }; " + l->text + "." + component(l->k) + " = 5; uout = uout + `${" + f + "()};`;";
 				}
 				case 10: {
 					const int o = other_precision(k);
 					const std::string f = fresh("ut");
 					return std::string(type_name(o)) + " " + f + " = " + (rng_.chance(50) ? t.text : std::string(type_name(o)) + "(" + t.text + ")") +
-					       "; uout = uout + " + f + " + \";\";";
+					       "; uout = uout + `${" + f + "};`;";
 				}
 				case 11: {
 					const std::string m = fresh("uk"), key = mexpr(k, ivar);
-					return "map<var, int> " + m + "; " + m + "[" + key + "] = 1; " + m + "[" + key + "] += 2; " + m + "[" + ctor(k) + "] = 4; uout = uout + " + m +
-					       ".size() + \";\" + " + m + "[" + key + "] + \";\";";
+					return "map<var, int> " + m + "; " + m + "[" + key + "] = 1; " + m + "[" + key + "] += 2; " + m + "[" + ctor(k) + "] = 4; uout = uout + `${" + m +
+					       ".size()};${" + m + "[" + key + "]};`;";
 				}
-				case 12: return array_name_ + ".push(" + ctor(array_kind_) + "); uout = uout + " + array_name_ + ".size() + \";\";";
+				case 12: return array_name_ + ".push(" + ctor(array_kind_) + "); uout = uout + `${" + array_name_ + ".size()};`;";
 				case 13: {
 					if (wrapped_) return t.text + "." + component(k) + " -= 1;";
 					const std::string h = fresh("uh");
 					funcs_.push_back("function " + h + "() -> void { " + t.text + "." + component(k) + " += 3; }");
 					return h + "();";
 				}
-				case 15: return "uout = uout + " + geometry_scalar(false) + " + \";\";";
+				case 15: return "uout = uout + `${" + geometry_scalar(false) + "};`;";
 				default: {
 					switch (rng_.below(4)) {
-						case 0: return "uout = uout + " + t.text + ".w;";
+						case 0: return "uout = uout + `${" + t.text + ".w}`;";
 						case 1: return "uout = uout + (" + t.text + " + " + ctor(dims(k) == 3 ? v2 : v3) + ");";
 						case 2: return "uout = uout + (" + t.text + " * 0.5);";
 						default: return by_value_call(k) + "(" + t.text + ")." + component(k) + " = 1;";
@@ -367,7 +367,7 @@ namespace jai::fuzz {
 						main_.push_back("\tint " + j + " = " + iv + " % " + std::to_string(array_size_) + ";");
 						main_.push_back("\t" + array_name_ + "[" + j + "]." + component(array_kind_) + ops[rng_.below(4)] + scalar(array_kind_, "") + ";");
 						main_.push_back("\t" + std::string(type_name(array_kind_)) + " " + u + " = " + array_name_ + "[" + j + "]; " + u + "." + component(array_kind_) +
-						                " += " + array_name_ + "[" + j + "]." + component(array_kind_) + "; uout = uout + " + u + " + \";\";");
+						                " += " + array_name_ + "[" + j + "]." + component(array_kind_) + "; uout = uout + `${" + u + "};`;");
 					}
 					main_.push_back("}");
 					return;
@@ -384,7 +384,7 @@ namespace jai::fuzz {
 					const std::string e = fresh("ue");
 					main_.push_back("for (auto " + e + " : " + array_name_ + ") {");
 					main_.push_back("\t" + e + "." + component(array_kind_) + " = 99;");
-					main_.push_back("\tuout = uout + " + e + " + \";\";");
+					main_.push_back("\tuout = uout + `${" + e + "};`;");
 					main_.push_back("}");
 					return;
 				}

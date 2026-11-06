@@ -531,6 +531,7 @@ namespace jai {
         struct binary_host;   // this backend's hooks for detail/binary_handlers.hpp
         // a op b on evaluated operands, by the shared kernels (detail/binary_handlers.hpp)
         checked_result<script_value> binary_operator(token_type op, const script_value& left, const script_value& right);
+        checked_result<script_value> join_text(const script_value& left, const script_value& right);
         checked_result<bool> language_equal(const script_value& left, const script_value& right) override;
         checked_result<script_value> invoke_method(const script_value& self, uint64_t name_id) override;
         // A function value running script calls: while a run is active a script callable enters without pinning it

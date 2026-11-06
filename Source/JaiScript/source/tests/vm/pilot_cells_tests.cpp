@@ -1692,7 +1692,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 					try { for (int i = 0; i < 3; ++i) { n += i / z; } } catch (ex) { e1 = ex; }
 					string e2 = ""; int big = 9223372036854775807;
 					try { for (int i = 0; i < 3; ++i) { big += i * 2 + 1; } } catch (ex) { e2 = ex; }
-					return "" + fs + "|" + n + "|" + s + "|" + e1 + "|" + e2 + "|" + big;
+					return `${fs}|${n}|${s}|${e1}|${e2}|${big}`;
 				}
 				run();
 			)";
@@ -1721,7 +1721,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 					string err = "";
 					En q = null;
 					try { for (int i = 0; i < 2; ++i) { u += q.x; } } catch (ex) { err = ex; }
-					return "" + s + "," + t + "," + u + "," + w + "," + a.reads + "|" + err;
+					return `${s},${t},${u},${w},${a.reads}|${err}`;
 				}
 				run();
 			)";
@@ -1752,7 +1752,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 					string err = "";
 					var z = null;
 					try { for (int k = 0; k < z.size(); ++k) { s += 1; } } catch (ex) { err = ex; }
-					return "" + s + "," + xs.size() + "," + c + "," + d + "," + e + "|" + err;
+					return `${s},${xs.size()},${c},${d},${e}|${err}`;
 				}
 				run();
 			)";
@@ -1804,7 +1804,7 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 					try { for (int k = 0; k < 2; ++k) { b += big[k]; } } catch (ex) { e2 = ex; }
 					array<string> ws = ["a", "b"]; string w = "";
 					for (int k = 0; k < 2; ++k) { w += ws[k]; }
-					return "" + s + "," + g + "," + n + "," + h + "," + w + "|" + e1 + "|" + e2;
+					return `${s},${g},${n},${h},${w}|${e1}|${e2}`;
 				}
 				run();
 			)";
@@ -1903,13 +1903,13 @@ var floats = function(int n) { int acc = 0; float f = -1.0; for (int i = 0; i < 
 				function pows(int n) -> int { float s = 0.0; for (int i = 0; i < n; i++) { s += math::pow(G, bump() ? 1 : 2); } return math::itrunc(s); }
 				function straight() -> int { int s = math::min(G, bump() ? 4 : 8); s += math::min(G, bump() ? 4 : 8); return s; }
 				function run() -> string {
-					string out = "" + globals(2);
-					G = 5; A[0] = 5; out += "," + elements(3);
-					G = 5; out += "," + fields(3) + "," + C().bare(2) + "," + C().own(3);
-					G = 5; out += "," + refs(3);
-					out += "," + captured(3);
-					G = 5; out += "," + pows(3);
-					G = 5; out += "," + straight();
+					string out = `${globals(2)}`;
+					G = 5; A[0] = 5; out += `,${elements(3)}`;
+					G = 5; out += `,${fields(3)},${C().bare(2)},${C().own(3)}`;
+					G = 5; out += `,${refs(3)}`;
+					out += `,${captured(3)}`;
+					G = 5; out += `,${pows(3)}`;
+					G = 5; out += `,${straight()}`;
 					return out;
 				}
 				run();
@@ -3628,8 +3628,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("a_string_call_result_lands_in_its_temp_and_concatenates", [this]() {
 			// blit_half's shape (`out += vid_row_half(cy) + "\n"`): a string result lands in its compiler temp, whose slot holds it as
-			// op_call_temp leaves it, and string + string lands there too; the landing still misses for a reference result, the
-			// concatenation for an int partner (the general conversion) and under the memory cap (the general text); a later miss reads
+			// op_call_temp leaves it, and string + string lands there too, a to_string partner included; the landing still misses for a
+			// reference result and under the memory cap (the general text); a later miss reads
 			// the temp's slot; a no-result store lands the string by the store's rule; both backends, proofs on and off, and under an
 			// injected miss
 			const std::string prelude =
@@ -3641,7 +3641,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"var blit = function(int n) { string out = \"\"; for (int cy = 0; cy < n; ++cy) { out += row(cy % 2) + \"\\n\"; } return out; };\n"
 				"var lead = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += \"[\" + sep(i); } return out; };\n"
 				"var counted = function(int n) { int acc = 0; string out = \"\"; for (int i = 0; i < n; ++i) { acc = acc + i; out += sep(i) + \".\"; } return to_string(acc) + out; };\n"
-				"var intpartner = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += sep(i) + 5; } return out; };\n"
+				"var intpartner = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += sep(i) + to_string(5); } return out; };\n"
 				"var refs = function(int n) { string out = \"\"; for (int i = 0; i < n; ++i) { out += pick(i) + \".\"; if (i == 1) { G = \"h\"; } } return out; };\n"
 				"var capped = function(int n) { string out = \"\"; try { for (int i = 0; i < n; ++i) { out += big(i) + \"\\n\"; } } catch (e) { return \"caught|\" + e; } return \"no cap\"; };\n";
 			const std::string body =
@@ -4431,7 +4431,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function measure(Pt& r) -> float { float h = 0.0; for (int i = 0; i < 3; ++i) { h += r.len2(); } return h; }\n"
 				"var run = function(int n) -> string { Pt p = Pt(1.0, 2.0); float fs = 0.0; int k = 0; for (int i = 0; i < n; ++i) { fs += p.len2(); k = k + p.tri(i % 4); } "
 				"p.scale(2.0); float g = p.len2(); var t3 = Pt3(1.0); float h = measure(t3); float h2 = measure(p); Acc a = Acc(); float w = 0.0; for (int i = 0; i < 2; ++i) { w += a.twice(); } "
-				"return \"\" + fs + \",\" + k + \",\" + g + \",\" + h + \",\" + h2 + \",\" + w; };\n";
+				"return `${fs},${k},${g},${h},${h2},${w}`; };\n";
 			const std::string body = "run(10);";
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts");
 			both(prelude + body, "50.0,8,20.0,9.0,60.0,12.0", "method grafts, proofs off", false);
@@ -4461,7 +4461,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"class S { string t = \"a\"; int up() { ++t; return 1; } }\n"
 				"string run() { P p = P(); int a = p.nm(); int b = p.pm(); int c = p.dm(); int d = p.qm(); float e = p.fx(); p.bump();\n"
 				"  string err = \"\"; S s = S(); try { s.up(); } catch (ex) { err = ex; }\n"
-				"  return \"\" + a + \",\" + b + \",\" + c + \",\" + d + \",\" + e + \",\" + p.m + \",\" + p.x + \"|\" + err; }\n";
+				"  return `${a},${b},${c},${d},${e},${p.m},${p.x}|${err}`; }\n";
 			both(prelude + "run();", "", "bare field increments in grafted methods");
 			check_true(run_on(true, prelude + "run();").find("1,1,1,1,2.5,1,2.5|") == 0, run_on(true, prelude + "run();"));
 			const std::string l = listing_run(prelude + "run();");
@@ -4502,7 +4502,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"float fs = 0.0; float gs = 0.0; int alive = 0; for (int i = 0; i < pts.size(); ++i) { fs += pts[i].x; gs = gs + pts[i].y * 2.0; if (pts[i].alive) { alive += 1; } if (i == 1) { bump(pts[2]); } } "
 				"array<Acc> as = [Acc(), Acc()]; float w = 0.0; for (int i = 0; i < 2; ++i) { w += as[i].v; } "
 				"string err = \"\"; try { for (int i = 0; i < 9; ++i) { fs += pts[i].x; } } catch (ex) { err = ex; } "
-				"return \"\" + fs + \",\" + gs + \",\" + alive + \",\" + w + \",\" + as[0].reads + \"|\" + err; };\n";
+				"return `${fs},${gs},${alive},${w},${as[0].reads}|${err}`; };\n";
 			const std::string body = "run(5);";
 			const std::string interp = run_on(false, prelude + body);
 			both(prelude + body, "", "element member reads");
@@ -4532,7 +4532,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string script = R"(
 				class C { int n = 0; float f = 0.0; float g = 0.0; int sets = 0; function _set_g(float v) -> void { sets += 1; g = v * 2.0; } C(float a, int b) { n = a; f = b; g = a; } }
 				class D : C { int m = 0; D(float a) : super(a, 2) { m = a; } }
-				function run() -> string { int sn = 0; float sf = 0.0; float sg = 0.0; int st = 0; for (int i = 0; i < 50; ++i) { C c = C(i * 1.5, i); sn += c.n; sf += c.f; sg += c.g; st += c.sets; D d = D(2.5); sn += d.m; } return "" + sn + "," + sf + "," + sg + "," + st; }
+				function run() -> string { int sn = 0; float sf = 0.0; float sg = 0.0; int st = 0; for (int i = 0; i < 50; ++i) { C c = C(i * 1.5, i); sn += c.n; sf += c.f; sg += c.g; st += c.sets; D d = D(2.5); sn += d.m; } return `${sn},${sf},${sg},${st}`; }
 				run();
 			)";
 			both(script, "", "constructor field stores");
@@ -4558,7 +4558,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					auto untyped = [](int a) { return a + K; };
 					int w = 0;
 					for (int i = 0; i < 3; ++i) { w = untyped(w); }
-					return "" + s + "," + g + "," + t + "," + u + "," + w;
+					return `${s},${g},${t},${u},${w}`;
 				}
 				run();
 			)";
@@ -4589,7 +4589,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					string err = "";
 					try { Bad z = Bad(0); } catch (ex) { err = ex; }
 					int s = 0; for (int i = 1; i < 50; ++i) { A t = A(i); s += t.x; }
-					return "" + a.x + "," + b.x + "," + p.get() + "," + d.b + "," + e.b + "," + k.m + "," + c.f() + "," + s + "|" + err;
+					return `${a.x},${b.x},${p.get()},${d.b},${e.b},${k.m},${c.f()},${s}|${err}`;
 				}
 				run();
 			)";
@@ -4610,7 +4610,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 					auto grab = [](var b) { return b[0]; };
 					int s = 0; float h = 0.0; int p = 0; float m = 0.0; int g = 0;
 					for (int i = 0; i < 8; ++i) { s = add(s, i); h += half(i * 3.0); if (pos(i - 3)) { p += 1; } m += mixed(i); g += grab(box); }
-					return "" + s + "," + h + "," + p + "," + m + "," + g;
+					return `${s},${h},${p},${m},${g}`;
 				}
 				run();
 			)";
@@ -5181,7 +5181,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string src =
 				"array<int> A = [1, 2, 4]; int I = 2; var V = [5, \"x\", 7];\n"
 				"int run() { int s = 0; for (int k = 0; k < 3; ++k) { s = s + A[I]; } return s; }\n"
-				"string runv() { string out = \"\"; for (int k = 0; k < 2; ++k) { out = out + V[I]; } return out; }\n";
+				"string runv() { string out = \"\"; for (int k = 0; k < 2; ++k) { out = out + to_string(V[I]); } return out; }\n";
 			both(src + "to_string(run()) + \"|\" + runv();", "12|77", "a global container at a global index");
 		});
 		test("bitwise_compound_stores_run_in_the_block", [this]() {
@@ -5705,7 +5705,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// each iteration declares the loop variable afresh: an int after a float stays an int, a float after an int stays a float
 			const std::string src =
 				"var out = \"\";\n"
-				"function g(a) { out = out + a + \";\"; }\n"
+				"function g(a) { out = out + to_string(a) + \";\"; }\n"
 				"function d(var xs) { for (auto e : xs) { g(e); } for (var e : xs) { g(e); } }\n"
 				"d([1, 7.5, 1]); d([true, 3.0, 1, 2.5, -3]); out;";
 			both(src, "1;7.5;1;1;7.5;1;true;3.0;1;2.5;-3;true;3.0;1;2.5;-3;", "range-for kinds");
@@ -6027,7 +6027,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function world(float g) -> float { return ((g < 0.0 ? -g : g) - G) / (1.5 * (2.1 + G * 2.4)); }\n"
 				"function march(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += world(i * 0.25 - 2.0) * 0.1; } return t; }\n"
 				"function mixed(var v, int n) -> string { string out = \"\"; for (int i = 0; i < n; ++i) { var w = (i % 3 == 0 ? v : i) + (i < 2 ? 0.5 : 1); out += to_string(w) + \" \"; } return out; }\n"
-				"run(20) + \",\" + to_string(march(30)) + \",\" + mixed(4, 6) + \",\" + mixed(\"s\", 4);";
+				"run(20) + \",\" + to_string(march(30)) + \",\" + mixed(4, 6) + \",\" + mixed(2.5, 4);";
 			both(src, "", "lifted ternaries");
 			both(src, "", "lifted ternaries, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
@@ -7441,7 +7441,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			// not resume (the general form takes the inner loop with its state); a range-for with an alias
 			const std::string src =
 				"map<int, var> m = {};\n"
-				"function kind_change() -> string { var v = 0; int n = 0; for (int i = 0; i < 20; ++i) { v = v + 1; n = n + 1; if (i == 9) { m[0] = 1; v = to_string(v) + \"!\"; } } return to_string(v) + \" \" + to_string(n); }\n"
+				"function kind_change() -> string { var v = 0; int n = 0; for (int i = 0; i < 20; ++i) { v = v + 1; n = n + 1; if (i == 9) { m[0] = 1; v = v * 1.5; } } return to_string(v) + \" \" + to_string(n); }\n"
 				"function kind_change_inner() -> string { var v = 1.5; int n = 0; for (int i = 0; i < 3; ++i) { for (int j = 0; j < 3; ++j) { auto w = v; v = [i]; var k = 7; n = n + k; } } return to_string(v) + \" \" + to_string(n); }\n"
 				"function raises(int at) -> int { int s = 0; for (int i = 0; i < 20; ++i) { s = s + i; m[i & 3] = 100 / (i - at); s = s + 1; } return s; }\n"
 				"function nested() -> int { int t = 0; for (int j = 0; j < 5; ++j) { int s = 0; for (int i = 0; i < 10; ++i) { s = s + i * j; m[i & 1] = s; } t = t + s; } return t; }\n"
@@ -7888,7 +7888,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"touch = function(var& r) { r = \"s\"; return 0; };\n"
 				"out + \" \" + trusted(3);";
 			const std::string want = "[3.7759740259740258,1.7357843137254902,1.0502136752136753,0.7170018796992481,0.5252146227755984] 16[4,2,3] 1.6636124329249773 11ss 10.52.50.2q0.1111111111111111 "
-				"4.0string 1.75int E:Invalid operands for - operator";
+				"4.0string 1.75int E:cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`";
 			both(src, want, "var local kinds");
 			both(src, want, "var local kinds, proofs off", false);
 			const std::string l = listing_run(src);

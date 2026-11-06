@@ -36,7 +36,7 @@ array<string> PAL_BGR3 = [];  // 3-byte BGR string per index (BMP fast path)
 function utf8(int cp) -> string {
 	if (cp < 128) { return "" + to_char(cp); }
 	if (cp < 2048) { return "" + to_char(192 + (cp >> 6)) + to_char(128 + (cp & 63)); }
-	if (cp < 65536) { return "" + to_char(224 + (cp >> 12)) + to_char(128 + ((cp >> 6) & 63)) + to_char(128 + (cp & 63)); }
+	if (cp < 65536) { return `${to_char(224 + (cp >> 12))}${to_char(128 + ((cp >> 6) & 63))}${to_char(128 + (cp & 63))}`; }
 	return "" + to_char(240 + (cp >> 18)) + to_char(128 + ((cp >> 12) & 63)) + to_char(128 + ((cp >> 6) & 63)) + to_char(128 + (cp & 63));
 }
 
@@ -76,7 +76,7 @@ function rgb_idx(int r, int g, int b) -> int {
 	PAL_R.push(r);
 	PAL_G.push(g);
 	PAL_B.push(b);
-	PAL_BGR3.push("" + to_char(b) + to_char(g) + to_char(r));
+	PAL_BGR3.push(`${to_char(b)}${to_char(g)}${to_char(r)}`);
 	return idx;
 }
 

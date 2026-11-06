@@ -2272,7 +2272,7 @@ public:
                     string name = "";
                     var other = null;
                     int tail = 0;
-                    void post_load(int version) { pl += name + ":" + other.name + "/" + other.tail + " "; }
+                    void post_load(int version) { pl += `${name}:${other.name}/${other.tail} `; }
                 }
                 var p = new Node();
                 p.name = "parent";
@@ -2285,7 +2285,7 @@ public:
                 string out = "";
                 pl = "";
                 var lj = from_json(to_json(p));
-                out += pl + "| ";
+                out += `${pl}| `;
                 pl = "";
                 var lb = from_binary(to_binary(p));
                 out += pl;
@@ -2300,7 +2300,7 @@ public:
                 class Countkin : SlotCreature {
                     int chomp = 3;
                     Countkin() : super() { built += 1; }
-                    void post_load(int version) { seen += "" + built + " "; }
+                    void post_load(int version) { seen += `${built} `; }
                 }
                 var c1 = Countkin();
                 var c2 = Countkin();
@@ -2332,7 +2332,7 @@ public:
                 int k = 0;
                 for (var v : [e, hy, wa]) { k += take(v); }
                 for (var v : [wa]) { var u = v; u.chomp = 9; }
-                return "" + k + " " + wa.chomp;
+                return `${k} ${wa.chomp}`;
             )");
             check_eq(std::string("3 9"), r.as<std::string>(), "the loop variable shares the nocopy object");
         });
@@ -2448,7 +2448,7 @@ public:
             eng->add_global("twin", eng->extend(twin, "Markkin"));
             check(twin->script_layer_from_json(state), "the state hydrates: " + state);
             check_eq(std::string("char q 6 true"), eng->execute(
-                "type_of(twin.mark) + \" \" + twin.mark + \" \" + to_string(twin.pal.n) + \" \" + to_string(same_object(twin.seen.lock(), twin.pal))").as<std::string>(),
+                "`${type_of(twin.mark)} ${twin.mark} ${to_string(twin.pal.n)} ${to_string(same_object(twin.seen.lock(), twin.pal))}`").as<std::string>(),
                 "a char field stays a char, a handle field its object, a weak_ptr to it the same object: " + state);
         });
 

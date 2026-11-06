@@ -19,6 +19,7 @@
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
+#include <jaiscript/detail/string_join.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/math_intrinsics.hpp>
 #include <jaiscript/detail/math_values.hpp>
@@ -499,7 +500,7 @@ namespace {
 		R join(const call_expr* c);
 		R output_limit() const;
 		R splice(const call_expr* c);
-		R arithmetic(token_type a_op, const script_value& a_left, const script_value& a_right);
+		R arithmetic(token_type a_op, const script_value& a_left, const script_value& a_right, bool a_joins_text);
 		R compare(token_type a_op, const script_value& a_left, const script_value& a_right);
 		R method(const script_value& a_receiver, const member_expr* a_callee, std::vector<script_value> a_args);
 		R namespace_call(const call_expr* c, const member_expr* a_callee);
@@ -668,7 +669,7 @@ namespace {
 		if (holds_object(l) || holds_object(r)) { return refuse_object("apply an operator to"); }
 		switch (op) {
 			case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
-				return arithmetic(op, l, r);
+				return arithmetic(op, l, r, b->op.joins_text);
 			case token_type::less: case token_type::less_equal: case token_type::greater: case token_type::greater_equal:
 			case token_type::equal_equal: case token_type::bang_equal:
 				return compare(op, l, r);
@@ -677,7 +678,7 @@ namespace {
 		}
 	}
 
-	R scoped_render::arithmetic(token_type a_op, const script_value& a_left, const script_value& a_right) {
+	R scoped_render::arithmetic(token_type a_op, const script_value& a_left, const script_value& a_right, bool a_joins_text) {
 		script_value l = utf8_operands(a_left.raw_storage_index(), a_right.raw_storage_index()) ? utf8_unwrapped(a_left, eng_) : a_left;
 		script_value r = utf8_operands(a_left.raw_storage_index(), a_right.raw_storage_index()) ? utf8_unwrapped(a_right, eng_) : a_right;
 		if (char_operands_promote(l.raw_storage_index(), r.raw_storage_index())) { l = char_promoted(l, eng_); r = char_promoted(r, eng_); }
@@ -696,6 +697,7 @@ namespace {
 			return script_value(out, eng_);
 		}
 		if (a_op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
+			if (!a_joins_text && string_beside_scalar(li, ri)) { return string_plus_refused(li, ri); }
 			auto lt = plain_text(l, nullptr);
 			if (!lt) { return lt.error_value(); }
 			auto rt = plain_text(r, nullptr);

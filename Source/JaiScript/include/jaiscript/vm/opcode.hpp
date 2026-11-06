@@ -31,7 +31,7 @@ namespace jai::vm {
         op_decl_ref_value,  // a=node index (variable_decl); pops evaluated initializer
         op_destructure,     // a=proto index; pops source array
 
-        op_binary,          // a=token_type, b=binary_shape_none; pops rhs,lhs, pushes result
+        op_binary,          // a=token_type, b=binary_shape_none, c=1 for a template string's `+` (join_text); pops rhs,lhs, pushes result
         op_binary_fused,    // a=fused_binary_proto index, b=shape; resolves operands in place, pushes result
         op_index,           // a=flags(index_flag_*); pops index,container, pushes element/reference
         op_unary,           // a=token_type; pops operand, pushes result
@@ -282,7 +282,7 @@ namespace jai::vm {
         op_call_builtin,    // a = argc, b = call site, c = receiver kind (1 string, 2 array, 3 map) | inline << 4 (1 size/length, 2 empty, 3 find, 4 contains, 5 starts_with, 6 ends_with, 7 substr, 8 at, 9 map has, 10 map get, 11 array pop); stack [object, args...]: a method the checker proved builtin, guarded on the kind, else op_call_method
         op_size_temp,       // a = frame slot (a compiler temp), b = call site (a slot receiver, no arguments), c = the proven kind (1 string, 2 array, 3 map): the receiver's size into the temp, else op_call_method's result
         op_c_size,          // a = dst cell, b = the receiver slot (an array container site): the site node's live size, an int
-        op_concat_append,   // stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string or scalar
+        op_concat_append,   // a = hint, b = 1 for a template string's `+`: stack [acc, x] -> acc + x: the general `+`, appending in place when acc is a string and x a string (or a scalar a template joins)
         op_deref_top,       // the top's dereferenced value in its place: an element read ahead of a sibling that may run user code; a = 1: its copy (a literal's existing object ahead of such a sibling); a = 2: the value under the top dies, the top takes its place (a read chain's held temporary, detail::held_chain_root)
         op_capture_arg,     // a = call site (new: expression node; stack: argument count), b = argument index, c = capture kind | form << 2 | place node + 1 << capture_place_shift: the argument on top takes its value as the callee binds it (detail/arg_capture.hpp)
         op_place_arg,       // a = member node, b = its frame-slot base + 1, c = argument index: a field argument whose pending callee binds it by reference pushes the reference it binds, else op_get_member's read (both at the argument's evaluation)

@@ -448,11 +448,11 @@ public:
                 import "reload_by_import.jai";
                 function reload_scripts() -> bool { return import("reload_by_import.jai"); }
                 ReloadP keep = ReloadP();
-                greet() + " " + keep.who();
+                `${greet()} ${keep.who()}`;
             )").as<std::string>());
             mod = create_temp_file("reload_by_import.jai", "function greet() -> string { return \"v2!\"; }\nclass ReloadP { int n = 1; int extra = 7; string who() { return \"P2\"; } }\n");
             check_true(eng->execute("reload_scripts();").as_bool(), "the import re-ran the touched module");
-            check_eq(std::string("v2! P2 7"), eng->execute("greet() + \" \" + keep.who() + \" \" + keep.extra;").as<std::string>());
+            check_eq(std::string("v2! P2 7"), eng->execute("`${greet()} ${keep.who()} ${keep.extra}`;").as<std::string>());
             check_false(eng->execute("reload_scripts();").as_bool(), "an untouched module does not re-run");
             cleanup_temp_file(mod);
         });

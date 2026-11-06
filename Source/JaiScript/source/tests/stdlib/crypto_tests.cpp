@@ -122,8 +122,8 @@ public:
 		});
 
 		test("the_bytes_forms_are_the_raw_digests", [this, es]() {
-			check_eq(std::string("32 64 20 16 32 64"), es("to_string(crypto::sha256_bytes(\"a\").size()) + \" \" + crypto::sha512_bytes(\"a\").size() + \" \" + crypto::sha1_bytes(\"a\").size() + \" \" + "
-			                                             "crypto::md5_bytes(\"a\").size() + \" \" + crypto::hmac_sha256_bytes(\"k\", \"a\").size() + \" \" + crypto::hmac_sha512_bytes(\"k\", \"a\").size();"));
+			check_eq(std::string("32 64 20 16 32 64"), es("`${crypto::sha256_bytes(\"a\").size()} ${crypto::sha512_bytes(\"a\").size()} ${crypto::sha1_bytes(\"a\").size()} "
+			                                             "${crypto::md5_bytes(\"a\").size()} ${crypto::hmac_sha256_bytes(\"k\", \"a\").size()} ${crypto::hmac_sha512_bytes(\"k\", \"a\").size()}`;"));
 			check_eq(std::string("true"), es(R"(
 				function hex_of(string bytes) -> string {
 					string digits = "0123456789abcdef";
@@ -139,8 +139,8 @@ public:
 
 		test("equals_compares_length_and_every_byte", [this, es]() {
 			check_eq(std::string("true false false false true true"),
-				es("to_string(crypto::equals(\"abc\", \"abc\")) + \" \" + crypto::equals(\"abc\", \"abd\") + \" \" + crypto::equals(\"ab\", \"abc\") + \" \" + "
-				   "crypto::equals(\"\\x00a\", \"\\x00b\") + \" \" + crypto::equals(\"\", \"\") + \" \" + crypto::equals(utf8_string(\"\xC3\xA9\"), \"\xC3\xA9\");"));
+				es("`${crypto::equals(\"abc\", \"abc\")} ${crypto::equals(\"abc\", \"abd\")} ${crypto::equals(\"ab\", \"abc\")} "
+				   "${crypto::equals(\"\\x00a\", \"\\x00b\")} ${crypto::equals(\"\", \"\")} ${crypto::equals(utf8_string(\"\xC3\xA9\"), \"\xC3\xA9\")}`;"));
 		});
 
 		test("random_bytes_and_random_int_come_from_the_operating_system", [this, es, caught]() {
@@ -150,12 +150,12 @@ public:
 				string h = crypto::random_hex(16);
 				bool hex = true;
 				for (int i = 0; i < h.size(); ++i) { if ("0123456789abcdef".find(h.substr(i, 1)) < 0) { hex = false; } }
-				to_string(crypto::random_bytes(0).size()) + " " + crypto::random_bytes(16).size() + " " + crypto::random_bytes(1000).size() + " " + h.size() + " " + (a != b) + " " + hex;)"));
+				`${to_string(crypto::random_bytes(0).size())} ${crypto::random_bytes(16).size()} ${crypto::random_bytes(1000).size()} ${h.size()} ${(a != b)} ${hex}`;)"));
 			check_eq(std::string("true 7"), es(R"(
 				bool in_range = true;
 				for (int i = 0; i < 500; ++i) { int n = crypto::random_int(-3, 3); if (n < -3 || n > 3) { in_range = false; } }
 				int full = crypto::random_int(-9223372036854775807 - 1, 9223372036854775807);
-				to_string(in_range) + " " + crypto::random_int(7, 7);)"));
+				`${to_string(in_range)} ${crypto::random_int(7, 7)}`;)"));
 			check_eq(std::string("crypto::random_bytes count cannot be negative"), caught("crypto::random_bytes(-1);"));
 			check_eq(std::string("crypto::random_hex count cannot be negative"), caught("crypto::random_hex(-2);"));
 			check_eq(std::string("crypto::random_int range is inverted (max < min)"), caught("crypto::random_int(5, 1);"));
@@ -206,10 +206,9 @@ public:
 			check_eq(std::string("60 $2y$04$ true false true false"), es(R"(
 				string h = crypto::password_hash("hunter2", 4);
 				string again = crypto::password_hash("hunter2", 4);
-				to_string(h.size()) + " " + h.substr(0, 7) + " " + crypto::password_verify("hunter2", h) + " " + crypto::password_verify("hunter3", h) + " " +
-				    crypto::password_verify("hunter2", again) + " " + (h == again);)"));
+				`${to_string(h.size())} ${h.substr(0, 7)} ${crypto::password_verify("hunter2", h)} ${crypto::password_verify("hunter3", h)} ${crypto::password_verify("hunter2", again)} ${(h == again)}`;)"));
 			check_eq(std::string("$2y$12$"), es("crypto::password_hash(\"x\").substr(0, 7);"));
-			check_eq(std::string("true"), es("string long = string::repeat(\"p\", 72); to_string(crypto::password_verify(long + \"ignored\", crypto::password_hash(long, 4)));"));
+			check_eq(std::string("true"), es("string long = string::repeat(\"p\", 72); to_string(crypto::password_verify(`${long}ignored`, crypto::password_hash(long, 4)));"));
 			check_eq(std::string("crypto::password_hash cost must be 4 to 31"), caught("crypto::password_hash(\"x\", 3);"));
 			check_eq(std::string("crypto::password_hash cost must be 4 to 31"), caught("crypto::password_hash(\"x\", 32);"));
 			check_eq(std::string("crypto::password_hash: the password contains a NUL byte"), caught("crypto::password_hash(\"a\\x00b\", 4);"));
@@ -252,21 +251,21 @@ public:
 			stdlib::register_all(*engine);
 			engine->disable(privilege::filesystem);
 			check_eq(std::string("Insufficient privilege: filesystem."), engine->execute("string m = \"\"; try { crypto::sha256_file(\"anything.bin\"); } catch (e) { m = e; } m;").as<std::string>());
-			check_eq(std::string("ba7816bf 4"), engine->execute("crypto::sha256(\"abc\").substr(0, 8) + \" \" + crypto::random_bytes(4).size();").as<std::string>());
+			check_eq(std::string("ba7816bf 4"), engine->execute("`${crypto::sha256(\"abc\").substr(0, 8)} ${crypto::random_bytes(4).size()}`;").as<std::string>());
 		});
 
 		test("the_pure_functions_and_secure_randomness_run_in_parallel_bodies_and_sha256_file_stays_serial", [this, caught]() {
 			const std::string source = R"(
 				array<string> texts = [];
-				for (int i = 0; i < 3000; ++i) { texts.push("<" + i + "> & '" + i + "'"); }
+				for (int i = 0; i < 3000; ++i) { texts.push(`<${i}> & '${i}'`); }
 				array<string> serial = [];
-				for (auto t : texts) { serial.push(crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + crypto::equals(t, "x")); }
-				var parallel = parallel_transform(texts, [](string t) { return crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + crypto::equals(t, "x"); });
+				for (auto t : texts) { serial.push(crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + to_string(crypto::equals(t, "x"))); }
+				var parallel = parallel_transform(texts, [](string t) { return crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + to_string(crypto::equals(t, "x")); });
 				array<string> looped = texts;
-				parallel_for (auto& t : looped) { t = crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + crypto::equals(t, "x"); }
+				parallel_for (auto& t : looped) { t = crypto::sha256(t) + crypto::hmac_sha512("k", t) + crypto::md5(t) + to_string(crypto::equals(t, "x")); }
 				array<int> sizes = [0, 0, 0, 0, 0, 0, 0, 0];
 				parallel_for (auto& n : sizes) { n = crypto::random_bytes(8).size() + crypto::random_int(0, 0); }
-				to_string(to_json(parallel) == to_json(serial)) + " " + to_string(to_json(looped) == to_json(serial)) + " " + sizes.join(",");)";
+				`${to_string(to_json(parallel) == to_json(serial))} ${to_string(to_json(looped) == to_json(serial))} ${sizes.join(",")}`;)";
 			for (size_t workers : {size_t(1), size_t(4), size_t(8)}) {
 				auto engine = make_engine();
 				stdlib::register_all(*engine);

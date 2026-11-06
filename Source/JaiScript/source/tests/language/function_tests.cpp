@@ -1415,8 +1415,8 @@ public:
             check_eq(std::string("AB33|1,2,3,4"), engine->execute(R"(
                 class O { var x = 0; }
                 string log = "";
-                void mix(var& r, string n) { log = log + "A"; r = 33; }
-                void mix(var r, int n) { log = log + "B"; r = 44; }
+                void mix(var& r, string n) { log = `${log}A`; r = 33; }
+                void mix(var r, int n) { log = `${log}B`; r = 44; }
                 var o = new O();
                 mix(o.x, "s");
                 mix(o.x, 5);
@@ -1424,7 +1424,7 @@ public:
                 int f(string a) { return 2; }
                 int f(int a, int b) { return 3; }
                 int f(float a) { return 4; }
-                log + o.x + "|" + f(7) + "," + f("x") + "," + f(1, 2) + "," + f(2.5);
+                `${log}${o.x}|${f(7)},${f("x")},${f(1, 2)},${f(2.5)}`;
             )").to_string());
         });
 

@@ -396,7 +396,7 @@ public:
             stdlib::register_all(*e);
             auto r = e->execute(R"(
                 string log = "";
-                class Node { shared_ptr<Node> next = null; int id = 0; Node(int a) { id = a; } ~Node() { log = log + "~" + id; } }
+                class Node { shared_ptr<Node> next = null; int id = 0; Node(int a) { id = a; } ~Node() { log = `${log}~${id}`; } }
                 class Special : Node { int extra = 9; Special(int a) : super(a) {} function _get_id() -> int { return 100; } }
                 class Walker {
                     shared_ptr<Node> cur = null; int steps = 0; int state = 1; float f = 0.5;
@@ -422,18 +422,18 @@ public:
                     shared_ptr<Node> a = new Node(1); shared_ptr<Node> b = new Special(2); shared_ptr<Node> c = new Node(3);
                     a.next = b; b.next = c;
                     Walker w = Walker(); w.cur = a; a = null;
-                    int s1 = w.walk(2); log = log + "|";
+                    int s1 = w.walk(2); log = `${log}|`;
                     int s2 = w.walk(5);
                     string err = w.missing();
                     shared_ptr<Special> sp = new Special(7); w.retarget(sp); sp = null;
                     int s3 = w.walk(1);
                     b = null; c = null; w.drop();
-                    return "" + s1 + "," + s2 + "," + s3 + "," + w.steps + "," + w.state + "," + w.f + "|" + err + "|" + log;
+                    return `${s1},${s2},${s3},${w.steps},${w.state},${w.f}|${err}|${log}`;
                 }
                 string first = run();
                 Walker g = Walker(); g.cur = new Node(5);
                 int t = g.walk(3); g.drop();
-                return first + "|" + t + "," + g.state + "|" + log;
+                return `${first}|${t},${g.state}|${log}`;
             )");
             check_eq(std::string("101,3,100,4,31,31.0|Cannot access 'id' on null ('cur' is null)|~1|~7~2~3|5,3|~1|~7~2~3~5"), r.to_string(),
                      "handle stores, declarations and member reads through bare fields");
@@ -453,11 +453,11 @@ public:
                 A a = A(); B b = B(); C c = C();
                 int s = 0;
                 for (int i = 0; i < 3; ++i) { s = s + a.f() + b.f() + c.f(); G = G + 1; }
-                return "" + s + " " + a.f() + " " + b.f() + " " + c.f() + " " + b.g();
+                return `${s} ${a.f()} ${b.f()} ${c.f()} ${b.g()}`;
             )");
             check_eq(std::string("405 16 103 20 100"), r.to_string(), "the program scope's names and the members that take them");
             e->execute("class A { int n = 1; int K = 50; int f() { return G + K * n; } int g() { return G; } }");
-            auto r2 = e->execute("return \"\" + a.f() + \" \" + b.f() + \" \" + c.f();");
+            auto r2 = e->execute("return `${a.f()} ${b.f()} ${c.f()}`;");
             check_eq(std::string("63 150 63"), r2.to_string(), "a reloaded class's own field of the name");
         });
 
@@ -497,9 +497,9 @@ public:
                 class Sub : Acc { int G = 70; }
                 Acc a = Acc(); Sub b = Sub();
                 a.step(3); b.step(2);
-                string before = "" + a.get() + " " + a.getf() + " " + a.getv() + " " + b.get() + " " + b.glob() + " " + a.glob();
+                string before = `${a.get()} ${a.getf()} ${a.getv()} ${b.get()} ${b.glob()} ${a.glob()}`;
                 a.blend();
-                return before + " | " + a.get() + " " + a.getv() + " " + a.u;
+                return `${before} | ${a.get()} ${a.getv()} ${a.u}`;
             )");
             check_eq(std::string("6 5.0 4 4 70 7 | 10 4.5 4"), r.to_string(), "returns and stores through the fields");
             e->execute(R"(
@@ -507,7 +507,7 @@ public:
                     void step(int k) { for (int i = 0; i < k; ++i) { n = n + 3; f = f + 1.0; v = v + 2; } }
                     int get() { return n; } float getf() { return f; } var getv() { return v; } int glob() { return G; } }
             )");
-            auto r2 = e->execute(R"(Acc c = Acc(); c.step(2); return "" + c.get() + " " + c.getf() + " " + c.getv() + " " + c.glob() + " " + b.glob();)");
+            auto r2 = e->execute(R"(Acc c = Acc(); c.step(2); return `${c.get()} ${c.getf()} ${c.getv()} ${c.glob()} ${b.glob()}`;)");
             check_eq(std::string("6 2.5 5 30 70"), r2.to_string(), "the reloaded layout's returns and stores");
         });
 
@@ -542,7 +542,7 @@ public:
                     Counter() { made = made + 1; }
                     int bump() { n = n + 1; return n; }
                     static int twice(int x) { return x * 2; }
-                    int deep(int k) { if (k == 0) { throw "bottom " + n; } return deep(k - 1) + 1; }
+                    int deep(int k) { if (k == 0) { throw `bottom ${n}`; } return deep(k - 1) + 1; }
                     int chain() { return bump() + twice(n) + helper(this); } }
                 int helper(Counter& c) { return c.n; }
                 string run() {
@@ -554,9 +554,9 @@ public:
                         s = s + c.bump() + Counter::twice(i) + f(i) + c.chain();
                         Counter d = Counter();
                         s = s + d.bump();
-                        try { c.deep(2); } catch (e) { caught = "" + e; }
+                        try { c.deep(2); } catch (e) { caught = `${e}`; }
                     }
-                    return "" + s + " " + c.n + " " + Counter::made + " " + caught;
+                    return `${s} ${c.n} ${Counter::made} ${caught}`;
                 }
                 return run();
             )");
@@ -580,7 +580,7 @@ public:
             auto r = e->execute(R"(
                 int seven() { return 7; }
                 class Shape { int side = 2; int area() { return 0; } int twice() { return area() * 2; } int scaled(int k) { return area() * k; }
-                    int probe() { return seven() + twice(); } int sink(int k) { if (k == 0) { throw "sink " + side; } return sink(k - 1); } }
+                    int probe() { return seven() + twice(); } int sink(int k) { if (k == 0) { throw `sink ${side}`; } return sink(k - 1); } }
                 class Sq : Shape { override int area() { return side * side; } }
                 class Tri : Shape { override int area() { return side * side / 2; } }
                 class Hex : Shape { override int area() { return side * side * 3; } }
@@ -595,10 +595,10 @@ public:
                 array<Shape> all = [Sq(), Tri(), Hex()];
                 int before = sweep(all);
                 string caught = "";
-                try { all[1].sink(3); } catch (x) { caught = "" + x; }
+                try { all[1].sink(3); } catch (x) { caught = `${x}`; }
                 class Run { int go(Shape& s) { int a = s.area(); redefine(); return a * 1000 + s.area(); } }
                 int mid = Run().go(all[0]);
-                return "" + before + " " + caught + " " + mid + " " + sweep(all) + " " + seven();
+                return `${before} ${caught} ${mid} ${sweep(all)} ${seven()}`;
             )");
             check_eq(std::string("872 sink 2 4400 15920 7"), r.to_string(), "the results through every lane");
             std::string shape;
@@ -613,9 +613,9 @@ public:
                 class Deep { int down(int k) { return k == 0 ? 0 : down(k - 1) + 1; } int bare() { return again(); } int again() { return bare(); } }
                 string a = "";
                 string b = "";
-                try { Deep().down(1000); } catch (x) { a = "" + x; }
-                try { Deep().bare(); } catch (x) { b = "" + x; }
-                return a + " | " + b + " | " + Deep().down(50);
+                try { Deep().down(1000); } catch (x) { a = `${x}`; }
+                try { Deep().bare(); } catch (x) { b = `${x}`; }
+                return `${a} | ${b} | ${Deep().down(50)}`;
             )");
             check_eq(std::string("Maximum recursion depth exceeded - possible infinite recursion | Maximum recursion depth exceeded - possible infinite recursion | 50"),
                 deep.to_string(),
@@ -633,7 +633,7 @@ public:
             stdlib::register_all(*e);
             auto r = e->execute(R"(
                 class P { int v = 3; float w = 0.25; int get() { return v; } float getw() { return w; } var any() { return v; }
-                    int bump() { v = v + 1; return v; } int fail() { throw "bad " + v; return 0; } }
+                    int bump() { v = v + 1; return v; } int fail() { throw `bad ${v}`; return 0; } }
                 class Q : P { var any() override { return 1.5; } }
                 string run() {
                     P p = P(); shared_ptr<P> q = new Q();
@@ -646,7 +646,7 @@ public:
                     int sz = arr.size() + arr.pop();
                     string err = "";
                     try { int u = s + p.fail(); } catch (e) { err = e; }
-                    return "" + s + " " + t + " " + x + " " + y + " " + z + " " + sz + " " + arr.size() + " " + err;
+                    return `${s} ${t} ${x} ${y} ${z} ${sz} ${arr.size()} ${err}`;
                 }
                 return run();
             )");
@@ -1368,7 +1368,7 @@ public:
                 class Other { int poke(o) { return o.secret; } }
                 var c = C();
                 var d = D();
-                var out = "" + c.peek() + "|" + c.pub + "|" + c.lam() + "|" + d.useProt();
+                var out = `${c.peek()}|${c.pub}|${c.lam()}|${d.useProt()}`;
                 try { var a = c.secret; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
                 try { var b = c.prot; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
                 try { var h = c.hidden_helper(); out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
@@ -1416,9 +1416,9 @@ public:
                     int badPrivM() { return super::corem(); }
                 }
                 var d = Derived();
-                var out = "" + d.okProt();
-                try { var a = d.badPriv(); out = out + "|" + a; } catch (e) { out = out + "|" + e; }
-                try { var b = d.badPrivM(); out = out + "|" + b; } catch (e) { out = out + "|" + e; }
+                var out = `${d.okProt()}`;
+                try { var a = d.badPriv(); out = `${out}|${a}`; } catch (e) { out = `${out}|${e}`; }
+                try { var b = d.badPrivM(); out = `${out}|${b}`; } catch (e) { out = `${out}|${e}`; }
                 out;
             )";
             const std::string expected = "24|1|11";
@@ -1442,7 +1442,7 @@ public:
                     static function bump() { counter += 1; return counter; }
                 }
                 function wantsRef(int& r) { r = 99; }
-                var out = "" + S::bump();
+                var out = `${S::bump()}`;
                 try { var a = S::counter; out = out + "|LEAK"; } catch (e) { out = out + "|" + e; }
                 try { S::counter = 0; out = out + "|WROTE"; } catch (e) { out = out + "|w:" + e; }
                 var s = S();

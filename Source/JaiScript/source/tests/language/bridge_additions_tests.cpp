@@ -150,14 +150,14 @@ public:
         test("array_helper_callback_throw_propagates", [this]() {
             check_eq(std::string("caught: boom at 2\n[1,2,3]\n"), run_output(R"JS(
                 var a = [1, 2, 3];
-                try { auto mapped = array::map(a, x => { if (x == 2) { throw "boom at " + x; } return x; }); } catch (e) { print("caught: ", e); }
+                try { auto mapped = array::map(a, x => { if (x == 2) { throw `boom at ${x}`; } return x; }); } catch (e) { print("caught: ", e); }
                 print(to_json(a));
             )JS"));
         });
 
         test("a_class_map_method_wins", [this]() {
             check_eq(std::string("mapped 3\n"), run_output(R"JS(
-                class Grid { string map(int n) { return "mapped " + n; } }
+                class Grid { string map(int n) { return `mapped ${n}`; } }
                 Grid g;
                 print(g.map(3));
             )JS"));
@@ -374,7 +374,7 @@ public:
         // ------------------------------------------------------------------ print
         test("print_uses_to_string", [this]() {
             check_eq(std::string("P(1)\nP(1) and 3\nat P(1)!\nPlain{y: 2}\n{x} 2\n"), run_output(R"JS(
-                class P { int x = 1; string to_string() { return "P(" + x + ")"; } }
+                class P { int x = 1; string to_string() { return `P(${x})`; } }
                 class Plain { int y = 2; }
                 class Braces { string to_string() { return "{x}"; } }
                 P p;
@@ -481,7 +481,7 @@ public:
             check_eq(std::string("arrow=20 potion=3 \n{\"arrow\":20,\"potion\":3}\n{\"arrow\":21,\"potion\":4}\n{\"a\":10,\"b\":20}\n"), run_output(R"JS(
                 var inv = {"potion": 3, "arrow": 20};
                 string line = "";
-                for (auto [k, v] : inv) { line += k + "=" + v + " "; v = 0; }
+                for (auto [k, v] : inv) { line += `${k}=${v} `; v = 0; }
                 print(line);
                 print(to_json(inv));
                 for (auto& [k, v] : inv) { v += 1; }

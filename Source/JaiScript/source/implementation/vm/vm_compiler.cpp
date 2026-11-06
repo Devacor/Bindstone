@@ -1662,7 +1662,7 @@ JAI_NOINLINE void vm_compiler::compile_return(const statement_ptr& stmt) {
 				const auto* bin = static_cast<const binary_expr*>(rs->value.get());
 				const token_type bop = bin->op.type;
 				const bool logical = (bop == token_type::ampersand_ampersand || bop == token_type::pipe_pipe || bop == token_type::question_question);
-				if (!logical && chunk_->code.back().op == opcode::op_binary) {
+				if (!logical && chunk_->code.back().op == opcode::op_binary && chunk_->code.back().c == 0) {
 					chunk_->code.back().op = opcode::op_return_binary;
 					return;
 				}
@@ -3342,7 +3342,7 @@ static member_expr* fusable_member_container(expression* e) {
 static binary_expr* index_binary_candidate(expression* e) {
 	if (e->get_type() != node_type::binary_expr) return nullptr;
 	auto* b = static_cast<binary_expr*>(e);
-	if (b->op.type == token_type::left_bracket ||
+	if (b->op.joins_text || b->op.type == token_type::left_bracket ||
 	    b->op.type == token_type::ampersand_ampersand ||
 	    b->op.type == token_type::pipe_pipe ||
 	    b->op.type == token_type::question_question) {
@@ -6396,7 +6396,7 @@ bool vm_compiler::fusable_index_expr(const expression* e) {
 // before right): the read lands in a temp first and the index binary keeps direct operands; the caller holds the
 // container to a frame slot (quiet_partner), so nothing raises ahead of the hoisted read there either
 bool vm_compiler::index_read_partner_shape(const binary_expr* rb) {
-	if (!detail::transient_read_marker::is_value_binary_op(rb->op.type)) return false;
+	if (rb->op.joins_text || !detail::transient_read_marker::is_value_binary_op(rb->op.type)) return false;
 	auto plain = [](const expression* e) { return e->get_type() == node_type::identifier_expr || e->get_type() == node_type::literal_expr; };
 	const bool lsub = fusable_index_expr(rb->left.get()) && quiet_partner(rb->right.get());
 	const bool rsub = fusable_index_expr(rb->right.get()) && quiet_partner(rb->left.get());
@@ -7699,7 +7699,7 @@ bool vm_compiler::lift_temp_only(const expression* c) {
 static bool lifted_partner(const expression* e) {
 	if (e->get_type() != node_type::binary_expr) return false;
 	const auto* b = static_cast<const binary_expr*>(e);
-	return b->op.type != token_type::left_bracket && detail::transient_read_marker::is_value_binary_op(b->op.type);
+	return !b->op.joins_text && b->op.type != token_type::left_bracket && detail::transient_read_marker::is_value_binary_op(b->op.type);
 }
 
 bool vm_compiler::lift_partners_ok(const binary_expr* b) {
@@ -7715,7 +7715,7 @@ int vm_compiler::lift_fusible_nodes(const expression* e, int budget) {
 	if (lift_operand_shape(e)) { return 0; }
 	if (e->get_type() != node_type::binary_expr) { return -1; }
 	const auto* b = static_cast<const binary_expr*>(e);
-	if (b->op.type == token_type::left_bracket) { return -1; }
+	if (b->op.type == token_type::left_bracket || b->op.joins_text) { return -1; }   // a template string's own `+` joins as an append chain
 	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
 	if (b->left->get_type() == node_type::literal_expr && b->right->get_type() == node_type::literal_expr) { return -1; }
 	if (!lift_partners_ok(b) || budget <= 0) { return -1; }
@@ -7740,6 +7740,7 @@ bool vm_compiler::numeric_value_binary(expression* e) {
 // A left-deep `+` chain of two or more from a string literal (a template string), or of strings the checker typed: compile_binary
 // emits it as appends, never as a fused binary, ahead of every other shape decision
 static bool string_append_chain(const binary_expr* b) {
+	if (b->op.type == token_type::plus && b->op.joins_text) return true;   // a template string's head is its literal: one link joins as well
 	size_t links = 0;
 	const expression* e = b;
 	while (e->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(e)->op.type == token_type::plus) {
@@ -7873,7 +7874,7 @@ JAI_NOINLINE void vm_compiler::compile_binary(const std::shared_ptr<binary_expr>
 		const binary_expr* b = it->get();
 		deref_ahead_of(b->left.get(), b->right.get());
 		compile_expression(b->right);
-		emit(opcode::op_binary, static_cast<uint32_t>(b->op.type), binary_shape_none);
+		emit(opcode::op_binary, static_cast<uint32_t>(b->op.type), binary_shape_none, b->op.joins_text ? 1u : 0u);
 	}
 }
 
@@ -7931,8 +7932,10 @@ JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binar
 		uint32_t first_hint = static_cast<uint32_t>((std::min)(hint, size_t{4096}));
 		concat_proto run;
 		uint32_t run_env = 0;
+		bool run_joins = false;
 		auto flush = [&]() {
 			if (run.pieces.empty()) return;
+			run.joins_text = run_joins;
 			run.hint = first_hint;
 			first_hint = 0;
 			chunk_->concat_protos.push_back(std::move(run));
@@ -7942,14 +7945,17 @@ JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binar
 		};
 		for (auto it = chain.rbegin(); it != chain.rend(); ++it) {
 			const expression_ptr& piece = (*it)->right;
+			const uint32_t joins = (*it)->op.joins_text ? 1u : 0u;
 			const bool literal = piece->get_type() == node_type::literal_expr;
 			const bool name = piece->get_type() == node_type::identifier_expr;
 			if (literal || name) {
 				fused_operand o = make_fused_operand(piece);
 				// a type-constructor name, or a compiler temp (a grafted leaf's result), reads through its own LOAD, which names the slot
 				if (name && ((o.load_flags & load_flag_type_ctor) || (o.slot != k_invalid_u32 && o.slot >= chunk_->first_temp_slot))) {
-					flush(); compile_expression(piece); emit(opcode::op_concat_append, first_hint); first_hint = 0; continue;
+					flush(); compile_expression(piece); emit(opcode::op_concat_append, first_hint, joins); first_hint = 0; continue;
 				}
+				if (!run.pieces.empty() && run_joins != (joins != 0)) { flush(); }
+				run_joins = joins != 0;
 				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32 && run_env == 3) { flush(); }   // three environment reads per op (the lookup cache's roles)
 				if (o.slot == k_invalid_u32 && o.const_index == k_invalid_u32) { ++run_env; }
 				run.pieces.push_back(std::move(o));
@@ -7957,7 +7963,7 @@ JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binar
 			}
 			flush();
 			compile_expression(piece);
-			emit(opcode::op_concat_append, first_hint);
+			emit(opcode::op_concat_append, first_hint, joins);
 			first_hint = 0;
 		}
 		flush();

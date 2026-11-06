@@ -74,66 +74,66 @@ public:
         test("stopwatch_start_elapsed_stop", [expect]() {
             expect(R"(
                 time::stopwatch sw;
-                string out = "" + sw.elapsed() + " " + sw.is_running() + " " + sw.is_paused();
+                string out = `${sw.elapsed()} ${sw.is_running()} ${sw.is_paused()}`;
                 sw.start(); advance(1.5);
-                out += " | " + sw.elapsed() + " " + sw.is_running();
+                out += ` | ${sw.elapsed()} ${sw.is_running()}`;
                 advance(0.5);
-                out += " | " + sw.stop() + " " + sw.elapsed() + " " + sw.is_running() + " " + sw.stop();
+                out += ` | ${sw.stop()} ${sw.elapsed()} ${sw.is_running()} ${sw.stop()}`;
                 out;)", "0.0 false false | 1.5 true | 2.0 0.0 false 0.0", "idle, running, stopped");
         });
 
         test("stopwatch_start_restarts_from_zero", [expect]() {
             expect(R"(
                 time::stopwatch sw; sw.start(); advance(2.0);
-                string out = "" + sw.elapsed();
+                string out = `${sw.elapsed()}`;
                 sw.start();
-                out += " " + sw.elapsed();
+                out += ` ${sw.elapsed()}`;
                 advance(1.0);
-                out += " " + sw.elapsed();
+                out += ` ${sw.elapsed()}`;
                 sw.pause(); advance(3.0); sw.start();
-                out += " " + sw.elapsed() + " " + sw.is_running() + " " + sw.is_paused();
+                out += ` ${sw.elapsed()} ${sw.is_running()} ${sw.is_paused()}`;
                 out;)", "2.0 0.0 1.0 0.0 true false", "start on a running or paused stopwatch");
         });
 
         test("stopwatch_pause_and_resume", [expect]() {
             expect(R"(
                 time::stopwatch sw; sw.start(); advance(1.0);
-                string out = "" + sw.pause() + " " + sw.is_paused() + " " + sw.is_running();
+                string out = `${sw.pause()} ${sw.is_paused()} ${sw.is_running()}`;
                 advance(5.0);
-                out += " | " + sw.elapsed() + " " + sw.pause();
-                out += " | " + sw.resume() + " " + sw.is_running() + " " + sw.is_paused();
+                out += ` | ${sw.elapsed()} ${sw.pause()}`;
+                out += ` | ${sw.resume()} ${sw.is_running()} ${sw.is_paused()}`;
                 advance(2.0);
-                out += " | " + sw.elapsed() + " " + sw.resume();
+                out += ` | ${sw.elapsed()} ${sw.resume()}`;
                 out;)", "1.0 true false | 1.0 1.0 | 1.0 true false | 3.0 3.0", "paused time never counts");
             expect(R"(
                 time::stopwatch a;
-                string out = "" + a.pause() + " " + a.is_paused() + " " + a.is_running();
-                out += " | " + a.resume() + " " + a.is_running();
+                string out = `${a.pause()} ${a.is_paused()} ${a.is_running()}`;
+                out += ` | ${a.resume()} ${a.is_running()}`;
                 advance(0.5);
-                out += " | " + a.elapsed();
+                out += ` | ${a.elapsed()}`;
                 out;)", "0.0 false false | 0.0 true | 0.5", "pause on idle is a no-op, resume on idle starts");
         });
 
         test("stopwatch_delta_sequences", [expect]() {
             expect(R"(
                 time::stopwatch sw;
-                string out = "" + sw.delta() + " " + sw.is_running();
-                advance(0.25); out += " " + sw.delta();
-                advance(0.5); out += " " + sw.delta();
-                out += " " + sw.delta();
+                string out = `${sw.delta()} ${sw.is_running()}`;
+                advance(0.25); out += ` ${sw.delta()}`;
+                advance(0.5); out += ` ${sw.delta()}`;
+                out += ` ${sw.delta()}`;
                 sw.pause(); advance(10.0);
-                out += " | " + sw.delta();
+                out += ` | ${sw.delta()}`;
                 sw.resume(); advance(1.0);
-                out += " " + sw.delta() + " | " + sw.elapsed();
+                out += ` ${sw.delta()} | ${sw.elapsed()}`;
                 out;)", "0.0 true 0.25 0.5 0.0 | 0.0 1.0 | 1.75", "delta starts, measures since the last delta, skips pauses");
             expect(R"(
                 time::stopwatch sw; sw.start(); advance(1.0);
-                string out = "" + sw.delta();
+                string out = `${sw.delta()}`;
                 advance(1.0);
-                out += " " + sw.stop();
-                out += " " + sw.delta() + " " + sw.is_running();
+                out += ` ${sw.stop()}`;
+                out += ` ${sw.delta()} ${sw.is_running()}`;
                 advance(0.5);
-                out += " " + sw.delta() + " " + sw.elapsed();
+                out += ` ${sw.delta()} ${sw.elapsed()}`;
                 out;)", "1.0 2.0 0.0 true 0.5 0.5", "stop resets elapsed and delta");
         });
 
@@ -145,15 +145,15 @@ public:
                 time::stopwatch c = a;
                 b.pause(); advance(1.0);
                 c.stop();
-                string out = "" + a.elapsed() + " " + b.elapsed() + " " + c.elapsed() + " " + a.is_running() + " " + b.is_paused() + " " + c.is_running();
-                out += " | " + lap(a) + " " + a.is_running() + " " + a.elapsed();
+                string out = `${a.elapsed()} ${b.elapsed()} ${c.elapsed()} ${a.is_running()} ${b.is_paused()} ${c.is_running()}`;
+                out += ` | ${lap(a)} ${a.is_running()} ${a.elapsed()}`;
                 out;)", "2.0 1.0 0.0 true true false | false true 2.0", "copies are independent");
             expect(R"(
                 class Lap { time::stopwatch sw; }
                 Lap l; l.sw.start(); advance(0.5);
                 Lap m = l;
                 m.sw.stop();
-                "" + l.sw.is_running() + " " + l.sw.elapsed() + " " + m.sw.is_running() + " " + type_of(l.sw);)",
+                `${l.sw.is_running()} ${l.sw.elapsed()} ${m.sw.is_running()} ${type_of(l.sw)}`;)",
                 "true 0.5 false time::stopwatch", "a stopwatch field copies with its instance");
         });
 
@@ -190,8 +190,8 @@ public:
         // ------------------------------------------------------------ engine and entry clocks
 
         test("now_and_engine_elapsed_follow_the_source", [this, expect]() {
-            expect(R"("" + time::now() + " " + time::engine_elapsed();)", "100.0 100.0", "a host source's reading is engine_elapsed");
-            expect(R"(advance(1.5); "" + time::now() + " " + time::engine_elapsed();)", "101.5 101.5", "advancing the host clock");
+            expect(R"(`${time::now()} ${time::engine_elapsed()}`;)", "100.0 100.0", "a host source's reading is engine_elapsed");
+            expect(R"(advance(1.5); `${time::now()} ${time::engine_elapsed()}`;)", "101.5 101.5", "advancing the host clock");
             for (bool use_vm : {false, true}) {
                 auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
@@ -212,7 +212,7 @@ public:
                 e->execute("function f() { advance(0.5); return time::execute_elapsed(); }");
                 auto f = e->get_variable("f");
                 check_eq(std::string("0.5"), f.as_function()({}).value().to_string(), std::string("a script function the host calls") + be);
-                check_eq(std::string("2.0 2.0"), e->execute(R"JAI(advance(1.0); var inner = nested("advance(1.0); time::execute_elapsed()"); inner + " " + time::execute_elapsed();)JAI").to_string(),
+                check_eq(std::string("2.0 2.0"), e->execute(R"JAI(advance(1.0); var inner = nested("advance(1.0); time::execute_elapsed()"); `${inner} ${time::execute_elapsed()}`;)JAI").to_string(),
                          std::string("a nested execute belongs to the running entry") + be);
                 const int before = clk.mono_reads;
                 e->execute("1;");
@@ -228,7 +228,7 @@ public:
                 const int before = clk.mono_reads;
                 e->execute("1;");
                 check_eq(0, clk.mono_reads - before, std::string("no program names execute_elapsed: entries read nothing") + be);
-                check_eq(std::string("0.0 1.0"), e->execute(R"(advance(1.0); var a = reflect::call("time::execute_elapsed"); advance(1.0); var b = reflect::call("time::execute_elapsed"); "" + a + " " + b;)").to_string(),
+                check_eq(std::string("0.0 1.0"), e->execute(R"(advance(1.0); var a = reflect::call("time::execute_elapsed"); advance(1.0); var b = reflect::call("time::execute_elapsed"); `${a} ${b}`;)").to_string(),
                          std::string("the first call stamps the entry") + be);
                 check_eq(std::string("1.0"), e->execute(R"(advance(1.0); reflect::call("time::execute_elapsed");)").to_string(), std::string("later entries are stamped") + be);
             }
@@ -249,8 +249,8 @@ public:
         // ------------------------------------------------------------ wall clock
 
         test("unix_time_and_unix_ms", [this, expect]() {
-            expect(R"("" + time::unix_ms() + " " + (time::unix_time() - 1700000000.0 > 0.1229) + " " + (time::unix_time() - 1700000000.0 < 0.1231);)", "1700000000123 true true", "a host wall clock");
-            expect(R"(advance(0.5); "" + time::unix_ms();)", "1700000000623", "advancing the wall clock");
+            expect(R"(`${time::unix_ms()} ${(time::unix_time() - 1700000000.0 > 0.1229)} ${(time::unix_time() - 1700000000.0 < 0.1231)}`;)", "1700000000123 true true", "a host wall clock");
+            expect(R"(advance(0.5); `${time::unix_ms()}`;)", "1700000000623", "advancing the wall clock");
             for (bool use_vm : {false, true}) {
                 auto e = jai::foundry::make_default_engine();
                 e->set_backend(use_vm ? backend_type::vm : backend_type::interpreter);
@@ -269,7 +269,7 @@ public:
             const std::string all = "${year}|${month}|${month_name}|${month_short}|${day}|${weekday_name}|${weekday_short}|${hours}|${military_hours}|${minutes}|${seconds}|${milliseconds}|${am_pm}";
             expect("time::date_now(\"" + all + "\") == time::local_now().format(\"" + all + "\");", "true", "every placeholder, one frozen instant");
             expect(R"(time::date_now("${year}-${month:02}-${day:02} ${military_hours:02}:${minutes:02}:${seconds:02}.${milliseconds:03}") == time::local_now().format("${year}-${month:02}-${day:02} ${military_hours:02}:${minutes:02}:${seconds:02}.${milliseconds:03}");)", "true", "format specs");
-            expect(R"(var d = time::local_now(); time::date_now("${milliseconds:03}") + " " + d.millisecond;)", "123 123", "milliseconds come from the wall clock");
+            expect(R"(var d = time::local_now(); `${time::date_now("${milliseconds:03}")} ${d.millisecond}`;)", "123 123", "milliseconds come from the wall clock");
             expect_error(R"(try { time::date_now("${nope}"); } catch (e) { return e; } return "no-error";)", "time::date_now: unknown placeholder '${nope}'", "an unknown placeholder");
             expect_error(R"(try { var n = 5; time::date_now(n); } catch (e) { return e; } return "no-error";)", "time::date_now expects a string template", "a non-string template");
         });
@@ -294,11 +294,11 @@ public:
 
         test("date_fields_and_validation", [expect, expect_error]() {
             expect(R"(var d = time::utc_date(2024, 2, 29, 23, 59, 58, 999);
-                "" + d.year + "-" + d.month + "-" + d.day + " " + d.hour + ":" + d.minute + ":" + d.second + "." + d.millisecond + " " + d.weekday + " " + d.yearday + " " + d.utc + " " + d.to_string();)",
+                `${d.year}-${d.month}-${d.day} ${d.hour}:${d.minute}:${d.second}.${d.millisecond} ${d.weekday} ${d.yearday} ${d.utc} ${d.to_string()}`;)",
                    "2024-2-29 23:59:58.999 4 60 true 2024-02-29T23:59:58.999Z", "field reads");
-            expect(R"(time::date z; string before = z.to_string(); z.year = 2000; z.month = 2; z.day = 29; z.hour = 12; z.minute = 30; z.second = 15; z.millisecond = 250; before + " " + z.to_string() + " " + type_of(z);)",
+            expect(R"(time::date z; string before = z.to_string(); z.year = 2000; z.month = 2; z.day = 29; z.hour = 12; z.minute = 30; z.second = 15; z.millisecond = 250; `${before} ${z.to_string()} ${type_of(z)}`;)",
                    "1970-01-01T00:00:00.000Z 2000-02-29T12:30:15.250Z time::date", "default date and field stores");
-            expect(R"(time::utc_date(2026, 12, 31).yearday + " " + time::utc_date(2024, 12, 31).yearday + " " + time::utc_date(1970, 1, 1).weekday + " " + time::utc_date(2000, 1, 1).weekday;)",
+            expect(R"(`${time::utc_date(2026, 12, 31).yearday} ${time::utc_date(2024, 12, 31).yearday} ${time::utc_date(1970, 1, 1).weekday} ${time::utc_date(2000, 1, 1).weekday}`;)",
                    "365 366 4 6", "yearday and weekday");
             const std::string z = "var z = time::utc_date(2000, 2, 29, 12, 30, 15, 250); ";
             const std::pair<const char*, const char*> bad[] = {
@@ -316,8 +316,8 @@ public:
                 {"z.utc = false;", "Cannot assign to 'utc': it is read-only"},
             };
             for (const auto& [store, text] : bad) {
-                expect_error(z + "try { " + store + " } catch (e) { return e + \" / \" + z.to_string(); } return \"no-error\";", text, store);
-                expect_error(z + "try { " + store + " } catch (e) { return e + \" / \" + z.to_string(); } return \"no-error\";", "/ 2000-02-29T12:30:15.250Z", "a refused store leaves the date unchanged");
+                expect_error(z + "try { " + store + " } catch (e) { return `${e} / ${z.to_string()}`; } return \"no-error\";", text, store);
+                expect_error(z + "try { " + store + " } catch (e) { return `${e} / ${z.to_string()}`; } return \"no-error\";", "/ 2000-02-29T12:30:15.250Z", "a refused store leaves the date unchanged");
             }
             expect_error(R"(try { time::utc_date(2023, 2, 29); } catch (e) { return e; } return "no-error";)", "time::date: day 29 does not exist in 2023-02", "constructor validation");
             expect_error(R"(try { time::local_date(2023, 4, 31); } catch (e) { return e; } return "no-error";)", "time::date: day 31 does not exist in 2023-04", "local constructor validation");
@@ -345,18 +345,18 @@ public:
 
         test("date_subtraction_comparisons_between", [expect]() {
             const std::string ab = "var a = time::utc_date(2024, 1, 1); var b = time::utc_date(2024, 1, 2, 12, 0, 0, 500); ";
-            expect(ab + R"("" + (b - a) + " " + (a - b) + " " + (a < b) + " " + (a <= b) + " " + (a > b) + " " + (a >= b) + " " + (a == b) + " " + (a != b);)",
+            expect(ab + R"(`${(b - a)} ${(a - b)} ${(a < b)} ${(a <= b)} ${(a > b)} ${(a >= b)} ${(a == b)} ${(a != b)}`;)",
                    "129600.5 -129600.5 true true false false false true", "subtraction and every comparison");
-            expect(ab + R"(var c = time::utc_date(2024, 1, 1); "" + (a == c) + " " + (a <= c) + " " + (a >= c) + " " + (a < c) + " " + (a != c);)",
+            expect(ab + R"(var c = time::utc_date(2024, 1, 1); `${(a == c)} ${(a <= c)} ${(a >= c)} ${(a < c)} ${(a != c)}`;)",
                    "true true true false false", "equal instants");
-            expect(ab + R"(var m = time::utc_date(2024, 1, 1, 12); "" + m.between(a, b) + " " + a.between(a, b) + " " + b.between(a, b) + " " + m.between(b, a) + " " + b.add_seconds(0.001).between(a, b) + " " + a.add_seconds(-0.001).between(b, a);)",
+            expect(ab + R"(var m = time::utc_date(2024, 1, 1, 12); `${m.between(a, b)} ${a.between(a, b)} ${b.between(a, b)} ${m.between(b, a)} ${b.add_seconds(0.001).between(a, b)} ${a.add_seconds(-0.001).between(b, a)}`;)",
                    "true true true true false false", "inclusive ranges, either order");
-            expect(R"(var l = time::date_from_unix(1700000000); var u = time::date_from_unix(1700000000, true); "" + (l == u) + " " + (l - u) + " " + l.between(u, u) + " " + l.utc + " " + u.utc;)",
+            expect(R"(var l = time::date_from_unix(1700000000); var u = time::date_from_unix(1700000000, true); `${(l == u)} ${(l - u)} ${l.between(u, u)} ${l.utc} ${u.utc}`;)",
                    "true 0.0 true false true", "local and UTC dates compare as instants");
         });
 
         test("date_operators_take_dates", [expect, expect_error]() {
-            expect(R"(var d = time::utc_date(2024, 1, 1); var five = 5; "" + (d == five) + " " + (d != five) + " " + (d == null) + " " + (d != null);)", "false true false true", "equality with a non-date");
+            expect(R"(var d = time::utc_date(2024, 1, 1); var five = 5; `${(d == five)} ${(d != five)} ${(d == null)} ${(d != null)}`;)", "false true false true", "equality with a non-date");
             expect_error(R"(var d = time::utc_date(2024, 1, 1); var five = 5; try { var r = d < five; } catch (e) { return e; } return "no-error";)", "time::date: '<' needs two dates, got int", "ordering needs two dates");
             expect_error(R"(var d = time::utc_date(2024, 1, 1); var s = "x"; try { var r = d - s; } catch (e) { return e; } return "no-error";)", "time::date: '-' needs two dates, got string", "subtraction needs two dates");
             expect_error(R"(var z = time::utc_date(2024, 1, 1); try { z.hour = 1.5; } catch (e) { return e; } return "no-error";)", "time::date: hour takes an int, got float", "a field takes an int");
@@ -365,7 +365,7 @@ public:
         test("date_unix_round_trips", [expect, expect_error]() {
             expect(R"(time::date_from_unix(0, true).to_string() + " " + time::date_from_unix(1700000000.5, true).to_string() + " " + time::date_from_unix(-1, true).to_string() + " " + time::date_from_unix(-0.001, true).to_string();)",
                    "1970-01-01T00:00:00.000Z 2023-11-14T22:13:20.500Z 1969-12-31T23:59:59.000Z 1969-12-31T23:59:59.999Z", "UTC from unix seconds");
-            expect(R"(var d = time::utc_date(2023, 11, 14, 22, 13, 20, 500); "" + d.unix() + " " + d.unix_ms() + " " + (time::date_from_unix(123456789.25, true).unix() == 123456789.25);)",
+            expect(R"(var d = time::utc_date(2023, 11, 14, 22, 13, 20, 500); `${d.unix()} ${d.unix_ms()} ${(time::date_from_unix(123456789.25, true).unix() == 123456789.25)}`;)",
                    "1700000000.5 1700000000500 true", "unix and unix_ms");
             expect(R"(time::date_from_unix(-62135596800, true).to_string() + " " + time::date_from_unix(253402300799.999, true).to_string();)",
                    "0001-01-01T00:00:00.000Z 9999-12-31T23:59:59.999Z", "the supported range's ends");
@@ -378,15 +378,15 @@ public:
         test("local_dates_are_consistent_with_utc", [expect]() {
             expect(R"(var t = 1700000000;
                 var l = time::date_from_unix(t);
-                "" + l.utc + " " + (l.unix() == t) + " " + (l.to_utc().to_string() == time::date_from_unix(t, true).to_string()) + " " + (l.to_utc().to_local().to_string() == l.to_string()) + " " + (time::date_from_unix(t, true).to_local().to_string() == l.to_string());)",
+                `${l.utc} ${(l.unix() == t)} ${(l.to_utc().to_string() == time::date_from_unix(t, true).to_string())} ${(l.to_utc().to_local().to_string() == l.to_string())} ${(time::date_from_unix(t, true).to_local().to_string() == l.to_string())}`;)",
                    "false true true true true", "one instant in both zones");
             expect(R"(var x = time::local_date(2024, 6, 15, 12, 0, 0, 250);
                 var back = time::date_from_unix(x.unix());
-                "" + (back.to_string() == x.to_string()) + " " + x.utc + " " + x.format("${year}-${month}-${day} ${military_hours}:${minutes}.${milliseconds}") + " " + (x.to_utc() == x);)",
+                `${(back.to_string() == x.to_string())} ${x.utc} ${x.format("${year}-${month}-${day} ${military_hours}:${minutes}.${milliseconds}")} ${(x.to_utc() == x)}`;)",
                    "true false 2024-6-15 12:0.250 true", "a local date from fields");
-            expect(R"(var l = time::date_from_unix(1700000000); l.hour = 12; l.minute = 0; var back = time::date_from_unix(l.unix()); "" + back.hour + " " + back.minute + " " + (back.day == l.day);)",
+            expect(R"(var l = time::date_from_unix(1700000000); l.hour = 12; l.minute = 0; var back = time::date_from_unix(l.unix()); `${back.hour} ${back.minute} ${(back.day == l.day)}`;)",
                    "12 0 true", "a local field store then unix");
-            expect(R"("" + (time::local_now() == time::utc_now()) + " " + (time::local_now().to_utc().to_string() == time::utc_now().to_string()) + " " + (time::utc_now().unix_ms() == time::unix_ms()) + " " + time::utc_now().to_string() + " " + time::local_now().utc;)",
+            expect(R"(`${(time::local_now() == time::utc_now())} ${(time::local_now().to_utc().to_string() == time::utc_now().to_string())} ${(time::utc_now().unix_ms() == time::unix_ms())} ${time::utc_now().to_string()} ${time::local_now().utc}`;)",
                    "true true true 2023-11-14T22:13:20.123Z false", "now in both zones");
         });
 
@@ -404,7 +404,7 @@ public:
                 time::date direct = time::utc_date(2020, 1, 1);
                 string names = "";
                 for (time::date x : list) { names += x.format("${day} "); }
-                "" + span(list[1], list[0]) + " " + later(ev.when).format("${month}/${day}") + " " + names + type_of(c) + " " + h.year + " " + direct.year + " " + ev.clock.is_running() + " " + type_of(time::stopwatch());)",
+                `${span(list[1], list[0])} ${later(ev.when).format("${month}/${day}")} ${names}${type_of(c)} ${h.year} ${direct.year} ${ev.clock.is_running()} ${type_of(time::stopwatch())}`;)",
                    "777600.0 5/2 11 2 time::date 1970 2020 false time::stopwatch", "parameters, returns, fields, arrays, references, casts, handles, loops");
         });
 
@@ -437,9 +437,9 @@ public:
         test("reflection_lists_time_functions_and_their_signatures", [expect]() {
             expect(R"(var args = reflect::function_arguments("time::date_from_unix")[0];
                 string out = "";
-                for (auto p : args) { out += p["name"] + ":" + p["type"] + ":" + p["default"] + " "; }
+                for (auto p : args) { out += `${p["name"]}:${p["type"]}:${p["default"]} `; }
                 var fns = reflect::functions();
-                out + fns.contains("time::now") + " " + fns.contains("time::utc_date") + " " + reflect::function_arguments("time::now")[0].size();)",
+                `${out}${fns.contains("time::now")} ${fns.contains("time::utc_date")} ${reflect::function_arguments("time::now")[0].size()}`;)",
                    "arg0:float:false arg1:bool:true true true 0", "declared signatures answer reflection");
         });
 

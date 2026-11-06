@@ -334,7 +334,7 @@ public:
 					});
 				} catch (e) { got = e; }
 				g_after = g_after + 10;
-				"" + g_after + ":" + got;
+				`${g_after}:${got}`;
 			)");
 			check_true(r.as_string().rfind("10:", 0) == 0 && r.as_string().find("nested boom") != std::string::npos, r.as_string());
 			check_false(host_continued, "the host call ended at the callback's error");
@@ -367,7 +367,7 @@ public:
 					});
 				} catch (e) { got = e; }
 				g_after = g_after + 10;
-				"" + g_after + ":" + got;
+				`${g_after}:${got}`;
 			)");
 			check_true(host_saw_failure, "host caught the nested failure with its text");
 			check_eq(std::string("10:callback boom"), r.as_string(), "the callback's own error reached the script after a scrubbed nested failure");
@@ -397,7 +397,7 @@ public:
 			check_eq((int64_t)7, r.as_int(), "callback ran to completion on the outer frame's local");
 			check_true(reported.empty(), "host handled the nested failure; nothing to report");
 			check_eq(std::string("none"),
-				eng->execute("var got = \"none\"; try { invoke([]() -> void { host_eval(\"throw g_boom;\"); }); } catch (e) { got = \"\" + e; } got;").as<std::string>(),
+				eng->execute("var got = \"none\"; try { invoke([]() -> void { host_eval(\"throw g_boom;\"); }); } catch (e) { got = `${e}`; } got;").as<std::string>(),
 				"an unrelated outer try/catch does not see the swallowed nested throw");
 		});
 

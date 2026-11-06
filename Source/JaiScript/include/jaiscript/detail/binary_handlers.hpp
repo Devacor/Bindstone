@@ -9,6 +9,7 @@
 // answers again and asks the class's operator method. The host supplies:
 //   script_value make_int(script_int), make_float(script_float), make_bool(bool); engine* engine()
 //   checked_result<script_value> concat(const script_value&, const script_value&)   // string +, memory-charged
+//   bool joins_text   // a template string's '+': a scalar beside the string becomes text instead of the error
 //   std::optional<checked_result<script_value>> object_arithmetic(l, r, uint64_t method_id)
 //   bool operator_takes(l, r, uint64_t method_id)   // l's class chain has an overload of the operator that takes r
 //   std::optional<checked_result<bool>> object_comparison(l, r, uint64_t method_id)
@@ -27,6 +28,7 @@
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/scalar_ops.hpp>
 #include <jaiscript/detail/char_promotion.hpp>
+#include <jaiscript/detail/string_join.hpp>
 #include <jaiscript/detail/utf8_operands.hpp>
 #include <jaiscript/detail/structural_equality.hpp>
 #include <jaiscript/detail/math_values.hpp>
@@ -97,7 +99,10 @@ namespace jai::detail {
 			return h.make_float(out);
 		}
 		if constexpr (Op == arith_op::add) {
-			if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) { return h.concat(l, r); }
+			if (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING) {
+				if (!h.joins_text && string_beside_scalar(li, ri)) [[unlikely]] { return string_plus_refused(li, ri); }
+				return h.concat(l, r);
+			}
 		}
 		if (math::owns_arithmetic(li, ri)) [[unlikely]] { return math::binary(static_cast<math::bop>(Op), l, r, h.engine()); }
 		return std::nullopt;
@@ -840,7 +845,12 @@ namespace jai::detail {
 		if (char_operands_promote(li, ri)) [[unlikely]] {
 			return evaluate_arithmetic(h, char_promoted(left, h.engine()), op, char_promoted(right, h.engine()), compound);
 		}
-		if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) { return h.concat(left, right); }
+		if (op == token_type::plus && (li == script_value::TYPEID_STRING || ri == script_value::TYPEID_STRING)) {
+			if (!h.joins_text && string_beside_scalar(li, ri) && !(compound >= 0 && li == script_value::TYPEID_STRING && ri == script_value::TYPEID_CHAR)) [[unlikely]] {   // string += char appends
+				return compound >= 0 ? compound_mismatch(static_cast<size_t>(compound), left, right, h.engine()) : string_plus_refused(li, ri);
+			}
+			return h.concat(left, right);
+		}
 		if (li == script_value::TYPEID_INT && ri == script_value::TYPEID_INT) {
 			if (!scalar_arith_op(op)) { return checked_result<script_value>(make_error_code(runtime_error_code::unknown_operator), "Unknown arithmetic operator"); }
 			script_int out;

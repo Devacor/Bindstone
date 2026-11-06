@@ -24,25 +24,25 @@ public:
 
                         TestClass(auto v) {
                             value = v;
-                            print("TestClass created with value: " + value);
+                            print("TestClass created with value: " + to_string(value));
                         }
 
                         auto test_lambda() {
                             print("Before lambda creation");
                             auto lambda = [this]() {
-                                print("Inside lambda, value = " + value);
+                                print("Inside lambda, value = " + to_string(value));
                                 return value * 2;
                             };
                             print("After lambda creation, before call");
                             auto result = lambda();
-                            print("Lambda returned: " + result);
+                            print("Lambda returned: " + to_string(result));
                             return result;
                         }
                     }
 
                     auto obj = TestClass(42);
                     auto result = obj.test_lambda();
-                    print("Final result: " + result);
+                    print("Final result: " + to_string(result));
                     result
                 )");
 

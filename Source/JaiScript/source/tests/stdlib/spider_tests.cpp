@@ -102,8 +102,7 @@ public:
 			check_eq(std::string("200|true|application/json|a, b|2|a=1; Path=/|3|2|http://example.org/data?x=1|application/json"), text(e, R"(
 				spider::Response r = spider::get("http://example.org/data?x=1#frag");
 				var j = r.json();
-				r.status + "|" + r.ok() + "|" + r.headers["content-type"] + "|" + r.headers["x-many"] + "|" + r.cookies.size() + "|" + r.cookies[0] + "|" +
-					j["n"] + "|" + j["list"].size() + "|" + r.url + "|" + r.header("CONTENT-TYPE");
+				`${r.status}|${r.ok()}|${r.headers["content-type"]}|${r.headers["x-many"]}|${r.cookies.size()}|${r.cookies[0]}|${j["n"]}|${j["list"].size()}|${r.url}|${r.header("CONTENT-TYPE")}`;
 			)"));
 			check_eq(size_t{1}, transport->seen.size());
 			check_eq(std::string("GET"), transport->seen[0].method);
@@ -118,7 +117,7 @@ public:
 			auto transport = std::make_shared<scripted_transport>();
 			transport->replies.push_back(reply(404, {}, "missing"));
 			auto e = spider_engine(transport);
-			check_eq(std::string("404 false missing"), text(e, "auto r = spider::get(\"https://example.org/x\"); r.status + \" \" + r.ok() + \" \" + r.body;"));
+			check_eq(std::string("404 false missing"), text(e, "auto r = spider::get(\"https://example.org/x\"); `${r.status} ${r.ok()} ${r.body}`;"));
 		});
 
 		test("post_and_sling_send_the_same_request_with_their_arguments_in_their_own_order", [this, text]() {
@@ -200,7 +199,7 @@ public:
 			check_eq(std::string("spider::get: http://h/hop3: more than 5 redirects"), caught(e, R"(spider::get("http://h/hop3");)"));
 			check_eq(size_t{6}, transport->seen.size());
 			check_eq(std::string("landed http://h/hop9"), text(e, R"(spider::get("http://h/hop0", {"redirects": 9}).body;)"));
-			check_eq(std::string("302 /hop1"), text(e, R"(auto r = spider::get("http://h/hop0", {"redirects": 0}); r.status + " " + r.headers["location"];)"));
+			check_eq(std::string("302 /hop1"), text(e, R"(auto r = spider::get("http://h/hop0", {"redirects": 0}); `${r.status} ${r.headers["location"]}`;)"));
 		});
 
 		test("a_redirect_resolves_its_location_and_changes_the_method_as_browsers_do", [this, text]() {
@@ -256,7 +255,7 @@ public:
 				spider::Response r = spider::Response(404, "missing");
 				r.header("Content-Type", "text/plain").header("X-A", "1");
 				r.header("content-type", "text/plain");
-				r.status + "|" + r.body + "|" + r.header("CONTENT-type") + "|" + r.headers.size() + "|" + (r.ok() ? "bad" : "ok");
+				`${r.status}|${r.body}|${r.header("CONTENT-type")}|${r.headers.size()}|${(r.ok() ? "bad" : "ok")}`;
 			)"));
 			check_eq(std::string("2 v 1"), text(e, R"(
 				spider::Response r;
@@ -264,9 +263,9 @@ public:
 				r.headers["X-C"] = "w";
 				spider::Response copy = r;
 				copy.headers["X-D"] = "x";
-				r.headers.size() + " " + r.header("x-b") + " " + (copy.headers.size() - r.headers.size());
+				`${r.headers.size()} ${r.header("x-b")} ${(copy.headers.size() - r.headers.size())}`;
 			)"));
-			check_eq(std::string("200 0 true"), text(e, "spider::Response r; r.status + \" \" + r.body.size() + \" \" + r.ok();"));
+			check_eq(std::string("200 0 true"), text(e, "spider::Response r; `${r.status} ${r.body.size()} ${r.ok()}`;"));
 		});
 
 		test("set_cookie_writes_one_line_per_cookie_with_the_safe_defaults", [this, text, caught]() {

@@ -504,7 +504,7 @@ public:
 					writeAll(a_socket, "HTTP/1.1 201 Created\r\nSet-Cookie: a=1\r\nSet-Cookie: b=2\r\nContent-Length: 4\r\nConnection: close\r\n\r\nmade");
 				});
 				auto answer = text("auto r = spider::post(\"http://127.0.0.1:" + std::to_string(server.port) + "/things?x=1\", \"payload\", {\"method\": \"PUT\", \"headers\": {\"X-Spider\": \"silk\"}}); "
-					"r.status + \" \" + r.body + \" \" + r.cookies.size() + \" \" + r.cookies[1];");
+					"`${r.status} ${r.body} ${r.cookies.size()} ${r.cookies[1]}`;");
 				server.finish();
 				check_eq(std::string("201 made 2 b=2"), answer);
 				check_true(contains(request, "PUT /things?x=1 HTTP/1.1\r\n") && contains(request, "X-Spider: silk\r\n") && contains(request, "Content-Type: text/plain; charset=utf-8\r\n")
@@ -517,7 +517,7 @@ public:
 					readUntil(a_socket, buffer, "\r\n\r\n", head);
 					writeAll(a_socket, "HTTP/1.1 302 Found\r\nLocation: /elsewhere\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
 				});
-				auto answer = text("auto r = spider::get(\"http://127.0.0.1:" + std::to_string(server.port) + "/\", {\"redirects\": 0}); r.status + \" \" + r.headers[\"location\"];");
+				auto answer = text("auto r = spider::get(\"http://127.0.0.1:" + std::to_string(server.port) + "/\", {\"redirects\": 0}); `${r.status} ${r.headers[\"location\"]}`;");
 				server.finish();
 				check_eq(std::string("302 /elsewhere"), answer, "the transport answers a redirect; the library's policy follows it");
 			}

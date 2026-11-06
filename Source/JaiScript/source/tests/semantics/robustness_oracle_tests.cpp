@@ -122,7 +122,7 @@ private:
 				}
 				int free_f(int v) { return v; }
 				C c;
-				"" + c.f(true) + "," + c.h("5") + "," + c.g(true) + "," + c.b("x") + "," + c.b(0) + "," + C::sf(true) + "," + free_f(true);
+				`${c.f(true)},${c.h("5")},${c.g(true)},${c.b("x")},${c.b(0)},${C::sf(true)},${free_f(true)}`;
 			)", "1,5,1.0,true,false,101,1");
 		});
 		test("overloaded_methods_score_the_conversion_table", [this]() {
@@ -135,11 +135,11 @@ private:
 					string m(int a, int b2) { return "pair"; }
 					string n(float x) { return "float"; }
 					string n(string s) { return "string"; }
-					string w(P p) { return "P" + p.v; }
+					string w(P p) { return `P${p.v}`; }
 					string w(string s, int z) { return "s"; }
 				}
 				D d;
-				d.k(true) + "," + d.k(2.5) + "," + d.k("c") + "," + d.n(true) + "," + d.n(3) + "," + d.w(5) + "," + d.m(true);
+				`${d.k(true)},${d.k(2.5)},${d.k("c")},${d.n(true)},${d.n(3)},${d.w(5)},${d.m(true)}`;
 			)", "int,int,string,float,float,P5,bool");
 		});
 		test("a_string_never_makes_a_bool_parameter_viable_among_overloads", [this]() {
@@ -168,10 +168,10 @@ private:
 			check_true(verdict.find("cannot pass 'string' to 'v' declared 'int'") != std::string::npos, "strict rejects f(string): " + verdict);
 			// the one overload the argument count admits binds and converts, at load as at run time
 			expect("the arity's one overload converts", R"(
-				class D { string m(bool b) { return "bool:" + b; } string m(int a, int b2) { return "pair"; } }
+				class D { string m(bool b) { return `bool:${b}`; } string m(int a, int b2) { return "pair"; } }
 				class E { bool v = false; E(bool b) { v = b; } E(int a, int b) { } }
 				D d; E x = E("s");
-				d.m("s") + "," + x.v;
+				`${d.m("s")},${x.v}`;
 			)", "bool:true,true");
 		});
 		test("a_cached_arity_answer_never_lets_a_string_reach_a_bool_overload", [this]() {
@@ -245,7 +245,7 @@ private:
 					int r = read(e) + read(arr[1]);
 				}
 				run();
-				"" + gone;
+				`${gone}`;
 			)", "11");
 		});
 		test("frame_locals_die_in_reverse_declaration_order", [this]() {
@@ -265,7 +265,7 @@ private:
 				lam(); log += "|";
 				{ Holder hh; } log += "|";
 				{ Token a = Token("a"); Token b = Token("b"); { Token i = Token("i"); Token j = Token("j"); } log += "."; }
-				class Key { int v; Key(int a) { v = a; } ~Key() { log += "k" + v; } int operator<=>(const Key& o) { return v - o.v; } }
+				class Key { int v; Key(int a) { v = a; } ~Key() { log += `k${v}`; } int operator<=>(const Key& o) { return v - o.v; } }
 				function keyed() { map<Key, int> m; m[Key(5)] = 1; m[Key(3)] = 2; m[Key(9)] = 3; log += ":"; map<int, Token> t; t[2] = Token("q"); t[1] = Token("p"); log += ":"; }
 				log += "|"; keyed();
 				log;
@@ -304,13 +304,13 @@ private:
 					map<string, int> m = {"a": 1, "b": 2, "c": 3, "d": 4};
 					m.filter((k, v) => v != 2);
 					m.filter((k, v) => v != 4);
-					string out = "" + m.size() + "," + m.contains("b") + "," + m.contains("d") + ",";
+					string out = `${m.size()},${m.contains("b")},${m.contains("d")},`;
 					map<string, int> m2 = {"a": 1, "b": 2};
 					map<string, int> c = map::filter(m2, (k, v) => v == 1);
-					out += "" + m2.size() + "," + c.size() + "," + c.contains("a") + ",";
+					out += `${m2.size()},${c.size()},${c.contains("a")},`;
 					map<string, int> m3 = {"x": 1, "y": 2, "z": 3};
 					m3.filter((k, v) => { if (k == "x") { m3.remove("z"); } return v != 2; });
-					out += "" + m3.size() + "," + m3.contains("x");
+					out += `${m3.size()},${m3.contains("x")}`;
 					return out;
 				}
 				run();
@@ -322,7 +322,7 @@ private:
 					map<int, int> m = {};
 					for (int i = 0; i < 64; i++) { m[i] = i; }
 					int removed = m.remove_if((k, v) => { if (k % 8 == 0) { m.remove(k + 1); m[1000 + k] = k; } return k % 2 == 0; });
-					return "" + removed + "," + m.size();
+					return `${removed},${m.size()}`;
 				}
 				run();
 			)", "32,32");
@@ -339,14 +339,14 @@ private:
 				class A { int x = 1; int bump() { x++; return x; } } class B : A { int d = 0; }
 				string run() {
 					var v = A(); var w = extend(v, B); w.d = 3;
-					string out = "" + same_object(v, w) + "," + v.d + "," + reflect::type_name(v) + reflect::type_name(w);
+					string out = `${same_object(v, w)},${v.d},${reflect::type_name(v)}${reflect::type_name(w)}`;
 					var v1 = A(); var& w1 = extend(v1, B); w1.d = 4;
-					out += "|" + same_object(v1, w1) + "," + v1.d;
-					var v2 = A(); extend(v2, B).bump(); out += "|" + v2.x;
+					out += `|${same_object(v1, w1)},${v1.d}`;
+					var v2 = A(); extend(v2, B).bump(); out += `|${v2.x}`;
 					A loc = A(); var c = extend(loc, B); c.d = 5; var& r = extend(loc, B); r.d = 6;
-					out += "|" + loc.d + "," + c.d;
+					out += `|${loc.d},${c.d}`;
 					var p = new A(); var q = extend(p, B); q.d = 7;
-					out += "|" + same_object(p, q) + "," + p.d;
+					out += `|${same_object(p, q)},${p.d}`;
 					return out;
 				}
 				run();
@@ -354,11 +354,11 @@ private:
 		});
 		test("a_thrown_object_reads_as_its_to_string", [this]() {
 			expect("thrown object text", R"(
-				class Oops { int code = 7; string to_string() { return "oops " + code; } }
+				class Oops { int code = 7; string to_string() { return `oops ${code}`; } }
 				class Bad { string to_string() { throw "inner"; } }
 				string out = "";
-				try { throw Oops(); } catch (e) { out += e + "|" + e.message + "|" + e.code; }
-				try { throw Bad(); } catch (e) { out += "|" + e; }
+				try { throw Oops(); } catch (e) { out += `${e}|${e.message}|${e.code}`; }
+				try { throw Bad(); } catch (e) { out += `|${e}`; }
 				out;
 			)", "oops 7|oops 7|7|inner");
 			for (const auto& c : robustness::configs()) {
@@ -401,9 +401,9 @@ private:
 					int plain() { return 1; }
 				}
 				string s = "";
-				for (auto v : ns::co(3)) { s += "" + v; }
+				for (auto v : ns::co(3)) { s += `${v}`; }
 				auto h = ns::names(); s += h.next(); s += h.next();
-				s + ns::plain();
+				s + to_string(ns::plain());
 			)", "012ab1");
 		});
 		test("a_top_level_call_before_the_declaration_is_a_strict_load_error", [this]() {
@@ -425,7 +425,7 @@ private:
 			// a name the engine already holds (an earlier run, another unit) is there when the use runs
 			auto e = robustness::make(robustness::configs()[0]);
 			e->execute("int G = 1; int fib2() { return 1; } class A { int v = 1; }");
-			check_eq(std::string("1|1|1"), e->execute("string r = G + \"|\" + fib2() + \"|\" + A().v; int G = 2; int fib2() { return 2; } class A { int v = 2; } r;").as_string());
+			check_eq(std::string("1|1|1"), e->execute("string r = `${G}|${fib2()}|${A().v}`; int G = 2; int fib2() { return 2; } class A { int v = 2; } r;").as_string());
 		});
 		test("a_host_overload_miss_names_the_function_and_the_arguments", [this]() {
 			for (const auto& c : robustness::configs()) {
@@ -457,22 +457,22 @@ private:
 				V mk(string tag, int v) { order += tag; return V(v); }
 				string run() {
 					V a = V(1); V b = V(2); V c = V(2);
-					string out = "" + (a < b) + (b <= c) + (b > a) + (c >= b) + (a > b) + (b < c) + calls + ",";
+					string out = `${(a < b)}${(b <= c)}${(b > a)}${(c >= b)}${(a > b)}${(b < c)}${calls},`;
 					calls = 0;
-					out += "" + (b == c) + (a == b) + (b != c) + (a != b) + calls + ",";
+					out += `${(b == c)}${(a == b)}${(b != c)}${(a != b)}${calls},`;
 					calls = 0;
-					out += "" + (5 < a) + (0 < a) + (1 <= a) + (2 > a) + calls + ",";
+					out += `${(5 < a)}${(0 < a)}${(1 <= a)}${(2 > a)}${calls},`;
 					calls = 0;
-					out += "" + (5 <=> a) + (a <=> 5) + (1 <=> a) + (a == 1) + (1 == a) + (a != 1) + (2 != a) + calls + ",";
+					out += `${(5 <=> a)}${(a <=> 5)}${(1 <=> a)}${(a == 1)}${(1 == a)}${(a != 1)}${(2 != a)}${calls},`;
 					calls = 0;
 					bool lt = mk("L", 1) < mk("R", 2);
-					out += "" + lt + order + calls + ",";
+					out += `${lt}${order}${calls},`;
 					array<V> arr = [V(3), V(1), V(2), V(1), V(5), V(0)];
 					arr.sort();
 					bool sorted = true;
 					for (int i = 1; i < arr.size(); i++) { if (arr[i] < arr[i - 1]) { sorted = false; } }
-					string xs = ""; for (auto& v : arr) { xs += "" + v.x; }
-					out += xs + sorted + arr.contains(V(2)) + arr.contains(V(9)) + arr.index_of(V(2));
+					string xs = ""; for (auto& v : arr) { xs += `${v.x}`; }
+					out += `${xs}${sorted}${arr.contains(V(2))}${arr.contains(V(9))}${arr.index_of(V(2))}`;
 					return out;
 				}
 				run();
@@ -507,7 +507,7 @@ private:
 			struct row { const char* name; const char* setup; const char* src; const char* attack; };
 			const row rows[] = {
 				{"to_string", "", "G", "Evil e; string s = to_string(e);"},
-				{"print", "", "G", "Evil e; string s = \"\" + e;"},
+				{"print", "", "G", "Evil e; string s = `${e}`;"},
 				{"to_int", "", "G", "Evil e; int i = e;"},
 				{"operator==", "", "G", "Evil e; Evil e2; bool b = e == e2;"},
 				{"spaceship", "", "G", "Evil e; Evil e2; bool b = e < e2;"},
@@ -529,7 +529,7 @@ private:
 			};
 			for (const auto& r : rows) {
 				const std::string src = prelude + "string f() {\n" + r.setup + "\nT x = " + r.src + ";\n" + r.attack +
-					"\nreturn \"\" + x.v + x.a.size();\n}\nf();";
+					"\nreturn `${x.v}${x.a.size()}`;\n}\nf();";
 				expect(std::string("alias ") + r.name, src, "11", true);
 			}
 		});
@@ -598,24 +598,24 @@ private:
 					array<T> arr = [T(), T()];
 					map<string, T> m = {"k": T()};
 					var a = arr.front(); a.v = 2;
-					string out = "" + arr[0].v;
-					var& b = arr.front(); b.v = 3; out += "," + arr[0].v;
-					arr.back().bump(); out += "," + arr[1].v;
-					auto c = arr.last(); c.v = 9; out += "," + arr[1].v;
-					T d = arr.first(); d.v = 9; out += "," + arr[0].v;
-					var e = m.get("k"); e.v = 5; out += "|" + m["k"].v;
-					var& f = m.get("k"); f.v = 6; out += "," + m["k"].v;
-					m.get("k").bump(); out += "," + m["k"].v;
-					T def = T(); var g = m.get("none", def); g.v = 8; out += "," + def.v;
+					string out = `${arr[0].v}`;
+					var& b = arr.front(); b.v = 3; out += `,${arr[0].v}`;
+					arr.back().bump(); out += `,${arr[1].v}`;
+					auto c = arr.last(); c.v = 9; out += `,${arr[1].v}`;
+					T d = arr.first(); d.v = 9; out += `,${arr[0].v}`;
+					var e = m.get("k"); e.v = 5; out += `|${m["k"].v}`;
+					var& f = m.get("k"); f.v = 6; out += `,${m["k"].v}`;
+					m.get("k").bump(); out += `,${m["k"].v}`;
+					T def = T(); var g = m.get("none", def); g.v = 8; out += `,${def.v}`;
 					var acc = arr.reduce((var& x, var y) => { x.v += y.v; return x; });
-					out += "|" + arr[0].v + "," + acc.v;
+					out += `|${arr[0].v},${acc.v}`;
 					T init = T();
 					var acc2 = arr.reduce((var& x, var y) => { x.v += y.v; return x; }, init);
-					out += "," + init.v + "," + acc2.v;
+					out += `,${init.v},${acc2.v}`;
 					array<array<int>> nested = [[1], [2]];
-					var n = nested.front(); n.push(5); out += "|" + nested[0].size();
-					var& n2 = nested.front(); n2.push(5); out += "," + nested[0].size();
-					array<int> ints = [4, 5]; var i = ints.back(); i = 9; out += "," + ints[1];
+					var n = nested.front(); n.push(5); out += `|${nested[0].size()}`;
+					var& n2 = nested.front(); n2.push(5); out += `,${nested[0].size()}`;
+					array<int> ints = [4, 5]; var i = ints.back(); i = 9; out += `,${ints[1]}`;
 					return out;
 				}
 				run();
@@ -817,12 +817,12 @@ private:
 					for (int i = 0; i < 40; i++) { la.push(T(i % 9)); }
 					int calls = 0;
 					la.sort((a, b) => { calls++; la[calls % 40].v = (calls * 7) % 13; return a.v < b.v; });
-					return "" + la.size();
+					return `${la.size()}`;
 				}
 				function run2() -> string {
 					array<T> la = [T(1), T(2)];
 					la.sort((a, b) => { la[0].v = 7; return a.v < b.v; });
-					return "" + la.size();
+					return `${la.size()}`;
 				}
 				run() + "|" + run2();
 			)", "40|2");
@@ -838,7 +838,7 @@ private:
 					int after = 0; for (auto x : xs) { after += x; }
 					array<int> ys = array::sort(xs, (a, b) => { n++; return n % 3 == 0; });
 					int copied = 0; for (auto y : ys) { copied += y; }
-					return "" + xs.size() + "," + (sum == after) + "," + ys.size() + "," + (sum == copied);
+					return `${xs.size()},${(sum == after)},${ys.size()},${(sum == copied)}`;
 				}
 				run();
 			)", "300,true,300,true");

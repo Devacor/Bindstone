@@ -504,12 +504,12 @@ public:
                     int patch = 3;
 
                     string to_string() {
-                        return major + "." + minor + "." + patch;
+                        return `${major}.${minor}.${patch}`;
                     }
                 }
 
                 var v = Version();
-                var result = "Version: " + v;
+                var result = `Version: ${v}`;
             )");
 
             auto result = eng->execute("result");

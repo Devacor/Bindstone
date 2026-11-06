@@ -127,7 +127,7 @@ class V2 {
 	bool operator==(V2 o) { return x == o.x && y == o.y; }
 	int operator<=>(V2 o) { float a = x * x + y * y; float b = o.x * o.x + o.y * o.y; if (a < b) { return -1; } if (a > b) { return 1; } return 0; }
 	float operator[](int i) { if (i == 0) { return x; } return y; }
-	function to_string() -> string { return "(" + x + "," + y + ")"; }
+	function to_string() -> string { return `(${x},${y})`; }
 }
 class Body { V2 p; V2 v; int near = 0; string tag = ""; }
 function fill(int n) -> array<Body> { array<Body> bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.p.x = i % 7; b.p.y = i % 3; b.v.x = 0.5; b.v.y = -0.25; bs.push(b); } return bs; }
@@ -139,7 +139,7 @@ function step(var& b) -> void {
 	b.near = b.near + math::itrunc(b.p[0] * 100.0);
 	b.tag = to_string(b.p);
 }
-function sum(var& bs) -> string { int n = 0; string t = ""; for (auto& b : bs) { n = n + b.near; t = b.tag; } return to_string(n) + " " + t; }
+function sum(var& bs) -> string { int n = 0; string t = ""; for (auto& b : bs) { n = n + b.near; t = b.tag; } return `${to_string(n)} ${t}`; }
 function serial(int n) -> string { array<Body> bs = fill(n); for (auto& b : bs) { step(b); } return sum(bs); }
 function par(int n) -> string { array<Body> bs = fill(n); parallel_for (auto& b : bs) { step(b); } return sum(bs); }
 0;)JAI", "par(200) == serial(200);", "par(200) == serial(200);" },
@@ -266,13 +266,13 @@ class Body {
 	V2 p; int mass = 1; string tag = "";
 	function weight() -> int { return mass * 2 + tag.size(); }
 }
-function fill(int n) -> array<Body> { array<Body> bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.p.x = i % 7; b.p.y = i % 3; b.mass = i % 11; b.tag = "t" + (i % 5); bs.push(b); } return bs; }
+function fill(int n) -> array<Body> { array<Body> bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.p.x = i % 7; b.p.y = i % 3; b.mass = i % 11; b.tag = `t${(i % 5)}`; bs.push(b); } return bs; }
 function step_w(int acc, Body b) -> int { return acc + b.weight() + b.mass; }
 function add(int a, int b) -> int { return a + b; }
 function step_v(V2 acc, Body b) -> V2 { return acc + b.p; }
 function join(V2 a, V2 b) -> V2 { return a + b; }
-function serial(int n) -> string { array<Body> bs = fill(n); int w = 0; V2 v; for (auto& b : bs) { w = step_w(w, b); v = step_v(v, b); } return to_string(w) + " " + to_string(v.x) + " " + to_string(v.y); }
-function par(int n) -> string { array<Body> bs = fill(n); V2 zero; V2 v = parallel_reduce(bs, zero, step_v, join); return to_string(parallel_reduce(bs, 0, step_w, add)) + " " + to_string(v.x) + " " + to_string(v.y); }
+function serial(int n) -> string { array<Body> bs = fill(n); int w = 0; V2 v; for (auto& b : bs) { w = step_w(w, b); v = step_v(v, b); } return `${to_string(w)} ${to_string(v.x)} ${to_string(v.y)}`; }
+function par(int n) -> string { array<Body> bs = fill(n); V2 zero; V2 v = parallel_reduce(bs, zero, step_v, join); return `${to_string(parallel_reduce(bs, 0, step_w, add))} ${to_string(v.x)} ${to_string(v.y)}`; }
 function untyped(int n) -> int { var bs = []; for (int i = 0; i < n; ++i) { Body b = Body(); b.mass = i; bs.push(b); } return parallel_reduce(bs, 0, [](int acc, var b) -> int { return acc + b.mass; }, add); }
 function aliased() -> string { var hs = []; shared_ptr<Body> h = new Body(); for (int i = 0; i < 40; ++i) { hs.push(h); } try { parallel_reduce(hs, 0, [](int acc, var b) -> int { return acc + 1; }, add); } catch (err) { return err; } return "ran"; }
 0;)JAI", "par(900) == serial(900);", "untyped(500);", "aliased();" },

@@ -134,7 +134,7 @@ function things_data_init() -> void {
 	var tf = "";
 	int tc = 65;
 	while (tc <= 90) {
-		var tl = "" + to_char(tc);
+		var tl = `${to_char(tc)}`;
 		if (sprite_lookup("TFOG", tl, 0) < 0) { break; }
 		tf += tl;
 		tc = tc + 1;
@@ -168,7 +168,7 @@ function decor_add(int ty, string spr, string base, float rad, bool extend) -> v
 	if (extend) {
 		int c = base[base.size() - 1] + 1;
 		while (c <= 90) {
-			var letter = "" + to_char(c);
+			var letter = `${to_char(c)}`;
 			if (sprite_lookup(spr, letter, 0) < 0) { break; }
 			anim += letter;
 			c = c + 1;
@@ -201,7 +201,7 @@ function xdeath_probe() -> void {
 		int c = danim[danim.size() - 1] + 1;
 		var xd = "";
 		while (c <= 90) {
-			var letter = "" + to_char(c);
+			var letter = `${to_char(c)}`;
 			if (sprite_lookup(spr, letter, 0) < 0) { break; }
 			xd += letter;
 			c = c + 1;

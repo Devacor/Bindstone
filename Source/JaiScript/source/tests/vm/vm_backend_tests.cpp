@@ -105,7 +105,7 @@ public:
 		test("string_concat_and_compare", [this]() {
 			auto e = vm_engine();
 			check_eq(std::string("Hello, World!"), e->execute("\"Hello, \" + \"World!\"").as<std::string>());
-			check_eq(std::string("n=42"), e->execute("var n = 42; \"n=\" + n").as<std::string>());
+			check_eq(std::string("n=42"), e->execute("var n = 42; `n=${n}`").as<std::string>());
 			check_true(e->execute("var s1 = \"apple\"; var s2 = \"banana\"; s1 < s2").as<bool>());
 			check_true(e->execute("\"same\" == \"same\"").as<bool>());
 			check_true(e->execute("\"a\" != \"b\"").as<bool>());
@@ -661,7 +661,7 @@ public:
 				r.ok(); r.ok();
 				var msg = "";
 				try { r.deep(0); } catch (err) { msg = err; }
-				msg + "|" + r.ok();
+				`${msg}|${r.ok()}`;
 			)";
 			for (bool use_vm : {false, true}) {
 				auto e = jai::foundry::make_default_engine();
@@ -730,7 +730,7 @@ public:
 				var p = P();
 				var q = P();
 				p.peek(); q.peek();
-				var out = "" + p.peek() + "|" + q.peek();
+				var out = `${p.peek()}|${q.peek()}`;
 				try { var leak = p.secret; out = out + "|LEAK"; } catch (err) { out = out + "|blocked"; }
 				out;
 			)";
@@ -3044,7 +3044,7 @@ public:
 				var h = Holder();
 				var wrong = Stranger();
 				var out = "";
-				try { put(h.n, wrong); } catch (e) { out = "" + e; }
+				try { put(h.n, wrong); } catch (e) { out = `${e}`; }
 				out;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -3103,7 +3103,7 @@ public:
 				var msg = "";
 				for (var& kv : m) {
 					f(kv.second);
-					try { g(kv.first); msg = kv.first; } catch (e) { msg = "" + e; }
+					try { g(kv.first); msg = kv.first; } catch (e) { msg = `${e}`; }
 					break;
 				}
 				to_string(m["a"]) + "|" + msg + "|" + to_string(m.has("zz")) + "|" + to_string(m.has("a"));
@@ -3135,7 +3135,7 @@ public:
 				put(h2.p, T());
 				var h3 = H(); h3.p = shared_ptr<S>();
 				var msg = "";
-				try { put(h3.p, 5); } catch (e) { msg = "" + e; }
+				try { put(h3.p, 5); } catch (e) { msg = `${e}`; }
 				var summary = "";
 				if (h1.p.x == 9) { summary = summary + "A"; }
 				if (h2.p.t == 2) { summary = summary + "B"; }
@@ -3158,7 +3158,7 @@ public:
 				function put(var& x, var val) { x = val; }
 				var h = H();
 				var msg = "";
-				try { put(h.p, 5); } catch (e) { msg = "" + e; }
+				try { put(h.p, 5); } catch (e) { msg = `${e}`; }
 				msg;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -3181,14 +3181,14 @@ public:
 				var va = Animal();
 				var vb = Box();
 				var d1 = ""; var r1 = "";
-				try { pen[0] = Dog(); } catch (e) { d1 = "" + e; }
-				try { put(pen[0], Dog()); } catch (e) { r1 = "" + e; }
+				try { pen[0] = Dog(); } catch (e) { d1 = `${e}`; }
+				try { put(pen[0], Dog()); } catch (e) { r1 = `${e}`; }
 				var d2 = ""; var r2 = "";
-				try { pen[0] = va; } catch (e) { d2 = "" + e; }
-				try { put(pen[0], va); } catch (e) { r2 = "" + e; }
+				try { pen[0] = va; } catch (e) { d2 = `${e}`; }
+				try { put(pen[0], va); } catch (e) { r2 = `${e}`; }
 				var d3 = ""; var r3 = "";
-				try { ints[0] = vb; } catch (e) { d3 = "" + e; }
-				try { put(ints[1], vb); } catch (e) { r3 = "" + e; }
+				try { ints[0] = vb; } catch (e) { d3 = `${e}`; }
+				try { put(ints[1], vb); } catch (e) { r3 = `${e}`; }
 				d1 + "&" + r1 + "&" + d2 + "&" + r2 + "&" + d3 + "&" + r3;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
@@ -3239,13 +3239,13 @@ public:
 				function probe(var x) -> string {
 					var before = type_of(x);
 					x = [1, 2];
-					return before + ">" + type_of(x);
+					return `${before}>${type_of(x)}`;
 				}
 				function clobber(var x) { x = 999; }
 				var i = 7; var f = 1.5; var b = true; var c = 'q'; var s = "str";
-				var out = probe(i) + "|" + probe(f) + "|" + probe(b) + "|" + probe(c) + "|" + probe(s);
+				var out = `${probe(i)}|${probe(f)}|${probe(b)}|${probe(c)}|${probe(s)}`;
 				clobber(i); clobber(s);
-				out + "|" + i + "|" + s;
+				`${out}|${i}|${s}`;
 			)";
 			auto [i_out, v_out] = run_both_backends_stdlib(src);
 			check_eq(std::string("int>array|float>array|bool>array|char>array|string>array|7|str"), i_out,
@@ -3258,12 +3258,12 @@ public:
 				function take(int x) -> string {
 					var t = type_of(x);
 					x = x + 1;
-					return t + ":" + x;
+					return `${t}:${x}`;
 				}
 				var a = 5;
 				var r1 = take(a);
 				var r2 = take(2.9);
-				r1 + "|" + r2 + "|" + a;
+				`${r1}|${r2}|${a}`;
 			)";
 			auto [i_out, v_out] = run_both_backends_stdlib(src);
 			check_eq(i_out, v_out, "int-param bind parity");
@@ -3291,7 +3291,7 @@ public:
 				function share(shared_ptr<P> p) { p.v = p.v + 100; }
 				auto sh = shared_ptr<P>(); sh.v = 7;
 				share(sh);
-				"" + r1 + "," + a.v + "|" + r2 + "," + q.v + "|" + r3 + "," + sp.v + "|" + sh.v;
+				`${r1},${a.v}|${r2},${q.v}|${r3},${sp.v}|${sh.v}`;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_eq(std::string("15,5|13,3|14,14|107"), i_out, "interp exact-class clone semantics");
@@ -3312,9 +3312,9 @@ public:
 				var nc = NC();
 				try { boom(1); } catch (e) { msg = "caught"; }
 				keep = keep + 1;
-				try { wants(nc); } catch (e) { msg = msg + "+caught2"; }
+				try { wants(nc); } catch (e) { msg = `${msg}+caught2`; }
 				keep = keep + 1;
-				msg + ":" + keep;
+				`${msg}:${keep}`;
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_eq(std::string("caught+caught2:42"), i_out, "interp env restored after throwing bind");
@@ -3327,9 +3327,9 @@ public:
 				var msg = "";
 				try { boom(1); } catch (e) { msg = "caught"; }
 				keep = keep + 1;
-				try { wants(NC()); } catch (e) { msg = msg + "+caught2"; }
+				try { wants(NC()); } catch (e) { msg = `${msg}+caught2`; }
 				keep = keep + 1;
-				msg + ":" + keep;
+				`${msg}:${keep}`;
 			)";
 			auto [w_out, wv_out] = run_both_backends_in(true, literal);
 			check_eq(std::string("caught+caught2:42"), w_out, "warn: literal mismatch throws at bind and restores");
@@ -3366,11 +3366,11 @@ public:
 			check_eq(i2, v2, "bare-ident slot parity");
 			auto [i3, v3] = run_both_backends(R"(
 				var a = 10; var b = 3; var log = "";
-				a += b; log += "" + a;
-				a -= b; log += "," + a;
-				a *= b; log += "," + a;
-				a /= b; log += "," + a;
-				a %= b; log += "," + a;
+				a += b; log += `${a}`;
+				a -= b; log += `,${a}`;
+				a *= b; log += `,${a}`;
+				a /= b; log += `,${a}`;
+				a %= b; log += `,${a}`;
 				log;
 			)");
 			check_eq(std::string("13,10,30,10,1"), i3, "interp all compound kinds, ident rhs");
@@ -3383,7 +3383,7 @@ public:
 				a += 5; a -= 2; a *= 3; a /= 2; a %= 7;
 				f += 0.25;
 				s += "y";
-				"" + a + "|" + f + "|" + s;
+				`${a}|${f}|${s}`;
 			)");
 			check_eq(i1, v1, "bare literal rhs parity");
 			check_true(i1.find("5|1.75") == 0 && i1.find("|xy") != std::string::npos,
@@ -3395,7 +3395,7 @@ public:
 				var a = 10; var b = 4;
 				var r = (a += b);
 				var r2 = (a += 1);
-				"" + r + "," + r2 + "," + a;
+				`${r},${r2},${a}`;
 			)");
 			check_eq(std::string("14,15,15"), i1, "interp compound-expression result value");
 			check_eq(i1, v1, "compound-expression result parity");
@@ -3419,7 +3419,7 @@ public:
 					int x = 0;
 					float f = 2.5;
 					for (int i = 0; i < 4; ++i) { x += f; }
-					return "" + x;
+					return `${x}`;
 				}
 				h();
 			)");
@@ -3518,7 +3518,7 @@ public:
 				sum3 += c ? i : 7;
 				var sum4 = 10;
 				sum4 += c ? 5 : i;
-				"" + sum + "," + sum2 + "," + sum3 + "," + sum4;
+				`${sum},${sum2},${sum3},${sum4}`;
 			)");
 			check_eq(std::string("15,16,13,15"), i1, "interp ternary compound rhs");
 			check_eq(i1, v1, "ternary compound rhs parity (no tail fusion)");
@@ -3530,7 +3530,7 @@ public:
 				while (c ? false : i < 2) { i += 100; c = false; }
 				var j = 0;
 				if (c ? false : j < 5) { j = 999; }
-				"" + i + "," + j;
+				`${i},${j}`;
 			)");
 			check_eq(std::string("0,0"), i1, "interp ternary condition");
 			check_eq(i1, v1, "ternary condition parity (no tail cmp fusion)");
@@ -3549,8 +3549,8 @@ public:
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				try {
 					e->execute("function f(auto n) -> int { return n + 1; }\nvar call_f(var x) { return f(x); }\nvar a = 0;\nfor (var i = 0; i < 3; i += 1) { a = call_f(a); }");
-					e->execute("function f(auto n) -> string { return \"s\" + n; }");
-					out[use_vm ? 1 : 0] = e->execute("var b = call_f(a);\n\"\" + a + \":\" + b;").to_string();
+					e->execute("function f(auto n) -> string { return `s${n}`; }");
+					out[use_vm ? 1 : 0] = e->execute("var b = call_f(a);\n`${a}:${b}`;").to_string();
 				} catch (const std::exception& ex) { out[use_vm ? 1 : 0] = std::string("ERROR: ") + ex.what(); }
 			}
 			const std::string& i1 = out[0];
@@ -3568,7 +3568,7 @@ public:
 				var h = inc;
 				var s = "";
 				for (var i = 0; i < 4; i += 1) {
-					s += "" + h(3) + ",";
+					s += `${h(3)},`;
 					h = (i % 2 == 0) ? dbl : inc;
 				}
 				s;
@@ -3596,7 +3596,7 @@ public:
 				}
 				var s = run(a);
 				a = null;
-				"" + s + ":" + w.expired();
+				`${s}:${w.expired()}`;
 			)");
 			check_eq(std::string("3:true"), i1, "interp: dead lambda keeps nothing (ruled)");
 			check_eq(i1, v1, "capture-lifetime parity (vm callee cache adds no pin)");
@@ -3616,7 +3616,7 @@ public:
 				var alive_while_held = !w.expired();
 				var r = l();
 				l = null;
-				"" + r + ":" + alive_while_held + ":" + w.expired();
+				`${r}:${alive_while_held}:${w.expired()}`;
 			)");
 			check_eq(std::string("1:true:true"), i1, "interp live-capture lifetime (ruled)");
 			check_eq(i1, v1, "live-capture lifetime parity");
@@ -3635,7 +3635,7 @@ public:
 					return 7;
 				}
 				var r = make();
-				"" + r + ":" + w.expired();
+				`${r}:${w.expired()}`;
 			)");
 			check_eq(std::string("7:true"), i1, "interp return-boundary expiry");
 			check_eq(i1, v1, "return-boundary expiry parity");
@@ -3654,7 +3654,7 @@ public:
 				for (var i = 0; i < 3; i += 1) { r += take(a); }
 				var before = w.expired();
 				a = null;
-				"" + r + ":" + before + ":" + w.expired();
+				`${r}:${before}:${w.expired()}`;
 			)");
 			check_eq(std::string("15:false:true"), i1, "interp arg-copy lifetime");
 			check_eq(i1, v1, "arg-copy lifetime parity");
@@ -3678,8 +3678,7 @@ public:
 				float tf = ff();
 				string ts = fs();
 				bool tb = fb();
-				"" + ti + ":" + tf + ":" + ts + ":" + tb
-				   + ":" + ftrunc() + ":" + fauto(4) + ":" + fref(q);
+				`${ti}:${tf}:${ts}:${tb}:${ftrunc()}:${fauto(4)}:${fref(q)}`;
 			)");
 			check_eq(i1, v1, "typed-return route parity");
 			check(i1.rfind("5:", 0) == 0, "int return value: " + i1);
@@ -3715,7 +3714,7 @@ public:
 				int cap_copy() { int hp = 5; auto l = [hp]() { return ::hp; }; return l(); }
 				int cap_ref() { int hp = 5; auto l = [&hp]() { return ::hp; }; return l(); }
 				int free_fn() { int hp = 9; return ::hp; }
-				"" + u.by_field() + "|" + u.by_local() + "|" + u.bare() + "|" + cap_copy() + "|" + cap_ref() + "|" + free_fn();
+				`${u.by_field()}|${u.by_local()}|${u.bare()}|${cap_copy()}|${cap_ref()}|${free_fn()}`;
 			)");
 			check_eq(std::string("1000|1000|5|1000|1000|1000"), i1, "interp: return ::name answers the global");
 			check_eq(i1, v1, "return ::name parity");
@@ -3738,7 +3737,7 @@ public:
 					int both() { return ::hp - ::hp; }
 				}
 				auto p = P();
-				"" + p.plus() + "|" + p.cmp() + "|" + p.decl() + "|" + p.compound() + "|" + p.eq() + "|" + p.mixed() + "|" + p.lit_left() + "|" + p.both();
+				`${p.plus()}|${p.cmp()}|${p.decl()}|${p.compound()}|${p.eq()}|${p.mixed()}|${p.lit_left()}|${p.both()}`;
 			)");
 			check_eq(std::string("1001|2|1000|1001|true|1995|1001|0"), i1, "interp: fused ::name operands");
 			check_eq(i1, v1, "fused ::name operand parity");
@@ -3757,7 +3756,7 @@ public:
 				}
 				auto c = C();
 				int f_local() { int f = 5; return ::f() + f; }
-				"" + c.call_f() + "|" + c.call_g() + "|" + c.held() + "|" + f_local();
+				`${c.call_f()}|${c.call_g()}|${c.held()}|${f_local()}`;
 			)");
 			check_eq(std::string("1|40|11|6"), i1, "interp: ::f() reaches the global function");
 			check_eq(i1, v1, "::f() parity");
@@ -3769,16 +3768,16 @@ public:
 			auto [i1, v1] = run_both_backends(R"(
 				int hp = 1000;
 				string log = "";
-				{ int hp = 5; auto& r = ::hp; r = r + 1; log = log + hp + ":" + ::hp; }
+				{ int hp = 5; auto& r = ::hp; r = r + 1; log = log + cast<string>(hp) + ":" + cast<string>(::hp); }
 				int via_cap() { int hp = 5; auto l = [hp]() { auto& r = ::hp; r = r + 1; return hp; }; return l(); }
-				log = log + "|" + via_cap() + ":" + hp;
-				{ int hp = 5; auto& r = cast<int&>(::hp); r = r + 1; log = log + "|" + hp + ":" + ::hp; }
+				log = `${log}|${via_cap()}:${hp}`;
+				{ int hp = 5; auto& r = cast<int&>(::hp); r = r + 1; log = `${log}|${hp}:` + cast<string>(::hp); }
 				int cast_cap() { int hp = 5; auto l = [hp]() { auto& r = cast<int&>(::hp); r = r + 1; return hp; }; return l(); }
-				log = log + "|" + cast_cap() + ":" + hp;
+				log = `${log}|${cast_cap()}:${hp}`;
 				auto& by_ref_local() { int hp = 5; return ::hp; }
 				auto& r1 = by_ref_local(); r1 = r1 + 1;
 				int ref_cap() { int hp = 5; auto l = [&hp]() -> auto& { return ::hp; }; auto& r = l(); r = r + 1; return hp; }
-				log = log + "|" + ref_cap() + ":" + hp;
+				log = `${log}|${ref_cap()}:${hp}`;
 				log;
 			)");
 			check_eq(std::string("5:1001|5:1002|5:1003|5:1004|5:1006"), i1, "interp: ::name reference binds hit the global");
@@ -4007,18 +4006,18 @@ public:
 				try { return e->execute(program).to_string(); } catch (const std::exception& ex) { return std::string("ERROR: ") + ex.what(); }
 			};
 			const char* kinds =
-				"class P { int x = 3; string to_string() { return \"P\" + x; } }\n"
+				"class P { int x = 3; string to_string() { return `P${x}`; } }\n"
 				"class Bad { string to_string() { throw \"no text\"; } }\n"
 				"array<float> fs = [1.5, 2.25]; string out = \"\";\n"
-				"for (int i = 0; i < 3; ++i) { for (float f : fs) { out += to_string(f) + \",\"; } out += to_string(i) + to_string(true) + to_string('c') + to_string(\"s\") + to_string(null) + \";\"; }\n"
+				"for (int i = 0; i < 3; ++i) { for (float f : fs) { out += `${to_string(f)},`; } out += to_string(i) + to_string(true) + to_string('c') + to_string(\"s\") + to_string(null) + \";\"; }\n"
 				"for (auto& f : fs) { out += to_string(f); }\n"
 				"P p; out += to_string(p) + to_string([1, 2]);\n"
-				"try { to_string(Bad()); } catch (e) { out += \" caught \" + e; }\n"
-				"var g = to_string; out += \" \" + g(7);\n"
+				"try { to_string(Bad()); } catch (e) { out += ` caught ${e}`; }\n"
+				"var g = to_string; out += ` ${g(7)}`;\n"
 				"out;";
 			const char* rebound =
 				"string out = \"\";\n"
-				"for (int i = 0; i < 4; ++i) { if (i == 2) { rereg(); } out += to_string(i) + \" \"; }\n"
+				"for (int i = 0; i < 4; ++i) { if (i == 2) { rereg(); } out += `${to_string(i)} `; }\n"
 				"out;";
 			check_eq(std::string("1.5,2.25,0truecsnull;1.5,2.25,1truecsnull;1.5,2.25,2truecsnull;1.52.25P3[1, 2] caught no text 7"), run(false, kinds, false), "kinds (interpreter)");
 			check_eq(run(false, kinds, false), run(true, kinds, false), "kinds (parity)");
@@ -4430,25 +4429,25 @@ public:
 				void run() {
 					var o = new O();
 					bump(o.x); bump_int(o.n);
-					log = log + o.x + "," + o.n + "," + read(o.x);
+					log = `${log}${o.x},${o.n},${read(o.x)}`;
 					var g = bump; g(o.x);
-					g = read; log = log + "|" + g(o.x) + "," + o.x;
+					g = read; log = `${log}|${g(o.x)},${o.x}`;
 					var p = new O(); p.left = new O();
 					two(p.x, p.left);
-					log = log + "|" + p.x + "," + p.left;
-					var c = new O(); chain(c, 3); log = log + "|" + c.x;
+					log = `${log}|${p.x},${p.left}`;
+					var c = new O(); chain(c, 3); log = `${log}|${c.x}`;
 					var none = null; string err = "";
 					try { bump(none.x); } catch (e) { err = e; }
-					log = log + "|" + (err != "");
+					log = `${log}|${(err != "")}`;
 					var q = new P(); string perr = "";
 					try { bump(q.secret); } catch (e) { perr = e; }
 					bump(q.open);
-					log = log + "|" + (perr != "") + "," + q.open;
+					log = `${log}|${(perr != "")},${q.open}`;
 				}
 				run();
 				class S { void mix(var& r, string s) { r = 50; } void mix(var r, int n) { r = 60; } }
 				var s = S(); var t = new O();
-				s.mix(t.x, "a"); log = log + "|" + t.x;
+				s.mix(t.x, "a"); log = `${log}|${t.x}`;
 				log;
 			)");
 			check_eq(std::string("11,102,11|21,21|7,8|31|true|true,14|50"), i2, "interp: field argument binding");
@@ -4464,7 +4463,7 @@ public:
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				stdlib::register_all(*e);
-				e->execute("extern function f; class O { var x = 1; } var o = new O(); string log = \"\"; void step() { var p = o; f(p.x); log = log + o.x + \",\"; }");
+				e->execute("extern function f; class O { var x = 1; } var o = new O(); string log = \"\"; void step() { var p = o; f(p.x); log = `${log}${o.x},`; }");
 				e->execute("void f(var& r) { r = r + 1; }");
 				e->execute("step(); step();");
 				e->execute("void f(var r) { r = r + 1; }");
@@ -4635,7 +4634,7 @@ public:
 				function side() -> auto { ran = true; return 1; }
 				var msg = "";
 				try { undefined_callee(side()); } catch (e) { msg = "caught"; }
-				"" + msg + ":" + ran;
+				`${msg}:${ran}`;
 			)";
 			auto [i1, v1] = run_both_backends_in(true, src);
 			check_eq(std::string("caught:false"), i1, "interp: missing callee beats arg side effects");
@@ -4651,7 +4650,7 @@ public:
 				var msg = "";
 				var missing = null;
 				try { missing(side()); } catch (e) { msg = "caught"; }
-				"" + msg + ":" + ran;
+				`${msg}:${ran}`;
 			)");
 			check_eq(std::string("caught:false"), n1, "interp: null callee beats arg side effects");
 			check_eq(n1, nv1, "null-callee ordering parity");
@@ -4666,7 +4665,7 @@ public:
 				function side() -> auto { ran = true; return 1; }
 				var msg = "";
 				try { notFn(side()); } catch (e) { msg = "caught"; }
-				"" + msg + ":" + ran;
+				`${msg}:${ran}`;
 			)");
 			check_eq(std::string("caught:false"), i1, "interp: not-a-function beats arg side effects");
 			check_eq(i1, v1, "not-a-function ordering parity");
@@ -4676,13 +4675,13 @@ public:
 			// The callee is RESOLVED before args: an argument that rebinds the name
 			// still invokes the original callable
 			auto [i1, v1] = run_both_backends(R"(
-				function orig(auto x) -> auto { return "orig:" + x; }
-				function repl(auto x) -> auto { return "repl:" + x; }
+				function orig(auto x) -> auto { return `orig:${x}`; }
+				function repl(auto x) -> auto { return `repl:${x}`; }
 				var h = orig;
 				function swap_h() -> auto { h = repl; return 7; }
 				var first = h(swap_h());
 				var second = h(1);
-				first + "|" + second;
+				`${first}|${second}`;
 			)");
 			check_eq(std::string("orig:7|repl:1"), i1, "interp: rebind-in-args calls the original");
 			check_eq(i1, v1, "rebind-in-args parity");
@@ -4696,7 +4695,7 @@ public:
 				function ok(auto v) -> auto { return v + 1; }
 				var r = 0;
 				try { ok(boom()); } catch (e) { r = ok(41); }
-				"" + r + ":" + ok(1);
+				`${r}:${ok(1)}`;
 			)");
 			check_eq(std::string("42:2"), i1, "interp: post-catch calls aligned");
 			check_eq(i1, v1, "throw-in-args pending hygiene parity");
@@ -4714,7 +4713,7 @@ public:
 				var first = h.next();
 				var between = add(2, 3);
 				var last = h.next();
-				"" + first + ":" + between + ":" + last + ":" + h.done();
+				`${first}:${between}:${last}:${h.done()}`;
 			)");
 			check_eq(std::string("1:5:15:true"), i1, "interp: yield-in-args pending isolation");
 			check_eq(std::string("1:5:15:true"), v1, "vm: yield-in-args pending isolation");
@@ -4747,7 +4746,7 @@ public:
 				var key = "b";
 				c.lut["a"] = c.lut["a"] + 7;
 				c.lut[key] = c.lut[key] + 1;
-				"" + total + ":" + c.arr[1] + ":" + c.lut["a"] + ":" + c.lut["b"];
+				`${total}:${c.arr[1]}:${c.lut["a"]}:${c.lut["b"]}`;
 			)");
 			check_eq(std::string("204:12.5:107:201"), i1, "interp: member-container reads/stores");
 			check_eq(i1, v1, "member-container fusion parity");
@@ -4767,7 +4766,7 @@ public:
 				int s = 0;
 				for (int i = 0; i < 3; ++i) { s += g.virt[i]; }
 				var declared = g.arr[0];
-				"" + s + ":" + g.calls + ":" + declared;
+				`${s}:${g.calls}:${declared}`;
 			)");
 			check_eq(std::string("24:3:666"), i1, "interp: getter fires per access, the declared field's getter owns the fused site");
 			check_eq(i1, v1, "getter/shadow parity at fused member sites");
@@ -4787,12 +4786,12 @@ public:
 				}
 				var e = E();
 				var out = "";
-				try { var t = e.arr[99]; out = out + "ran"; } catch (er) { out = out + er; }
-				try { e.arr[99] = 5; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
-				try { var t = e.nope[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
-				try { var t = e.sec[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
-				try { var t = e.boom[0]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
-				out = out + "|" + e.rd() + "|" + e.arr[1];
+				try { var t = e.arr[99]; out = `${out}ran`; } catch (er) { out = out + er; }
+				try { e.arr[99] = 5; out = `${out}|ran`; } catch (er) { out = `${out}|${er}`; }
+				try { var t = e.nope[0]; out = `${out}|ran`; } catch (er) { out = `${out}|${er}`; }
+				try { var t = e.sec[0]; out = `${out}|ran`; } catch (er) { out = `${out}|${er}`; }
+				try { var t = e.boom[0]; out = `${out}|ran`; } catch (er) { out = `${out}|${er}`; }
+				out = `${out}|${e.rd()}|${e.arr[1]}`;
 				out;
 			)");
 			check_eq(i1, v1, "member-site error spelling and unwind parity");
@@ -4810,7 +4809,7 @@ public:
 				class P { var other = 1; }
 				var msg = "";
 				try { var t = hot(); msg = "ran"; } catch (er) { msg = er; }
-				"" + first + ":" + msg;
+				`${first}:${msg}`;
 			)");
 			check_eq(i1, v1, "member fused site revalidates across reload");
 			check(i1.rfind("6:", 0) == 0, "hot loop summed before the reload");
@@ -4835,7 +4834,7 @@ public:
 				var total = hot();
 				var suffix = "x";
 				var viaKey = m["k" + suffix];
-				var out = "" + total + ":" + a[1] + ":" + a[2] + ":" + t[2] + ":" + viaKey;
+				var out = `${total}:${a[1]}:${a[2]}:${t[2]}:${viaKey}`;
 				var z = 0;
 				try { var q = a[3 / z]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
 				try { var q2 = a[1 + 1.5]; out = out + "|ran2:" + q2; } catch (er) { out = out + "|" + er; }
@@ -4863,14 +4862,14 @@ public:
 				for (int y = 0; y < 3; ++y) { for (int x = 0; x < 4; ++x) { s += grid(y, x); } }
 				var d = deep(1, 1);
 				put(2, 1, 99);
-				var out = "" + s + ":" + d + ":" + a[9];
+				var out = `${s}:${d}:${a[9]}`;
 				var big = 9223372036854775807;
-				try { var q = a[big * 2 + 1]; out = out + "|ran"; } catch (er) { out = out + "|" + er; }
-				try { var q2 = a[1 * 2 + big]; out = out + "|ran2"; } catch (er) { out = out + "|" + er; }
+				try { var q = a[big * 2 + 1]; out = `${out}|ran`; } catch (er) { out = `${out}|${er}`; }
+				try { var q2 = a[1 * 2 + big]; out = `${out}|ran2`; } catch (er) { out = `${out}|${er}`; }
 				var f = 1.5;
 				var viaFloat = a[1 * 2 + 1] + a[0 * 2 + 0];
-				try { var q3 = a[1 * 2 + f]; out = out + "|ranF:" + q3; } catch (er) { out = out + "|" + er; }
-				out + ":" + viaFloat;
+				try { var q3 = a[1 * 2 + f]; out = `${out}|ranF:${q3}`; } catch (er) { out = `${out}|${er}`; }
+				`${out}:${viaFloat}`;
 			)");
 			check_eq(i1, v1, "index-chain parity (raw fold + boxed tail + spellings)");
 			check(i1.rfind("66:", 0) == 0, "3x4 grid sum through the 2-level chain");
@@ -4896,7 +4895,7 @@ public:
 				}
 				var mi = M();
 				b[mi + 1] = 55;
-				"" + got + ":" + after + ":" + b[0] + ":" + b[2];
+				`${got}:${after}:${b[0]}:${b[2]}`;
 			)");
 			check_eq(i1, v1, "container-before-index order parity under reassigning overloads");
 			check(i1.rfind("20:", 0) == 0, "read indexed the pre-reassignment array");

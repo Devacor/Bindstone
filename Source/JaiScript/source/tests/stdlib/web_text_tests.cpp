@@ -19,9 +19,9 @@ public:
 			check_eq(std::string("plain text, no change"), es("web::html_escape(\"plain text, no change\");"));
 			check_eq(std::string("&amp;amp;"), es("web::html_escape(\"&amp;\");"));
 			check_eq(std::string("caf\xC3\xA9 &lt;\xF0\x9F\x99\x82&gt; \xFF\x00x", 22), es("web::html_escape(\"caf\xC3\xA9 <\xF0\x9F\x99\x82> \\xFF\\x00x\");"));
-			check_eq(std::string("utf8_string 10 \xC3\xA9&lt;b&gt;"), es("var u = web::html_escape(utf8_string(\"\xC3\xA9<b>\")); type_of(u) + \" \" + u.size() + \" \" + u;"));
-			check_eq(std::string("string utf8_string"), es("type_of(web::html_escape(\"a\")) + \" \" + type_of(web::html_escape(utf8_string(\"a\")));"));
-			check_eq(std::string("x untouched"), es("string s = \"x\"; string t = web::html_escape(s); t += \" untouched\"; s + \" untouched\";"));
+			check_eq(std::string("utf8_string 10 \xC3\xA9&lt;b&gt;"), es("var u = web::html_escape(utf8_string(\"\xC3\xA9<b>\")); type_of(u) + \" \" + to_string(u.size()) + \" \" + u;"));
+			check_eq(std::string("string utf8_string"), es("`${type_of(web::html_escape(\"a\"))} ${type_of(web::html_escape(utf8_string(\"a\")))}`;"));
+			check_eq(std::string("x untouched"), es("string s = \"x\"; string t = web::html_escape(s); t += \" untouched\"; `${s} untouched`;"));
 		});
 
 		test("html_unescape_reads_references_as_a_browser_does", [this, es]() {
@@ -49,9 +49,9 @@ public:
 		});
 
 		test("html_unescape_keeps_the_text_kind_and_bytes_it_does_not_read", [this, es]() {
-			check_eq(std::string("utf8_string 4 \xC3\xA9<\xE2\x82\xAC>"), es("var u = web::html_unescape(utf8_string(\"\xC3\xA9&lt;&euro;&gt;\")); type_of(u) + \" \" + u.size() + \" \" + u;"));
+			check_eq(std::string("utf8_string 4 \xC3\xA9<\xE2\x82\xAC>"), es("var u = web::html_unescape(utf8_string(\"\xC3\xA9&lt;&euro;&gt;\")); type_of(u) + \" \" + to_string(u.size()) + \" \" + u;"));
 			check_eq(std::string("\xFF<\x00", 3), es("web::html_unescape(\"\\xFF&lt;\\x00\");"));
-			check_eq(std::string("string no references"), es("type_of(web::html_unescape(\"no references\")) + \" \" + web::html_unescape(\"no references\");"));
+			check_eq(std::string("string no references"), es("`${type_of(web::html_unescape(\"no references\"))} ${web::html_unescape(\"no references\")}`;"));
 		});
 
 		test("html_escape_then_unescape_round_trips_every_byte_string", [this, es]() {
@@ -96,7 +96,7 @@ public:
 		test("the_html_functions_run_in_parallel_bodies", [this, es]() {
 			check_eq(std::string("true true"), es(R"(
 				array<string> texts = [];
-				for (int i = 0; i < 64; ++i) { texts.push("<" + i + "> & '" + i + "'"); }
+				for (int i = 0; i < 64; ++i) { texts.push(`<${i}> & '${i}'`); }
 				array<string> serial = [];
 				for (auto t : texts) { serial.push(web::html_escape(t) + web::html_unescape(web::html_escape(t))); }
 				var parallel = parallel_transform(texts, [](string t) { return web::html_escape(t) + web::html_unescape(web::html_escape(t)); });
@@ -112,7 +112,7 @@ public:
 			check_eq(std::string("0 bad"), es(R"(
 				int bad = 0;
 				for (int b = 0; b < 256; ++b) {
-					string s = "x" + to_char(b) + "y";
+					string s = `x${to_char(b)}y`;
 					if (web::url_decode(web::url_encode(s)) != s) { ++bad; }
 				}
 				to_string(bad) + " bad";)"));
@@ -124,7 +124,7 @@ public:
 			check_eq(std::string("0 bad"), es(R"(
 				int bad = 0;
 				for (int b = 0; b < 256; ++b) {
-					string s = to_char(b) + " " + to_char(b);
+					string s = `${to_char(b)} ${to_char(b)}`;
 					if (web::form_decode(web::form_encode(s)) != s) { ++bad; }
 				}
 				to_string(bad) + " bad";)"));
@@ -147,10 +147,10 @@ public:
 		test("parse_url_splits_rfc_3986_references_and_to_string_joins_them", [this, es, caught]() {
 			check_eq(std::string("https|user|pw|example.com|8443|/a/b|x=1&y=2|frag|https://user:pw@example.com:8443/a/b?x=1&y=2#frag"), es(R"(
 				web::url u = web::parse_url("https://user:pw@example.com:8443/a/b?x=1&y=2#frag");
-				u.scheme + "|" + u.user + "|" + u.password + "|" + u.host + "|" + u.port + "|" + u.path + "|" + u.query + "|" + u.fragment + "|" + u.to_string();)"));
-			check_eq(std::string("||0|/relative/path|q|"), es(R"(web::url u = web::parse_url("/relative/path?q"); u.scheme + "|" + u.host + "|" + u.port + "|" + u.path + "|" + u.query + "|" + u.fragment;)"));
-			check_eq(std::string("[::1] 80 /"), es(R"(web::url u = web::parse_url("http://[::1]:80/"); u.host + " " + u.port + " " + u.path;)"));
-			check_eq(std::string("mailto||ada@example.org"), es(R"(web::url u = web::parse_url("mailto:ada@example.org"); u.scheme + "|" + u.host + "|" + u.path;)"));
+				`${u.scheme}|${u.user}|${u.password}|${u.host}|${u.port}|${u.path}|${u.query}|${u.fragment}|${u.to_string()}`;)"));
+			check_eq(std::string("||0|/relative/path|q|"), es(R"(web::url u = web::parse_url("/relative/path?q"); `${u.scheme}|${u.host}|${u.port}|${u.path}|${u.query}|${u.fragment}`;)"));
+			check_eq(std::string("[::1] 80 /"), es(R"(web::url u = web::parse_url("http://[::1]:80/"); `${u.host} ${u.port} ${u.path}`;)"));
+			check_eq(std::string("mailto||ada@example.org"), es(R"(web::url u = web::parse_url("mailto:ada@example.org"); `${u.scheme}|${u.host}|${u.path}`;)"));
 			check_eq(std::string("web::parse_url: 'http://host:99999/' has a malformed host or port"), caught(R"(web::parse_url("http://host:99999/");)"));
 			check_eq(std::string("https://x.org/p?q=a+b"), es(R"(
 				web::url u;
@@ -180,11 +180,11 @@ public:
 		test("the_web_functions_run_in_parallel_bodies", [this, es]() {
 			check_eq(std::string("true true"), es(R"(
 				string mix(string t) {
-					web::url u = web::parse_url("http://h/" + web::form_encode(t));
+					web::url u = web::parse_url(`http://h/${web::form_encode(t)}`);
 					return web::url_encode(t) + web::html_escape(t) + web::build_query(web::parse_query(t)) + u.path;
 				}
 				array<string> texts = [];
-				for (int i = 0; i < 64; ++i) { texts.push("a=" + i + "&b=<" + i + "> & '" + i + "'"); }
+				for (int i = 0; i < 64; ++i) { texts.push(`a=${i}&b=<${i}> & '${i}'`); }
 				array<string> serial = [];
 				for (auto t : texts) { serial.push(mix(t)); }
 				var parallel = parallel_transform(texts, [](string t) { return mix(t); });

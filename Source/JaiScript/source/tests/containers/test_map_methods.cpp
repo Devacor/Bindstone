@@ -208,16 +208,16 @@ public:
                     map<var, int> m = {};
                     m["b"] = 1; m[3] = 2; m["a"] = 3; m[1] = 4; m[2.5] = 5; m[true] = 6; m[-7] = 7;
                     string out = "";
-                    for (auto kv : m) { out = out + kv.first + "=" + kv.second + ","; }
+                    for (auto kv : m) { out = `${out}${kv.first}=${kv.second},`; }
                     array<var> ks = m.keys();
-                    out = out + "|" + ks.size() + ":" + ks[0] + ":" + ks[ks.size() - 1];
+                    out = `${out}|${ks.size()}:${ks[0]}:${ks[ks.size() - 1]}`;
                     map<int, int> x = {}; map<int, int> y = {};
                     for (int i = 0; i < 50; ++i) { x[(i * 37) % 50] = i; }
                     for (int i = 49; i >= 0; --i) { y[(i * 37) % 50] = i; }
-                    out = out + "|" + (x == y);
+                    out = `${out}|${(x == y)}`;
                     int prev = -1; bool sorted = true;
                     for (auto kv : x) { if (kv.first <= prev) { sorted = false; } prev = kv.first; }
-                    out = out + "|" + sorted;
+                    out = `${out}|${sorted}`;
                     return out;
                 }
                 run();
@@ -233,15 +233,15 @@ public:
                     map<int, int> m = {1: 1, 3: 3, 5: 5};
                     string out = "";
                     for (auto kv : m) {
-                        out = out + kv.first + ",";
+                        out = `${out}${kv.first},`;
                         if (kv.first == 1) { m[4] = 4; m[0] = 0; }   // 4 is ahead (visited), 0 is behind (not)
                         if (kv.first == 3) { m.remove(3); }           // erasing the current entry
                     }
-                    out = out + "|" + m.size();
+                    out = `${out}|${m.size()}`;
                     map<int, int> e = {1: 1, 2: 2, 3: 3};
                     string seen = "";
-                    for (auto kv : e) { seen = seen + kv.first; if (kv.first == 1) { e.remove(2); } }
-                    return out + "|" + seen;
+                    for (auto kv : e) { seen = seen + to_string(kv.first); if (kv.first == 1) { e.remove(2); } }
+                    return `${out}|${seen}`;
                 }
                 run();
             )");
@@ -254,7 +254,7 @@ public:
                 function run() -> string {
                     map<var, int> m = {};
                     m[0.0] = 1; m[-0.0] = 2; m[1] = 3; m[1.0] = 4; m["1"] = 5; m['1'] = 6;
-                    return "" + m.size() + "," + m[0.0] + "," + m[-0.0] + "," + m[1] + "," + m[1.0] + "," + m.has("1") + "," + m.has(2);
+                    return `${m.size()},${m[0.0]},${m[-0.0]},${m[1]},${m[1.0]},${m.has("1")},${m.has(2)}`;
                 }
                 run();
             )");
@@ -273,19 +273,19 @@ public:
                     ms[k] = 2.0;                 // a float converts into the int value slot
                     ms[keys[0]] = 7;
                     var v = (ms[keys[0]] = 9);   // the assignment's value
-                    string out = "" + ms["a"] + "," + ms[k] + "," + v + "," + ms.size();
+                    string out = `${ms["a"]},${ms[k]},${v},${ms.size()}`;
                     string miss = "";
                     try { var x = ms["zz"]; } catch (e) { miss = e; }
-                    out = out + "," + miss + "," + ms.size() + "," + ms.has(keys[1]) + "," + ms.has("q");
-                    var xs = "x"; try { ms[keys[0]] = xs; } catch (e) { out = out + "|" + e; }
-                    out = out + "," + ms.size();
+                    out = `${out},${miss},${ms.size()},${ms.has(keys[1])},${ms.has("q")}`;
+                    var xs = "x"; try { ms[keys[0]] = xs; } catch (e) { out = `${out}|${e}`; }
+                    out = `${out},${ms.size()}`;
                     map<int, float> mi = {};
                     for (int i = 0; i < 5; ++i) { mi[i & 1] = i; }
-                    out = out + "|" + mi[0] + "," + mi[1] + "," + mi.size();
-                    try { map<int, int> bad = {}; var s = "s"; bad[s] = 1; } catch (e) { out = out + "|" + e; }
+                    out = `${out}|${mi[0]},${mi[1]},${mi.size()}`;
+                    try { map<int, int> bad = {}; var s = "s"; bad[s] = 1; } catch (e) { out = `${out}|${e}`; }
                     var& ref = keys[1];
                     ms[ref] = 5;
-                    out = out + "|" + ms["b"];
+                    out = `${out}|${ms["b"]}`;
                     return out;
                 }
                 run();

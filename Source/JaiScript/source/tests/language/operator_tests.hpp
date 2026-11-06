@@ -70,6 +70,46 @@ public:
             auto eng = make_engine();
             eng->execute("var s = \"Hello\";");
             check_eq(eng->execute("s += \", World!\"").as<std::string>(), "Hello, World!");
+            // a number, bool, char or null beside a string raises the checker's text at run time, in either order and on every
+            // shape the VM compiles a + to (a chain, a builder store, a fused binary, a compound); a template string's splice is text
+            auto run = make_engine();
+            check_eq(std::string(
+                "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'int' and 'string': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'string' and 'float': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'bool' and 'string': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'string' and 'char': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'null' and 'string': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
+                "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
+                "Cannot apply '+=' to int and string|"
+                "s3 1.5 true s null [1] 3:4 a7b k1=1 x0,1,2, 5!"), run->execute(R"(
+                var n = 3; var f = 1.5; var b = true; var s = "s"; var c = s[0]; var z = null;
+                string out = "";
+                function shapes(var x) -> string {
+                    string acc = "a";
+                    string r = "";
+                    try { r = acc + x; } catch (e) { return e; }
+                    return r;
+                }
+                for (var pair : [[s, n], [n, s], [s, f], [b, s], [s, c], [z, s]]) {
+                    try { var r = pair[0] + pair[1]; out += r + "|"; } catch (e) { out += e + "|"; }
+                }
+                out += shapes(n) + "|";
+                try { string t = "t"; t = t + "x" + n; out += t; } catch (e) { out += e + "|"; }
+                try { string t = "t"; t = t + n; out += t; } catch (e) { out += e + "|"; }
+                try { var m = 5; m += "x"; out += m; } catch (e) { out += e + "|"; }
+                function joined(int i, int j) -> string {
+                    map<string, int> h;
+                    h[`k${i}`] = 1;
+                    string acc = "";
+                    for (int k = 0; k < 3; ++k) { acc += `${k},`; }
+                    return "" + `${i}:${j}` + " a" + `${i + j * 0 + 4}b` + " " + `k${i - 2}=${h[`k${i}`]}` + " x" + acc;
+                }
+                out += `${s}${n} ${f} ${b} ${c} ${z} ${[1]} ` + joined(3, 4);
+                out + " " + `${n + 2}!`
+            )").as_string());
         });
         
         test("comparison_operators", [this]() {

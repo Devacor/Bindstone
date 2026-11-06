@@ -2764,11 +2764,11 @@ public:
         });
 
         test("typed_storage_reads_and_stores", [check_quad, check_quad_error]() {
-            check_quad("array<int> a = [1,2,3]; to_string(a[0]) + \",\" + to_string(a[2])", "1,3", "reads");
+            check_quad("array<int> a = [1,2,3]; `${to_string(a[0])},${to_string(a[2])}`", "1,3", "reads");
             check_quad("array<int> a = [1,2,3]; a[1] = 9; to_string(a[1])", "9", "store");
-            check_quad("array<int> a = [1]; a[0] = 2.7; type_of(a[0]) + \":\" + to_string(a[0])", "int:2", "store converts");
-            check_quad("array<float> a = [1.5]; a[0] = 2; type_of(a[0]) + \":\" + to_string(a[0])", "float:2.0", "float store widens");
-            check_quad("array<int> a = [10]; a[0] += 2.5; type_of(a[0]) + \":\" + to_string(a[0])", "int:12", "compound converts");
+            check_quad("array<int> a = [1]; a[0] = 2.7; `${type_of(a[0])}:${to_string(a[0])}`", "int:2", "store converts");
+            check_quad("array<float> a = [1.5]; a[0] = 2; `${type_of(a[0])}:${to_string(a[0])}`", "float:2.0", "float store widens");
+            check_quad("array<int> a = [10]; a[0] += 2.5; `${type_of(a[0])}:${to_string(a[0])}`", "int:12", "compound converts");
             check_quad("array<int> a = [10]; a[0] %= 4.5; to_string(a[0])", "1", "compound modulo");
             // byte kinds (bool/char buffers): reads, stores, push, sort, reverse, copies, json
             check_quad("array<bool> f = [true, false, true]; f[1] = true; to_string(f[0]) + to_string(f[1]) + to_string(f.size())", "truetrue3", "bool buffer store/read");
@@ -2776,7 +2776,7 @@ public:
             check_quad("array<char> c = ['q', 'a', 'z']; c.sort(); c.reverse(); to_string(c[0]) + to_string(c[2])", "za", "char buffer sort/reverse");
             check_quad("array<char> c = ['a', 'b']; array<char> d = c; d[0] = 'x'; to_string(c[0]) + to_string(d[0])", "ax", "char buffer copy is a copy");
             check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
-            check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + ch; } s", "hi", "char buffer range-for");
+            check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + to_string(ch); } s", "hi", "char buffer range-for");
             check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int");
             check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
             // fuzz seed 201467 (element band): an int written into a bool element through a reference reached the

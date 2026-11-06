@@ -413,7 +413,7 @@ public:
                 string s = "";
                 for (int i = 0; i < 3; ++i) {
                     s += to_string(p.first) + to_json(p.second) + ",";
-                    p.first = p.first + 1;
+                    p.first = p.first + (i == 2 ? "1" : 1);   // a string member joins text, an int one adds
                     p.second.push(i);
                     var copy = p.second;
                     copy.push(99);

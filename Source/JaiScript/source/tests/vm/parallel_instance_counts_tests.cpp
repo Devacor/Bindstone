@@ -291,8 +291,8 @@ caught + "|" + to_string(sum);
 			                               "bool to_bool() { return extra > 5; } string to_string() { return \"num\"; } }";
 			const std::string plain = "class Num : Probe { int extra = 2; Num() : super() {} }";
 			const std::string convert = "{ var q = probe(); int k = q; float f = q; bool b = q; string s = q; "
-			                            "o = k + cast<int>(f) + (b ? 1 : 0) + (q ? 10 : 0) + s.size() + to_string(q).size() + (\"\" + q).size() + x; }";
-			const std::string show = "{ var q = probe(); string s = to_string(q); o = s.size() + to_string(q).size() + (\"\" + q).size() + (q ? 1 : 0) + x; }";
+			                            "o = k + cast<int>(f) + (b ? 1 : 0) + (q ? 10 : 0) + s.size() + to_string(q).size() + (`${q}`).size() + x; }";
+			const std::string show = "{ var q = probe(); string s = to_string(q); o = s.size() + to_string(q).size() + (`${q}`).size() + (q ? 1 : 0) + x; }";
 			auto with = [&](const std::string& cls, const std::string& loop) {
 				std::string p = body;
 				p.replace(p.find("CLASS"), 5, cls);

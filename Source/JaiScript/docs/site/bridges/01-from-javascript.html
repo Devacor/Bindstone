@@ -113,14 +113,14 @@ public:
     string name;
     int hp = 10;
     Hero(string n) { name = n; Hero::count += 1; }
-    string describe() { return name + " (" + hp + " hp)"; }
+    string describe() { return `${name} (${hp} hp)`; }
     int _get_wealth() { return gold; }
     void _set_wealth(int v) { gold = v &lt; 0 ? 0 : v; }
 }
 class Mage : Hero {
     int mana = 30;
     Mage(string n) : super(n) {}
-    string describe() override { return super::describe() + " with " + mana + " mana"; }
+    string describe() override { return `${super::describe()} with ${mana} mana`; }
 }
 auto a = Hero("Ada");
 auto m = Mage("Merlin");
@@ -218,18 +218,20 @@ try { print(1 / 0); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 3.5 0.30000000000000004
 caught: Integer overflow in '+='
 caught: Division by zero</code></pre></div>
-<h3 id="plus-and-plus-equals">+ converts a number to text; += does not<a class="hlink" href="#plus-and-plus-equals" aria-label="link">&#8203;</a></h3>
-<p><code>+</code> with a string on either side turns the other side into text, left to right as in JavaScript. <code>+=</code> onto a string accepts only strings and chars, so a number is spelled <code>to_string(n)</code> there:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("hp: " + 10, " / ", 1 + "0", " / ", "v" + 1 + 2);
+<h3 id="plus-and-plus-equals">+ never converts a number to text<a class="hlink" href="#plus-and-plus-equals" aria-label="link">&#8203;</a></h3>
+<p>Unlike JavaScript, <code>+</code> joins text only, as <code>std::string</code>&#x27;s does: a number, bool, char or <code>null</code> beside a string is an error, in either order. A template string or <code>to_string(n)</code> spells the text, and <code>+=</code> onto a string likewise takes only strings and chars:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var n = 10;
+print(`hp: ${n}`, " / ", "hp: " + to_string(n));
+try { print("hp: " + n); } catch (e) { print("caught: ", e); }
 string label = "hp: ";
-var n = 10;
 try { label += n; } catch (e) { print("caught: ", e); }
 label += to_string(n);
 print(label);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp: 10 / 10 / v12
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hp: 10 / hp: 10
+caught: cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`
 caught: Cannot apply '+=' to string and int
 hp: 10</code></pre></div>
-<p>Written with a literal (<code>label += 10;</code>), the same mistake is a load error.</p>
+<p>Written with literals or typed variables (<code>"hp: " + 10</code>, <code>label += 10;</code>), the same mistakes are load errors.</p>
 <h3 id="truthiness">Empty containers are false<a class="hlink" href="#truthiness" aria-label="link">&#8203;</a></h3>
 <p><code>0</code>, <code>0.0</code>, <code>""</code>, <code>null</code> and an empty array or map are false in a condition; everything else is true. JavaScript treats <code>[]</code> and <code>{}</code> as true. A class instance is true unless its class declares <code>bool to_bool()</code>, which <code>if (v)</code> calls and <code>!v</code> negates:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var values = [0, 0.0, "", [], {}, null, "0", [0]];

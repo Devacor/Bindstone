@@ -134,10 +134,10 @@ public:
 		test("a_parameter_the_initializer_list_stores_is_the_bodys", [this]() {
 			// C++: one activation per constructor, so a store to a parameter in the initializer list is what the level's field
 			// initializers and body read, at every level of a chain
-			both("string log = \"\"; class A { int a = 0; A(int x) { a = x; log = log + \"A\" + x + \";\"; } } "
-			     "class B : A { int b = 0; B(int x) : super(x = x + 10) { b = x; log = log + \"B\" + x + \";\"; } } "
-			     "class C : B { int c = 0; C(int x) : super(x = x + 100) { c = x; log = log + \"C\" + x + \";\"; } } "
-			     "C c = C(1); log + \" | \" + c.a + \" \" + c.b + \" \" + c.c;", "A111;B111;C101; | 111 111 101", "a three-level chain");
+			both("string log = \"\"; class A { int a = 0; A(int x) { a = x; log = `${log}A${x};`; } } "
+			     "class B : A { int b = 0; B(int x) : super(x = x + 10) { b = x; log = `${log}B${x};`; } } "
+			     "class C : B { int c = 0; C(int x) : super(x = x + 100) { c = x; log = `${log}C${x};`; } } "
+			     "C c = C(1); `${log} | ${c.a} ${c.b} ${c.c}`;", "A111;B111;C101; | 111 111 101", "a three-level chain");
 			both("class P { int p = 0; P(int v) { p = v; } } class Q : P { int q = 0; Q(int v) : super(v = v * 3) { q = v; } } auto x = Q(2); [x.p, x.q];",
 			     "[6, 6]", "a two-level chain");
 			both("class E { int a = 0; E(int k) { a = k; } E(int k, int j) : this(k = k + j) { a = a * 100 + k; } } E(1, 2).a;", "303", "a delegating constructor");
@@ -150,12 +150,12 @@ public:
 		test("a_base_without_a_constructor_is_default_constructed_under_every_level", [this]() {
 			const std::string note = "string log = \"\"; int note(string s, int v) { log = log + s + \";\"; return v; } ";
 			both(note + "class P { int p = note(\"P.p\", 7); } class B : P { int b = note(\"B.b\", 2); B(int x) { b = b + x; note(\"B()\", 0); } } "
-			     "class C : B { int c = note(\"C.c\", 3); C() : super(1) { note(\"C()\", 0); } } C c = C(); log + \" | \" + c.p + \" \" + c.b + \" \" + c.c;",
+			     "class C : B { int c = note(\"C.c\", 3); C() : super(1) { note(\"C()\", 0); } } C c = C(); `${log} | ${c.p} ${c.b} ${c.c}`;",
 			     "P.p;B.b;B();C.c;C(); | 7 3 3", "a plain base under a base level");
 			both(note + "class L { int l = note(\"L.l\", 1); } class R { int r = note(\"R.r\", 2); R() { note(\"R()\", 0); } } "
 			     "class M : L, R { int m = note(\"M.m\", 3); M(int k) { note(\"M()\", 0); } } class D : M { D() : super(1) { note(\"D()\", 0); } } D(); log;",
 			     "L.l;R.r;R();M.m;M();D();", "both bases of a base level, in declaration order");
-			both(note + "class X { X(int v) { note(\"X\" + v, 0); } } class Y : X { Y() : super(1) { note(\"Y()\", 0); } } class Z : Y { Z() { note(\"Z()\", 0); } } Z(); log;",
+			both(note + "class X { X(int v) { note(`X${v}`, 0); } } class Y : X { Y() : super(1) { note(\"Y()\", 0); } } class Z : Y { Z() { note(\"Z()\", 0); } } Z(); log;",
 			     "X1;Y();Z();", "an implicit super() over a base level");
 			both("int n = 40; class P { int p = n; } class C : P { C(int n) {} } C(5).p;", "40", "a base's initializers do not see the derived constructor's parameters");
 		});
@@ -173,13 +173,13 @@ public:
 			both(prelude + "class A { int a = boom(\"A.a\", 1); A() { note(\"A()\", 0); boom(\"A()\", 2); } ~A() { note(\"~A\", 0); } } "
 			     "class B : A { int b = boom(\"B.b\", 3); B(int x) : super() { note(\"B()\", 0); boom(\"B()\", 4); } ~B() { note(\"~B\", 0); } } "
 			     "class C : B { int c = boom(\"C.c\", 5); C() : super(boom(\"C.super\", 6)) { note(\"C()\", 0); boom(\"C()\", 7); } ~C() { note(\"~C\", 0); } } "
-			     "for (int i = 1; i <= 8; ++i) { at = i; log = \"\"; try { C c = C(); note(\"made\", 0); } catch (e) { log = log + \"!\" + e; } out = out + i + \":\" + log + \" \"; } out;",
+			     "for (int i = 1; i <= 8; ++i) { at = i; log = \"\"; try { C c = C(); note(\"made\", 0); } catch (e) { log = `${log}!${e}`; } out = `${out}${i}:${log} `; } out;",
 			     "1:!A.a 2:A();!A() 3:A();~A;!B.b 4:A();B();~A;!B() 5:A();B();~B;~A;!C.c 6:!C.super 7:A();B();C();~B;~A;!C() 8:A();B();C();made;~C;~B;~A; ",
 			     "a three-level chain");
 			both(prelude + "class P { int p = boom(\"P.p\", 1); ~P() { note(\"~P\", 0); } } class Q { int q = 0; Q() { boom(\"Q()\", 2); note(\"Q()\", 0); } ~Q() { note(\"~Q\", 0); } } "
 			     "class M : P, Q { int m = boom(\"M.m\", 3); M() { note(\"M()\", 0); boom(\"M()\", 4); } ~M() { note(\"~M\", 0); } } "
 			     "class D : M { D() : super() { note(\"D()\", 0); boom(\"D()\", 5); } ~D() { note(\"~D\", 0); } } "
-			     "for (int i = 1; i <= 6; ++i) { at = i; log = \"\"; try { D d = D(); note(\"made\", 0); } catch (e) { log = log + \"!\" + e; } out = out + i + \":\" + log + \" \"; } out;",
+			     "for (int i = 1; i <= 6; ++i) { at = i; log = \"\"; try { D d = D(); note(\"made\", 0); } catch (e) { log = `${log}!${e}`; } out = `${out}${i}:${log} `; } out;",
 			     "1:!P.p 2:~P;!Q() 3:Q();~Q;~P;!M.m 4:Q();M();~Q;~P;!M() 5:Q();M();D();~M;~Q;~P;!D() 6:Q();M();D();made;~D;~M;~Q;~P; ",
 			     "two bases under a base level");
 		});
@@ -193,7 +193,7 @@ public:
 			both("int m = 5; class S { S(int& x) { x = x * 2; } } class T : S { T(int v) : super(m) {} } T(0); m;", "10", "a base level's parameter bound to a global");
 			both("int n = 4; class G { int g = 0; G(int v) { g = v; } } class F : G { F(int& r) : super(r * 3) { r = 0; } } F x = F(n); [n, x.g];", "[0, 12]",
 			     "an initializer-list argument reads the parameter");
-			both("array<int> arr = [1, 2]; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } D x = D(arr[1]); to_string(arr) + \" \" + x.d;", "[1, 3] 3",
+			both("array<int> arr = [1, 2]; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } D x = D(arr[1]); `${to_string(arr)} ${x.d}`;", "[1, 3] 3",
 			     "an element place");
 			both("int h = 1; class D { int d = 0; D(int& r) { r = r + 1; d = r; } } shared_ptr<D> p = new D(h); [h, p.d];", "[2, 2]", "a new expression");
 			both("int f() { return 3; } class W { int w = 0; W(const int& c) { w = c; } } W(f()).w;", "3", "a const reference takes a temporary");

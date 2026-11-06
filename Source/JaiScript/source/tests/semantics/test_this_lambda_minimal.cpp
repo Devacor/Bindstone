@@ -25,19 +25,19 @@ public:
                         auto value;
 
                         TestClass(auto v) {
-                            print("Constructor called with: " + v);
+                            print(`Constructor called with: ${v}`);
                             value = v;
                         }
 
                         void call_lambda() {
                             print("call_lambda: start");
                             auto lambda = [this]() {
-                                print("Inside lambda, value = " + value);
+                                print(`Inside lambda, value = ${value}`);
                                 return value;
                             };
                             print("call_lambda: lambda created, about to call");
                             auto result = lambda();
-                            print("call_lambda: lambda returned " + result);
+                            print(`call_lambda: lambda returned ${result}`);
                             return result;
                         }
                     }
@@ -46,7 +46,7 @@ public:
                     auto obj = TestClass(42);
                     print("Calling call_lambda");
                     auto result = obj.call_lambda();
-                    print("Result: " + result);
+                    print(`Result: ${result}`);
                     result
                 )");
 
@@ -70,14 +70,14 @@ public:
                         auto value;
 
                         TestClass(auto v) {
-                            print("Constructor: " + v);
+                            print(`Constructor: ${v}`);
                             value = v;
                         }
 
                         void method_void() {
                             print("method_void: start");
                             auto lambda = [this]() {
-                                print("lambda: value = " + value);
+                                print(`lambda: value = ${value}`);
                             };
                             print("method_void: calling lambda");
                             lambda();

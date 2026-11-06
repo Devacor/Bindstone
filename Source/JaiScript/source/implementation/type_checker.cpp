@@ -4192,6 +4192,7 @@ private:
             if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
         }
         if (r.kind == ctype::object_k) { warn_missing_reflected(b, l, r); }
+        if (b->op.type == token_type::plus && !b->op.joins_text) { check_string_plus(b, l, r); }
         return binary_result(l, b->op.type, r);
     }
 
@@ -4217,6 +4218,19 @@ private:
         if (!refused) { return; }
         diag(diag_level::error, u->location, op == token_type::minus ? "Unary minus requires numeric operand"
                                            : op == token_type::plus ? "Unary plus requires numeric operand" : "Bitwise NOT requires integer operand");
+    }
+
+    // a string's + joins text (detail/string_join.hpp, the run-time text): a number, bool, char or null beside it is the load error
+    void check_string_plus(const binary_expr* b, const ctype& l, const ctype& r) {
+        const auto text = [](const ctype& t) { return !t.tentative && (t.kind == ctype::string_k || t.kind == ctype::utf8_k); };
+        const auto scalar = [](const ctype& t) {
+            return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k || t.kind == ctype::char_k ||
+                                    t.kind == ctype::null_k);
+        };
+        if (!(text(l) && scalar(r)) && !(scalar(l) && text(r))) { return; }
+        if (eng_.has_function("+")) { return; }   // a registered global operator answers every +
+        const auto name = [](const ctype& t) { return t.kind == ctype::utf8_k ? std::string("string") : ctype_name(t); };
+        diag(diag_level::error, b->location, "cannot apply '+' to '" + name(l) + "' and '" + name(r) + "': stringify it with to_string(x) or `${x}`");
     }
 
     JAI_NOINLINE ctype infer_unary(unary_expr* u) {

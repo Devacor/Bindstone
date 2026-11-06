@@ -117,7 +117,7 @@ public:
 				"T3 [T3, T3] {\"k\": T3}\n"
 				"D:T3\n"
 				"Box{t: T3, n: N{v: 1}}\n"), run_output(R"JAI(
-				class T { int v = 3; string to_string() { return "T" + v; } }
+				class T { int v = 3; string to_string() { return `T${v}`; } }
 				class D : T { }
 				class N { int v = 1; int to_string() { return 5; } }
 				class Box { T t; N n; }
@@ -178,12 +178,12 @@ public:
 			const std::string want = "[T3, {\"k\": P{x: 1}}]";
 			check_eq(want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n" + want + "\n",
 				run_output(R"JAI(
-				class T { int v = 3; string to_string() { return "T" + v; } }
+				class T { int v = 3; string to_string() { return `T${v}`; } }
 				class P { int x = 1; }
 				var v = [T(), {"k": P()}];
 				print(v);
 				print(to_string(v));
-				print("" + v);
+				print(`${v}`);
 				print(`${v}`);
 				print(format("{}", v));
 				print("{}", v);
@@ -225,9 +225,9 @@ public:
 				"caught: Division by zero\n"
 				"caught: nope\n"), run_output(R"JAI(
 				class Bad { string to_string() { throw "nope"; } }
-				class Bad2 { string to_string() { int z = 0; return "x" + (1 / z); } }
+				class Bad2 { string to_string() { int z = 0; return `x${(1 / z)}`; } }
 				try { print([1, Bad()]); } catch (e) { print("caught: ", e); }
-				try { string s = "p" + {"k": [Bad()]}; print(s); } catch (e) { print("caught: ", e); }
+				try { string s = `p${{"k": [Bad()]}}`; print(s); } catch (e) { print("caught: ", e); }
 				try { print(to_string([Bad2()])); } catch (e) { print("caught: ", e); }
 				try { print(`${[Bad2()]}`); } catch (e) { print("caught: ", e); }
 				try { print([Bad()].join(",")); } catch (e) { print("caught: ", e); }
@@ -291,7 +291,7 @@ public:
 			auto out = std::make_shared<std::ostringstream>();
 			e->set_output_stream(out);
 			e->execute(R"JAI(
-				class T { int v = 3; string to_string() { return "T" + v; } }
+				class T { int v = 3; string to_string() { return `T${v}`; } }
 				class P { int x = 1; string s = "q\"t"; }
 				class Node { int v = 0; shared_ptr<Node> next; weak_ptr<Node> back; }
 				shared_ptr<Node> a = new Node();
@@ -307,7 +307,7 @@ public:
 				for (var& k : kinds) {
 					print(k);
 					print(to_string(k));
-					print("" + k);
+					print(`${k}`);
 					print(`${k}`);
 					print(format("{}", k));
 				}
@@ -330,7 +330,7 @@ public:
 			auto e = make_engine();
 			stdlib::register_all(*e);
 			e->execute(R"JAI(
-				class T { int v = 3; string to_string() { return "T" + v; } }
+				class T { int v = 3; string to_string() { return `T${v}`; } }
 				var held = [T(), "s", [1, 2, 3, 4, 5, 6, 7, 8]];
 			)JAI");
 			script_value held = e->get_variable("held");

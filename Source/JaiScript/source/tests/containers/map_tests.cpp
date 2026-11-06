@@ -555,7 +555,7 @@ public:
                 "{\"a\":1,\"b\":2}true", "string keys in map<var,V>, both shapes");
             row("string k = \"a\"; map<string,int> m = {}; m[k] = 1; k.to_upper(); k += \"!\"; to_json(m) + to_string(m.contains(\"a\")) + k",
                 "{\"a\":1}trueA!", "a key inserted through a variable shares its node until the variable is written");
-            row("map<string,int> m = {\"y\": 1}; var f = m.filter([](k, v) { k.to_upper(); return true; }); to_json(m) + to_json(f)",
+            row("map<string,int> m = {\"y\": 1}; m.filter([](k, v) { k.to_upper(); return true; }); var f = m; to_json(m) + to_json(f)",
                 "{\"y\":1}{\"y\":1}", "filter predicate argument detaches on write");
             row("map<string,int> m = {\"z\": 1}; m.remove_if([](k, v) { k.to_upper(); return false; }); to_json(m)",
                 "{\"z\":1}", "remove_if predicate argument detaches on write");

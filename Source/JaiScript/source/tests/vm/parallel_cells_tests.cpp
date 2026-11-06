@@ -155,7 +155,7 @@ function total() -> int { int t = 0; for (auto& p : ps) { t = t + p.a * 1000 + p
 function weigh(int v) -> int { int s = 0; for (int i = 0; i < 40; ++i) { s = s + (v * i) % 7; } return s; }
 array<int> xs = []; for (int i = 0; i < 200; ++i) { xs.push(i); }
 )JAI";
-			both(defs, "array<int> zs = xs.filter([](int v) -> bool { return weigh(v) > 50; }); int total = zs.size(); array<int> ys = xs.map([](int v) -> int { int s = 0; for (int i = 0; i < 30; ++i) { s = s + v % (i + 1); } return s; }); "
+			both(defs, "array<int> zs = array::filter(xs, [](int v) -> bool { return weigh(v) > 50; }); int total = zs.size(); array<int> ys = array::map(xs, [](int v) -> int { int s = 0; for (int i = 0; i < 30; ++i) { s = s + v % (i + 1); } return s; }); "
 			           "to_string(total) + \" \" + to_string(ys[17]) + \" \" + to_string(ys[199]);", "", 200, "callbacks");
 		});
 
@@ -166,7 +166,7 @@ array<int> xs = []; for (int i = 0; i < 200; ++i) { xs.push(i); }
 function key(int v) -> int { int s = 0; for (int i = 0; i < 12; ++i) { s = s + (v * (i + 3)) % 11; } return s; }
 array<array<int>> groups = []; for (int g = 0; g < 20; ++g) { array<int> one = []; for (int i = 0; i < 8; ++i) { one.push((g * 31 + i * 17) % 50); } groups.push(one); }
 )JAI";
-			both(defs, "array<int> firsts = groups.map([](array<int> one) -> int { int acc = 0; for (int i = 0; i < one.size(); ++i) { acc = acc + key(one[i]); } "
+			both(defs, "array<int> firsts = array::map(groups, [](array<int> one) -> int { int acc = 0; for (int i = 0; i < one.size(); ++i) { acc = acc + key(one[i]); } "
 			           "one.sort([](int a, int b) -> bool { return key(a) < key(b); }); return acc * 100 + one[0]; }); to_string(firsts);", "", 20, "nested callbacks");
 		});
 

@@ -1742,7 +1742,7 @@ public:
             )").c_str(), "|Cannot call 'push' on null ('v8' is null)", "null receiver beats arg side effects", false);
             // the fuzz shape (seed 132479): the callee's null error names the CALLEE member
             auto [i, v] = run_order_both(R"(
-                auto v7 = [4611686018427387904, 5]; auto v8 = v7.reverse(); v8.push(v8.length());
+                auto v7 = [4611686018427387904, 5]; v7.reverse(); var v8 = null; v8.push(v8.length());
             )", false);
             check_eq(i, v, "uncaught null-receiver what() parity");
             check_true(i.find("Cannot call 'push' on null ('v8' is null)") != std::string::npos,
@@ -3160,19 +3160,20 @@ public:
             expect(R"(
                 var s = "glob";
                 string f() { s = 5; return "x"; }
-                var r = s.insert(0, f());
-                r + "/" + s
-            )", "xglob/5", "argument retypes the receiver");
+                s.insert(0, f());
+                "" + s
+            )", "5", "argument retypes the receiver");
             expect(R"(
                 var t = "abc";
                 string g() { t = "zzz"; return "y"; }
-                var r2 = t.insert(0, g());
-                r2 + "/" + t
-            )", "yzzz/yzzz", "argument reassigns the receiver");
+                t.insert(0, g());
+                t
+            )", "yzzz", "argument reassigns the receiver");
             expect(R"(
                 string u = "ab";
-                u.insert(0, "c") + "/" + u
-            )", "cab/cab", "pure arguments");
+                u.insert(0, "c");
+                u + "/" + u.size()
+            )", "cab/3", "pure arguments");
             expect(R"(
                 string p() { return "q"; }
                 string h() { string u = "ab"; u.insert(1, p()); return u + "/" + u.length(); }

@@ -329,17 +329,17 @@ public:
 				"string s = string::pad_left(\"x\", 64000000);",
 				"string s = string::repeat(\"x\", 64000000);",
 				"string s = \"abcd\"; s.repeat(4611686018427387905);",
-				"string s = \"x\".repeat(500000); s.append(s, s, s);",
-				"string s = \"x\".repeat(500000); string t = string::append(s, s, s);",
+				"string s = \"x\"; s.repeat(500000); s.append(s, s, s);",
+				"string s = \"x\"; s.repeat(500000); string t = string::append(s, s, s);",
 				"var a = [1]; for (int i = 0; i < 30; i++) { a.concat(a); }",
 				"var a = [1]; for (int i = 0; i < 30; i++) { a.append(a); }",
-				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); a.join(sep);",
-				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\".repeat(500000); string::join(a, sep);",
-				"string s = \"x\".repeat(500000); s.replace(\"x\", \"yyyy\");",
-				"string s = \"x\".repeat(500000); string::replace(s, \"x\", \"yyyy\");",
-				"string s = \"x\".repeat(500000); var parts = s.split(\"\");",
-				"string s = \"x\".repeat(500000); var parts = s.utf8_chars();",
-				"string s = \"x\\n\".repeat(300000); var parts = s.lines();",
+				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\"; sep.repeat(500000); a.join(sep);",
+				"var a = [\"a\", \"b\", \"c\"]; string sep = \"x\"; sep.repeat(500000); string::join(a, sep);",
+				"string s = \"x\"; s.repeat(500000); s.replace(\"x\", \"yyyy\");",
+				"string s = \"x\"; s.repeat(500000); string::replace(s, \"x\", \"yyyy\");",
+				"string s = \"x\"; s.repeat(500000); var parts = s.split(\"\");",
+				"string s = \"x\"; s.repeat(500000); var parts = s.utf8_chars();",
+				"string s = \"x\\n\"; s.repeat(300000); var parts = s.lines();",
 				"var w = binary::writer(); w.text(\"x\", 64000000);",
 				"var w = binary::writer(); for (int i = 0; i < 1000000; i++) { w.int64(i); }",
 				"var deep = [[[[[[1]]]]]]; to_json(deep, 10000000);",
@@ -392,10 +392,10 @@ public:
 		test("replace_is_linear_in_the_hits", [this]() {
 			auto e = make_engine();
 			stdlib::register_all(*e);
-			check_eq((int64_t)8000000, e->execute("string s = \"x\".repeat(4000000); s.replace(\"x\", \"yy\"); s.size()").as_int());
-			check_eq((int64_t)8000000, e->execute("string s = \"x\".repeat(4000000); string::replace(s, \"x\", \"yy\").size()").as_int());
-			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace(\", \", \"-\")").as<std::string>());
-			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace(\"x\", \"xx\")").as<std::string>());
+			check_eq((int64_t)8000000, e->execute("string s = \"x\"; s.repeat(4000000); s.replace(\"x\", \"yy\"); s.size()").as_int());
+			check_eq((int64_t)8000000, e->execute("string s = \"x\"; s.repeat(4000000); string::replace(s, \"x\", \"yy\").size()").as_int());
+			check_eq(std::string("a-b-c"), e->execute("string s = \"a, b, c\"; s.replace(\", \", \"-\"); s").as<std::string>());
+			check_eq(std::string("xxyxxy"), e->execute("string s = \"xyxy\"; s.replace(\"x\", \"xx\"); s").as<std::string>());
 			check_eq(std::string("q"), e->execute("string s = \"aaaa\"; s.replace(\"aa\", \"\"); s + \"q\"").as<std::string>());
 		});
 	}

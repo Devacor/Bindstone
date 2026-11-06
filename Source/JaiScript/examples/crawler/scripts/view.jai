@@ -637,7 +637,7 @@ function build_layout() -> void {
 	for (int b = 0; b < BOX_ID.size(); ++b) {
 		BOX_ROW0.push(BOX_ROWS.size());
 		for (int r = 0; r < BOX_H[b]; ++r) {
-			BOX_ROWS.push(" ".repeat(BOX_W[b]));
+			BOX_ROWS.push(string::repeat(" ", BOX_W[b]));
 			BOX_ROW_X.push(BOX_X[b]);
 		}
 	}

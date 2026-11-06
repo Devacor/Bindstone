@@ -275,7 +275,7 @@ class Gfx {
 			n = w;
 		}
 		int pad = (w - n) / 2;
-		rows[y] = style + " ".repeat(pad) + text + " ".repeat(w - pad - n) + RESET;
+		rows[y] = style + string::repeat(" ", pad) + text + string::repeat(" ", w - pad - n) + RESET;
 	}
 
 	void overlay_left(var& rows, int w, int y, string text, string style) {
@@ -285,6 +285,6 @@ class Gfx {
 			text = text.substr(0, w);
 			n = w;
 		}
-		rows[y] = style + text + " ".repeat(w - n) + RESET;
+		rows[y] = style + text + string::repeat(" ", w - n) + RESET;
 	}
 }

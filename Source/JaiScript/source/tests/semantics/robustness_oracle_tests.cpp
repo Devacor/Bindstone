@@ -295,14 +295,15 @@ private:
 		});
 	}
 
-	// map.filter(pred) keeps the accepted entries in the receiver and returns it, map::filter(m, pred)
+	// map.filter(pred) keeps the accepted entries in the receiver and returns nothing, map::filter(m, pred)
 	// returns them as a new map and leaves m alone (the array dot / namespace pairs)
 	void map_transforms() {
 		test("map_dot_filter_mutates_and_map_namespace_filter_copies", [this]() {
 			expect("map filter", R"(
 				string run() {
 					map<string, int> m = {"a": 1, "b": 2, "c": 3, "d": 4};
-					m.filter((k, v) => v != 2).filter((k, v) => v != 4);
+					m.filter((k, v) => v != 2);
+					m.filter((k, v) => v != 4);
 					string out = "" + m.size() + "," + m.contains("b") + "," + m.contains("d") + ",";
 					map<string, int> m2 = {"a": 1, "b": 2};
 					map<string, int> c = map::filter(m2, (k, v) => v == 1);

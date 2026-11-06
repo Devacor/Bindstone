@@ -258,13 +258,13 @@ null false
 print("[", ranks(1), "] [", ranks(2), "]");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[novice ] [adept master]</code></pre></div>
 <h3 id="string-methods-change-the-string">Some string methods change the string<a class="hlink" href="#string-methods-change-the-string" aria-label="link">&#8203;</a></h3>
-<p><code>to_upper</code>, <code>to_lower</code>, <code>trim</code>, <code>replace</code>, <code>pad_left</code> and the other mutators change the string they are called on and return it. The <code>string::</code> functions are the versions that return a new string:</p>
+<p><code>to_upper</code>, <code>to_lower</code>, <code>trim</code>, <code>replace</code>, <code>pad_left</code> and the other mutators change the string they are called on and return nothing, so <code>string shout = name.to_upper();</code> is an error. The <code>string::</code> functions are the versions that return a new string:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string name = "ada";
-string shout = name.to_upper();          // name changes too
-print(name, " ", shout);
+name.to_upper();                         // changes name, returns nothing
+print(name);
 string quiet = "BOB";
 print(string::to_lower(quiet), " ", quiet);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA ADA
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA
 bob BOB</code></pre></div>
 <h3 id="map-keys">Map keys<a class="hlink" href="#map-keys" aria-label="link">&#8203;</a></h3>
 <p>A bare name before a colon is the key's text, as in JavaScript; a computed key goes through <code>[]</code>. A missing key reads <code>null</code> and adds nothing. A map walks its keys in key order, whatever order they were added in. A dot reads a key that exists (a missing one raises <code>map has no member or key 'mana'</code>, where <code>[]</code> reads null), and a store needs <code>[]</code>:</p>
@@ -293,7 +293,7 @@ print(to_json(b), " ", to_json(a));</code></pre></div>
 2=3
 3=4
 [0,1,2,3,4,5] [1,2,3,4]</code></pre></div>
-<p>Dot <code>map</code>, <code>filter</code>, <code>concat</code> and <code>slice</code> change the array; the matching <code>array::</code> functions return new arrays. A map&#x27;s <code>filter</code> pairs the same way: <code>m.filter(f)</code> keeps the entries in <code>m</code>, <code>map::filter(m, f)</code> returns a new map. <code>insert</code>, <code>sort</code> and <code>remove_if</code> also mutate. Dot <code>map</code> retains the input element type; <code>array::map</code> returns an <code>array&lt;T&gt;</code> when its callback declares return type <code>T</code>, and an array of anything otherwise. A callback whose element parameter is <code>T&amp;</code> gets the live element, so <code>a.for_each([](int&amp; x) { x *= 2; })</code> doubles every element, as <code>std::for_each</code> does in C++.</p>
+<p>Dot <code>map</code>, <code>filter</code>, <code>concat</code> and <code>slice</code> change the array and return nothing, so <code>a.filter(f).map(g)</code> is an error; the matching <code>array::</code> functions return new arrays. A map&#x27;s <code>filter</code> pairs the same way: <code>m.filter(f)</code> keeps the entries in <code>m</code>, <code>map::filter(m, f)</code> returns a new map. <code>insert</code>, <code>sort</code> and <code>remove_if</code> also mutate. Dot <code>map</code> retains the input element type; <code>array::map</code> returns an <code>array&lt;T&gt;</code> when its callback declares return type <code>T</code>, and an array of anything otherwise. A callback whose element parameter is <code>T&amp;</code> gets the live element, so <code>a.for_each([](int&amp; x) { x *= 2; })</code> doubles every element, as <code>std::for_each</code> does in C++.</p>
 <h3 id="closures">A function expression closes over its scope; a lambda names what it captures<a class="hlink" href="#closures" aria-label="link">&#8203;</a></h3>
 <p>A <code>function(...)</code> expression is JavaScript's closure: it shares the variables of the function around it, and they outlive that function, so the counter is safe to return. In lambda terms it is <code>[&amp;]</code>. An arrow function, <code>() =&gt; { ... }</code>, closes over its scope the same way:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_counter() {

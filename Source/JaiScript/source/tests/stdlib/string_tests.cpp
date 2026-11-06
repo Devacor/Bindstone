@@ -290,20 +290,20 @@ public:
         });
 
         // ============================================================
-        // Mutating methods (modify in place, return self for chaining)
+        // Mutating methods (modify in place, return nothing)
         // ============================================================
 
         test("to_lower", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"HELLO\"; s.to_lower();");
+            auto result = engine->execute("var s = \"HELLO\"; s.to_lower(); s;");
             check_eq(result.as<std::string>(), "hello");
         });
 
         test("to_upper", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.to_upper();");
+            auto result = engine->execute("var s = \"hello\"; s.to_upper(); s;");
             check_eq(result.as<std::string>(), "HELLO");
         });
 
@@ -354,49 +354,49 @@ public:
         test("trim_both_sides", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim();");
+            auto result = engine->execute("var s = \"  hello  \"; s.trim(); s;");
             check_eq(result.as<std::string>(), "hello");
         });
 
         test("trim_with_chars", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"***hello***\"; s.trim(\"*\");");
+            auto result = engine->execute("var s = \"***hello***\"; s.trim(\"*\"); s;");
             check_eq(result.as<std::string>(), "hello");
         });
 
         test("trim_left", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim_left();");
+            auto result = engine->execute("var s = \"  hello  \"; s.trim_left(); s;");
             check_eq(result.as<std::string>(), "hello  ");
         });
 
         test("trim_right", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim_right();");
+            auto result = engine->execute("var s = \"  hello  \"; s.trim_right(); s;");
             check_eq(result.as<std::string>(), "  hello");
         });
 
         test("pad_left", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hi\"; s.pad_left(5, '.');");
+            auto result = engine->execute("var s = \"hi\"; s.pad_left(5, '.'); s;");
             check_eq(result.as<std::string>(), "...hi");
         });
 
         test("pad_right", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hi\"; s.pad_right(5, '.');");
+            auto result = engine->execute("var s = \"hi\"; s.pad_right(5, '.'); s;");
             check_eq(result.as<std::string>(), "hi...");
         });
 
         test("pad_center", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hi\"; s.pad_center(6, '.');");
+            auto result = engine->execute("var s = \"hi\"; s.pad_center(6, '.'); s;");
             check_eq(result.as<std::string>(), "..hi..");
             // a fill of several characters tiles from its start on each side (JavaScript's padStart / padEnd)
             check_eq(std::string("xyzxyab|abxyzxy|xyzabxyz|\xC3\xA9\xE6\x97\xA5\xC3\xA9\xE6\x97\xA5" "b"),
@@ -407,70 +407,70 @@ public:
         test("replace_first", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.replace_first(\"hello\", \"hi\");");
+            auto result = engine->execute("var s = \"hello hello\"; s.replace_first(\"hello\", \"hi\"); s;");
             check_eq(result.as<std::string>(), "hi hello");
         });
 
         test("replace_last", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.replace_last(\"hello\", \"hi\");");
+            auto result = engine->execute("var s = \"hello hello\"; s.replace_last(\"hello\", \"hi\"); s;");
             check_eq(result.as<std::string>(), "hello hi");
         });
 
         test("replace", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\");");
+            auto result = engine->execute("var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\"); s;");
             check_eq(result.as<std::string>(), "hi hi hi");
         });
 
         test("replace_non_overlapping", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"aaaa\"; s.replace(\"aa\", \"b\");");
+            auto result = engine->execute("var s = \"aaaa\"; s.replace(\"aa\", \"b\"); s;");
             check_eq(result.as<std::string>(), "bb");
         });
 
         test("insert", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"helloworld\"; s.insert(5, \" \");");
+            auto result = engine->execute("var s = \"helloworld\"; s.insert(5, \" \"); s;");
             check_eq(result.as<std::string>(), "hello world");
         });
 
         test("erase", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.erase(5, 1);");
+            auto result = engine->execute("var s = \"hello world\"; s.erase(5, 1); s;");
             check_eq(result.as<std::string>(), "helloworld");
         });
 
         test("remove_prefix", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.remove_prefix(6);");
+            auto result = engine->execute("var s = \"hello world\"; s.remove_prefix(6); s;");
             check_eq(result.as<std::string>(), "world");
         });
 
         test("remove_suffix", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.remove_suffix(6);");
+            auto result = engine->execute("var s = \"hello world\"; s.remove_suffix(6); s;");
             check_eq(result.as<std::string>(), "hello");
         });
 
         test("reverse", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.reverse();");
+            auto result = engine->execute("var s = \"hello\"; s.reverse(); s;");
             check_eq(result.as<std::string>(), "olleh");
         });
 
         test("repeat", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"ab\"; s.repeat(3);");
+            auto result = engine->execute("var s = \"ab\"; s.repeat(3); s;");
             check_eq(result.as<std::string>(), "ababab");
         });
 
@@ -478,18 +478,19 @@ public:
         // Chaining tests
         // ============================================================
 
+        // a mutator returns nothing, so a chain uses its result: it raises before the first write
         test("chaining_trim_to_lower", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  HELLO  \"; s.trim().to_lower();");
-            check_eq(result.as<std::string>(), "hello");
+            auto result = engine->execute("var s = \"  HELLO  \"; var r = \"\"; try { s.trim().to_lower(); } catch (e) { r = e.message; } r + \"|\" + s;");
+            check_eq(result.as<std::string>(), "trim changes s in place and returns nothing; string::trim(s) returns a trimmed copy|  HELLO  ");
         });
 
         test("chaining_multiple_operations", [this]() {
             auto engine = make_engine();
             stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  Hello World  \"; s.trim().to_lower().replace(\" \", \"_\");");
-            check_eq(result.as<std::string>(), "hello_world");
+            auto result = engine->execute("var s = \"  Hello World  \"; s.trim(); s.to_lower(); s.replace(\" \", \"_\"); s + \"|\" + string::replace(string::to_upper(s), \"_\", \"-\");");
+            check_eq(result.as<std::string>(), "hello_world|HELLO-WORLD");
         });
 
         // ============================================================
@@ -982,7 +983,7 @@ public:
             check_eq(std::string("2|3|-1|true|true"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; to_string(u.find(\"\xE6\x97\xA5\")) + \"|\" + to_string(u.rfind(\"b\")) + \"|\" + to_string(u.find(\"z\")) + \"|\" + to_string(u.contains(\"\xC3\xB1\")) + \"|\" + to_string(u.starts_with(\"a\xC3\xB1\"));"));
             check_eq(std::string("b\xE6\x97\xA5\xC3\xB1" "a|4|aZ\xC3\xB1\xE6\x97\xA5" "b"), es("utf8_string u = \"a\xC3\xB1\xE6\x97\xA5" "b\"; utf8_string r = u; r.reverse(); utf8_string z = u; z.insert(1, \"Z\"); r + \"|\" + to_string(u.split(\"\").size()) + \"|\" + z;"));
             check_eq(std::string("\xC3\xA9\xC3\xA9\xE6\x97\xA5|\xE6\x97\xA5\xC3\xA9\xC3\xA9"), es("utf8_string a = \"\xE6\x97\xA5\"; a.pad_left(3, \"\xC3\xA9\"); utf8_string b = \"\xE6\x97\xA5\"; b.pad_right(3, \"\xC3\xA9\"); a + \"|\" + b;"));
-            check_eq(std::string("utf8_string|utf8_string|utf8_string"), es("utf8_string u = \"a b\"; type_of(u.split(\" \")[0]) + \"|\" + type_of(u.to_upper()) + \"|\" + type_of(u.substr(0, 1));"));
+            check_eq(std::string("utf8_string|utf8_string|utf8_string"), es("utf8_string u = \"a b\"; type_of(u.split(\" \")[0]) + \"|\" + type_of(string::to_upper(u)) + \"|\" + type_of(u.substr(0, 1));"));
             check_eq(std::string("H\xC3\xA9LLO"), es("utf8_string u = \"h\xC3\xA9llo\"; u.to_upper(); u;"));
         });
 

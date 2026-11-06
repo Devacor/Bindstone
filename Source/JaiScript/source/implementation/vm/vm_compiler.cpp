@@ -8770,6 +8770,8 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 			site_lease site(pending_sites_);
 			site->member_node = add_node(member);
 			site->call_node = add_node(expr);
+			site->in_place_check = !member->call_result_discarded && member->object->get_type() != node_type::super_expr &&
+			                       is_in_place_method_name(member->member);
 			if (member->object->get_type() == node_type::identifier_expr) {
 				auto* recv_ident = static_cast<identifier_expr*>(member->object.get());
 				site->receiver_symbol = recv_ident->symbol_id;
@@ -8811,7 +8813,8 @@ JAI_NOINLINE void vm_compiler::compile_call(const std::shared_ptr<call_expr>& ex
 			}
 			for (const size_t ip : capture_ips) { chunk_->code[ip].a = static_cast<uint32_t>(chunk_->call_sites.size() - 1); }
 			uint32_t builtin_kind = 0;   // the checker proved the receiver and the name is that kind's builtin, or the receiver's kind picks at run time
-			if (builtins_ && !reference_ && !member->null_safe && member->object->get_type() != node_type::super_expr) {
+			if (builtins_ && !reference_ && !member->null_safe && member->object->get_type() != node_type::super_expr &&
+			    !chunk_->call_sites.back().in_place_check) {
 				const call_site& cs = chunk_->call_sites.back();
 				bool args_callout_free = true;   // an identifier string receiver is re-read after the arguments: none may run code
 				if (member->object->get_type() == node_type::identifier_expr) {

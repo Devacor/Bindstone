@@ -839,17 +839,17 @@ namespace jai::fuzz {
 				case 3: { // builtin string methods
 					std::string base = random_var(vt::s) ? random_var(vt::s)->name : string_literal();
 					switch (rng_.below(8)) {
-						case 0: return base + ".to_upper()";
-						case 1: return base + ".to_lower()";
-						case 2: return base + ".trim()";
-						case 3: return base + ".reverse()";
+						case 0: return changed_copy(base, "to_upper()");
+						case 1: return changed_copy(base, "to_lower()");
+						case 2: return changed_copy(base, "trim()");
+						case 3: return changed_copy(base, "reverse()");
 						case 4: return base + ".substr(0, " + std::to_string(rng_.range(0, 3)) + ")";
-						case 5: return base + ".repeat(" + std::to_string(rng_.range(0, 3)) + ")";
+						case 5: return changed_copy(base, "repeat(" + std::to_string(rng_.range(0, 3)) + ")");
 						case 6: {
 							const std::string to = string_literal();
-							return base + ".replace(" + string_literal() + ", " + to + ")";
+							return changed_copy(base, "replace(" + string_literal() + ", " + to + ")");
 						}
-						default: return base + ".pad_left(" + std::to_string(rng_.range(0, 6)) + ", \"*\")";
+						default: return changed_copy(base, "pad_left(" + std::to_string(rng_.range(0, 6)) + ", \"*\")");
 					}
 				}
 				case 4: return "to_string(" + expr(rng_.chance(50) ? vt::i : vt::f, depth - 1) + ")";
@@ -858,6 +858,11 @@ namespace jai::fuzz {
 					return c.empty() ? string_literal() : c;
 				}
 			}
+		}
+
+		// an in-place builtin returns nothing: the value is a copy the method changed, through a by-value parameter
+		static std::string changed_copy(const std::string& base, const std::string& call) {
+			return "((t) => { t." + call + "; return t; })(" + base + ")";
 		}
 
 		std::string array_expr(int depth) {
@@ -874,8 +879,8 @@ namespace jai::fuzz {
 			}
 			if (const var_info* a = random_var(vt::arr)) {
 				switch (rng_.below(3)) {
-					case 0: return a->name + ".slice(0, " + std::to_string(rng_.range(0, 2)) + ")";
-					case 1: return a->name + ".reverse()";
+					case 0: return changed_copy(a->name, "slice(0, " + std::to_string(rng_.range(0, 2)) + ")");
+					case 1: return changed_copy(a->name, "reverse()");
 					default: return a->name;
 				}
 			}

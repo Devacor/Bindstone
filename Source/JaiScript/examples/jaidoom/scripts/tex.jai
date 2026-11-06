@@ -57,7 +57,7 @@ function gfx_init() -> void {
 	int npatch = names.int32();
 	PNAME_LUMP = []; PATCH_W = []; PATCH_COL0 = []; PATCH_POST = [];
 	for (int p = 0; p < npatch; ++p) {
-		PNAME_LUMP.push(lump_num(names.text(8).to_upper()));
+		PNAME_LUMP.push(lump_num(string::to_upper(names.text(8))));
 		PATCH_W.push(-1);
 		PATCH_COL0.push(0);
 	}

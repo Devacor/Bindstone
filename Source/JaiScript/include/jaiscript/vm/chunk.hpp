@@ -139,6 +139,9 @@ namespace jai::vm {
         uint16_t bi_array = 0xFFFF;
         uint16_t bi_map = 0xFFFF;
         uint16_t bi_string = 0xFFFF;
+        // op_call_method whose result is used under the name of an in-place builtin: the call raises when the receiver's kind
+        // runs that builtin (detail/in_place_result.hpp); such a site never takes op_call_builtin
+        bool in_place_check = false;
         // Monomorphic in-loop callee cache: keyed on the address of
         // the loaded function value's shared script_function payload; ic_pin keeps that
         // object alive so a hit can never be a recycled address (ABA) — a redefined name

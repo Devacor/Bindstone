@@ -1444,7 +1444,7 @@
      "name": "shout",
      "range": {
       "end": {
-       "character": 48,
+       "character": 51,
        "line": 26
       },
       "start": {

@@ -3961,7 +3961,7 @@ public:
             check_quad("class D { string s = \"x\"; } var ds = [D()]; ds[0].s.to_upper(); ds[0].s", "X", "field of an element receiver");
             check_quad("class P { string _n = \"a\"; string _get_n() { return _n; } } var p = P(); p.n.to_upper(); p.n", "a", "a computed property is a temporary");
             check_quad("string s = \"abc\"; s.substr(1).to_upper(); s", "abc", "a call result is a temporary");
-            check_quad("function mk() { return \"t\"; } mk().to_upper()", "T", "temporary mutation lands in the result");
+            check_quad("function mk() { return \"t\"; } mk().to_upper(); \"dropped\"", "dropped", "a temporary takes the write and is dropped");
             check_quad("string q = \"hello\"; var f = []() { q.to_upper(); }; f(); q", "HELLO", "a string method taken as a value is a lambda over the receiver");
             check_quad("string a = \"hello\"; string b = a; b.to_lower(); b.trim(); b.trim_left(); b.trim_right(); b.pad_left(6, ' '); b.pad_right(7, ' '); b.pad_center(9, '*'); b.replace_first(\"h\", \"j\"); b.replace_last(\"o\", \"y\"); b.replace(\"l\", \"L\"); b.insert(0, \">\"); b.erase(0, 1); b.remove_prefix(1); b.remove_suffix(1); b.reverse(); b.repeat(1); b.to_upper(); a + \"|\" + b",
                        "hello| YLLEJ ", "all seventeen mutators on a copy leave the source");
@@ -3969,19 +3969,17 @@ public:
                        "hello| YLLEJ ", "all seventeen mutators through an element receiver land in the element");
         });
 
-        test("string_mutator_chain_battery", [check_quad]() {
-            // Mutators return self for chaining; a chain rooted at an lvalue keeps writing
-            // to the root (guide ch.9 pins `t.trim().to_upper().replace(...)` -> t)
-            check_quad("var t = \"  hello world  \"; t.trim().to_upper().replace(\"WORLD\", \"JAI\"); t", "HELLO JAI", "guide ch.9 chain on a variable");
-            check_quad("auto name = \"jai\"; auto upper = name.to_upper(); name + upper", "JAIJAI", "guide ch.9: the mutator's result is the mutated receiver");
+        test("string_mutator_chain_battery", [check_quad, check_quad_error]() {
+            // A mutator returns nothing (C++ `void to_upper()`), so a chain uses its result: the inner call raises before it writes
+            // (guide ch.9 "In place or a copy")
+            check_quad("var t = \"  hello world  \"; t.trim(); t.to_upper(); t.replace(\"WORLD\", \"JAI\"); t", "HELLO JAI", "guide ch.9 mutators as statements");
+            check_quad("var t = \" ab \"; string r = \"\"; try { t.trim().to_upper(); } catch (e) { r = e.message; } r + \"|\" + t",
+                       "trim changes t in place and returns nothing; string::trim(t) returns a trimmed copy| ab ", "a chain on a variable raises before the first write");
+            check_quad("var arr = [\" ab \"]; string r = \"\"; try { arr[0].trim().to_upper(); } catch (e) { r = e.message; } r + \"|\" + arr[0]",
+                       "trim changes obj in place and returns nothing; string::trim(obj) returns a trimmed copy| ab ", "a chain rooted at an element raises before the first write");
+            check_quad_error("string t = \"ab\"; t.to_upper().to_lower(); t", "a chain on a typed variable is a load error");
             check_quad("auto name = \"jai\"; auto upper = name; upper.to_upper(); name + \"|\" + upper", "jai|JAI", "guide ch.9: copy first keeps the original");
-            check_quad("string a = \"  x \"; string b = a; b.trim().to_upper(); a + \"|\" + b", "  x |X", "chain on a copy leaves the source");
-            check_quad("var arr = [\"  ab \"]; arr[0].trim().to_upper(); arr[0]", "AB", "chain rooted at an element");
-            check_quad("array<string> ts = [\"  ab \"]; ts[0].trim().to_upper(); ts[0]", "AB", "chain rooted at a typed element");
-            check_quad("class D { string t = \" y \"; void m() { this.t.trim().to_upper(); } } var d = D(); d.m(); d.t.pad_left(2, '-').pad_right(3, '+'); d.t", "-Y+", "chain rooted at this.field and obj.field");
-            check_quad("string s = \"abc\"; s.substr(1).to_upper().reverse(); s", "abc", "chain rooted at a temporary");
-            check_quad("class H { string name = \"  n \"; string get() { return name; } } var h = H(); h.get().trim().to_upper(); h.name", "  n ", "chain rooted at a by-value method result");
-            check_quad("string t = \"ab\"; t.to_upper().to_lower().reverse(); t", "ba", "three-deep chain on a variable");
+            check_quad_error("string s = \"abc\"; s.substr(1).to_upper().reverse(); s", "a chain rooted at a temporary is a load error too");
         });
 
     }

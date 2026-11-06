@@ -1172,6 +1172,7 @@ namespace jai {
         std::unordered_map<uint64_t, builtin_method> string_methods_;
         std::unordered_map<uint64_t, builtin_method> utf8_methods_;
         std::unordered_set<uint64_t> string_mutator_ids_;   // k_string_mutator_method_names (receiver lvalue binding)
+        builtin_method_registries::in_place_ids in_place_;   // the builtins whose result a call may not use (detail/in_place_result.hpp)
         std::unordered_map<uint64_t, builtin_method> weak_ptr_methods_;
         std::unordered_map<uint64_t, builtin_method> shared_ptr_methods_;
 

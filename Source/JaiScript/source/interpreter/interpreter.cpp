@@ -23,6 +23,7 @@
 #include <jaiscript/detail/math_component_store.hpp>   // math-value component stores (vm parity)
 #include <jaiscript/detail/ref_lvalue.hpp>    // shared ref-param lvalue binding (vm parity)
 #include <jaiscript/detail/method_value.hpp>
+#include <jaiscript/detail/in_place_result.hpp>
 #include <jaiscript/detail/string_mutator_receiver.hpp>
 #include <jaiscript/detail/string_element.hpp>
 #include <jaiscript/detail/import_paths.hpp>
@@ -152,6 +153,7 @@ void interpreter::init_builtin_methods() {
     string_methods_ = std::move(registries.string_methods);
     utf8_methods_ = std::move(registries.utf8_methods);
     string_mutator_ids_ = std::move(registries.string_mutator_ids);
+    in_place_ = std::move(registries.in_place);
     weak_ptr_methods_ = std::move(registries.weak_ptr_methods);
     shared_ptr_methods_ = std::move(registries.shared_ptr_methods);
 }
@@ -3613,6 +3615,9 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
                         }
                     }
 
+                    if (!member->call_result_discarded && string_mutator_ids_.count(member->member_id)) [[unlikely]] {
+                        return detail::in_place_result_error(string_symbolizer_, member, in_place_.string.at(member->member_id)).error_value();
+                    }
                     // Resolve through references (ref decls/cells): string builtins read
                     // self's storage RAW, and in-place mutation must land in the target; a
                     // scratch-backed alias (typed element, C++ property) writes back after
@@ -4466,6 +4471,18 @@ checked_result<void> interpreter::method_value_error(const member_expr* expr, co
 
 checked_result<void> interpreter::member_read_on(member_expr* expr, script_value objectValue, bool as_callee) {
     const bool is_super_access = expr->object->get_type() == node_type::super_expr;
+
+    // An in-place builtin whose result the call uses raises once its arguments ran (KEEP BYTE-PARALLEL with
+    // vm_backend::exec_call_method_general's in_place_check)
+    if (as_callee && !expr->call_result_discarded && !is_super_access) [[unlikely]] {
+        if (const auto twin = detail::in_place_builtin(in_place_, objectValue.deref(), expr->member_id)) {
+            script_function raise_used = [symbols = string_symbolizer_, expr, twin = *twin](const std::vector<script_value>&) -> checked_result<script_value> {
+                return detail::in_place_result_error(symbols, expr, twin);
+            };
+            push_value(script_value::make_function(raise_used, engine_));
+            return {};
+        }
+    }
 
     // A handle's reset() writes null into the receiver LVALUE (C++ `p.reset()`; detail/string_mutator_receiver.hpp); a class
     // that declares reset() keeps its method (KEEP BYTE-PARALLEL with vm_backend::exec_call_method's handle reset)

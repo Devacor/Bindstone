@@ -54,7 +54,7 @@ namespace {
             }
         }
         auto& str = self.unchecked_text_ref(ctx.get_engine());
-        if (target_len <= static_cast<script_int>(str.size())) { return self; }
+        if (target_len <= static_cast<script_int>(str.size())) { return ctx.make_value(); }
         const size_t total = detail::saturating_count(target_len) - str.size();
         if (!detail::builtin_memory_charge(ctx.get_engine(), total)) [[unlikely]] { return detail::builtin_memory_cap(ctx.get_engine()); }
         if (total > std::string().max_size() - 64) { throw std::length_error("pad"); }
@@ -66,7 +66,7 @@ namespace {
             return out;
         };
         str = tiled(left) + str + tiled(total - left);
-        return self;
+        return ctx.make_value();
     }
     // The argument positions a builtin's callback binds by reference (a script T& parameter, a host T& that writes back):
     // those take the builtin's elements as lvalues, as std::sort hands its comparator the elements it sorts
@@ -438,7 +438,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 
 			if (!a_context.copy_array_result) {
 				a_self.unchecked_get_array_storage()->retain_range(static_cast<size_t>(start), static_cast<size_t>(end));
-				return a_self;
+				return a_context.make_value();
 			}
 			// Preserve the receiver's declared element type in the copy.
 			auto self_type = a_self.get_type_info();
@@ -472,7 +472,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			}
 			if (a_context.copy_array_result) { return result; }
 			array->retain_selected(selected);
-			return a_self;
+			return a_context.make_value();
 		}},
 
 		{symbolizer->intern("sort"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
@@ -767,7 +767,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 		const uint32_t refs = target.live_elem_refs;
 		target = std::move(output);
 		target.live_elem_refs = refs;
-		return self;
+		return ctx.make_value();
 	}},
 
 		// reduce(f, init): f(accumulator, element) over the elements in order, starting from init; reduce(f) starts from the first element
@@ -921,7 +921,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			script_value result = a_context.copy_array_result ? a_self.clone() : script_value(a_self);
 			const auto target = result.unchecked_get_array_storage();
 			const auto input = other.unchecked_get_array_storage();
-			if (target->append_same_kind(*input)) { return result; }
+			if (target->append_same_kind(*input)) { return a_context.copy_array_result ? result : a_context.make_value(); }
 			auto tag = result.get_type_info();
 			type_info_ptr type = tag ? tag->element_type() : nullptr;
 			if (type && (type->base_type == script_value_type::jai_any_type || type->base_type == script_value_type::jai_null_type)) { type = nullptr; }
@@ -942,7 +942,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			}
 			target->reserve(target->size() + values.size());
 			for (auto& value : values) { target->push(std::move(value)); }
-			return result;
+			return a_context.copy_array_result ? result : a_context.make_value();
 		}},
 
         {symbolizer->intern("insert"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1173,7 +1173,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             auto it = source->find(key);
             if (it != source->end()) { source->erase(it); }
         }
-        return self;
+        return ctx.make_value();
     }},
 
         {symbolizer->intern("to_array"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1201,7 +1201,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 	out.map_methods.emplace(symbolizer->intern("erase"), out.map_methods.at(symbolizer->intern("remove")));
 
     // String methods - enable str.length(), str.substr(), etc.
-    // Observer methods return values; mutating methods modify in place and return self
+    // Observer methods return values; mutating methods modify in place and return nothing
     out.string_methods = {
 		{symbolizer->intern("append"), [](const builtin_method_context& a_context, script_value& a_self, const std::vector<script_value>& a_args) -> checked_result<script_value> {
 			if (a_args.empty()) { return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "append() requires at least one text argument"); }
@@ -1214,7 +1214,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
 			auto& text = a_self.unchecked_text_ref(a_context.get_engine());
 			text.reserve(text.size() + extra);
 			for (const auto& argument : a_args) { text.append(argument.unchecked_text()); }
-			return a_self;
+			return a_context.make_value();
 		}},
         // ============================================================
         // Observer methods (non-mutating)
@@ -1622,7 +1622,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         }},
 
         // ============================================================
-        // Mutating methods (modify in place, return self for chaining)
+        // Mutating methods (modify in place, return nothing)
         // ============================================================
 
         {symbolizer->intern("to_lower"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1635,7 +1635,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     c = c + ('a' - 'A');
                 }
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("to_upper"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1648,7 +1648,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                     c = c - ('a' - 'A');
                 }
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("trim"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1671,7 +1671,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 size_t end = str.find_last_not_of(chars);
                 str = str.substr(start, end - start + 1);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("trim_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1693,7 +1693,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else {
                 str.erase(0, start);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("trim_right"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1715,7 +1715,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             } else {
                 str.erase(end + 1);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("pad_left"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1755,7 +1755,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("replace_last"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1777,7 +1777,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             if (pos != std::string::npos) {
                 str.replace(pos, old_str.size(), new_str);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("replace"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1798,7 +1798,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             auto& str = self.unchecked_text_ref(ctx.get_engine());
             size_t hits = 0;
             for (size_t at = str.find(old_str); at != std::string::npos; at = str.find(old_str, at + old_str.size())) { ++hits; }
-            if (hits == 0) { return self; }
+            if (hits == 0) { return ctx.make_value(); }
             if (new_str.size() > old_str.size() && !detail::builtin_memory_charge(ctx.get_engine(), hits, new_str.size() - old_str.size())) [[unlikely]] {
                 return detail::builtin_memory_cap(ctx.get_engine());
             }
@@ -1812,7 +1812,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
             out.append(str, at, std::string::npos);
             str = std::move(out);
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("insert"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1846,7 +1846,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             str.insert(static_cast<size_t>(pos), text);
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("erase"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1864,7 +1864,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             // Normalize negative index
             if (pos < 0) pos += len;
             if (pos < 0 || pos >= len) {
-                return self;  // Out of bounds, no change
+                return ctx.make_value();  // Out of bounds, no change
             }
 
             size_t count = std::string::npos;
@@ -1878,7 +1878,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
 
             str.erase(static_cast<size_t>(pos), count);
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("remove_prefix"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1896,7 +1896,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 size_t to_remove = std::min(static_cast<size_t>(n), str.size());
                 str.erase(0, to_remove);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("remove_suffix"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1914,7 +1914,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
                 size_t to_remove = std::min(static_cast<size_t>(n), str.size());
                 str.erase(str.size() - to_remove);
             }
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("reverse"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1923,7 +1923,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
             auto& str = self.unchecked_text_ref(ctx.get_engine());
             std::reverse(str.begin(), str.end());
-            return self;
+            return ctx.make_value();
         }},
 
         {symbolizer->intern("repeat"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -1940,7 +1940,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             }
             if (count == 0) {
                 self.unchecked_text_ref(ctx.get_engine()).clear();
-                return self;
+                return ctx.make_value();
             }
 
             auto& str = self.unchecked_text_ref(ctx.get_engine());
@@ -1954,7 +1954,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
             for (script_int i = 0; i < count; ++i) {
                 str += original;
             }
-            return self;
+            return ctx.make_value();
         }},
 
         // ============================================================
@@ -2111,7 +2111,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         auto& weak_storage = self.get_weak_ptr_storage();
         weak_storage.reset();
 
-        return self; // Return the reset weak_ptr
+        return ctx.make_value();
     }},
 
         {symbolizer->intern("same_as"), [](const builtin_method_context& ctx, script_value& self, const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -2135,7 +2135,7 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         self = ctx.make_value();
         self.set_type_info(current_type_info); // Preserve the shared_ptr<T> type
 
-        return self; // Return the reset shared_ptr
+        return ctx.make_value();
     }},
 
         // use_count() reports the OUTER
@@ -2252,13 +2252,26 @@ void init_builtin_method_registries(string_symbolizer* symbolizer, builtin_metho
         if (it != out.utf8_methods.end()) { out.utf8_by_index[at] = &it->second; out.utf8_index.emplace(id, at); }
     }
     out.string_mutator_ids.clear();
+    out.in_place.string.clear();
     out.string_mutates_by_index.assign(out.string_by_index.size(), 0);
     for (std::string_view name : k_string_mutator_method_names) {
         const uint64_t id = symbolizer->intern(name);
         assert(out.string_methods.count(id) && "k_string_mutator_method_names names a builtin the registry lacks");
         out.string_mutator_ids.insert(id);
         out.string_mutates_by_index[out.string_index.at(id)] = 1;
+        out.in_place.string[id] = *in_place_method_twin(2, name);
     }
+    out.in_place.array.clear();
+    out.in_place.map.clear();
+    for (const auto& m : k_array_in_place_methods) {
+        assert(out.array_methods.count(symbolizer->intern(m.name)) && "k_array_in_place_methods names a builtin the registry lacks");
+        out.in_place.array[symbolizer->intern(m.name)] = m.twin;
+    }
+    for (const auto& m : k_map_in_place_methods) {
+        assert(out.map_methods.count(symbolizer->intern(m.name)) && "k_map_in_place_methods names a builtin the registry lacks");
+        out.in_place.map[symbolizer->intern(m.name)] = m.twin;
+    }
+    out.in_place.reset = symbolizer->intern("reset");
 }
 
 namespace detail {

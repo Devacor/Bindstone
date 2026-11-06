@@ -64,7 +64,7 @@ bool name_in_use(string name) {
 }
 
 string clean_name(string raw) {
-	string n = clean_text(raw).trim();
+	string n = string::trim(clean_text(raw));
 	if (n.size() > 14) { n = n.substr(0, 14); }
 	return n == "" ? "Gator" : n;
 }

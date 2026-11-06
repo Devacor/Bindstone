@@ -147,7 +147,7 @@ namespace jai::detail {
             const script_utf8& n = node(self);
             const size_t len = utf8::length(n, cache);
             const script_int pos = utf8::normalize(args[0].unchecked_as_int(), len);
-            if (pos < 0 || pos >= static_cast<script_int>(len)) return R(self);   // out of bounds: no change, as the byte form
+            if (pos < 0 || pos >= static_cast<script_int>(len)) return R(ctx.make_value());   // out of bounds: no change, as the byte form
             const size_t b0 = utf8::byte_of(n, static_cast<size_t>(pos), cache);
             size_t b1 = n.bytes.size();
             if (args.size() == 2) {
@@ -156,7 +156,7 @@ namespace jai::detail {
                 b1 = utf8::byte_of(n, std::min(len, static_cast<size_t>(pos) + static_cast<size_t>(count)), cache);
             }
             self.unchecked_as_utf8_ref().bytes.erase(b0, b1 - b0);
-            return R(self);
+            return R(ctx.make_value());
         };
 
         // the character-set searches: a position of a character in (or not in) the argument's characters
@@ -201,7 +201,7 @@ namespace jai::detail {
                 const bool cache = utf8::may_cache(ctx);
                 const size_t len = utf8::length(node(self), cache);
                 const script_int want = args[0].unchecked_as_int();
-                if (want <= static_cast<script_int>(len)) return R(self);
+                if (want <= static_cast<script_int>(len)) return R(ctx.make_value());
                 const size_t total = saturating_count(want) - len;
                 if (!builtin_memory_charge(ctx.get_engine(), total, fill.size())) [[unlikely]] { return builtin_memory_cap(ctx.get_engine()); }
                 const size_t left = pk.side < 0 ? total : pk.side > 0 ? 0 : total / 2;
@@ -218,7 +218,7 @@ namespace jai::detail {
                 const std::string lhs = tiled(left), rhs = tiled(total - left);
                 std::string& bytes = self.unchecked_as_utf8_ref().bytes;
                 bytes = lhs + bytes + rhs;
-                return R(self);
+                return R(ctx.make_value());
             };
         }
         const builtin_method string_reverse = get("reverse");
@@ -231,7 +231,7 @@ namespace jai::detail {
             for (size_t at = 0; at < bytes.size();) { starts.push_back(at); at += utf8::decode(bytes, at).length; }
             for (size_t k = starts.size(); k-- > 0;) { out.append(bytes, starts[k], end - starts[k]); end = starts[k]; }
             bytes = std::move(out);
-            return R(self);
+            return R(ctx.make_value());
         };
         const builtin_method string_split = get("split");
         const builtin_method string_chars = get("utf8_chars");

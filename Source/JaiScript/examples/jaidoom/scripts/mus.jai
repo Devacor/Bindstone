@@ -123,7 +123,7 @@ var MUSIC_SOUND = null;       // the track playing, looped
 function music_want(string name) -> void {
 	if (!SND_ON || MUSIC_CUR == name) { return; }
 	if (!MUSIC_READY.has(name)) {
-		var path = audio_cache_dir() + ("" + name).to_lower() + ".mid";
+		var path = audio_cache_dir() + string::to_lower(name) + ".mid";
 		if (!file_exists(path)) {                    // bootstrap (or an earlier run) already transcoded it
 			var mid = mus_midi_bytes(name);
 			if (mid == "" || !write_file(path, mid)) { path = ""; }

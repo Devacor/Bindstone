@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/script_map.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
+#include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/object_borrow.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <algorithm>
@@ -109,8 +110,8 @@ namespace value_text_walk {
 	public:
 		walker(const own_text_hook& hook, size_t limit, engine* eng) : hook_(hook), limit_(limit), eng_(eng), scratch_(std::monostate{}, eng) {}
 
-		checked_result<std::string> run(const script_value& root) {
-			auto entered = enter(root, nullptr, false);
+		checked_result<std::string> run(const script_value& root, bool nested_root = false) {
+			auto entered = enter(root, nullptr, nested_root);
 			if (!entered) { return entered.error_value(); }
 			while (!frames_.empty() && !stopped_) {
 				if (out_.size() >= limit_) {
@@ -405,6 +406,24 @@ namespace value_text_walk {
 checked_result<std::string> value_text(const script_value& v, const own_text_hook& hook, size_t limit) {
 	value_text_walk::walker walk(hook, limit, v.payload_engine());
 	return walk.run(v);
+}
+
+JAI_NOINLINE error_propagator map_key_missing_error(string_symbolizer* sym, const type_info* map_tag, const script_value& key) {
+	const script_value& k = key.deref();
+	if (map_tag && map_tag->base_type == script_value_type::jai_map_type) {
+		if (type_info_ptr key_type = map_tag->key_type(); key_type && key_type->base_type != script_value_type::jai_any_type && k.type() != key_type->base_type) {
+			return element_type_error(sym, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", k, key_type);
+		}
+	}
+	const auto code = make_error_code(runtime_error_code::map_key_not_found);
+	value_text_walk::walker walk(own_text_hook{}, SIZE_MAX, k.payload_engine());
+	auto text = walk.run(k, true);
+	if (!text) { return error_propagator{code, map_key_not_found_slotless, 0, 0}; }
+	if (sym->frozen()) {   // a parallel region: a key text the program already interned still names the key
+		if (const auto id = sym->find(text.value())) { return error_propagator{code, map_key_not_found_text, *id, 0}; }
+		return error_propagator{code, map_key_not_found_slotless, 0, 0};
+	}
+	return error_propagator{code, map_key_not_found_text, sym->intern(text.value()), 0};
 }
 
 } // namespace jai::detail

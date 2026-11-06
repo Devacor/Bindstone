@@ -27,45 +27,6 @@
 
 namespace jai::detail {
 
-	// The value a compound assignment on a missing key of a typed-value map starts from (C++ operator[] value-initializes):
-	// a primitive's zero, "", an empty typed container. A var value type (and a class) has none: the compound meets null
-	inline std::optional<script_value> map_value_default(const script_value& map_value, engine* eng) {
-		auto tag = map_value.get_type_info();
-		type_info_ptr vt = tag && tag->base_type == script_value_type::jai_map_type ? tag->value_type() : nullptr;
-		if (!vt) { return std::nullopt; }
-		switch (vt->base_type) {
-			case script_value_type::jai_int_type: return script_value(script_int(0), eng);
-			case script_value_type::jai_float_type: return script_value(script_float(0.0), eng);
-			case script_value_type::jai_bool_type: return script_value(false, eng);
-			case script_value_type::jai_char_type: return script_value(script_char(0), eng);
-			case script_value_type::jai_string_type: return script_value(script_string(), eng);
-			case script_value_type::jai_utf8_string_type: return script_value::make_utf8(std::string(), eng);
-			case script_value_type::jai_array_type: return script_value::make_array(vt->element_type(), eng);
-			case script_value_type::jai_map_type: return script_value::make_map(vt->key_type(), vt->value_type(), eng);
-			default: return std::nullopt;
-		}
-	}
-
-	// A compound target m[k] on a missing key: insert the value type's default so the compound applies to it; false when the
-	// map has no default for its value type (the compound then meets null as before)
-	// The compound's target value in the map (inserted as above when missing), or null when the key is missing and the value
-	// type has no default
-	inline script_value* map_compound_target(script_value& map_value, const script_value& key, engine* eng) {
-		auto& map = const_cast<script_map&>(map_value.as_map());
-		if (const script_map::value_type* hit = map.lookup(key)) { return const_cast<script_value*>(&hit->second); }
-		auto def = map_value_default(map_value, eng);
-		if (!def) { return nullptr; }
-		script_value k = key;
-		auto tag = map_value.get_type_info();
-		def->set_type_info(tag->value_type());
-		script_value& slot = map[k];
-		slot = std::move(*def);
-		return &slot;
-	}
-	inline bool map_compound_insert_default(script_value& map_value, const script_value& key, engine* eng) {
-		return map_compound_target(map_value, key, eng) != nullptr;
-	}
-
 	inline std::string container_base_type_name(script_value_type type) { return std::string(base_type_spelling(type)); }
 
 	// engine.cpp: the class rows of the element boundary judge the instance behind the value's
@@ -282,6 +243,12 @@ namespace jai::detail {
 		const uint64_t size_id = sym->intern(std::to_string(size));
 		return error_propagator{code, text, index_id, size_id};
 	}
+
+	inline constexpr std::string_view map_key_not_found_text = "Key {0} not found in map";
+	inline constexpr std::string_view map_key_not_found_slotless = "Key not found in map";
+	// A read of a key the map does not hold (value_text.cpp): a key of the wrong type for a typed map says that, any other key is
+	// shown as a container shows it (a string quoted); a parallel worker cannot intern the text and gets the slotless form
+	error_propagator map_key_missing_error(string_symbolizer* sym, const type_info* map_tag, const script_value& key);
 
 	// The class tag a class-typed element stores: the object's own class (a Derived in an array<Base> stays a Derived)
 	inline type_info_ptr object_element_value_tag(const script_value& object, engine* eng) {

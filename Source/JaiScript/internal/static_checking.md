@@ -19,7 +19,7 @@ strongly-typed mismatch (`int x = "s"`, returning a string from a function decla
 passing an array to an `int` parameter, an unrelated class into a typed slot) is a load error
 when the source type is known. Dynamic or unresolved sources and value-dependent failures still
 reach runtime, where `try`/`catch` sees them. Examples include a computed float outside the int
-range and a missing map key returning null. A `[[warn_mode]]` region ("Escape hatches") reports
+range and a read of a missing map key. A `[[warn_mode]]` region ("Escape hatches") reports
 its errors as warnings, so it loads and the runtime's own conversion errors apply there. There is
 no engine-wide mode.
 

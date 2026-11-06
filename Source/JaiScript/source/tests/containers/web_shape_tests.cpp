@@ -12,7 +12,7 @@ public:
 	web_shape_tests() : suite("Web Shapes") {}
 
 	void forge_tests() override {
-		// m[k] op= v on present and missing keys of string (lengths 0 to 36), float and int maps, its value as an expression, ++/--, the zero texts, conversion into an int value, a var map's missing key, NaN and signed-zero float keys, string +=; keys found again through copies with their own nodes
+		// m[k] op= v on the entries of string (lengths 0 to 36), float and int maps, its value as an expression, ++/--, the zero texts, conversion into an int value, a missing key's error, NaN and signed-zero float keys, string +=; keys found again through copies with their own nodes
 		test("compound_assignments_on_map_entries_and_string_keys_of_every_length", [this]() {
 			auto e = make_engine();
 			e->execution_budget(0);   // a Debug build runs these past the default budget
@@ -20,6 +20,7 @@ public:
 			const std::string got = e->execute(R"JAI(
 map<string, int> m = {};
 array<string> words = ["", "a", "ab", "abc", "abcd", "abcde", "abcdefg", "abcdefgh", "abcdefghi", "abcdefghijklmno", "abcdefghijklmnop", "abcdefghijklmnopq", "abcdefghijklmnopqrstuvwxyz0123456789", "\xff\xfe", "a\x01b"];
+for (auto& w : words) { m[w] = 0; }
 for (int r = 0; r < 3; ++r) {
 	for (auto& w : words) { m[w] += r + 1; }
 	for (auto& w : words) { m[w + ""] -= 1; }
@@ -27,10 +28,11 @@ for (int r = 0; r < 3; ++r) {
 string out = "";
 for (auto [k, v] : m) { out += to_string(k.size()) + ":" + to_string(v) + ","; }
 for (auto& w : words) { string copy = w; copy.append("!"); copy = copy.substr(0, copy.size() - 1); out += to_string(m[copy]); }
-map<string, float> f = {};
+map<string, float> f = {"x": 0.0, "y": 0.0};
 f["x"] += 1.5; f["x"] *= 4; f["y"] -= 2;
 out += " " + to_string(f["x"]) + " " + to_string(f["y"]);
 map<int, int> im = {};
+for (int i = 0; i < 37; ++i) { im[i] = 0; }
 for (int i = 0; i < 1000; ++i) { im[i % 37] += i; im[i % 5] *= 1; }
 int total = 0; for (auto [k, v] : im) { total = total * 31 % 1000003 + v; }
 out += " " + to_string(total) + " " + to_string(im.size());
@@ -45,11 +47,12 @@ d["k"] += 2.9;
 out += " " + to_string(d["k"]);
 var vm = {};
 vm["n"] = 1; vm["n"] += 2.5;
-try { vm["missing"] += 1; } catch (e) { out += " null:" + e.message; }
+try { vm["missing"] += 1; } catch (e) { out += " missing:" + e.message; }
 map<float, int> fk = {};
+fk[0.0] = 0; fk[math::sqrt(-1.0)] = 0;
 fk[0.0] += 1; fk[-0.0] += 1; fk[math::sqrt(-1.0)] += 1; fk[math::sqrt(-1.0)] += 1;
 out += " " + to_string(vm["n"]) + " " + to_string(fk.size()) + " " + to_string(fk[0.0]);
-map<string, string> sm = {};
+map<string, string> sm = {"a": ""};
 sm["a"] += "x"; sm["a"] += "y";
 out += " " + sm["a"];
 var bad_src = {"z": "s", "b": [1], "a": true, "m": 2};
@@ -60,7 +63,7 @@ map<string, float> widened = {"a": 1, "b": 2.5};
 out += " " + to_string(widened["a"]);
 out;
 )JAI").to_string();
-			check_eq(std::string(R"OUT(0:3,1:3,3:3,2:3,3:3,4:3,5:3,7:3,8:3,9:3,15:3,16:3,17:3,36:3,2:3,333333333333333 6.0 -2.0 727059 37 13 13 15 15 div:Division by zero mod:Modulo by zero 9 null:Cannot apply '+=' to null and int 3.5 2 2 xy bad:Cannot store array in map<string,int> badkey:Cannot store int in map<string,int> 1.0)OUT"), got);
+			check_eq(std::string(R"OUT(0:3,1:3,3:3,2:3,3:3,4:3,5:3,7:3,8:3,9:3,15:3,16:3,17:3,36:3,2:3,333333333333333 6.0 -2.0 727059 37 13 13 15 15 div:Division by zero mod:Modulo by zero 9 missing:Key "missing" not found in map 3.5 2 2 xy bad:Cannot store array in map<string,int> badkey:Cannot store int in map<string,int> 1.0)OUT"), got);
 		});
 
 		// to_json compact and indented over scalars, escapes, containers, tagged maps, math values, instances and handles; from_json of plain documents (duplicate keys keep the first), archive records, and documents whose maps share key strings

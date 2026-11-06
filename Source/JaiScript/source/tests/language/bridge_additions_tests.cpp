@@ -255,9 +255,11 @@ public:
         });
 
         test("coalesce_map_missing_key_and_get", [this]() {
-            check_eq(std::string("0 3 0 1\n"), run_output(R"JS(
+            check_eq(std::string("0 3 0 1 Key \"mana\" not found in map\n"), run_output(R"JS(
                 var m = {"hp": 3};
-                print(m["mana"] ?? 0, " ", m["hp"] ?? 0, " ", m.get("mana", 0), " ", m.size());
+                string raised = "";
+                try { var x = m["mana"] ?? 0; } catch (e) { raised = e; }
+                print(m.get("mana") ?? 0, " ", m["hp"] ?? 0, " ", m.get("mana", 0), " ", m.size(), " ", raised);
             )JS"));
         });
 
@@ -283,7 +285,7 @@ public:
                 Hero h;
                 h.weapon ??= "axe";
                 h.weapon ??= "bow";
-                var m = {};
+                var m = {"k": null};
                 m["k"] ??= 1;
                 m["k"] ??= 2;
                 int calls = 0;

@@ -1095,16 +1095,6 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
 
             const bool is_lvalue = detail::subscript_base_is_lvalue(is_lvalue_shaped_expr(expr->left.get()), left_raw);
 
-            // A compound's own target on a typed-value map inserts the value type's default first, on a temporary too
-            // (C++ operator[]; KEEP BYTE-PARALLEL with vm_backend::exec_index_compound_fused)
-            if (expr == compound_map_target_ && !(is_lvalue && want_lvalue_write)) {
-                auto map_tag = left.get_type_info();
-                type_info_ptr key_type = map_tag ? map_tag->key_type() : nullptr;
-                if (key_type && key_type->base_type != script_value_type::jai_any_type && right.deref().type() != key_type->base_type) {
-                    return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", right.deref(), key_type);
-                }
-                (void)detail::map_compound_insert_default(left, right, engine_);
-            }
             if (is_lvalue && want_lvalue_write) {
                 // Assignment target (m[k] = v): auto-insert a slot so the
                 // assignment has somewhere to write through. The key is COPIED into
@@ -1134,10 +1124,8 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 script_value ref_value = script_value::make_map_entry_reference(left.get_map_storage(), key, &value_ref, engine_, value_type);
                 push_value(std::move(ref_value));
             } else if (is_lvalue) {
-                // lvalue-shaped but a READ (e.g. x = m[k], or the inner m[k]
-                // of m[k][i] / m[k].field): return a reference to the EXISTING
-                // entry so nested in-place mutation still works, but NEVER
-                // insert a missing key: reading must not grow the map.
+                // lvalue-shaped but a READ (x = m[k], a compound's target, the inner m[k] of m[k][i] / m[k].field): a reference to
+                // the EXISTING entry so nested in-place mutation still works; a missing key raises and never grows the map
                 auto it = map.find(right);
                 if (it != map.end()) {
                     script_value& value_ref = const_cast<script_value&>(it->second);
@@ -1145,8 +1133,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     type_info_ptr value_type = map_type_info ? map_type_info->value_type() : nullptr;
                     push_value(script_value::make_map_entry_reference(left.get_map_storage(), right, &value_ref, engine_, value_type));
                 } else {
-                    // Missing key on a read: yield null WITHOUT inserting.
-                    push_value(script_value(std::monostate{}, engine_));
+                    return detail::map_key_missing_error(string_symbolizer_, left.type_info_raw(), right);
                 }
             } else {
                 // This is a true temporary (e.g., function return), read-only access
@@ -1156,7 +1143,7 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                     script_value val = it->second;
                     push_value(std::move(val));
                 } else {
-                    push_value(script_value(std::monostate{}, engine_));
+                    return detail::map_key_missing_error(string_symbolizer_, left.type_info_raw(), right);
                 }
             }
         } else if (left.is_string()) {
@@ -2041,9 +2028,7 @@ checked_result<void> interpreter::assign_compound_element(assignment_expr* expr,
     }
     string_target_context_ = expr->target->get_type() == node_type::binary_expr &&
                              static_cast<binary_expr*>(expr->target.get())->op.type == token_type::left_bracket;
-    compound_map_target_ = expr->target.get();   // a missing key of a typed-value map takes its default (visit_binary)
     auto target_read = eval_child<Replaying>(expr->target.get(), rs, 1);
-    compound_map_target_ = nullptr;
     string_target_context_ = false;
     JAISCRIPT_TRY_OPERAND(std::move(target_read), expr, rp_asg_general, 1, (std::vector<script_value>{rightValue}));
     script_value currentValue = pop_value();
@@ -10009,7 +9994,6 @@ struct interpreter::interpreter_run_state : backend_run_state {
     size_t unit_override_depth = 0;
     unit_stamp run_unit{};
     size_t structural_equality_depth = 0;
-    const expression* compound_map_target = nullptr;
     std::vector<construction_trace_frame> construction_traces;
     constructor_prologue_hook* pending_prologue = nullptr;
     size_t prologue_frame = SIZE_MAX;
@@ -10068,7 +10052,6 @@ void interpreter::swap_run_state(backend_run_state& a_state) noexcept {
     swap(unit_override_depth_, s.unit_override_depth);
     swap(run_unit_, s.run_unit);
     swap(structural_equality_depth_, s.structural_equality_depth);
-    swap(compound_map_target_, s.compound_map_target);
     swap(construction_traces_, s.construction_traces);
     swap(pending_prologue_, s.pending_prologue);
     swap(prologue_frame_, s.prologue_frame);
@@ -10114,7 +10097,6 @@ void interpreter::reset_run_state(backend_run_state& a_state) {
     s.unit_override_depth = 0;
     s.run_unit = {};
     s.structural_equality_depth = 0;
-    s.compound_map_target = nullptr;
     s.construction_traces.clear();
     s.pending_prologue = nullptr;
     s.prologue_frame = SIZE_MAX;

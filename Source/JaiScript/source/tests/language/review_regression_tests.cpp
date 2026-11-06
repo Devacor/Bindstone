@@ -362,11 +362,12 @@ public:
             auto e = make_engine();
             auto r = e->execute(R"(
                 var m = {"a": 1, "b": 2};
-                var x = m["zzz"];
-                var y = m["qqq"];
-                m.size()
+                int raised = 0;
+                try { var x = m["zzz"]; } catch (e) { raised += 1; }
+                try { var y = m["qqq"]; } catch (e) { raised += 1; }
+                m.size() * 10 + raised
             )");
-            check_eq((int64_t)2, r.as_int());
+            check_eq((int64_t)22, r.as_int());
         });
         test("map_assign_still_inserts", [this]() {
             auto e = make_engine();
@@ -2169,9 +2170,8 @@ public:
             )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
                 "a string subscript compound runs the index once", false);
         });
-        test("map_compound_missing_key_starts_from_the_default", [this, expect_order]() {
-            // A typed-value map's missing key takes the value type's default before the compound (C++
-            // operator[]); a var-valued map has none and raises; the key expression runs once either way
+        test("map_compound_missing_key_raises", [this, expect_order]() {
+            // A compound reads its target first: a missing key raises on every map and inserts nothing; the key expression runs once
             expect_order(R"(
                 var log = "";
                 string key() { log += "K"; return "k"; }
@@ -2183,8 +2183,8 @@ public:
                 try { ms[key()] += "s"; } catch (e) { c2 = e; }
                 try { mi[key()] += 1; } catch (e) { c3 = e; }
                 log + "|" + c1 + "|" + c2 + "|" + c3 + "|" + ("" + m.size()) + ("" + ms.size()) + ("" + mi.size());
-            )", "KKK|Cannot apply '+=' to null and string|||011",   // a text operand never stringifies null (one '+=' table)
-                "a typed-value map's missing key starts from the default; a var-valued map's compound raises", false);
+            )", "KKK|Key \"k\" not found in map|Key \"k\" not found in map|Key \"k\" not found in map|000",
+                "a missing key raises on every map", false);
             expect_order(R"(
                 var log = "";
                 string key() { log += "K"; return "k"; }
@@ -3562,10 +3562,11 @@ public:
             auto r = e->execute(R"(
                 var m = {"a": 3};
                 auto hit = m["a"] + 1;
-                auto missing = m["nope"] == null;
-                to_string(m.size()) + "|" + to_string(hit) + "|" + to_string(missing);
+                string missing = "";
+                try { auto b = m["nope"] == null; } catch (e) { missing = e; }
+                to_string(m.size()) + "|" + to_string(hit) + "|" + missing;
             )");
-            check_eq(std::string("1|4|true"), r.as_string());
+            check_eq(std::string("1|4|Key \"nope\" not found in map"), r.as_string());
         });
 
         // Impure sibling (a call that reallocates the array) keeps the LEFT operand on
@@ -5437,8 +5438,8 @@ public:
                 try { entry("missing") = 3; } catch (e) { seen = seen + e + "|"; }
                 try { call_result() = 3; } catch (e) { seen = seen + e + "|"; }
                 seen + to_json(m)
-            )", "Function with reference return type must return an lvalue reference|"
-                "Function with reference return type must return an lvalue reference|{\"a\":1}", "a missing entry and a by-value call are no storage");
+            )", "Key \"missing\" not found in map|"
+                "Function with reference return type must return an lvalue reference|{\"a\":1}", "a missing entry raises its read, a by-value call is no storage");
         });
     }
 };

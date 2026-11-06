@@ -61,7 +61,7 @@ public:
 				string g = "";
 				string run() {
 					string s = ""; var v = ""; utf8_string u = ""; Holder h; Builder b;
-					array<string> a = ["", ""]; array<var> av = [""]; map<string, string> m = {};
+					array<string> a = ["", ""]; array<var> av = [""]; map<string, string> m = {"k": "", "0": "", "1": ""};
 					for (int i = 0; i < 50; ++i) {
 						s += "a"; s += 'b'; s = s + "c"; s = s + i % 10 + "-" + to_string(i % 3);
 						v += "a"; v = v + "b" + 1;
@@ -272,7 +272,7 @@ public:
 					jai::stdlib::register_all(e);
 					e->memory_cap(256 * 1024);
 					auto r = e->execute("class Holder { string s; static string st = \"\"; }\nstring g = \"\";\nstring last = \"\";\n"
-					                    "int run() { string s = \"\"; Holder h; array<string> a = [\"\"]; map<string, string> m = {}; int n = 0;\n"
+					                    "int run() { string s = \"\"; Holder h; array<string> a = [\"\"]; map<string, string> m = {\"k\": \"\"}; int n = 0;\n"
 					                    "try { while (true) { " + step + " ++n; } } catch (err) { last = err; }\nreturn n; }\nint n = run();\nto_string(n) + \"|\" + last");
 					texts[b] = r.to_string();
 				}
@@ -290,7 +290,7 @@ public:
 			auto r = e->execute(R"(
 				class Holder { string s; }
 				int run() {
-					string s = ""; Holder h; array<string> a = [""]; map<string, string> m = {};
+					string s = ""; Holder h; array<string> a = [""]; map<string, string> m = {"k": ""};
 					for (int i = 0; i < 200000; ++i) { s += "x"; s = s + "y"; s = s + "z" + i % 10; h.s += 'q'; a[0] += "w"; m["k"] += "v"; }
 					return s.size() + h.s.size() + a[0].size() + m["k"].size();
 				}

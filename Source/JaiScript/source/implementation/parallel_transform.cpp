@@ -6983,9 +6983,7 @@ checked_result<script_value> parallel_borrow_subscript_read(const script_value& 
 	}
 	if (const auto* map = borrow.parallel_borrow_map()) {
 		auto it = map->find(index);
-		if (it == map->end()) {
-			return script_value(std::monostate{}, eng);   // read misses yield null (twin semantics)
-		}
+		if (it == map->end()) { return map_key_missing_error(engine_access::get_symbolizer(*eng), nullptr, index); }
 		const script_value& elem = it->second;
 		switch (elem.raw_storage_index()) {
 		case script_value::TYPEID_NULL:

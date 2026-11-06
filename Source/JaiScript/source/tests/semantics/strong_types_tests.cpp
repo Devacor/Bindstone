@@ -2356,7 +2356,7 @@ public:
             check_quad("var m = {\"zeta\": 1, \"alpha\": 2, \"mid\": 3}; string s = \"\"; for (auto kv : m) { s += kv.first + \",\"; } s", "alpha,mid,zeta,", "string keys iterate in byte order");
             check_quad("var m = {2: \"i\", \"x\": \"s\", 1.5: \"f\", true: \"b\"}; string s = \"\"; for (auto kv : m) { s += type_of(kv.first) + \",\"; } s", "int,float,string,bool,", "mixed keys order by type rank");
             check_quad("map<string,int> m = {}; m[\"k\"] = 5; m[\"k\"] = m[\"k\"] + 1; to_string(m[\"k\"]) + \",\" + to_string(m.size())", "6,1", "store and re-store");
-            check_quad("map<string,int> m = {\"a\": 1}; to_string(m[\"nope\"] == null)", "true", "missing key reads null, no auto-insert");
+            check_quad("map<string,int> m = {\"a\": 1}; string r = \"\"; try { int x = m[\"nope\"]; } catch (e) { r = e; } r + \",\" + to_string(m.size())", "Key \"nope\" not found in map,1", "a missing key raises, no auto-insert");
             check_quad("map<string,int> m = {\"a\": 1}; to_string(m.contains(\"a\")) + \",\" + to_string(m.contains(\"b\"))", "true,false", "contains");
             check_quad("map<string,int> m = {\"a\": 1, \"b\": 2}; m.erase(\"a\"); to_string(m.size()) + \",\" + to_string(m.contains(\"a\"))", "1,false", "erase");
             check_quad("map<string,int> m = {\"b\": 2, \"a\": 1}; to_json(m.keys()) + to_json(m.values())", "[\"a\",\"b\"][1,2]", "keys and values in order");

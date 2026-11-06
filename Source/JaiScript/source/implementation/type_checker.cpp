@@ -2502,7 +2502,7 @@ private:
         // Tentative for diagnostics; a scalar element of a declared, non-tentative typed array is a
         // proof source for the operand class (the typed rows guard it at runtime)
         result.tentative = true;
-        // a map's missing key reads null: only an array's element proves
+        // only an array's element proves (a typed map's value could, a missing key raising, but it is not claimed yet)
         result.element_proof = container.kind == ctype::array_k && (!container.tentative || container.alias_proof) &&
                                (result.kind == ctype::int_k || result.kind == ctype::float_k);
         return result;

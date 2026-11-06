@@ -7920,8 +7920,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				"function r3() -> string { try { Acc q = Acc(); for (int i = 0; i < 2; ++i) { bumpf(q.x, mark(i)); } return to_string(q.hidden); } catch (e) { return \"E3:\" + e; } }\n"
 				"function r4() -> string { try { var V = \"xy\"; for (int i = 0; i < 2; ++i) { setv(V[i], mark(i)); } return to_json(V); } catch (e) { return \"E4:\" + e; } }\n"
 				"r1() + \" | \" + r2() + \" | \" + r3() + \" | \" + r4() + \" | \" + to_string(G);";
-			const std::string bad_want = "E1:Cannot pass non-lvalue to reference parameter | E2:Cannot pass non-lvalue to reference parameter | "
-				"E3:Cannot pass non-lvalue to reference parameter | E4:Cannot pass non-lvalue to reference parameter | 4";
+			const std::string bad_want = "E1:Cannot pass non-lvalue to reference parameter | E2:Key \"z\" not found in map | "
+				"E3:Cannot pass non-lvalue to reference parameter | E4:Cannot pass non-lvalue to reference parameter | 3";
 			both(bad, bad_want, "binds that fail");
 			both(bad, bad_want, "binds that fail, proofs off", false);
 			const std::string args = "[[warn_mode]]\n"

@@ -738,7 +738,7 @@ namespace {
 			case script_value::TYPEID_MAP: {
 				const auto& map = a_container.as_map();
 				auto found = map.find(a_key);
-				if (found == map.end()) { return null_value(); }
+				if (found == map.end()) { return map_key_missing_error(&symbols(), a_container.type_info_raw(), a_key); }
 				return script_value(found->second.deref());
 			}
 			case script_value::TYPEID_STRING: {

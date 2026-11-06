@@ -6,7 +6,7 @@
 // cast<T>(e) / cast<T&>(e) / cast<shared_ptr<T>>(e) semantics shared VERBATIM by the vm
 // and the interpreter (parity by construction): operand-shape classification, the
 // class-derivation verdict and its error text, the class-target value/handle/reference
-// outcomes, and the char rules (the one primitive pair the assignment table refuses).
+// outcomes, the char rules and the text rule (the primitive pairs the assignment table refuses).
 // Other primitive and container targets convert through the typed-slot table
 // (detail::convert_for_typed_slot via enforce_type_compatibility) and only borrow the error text here.
 
@@ -179,6 +179,22 @@ namespace jai::detail {
 			return cast_error(seen, c, sym);
 		}
 		return script_value(static_cast<script_char>(text[0]), eng);
+	}
+
+	// cast<string>(e) and cast<utf8_string>(e) are the explicit stringify: e's display text, as to_string(e) gives it (a string slot
+	// takes only text, or an object's own to_string()); text itself converts through the table
+	inline bool cast_text_rule_applies(const script_value& seen, const type_info& target) {
+		const script_value_type src = seen.type();
+		return (target.base_type == script_value_type::jai_string_type || target.base_type == script_value_type::jai_utf8_string_type) &&
+		       src != script_value_type::jai_string_type && src != script_value_type::jai_utf8_string_type;
+	}
+
+	// a to_string() that throws leaves its throw in flight and the text empty: the caller checks its unwinding
+	inline checked_result<script_value> cast_text_value(const script_value& seen, const type_info& target, engine* eng) {
+		auto text = eng->text_of(seen);
+		if (!text) { return text.error_value(); }
+		return target.base_type == script_value_type::jai_string_type ? script_value(std::move(text.value()), eng)
+		                                                              : script_value::make_utf8(std::move(text.value()), eng);
 	}
 
 	// Reference form: `ref` is the bound reference (or a pinned temporary); the verdict is on

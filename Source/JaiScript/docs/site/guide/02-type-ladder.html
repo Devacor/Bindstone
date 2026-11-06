@@ -157,26 +157,26 @@ mixed[1] = two
 == result: map</code></pre></div>
 <p>Container homogeneity follows the ladder: <code>auto nums = [1, 2, 3]</code> locks a homogeneous array; <code>var</code> containers may be heterogeneous and may be reassigned to a different container kind entirely.</p>
 <h2 id="conversion-table-typed-locked-auto-targets">The one conversion table<a class="hlink" href="#conversion-table-typed-locked-auto-targets" aria-label="Link to this section">&#8203;</a></h2>
-<p>There is exactly one table, and every typed slot in the language runs it: declarations, <code>=</code>, by-value parameters, returns, instance fields, static fields, and the element boundary of a typed container. Learn it once.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tag { string name = "?"; }
+<p>There is exactly one table, and every typed slot in the language runs it: declarations, <code>=</code>, by-value parameters, returns, instance fields and static fields. The element boundary of a typed container runs its strict end: an element takes its own type, int and float both ways and bool and int both ways, with no truthiness and no <code>to_X()</code> (<a href="09-containers-strings.html">Containers &amp; Strings</a>). Learn it once.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tag { int count = 0; }
 
-string shout(string s) { return s + "!"; }   // parameter AND return run the table
+float half(float x) { return x / 2; }        // parameter AND return run the table
 
 float f = 3;                                 // declaration: int widens
 Tag t = Tag();
-t.name = 5;                                  // field store: string accepts anything
+t.count = 2.9;                               // field store: float truncates into int
 print("declaration: ", f);
-print("parameter:   ", shout(42));
-print("field:       ", t.name, " (", type_of(t.name), ")");</code></pre></div>
+print("parameter:   ", half(3));
+print("field:       ", t.count, " (", type_of(t.count), ")");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">declaration: 3.0
-parameter:   42!
-field:       5 (string)</code></pre></div>
+parameter:   1.5
+field:       2 (int)</code></pre></div>
 <p>What each target accepts, and what it does with it:</p>
 <div class="tablewrap"><table><thead><tr><th>Target</th><th>Accepts</th><th>Result</th></tr></thead><tbody>
 <tr><td><code>int</code></td><td>int, float, bool, an object with <code>to_int()</code></td><td>float <strong>truncates toward zero</strong> (<code>3.99</code> &rarr; <code>3</code>, <code>-3.99</code> &rarr; <code>-3</code>); <code>true</code> &rarr; <code>1</code></td></tr>
 <tr><td><code>float</code></td><td>float, int, bool, an object with <code>to_float()</code></td><td>int widens (<code>3</code> &rarr; <code>3.0</code>)</td></tr>
 <tr><td><code>bool</code></td><td>anything</td><td>truthiness (<code>5</code> &rarr; <code>true</code>, <code>0</code> &rarr; <code>false</code>)</td></tr>
-<tr><td><code>string</code></td><td>anything</td><td>stringified (<code>5</code> &rarr; <code>"5"</code>); an object uses its own <code>to_string()</code> when it declares one</td></tr>
+<tr><td><code>string</code></td><td>string, utf8_string (its bytes), an object with <code>to_string()</code></td><td>text only: an int, float, bool, char, null or container is an <strong>error</strong>, as a string never reads as an int. Stringify it: <code>to_string(5)</code> or <code>`${5}`</code></td></tr>
 <tr><td><code>char</code></td><td>char, an object with <code>to_char()</code></td><td>there is no int row at all, so <code>char c = 65</code> is an error. <a href="#cast-the-explicit-boundary"><code>cast&lt;char&gt;(65)</code></a> is the spelling</td></tr>
 <tr><td><code>int</code> / <code>float</code></td><td>&hellip;but never a string</td><td><strong>error</strong>; there is no implicit parse. Use <code>"42".to_int()</code></td></tr>
 <tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>element and key types are enforced at the element boundary when a value lands; a literal the checker can see fails the load (<code>array&lt;int&gt; a = ["x"];</code>: <code>array element 0: expected 'int', got 'string'</code>). See <a href="09-containers-strings.html">Containers &amp; Strings</a></td></tr>
@@ -199,7 +199,7 @@ int j = -3.99;
 print("j = {}", j);
 bool b = 5;          // numeric -&gt; bool is truthiness
 print("b = {}", b);
-string s = 5;        // int -&gt; string coercion on typed target
+string s = to_string(5);   // a string slot takes text: stringify explicitly
 print("s = {} ({})", s, type_of(s));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">f = 3.0 (float)
 i = 3 (int)
@@ -213,7 +213,7 @@ s = 5 (string)</code></pre></div>
     string to_string() { return format("${}", cents); }
     int to_int() { return cents; }
 }
-string s = Money(1234);      // string &lt;- anything; objects use their to_string()
+string s = Money(1234);      // string &lt;- an object with to_string()
 print("string &lt;- Money:  ", s);
 int n = Money(1234);         // int &lt;- an object with to_int()
 print("int    &lt;- Money:  ", n);
@@ -230,7 +230,7 @@ Pt     &lt;- null:   true
 Pt     &lt;- handle: 0</code></pre></div>
 <h2 id="cast-the-explicit-boundary">cast&lt;T&gt;(e): the explicit boundary<a class="hlink" href="#cast-the-explicit-boundary" aria-label="Link to this section">&#8203;</a></h2>
 <p>Some conversions the table refuses on purpose, not because they are wrong, but because you should have to say so. <code>cast</code> is where you say so. It is a keyword, not a function.</p>
-<p><code>cast&lt;T&gt;(e)</code> yields exactly what <code>T tmp = e;</code> would hold. For primitives that is the table above, run on demand:</p>
+<p><code>cast&lt;T&gt;(e)</code> yields exactly what <code>T tmp = e;</code> would hold. For primitives that is the table above, run on demand, with two additions: the char rules below, and <code>cast&lt;string&gt;(e)</code>, which stringifies anything as <code>to_string(e)</code> does:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("cast&lt;int&gt;(2.7)    = ", cast&lt;int&gt;(2.7));     // the assignment table, spelled out
 print("cast&lt;string&gt;(5)   = ", cast&lt;string&gt;(5));
 print("cast&lt;int&gt;('a')    = ", cast&lt;int&gt;('a'));     // char converts ONLY through cast

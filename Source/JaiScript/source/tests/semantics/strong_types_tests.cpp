@@ -207,7 +207,7 @@ public:
                 cap("nested_plain", function() -> string { array<array<int>> g = [[0]]; auto r = (g[0][0] = 3.9); return show(r, g[0][0]); });
                 cap("var_array_plain", function() -> string { array<var> a = [0]; auto r = (a[0] = 3.9); return show(r, a[0]); });
                 cap("field_bool", function() -> string { C c = C(); auto r = (c.n = true); return show(r, c.n); });
-                cap("string_field", function() -> string { S s = S(); auto r = (s.t = 42); return show(r, s.t); });
+                cap("string_field", function() -> string { S s = S(); utf8_string u = "42"; auto r = (s.t = u); return show(r, s.t); });
                 cap("postfix_field", function() -> string { C c = C(); c.n = 7; auto r = (c.n++); return show(r, c.n); });
                 cap("postfix_element", function() -> string { array<int> a = [7]; auto r = (a[0]++); return show(r, a[0]); });
                 cap("prefix_element", function() -> string { array<int> a = [7]; auto r = (++a[0]); return show(r, a[0]); });
@@ -544,17 +544,6 @@ public:
                 x
             )");
             check_eq(result.as<double>(), 10.0);
-        });
-
-        // JaiScript allows auto-coercion to string (consistent with "hello" + 42)
-        test("string_type_accepts_int_coercion", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                string s = "hello";
-                s = 42;  // Auto-converts int to string
-                s
-            )");
-            check_eq(result.as<std::string>(), "42");
         });
 
         test("bool_converts_truthy", [this]() {
@@ -1568,9 +1557,10 @@ public:
             check_both(R"(
                 class C { string s = ""; }
                 auto c = C();
-                c.s = 42;
-                c.s
-            )", "42", "string field converts via to_string");
+                utf8_string u = "42";
+                c.s = u;
+                type_of(c.s) + ":" + c.s
+            )", "string:42", "a string field takes a utf8_string's bytes");
             // a string literal into an int field: a strict load error; the locals-identical
             // runtime text under warn and, under strict, for a var-sourced value
             const char* typed_mismatch = R"(
@@ -1801,6 +1791,8 @@ public:
                  "cannot assign 'string' to 'x' declared 'int'", "Cannot assign string to 'x' (declared int)"},
                 {"int x = 1; x += \"s\"; x",
                  "cannot assign 'string' to 'x' declared 'int'", "Cannot apply '+=' to int and string"},
+                {"string s = 42; s",
+                 "cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`", "Cannot initialize 's' (declared string) with int"},
             };
             for (const row& r : typed_mismatches) {
                 auto [si, sv] = both_in(false, r.src);
@@ -1838,7 +1830,6 @@ public:
             struct clean_row { const char* src; const char* expected; };
             const clean_row clean[] = {
                 {"int x = 4.7; x", "4"},
-                {"string s = 42; s", "42"},
                 {"float f = 2; type_of(f) + \":\" + to_string(f)", "float:2.0"},
                 {"class S { int x = 1; } class T : S { int t = 2; } function f(S s) -> int { return s.x; } f(T())", "1"},
                 {"function twice(int v) -> int { return v * 2; } twice(21)", "42"},
@@ -2399,7 +2390,7 @@ public:
             // create_instance seeds every default through a per-class plan (slot order, post-
             // conversion) and a literal-only chain skips the initializer re-run; every row is
             // the exact pre-plan output of both backends.
-            check_quad("class A { int a = 1; float f = 2; string s = 3; bool b = 1; } A x = A(); to_string(x.a) + \",\" + to_string(x.f) + \",\" + x.s + \",\" + to_string(x.b)", "1,2.0,3,true", "literal defaults convert to the declared types");
+            check_quad("class A { int a = 1; float f = 2; string s = \"3\"; bool b = 1; } A x = A(); to_string(x.a) + \",\" + to_string(x.f) + \",\" + x.s + \",\" + to_string(x.b)", "1,2.0,3,true", "literal defaults convert to the declared types");
             check_quad("class P { int a = 1; int b = 2; } class C : P { int b = 20; int c = 3; } C x = C(); to_string(x.a) + \",\" + to_string(x.b) + \",\" + to_string(x.c)", "1,20,3", "child default overrides the parent default");
             check_quad("class P { int a = 0; P(int v) { a = v; } } class C : P { int a2 = 7; C() : super(5) {} } C x = C(); to_string(x.a) + \",\" + to_string(x.a2)", "5,7", "parent ctor body writes a field the plan seeded");
             check_quad("class P { int a = 1; P() { a = 9; } } class C : P { int a = 4; C() : super() {} } C x = C(); to_string(x.a)", "4", "child re-declares a field the parent ctor wrote: child initializer wins after the parent body");
@@ -2558,7 +2549,7 @@ public:
             check_quad(q("o.setInt(null) + \" \" + o.dump()").c_str(), "Cannot assign null to field 'i' of F (declared int) 1|1.5|a|false|10|0|2|true|true", "typed int field, null raises");
             check_quad(q("o.setFloat(2) + \" \" + o.dump()").c_str(), "ok 1|2.0|a|false|10|0|2|true|true", "typed float field, int promotes");
             check_quad(q("o.setFloat(\"q\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'f' of F (declared float) 1|1.5|a|false|10|0|2|true|true", "typed float field, string raises");
-            check_quad(q("o.setStr(12) + \" \" + o.dump()").c_str(), "ok 1|1.5|12|false|10|0|2|true|true", "typed string field, int converts via to_string");
+            check_quad(q("o.setStr(12) + \" \" + o.dump()").c_str(), "Cannot assign int to field 's' of F (declared string) 1|1.5|a|false|10|0|2|true|true", "typed string field, int raises, field untouched");
             check_quad(q("o.setBool(1) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|true|10|0|2|true|true", "typed bool field, int converts");
             check_quad(q("o.setAuto(2.5) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|false|2|0|2|true|true", "auto field infers int from its initializer, float truncates");
             check_quad(q("o.setAuto(\"str\") + \" \" + o.dump()").c_str(), "Cannot assign string to field 'a' of F (declared int) 1|1.5|a|false|10|0|2|true|true", "auto field rejects a string");
@@ -2624,7 +2615,7 @@ public:
             check_quad(q("auto lam = [](var val) { string r = \"ok\"; try { C::i = val; } catch (err) { r = err; } return r; }; lam(\"x\") + \" \" + lam(3) + \" \" + to_string(C::i)").c_str(), "Cannot assign string to static 'i' of C (declared int) ok 3", "C::i inside a lambda");
             check_quad(q("var vv = 2.9; C::i = vv; to_string(C::i) + \"|\" + type_of(C::i)").c_str(), "2|int", "C::i at top level keeps the declared type");
             check_quad(q("setF(2) + \" \" + setF(\"q\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'f' of C (declared float) 1|2.0|a|false|10|0|2|true|true|true", "float static: int promotes, string raises");
-            check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "ok ok ok 1|1.5|C{x: 0}|false|10|0|2|true|true|true", "string static takes anything through to_string (the instance-field row)");
+            check_quad(q("setStr(12) + \" \" + setStr(null) + \" \" + setStr(C()) + \" \" + o.dump()").c_str(), "Cannot assign int to static 's' of C (declared string) Cannot assign null to static 's' of C (declared string) Cannot assign C to static 's' of C (declared string) 1|1.5|a|false|10|0|2|true|true|true", "a string static takes text only (the instance-field row)");
             check_quad(q("setB(1) + \" \" + o.dump()").c_str(), "ok 1|1.5|a|true|10|0|2|true|true|true", "bool static: int converts");
             check_quad(q("setA(2.5) + \" \" + setA(\"str\") + \" \" + o.dump()").c_str(), "ok Cannot assign string to static 'a' of C (declared int) 1|1.5|a|false|2|0|2|true|true|true", "auto static infers int from its initializer");
             check_quad(q("setV(\"anything\") + \" \" + setV([1, 2, 3]) + \" \" + o.dump()").c_str(), "ok ok 1|1.5|a|false|10|[1, 2, 3]|2|true|true|true", "var static takes anything");
@@ -2671,7 +2662,6 @@ public:
             // A static's declared type is recorded at definition and its initializer converts
             // through the field table; a missing initializer is a readable typed null
             check_quad("class C { static float f = 3; } type_of(C::f) + \" \" + to_string(C::f)", "float 3.0", "static float from an int initializer");
-            check_quad("class C { static string t = 5; } C::t + \"|\" + type_of(C::t)", "5|string", "static string from an int initializer");
             check_quad("class C { static int n = true; } to_string(C::n) + \"|\" + type_of(C::n)", "1|int", "static int from a bool initializer");
             check_quad_error("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "an unconvertible static initializer raises at definition");
             check_quad_error_text("function L(var x) { return x; } class C { static int s = L(\"x\"); }", "Cannot assign string to static 's' of C (declared int)", "the definition raises the store text");
@@ -3251,7 +3241,7 @@ public:
                 {"float",  "1.5",   "2.5",   "3",   "float:2.5:float:2.5:2.5:1.5:2.5", "float:3.0:float:3.0"},
                 {"bool",   "true",  "false", "1",   "bool:false:bool:false:false:true:false", "bool:true:bool:true"},
                 {"char",   "'a'",   "'b'",   "65",  "char:b:char:b:b:a:b",                    ""},
-                {"string", "\"a\"", "\"b\"", "3",   "string:b:string:b:b:a:b",                "string:3:string:3"},
+                {"string", "\"a\"", "\"b\"", "3",   "string:b:string:b:b:a:b",                ""},
             };
             for (const kind_row& k : rows) {
                 const std::string T = k.type;
@@ -3267,7 +3257,7 @@ public:
                 const std::string mismatch =
                     "c.f = " + std::string(k.mismatch) + "; g = " + k.mismatch + "; type_of(c.f) + \":\" + to_string(c.f) + \":\" + type_of(g) + \":\" + to_string(g)";
                 check_proof_run(thrice(unit), k.expect, T + " same-type lanes");
-                if (T == "char") { check_proof_error(thrice_then(unit, mismatch), "int into a proven char field/global raises"); }
+                if (T == "char" || T == "string") { check_proof_error(thrice_then(unit, mismatch), "int into a proven " + T + " field/global raises"); }
                 else { check_proof_run(thrice_then(unit, mismatch), k.expect_mismatch, T + " mismatching store takes the ladder"); }
             }
             const std::string obj_unit =
@@ -3567,31 +3557,55 @@ public:
         // all run the assignment table (docs/site/guide/02-type-ladder.html "The one conversion table"); each site owns its
         // rejection text. Every row is byte-identical across backends.
 
-        test("typed_slot_string_accepts_anything_everywhere", [check_both]() {
-            check_both(R"JAI(
-                string s = 5;
-                string fp(string t) { return "param: " + t; }
-                string g() { return 5; }
-                class H { string s = ""; }
-                auto h = H(); h.s = 5;
-                s + "|" + fp(5) + "|" + g() + "|" + h.s
-            )JAI", "5|param: 5|5|5", "the item: string slots take an int on every path");
-            check_both(R"JAI(
-                string f(string t) { return t; }
-                var n = null;
-                f(2.5) + "|" + f(true) + "|" + f('a') + "|" + f(n) + "|" + f(null) + "|" + f([1]) + "|" + f({"k": 1})
-            )JAI", "2.5|true|a|null|null|[1]|{\"k\": 1}", "string parameter: every primitive and container row");
+        // A string slot takes text (a string, a utf8_string's bytes) or an object's own to_string(), as an int slot takes an object's
+        // to_int(); cast<string> is the explicit stringify
+        test("typed_slot_string_takes_text_everywhere", [this, check_both, both]() {
             check_both(R"JAI(
                 class X { string to_string() { return "X!"; } }
-                class D {}
                 string f(string t) { return t; }
                 string g() { return X(); }
-                string g2() { return 2.5; }
                 class H { string s = ""; }
                 auto h = H(); h.s = X();
                 string a = X(); string b; b = X();
-                f(X()) + "|" + f(D()) + "|" + g() + "|" + g2() + "|" + h.s + "|" + a + "|" + b
-            )JAI", "X!|D{}|X!|2.5|X!|X!|X!", "objects render through their script to_string() on every path");
+                utf8_string u = "uu"; string c = u;
+                f("p") + "|" + f(X()) + "|" + g() + "|" + h.s + "|" + a + "|" + b + "|" + c
+            )JAI", "p|X!|X!|X!|X!|X!|uu", "text and an object's to_string() reach a string slot on every path");
+            const char* rejected[] = {
+                "string s = 5;",
+                "string s = \"a\"; s = 2.5;",
+                "string f(string t) { return t; } f(true);",
+                "string g() { return 5; }",
+                "class H { string s = 3; }",
+                "class H { string s = \"\"; } auto h = H(); h.s = 'c';",
+                "string s = null;",
+                "string s = [1];",
+                "class D {} string s = D();",
+                "utf8_string u = 7;",
+            };
+            for (const char* src : rejected) {
+                auto [i_out, v_out] = both(src);
+                check_eq(i_out, v_out, std::string("parity: ") + src);
+                check(v_out.find("static check failed") != std::string::npos && v_out.find("stringify it with to_string(x) or `${x}`") != std::string::npos,
+                      std::string("a load error with the hint: ") + src + " (got: " + v_out + ")");
+            }
+            check_both(R"JAI(
+                class D {}
+                var v = 5;
+                var d = D();
+                string m(var f) { try { f(); return "none"; } catch (e) { return e; } }
+                string p(string t) { return t; }
+                string r() { return v; }
+                class H { string s = ""; }
+                m([]() { string s = v; }) + "|" + m([]() { string s = ""; s = v; }) + "|" + m([]() { p(v); }) + "|" + m([]() { r(); }) + "|" +
+                    m([]() { auto h = H(); h.s = v; }) + "|" + m([]() { string s = d; })
+            )JAI", "Cannot initialize 's' (declared string) with int|Cannot assign int to 's' (declared string)|"
+                   "Cannot pass int to parameter 't' of 'p' (declared string)|Cannot return int from 'r' (declared -> string)|"
+                   "Cannot assign int to field 's' of H (declared string)|Cannot initialize 's' (declared string) with D",
+                   "a var-sourced non-text value raises where it lands");
+            check_both(R"JAI(
+                class D {}
+                cast<string>(5) + cast<string>(2.5) + cast<string>(true) + cast<string>('c') + cast<string>([1]) + cast<string>(D()) + to_string(7)
+            )JAI", "52.5truec[1]D{}7", "cast<string> and to_string stringify anything");
         });
 
         test("typed_slot_bool_is_truthiness_everywhere", [check_both]() {
@@ -3746,8 +3760,10 @@ public:
                 try { instance->set_field(detail::engine_access::symbolize(*e, "c"), jai::script_value((int64_t)5, e.get())); }
                 catch (const std::exception& ex) { threw = std::string(ex.what()).find("Cannot assign int to field 'c' of H (declared C)") != std::string::npos; }
                 check(threw, "set_field: ctor conversion is a script row, refused from C++");
-                instance->set_field(detail::engine_access::symbolize(*e, "s"), jai::script_value((int64_t)5, e.get()));
-                check_eq(std::string("5"), e->execute("h.s").as<std::string>(), "set_field: to_string row still converts");
+                threw = false;
+                try { instance->set_field(detail::engine_access::symbolize(*e, "s"), jai::script_value((int64_t)5, e.get())); }
+                catch (const std::exception& ex) { threw = std::string(ex.what()).find("Cannot assign int to field 's' of H (declared string)") != std::string::npos; }
+                check(threw, "set_field: a string field takes text only");
                 e->execute("class R { int f = 0; } R r = R(); r.f = 5; class X { int to_int() { return 7; } } class R2 { X f = X(); } R2 r2 = R2();");
                 e->execute("class R { C f; }");
                 check_eq(std::string("0"), e->execute("r.f.a").to_string(), "reload int->C: ctor-only conversion adopts the default (a default-constructed C)");
@@ -3909,7 +3925,7 @@ public:
         });
 
         test("typed_slot_proof_lanes", [check_proof_run]() {
-            check_proof_run({"string f(string t) { return t + \"!\"; } string r = f(5); r = r + f(2.5); r"}, "5!2.5!", "string parameter bound from an int under every lane");
+            check_proof_run({"string f(string t) { return t + \"!\"; } utf8_string u = \"5\"; string r = f(u); r = r + f(u); r"}, "5!5!", "string parameter bound from a utf8_string under every lane");
             check_proof_run({"int sum(array<int> a) { int s = 0; for (auto x : a) { s += x; } return s; } to_string(sum([1, 2.5, 3]))"}, "6", "array<int> parameter bound from a hetero literal under every lane");
             check_proof_run({"bool b(bool x) { return x; } to_string(b(5)) + to_string(b(0))"}, "truefalse", "bool parameter bound from an int under every lane");
         });

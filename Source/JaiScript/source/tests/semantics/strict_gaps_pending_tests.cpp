@@ -45,7 +45,7 @@ private:
 			auto engine = make_engine();
 			const std::string source = R"jai(string s = 42; s;)jai";
 			const auto report = engine->check(source);
-			check_false(report.has_errors());
+			check_true(report.has_errors());   // a string takes text only
 		});
 
 		test("control_shared_lenient", [this]() {
@@ -801,7 +801,7 @@ private:
 
 		test("rules_123_check_accept_07", [this]() {
 			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; string x = a[0]; bool b = a[0];)jai";
+			const std::string source = R"jai(array<int> a = [1]; float x = a[0]; bool b = a[0];)jai";
 			const auto report = eng->check(source);
 			check_false(report.has_errors(), source + "\n" + report.format(source));
 		});

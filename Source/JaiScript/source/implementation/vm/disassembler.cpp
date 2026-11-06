@@ -236,6 +236,7 @@ std::string disassemble(const chunk& ch, const string_symbolizer* symbolizer) {
 				break;
 			case opcode::op_call_from_scratch:
 			case opcode::op_sleep:
+			case opcode::op_format_call:
 			case opcode::op_call_typed:
 				out << " argc=" << ins.a << " site=" << ins.b;
 				break;

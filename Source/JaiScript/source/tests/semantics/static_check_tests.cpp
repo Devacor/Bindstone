@@ -168,7 +168,8 @@ public:
             // raises the runtime's own error at the store, and no diagnostic is an error.
             auto e = make_engine();
             check_eq((int64_t)4, e->execute("[[warn_mode]]; int x = 4.7; x").as_int());
-            check_eq(std::string("42"), e->execute("[[warn_mode]]; string s = 42; s").as<std::string>());
+            check_eq(std::string("Cannot initialize 's' (declared string) with int"),
+                     e->execute("[[warn_mode]]; string m = \"\"; try { string s = 42; } catch (err) { m = err; } m").as<std::string>());
             check_eq(true, e->execute("[[warn_mode]]; bool b = \"x\"; b").as<bool>());
             check_eq((int64_t)7, e->execute("[[warn_mode]]; var v = 5; v = \"s\"; 7").as_int());
             check_eq((int64_t)10, e->execute("[[warn_mode]]; function ten() { return 10; } ten()").as_int());
@@ -198,13 +199,13 @@ public:
             // conversions the checker must ACCEPT
             check_eq((int64_t)4, e->execute("int a = 4.7; a").as_int());
             check_eq((int64_t)1, e->execute("int b = true; b").as_int());
-            check_eq(std::string("42"), e->execute("string c = 42; c").as<std::string>());
             check_eq(true, e->execute("bool d = \"x\"; d").as<bool>());
             check_near(2.0, e->execute("float f = 2; f").as_float(), 0.0001);
             // violations the checker flags must FAIL at runtime too
             check_throws([&]() { e->execute("int p1 = \"s\";"); });
             check_throws([&]() { e->execute("int p2 = null;"); });
             check_throws([&]() { e->execute("int p3 = 'c';"); });
+            check_throws([&]() { e->execute("string p4 = 42;"); });
             check_throws([&]() { e->execute("char p4 = 65;"); });
             check_throws([&]() { e->execute("function tp(int a) { return a; } tp(\"s\");"); });
         });
@@ -217,7 +218,7 @@ public:
             check_eq((size_t)0, error_count(e->check("int x = 4.7;")));      // converts
             check_eq((size_t)0, error_count(e->check("int x = true;")));     // converts
             check_eq((size_t)0, error_count(e->check("float f = 2;")));
-            check_eq((size_t)0, error_count(e->check("string s = 42;")));    // to_string
+            check_eq((size_t)1, error_count(e->check("string s = 42;")));    // text only
             check_eq((size_t)0, error_count(e->check("bool b = \"x\";")));   // truthy
             check_eq((size_t)0, error_count(e->check("int x;")));            // null init is fine
             check_eq((size_t)1, error_count(e->check("int x = \"s\";")));
@@ -350,22 +351,21 @@ public:
             check_eq((size_t)0, error_count(e->check(std::string(fn) + "d(1);")));
             check_eq((size_t)0, error_count(e->check(std::string(fn) + "d(1, 5);")));
             check_eq((size_t)1, error_count(e->check(std::string(fn) + "d();")));
-            // overloads: error only when NO overload matches (string params take anything
-            // via to_string, so pair types that both reject a string argument)
+            // overloads: error only when NO overload matches (pair types that both reject a string argument)
             const char* ov = "function pick(int a) { return 1; }\nfunction pick(char c) { return 2; }\n";
             check_eq((size_t)0, error_count(e->check(std::string(ov) + "pick(1);")));
             check_eq((size_t)0, error_count(e->check(std::string(ov) + "pick('c');")));
             check_eq((size_t)1, error_count(e->check(std::string(ov) + "pick(\"s\");")));
-            // a string overload makes anything viable
+            // a string overload takes text only: an array matches neither
             const char* ov2 = "function show(int a) { return 1; }\nfunction show(string s) { return 2; }\n";
-            check_eq((size_t)0, error_count(e->check(std::string(ov2) + "show([1]);")));
+            check_eq((size_t)1, error_count(e->check(std::string(ov2) + "show([1]);")));
         });
 
         test("return_type_checking", [this]() {
             auto e = make_engine();
             check_eq((size_t)0, error_count(e->check("int f() { return 5; } f();")));
             check_eq((size_t)0, error_count(e->check("int f() { return 2.5; } f();")));    // converts
-            check_eq((size_t)0, error_count(e->check("string f() { return 5; } f();")));   // to_string
+            check_eq((size_t)1, error_count(e->check("string f() { return 5; } f();")));   // text only
             check_eq((size_t)1, error_count(e->check("int f() { return \"s\"; } f();")));
             check_eq((size_t)1, error_count(e->check("void f() { return 5; } f();")));
             // A structurally reachable fall-through violates a required result.
@@ -1423,7 +1423,7 @@ public:
                 "R r = R(); r.set(41); r.f = 42; r.show()";
             const char* v2 =
                 "class R { string f = \"z\"; int g = 0;\n"
-                "  int set(int v) { f = v; this.f = v; g = 5; return v; }\n"
+                "  int set(int v) { f = to_string(v); this.f = to_string(v); g = 5; return v; }\n"
                 "  string show() { return f + \":\" + to_string(g) + \":\" + to_string(this.g); } }\n"
                 "r.show()";
             const char* use = "r.set(7); r.f = 9; r.g = 3; r.show()";
@@ -1437,7 +1437,9 @@ public:
                 check_eq(outcome(*off, use), outcome(*on, use));
                 check_eq(outcome(*off, bad), outcome(*on, bad));
             }
-            check_eq(std::string("VALUE 9:3:3"), outcome(*on, use));
+            const char* retyped_use = "r.set(7); r.f = \"9\"; r.g = 3; r.show()";
+            check_eq(outcome(*off, retyped_use), outcome(*on, retyped_use));
+            check_eq(std::string("VALUE 9:3:3"), outcome(*on, retyped_use));
         });
 
         // ------------------------------------------------------------ fuzz corpus FP gate
@@ -2478,7 +2480,7 @@ public:
                 (proofs ? with_proofs : without_proofs) = outcome(*e, src);
             }
             check_eq(without_proofs, with_proofs);
-            check_eq(std::string("VALUE 5"), with_proofs);
+            check_true(with_proofs.find("Cannot assign int to 'hp' (declared string)") != std::string::npos, with_proofs);
         });
 
         test("extern_function_allows_unchecked_calls", [this]() {
@@ -2650,7 +2652,7 @@ public:
             check_eq((size_t)1, error_count(r), r.format());
             check_true(has_diag(r, dlevel::error, "undeclared identifier 'x'"), r.format());
             // an undeclared callee in a warn region is callable with an unknown result: no proof
-            r = make_engine()->check("int k = 1;\n[[warn_mode]] int v = mystery(1);\nstring s = v;");
+            r = make_engine()->check("int k = 1;\n[[warn_mode]] int v = mystery(1);\nint s = v;");
             check_eq((size_t)0, error_count(r), r.format());
         });
 
@@ -2701,8 +2703,9 @@ public:
             auto e = make_engine();
             check_eq((int64_t)3, e->execute("class K { int to_int() { return 3; } } int v = K(); v").as_int());
             check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "to_int() source is clean under strict");
-            check_eq(std::string("5"), e->execute("string t(string s) { return s; } t(5)").as<std::string>());
-            check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "int into a string parameter is clean");
+            std::string refused;
+            try { e->execute("string t(string s) { return s; } t(5)"); } catch (const std::exception& ex) { refused = ex.what(); }
+            check_true(refused.find("cannot pass 'int' to 's' declared 'string': stringify it") != std::string::npos, "an int into a string parameter is refused up front (got: " + refused + ")");
             check_eq(std::string("yes"), e->execute("class C { int a = 0; } string p(shared_ptr<C> x) { if (x == null) { return \"yes\"; } return \"no\"; } p(null)").as<std::string>());
             check_eq((size_t)0, e->last_check_diagnostics().diagnostics.size(), "null into a shared_ptr parameter is clean");
             std::string text;
@@ -2735,7 +2738,7 @@ public:
             auto ri = e->check("class C { static int s = \"x\"; }");
             check_eq((size_t)1, error_count(ri));
             check_true(has_diag(ri, dlevel::error, "cannot initialize field 's' declared 'int' with 'string'"));
-            check_eq((size_t)0, error_count(e->check("class C { static float f = 3; static string t = 5; static int n = true; static int u; }")), "converting static initializers are clean");
+            check_eq((size_t)0, error_count(e->check("class C { static float f = 3; static int n = true; static int u; }")), "converting static initializers are clean");
         });
 
         // ------------------------------------------------------------ precision map (docs "Precision map")
@@ -2801,7 +2804,7 @@ public:
             check_eq((size_t)1, error_count(e->check(cls + "int n = 0; n = v.name;")), "assignment from a string getter");
             check_eq((size_t)1, error_count(e->check(cls + "int take(int x) { return x; } take(v.name);")), "argument from a string getter");
             check_eq((size_t)1, error_count(e->check(cls + "int f(V q) { return q.name; }")), "return from a string getter");
-            check_eq((size_t)0, error_count(e->check(cls + "int a = v.hp; float f = v.hp; string s = v.name; string t = v.hp; bool b = v.hp; var d = v.name; int l = v.name.size();")), "well-typed reads are clean");
+            check_eq((size_t)0, error_count(e->check(cls + "int a = v.hp; float f = v.hp; string s = v.name; string t = `${v.hp}`; bool b = v.hp; var d = v.name; int l = v.name.size();")), "well-typed reads are clean");
             check_eq((size_t)0, error_count(e->check(cls + "v.name.zzz();")), "a builtin method on the typed result stays lenient");
             std::string what = outcome(*e, "[[warn_mode]]; " + cls + "int n = v.name; n");
             check_true(what.find("ERROR Cannot initialize") == 0, "the runtime keeps its rejection (got: " + what + ")");

@@ -533,7 +533,7 @@ public:
             expect("function f(math::vec3 p) { return p.x; } to_string(f(math::ivec3(7, 2, 3)))", "7.0", "a parameter converts");
             expect("math::ivec2 g() { return math::vec2(2.9, 1.1); } to_string(g())", "(2, 1)", "a return converts");
             expect("class H { math::ivec2 cell; } var h = H(); h.cell = math::vec2(3.5, 4.5); to_string(h.cell)", "(3, 4)", "a field converts");
-            expect("string s = math::vec2(1, 2); s", "(1.0, 2.0)", "a string slot takes the text");
+            expect("string s = to_string(math::vec2(1, 2)); s", "(1.0, 2.0)", "a string slot takes the text to_string gives");
             expect("auto a = math::ivec2(1, 2); a = math::vec2(3.7, 4.2); to_string(a)", "(3, 4)", "auto infers the kind");
             expect("var a = math::ivec2(1, 2); a = 5; to_string(a)", "5", "var stays dynamic");
             expect("var five = 5; string m = \"\"; try { math::vec3 v = five; } catch (e) { m = e; } to_string(m.contains(\"declared math::vec3\"))", "true", "an int rejects, naming the declared type");

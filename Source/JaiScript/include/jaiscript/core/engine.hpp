@@ -884,6 +884,18 @@ namespace jai {
         // else blocks. sleep_callee: `function` is the core sleep function (a call of it runs the builtin)
         checked_result<script_value> sleep_builtin(const script_value& seconds);
         bool sleep_callee(const void* function) const noexcept;
+        // A builtin formatter's literal entry (stdlib/io.cpp's print and format): a call of it by name whose first argument is a
+        // string literal (call_expr::literal_format_call) runs `literal` while the name binds the function; any other call of it
+        // takes its first argument as text like the rest
+        struct format_literal_row {
+            const void* identity = nullptr;   // &function.unchecked_as_function()
+            script_value function{std::monostate{}, nullptr};   // pins the node: a freed function's address never matches later
+            script_value literal{std::monostate{}, nullptr};
+            host_direct_invoke invoke = nullptr;   // the literal entry over arguments where they are, none of them a reference
+            const void* target = nullptr;
+        };
+        void add_format_literal(std::string_view name, script_function literal, host_direct_invoke invoke, const void* target);
+        const format_literal_row* format_literal_for(const void* function) const noexcept;
         // Native code running script inside a run (a host callback, a destructor, a signal receiver, an import, a builtin's
         // callback): while one is on the stack a sleep blocks instead of suspending the run
         void pin_run() noexcept { if (active_run_pins_) { ++*active_run_pins_; } }

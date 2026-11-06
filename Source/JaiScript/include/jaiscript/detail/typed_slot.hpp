@@ -17,7 +17,6 @@
 #include <jaiscript/detail/container_enforce.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>
 #include <jaiscript/detail/return_conv.hpp>
-#include <jaiscript/detail/value_text.hpp>
 #include <string>
 #include <utility>
 #include <vector>
@@ -26,14 +25,6 @@ namespace jai::detail {
 
     // Source spelling for rejection texts: detail::slot_source_type_name (class_definition.hpp,
     // next to the slot texts both wrappers raise through).
-
-    // A string or utf8_string slot holds the source's display text (engine::text_of: each object's to_string() runs)
-    inline checked_result<slot_conversion> converted_to_display_text(const script_value& v, script_value_type target, engine* eng) {
-        auto text = eng ? eng->text_of(v) : checked_result<std::string>(v.to_string());
-        if (!text) { return text.error_value(); }
-        return slot_conversion::converted_to(target == script_value_type::jai_string_type ? script_value(std::move(text.value()), eng)
-                                                                                           : script_value::make_utf8(std::move(text.value()), eng));
-    }
 
     // v's conversion method name (to_bool, to_int, ...), nullopt when its class binds none. A parallel chunk runs it through the
     // region's pin (an unpinned one raises what the region refused), never through the class's shared method value
@@ -75,9 +66,6 @@ namespace jai::detail {
                 auto view = resolve_slot_class(v, eng);
                 auto called = call_conversion_method(v, view.def, name, eng);
                 if (!called) {
-                    if (target == script_value_type::jai_string_type || target == script_value_type::jai_utf8_string_type) {
-                        return converted_to_display_text(v, target, eng);
-                    }
                     return slot_conversion::of(verdict::reject);
                 }
                 checked_result<script_value>& result = *called;
@@ -206,12 +194,6 @@ namespace jai::detail {
         if (value.deref().raw_storage_index() == script_value::TYPEID_PARALLEL_BORROW && target_type && primitive_slot_type(target_type->base_type) &&
             value.deref().parallel_object_borrow()) {
             return convert_for_typed_slot(parallel_by_value(value.deref()), target_type, eng);   // a shared object converts as the worker's copy
-        }
-        if (target_type && (target_type->base_type == script_value_type::jai_string_type || target_type->base_type == script_value_type::jai_utf8_string_type)) {
-            const script_value& v = value.deref();
-            if (!plain_text_value(v) && v.raw_storage_index() != script_value::TYPEID_OBJECT) {   // an object asks its class first
-                return converted_to_display_text(v, target_type->base_type, eng);
-            }
         }
 		auto result = convert_for_typed_slot_core(value, target_type, eng);
 		if (!result) { return result.error_value(); }

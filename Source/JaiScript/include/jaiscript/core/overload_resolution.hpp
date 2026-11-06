@@ -175,8 +175,8 @@ inline bool object_declares_method(const script_value& arg, std::string_view nam
 inline bool converting_constructor_takes(const script_value& arg, const type_info& target, engine* eng);
 
 // The assignment table's rows past the exact type that a by-value parameter takes (docs/site/embedding/06-static-checking.html "One conversion table"), as overload costs:
-// int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char method and the string
-// and bool rows 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
+// int<->float and bool to a number 1 (a conversion, ahead of a var parameter); a to_int/to_float/to_char/to_string method, the
+// other text kind and the bool row 2 and a converting constructor 3 (k_loose_conversion and up: after a var parameter, which takes the value as it
 // is); 0 = not viable. Among several overloads a string never makes a bool parameter viable.
 inline constexpr size_t k_loose_conversion = 2;
 inline size_t table_conversion_cost(const script_value& arg, const parameter& param, bool in_set, engine* eng) {
@@ -197,7 +197,8 @@ inline size_t table_conversion_cost(const script_value& arg, const parameter& pa
             return in_set && (from == t::jai_string_type || from == t::jai_utf8_string_type) ? 0 : 2;
         case t::jai_string_type:
         case t::jai_utf8_string_type:
-            return 2;
+            if (from == t::jai_string_type || from == t::jai_utf8_string_type) { return 2; }
+            return from == t::jai_object_type && object_declares_method(arg, "to_string") ? 2 : 0;
         case t::jai_object_type:
             return converting_constructor_takes(arg, *param.type, eng) ? 3 : 0;
         default:

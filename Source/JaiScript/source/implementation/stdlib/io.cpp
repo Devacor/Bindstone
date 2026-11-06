@@ -210,8 +210,10 @@ namespace stdlib {
         return std::nullopt;
     }
 
-    // format(...) over its values where they are: the variadic entry's vector, or a vm call site's stack (its direct row)
-    inline checked_result<script_value> format_values(engine* eng, const script_value* args, size_t argc) {
+    // format(...) over its values where they are: the variadic entry's vector, or a vm call site's stack (its direct row).
+    // literal: the first value is the call's format string (a string literal, or vformat's text), formatting when it holds a
+    // placeholder; otherwise every value is text, the first one too
+    inline checked_result<script_value> format_values(engine* eng, const script_value* args, size_t argc, bool literal) {
         // the control values (skip_newline, skip_flush) mean nothing here and drop out
         const script_value* inline_kept[8];
         const script_value* inline_shown[8];
@@ -248,23 +250,110 @@ namespace stdlib {
             return script_value(shown[0]->to_string(), eng);
         }
 
-        const script_value& first = shown[0]->is_reference() ? shown[0]->deref() : *shown[0];
-        std::string first_text;
-        std::string_view first_str;
-        if (first.raw_storage_index() == script_value::TYPEID_STRING) {
-            first_str = first.unchecked_as_string();
-        } else {
-            first_text = first.to_string();
-            first_str = first_text;
+        std::string result;
+        if (literal && detail::plain_text_value(*kept[0])) {
+            const script_value& first = shown[0]->is_reference() ? shown[0]->deref() : *shown[0];
+            std::string first_text;
+            std::string_view first_str;
+            if (first.raw_storage_index() == script_value::TYPEID_STRING) {
+                first_str = first.unchecked_as_string();
+            } else {
+                first_text = first.to_string();
+                first_str = first_text;
+            }
+            if (has_format_placeholders(first_str)) {
+                process_format_string(result, first_str, shown, kept, count);
+                return script_value(std::move(result), eng);
+            }
+        }
+        for (size_t i = 0; i < count; ++i) { append_format_argument(result, *shown[i]); }
+        return script_value(std::move(result), eng);
+    }
+
+    // print(...) over its arguments; literal: format_values' rule for the first argument
+    inline checked_result<script_value> print_values(engine* eng, const std::vector<script_value>& raw_args, bool literal) {
+        // every value shows its display text, as to_string(x) and `${x}` do; a container's or an object's is never a format string
+        std::vector<script_value> shown;
+        if (auto failed = show_arguments(eng, raw_args, shown)) { return std::move(*failed); }
+        const bool first_was_shown = !raw_args.empty() && !detail::plain_text_value(raw_args[0]);
+        const std::vector<script_value>& args = shown.empty() ? raw_args : shown;
+        std::ostream& out = eng ? detail::engine_access::get_output_stream(*eng) : std::cout;
+
+        if (args.empty()) {
+            out << std::endl;
+            return script_value(std::monostate{}, eng);
         }
 
-        std::string result;
-        if (!detail::plain_text_value(*kept[0]) || !has_format_placeholders(first_str)) {
-            for (size_t i = 0; i < count; ++i) { append_format_argument(result, *shown[i]); }
-        } else {
-            process_format_string(result, first_str, shown, kept, count);
+        bool should_newline = true;
+        bool should_flush = true;
+        size_t effective_args = args.size();
+
+        if (!args.empty()) {
+            const auto& last_arg = args.back();
+            auto type_info = last_arg.get_type_info();
+            if (type_info && type_info->type_name == "skip_newline_t") {
+                should_newline = false;
+                should_flush = true;
+                effective_args--;
+            } else if (type_info && type_info->type_name == "skip_flush_t") {
+                should_newline = false;
+                should_flush = false;
+                effective_args--;
+            }
         }
-        return script_value(std::move(result), eng);
+
+        if (effective_args == 0) {
+            if (should_newline) {
+                out << std::endl;
+            } else if (should_flush) {
+                out << std::flush;
+            }
+            return script_value(std::monostate{}, eng);
+        }
+
+        if (effective_args == 1) {
+            // Single-arg print is VERBATIM passthrough by design:
+            // {{ }} escapes only apply when format substitution runs — no reason to
+            // alter the string when there is nothing to substitute
+            out << args[0].to_string();
+            if (should_newline) {
+                out << std::endl;
+            } else if (should_flush) {
+                out << std::flush;
+            }
+            return script_value(std::monostate{}, eng);
+        }
+
+        std::string first_str = literal && !first_was_shown ? args[0].to_string() : std::string();
+        bool has_format_specs = literal && !first_was_shown && has_format_placeholders(first_str);
+
+        if (!has_format_specs) {
+            for (size_t i = 0; i < effective_args; ++i) {
+                out << args[i].to_string();
+            }
+            if (should_newline) {
+                out << std::endl;
+            } else if (should_flush) {
+                out << std::flush;
+            }
+            return script_value(std::monostate{}, eng);
+        }
+
+        // the format string is args[0], the values start at args[1]
+        std::vector<const script_value*> format_args;
+        format_args.reserve(effective_args * 2);
+        for (size_t i = 0; i < effective_args; ++i) { format_args.push_back(&args[i]); }
+        for (size_t i = 0; i < effective_args; ++i) { format_args.push_back(&raw_args[i]); }
+        std::string result;
+        process_format_string(result, first_str, format_args.data(), format_args.data() + effective_args, effective_args);
+
+        out << result;
+        if (should_newline) {
+            out << std::endl;
+        } else if (should_flush) {
+            out << std::flush;
+        }
+        return script_value(std::monostate{}, eng);
     }
 
     // Special types for controlling print behavior
@@ -304,129 +393,35 @@ namespace stdlib {
 
         eng_ref.add_global("skip_newline", detail::engine_access::make_value_object(eng_ref, skip_newline_ptr));
         eng_ref.add_global("skip_flush", detail::engine_access::make_value_object(eng_ref, skip_flush_ptr));
-        // Usage:
-        //   print()                           - Prints just a newline
-        //   print(value)                      - Prints value followed by newline
-        //   print(format, args...)            - If format contains {}, uses format-style
-        //   print(arg1, arg2, ...)            - If no {} in first arg, prints all args sequentially
-        //   print(..., skip_newline)          - Skips the newline at end
-        //   print(..., skip_flush)            - Skips both newline and flush
-        //
-        // Format string placeholders (when {} is found in first argument):
-        //   {}     - Sequential placeholder, replaced with next argument
-        //   {n}    - Positional placeholder, replaced with nth argument (0-based)
-        //   {{     - Escaped left brace, prints a literal '{'
-        //   }}     - Escaped right brace, prints a literal '}'
-        //
-        // Examples:
-        //   print("Hello, World!")                    // Output: Hello, World!\n
-        //   print("Hello", "World", "!")              // Output: HelloWorld!\n
-        //   print("Hello, {}!", "JaiScript")          // Output: Hello, JaiScript!\n
-        //   print("{} + {} = {}", 2, 3, 5)            // Output: 2 + 3 = 5\n
-        //   print("Line 1", skip_newline)             // Output: Line 1 (no newline)
-        //   print("Debug: ", value, skip_flush)       // Output: Debug: <value> (no newline/flush)
-        //
-        eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& raw_args) -> checked_result<script_value> {
-            // every value shows its display text, as to_string(x) and `${x}` do; a container's or an object's is never a format string
-            std::vector<script_value> shown;
-            if (auto failed = show_arguments(eng, raw_args, shown)) { return std::move(*failed); }
-            const bool first_was_shown = !raw_args.empty() && !detail::plain_text_value(raw_args[0]);
-            const std::vector<script_value>& args = shown.empty() ? raw_args : shown;
-            std::ostream& out = eng ? detail::engine_access::get_output_stream(*eng) : std::cout;
-
-            if (args.empty()) {
-                out << std::endl;
-                return script_value(std::monostate{}, eng);
-            }
-
-            bool should_newline = true;
-            bool should_flush = true;
-            size_t effective_args = args.size();
-
-            if (!args.empty()) {
-                const auto& last_arg = args.back();
-                auto type_info = last_arg.get_type_info();
-                if (type_info && type_info->type_name == "skip_newline_t") {
-                    should_newline = false;
-                    should_flush = true;
-                    effective_args--;
-                } else if (type_info && type_info->type_name == "skip_flush_t") {
-                    should_newline = false;
-                    should_flush = false;
-                    effective_args--;
-                }
-            }
-
-            if (effective_args == 0) {
-                if (should_newline) {
-                    out << std::endl;
-                } else if (should_flush) {
-                    out << std::flush;
-                }
-                return script_value(std::monostate{}, eng);
-            }
-
-            if (effective_args == 1) {
-                // Single-arg print is VERBATIM passthrough by design:
-                // {{ }} escapes only apply when format substitution runs — no reason to
-                // alter the string when there is nothing to substitute
-                out << args[0].to_string();
-                if (should_newline) {
-                    out << std::endl;
-                } else if (should_flush) {
-                    out << std::flush;
-                }
-                return script_value(std::monostate{}, eng);
-            }
-
-            std::string first_str = args[0].to_string();
-            bool has_format_specs = !first_was_shown && has_format_placeholders(first_str);
-
-            if (!has_format_specs) {
-                for (size_t i = 0; i < effective_args; ++i) {
-                    out << args[i].to_string();
-                }
-                if (should_newline) {
-                    out << std::endl;
-                } else if (should_flush) {
-                    out << std::flush;
-                }
-                return script_value(std::monostate{}, eng);
-            }
-
-            // the format string is args[0], the values start at args[1]
-            std::vector<const script_value*> format_args;
-            format_args.reserve(effective_args * 2);
-            for (size_t i = 0; i < effective_args; ++i) { format_args.push_back(&args[i]); }
-            for (size_t i = 0; i < effective_args; ++i) { format_args.push_back(&raw_args[i]); }
-            std::string result;
-            process_format_string(result, first_str, format_args.data(), format_args.data() + effective_args, effective_args);
-
-            out << result;
-            if (should_newline) {
-                out << std::endl;
-            } else if (should_flush) {
-                out << std::flush;
-            }
-            return script_value(std::monostate{}, eng);
+        // print(values...): every value's display text in a row, then a newline (a trailing skip_newline keeps the line,
+        // skip_flush keeps it unflushed too). print(fmt, values...) with fmt a string literal holding a {} / {n} / {:spec}
+        // placeholder is a format string, as in C++20; any other first argument is text like the rest. format is the same rule
+        // returning the text, and vformat(fmt, values...) formats a run-time text the way format formats a literal.
+        eng_ref.add_variadic_function("print", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+            return print_values(eng, args, false);
         });
-        
-        // Usage:
-        //   format(value)                      - Converts value to string
-        //   format(format_str, args...)        - If format_str contains {}, uses format-style
-        //   format(arg1, arg2, ...)            - If no {} in first arg, concatenates all args
-        //
-        // Examples:
-        //   format("Hello, {}!", "World")      // Returns: "Hello, World!"
-        //   format("Hello", " ", "World")      // Returns: "Hello World"
-        //   format("{} + {} = {}", 2, 3, 5)    // Returns: "2 + 3 = 5"
-        //
+        detail::engine_access::add_format_literal(eng_ref, "print", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+            return print_values(eng, args, true);
+        }, [](const void* target, const script_value* args, size_t argc) -> checked_result<script_value> {
+            return print_values(static_cast<engine*>(const_cast<void*>(target)), std::vector<script_value>(args, args + argc), true);
+        }, eng);
+
+        constexpr engine::host_direct_invoke format_literal = [](const void* target, const script_value* args, size_t argc) -> checked_result<script_value> {
+            return format_values(static_cast<engine*>(const_cast<void*>(target)), args, argc, true);
+        };
         eng_ref.add_variadic_function("format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
-            return format_values(eng, args.data(), args.size());
+            return format_values(eng, args.data(), args.size(), false);
         });
         eng_ref.add_host_direct("format", engine::host_direct_any_arity, [](const void* target, const script_value* args, size_t argc) -> checked_result<script_value> {
-            return format_values(static_cast<engine*>(const_cast<void*>(target)), args, argc);
+            return format_values(static_cast<engine*>(const_cast<void*>(target)), args, argc, false);
         }, eng);
+        detail::engine_access::add_format_literal(eng_ref, "format", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+            return format_values(eng, args.data(), args.size(), true);
+        }, format_literal, eng);
+        eng_ref.add_variadic_function("vformat", [eng](const std::vector<script_value>& args) -> checked_result<script_value> {
+            return format_values(eng, args.data(), args.size(), true);
+        });
+        eng_ref.add_host_direct("vformat", engine::host_direct_any_arity, format_literal, eng);
 
         // Register as variadic to bypass type matching issues
         // the display text string + value shows (a class's own to_string() speaks for its instances)

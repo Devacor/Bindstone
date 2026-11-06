@@ -188,10 +188,10 @@ public:
 				print(format("{}", v));
 				print("{}", v);
 				print([v].join(""));
-				string s = v;
+				string s = cast<string>(v);
 				print(s);
 				string id(string t) { return t; }
-				print(id(v));
+				print(id(to_string(v)));
 				try { throw v; } catch (e) { print(e); }
 			)JAI"));
 		});

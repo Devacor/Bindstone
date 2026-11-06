@@ -2188,7 +2188,7 @@
       "signature": "print(values: var...) -> void",
       "provider": "core",
       "effect": "output",
-      "notes": "Core concatenates display texts; stdlib replacement supports formatting and print tokens.",
+      "notes": "Core concatenates display texts; stdlib replacement formats a string literal first argument and supports print tokens.",
       "source": "source/implementation/engine.cpp",
       "form": "function",
       "availability": "Every engine",
@@ -2520,7 +2520,7 @@
       "signature": "print(format_or_values: var...) -> void",
       "provider": "stdlib",
       "effect": "output, callback",
-      "notes": "Format string placeholders when applicable; each value prints its display text (containers their contents, instances their to_string methods or fields); skip_newline/skip_flush are control tokens.",
+      "notes": "A string literal first argument holding a {} placeholder is a format string (C++20's constant format string); any other first argument prints as text like the rest; each value prints its display text (containers their contents, instances their to_string methods or fields); skip_newline/skip_flush are control tokens.",
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
@@ -2532,13 +2532,29 @@
       "signature": "format(template: string, values: var...) -> string",
       "provider": "stdlib",
       "effect": "callback",
-      "notes": "Creates formatted text.",
+      "notes": "Creates formatted text from a string literal format string; a string the checker sees is not a literal fails the load (vformat formats a run-time text).",
       "source": "include/jaiscript/stdlib/io.hpp",
       "form": "function",
       "availability": "register_all() or area registration",
       "display": "format(template: string, values: var...) -> string",
       "example": {
         "code": "print(format(\"{} has {} hp\", \"orc\", 7));",
+        "output": "orc has 7 hp"
+      }
+    },
+    {
+      "owner": "global",
+      "name": "vformat",
+      "signature": "vformat(format: string, values: var...) -> string",
+      "provider": "stdlib",
+      "effect": "callback",
+      "notes": "Formats a run-time format text the way format formats a literal (C++'s std::vformat).",
+      "source": "include/jaiscript/stdlib/io.hpp",
+      "form": "function",
+      "availability": "register_all() or area registration",
+      "display": "vformat(format: string, values: var...) -> string",
+      "example": {
+        "code": "string pattern = \"{} has {} hp\";\nprint(vformat(pattern, \"orc\", 7));",
         "output": "orc has 7 hp"
       }
     },

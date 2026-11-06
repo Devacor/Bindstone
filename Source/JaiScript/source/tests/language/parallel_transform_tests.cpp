@@ -1364,7 +1364,7 @@ public:
 		test("grafted_fn_body_keeps_return_conversion_and_early_returns", [this]() {
 			// A read-only fn's body runs grafted into the chunk loop (no call per element): a
 			// converting typed return still converts (float from an int expression widens, string
-			// takes anything), a proven same-type return lands as is, `var` stays dynamic, an early
+			// takes a utf8_string's bytes), a proven same-type return lands as is, `var` stays dynamic, an early
 			// top-level return picks its value, a return inside a nested loop takes the call form
 			auto e = make_engine();
 			e->parallel_thread_count(3);
@@ -1374,7 +1374,7 @@ public:
 				for (int i = 0; i < 90; i++) { ps.push(P(i)); }
 				float widened(P p) { return p.n * 3; }
 				float same(P p) { return p.a; }
-				string text(P p) { return p.n; }
+				string text(P p) { utf8_string u = `${p.n}`; return u; }
 				var dynamic(P p) { if (p.n % 2 == 0) { return p.n; } return p.a; }
 				int early(P p) { if (p.n < 10) { return -1; } if (p.n < 20) { return -2; } return p.n; }
 				int nested(P p) { for (int k = 0; k < 5; k++) { if (k == p.n % 5) { return k * 100 + p.n; } } return 0; }

@@ -4346,7 +4346,7 @@ private:
 				t([]() { var a = [B(), A()]; int n = 0; for (A& r : a) { r.v = 7; n += r.v; } return n; }) + "|" +
 				t([]() { var a = [1, 2]; string s = ""; for (auto x : a) { x = "s"; s += x; } return s; }) + "|" +
 				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = 2.9; s += type_of(x) + ":" + x; } return s; });
-			)", "int:1 int:2 |string:1 string:2 |Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
+			)", "int:1 int:2 |Cannot initialize 'v' (declared string) with int|Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
 			    "14|ss|int:2", warn_region);
 			every_config("checker", "1|0", [](engine& e) {
 				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { }");
@@ -4366,7 +4366,7 @@ private:
 				t([]() { string x = "a"; var& r = x; r = 5; return type_of(x) + ":" + x; }) + "|" +
 				t([]() { var x = 1; var& r = x; r = "free"; return type_of(x); }) + "|" +
 				t([]() { int u = 1; set37(u); return type_of(u) + ":" + u; });
-			)", "Cannot assign string to 'r' (declared int&)|int:2|string:5|string|int:3", warn_region);
+			)", "Cannot assign string to 'r' (declared int&)|int:2|Cannot assign int to 'r' (declared string&)|string|int:3", warn_region);
 		});
 		test("a_store_through_a_reference_copies_like_the_variables_own_store", [this]() {
 			// value semantics hold through the reference: the typed variable takes a copy, never the source's node

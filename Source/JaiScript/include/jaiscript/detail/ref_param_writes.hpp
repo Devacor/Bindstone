@@ -72,7 +72,7 @@ namespace jai::detail {
 	// The core builtins that take their arguments as copies (printing, conversion, identity)
 	inline bool ref_write_copying_builtin(std::string_view name) {
 		return name == "print" || name == "println" || name == "to_string" || name == "type_of" || name == "to_json" ||
-		       name == "same_object" || name == "format" || name == "to_char" || name == "int" || name == "float" ||
+		       name == "same_object" || name == "format" || name == "vformat" || name == "to_char" || name == "int" || name == "float" ||
 		       name == "string" || name == "bool" || name == "char" || name == "double" || name == "int64";
 	}
 

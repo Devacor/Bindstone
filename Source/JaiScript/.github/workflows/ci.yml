@@ -63,6 +63,14 @@ jobs:
           key: ${{ matrix.name }}-${{ matrix.config }}
           max-size: 1G
 
+      # jai_spider downloads the SQLite amalgamation at configure time (pinned and hash-checked in tools/jai_spider/CMakeLists.txt);
+      # the cache keeps a sqlite.org outage from failing the cell. A system SQLite is used when CMake finds one.
+      - name: SQLite download cache
+        uses: actions/cache@v4
+        with:
+          path: build/tools/jai_spider/sqlite_download
+          key: sqlite-${{ hashFiles('tools/jai_spider/CMakeLists.txt') }}
+
       # Embedded (/Z7) debug info on MSVC Debug: ccache cannot cache /Zi's shared PDB.
       - name: Configure
         run: >

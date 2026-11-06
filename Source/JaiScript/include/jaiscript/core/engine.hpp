@@ -33,6 +33,7 @@
 namespace jai {
 
     // Forward declarations
+    class class_decl;
     class class_definition;
     class class_instance;
     class class_registry;
@@ -1224,6 +1225,8 @@ namespace jai {
         // checker's surface moved, cached entries re-check (and re-stamp proofs) at their next
         // execute. Identical reloads must NOT call this.
         void note_class_shape_change();
+        // A script class's first definition: news to the checker unless the program pools model this very declaration
+        void note_class_defined(const std::string& name, const class_decl* declaration);
 
         // === TYPE INFO INTERNING ===
         // Get or create type_info for basic types (fast O(1) access for common types)
@@ -1375,6 +1378,9 @@ namespace jai {
         checked_result<bool> import_modules(import_site& site, const std::vector<std::string>& paths, bool force);
         // Filesystem queries the import step has made (resolution, stamps): the counter the throttle's tests read
         uint64_t import_stat_count() const noexcept;
+        // Source texts the loads read from disk, and diagnostics walks the cached checker ran: what a load costs, counted
+        uint64_t source_read_count() const noexcept;
+        uint64_t check_walk_count() const noexcept;
         // Writes of the engine's clock sample (host entries, budget-check samples, time:: reads of the system clock)
         uint64_t clock_sample_count() const noexcept;
 

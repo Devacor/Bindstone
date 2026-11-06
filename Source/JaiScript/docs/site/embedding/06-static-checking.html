@@ -525,7 +525,11 @@ stamp: they re-derive at creation, load and execute. Details in the
 <p>One AST walk per unique source per registration epoch, cached beside the parse; the proof pass rides
 it. The walk re-runs only when the
 registration surface moves (<code>add_function</code>/<code>add_global</code>/<code>add_class</code>/<code>register_template_type</code>,
-a script class's first definition or a non-identical redefinition) or the proof switch flips. Executes with
+a non-identical redefinition, or the first definition of a script class no program unit declares) or the proof
+switch flips; a failing verdict is derived again whenever the program gains names, and a hot reload checks the units
+its new text could break.
+A program that runs defines its own classes without moving anything the checker read, so executing the same import root
+again checks nothing until a file, a registration or the program changes. Executes with
 per-call host instance variables check fresh per call, without touching the cached stamps. Walk cost is
 parse-order: the same tree, no allocation-heavy state. A <code>.jaibite</code> cache stamped checked-clean
 skips the diagnostics walk on load. New source text (a hot reload) is a new cache entry and a fresh check.</p>

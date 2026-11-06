@@ -161,6 +161,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static uint64_t local_alias_binds(const engine& a_engine) { return a_engine.local_alias_binds(); }
         JAI_FORCEINLINE static void note_local_alias_bind(engine& a_engine) { return a_engine.note_local_alias_bind(); }
         JAI_FORCEINLINE static void note_class_shape_change(engine& a_engine) { return a_engine.note_class_shape_change(); }
+        JAI_FORCEINLINE static void note_class_defined(engine& a_engine, const std::string& name, const class_decl* declaration) { return a_engine.note_class_defined(name, declaration); }
         JAI_FORCEINLINE static type_info* get_type_info_int(engine& a_engine) { return a_engine.get_type_info_int(); }
         JAI_FORCEINLINE static type_info* get_type_info_float(engine& a_engine) { return a_engine.get_type_info_float(); }
         JAI_FORCEINLINE static type_info* get_type_info_string(engine& a_engine) { return a_engine.get_type_info_string(); }
@@ -224,6 +225,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static bool import_skips(engine& a_engine, const import_site& site, const script_value* const* args, size_t count) { return a_engine.import_skips(site, args, count); }
         JAI_FORCEINLINE static checked_result<bool> import_modules(engine& a_engine, import_site& site, const std::vector<std::string>& paths, bool force) { return a_engine.import_modules(site, paths, force); }
         JAI_FORCEINLINE static uint64_t import_stat_count(const engine& a_engine) noexcept { return a_engine.import_stat_count(); }
+        JAI_FORCEINLINE static uint64_t source_read_count(const engine& a_engine) noexcept { return a_engine.source_read_count(); }
+        JAI_FORCEINLINE static uint64_t check_walk_count(const engine& a_engine) noexcept { return a_engine.check_walk_count(); }
         JAI_FORCEINLINE static uint64_t clock_sample_count(const engine& a_engine) noexcept { return a_engine.clock_sample_count(); }
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, const std::vector<stack_frame>& trace, const char* thrown_text = nullptr) { return a_engine.make_caught_error(thrown, by_throw, throw_site, trace, thrown_text); }
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, std::vector<stack_frame>&& trace, const char* thrown_text = nullptr) { return a_engine.make_caught_error(thrown, by_throw, throw_site, std::move(trace), thrown_text); }

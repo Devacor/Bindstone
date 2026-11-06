@@ -11,7 +11,8 @@ namespace jai {
 
 class class_registry {
 public:
-    checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def);
+    // a_declaration: the class_decl the definition ran (a first definition the program pools modeled moves no checker surface)
+    checked_result<void> register_script_class(std::shared_ptr<script_class_definition> class_def, const class_decl* a_declaration = nullptr);
     checked_result<void> register_cpp_class(std::shared_ptr<class_definition> class_def);
     std::shared_ptr<script_class_definition> find_script_class(const std::string& name);
     std::shared_ptr<script_class_definition> find_script_class(uint64_t type_id) const;

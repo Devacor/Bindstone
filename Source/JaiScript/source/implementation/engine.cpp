@@ -913,6 +913,8 @@ struct engine::implementation {
     uint64_t import_generation_ = 1;
     uint64_t import_pass_id_ = 0;
     uint64_t import_stats_ = 0;
+    uint64_t source_reads_ = 0;
+    uint64_t check_walks_ = 0;
     std::string cwd_;   // the working directory resolution keys use, refreshed when a check pass opens
     // caught errors (engine::make_caught_error): the catch variable is its message as a string whose node keys the error's
     // place, stack and thrown value; an entry goes when nothing but this table holds the string
@@ -1028,9 +1030,10 @@ struct engine::implementation {
         bool loaded_noted = false;   // run_unit looked at it for loaded_units_ (which holds the entry each unit last ran)
         bool constants_gathered = false;   // its const texts and constant arguments are in the engine's tables (gather_constant_texts)
         // Static-check result, cached beside the parse (amortized once per unique
-        // source); re-run when the registration surface epoch moves.
+        // source); re-run when the registration surface epoch or the program's union moves.
         bool checked = false;
         uint64_t checked_epoch = 0;
+        uint64_t checked_union = 0;
         check_report check_result;
         uint64_t proof_epoch = UINT64_MAX;   // surface epoch the nodes' proofs were stamped at; UINT64_MAX = unproven
         bool autos_typed = false;            // the first proof pass types the auto slots
@@ -1138,20 +1141,48 @@ struct engine::implementation {
     detail::program_global_map program_globals_;   // the closure units' top-level variables: the proof pass types them (internal/static_checking.md "Proofs")
     std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> program_name_units_;   // name -> unit path -> unit_key of the unit declaring it
     std::unordered_map<std::string, uint64_t> pooled_unit_keys_;   // unit path -> the unit_key its names were pooled under
+    std::unordered_map<std::string, std::vector<declaration_ptr>> pooled_unit_declarations_;   // unit path -> its functions, globals and enums the tables hold
+    // moves whenever what the checker reads of the pools (names, class models, enums) changes: a verdict holds while it stands
+    uint64_t program_union_epoch_ = 0;
+    static bool pooled_by_path(const declaration_ptr& d) {
+        if (!d) { return false; }
+        const node_type type = d->get_type();
+        return type == node_type::function_decl || type == node_type::variable_decl || type == node_type::enum_decl;
+    }
+    // whether the path-keyed tables already hold exactly these declarations of the unit
+    static bool pools_as(const std::vector<declaration_ptr>& pooled, const std::vector<declaration_ptr>& decls) {
+        size_t next = 0;
+        for (const auto& d : decls) {
+            if (!pooled_by_path(d)) { continue; }
+            if (next == pooled.size() || pooled[next] != d) { return false; }
+            ++next;
+        }
+        return next == pooled.size();
+    }
     // A unit's declarations into the program pools, each name under the unit that declares it; a unit pooled again under the
-    // key it was pooled with brings the names it brought before
+    // key it was pooled with brings the names it brought before, and again with the same declarations changes nothing but the
+    // class models, where the unit pooled last wins
     void pool_unit(const std::vector<declaration_ptr>& decls, const std::string& path, uint64_t key) {
+        bool moved = false;
         if (auto [pooled, fresh] = pooled_unit_keys_.try_emplace(path, key); fresh || pooled->second != key) {
             pooled->second = key;
             std::unordered_set<std::string> names;
             detail::collect_unit_names(decls, names);
-            for (const auto& n : names) { program_name_units_[n][path] = key; }
-            program_names_.insert(names.begin(), names.end());
+            for (const auto& n : names) {
+                program_name_units_[n][path] = key;
+                moved = program_names_.insert(n).second || moved;
+            }
         }
-        detail::collect_unit_classes(decls, program_classes_);
-        detail::collect_unit_enums(decls, path, program_enums_);
-        detail::collect_unit_functions(decls, path, program_functions_);
-        detail::collect_unit_globals(decls, path, program_globals_);
+        moved = detail::collect_unit_classes(decls, program_classes_) || moved;
+        if (std::vector<declaration_ptr>& pooled = pooled_unit_declarations_[path]; !pools_as(pooled, decls)) {
+            pooled.clear();
+            for (const auto& d : decls) { if (pooled_by_path(d)) { pooled.push_back(d); } }
+            detail::collect_unit_enums(decls, path, program_enums_);
+            detail::collect_unit_functions(decls, path, program_functions_);
+            detail::collect_unit_globals(decls, path, program_globals_);
+            moved = true;
+        }
+        if (moved) { ++program_union_epoch_; }
     }
     struct closure_unit {
         std::string path;   // resolved spelling: the key the unit later executes under
@@ -1284,13 +1315,10 @@ struct engine::implementation {
                 if (!resolved || !visited.insert(resolved.value()).second) { continue; }
                 unit.path = std::move(resolved.value());
                 closure_stamp stamp{unit.path, 0, 0};
-                stat_mtime_size(unit.path, stamp.mtime, stamp.size);
+                const bool stamped = stat_mtime_size(unit.path, stamp.mtime, stamp.size);
+                const uint64_t mtime = stamp.mtime, size = stamp.size;
                 stamps.push_back(std::move(stamp));
-                std::ifstream file(unit.path);
-                if (!file.is_open()) { continue; }
-                std::stringstream buffer;
-                buffer << file.rdbuf();
-                unit.source = buffer.str();
+                if (read_for_load(unit.path, stamped, mtime, size, unit.source) == stamped_read::missing) { continue; }
                 std::filesystem::path cacheFile;
                 bool cacheFresh = false;
                 unit.entry = acquire_entry(self, unit.source, unit.path, cacheFile, cacheFresh);
@@ -1384,7 +1412,10 @@ struct engine::implementation {
     void check_entry(engine& self, script_cache_entry& entry, bool want_diagnostics) {
         gather_entry_constants(entry);
         const uint64_t want_proof_epoch = type_proofs_ ? check_surface_epoch_ : UINT64_MAX;
-        const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_);
+        // a moved union re-derives a failing verdict (the names it lacked may be there now); a clean one breaking is a reload's
+        // dependents check (check_group), and a gather re-derives its root
+        const bool need_check = want_diagnostics && (!entry.checked || entry.checked_epoch != check_surface_epoch_ ||
+                                                     (entry.checked_union != program_union_epoch_ && entry.check_result.has_errors()));
         const bool need_proofs = entry.proof_epoch != want_proof_epoch || !entry.autos_typed ||
                                  (lowering_on() && !entry.lowering.built) || entry.lowering.lowered_view != lowering_on();
         if (need_check && entry.stamp_loaded && outside_key(self, entry.context.outside) == entry.context.outside_key) {
@@ -1398,6 +1429,7 @@ struct engine::implementation {
             const bool first = jaibite_cache_enabled && entry.source_path != "<script>" && !entry.context_recorded;
             std::vector<std::string> outside;
             if (first) { o.outside = &outside; }
+            ++check_walks_;
             entry.check_result = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             if (first) {
                 entry.restamp = entry.stamp_loaded;
@@ -1411,6 +1443,7 @@ struct engine::implementation {
             entry.stamp_loaded = false;
             entry.checked = true;
             entry.checked_epoch = check_surface_epoch_;
+            entry.checked_union = program_union_epoch_;
         }
         if (need_check || need_proofs) {
             lowering_view(self, checked_declarations(entry), entry.lowering);
@@ -1422,7 +1455,7 @@ struct engine::implementation {
 
     // The ONE cached checker entry point. A root with literal imports
     // gathers its closure when due (names first, so the root's own check already knows
-    // them; the root's verdict is re-derived because the union may have moved), then
+    // them; the root's verdict is re-derived when the union moved), then
     // checks every closure unit whose entry is stale so the unit's later execute through
     // import finds it checked. A unit that fails to parse stops the program there: its
     // parse error is the whole report (the names it would have declared are unknown, so
@@ -1442,7 +1475,7 @@ struct engine::implementation {
                 pool_unit(entry.declarations, entry.source_path, unit_key(entry, source));
                 std::unordered_set<std::string> visited;
                 collect_closure_units(self, roots, visited, closure, entry.closure_stamps, entry.source_path, entry.closure_parse_failures);
-                entry.checked = false;
+                if (entry.checked_union != program_union_epoch_) { entry.checked = false; }
                 // every unit's consts before any unit's check: a constant argument may name a const a later unit declares
                 detail::gather_constants(entry.declarations, program_constants_, constant_rule_index_);
                 for (const auto& unit : closure) { detail::gather_constants(unit.entry->declarations, program_constants_, constant_rule_index_); }
@@ -1554,6 +1587,7 @@ struct engine::implementation {
                                    const instance_variables& instanceVars, std::string_view source) {
         script_cache_entry& entry = *held;
         has_executed_ = true;
+        load_scope loading(*this);
         self.backend()->prepare_for_execution();
         entry.last_used = ++script_cache_clock;
         const check_report& rep = checked_report(self, entry, source);
@@ -1641,14 +1675,18 @@ struct engine::implementation {
         detail::program_global_map globals;
         std::unordered_map<std::string, std::unordered_map<std::string, uint64_t>> name_units;
         std::unordered_map<std::string, uint64_t> unit_keys;
+        std::unordered_map<std::string, std::vector<declaration_ptr>> unit_declarations;
     };
     program_pools save_program_pools() const {
-        return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_};
+        return {program_names_, program_classes_, program_enums_, program_functions_, program_globals_, program_name_units_, pooled_unit_keys_,
+                pooled_unit_declarations_};
     }
     void restore_program_pools(program_pools&& saved) {
+        ++program_union_epoch_;
         program_names_ = std::move(saved.names);
         program_name_units_ = std::move(saved.name_units);
         pooled_unit_keys_ = std::move(saved.unit_keys);
+        pooled_unit_declarations_ = std::move(saved.unit_declarations);
         program_classes_ = std::move(saved.classes);
         program_enums_ = std::move(saved.enums);
         program_functions_ = std::move(saved.functions);
@@ -2104,6 +2142,7 @@ struct engine::implementation {
     enum class stamped_read { missing, torn, stable };
     stamped_read read_under_stamp(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
         {
+            ++source_reads_;
             std::ifstream file(path);
             if (!file.is_open()) { return stamped_read::missing; }
             std::stringstream buffer;
@@ -2114,6 +2153,36 @@ struct engine::implementation {
         uint64_t after_mtime = 0, after_size = 0;
         return stat_mtime_size(path, after_mtime, after_size) && after_mtime == mtime && after_size == size
             ? stamped_read::stable : stamped_read::torn;
+    }
+
+    // A load (an execute, or an import the host's call reached) reads each file once: the closure gather, the imports and
+    // includes that run the gathered units and the gathers nested in them take a text read earlier in the load while the
+    // file's stamp still matches the one it was read under. The texts go when the outermost load ends.
+    struct load_text {
+        uint64_t mtime = 0, size = 0;
+        std::string text;
+    };
+    std::unordered_map<std::string, load_text> load_texts_;
+    uint32_t load_depth_ = 0;
+    struct load_scope {
+        implementation& impl;
+        explicit load_scope(implementation& a_impl) : impl(a_impl) { ++impl.load_depth_; }
+        load_scope(const load_scope&) = delete;
+        load_scope& operator=(const load_scope&) = delete;
+        ~load_scope() {
+            if (--impl.load_depth_ == 0) { impl.load_texts_.clear(); }
+        }
+    };
+    stamped_read read_for_load(const std::string& path, bool stamped, uint64_t mtime, uint64_t size, std::string& content) {
+        if (stamped) {
+            if (auto it = load_texts_.find(path); it != load_texts_.end() && it->second.mtime == mtime && it->second.size == size) {
+                content = it->second.text;
+                return stamped_read::stable;
+            }
+        }
+        const stamped_read result = read_under_stamp(path, stamped, mtime, size, content);
+        if (result == stamped_read::stable && stamped && load_depth_ > 0) { load_texts_[path] = {mtime, size, content}; }
+        return result;
     }
 
     // Jaibite disk cache (engine.hpp doc): <folder>/.cache/<file>.jaibite, or below the host's cache directory, maintained
@@ -3431,7 +3500,7 @@ script_value engine::execute_file_source(const std::string& resolvedPath, const 
 bool engine::read_include_file(const std::string& resolvedPath, std::string& content) {
     uint64_t mtime = 0, size = 0;
     const bool stamped = impl->stat_mtime_size(resolvedPath, mtime, size);
-    const auto read = impl->read_under_stamp(resolvedPath, stamped, mtime, size, content);
+    const auto read = impl->read_for_load(resolvedPath, stamped, mtime, size, content);
     if (read == implementation::stamped_read::missing) { return false; }
     impl->note_closure_file(resolvedPath, stamped && read == implementation::stamped_read::stable, mtime, size);
     return true;
@@ -3471,6 +3540,7 @@ script_value engine::execute_unheld(script_source source) {
 
 script_value engine::execute_source(const std::string& scriptContent, const instance_variables& instanceVars, const std::string& sourcePath, bool textual, std::string_view include_scope) {
     impl->has_executed_ = true;
+    implementation::load_scope loading(*impl);
     impl->note_root_source(sourcePath);
     try {
         // Prepare backend for new execution
@@ -5073,6 +5143,12 @@ void engine::note_class_shape_change() {
     ++impl->check_surface_epoch_;
 }
 
+void engine::note_class_defined(const std::string& name, const class_decl* declaration) {
+    const auto modeled = impl->program_classes_.find(name);
+    if (declaration && modeled != impl->program_classes_.end() && modeled->second.get() == declaration) { return; }   // every check that read the pools knew it
+    ++impl->check_surface_epoch_;
+}
+
 bool engine::throw_on_overflow() const {
     return kCheckedOverflow;  // compile-time policy (integer_ops.hpp)
 }
@@ -6023,6 +6099,14 @@ uint64_t engine::import_stat_count() const noexcept {
     return impl->import_stats_;
 }
 
+uint64_t engine::source_read_count() const noexcept {
+    return impl->source_reads_;
+}
+
+uint64_t engine::check_walk_count() const noexcept {
+    return impl->check_walks_;
+}
+
 uint64_t engine::clock_sample_count() const noexcept {
     return impl->limits_.clock_samples;
 }
@@ -6127,6 +6211,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     auto allowed = require_privilege(privilege::filesystem);
     if (!allowed) { return allowed.error_value(); }
     implementation& I = *impl;
+    implementation::load_scope loading(I);
     detail::execution_limits& limits = I.limits_;
     const bool always = I.import_behavior == import_behavior::always;
     const bool once = I.import_behavior == import_behavior::once;
@@ -6325,7 +6410,7 @@ checked_result<bool> engine::import_modules(import_site& site, const std::vector
     const auto read_module = [&](import_unit& m, std::string& content) -> bool {
         const bool loaded_before = I.import_cache.count(m.resolved) != 0;
         for (int attempt = 0; ; ++attempt) {
-            const auto read = impl->read_under_stamp(m.resolved, m.stamped, m.mtime, m.size, content);
+            const auto read = impl->read_for_load(m.resolved, m.stamped, m.mtime, m.size, content);
             if (read == implementation::stamped_read::missing) { throw runtime_error("Failed to open import file: " + m.resolved); }
             if (read == implementation::stamped_read::stable) { return true; }
             if (loaded_before) { return false; }
@@ -6807,7 +6892,7 @@ script_value engine::execute_import(const std::string& resolved_path) {
         record.resolved_path = resolved_path;
         const bool stamped = impl->stat_mtime_size(resolved_path, record.mtime, record.size);
         std::string content;
-        const auto read = impl->read_under_stamp(resolved_path, stamped, record.mtime, record.size, content);
+        const auto read = impl->read_for_load(resolved_path, stamped, record.mtime, record.size, content);
         if (read == implementation::stamped_read::missing) {
             throw runtime_error("Failed to open import file: " + resolved_path);
         }

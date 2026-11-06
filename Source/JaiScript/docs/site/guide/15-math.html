@@ -108,7 +108,7 @@ math::vec2 has no member &#x27;z&#x27;
 Cannot store a non-numeric value in a math::vec3 component
 (inf, 0.0)</code></pre></div>
 <h2 id="operators">Operators<a class="hlink" href="#operators" aria-label="link">&#8203;</a></h2>
-<p><code>+ - * /</code> work component by component between two vectors of the same type, and between a vector and a scalar on either side; <code>*</code> of two vectors is the component-wise product (the dot product is <code>math::dot</code>). Unary <code>-</code> negates every component. An ivec divides like an int (truncating) and has <code>%</code>; float vectors have no <code>%</code>. Compound assignment works on any vector lvalue, and a vector concatenates into a string as its text.</p>
+<p><code>+ - * /</code> work component by component between two vectors of the same type, and between a vector and a scalar on either side; <code>*</code> of two vectors is the component-wise product (the dot product is <code>math::dot</code>). Unary <code>-</code> negates every component; unary <code>+</code> is the identity and returns a copy (as glm does in C++); <code>~</code> is refused. An ivec divides like an int (truncating) and has <code>%</code>; float vectors have no <code>%</code>. Compound assignment works on any vector lvalue, and a vector concatenates into a string as its text.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
 math::vec3 b = math::vec3(0.5, 0.5, 0.5);
 print(a + b, " ", a - b, " ", -a);

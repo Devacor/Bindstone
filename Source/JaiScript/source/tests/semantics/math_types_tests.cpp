@@ -195,6 +195,7 @@ public:
             expect("to_string(math::vec2(3, 6) / 2) + to_string(6 / math::vec2(3, 6))", "(1.5, 3.0)(2.0, 1.0)", "division both ways");
             expect("to_string(math::vec2(1, 2) * math::vec2(3, 4))", "(3.0, 8.0)", "componentwise product");
             expect("to_string(-math::vec3(1, -2, 0))", "(-1.0, 2.0, -0.0)", "negation");
+            expect("math::vec2 v = math::vec2(1, -2); math::vec2 w = +v; w.x = 9; to_string(+v) + to_string(w) + to_string(+math::ivec2(3, 4)) + to_string(+math::color(0.25, 0.5, 0.75) == math::color(0.25, 0.5, 0.75))", "(1.0, -2.0)(9.0, -2.0)(3, 4)true", "unary plus is the identity, a copy");
             expect("to_string(math::ivec2(7, -7) / 2) + to_string(math::ivec2(7, -7) % 4)", "(3, -3)(3, -3)", "int division truncates, modulo keeps the sign");
             expect("to_string(math::ivec3(1, 2, 3) * 2 + 1)", "(3, 5, 7)", "ivec arithmetic");
             expect("to_string(math::vec4(1, 2, 3, 4) * 2 - math::vec4(1, 1, 1, 1))", "(1.0, 3.0, 5.0, 7.0)", "vec4 arithmetic");

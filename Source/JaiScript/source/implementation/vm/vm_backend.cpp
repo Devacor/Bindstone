@@ -4066,8 +4066,8 @@ op_status vm_backend::exec_unary(frame& f, const vm_instruction& ins) {
 			stack_.push_back(script_value(!is_truthy(operand), engine_));
 			return {};
 		case token_type::plus:
-			// C++'s unary plus: a number is itself, a char promotes to its int
-			if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT) { stack_.push_back(std::move(operand)); return {}; }
+			// C++'s unary plus: a number or a math value is itself, a char promotes to its int
+			if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT || detail::math::is_kind(oi)) { stack_.push_back(std::move(operand)); return {}; }
 			if (oi == script_value::TYPEID_CHAR) { stack_.push_back(detail::char_promoted(operand, engine_)); return {}; }
 			if (auto landed = user_unary(token_type::plus)) { return *landed; }
 			return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary plus requires numeric operand");

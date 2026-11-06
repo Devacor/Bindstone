@@ -92,7 +92,7 @@ public:
 			f.write("page.spider", "${shout(who)} ${limit}");
 			auto eng = engine_for();
 			check_eq(std::string("ADA! 3"), run(eng, f,
-				"int limit = 3; string shout(string s) { return s.to_upper() + \"!\"; } string who = \"global\"; "
+				"int limit = 3; string shout(string s) { return string::to_upper(s) + \"!\"; } string who = \"global\"; "
 				"class Page { string who = \"field\"; string render() { string who = \"ada\"; return template(\"page.spider\", who).to_string(); } } Page().render();"));
 			f.write("leak.spider", "<p>\n${secret}</p>");
 			const std::string leak = failure(eng, f, "void f() { int secret = 1; string who = \"x\"; template(\"leak.spider\", who); } f();");
@@ -171,10 +171,14 @@ public:
 
 		test("scoped_template_renders_built_in_values_escaped", [=, this]() {
 			check_eq(std::string("&lt;ann&gt; Rex 002 B,A"),
-				scoped_error(data, "${args.name} ${args.pet.name} ${args[\"items\"].size():03} ${args.items.map(i => i.to_upper()).join(\",\")}"));
+				scoped_error(data, "${args.name} ${args.pet.name} ${args[\"items\"].size():03} ${array::map(args.items, i => string::to_upper(i)).join(\",\")}"));
 			auto eng = engine_for();
-			check_eq(std::string("[\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${args.items.sort()}\", d); to_json(d[\"items\"]);").as_string(),
-				"a mutating method acts on the template's own copy");
+			check_eq(std::string("ab [\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${array::sort(args.items)}\", d).to_string() + \" \" + to_json(d[\"items\"]);").as_string(),
+				"the string::, array:: and map:: functions work on copies");
+			check_eq(std::string("sort changes args.items in place and returns nothing; array::sort(args.items) returns a sorted copy"),
+				eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; string m = \"\"; try { scoped_template_text(\"${args.items.sort()}\", d); } catch (e) { m = e; } m;").as_string(),
+				"an in-place method's result is the language's error");
+			check_eq(std::string(" \t\n\v\f\r|"), eng->execute("map<string, var> d; scoped_template_text(\"${string::whitespace}|\", d).to_string();").as_string(), "a namespace value reads");
 		});
 
 		test("scoped_template_refuses_a_global_read", [=, this]() {
@@ -184,7 +188,11 @@ public:
 
 		test("scoped_template_refuses_a_free_function_call", [=, this]() {
 			const std::string m = scoped_error(data, "${leak()}");
-			check(m.find("a scoped template calls only the built-in methods of built-in values: 'leak(...)' is not allowed") != std::string::npos, m);
+			check(m.find("a scoped template calls only built-in methods and the string::, array:: and map:: functions: 'leak(...)' is not allowed") != std::string::npos, m);
+			const std::string other = scoped_error(data, "${web::html_escape(args.name)}");
+			check(other.find("a scoped template calls only built-in methods and the string::, array:: and map:: functions: 'html_escape(...)' is not allowed") != std::string::npos, "another namespace's function: " + other);
+			const std::string script_ns = scoped_error("namespace leaks { int f() { return 1; } } " + data, "${leaks::f()}");
+			check(script_ns.find("'f(...)' is not allowed") != std::string::npos, "a script namespace's function: " + script_ns);
 		});
 
 		test("scoped_template_refuses_a_bound_cpp_method", [=, this]() {
@@ -200,7 +208,7 @@ public:
 			check_eq(std::string("a scoped template does not splice a class instance, a host object or a function: its code could run"),
 				scoped_error(data, "${args.pet}"), "splicing an instance would run its to_string()");
 			check_eq(std::string("a scoped template does not call a built-in method over a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${args.items.map(i => args.pet).size()}"), "a built-in that would reach an instance's code");
+				scoped_error(data, "${array::map(args.items, i => args.pet).size()}"), "a built-in that would reach an instance's code");
 		});
 
 		test("scoped_template_refuses_an_operator_overload", [=, this]() {
@@ -228,7 +236,7 @@ public:
 				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s}${args.s}\", d); } catch (e) { m = e; } m;").as_string());
 			check_eq(std::string("0123456789"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; scoped_template_text(\"${args.s}\", d).to_string();").as_string());
 			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
-				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s.repeat(2).size()}\", d); } catch (e) { m = e; } m;").as_string(),
+				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${string::repeat(args.s, 2).size()}\", d); } catch (e) { m = e; } m;").as_string(),
 				"a built-in that makes a longer string counts as writing it");
 			eng->scoped_template_output_limit(0);
 			check_eq(std::string("20"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; to_string(scoped_template_text(\"${args.s}${args.s}\", d).to_string().size());").as_string(), "0 is no limit");

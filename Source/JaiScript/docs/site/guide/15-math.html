@@ -201,10 +201,10 @@ print(tint);</code></pre></div>
 (40.0, 20.0)
 (1.0, 1.0, 1.0, 10.0)</code></pre></div>
 <h2 id="typed-slots">Typed slots<a class="hlink" href="#typed-slots" aria-label="link">&#8203;</a></h2>
-<p>A declared vector slot (a variable, a parameter, a return, a field, an array element) converts between the float and int families of the same dimensions; a <code>string</code> slot takes the vector's text; anything else is rejected with the typed-slot text. A color never converts to or from a <code>vec4</code>.</p>
+<p>A declared vector slot (a variable, a parameter, a return, a field, an array element) converts between the float and int families of the same dimensions; a <code>string</code> slot takes text only, so <code>to_string(v)</code> gives it a vector's text; anything else is rejected with the typed-slot text. A color never converts to or from a <code>vec4</code>.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::ivec3(1, 2, 3);            // an ivec into a vec slot
 math::ivec2 p = math::vec2(1.5, -2.5);          // a vec into an ivec slot truncates
-string s = math::vec2(1, 2);                    // a string slot takes the text
+string s = to_string(math::vec2(1, 2));         // a string slot takes the text
 math::ivec2 snap(math::vec2 at) { return at; }  // returns convert too
 print(v, " ", p, " ", s, " ", snap(math::vec2(2.9, 1.1)));
 

@@ -382,7 +382,8 @@ public:
             const char* ov = "function pick(int a) { return 1; }\nfunction pick(char c) { return 2; }\n";
             check_eq((size_t)0, error_count(e->check(std::string(ov) + "pick(1);")));
             check_eq((size_t)0, error_count(e->check(std::string(ov) + "pick('c');")));
-            check_eq((size_t)1, error_count(e->check(std::string(ov) + "pick(\"s\");")));
+            check_eq((size_t)0, error_count(e->check(std::string(ov) + "pick(\"s\");")));   // a one-character string fills the char
+            check_eq((size_t)1, error_count(e->check(std::string(ov) + "pick(\"st\");")));
             // a string overload takes text only: an array matches neither
             const char* ov2 = "function show(int a) { return 1; }\nfunction show(string s) { return 2; }\n";
             check_eq((size_t)1, error_count(e->check(std::string(ov2) + "show([1]);")));
@@ -932,7 +933,6 @@ public:
                      {"string s = 1 + \"b\";", "cannot apply '+' to 'int' and 'string': stringify it with to_string(x) or `${x}`"},
                      {"string s = \"b\" + 2.5;", "cannot apply '+' to 'string' and 'float': stringify it with to_string(x) or `${x}`"},
                      {"bool f = true; string s = \"b\" + f;", "cannot apply '+' to 'string' and 'bool': stringify it with to_string(x) or `${x}`"},
-                     {"string t = \"a\"; char c = t[0]; string s = c + t;", "cannot apply '+' to 'char' and 'string': stringify it with to_string(x) or `${x}`"},
                      {"string s = \"b\" + null;", "cannot apply '+' to 'string' and 'null': stringify it with to_string(x) or `${x}`"}}) {
                 auto r = e->check(source);
                 check_eq((size_t)1, error_count(r), source);
@@ -3308,7 +3308,7 @@ public:
                 {"i < s", "cannot compare 'int' with 'string' using '<': the types have no comparison (it raises 'Invalid operands for < operator'); convert one operand"},
                 {"s <=> 1", "using '<=>'"},
                 {"b == 1", "cannot compare 'bool' with 'int' using '=='"},
-                {"c == \"a\"", "cannot compare 'char' with 'string' using '=='"},
+                {"c == true", "cannot compare 'char' with 'bool' using '=='"},
                 {"a == m", "cannot compare 'array<int>' with 'map<string,int>' using '=='"},
                 {"a >= i", "using '>='"},
                 {"oc == 1", "cannot compare 'C' with 'int' using '==': class 'C' declares no comparison operator (it is always false); declare the operator in the class or convert the operand"},

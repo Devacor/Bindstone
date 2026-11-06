@@ -2082,16 +2082,23 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
             return slot_conversion::of(verdict::reject);
         case script_value_type::jai_char_type:
             if (src == script_value_type::jai_char_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (src == script_value_type::jai_string_type && primitive_src) {
+                auto converted = ri == script_value::TYPEID_STRING ? char_of_text(v.unchecked_as_string()) : char_of_text(v.to_string());
+                if (!converted) { return converted.error_value(); }
+                return slot_conversion::converted_to(script_value(converted.value(), eng));
+            }
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::of(verdict::reject);
         case script_value_type::jai_string_type:
             if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::of(verdict::identity);
             if (ri == script_value::TYPEID_UTF8_STRING) return slot_conversion::converted_to(script_value(v.to_string(), eng));
+            if (src == script_value_type::jai_char_type && primitive_src) return slot_conversion::converted_to(script_value(std::string(1, v.unchecked_as_char()), eng));
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::of(verdict::reject);
         case script_value_type::jai_utf8_string_type:
             if (ri == script_value::TYPEID_UTF8_STRING) return slot_conversion::of(verdict::identity);
             if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
+            if (src == script_value_type::jai_char_type && primitive_src) return slot_conversion::converted_to(script_value::make_utf8(std::string(1, v.unchecked_as_char()), eng));
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
             return slot_conversion::of(verdict::reject);
         case script_value_type::jai_bool_type: {

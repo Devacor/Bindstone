@@ -219,7 +219,7 @@ try { print(1 / 0); } catch (e) { print("caught: ", e); }</code></pre></div>
 caught: Integer overflow in '+='
 caught: Division by zero</code></pre></div>
 <h3 id="plus-and-plus-equals">+ never converts a number to text<a class="hlink" href="#plus-and-plus-equals" aria-label="link">&#8203;</a></h3>
-<p>Unlike JavaScript, <code>+</code> joins text only, as <code>std::string</code>&#x27;s does: a number, bool, char or <code>null</code> beside a string is an error, in either order. A template string or <code>to_string(n)</code> spells the text, and <code>+=</code> onto a string likewise takes only strings and chars:</p>
+<p>Unlike JavaScript, <code>+</code> joins text only, as <code>std::string</code>&#x27;s does: a number, bool or <code>null</code> beside a string is an error, in either order (a char joins as its character). A template string or <code>to_string(n)</code> spells the text, and <code>+=</code> onto a string likewise takes only strings and chars:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var n = 10;
 print(`hp: ${n}`, " / ", "hp: " + to_string(n));
 try { print("hp: " + n); } catch (e) { print("caught: ", e); }

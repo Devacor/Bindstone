@@ -5,7 +5,7 @@
 #define __JAISCRIPT_CORE_SCRIPT_MAP_HPP__
 
 // script_map: the map behind TYPEID_MAP. Lookup is hashed through an open-addressing index (keys are equal exactly when
-// script_value::operator<=> calls them equivalent: type rank, then payload; floats by value with every NaN one key and both zeros one, heavy values by identity); key order exists only where it is observed -
+// script_value::operator<=> calls them equivalent: type rank, then payload, a char ranking as its one-character string; floats by value with every NaN one key and both zeros one, heavy values by identity); key order exists only where it is observed -
 // iteration and everything built on it (serialization, keys()/values(), structural equality) - through a key-sorted view of the
 // entries built on the first iteration after a change. Entries never move: a reference or pointer to a key or value stays valid
 // until that entry is erased. An iteration iterator carries its key, so after the map changes under it (the body of a range-for
@@ -73,7 +73,8 @@ namespace jai {
             return (a <=> b) == 0;
         }
         bool operator()(const script_value& a, const map_string_key_probe& p) const {
-            return a.type() == script_value_type::jai_string_type && a.unchecked_as_string() == p.text;
+            if (a.type() == script_value_type::jai_string_type) { return a.unchecked_as_string() == p.text; }
+            return a.type() == script_value_type::jai_char_type && a.key_text() == p.text;
         }
         bool operator()(const map_string_key_probe& p, const script_value& b) const { return (*this)(b, p); }
     };
@@ -117,7 +118,8 @@ namespace jai {
             return k;
         }
         JAI_FORCEINLINE static short_key short_of(const script_value& v) noexcept {
-            return v.raw_storage_index() == script_value::TYPEID_STRING ? short_of(std::string_view(v.unchecked_as_string())) : short_key{};
+            if (v.raw_storage_index() == script_value::TYPEID_STRING) { return short_of(std::string_view(v.unchecked_as_string())); }
+            return v.raw_storage_index() == script_value::TYPEID_CHAR ? short_of(v.key_text()) : short_key{};
         }
         JAI_FORCEINLINE static short_key short_of(const map_string_key_probe& p) noexcept { return short_of(p.text); }
         struct entry {

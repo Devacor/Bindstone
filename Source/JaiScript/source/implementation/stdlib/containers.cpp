@@ -58,7 +58,8 @@ namespace stdlib {
 		}
 		for (const auto& [key,value] : a_right.unchecked_as_map()) { entries.emplace_back(key,value); }
 		for (const auto& [key,value] : entries) {
-			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type && key.type() != keyType->base_type) {
+			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type &&
+			    !detail::map_key_kind_admits(key.type(), keyType->base_type)) {
 				return checked_result<script_value>(make_error_code(runtime_error_code::map_key_type_mismatch), "Cannot use '{0}' as a key of type '{1}'", detail::engine_access::symbolize(*engine, detail::container_value_type_name(key)), detail::engine_access::symbolize(*engine, detail::type_info_display_name(keyType)));
 			}
 			script_value output = value.clone_element();
@@ -69,6 +70,13 @@ namespace stdlib {
 				auto converted = detail::convert_container_element(engine, output, valueType);
 				if (!converted) { return converted.error_value(); }
 				output = std::move(converted.value());
+			}
+			if (keyType && keyType->base_type != script_value_type::jai_any_type && keyType->base_type != script_value_type::jai_null_type &&
+			    key.type() != keyType->base_type) {
+				auto converted_key = detail::map_key_in_kind(key, keyType->base_type, engine);
+				if (!converted_key) { return converted_key.error_value(); }
+				(*result.unchecked_get_map_storage())[std::move(converted_key.value())] = std::move(output);
+				continue;
 			}
 			(*result.unchecked_get_map_storage())[key.clone_element()] = std::move(output);
 		}

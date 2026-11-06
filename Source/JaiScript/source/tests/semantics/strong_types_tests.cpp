@@ -2778,7 +2778,8 @@ public:
             check_quad("array<bool> f = [true, false]; to_json(f)", "[true,false]", "bool buffer serializes");
             check_quad("array<char> c = ['h', 'i']; var s = \"\"; for (auto ch : c) { s = s + to_string(ch); } s", "hi", "char buffer range-for");
             check_quad("array<bool> f = [true]; f.push(1); f.push(0); to_json(f)", "[true,true,false]", "bool buffer converts an int");
-            check_quad_error("array<char> c = ['a']; c[0] = \"s\"", "char buffer rejects string");
+            check_quad("array<char> c = ['a']; c[0] = \"s\"; to_string(c[0])", "s", "char buffer takes a one-character string");
+            check_quad_error("array<char> c = ['a']; c[0] = \"st\"", "char buffer rejects a longer string");
             // fuzz seed 201467 (element band): an int written into a bool element through a reference reached the
             // buffer unconverted and crashed both backends; a reference store takes the direct store's rows
             check_quad("array<bool> f = [false, true]; for (auto& x : f) { x = 5; } to_json(f)", "[true,true]", "bool buffer store through a range-for reference converts an int");
@@ -3568,15 +3569,16 @@ public:
                 auto h = H(); h.s = X();
                 string a = X(); string b; b = X();
                 utf8_string u = "uu"; string c = u;
-                f("p") + "|" + f(X()) + "|" + g() + "|" + h.s + "|" + a + "|" + b + "|" + c
-            )JAI", "p|X!|X!|X!|X!|X!|uu", "text and an object's to_string() reach a string slot on every path");
+                string k = 'k'; utf8_string uk = 'k';
+                f("p") + "|" + f(X()) + "|" + g() + "|" + h.s + "|" + a + "|" + b + "|" + c + "|" + k + uk
+            )JAI", "p|X!|X!|X!|X!|X!|uu|kk", "text, a char and an object's to_string() reach a string slot on every path");
             const char* rejected[] = {
                 "string s = 5;",
                 "string s = \"a\"; s = 2.5;",
                 "string f(string t) { return t; } f(true);",
                 "string g() { return 5; }",
                 "class H { string s = 3; }",
-                "class H { string s = \"\"; } auto h = H(); h.s = 'c';",
+                "class H { string s = \"\"; } auto h = H(); h.s = false;",
                 "string s = null;",
                 "string s = [1];",
                 "class D {} string s = D();",

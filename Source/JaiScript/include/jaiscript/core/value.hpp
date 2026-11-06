@@ -1975,9 +1975,21 @@ namespace detail {
         void assign_through_reference(V&& value);
     public:
         
-        // C++ equality: both sides dereferenced, then the same kind (a string is never a utf8_string here) and the payload
+        // C++ equality: both sides dereferenced, then the same kind (a string is never a utf8_string here, a char is its string) and the payload
         // equal; floats by IEEE ==, heavy kinds by the identity operator<=> orders them by. Script == is structural
         bool operator==(const script_value& other) const;
+        // A char and a string are one key kind: the char is its one-character string to ==, <=> and the map-key hash
+        bool char_beside_string(const script_value& other) const noexcept {
+            const script_value_type a = type(), b = other.type();
+            return (a == script_value_type::jai_char_type && b == script_value_type::jai_string_type) ||
+                   (a == script_value_type::jai_string_type && b == script_value_type::jai_char_type);
+        }
+        // a string's text, or a char's one character (a view into this value)
+        std::string_view key_text() const noexcept {
+            if (type() != script_value_type::jai_char_type) { return unchecked_as_string(); }
+            if (auto* b = storage_.get_if<TYPEID_CPP_BOUND>()) [[unlikely]] { return {static_cast<const script_char*>((*b)->ptr), 1}; }
+            return {storage_.get_if<TYPEID_CHAR>(), 1};
+        }
         // the map-key hash: equal for keys operator<=> calls equivalent (core/script_map.hpp)
         uint64_t map_key_hash() const noexcept;
         static uint64_t map_string_key_hash(std::string_view text) noexcept;

@@ -545,7 +545,7 @@ public:
                 check_eq(std::string("hallo"), es("string s = \"hello\"; s[1] = 'a'; s;"));
                 check_eq(std::string("helllo"), es("string s = \"hello\"; s[2] = \"ll\"; s;"));
                 check_eq(std::string("hellllo"), es("string s = \"hello\"; s[2] = `${s[2]}ll`; s;"));
-                check_eq(std::string("Cannot apply '+=' to char and string"), caught("string s = \"hello\"; s[2] += \"ll\";"));
+                check_eq(std::string("hellllo"), es("string s = \"hello\"; s[2] += \"ll\"; s;"));
                 check_eq(std::string("heo"), es("string s = \"hello\"; s[2] = \"\"; s[2] = \"\"; s;"));
                 check_eq(std::string("hello|jello"), es("string s = \"hello\"; string t = s; s[0] = 'j'; `${t}|${s}`;"));
                 check_eq(std::string("abc|aXc"), es("var s = \"abc\"; var t = s; t[1] = 'X'; `${s}|${t}`;"));

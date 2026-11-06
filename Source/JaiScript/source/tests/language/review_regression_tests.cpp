@@ -2157,8 +2157,8 @@ public:
                 "an rvalue subscript base runs once and raises the vm's text", false);
         });
         test("subscript_compound_string_base_text", [this, expect_order]() {
-            // Pinned alignment (interpreter -> vm): the index runs once per compound store; an int result raises at the store and
-            // text beside the char raises at the +, each leaving the string alone
+            // Pinned alignment (interpreter -> vm): the index runs once per compound store; an int result raises at the store, leaving
+            // the string alone, and text beside the char joins it and stores the text back
             expect_order(R"(
                 var log = "";
                 var s = "abc";
@@ -2167,7 +2167,7 @@ public:
                 try { s[idx()] += 1; } catch (e) { c1 = e; }
                 try { s[idx()] += "x"; } catch (e) { c2 = e; }
                 `${log}|${c1}|${c2}|${s}`;
-            )", "II|Cannot assign int to a string character (it takes a char or a string)|Cannot apply '+=' to char and string|abc",
+            )", "II|Cannot assign int to a string character (it takes a char or a string)||axbc",
                 "a string subscript compound runs the index once", false);
         });
         test("map_compound_missing_key_raises", [this, expect_order]() {
@@ -4585,8 +4585,8 @@ public:
 
 // Char integral promotion (from the DOOM WAD-parser feedback):
 // a char operand enters ARITHMETIC and BITWISE binary operators as int64 in 0..255
-// (unsigned by spec). Strictly additive: char+string concat, native char comparisons,
-// and object custom operators keep their pre-promotion meaning. One shared kernel,
+// (unsigned by spec). A char beside a string is its one-character text instead: it compares,
+// joins, fills slots, matches cases and keys maps as that string. One shared kernel,
 // detail/char_promotion.hpp, feeds both backends.
 class char_promotion_tests : public suite {
 public:
@@ -4670,13 +4670,16 @@ public:
                 out
             )").as_string());
         });
-        // a char is no text to a string's +, in either order (a load error where the checker sees it); a template makes it text
-        test("a_char_beside_a_string_is_the_plus_error", [this]() {
+        // a char beside a string joins as its character, in either order, as std::string's + does; a number beside one stays the error
+        test("a_char_beside_a_string_joins", [this]() {
             auto e = make_engine();
-            check_eq(std::string("cannot apply '+' to 'char' and 'string': stringify it with to_string(x) or `${x}`"),
-                e->execute("var c = 'x'; string got = \"\"; try { got = c + \"post\"; } catch (err) { got = err.message; } got").as_string());
-            check_throws([&]() { e->execute("\"pre\" + 'x'"); });
-            check_eq(std::string("prex xpost"), e->execute("var c = 'x'; `pre${c} ${c}post`").as_string());
+            check_eq(std::string("xpost prex abc cab abcd"),
+                e->execute("var c = 'x'; string s = \"ab\"; string t = \"abc\"; `${c + \"post\"} ${\"pre\" + c} ${s + 'c'} ${'c' + s} ${s + t[2] + 'd'}`").as_string());
+            check_false(e->check("string s = \"ab\"; string t = s + 'c'; string u = 'c' + s;").has_errors());
+            check_eq((int64_t)98, e->execute("'a' + 1").as_int());
+            check_eq(std::string("cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`"),
+                e->execute("var n = 1; string got = \"\"; try { got = \"a\" + n; } catch (err) { got = err.message; } got").as_string());
+            check_eq(std::string("hellllo"), e->execute("string s = \"hello\"; s[2] += \"ll\"; s").as_string());
         });
         test("no_implicit_int_to_char", [this]() {
             auto e = make_engine();
@@ -4696,11 +4699,104 @@ public:
             // The binary idiom that is silently false without promotion, truthful:
             check(e->execute("var s = \"\\x1A\"; s[0] == 0x1A").as_bool());
         });
-        test("char_equals_string_stays_false", [this]() {
+        // a char compared with a string compares as its one-character text, in either order and under every comparison; a string of
+        // another length compares as text too (the empty string first)
+        test("char_compares_with_a_string_as_text", [this]() {
             auto e = make_engine();
-            // Promotion never crosses into the string domain: the run time says false, the checker rejects the visible pair
-            check_false(e->execute("var c = 'a'; var s = \"a\"; c == s").as_bool());
-            check_true(e->check("'a' == \"a\"").has_errors());
+            const std::string probe = R"(
+                string s = "abc"; var c = s[0]; var one = "a"; var two = "ab"; var none = "";
+                string out = "";
+                for (var r : [s[0] == "a", "a" == s[0], s[1] == "a", c == one, one == c, c != one, c == two, c != two, c == none, c != none,
+                              c < "b", "b" > c, c <= one, c >= one, c < two, two > c, none < c, c > none, s[2] > "bz"]) {
+                    out += r ? "1" : "0";
+                }
+                `${out} ${c <=> one} ${c <=> two} ${two <=> c} ${c <=> none}`
+            )";
+            check_eq(std::string("1101100101111111111 0 -1 1 1"), e->execute(probe).as_string());
+            check_false(e->check("char c = 'a'; string t = \"ab\"; bool r = c == \"a\" && c < t && \"\" < c;").has_errors());
+            check_eq((int64_t)3, e->execute("int n = 0; for (auto ch : \"banana\") { if (ch == \"a\") { n++; } } n").as_int());
+            check_eq((int64_t)2, e->execute("string w = \"xyxx\"; int n = 0; for (int i = 0; i < w.size(); i++) { if (w[i] != \"x\") { continue; } if (\"x\" == w[i] && i > 0) { n++; } } n").as_int());
+        });
+        // a char slot takes a string of exactly one character, a string slot a char: every slot kind, on both backends
+        test("char_and_string_slots_take_each_other", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check_eq(std::string("q char m string r char s string t char p char q string w char ['a', 'b', 'c'] char [\"a\", \"b\"] string"), e->execute(R"(
+                char k = "q"; string m = 'm';
+                string got = `${k} ${type_of(k)} ${m} ${type_of(m)}`;
+                string f(char x) { return `${x} ${type_of(x)}`; }
+                string g(string x) { return `${x} ${type_of(x)}`; }
+                char ret() { return "t"; }
+                class P { char ch = "p"; string st = 'q'; }
+                P p;
+                got += ` ${f("r")} ${g('s')} ${ret()} ${type_of(ret())} ${p.ch} ${type_of(p.ch)} ${p.st} ${type_of(p.st)}`;
+                p.ch = "w";
+                array<char> ac = ["a", "b"]; ac.push("c");
+                array<string> as = ['a']; as.push('b');
+                got += ` ${p.ch} ${type_of(p.ch)} ${ac} ${type_of(ac[0])} ${as} ${type_of(as[0])}`;
+                got
+            )").as_string());
+            // among overloads a char reaches text as a conversion ahead of a bool's truthiness and a var parameter
+            check_eq(std::string("string string"), e->execute(
+                "string h(bool b) { return \"bool\"; } string h(string q) { return \"string\"; } string v(var x) { return \"var\"; } "
+                "string v(string q) { return \"string\"; } char k = 'k'; `${h(k)} ${v(k)}`").as_string());
+            const std::string refused = "Cannot convert 'string' to 'char': a char takes a string of exactly one character";
+            const std::vector<std::string> stores = {
+                "var v = \"zz\"; char d = v;", "var v = \"\"; char d = 'a'; d = v;", "var v = \"zz\"; void f(char x) {} f(v);",
+                "var v = \"zz\"; char r() { return v; } r();", "var v = \"zz\"; class P { char ch = 'a'; } P p; p.ch = v;",
+                "var v = \"zz\"; array<char> a; a.push(v);", "var v = \"zz\"; array<char> a = ['a']; a[0] = v;",
+                "var v = \"zz\"; map<char, int> m; m[v] = 1;", "var v = [\"a\", \"zz\"]; array<char> a = v;"};
+            for (const auto& store : stores) {
+                check_eq(refused, e->execute("string got = \"\"; try { " + store + " } catch (err) { got = err.message; } got").as_string(), store);
+            }
+            const std::string load = "a char takes a string of exactly one character";
+            for (const std::string src : {"char a = \"ab\";", "char b = \"\";", "void f(char x) {} f(\"xy\");", "array<char> a; a.push(\"zz\");",
+                                          "char r() { return \"no\"; }", "class Q { char c = \"qq\"; }", "map<char, int> m = {\"ab\": 1};",
+                                          "char c = 'a'; c = \"bc\";"}) {
+                auto rep = e->check(src);
+                check_eq((size_t)1, rep.error_count(), rep.format(src));
+                check_true(rep.format(src).find(load) != std::string::npos, rep.format(src));
+            }
+        });
+        // a switch runs the language's ==: a char subject matches a one-character string case and a string subject a char case
+        test("switch_matches_a_char_and_its_string", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("hit hit n hit miss"), e->execute(R"(
+                string out = "";
+                var c = 'a'; var t = "a"; string w = "banana"; string two = "ab";
+                switch (c) { case "a": out += "hit"; break; default: out += "miss"; }
+                switch (t) { case 'a': out += " hit"; break; default: out += " miss"; }
+                switch (w[2]) { case "a": out += " a"; break; case "n": out += " n"; break; case "b": out += " b"; break; case "x": out += " x"; break; default: out += " none"; }
+                switch (w[0]) { case 'b': out += " hit"; break; default: out += " miss"; }
+                switch (two) { case 'a': out += " hit"; break; default: out += " miss"; }
+                out
+            )").as_string());
+        });
+        // a char key and its one-character string are one key (==, <=> and the key hash agree): one entry, kept in the spelling that
+        // made it; a typed map stores its declared kind; to_json / from_json keep the entry and its kind
+        test("a_char_key_and_its_string_are_one_key", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(e);
+            check_eq(std::string("3 2 4 a:char:2 b:string:3 c:char:4 | 1 2 string | 1 2 char | 1 2 | 3 2 4 char string char | 2 2"), e->execute(R"(
+                var u = {};
+                u['a'] = 1; u["a"] = 2; u["b"] = 3; u['c'] = 4;
+                string out = `${u.size()} ${u['a']} ${u["c"]}`;
+                for (auto& [k, v] : u) { out += ` ${k}:${type_of(k)}:${v}`; }
+                map<string, int> ms; ms['x'] = 1; ms["x"] += 1;
+                for (auto& [k, v] : ms) { out += ` | ${ms.size()} ${ms['x']} ${type_of(k)}`; }
+                map<char, int> mc; mc["y"] = 1; mc['y'] += 1;
+                for (auto& [k, v] : mc) { out += ` | ${mc.size()} ${mc["y"]} ${type_of(k)}`; }
+                var lit = {'z': 1, "z": 2};
+                out += ` | ${lit.size()} ${lit["z"]}`;
+                var back = from_json(to_json(u));
+                out += ` | ${back.size()} ${back["a"]} ${back['c']}`;
+                for (auto& [k, v] : back) { out += ` ${type_of(k)}`; }
+                map<char, int> mc2 = from_json(to_json(mc));
+                out += ` | ${mc2['y']} ${mc2["y"]}`;
+                out
+            )").as_string());
+            check_true(e->execute("var m = {}; m['q'] = 1; m.contains(\"q\") && m.contains('q')").as_bool());
+            check_true(e->execute("var m = {}; m[\"q\"] = 1; m.erase('q'); m.size() == 0").as_bool());
         });
         test("char_ordered_vs_int", [this]() {
             auto e = make_engine();

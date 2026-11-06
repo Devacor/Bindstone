@@ -769,7 +769,8 @@ out += " " + to_string(s) + " " + miss + " " + to_string(m.size());
 out;
 )JAI";
             auto [i_out, v_out] = both_mode(src, true);
-            check_eq(std::string("intfloatcharboolstringneg 15540 Key 2 not found in map 66"), i_out, "interpreter");
+            // '1' and "1" are one key: the string store replaces the char key's value
+            check_eq(std::string("intfloatstringboolstringneg 15540 Key 2 not found in map 65"), i_out, "interpreter");
             check_eq(i_out, v_out, "backend parity");
         });
 

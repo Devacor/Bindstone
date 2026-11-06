@@ -70,15 +70,15 @@ public:
             auto eng = make_engine();
             eng->execute("var s = \"Hello\";");
             check_eq(eng->execute("s += \", World!\"").as<std::string>(), "Hello, World!");
-            // a number, bool, char or null beside a string raises the checker's text at run time, in either order and on every
-            // shape the VM compiles a + to (a chain, a builder store, a fused binary, a compound); a template string's splice is text
+            // a number, bool or null beside a string raises the checker's text at run time, in either order and on every shape the VM
+            // compiles a + to (a chain, a builder store, a fused binary, a compound); a char joins, and a template string's splice is text
             auto run = make_engine();
             check_eq(std::string(
                 "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
                 "cannot apply '+' to 'int' and 'string': stringify it with to_string(x) or `${x}`|"
                 "cannot apply '+' to 'string' and 'float': stringify it with to_string(x) or `${x}`|"
                 "cannot apply '+' to 'bool' and 'string': stringify it with to_string(x) or `${x}`|"
-                "cannot apply '+' to 'string' and 'char': stringify it with to_string(x) or `${x}`|"
+                "ss|"
                 "cannot apply '+' to 'null' and 'string': stringify it with to_string(x) or `${x}`|"
                 "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"
                 "cannot apply '+' to 'string' and 'int': stringify it with to_string(x) or `${x}`|"

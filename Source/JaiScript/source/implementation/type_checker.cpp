@@ -218,6 +218,16 @@ std::string declared_variable_type_name(const variable_decl* decl) {
 bool is_numeric(ctype::kind_t k) { return k == ctype::int_k || k == ctype::float_k; }
 // Integral promotion (char_promotion.hpp): char acts as int64 0..255 under arithmetic/bitwise.
 bool is_numeric_or_char(ctype::kind_t k) { return is_numeric(k) || k == ctype::char_k; }
+// A char beside text compares as its one-character string (char_promotion.hpp char_beside_string)
+bool char_beside_text(const ctype& l, const ctype& r) {
+    const auto text = [](ctype::kind_t k) { return k == ctype::string_k || k == ctype::utf8_k; };
+    return (l.kind == ctype::char_k && text(r.kind)) || (text(l.kind) && r.kind == ctype::char_k);
+}
+// A char slot takes a string (one character), a string or utf8_string slot a char: the typed-slot table's text rows
+bool char_text_slot(const ctype& src, const ctype& dst) {
+    return (dst.kind == ctype::char_k && src.kind == ctype::string_k) ||
+           (src.kind == ctype::char_k && (dst.kind == ctype::string_k || dst.kind == ctype::utf8_k));
+}
 
 // Result type of `l op r` (token base ops). Anything uncertain -> unknown.
 ctype binary_result_kind(const ctype& l, token_type op, const ctype& r) {
@@ -2566,6 +2576,14 @@ private:
         return value && !float_fits_script_int(*value);
     }
 
+    // a string literal into a char slot holds exactly one character (the conversion's text otherwise, detail/numeric_conversion.hpp)
+    static bool literal_char_text_refused(const ctype& src, const ctype& dst) {
+        if (dst.kind != ctype::char_k || src.kind != ctype::string_k || !src.origin || src.origin->get_type() != node_type::literal_expr) { return false; }
+        const script_value& value = static_cast<const literal_expr*>(src.origin)->value;
+        return value.is_string() && value.unchecked_as_string().size() != 1;
+    }
+    static std::string char_text_reason() { return std::string(detail::char_of_text_refused.substr(detail::char_of_text_refused.find(": ") + 2)); }
+
     ctype declared_container_receiver(const expression* expr, ctype inferred) {
         if (!inferred.is_unknown() || !expr || expr->get_type() != node_type::identifier_expr) {
             return inferred;
@@ -2619,11 +2637,12 @@ private:
         const ctype dst = ctype_from_type_info(target);
         if (src.is_unknown() || dst.is_unknown() || depth > 512) { return {}; }
         if (literal_int_overflow(src, dst)) { return "float literal is outside the int range"; }
+        if (literal_char_text_refused(src, dst)) { return char_text_reason(); }
         if (auto issue = byte_literal_issue(src, target); !issue.empty()) { return issue; }
         if (dst.kind == ctype::array_k || dst.kind == ctype::map_k) {
             return container_issue(src, dst, depth + 1);
         }
-        bool accepted = src.kind == dst.kind;
+        bool accepted = src.kind == dst.kind || char_text_slot(src, dst);
         if (is_numeric(src.kind) && is_numeric(dst.kind)) { accepted = true; }
         if ((src.kind == ctype::bool_k && dst.kind == ctype::int_k) ||
             (src.kind == ctype::int_k && dst.kind == ctype::bool_k)) { accepted = true; }
@@ -2647,8 +2666,10 @@ private:
     std::string map_key_issue(const ctype& src, const type_info* target) {
         const ctype dst = ctype_from_type_info(target);
         if (src.is_unknown() || dst.is_unknown()) { return {}; }
-        // Keys never coerce: a numeric conversion could merge distinct entries.
-        // The runtime key boundary checks the kind, not a pointee or element type.
+        // Keys never coerce numerically: a conversion could merge distinct entries. A char and its one-character string are one
+        // key already, so each converts to the other's kind. The runtime key boundary checks the kind, not a pointee or element type.
+        if (literal_char_text_refused(src, dst)) { return char_text_reason(); }
+        if ((src.kind == ctype::char_k && dst.kind == ctype::string_k) || (src.kind == ctype::string_k && dst.kind == ctype::char_k)) { return {}; }
         const bool accepted = src.kind == dst.kind &&
             (!src.ti || src.ti->base_type == target->base_type);
         if (accepted) { return {}; }
@@ -2699,6 +2720,7 @@ private:
 
     std::string assignment_detail(const ctype& src, const ctype& dst) {
         if (literal_int_overflow(src, dst)) { return ": float literal is outside the int range"; }
+        if (literal_char_text_refused(src, dst)) { return ": " + char_text_reason(); }
         if ((dst.kind == ctype::string_k || dst.kind == ctype::utf8_k) && src.kind != ctype::string_k && src.kind != ctype::utf8_k) {
             return ": stringify it with to_string(x) or `${x}`";
         }
@@ -2716,7 +2738,7 @@ private:
 
     bool assignable(const ctype& src, const ctype& dst) {
         if (dst.is_unknown() || src.is_unknown()) { return true; }
-        if (literal_int_overflow(src, dst)) { return false; }
+        if (literal_int_overflow(src, dst) || literal_char_text_refused(src, dst)) { return false; }
         if (src.kind == ctype::class_ref_k && dst.kind != ctype::class_ref_k && dst.kind != ctype::enum_ref_k && class_name_constructs(src.cls)) {
             return assignable(ctype::make(ctype::function_k), dst);   // a class's name as a value is its constructor
         }
@@ -2733,8 +2755,8 @@ private:
                        may_convert_via_method(src, "to_float");
             case ctype::bool_k: return true;     // truthy conversion accepts anything
             case ctype::string_k:
-            case ctype::utf8_k: return src.kind == ctype::string_k || src.kind == ctype::utf8_k || may_convert_via_method(src, "to_string");
-            case ctype::char_k: return src.kind == ctype::char_k || may_convert_via_method(src, "to_char");
+            case ctype::utf8_k: return src.kind == ctype::string_k || src.kind == ctype::utf8_k || src.kind == ctype::char_k || may_convert_via_method(src, "to_string");
+            case ctype::char_k: return src.kind == ctype::char_k || src.kind == ctype::string_k || may_convert_via_method(src, "to_char");
             case ctype::array_k:
             case ctype::map_k: return container_issue(src, dst).empty();
             case ctype::function_k: return src.kind == ctype::function_k || src.kind == ctype::null_k;
@@ -3738,8 +3760,8 @@ private:
             switch (pt.kind) {
                 case ctype::int_k: case ctype::float_k: cost(a.kind == ctype::bool_k ? 1 : 0); break;
                 case ctype::bool_k: cost(in_set && (a.kind == ctype::string_k || a.kind == ctype::utf8_k) ? 0 : 2); break;
-                case ctype::string_k: case ctype::utf8_k: cost(2); break;
-                case ctype::char_k: cost(0); break;
+                case ctype::string_k: case ctype::utf8_k: cost(a.kind == ctype::char_k ? 1 : 2); break;
+                case ctype::char_k: cost(a.kind == ctype::string_k && !literal_char_text_refused(a, pt) ? 2 : 0); break;
                 default: return std::nullopt;
             }
         }
@@ -4276,12 +4298,11 @@ private:
                                            : op == token_type::plus ? "Unary plus requires numeric operand" : "Bitwise NOT requires integer operand");
     }
 
-    // a string's + joins text (detail/string_join.hpp, the run-time text): a number, bool, char or null beside it is the load error
+    // a string's + joins text (detail/string_join.hpp, the run-time text): a number, bool or null beside it is the load error
     void check_string_plus(const binary_expr* b, const ctype& l, const ctype& r) {
         const auto text = [](const ctype& t) { return !t.tentative && (t.kind == ctype::string_k || t.kind == ctype::utf8_k); };
         const auto scalar = [](const ctype& t) {
-            return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k || t.kind == ctype::char_k ||
-                                    t.kind == ctype::null_k);
+            return !t.tentative && (t.kind == ctype::int_k || t.kind == ctype::float_k || t.kind == ctype::bool_k || t.kind == ctype::null_k);
         };
         if (!(text(l) && scalar(r)) && !(scalar(l) && text(r))) { return; }
         if (eng_.has_function("+")) { return; }   // a registered global operator answers every +
@@ -5561,7 +5582,7 @@ private:
         if (l.kind == ctype::object_k && r.kind == ctype::object_k) { return; }
         const ctype* object = l.kind == ctype::object_k ? &l : r.kind == ctype::object_k ? &r : nullptr;
         if (object && class_may_compare(object->cls)) { return; }
-        if (!object && family(l.kind) == family(r.kind)) { return; }
+        if (!object && (family(l.kind) == family(r.kind) || char_beside_text(l, r))) { return; }
         const bool equality = b->op.type == token_type::equal_equal || b->op.type == token_type::bang_equal;
         std::string text = "cannot compare '" + ctype_name(l) + "' with '" + ctype_name(r) + "' using '" + op + "': ";
         text += object ? "class '" + std::string(object->cls) + "' declares no comparison operator" : std::string("the types have no comparison");

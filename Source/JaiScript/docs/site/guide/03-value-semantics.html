@@ -145,7 +145,7 @@ total(scores) = 9</code></pre></div>
 <p>The checker counts each of these as a write to the parameter:</p>
 <ul>
 <li>An assignment, a compound assignment (<code>+=</code> and the rest), <code>++</code> or <code>--</code> on the parameter or on anything inside it, such as an element or a field.</li>
-<li>The same through a reference alias of it, such as <code>auto&amp; r = xs;</code> or <code>for (auto&amp; x : xs)</code>.</li>
+<li>Any of these through a reference alias of it, such as a store to <code>r</code> after <code>auto&amp; r = xs;</code> or to <code>x</code> in <code>for (auto&amp; x : xs)</code>; an alias that is only read is a read.</li>
 <li>A method call on it. On an array, map or string, the library&#x27;s reading methods (<code>size</code>, <code>find</code>, <code>keys</code> and the like) are reads, not writes.</li>
 <li>Passing it on to an <code>&amp;</code> parameter that writes. The checker follows the call to find out.</li>
 <li>Passing it to a <code>shared_ptr</code> parameter, to a constructor, or to a function the checker cannot see into: a lambda, a host function or a method. <code>print</code>, <code>to_string</code>, <code>math::</code>, <code>string::</code> and the container methods take copies, so passing to them is a read.</li>

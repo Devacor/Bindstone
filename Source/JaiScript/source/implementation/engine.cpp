@@ -1643,7 +1643,8 @@ struct engine::implementation {
             script_cache_entry& entry = *loaded.entry;
             const bool lowered = entry.lowering.lowered_view;
             detail::set_aggregate_view(entry.lowering, false);
-            const detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
+            detail::check_options o = program_check_options(detail::check_options::proofs_t::leave);
+            o.reload_dependent = true;
             const check_report recheck = detail::run_static_check(self, checked_declarations(entry), nullptr, o);
             detail::set_aggregate_view(entry.lowering, lowered);
             check_report broken;

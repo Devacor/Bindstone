@@ -2232,6 +2232,49 @@ public:
             for (const char* f : {"dr_c.jai", "dr_c.jaibite"}) { cleanup_temp_file((dir / f).string()); }
         });
 
+        test("a_reload_checks_references_to_the_class_it_reshapes", [=, this]() {
+            // a dependent's code runs only after the reload has migrated every live instance, so a reference to the reshaped class
+            // reads the new shape: removing a field it uses is the reload's error, whether the reload is
+            // reached inside the execute that loaded the modules (a game loop's frame) or in a later one
+            const auto dir = jai::foundry::test_temp_directory();
+            int tick = 1200;
+            auto write_module = [&](const std::string& name, const std::string& body) {
+                const auto path = dir / name;
+                { std::ofstream(path, std::ios::binary | std::ios::trunc) << body; }
+                std::error_code ec;
+                std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
+            };
+            const std::string uses = (dir / "rs_use.jai").string();
+            for (bool use_vm : {false, true}) {
+                for (bool same_execute : {true, false}) {
+                    const std::string be = std::string(use_vm ? " (vm" : " (interpreter") + (same_execute ? ", same execute)" : ", later execute)");
+                    auto eng = jai::foundry::make_default_engine();
+                    eng->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                    jai::stdlib::register_all(*eng);
+                    eng->add_include_path(dir.string());
+                    eng->import_recheck_interval(0);
+                    eng->add_function("reshape", [&]() { write_module("rs_p.jai", "class P { int a = 1; }\n"); });
+                    write_module("rs_p.jai", "class P { int a = 1; int b = 2; }\n");
+                    write_module("rs_use.jai", "int by_ref(P& p) { return p.b; }\nint by_const_ref(const P& p) { return p.b; }\n");
+                    const std::string reload = "string m = \"accepted\";\ntry { import(\"rs_p.jai\"); } catch (e) { m = e; }\n";
+                    const std::string load = "import(\"rs_p.jai\");\nimport(\"rs_use.jai\");\nP SHARED;\n";
+                    std::string failed;
+                    if (same_execute) {
+                        failed = eng->execute(load + "reshape();\n" + reload + "m;").to_string();
+                    } else {
+                        eng->execute(load);
+                        eng->execute("reshape();");
+                        failed = eng->execute(reload + "m;").to_string();
+                    }
+                    check_true(failed.rfind("static check failed:\n", 0) == 0, "the reload is rejected" + be + ": " + failed);
+                    check_true(failed.find(uses + ":1:29: error: no member 'b' in class 'P'") != std::string::npos, "the reference parameter's use" + be + ": " + failed);
+                    check_true(failed.find(uses + ":2:41: error: no member 'b' in class 'P'") != std::string::npos, "the const reference's use" + be + ": " + failed);
+                    check_eq((int64_t)4, eng->execute("by_ref(SHARED) + by_const_ref(SHARED);").as_int(), "nothing applied: the old class stands" + be);
+                }
+            }
+            for (const char* f : {"rs_p.jai", "rs_use.jai", "rs_p.jaibite", "rs_use.jaibite"}) { cleanup_temp_file((dir / f).string()); }
+        });
+
         test("a_reload_is_checked_against_the_pending_edits_of_the_modules_it_would_break", [=, this]() {
             // a dependent in a sibling module: unchanged, it rejects the reload until it changes (the edit then tries again); with
             // its file already edited, the reload is checked against its new text and passes, whichever import is reached first.

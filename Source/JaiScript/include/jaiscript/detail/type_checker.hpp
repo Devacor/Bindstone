@@ -162,6 +162,9 @@ namespace jai {
             const program_global_map* program_globals = nullptr;
             const program_enum_map* program_enums = nullptr;
             std::vector<std::string>* deferred_classes = nullptr;   // out: the program-table classes the walk met before the engine defined them
+            // a loaded unit re-checked against a reload's declarations: it runs again only after the reload has migrated every live
+            // instance, so a class the engine holds under another shape is read in its new one (no receiver is old-shaped)
+            bool reload_dependent = false;
             // out, sorted: every name the walk asked the engine or the program tables about, the outside declarations its verdict
             // rests on (engine.cpp keys a checked-clean stamp by what they resolve to)
             std::vector<std::string>* outside = nullptr;

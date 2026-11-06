@@ -122,6 +122,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static string_symbolizer* get_symbolizer(engine& a_engine) { return a_engine.get_symbolizer(); }
         JAI_FORCEINLINE static uint64_t symbolize(const engine& a_engine, std::string_view str) { return a_engine.symbolize(str); }
         JAI_FORCEINLINE static uint64_t park_error_text(const engine& a_engine, std::string_view text) { return a_engine.park_error_text(text); }
+        JAI_FORCEINLINE static checked_result<script_value> run_template_unit(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.run_template_unit(unit, source); }
+        JAI_FORCEINLINE static bool template_unit_current(engine& a_engine, const std::string& unit, const std::string& source) { return a_engine.template_unit_current(unit, source); }
         JAI_FORCEINLINE static std::shared_ptr<class_definition> get_class_definition_by_type(const engine& a_engine, const std::type_index& type) { return a_engine.get_class_definition_by_type(type); }
         JAI_FORCEINLINE static std::shared_ptr<conversions::conversion_registry> get_conversion_registry(const engine& a_engine) { return a_engine.get_conversion_registry(); }
         template<typename Registry> JAI_FORCEINLINE static void set_conversion_registry(engine& a_engine, Registry&& registry) { return a_engine.set_conversion_registry(std::forward<Registry>(registry)); }

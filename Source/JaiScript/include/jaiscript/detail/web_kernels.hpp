@@ -43,6 +43,8 @@ namespace web_text_detail {
 	void append_percent_encoded(std::string_view a_text, bool a_form, std::string& a_out);
 	bool query_value_text(const script_value& a_value, std::string& a_out, engine* a_engine);
 	bool split_url(std::string_view a_text, url_record& a_out);
+	// a_text with & < > " ' as web::html_escape writes them, appended to a_out (templates.cpp splices through it)
+	void append_html_escaped(std::string_view a_text, std::string& a_out);
 
 } // namespace web_text_detail
 } // namespace stdlib

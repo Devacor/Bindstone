@@ -38,6 +38,9 @@ namespace jai {
         std::vector<std::string> namespace_queries() const { return {namespace_queries_.begin(), namespace_queries_.end()}; }
         // after a failed parse: the top-level declarations that parsed around the errors (a tool checks what it can)
         std::vector<declaration_ptr>& recovered_declarations() { return recovered_; }
+        // The token stream as one template body (lexer::tokenize_template) under a scoped_template's rules: the expression, or the
+        // listing of what the text breaks (docs/site/guide/19-templates.html)
+        checked_result<expression_ptr> parse_scoped_template_body();
 
     private:
         std::vector<declaration_ptr> recovered_;
@@ -82,6 +85,25 @@ namespace jai {
         std::vector<std::string> splice_spelled_;   // the paths as written, for the include's own texts
         int splice_depth_ = 0;
         bool splice_include(const declaration_ptr& decl, std::vector<declaration_ptr>& out);
+
+        // template(path, a, b, ...), scoped_template(path, map), scoped_template_text(text, map) (docs/site/guide/19-templates.html).
+        // A template body sees the names its own text declares, the names passed to it and the program's names: a barrier
+        // hides every enclosing scope (function scopes below scope_count, member scopes, block scopes at program level) from a
+        // name it does not admit. A scoped barrier admits `args` and nothing past it.
+        struct template_barrier {
+            size_t scope_count = 0;
+            std::vector<uint64_t> names;
+            bool scoped = false;
+        };
+        std::vector<template_barrier> template_barriers_;
+        std::vector<std::string> template_chain_;   // the template files being expanded: a call back into one renders through the dynamic form
+        bool template_call_ahead() const;
+        checked_result<expression_ptr> template_call();
+        checked_result<expression_ptr> scoped_template_call(bool text_form);
+        checked_result<expression_ptr> template_text_body(const std::string& content, const std::string& file, template_barrier barrier);
+        bool template_hides(uint64_t symbol_id) const;
+        void resolve_name(identifier_expr& id);
+        expression_ptr template_builtin(std::string_view name, const source_location& at, std::vector<expression_ptr> arguments);
         void reject_class_in_function_body(const token& at);
 
         // Current namespace context for nested namespace declarations

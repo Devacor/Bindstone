@@ -27,6 +27,7 @@
 #include <jaiscript/detail/value_text.hpp>
 #include <jaiscript/detail/binary_data.hpp>
 #include <jaiscript/detail/regex_library.hpp>
+#include <jaiscript/detail/template_library.hpp>
 #include <jaiscript/debug/controller.hpp>         // engine::debugger()
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
@@ -1508,7 +1509,7 @@ struct engine::implementation {
                 if (r.has_errors()) { entry.closure_listing += r.format(unit.source, unit.path); }
                 for (const auto& d : r.diagnostics) {
                     entry.closure_diags.push_back({d.severity, 0, 0,
-                        unit.path + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
+                        (d.file.empty() ? unit.path : d.file) + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message,
                         d.related_line, d.related_column});
                 }
             }
@@ -3257,6 +3258,7 @@ void engine::initialize_engine_reference() {
     binary::register_library(*this);
     // regex, regex::match and regex::escape (detail/regex_library.hpp): engine-core, so a constant pattern compiles once at load
     detail::regex_library::register_library(*this);
+    detail::template_library::register_library(*this);
 }
 
 
@@ -5426,6 +5428,30 @@ void engine::binary_scan_limit(size_t bytes) {
 
 size_t engine::binary_scan_limit() const {
     return impl->limits_.binary_scan_limit;
+}
+
+void engine::template_output_limit(size_t bytes) {
+    impl->limits_.template_output_limit = bytes;
+}
+
+size_t engine::template_output_limit() const {
+    return impl->limits_.template_output_limit;
+}
+
+checked_result<script_value> engine::run_template_unit(const std::string& unit, const std::string& source) {
+    std::string failure;
+    try {
+        return execute_source(source, instance_variables{}, unit);
+    } catch (const parse_error& e) {
+        failure = e.what();
+    } catch (const static_check_error& e) {
+        failure = e.what();
+    }
+    return checked_result<script_value>(make_error_code(runtime_error_code::evaluation_failed), "{0}", park_error_text(failure));
+}
+
+bool engine::template_unit_current(const std::string& unit, const std::string& source) {
+    return impl->find_cached_script(unit, source) != nullptr;   // a stale entry is a miss
 }
 
 detail::execution_limits& engine::execution_limits() noexcept {

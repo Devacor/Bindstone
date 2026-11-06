@@ -1,0 +1,245 @@
+#include <jaiscript/testing/foundry.hpp>
+#include <jaiscript/testing/temporary_directory.hpp>
+#include <jaiscript/core/engine.hpp>
+#include <jaiscript/core/dynamic_binder.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
+#include <filesystem>
+#include <fstream>
+#include <string>
+
+namespace jai::foundry::tests {
+
+namespace {
+	struct template_host_thing {
+		std::string secret = "host";
+		std::string reveal() const { return secret; }
+	};
+}
+
+class template_tests : public suite {
+public:
+	template_tests() : suite("Template Tests") {}
+
+	void forge_tests() override {
+		// A folder of its own per test: a template file and the script that renders it
+		struct folder {
+			std::filesystem::path dir;
+			explicit folder(const std::string& a_name) : dir(jai::foundry::test_temp_directory() / ("templates_" + a_name)) {
+				std::error_code ec;
+				std::filesystem::remove_all(dir, ec);
+				std::filesystem::create_directories(dir);
+			}
+			~folder() { std::error_code ec; std::filesystem::remove_all(dir, ec); }
+			std::string write(const std::string& a_file, const std::string& a_text) const {
+				std::ofstream out(dir / a_file, std::ios::binary | std::ios::trunc);
+				out << a_text;
+				return (dir / a_file).string();
+			}
+		};
+		auto engine_for = []() {
+			auto eng = make_engine();
+			stdlib::register_all(*eng);
+			stdlib::register_web(*eng);
+			return eng;
+		};
+		auto run = [](std::shared_ptr<engine>& a_engine, const folder& a_folder, const std::string& a_script) {
+			const std::string main = a_folder.write("main.jai", a_script);
+			return a_engine->execute_file(main).as_string();
+		};
+		auto failure = [](std::shared_ptr<engine>& a_engine, const folder& a_folder, const std::string& a_script) {
+			const std::string main = a_folder.write("main.jai", a_script);
+			try {
+				a_engine->execute_file(main);
+			} catch (const std::exception& e) {
+				return std::string(e.what());
+			}
+			return std::string("<no error>");
+		};
+
+		test("splices_escape_and_a_nested_template_is_not_escaped_twice", [=, this]() {
+			folder f("nesting");
+			f.write("item.spider", "<li>${item}</li>");
+			f.write("list.spider", "<ul>${template(\"item.spider\", item)}${raw(\"<hr>\")}</ul>${title:>8}");
+			auto eng = engine_for();
+			check_eq(std::string("<ul><li>a &lt;b&gt; &amp; &#39;c&#39;</li><hr></ul>     x&lt;y"),
+				run(eng, f, "string item = \"a <b> & 'c'\"; string title = \"x<y\"; template(\"list.spider\", item, title).to_string();"));
+			check_eq(std::string(""), eng->execute("string hidden = \"\"; for (var n : reflect::functions()) { if (to_string(n).contains(\"#\")) { hidden += to_string(n); } } hidden;").as_string(),
+				"the builtins a template desugars to are not listed");
+		});
+
+		test("an_array_of_html_joins_and_an_array_of_text_joins_escaped", [=, this]() {
+			folder f("join");
+			f.write("row.spider", "<td>${cell}</td>");
+			f.write("table.spider", "<tr>${array::map(cells, cell => template(\"row.spider\", cell))}</tr>${cells}");
+			auto eng = engine_for();
+			check_eq(std::string("<tr><td>1</td><td>&lt;2&gt;</td></tr>1&lt;2&gt;"),
+				run(eng, f, "array<string> cells = [\"1\", \"<2>\"]; template(\"table.spider\", cells).to_string();"));
+		});
+
+		test("names_bind_by_reference_with_their_static_type", [=, this]() {
+			folder f("reference");
+			f.write("bump.spider", "${count += 2}|${names[0] = \"q\"}");
+			auto eng = engine_for();
+			check_eq(std::string("7|q 7 q"), run(eng, f,
+				"int count = 5; array<string> names = [\"x\", \"y\"]; string page = template(\"bump.spider\", count, names).to_string(); page + \" \" + count + \" \" + names[0];"));
+			f.write("store.spider", "${count = \"text\"}");
+			const std::string wrong = failure(eng, f, "int count = 1; template(\"store.spider\", count);");
+			check(wrong.find("store.spider:1:") != std::string::npos && wrong.find("count") != std::string::npos, "a store the caller's type refuses fails the load at the template's line: " + wrong);
+		});
+
+		test("the_template_sees_its_names_and_the_program_and_nothing_else", [=, this]() {
+			folder f("visibility");
+			f.write("page.spider", "${shout(who)} ${limit}");
+			auto eng = engine_for();
+			check_eq(std::string("ADA! 3"), run(eng, f,
+				"int limit = 3; string shout(string s) { return s.to_upper() + \"!\"; } string who = \"global\"; "
+				"class Page { string who = \"field\"; string render() { string who = \"ada\"; return template(\"page.spider\", who).to_string(); } } Page().render();"));
+			f.write("leak.spider", "<p>\n${secret}</p>");
+			const std::string leak = failure(eng, f, "void f() { int secret = 1; string who = \"x\"; template(\"leak.spider\", who); } f();");
+			check(leak.find("leak.spider:2:3: error: use of undeclared identifier 'secret'") != std::string::npos, "an enclosing local the call does not pass is unseen: " + leak);
+			f.write("this.spider", "${this.x}");
+			const std::string self = failure(eng, f, "class C { int x = 1; void f() { template(\"this.spider\"); } } C().f();");
+			check(self.find("'this' is not one of them") != std::string::npos, "this is not a name the template sees: " + self);
+		});
+
+		test("load_time_checks_point_at_the_template_line", [=, this]() {
+			folder f("checks");
+			f.write("entry.spider", "<article>\n<p>${entry.mesage}</p>\n</article>\n");
+			auto eng = engine_for();
+			const std::string member = failure(eng, f, "class Entry { string message = \"hi\"; } Entry entry = Entry(); template(\"entry.spider\", entry);");
+			check(member.find("entry.spider:2:12: error: no member 'mesage' in class 'Entry'") != std::string::npos, "a member typo names the template's line: " + member);
+			f.write("call.spider", "x\ny\n${fromat(1)}");
+			const std::string call = failure(eng, f, "template(\"call.spider\");");
+			check(call.find("call.spider:3:3: error: use of undeclared identifier 'fromat'") != std::string::npos, "a misspelled function names the template's line: " + call);
+			const std::string plain = failure(eng, f, "array<int> rows = [1]; template(\"call.spider\", rows[0]);");
+			check(plain.find("template() argument 2 is not a plain variable name") != std::string::npos && plain.find("(auto entry = rows[0];)") != std::string::npos,
+				"an argument that is not a name fails the load with the local to write: " + plain);
+			check_eq(std::string("<no error>"), failure(eng, f, "var r = 1; string s = \"\";"));
+		});
+
+		test("an_edited_template_applies_on_the_next_import_and_a_broken_edit_keeps_the_last_version", [=, this]() {
+			folder f("reload");
+			const std::string page = f.write("page.spider", "one ${n}");
+			f.write("views.jai", "string view(int n) { return template(\"page.spider\", n).to_string(); }\n");
+			auto eng = engine_for();
+			const std::string main = f.write("main.jai", "import \"views.jai\"; view(1);");
+			check_eq(std::string("one 1"), eng->execute_file(main).as_string());
+			auto render = [&]() { return eng->execute("import \"" + (f.dir / "views.jai").generic_string() + "\"; view(2);").as_string(); };
+			f.write("page.spider", "two, ${n}!");
+			check_eq(std::string("two, 2!"), render(), "the edit applies on the next import");
+			f.write("page.spider", "three ${missing_name}");
+			check_throws([&]() { render(); }, "the broken edit is reported by the import that reaches it");
+			check_eq(std::string("two, 2!"), eng->execute("view(2);").as_string(), "the last version that checked keeps rendering");
+			f.write("page.spider", "four ${n} fixed");
+			check_eq(std::string("four 2 fixed"), render(), "the fix applies");
+		});
+
+		test("a_path_known_at_run_time_compiles_at_first_render_and_reloads", [=, this]() {
+			folder f("dynamic");
+			f.write("dyn.spider", "hello ${who}");
+			auto eng = engine_for();
+			const std::string main = f.write("main.jai", "string which = \"dyn.spider\"; string render(string who) { return template(which, who).to_string(); } render(\"ada\");");
+			check_eq(std::string("hello ada"), eng->execute_file(main).as_string());
+			f.write("dyn.spider", "hi there ${who}");
+			check_eq(std::string("hi there bo"), eng->execute("render(\"bo\");").as_string(), "an edit applies at the next render");
+			f.write("dyn.spider", "broken ${nobody}");
+			check_throws([&]() { eng->execute("render(\"cy\");"); }, "a broken edit raises once");
+			check_eq(std::string("hi there cy"), eng->execute("render(\"cy\");").as_string(), "then the last version that checked renders");
+			f.write("dyn.spider", "fixed ${who}!");
+			check_eq(std::string("fixed di!"), eng->execute("render(\"di\");").as_string());
+			check_eq(std::string("template file 'nope.spider' not found"), eng->execute("string which2 = \"nope.spider\"; string s = \"\"; try { template(which2, s); } catch (e) { s = e; } s;").as_string());
+		});
+
+		test("a_template_rendering_itself_recurses_through_the_run_time_path", [=, this]() {
+			folder f("recursion");
+			f.write("tree.spider", "<li>${node[\"name\"]}${array::map(node[\"kids\"], node => template(\"tree.spider\", node))}</li>");
+			auto eng = engine_for();
+			check_eq(std::string("<li>root<li>a</li><li>b<li>c</li></li></li>"), run(eng, f,
+				"var node = {\"name\": \"root\", \"kids\": [{\"name\": \"a\", \"kids\": []}, {\"name\": \"b\", \"kids\": [{\"name\": \"c\", \"kids\": []}]}]}; template(\"tree.spider\", node).to_string();"));
+		});
+
+		// --------------------------------------------------------- scoped_template: one test per rule, each with the escape it blocks
+
+		auto scoped_error = [=](const std::string& a_setup, const std::string& a_text) {
+			auto eng = engine_for();
+			dynamic_binder<template_host_thing>(*eng, "TemplateHostThing").constructor<>().method("reveal", &template_host_thing::reveal).build();
+			const std::string script = a_setup + " string text = R\"tpl(" + a_text + ")tpl\"; string m = \"<rendered>\"; try { m = scoped_template_text(text, data).to_string(); } catch (e) { m = e; } m;";
+			return eng->execute(script).as_string();
+		};
+		const std::string data = "int secret = 42; int leak() { return secret; } class Pet { string name = \"Rex\"; string speak() { return \"secret \" + secret; } bool operator==(Pet o) { return secret == 42; } } "
+			"map<string, var> data = {\"name\": \"<ann>\", \"pet\": Pet(), \"host\": TemplateHostThing(), \"call\": () => secret, \"items\": [\"b\", \"a\"]};";
+
+		test("scoped_template_renders_built_in_values_escaped", [=, this]() {
+			check_eq(std::string("&lt;ann&gt; Rex 002 B,A"),
+				scoped_error(data, "${args.name} ${args.pet.name} ${args[\"items\"].size():03} ${args.items.map(i => i.to_upper()).join(\",\")}"));
+			auto eng = engine_for();
+			check_eq(std::string("[\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${args.items.sort()}\", d); to_json(d[\"items\"]);").as_string(),
+				"a mutating method acts on the template's own copy");
+		});
+
+		test("scoped_template_refuses_a_global_read", [=, this]() {
+			check_eq(std::string("parse failed:\n<scoped_template_text>:1:3: error: a scoped template sees only args: 'secret' is not available\n    ${secret}\n      ^"),
+				scoped_error(data, "${secret}"));
+		});
+
+		test("scoped_template_refuses_a_free_function_call", [=, this]() {
+			const std::string m = scoped_error(data, "${leak()}");
+			check(m.find("a scoped template calls only the built-in methods of built-in values: 'leak(...)' is not allowed") != std::string::npos, m);
+		});
+
+		test("scoped_template_refuses_a_bound_cpp_method", [=, this]() {
+			check_eq(std::string("a scoped template does not call a method of a class instance, a host object or a function: its code could run"),
+				scoped_error(data, "${args.host.reveal()}"));
+			check_eq(std::string("a scoped template reads the plain fields of a script class instance: 'secret' is not one"),
+				scoped_error(data, "${args.host.secret}"), "a host property's getter is host code");
+		});
+
+		test("scoped_template_refuses_a_script_class_method", [=, this]() {
+			check_eq(std::string("a scoped template does not call a method of a class instance, a host object or a function: its code could run"),
+				scoped_error(data, "${args.pet.speak()}"));
+			check_eq(std::string("a scoped template does not splice a class instance, a host object or a function: its code could run"),
+				scoped_error(data, "${args.pet}"), "splicing an instance would run its to_string()");
+			check_eq(std::string("a scoped template does not call a built-in method over a class instance, a host object or a function: its code could run"),
+				scoped_error(data, "${args.items.map(i => args.pet).size()}"), "a built-in that would reach an instance's code");
+		});
+
+		test("scoped_template_refuses_an_operator_overload", [=, this]() {
+			check_eq(std::string("a scoped template does not apply an operator to a class instance, a host object or a function: its code could run"),
+				scoped_error(data, "${args.pet == args.pet}"));
+		});
+
+		test("scoped_template_refuses_a_function_value_call", [=, this]() {
+			check_eq(std::string("a scoped template does not call function values: 'call(...)' is not allowed"), scoped_error(data, "${args.call()}"));
+			const std::string m = scoped_error(data, "${(x => x)(1)}");
+			check(m.find("a scoped template does not call function values") != std::string::npos, m);
+		});
+
+		test("scoped_template_refuses_raw", [=, this]() {
+			const std::string m = scoped_error(data, "${raw(args.name)}");
+			check(m.find("raw() is not allowed in a scoped template: its output is always escaped") != std::string::npos, m);
+		});
+
+		test("scoped_template_caps_its_output", [=, this]() {
+			auto eng = engine_for();
+			eng->template_output_limit(16);
+			check_eq(std::string("a scoped template's output passed its 16-byte limit (engine::template_output_limit)"), eng->execute(
+				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s}${args.s}\", d); } catch (e) { m = e; } m;").as_string());
+			check_eq(std::string("0123456789"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; scoped_template_text(\"${args.s}\", d).to_string();").as_string());
+		});
+
+		test("scoped_template_reads_a_file_checked_at_load", [=, this]() {
+			folder f("scoped");
+			f.write("card.spider", "<b>${args.name}</b>");
+			f.write("bad.spider", "\n${secret}");
+			auto eng = engine_for();
+			check_eq(std::string("<b>&lt;i&gt;</b>"), run(eng, f, "map<string, var> m = {\"name\": \"<i>\"}; scoped_template(\"card.spider\", m).to_string();"));
+			const std::string bad = failure(eng, f, "int secret = 1; map<string, var> m; scoped_template(\"bad.spider\", m);");
+			check(bad.find("bad.spider:2:3: error: a scoped template sees only args: 'secret' is not available") != std::string::npos, bad);
+		});
+	}
+};
+
+}
+
+using template_tests = jai::foundry::tests::template_tests;
+FOUNDRY_REGISTER(template_tests)

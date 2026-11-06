@@ -855,6 +855,20 @@ print(to_json([1, 2], 2));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="include(path: string) -&gt; var execute executes included source every reach; literal function-body include is textual. every engine"><h3 id="api-3acb3fdf45f6"><code>include(path: string) -&gt; var</code></h3><p><strong>Every engine</strong> &middot; execute</p>
 <p>Executes included source every reach; literal function-body include is textual.</p>
 </div>
+<div class="api-entry" data-provider="core" data-search="raw(text: var) -&gt; web::html copy inside a template(...) only: the text spliced unescaped. a scoped template refuses it. inside a template"><h3 id="api-1affd0c545bd"><code>raw(text: var) -&gt; web::html</code></h3><p><strong>Inside a template</strong> &middot; copy</p>
+<p>Inside a template(...) only: the text spliced unescaped. A scoped template refuses it.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="scoped_template(path: string, args: map) -&gt; web::html execute renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values, always escapes, and writes at most engine::template_output_limit bytes. every engine (reads the file under the filesystem privilege)"><h3 id="api-2f436a0847fa"><code>scoped_template(path: string, args: map) -&gt; web::html</code></h3><p><strong>Every engine (reads the file under the filesystem privilege)</strong> &middot; execute</p>
+<p>Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values, always escapes, and writes at most engine::template_output_limit bytes.</p>
+</div>
+<div class="api-entry" data-provider="core" data-search="scoped_template_text(text: string, args: map) -&gt; web::html execute scoped_template over template text instead of a file. every engine"><h3 id="api-326c54513600"><code>scoped_template_text(text: string, args: map) -&gt; web::html</code></h3><p><strong>Every engine</strong> &middot; execute</p>
+<p>scoped_template over template text instead of a file.</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(scoped_template_text(&quot;&lt;b&gt;${args.name}&lt;/b&gt;&quot;, {&quot;name&quot;: &quot;&lt;i&gt;&quot;}));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">&lt;b&gt;&amp;lt;i&amp;gt;&lt;/b&gt;</code></pre></div>
+</div>
+<div class="api-entry" data-provider="core" data-search="template(path: string, names: variable names...) -&gt; web::html execute renders the template file at path, seeing each passed name by reference with its declared type, and the program; every splice html-escaped. a literal path compiles and checks at load; another path at its first render. every engine (reads the file under the filesystem privilege)"><h3 id="api-f26ca47e3461"><code>template(path: string, names: variable names...) -&gt; web::html</code></h3><p><strong>Every engine (reads the file under the filesystem privilege)</strong> &middot; execute</p>
+<p>Renders the template file at path, seeing each passed name by reference with its declared type, and the program; every splice HTML-escaped. A literal path compiles and checks at load; another path at its first render.</p>
+</div>
 </section>
 <section class="api-group"><h2 id="group-map">map</h2>
 <div class="api-entry" data-provider="core" data-search="map::filter(values: map&lt;k,v&gt;, predicate: function(k, v) -&gt; bool) -&gt; map&lt;k,v&gt; copy, callback returns a new map of the entries the predicate accepts, preserving key/value constraints; the input does not mutate. only selected value elements copy; explicit handles retain identity. every engine"><h3 id="api-b8f32f5469d5"><code>map::filter(values: map&lt;K,V&gt;, predicate: function(K, V) -&gt; bool) -&gt; map&lt;K,V&gt;</code></h3><p><strong>Every engine</strong> &middot; copy, callback</p>
@@ -1971,6 +1985,11 @@ print(u.host, &quot; &quot;, u.port, &quot; &quot;, u.path, &quot; &quot;, u.que
 <p>RFC 3986 percent-encoding (rawurlencode): A-Z a-z 0-9 - . _ ~ stay, every other byte is %XX in upper-case hex.</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(web::url_encode(&quot;Snap Jaw/Social? &amp; more&quot;));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Snap%20Jaw%2FSocial%3F%20%26%20more</code></pre></div>
+</div>
+</section>
+<section class="api-group"><h2 id="group-web-html">web::html</h2>
+<div class="api-entry" data-provider="core" data-search="web::html.to_string() -&gt; string observe the html text; a web::html splices into a template as it is. every engine"><h3 id="api-b88eb0fb136f"><code>web::html.to_string() -&gt; string</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<p>The HTML text; a web::html splices into a template as it is.</p>
 </div>
 </section>
 <section class="api-group"><h2 id="group-web-url">web::url</h2>

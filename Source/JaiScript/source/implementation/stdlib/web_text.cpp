@@ -708,6 +708,25 @@ namespace web_text_detail {
 		return result;
 	}
 
+	void append_html_escaped(std::string_view a_text, std::string& a_out) {
+		size_t run = 0;
+		for (size_t i = 0; i < a_text.size(); ++i) {
+			std::string_view entity;
+			switch (a_text[i]) {
+				case '&': entity = "&amp;"; break;
+				case '<': entity = "&lt;"; break;
+				case '>': entity = "&gt;"; break;
+				case '"': entity = "&quot;"; break;
+				case '\'': entity = "&#39;"; break;
+				default: continue;
+			}
+			a_out.append(a_text.substr(run, i - run));
+			a_out.append(entity);
+			run = i + 1;
+		}
+		a_out.append(a_text.substr(run));
+	}
+
 	// No reference writes more than 6/5 of its spelling (&nLt;, five bytes, writes six), so the bound reserves once
 	size_t html_unescape_bound(const std::string& a_text) { return a_text.size() + a_text.size() / 5; }
 

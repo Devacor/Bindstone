@@ -38,6 +38,8 @@ namespace jai {
         // Related source point (e.g. the declaration a bad assignment violates); 0 = none.
         size_t related_line = 0;
         size_t related_column = 0;
+        // A diagnostic in a template a call expanded (template(...)): that file's path, its line and column; empty = the unit's
+        std::string file;
     };
 
     struct check_report {

@@ -517,6 +517,100 @@ token lexer::scan_number() {
     return tok;
 }
 
+// The splice after "${": its expression's tokens and an optional format spec, through the closing '}'. False when the splice
+// failed; the lexer's error token is then in `out`.
+bool lexer::scan_splice(std::vector<token>& out, std::vector<token>& expr_tokens, std::string& spec_text, bool& has_spec) {
+    has_spec = false;
+    int brace_depth = 1;
+    int paren_depth = 0;
+    int bracket_depth = 0;
+    int ternary_depth = 0;   // top-level '?' awaiting its ':' — ternaries keep working
+    while (!is_at_end() && brace_depth > 0) {
+        // Recursive next_token() is safe here because pending_tokens_
+        // is not being used (the caller builds into a local vector).
+        // Depth bookkeeping happens on the LEXED brace tokens, not raw peeks:
+        // whitespace before a brace made next_token() consume it without a
+        // depth adjustment (`${ x }` was a parse error, and a space-prefixed
+        // '{' swallowed the splice terminator).
+        token expr_tok = next_token();
+        if (expr_tok.type == token_type::eof) break;
+        if (expr_tok.type == token_type::error) {
+            out.push_back(expr_tok);   // surface the lexer's message, not a cascade
+            return false;
+        }
+        const bool at_top_level = brace_depth == 1 && paren_depth == 0 && bracket_depth == 0;
+        if (expr_tok.type == token_type::left_brace) {
+            ++brace_depth;
+        } else if (expr_tok.type == token_type::right_brace) {
+            --brace_depth;
+            if (brace_depth == 0) {
+                break;   // splice terminator: not part of the expression
+            }
+        } else if (expr_tok.type == token_type::left_paren) {
+            ++paren_depth;
+        } else if (expr_tok.type == token_type::right_paren) {
+            --paren_depth;
+        } else if (expr_tok.type == token_type::left_bracket) {
+            ++bracket_depth;
+        } else if (expr_tok.type == token_type::right_bracket) {
+            --bracket_depth;
+        } else if (expr_tok.type == token_type::question && at_top_level) {
+            ++ternary_depth;
+        } else if (expr_tok.type == token_type::colon && at_top_level) {
+            if (ternary_depth > 0) {
+                --ternary_depth;   // ternary's ':' — part of the expression
+            } else {
+                // A top-level ':' that closes no ternary starts a format spec:
+                // raw chars from here to the closing '}' (a bare ':' is never a
+                // valid expression continuation, so this claims nothing legal).
+                size_t spec_start = current_;
+                while (!is_at_end() && peek() != '}' && peek() != '`' && peek() != '\n') {
+                    advance();
+                }
+                if (is_at_end() || peek() != '}') {
+                    out.push_back(error_token("unterminated format spec in template string"));
+                    return false;
+                }
+                spec_text = source_.substr(spec_start, current_ - spec_start);
+                advance();   // consume '}': splice terminator
+                detail::format_spec parsed;
+                if (!detail::parse_format_spec(spec_text, parsed)) {
+                    out.push_back(error_token("unsupported format spec ':" + spec_text + "' in template string"));
+                    return false;
+                }
+                has_spec = true;
+                return true;
+            }
+        }
+        expr_tokens.push_back(expr_tok);
+    }
+    return true;
+}
+
+// `callee((expr))` or `callee((expr), "spec")`, or `(expr)` when callee is 0: a splice as a call
+void lexer::emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec) {
+    const source_location at = current_location();
+    auto punct = [&](token_type type, const char* text) { out.push_back(token(type, symbolizer_->intern_with_view(text).second, at)); };
+    if (callee != 0) {
+        out.push_back(token(token_type::identifier, symbolizer_->get_string(callee), callee, at));
+        punct(token_type::left_paren, "(");
+    }
+    punct(token_type::left_paren, "(");
+    for (auto& expr_tok : expr_tokens) {
+        out.push_back(std::move(expr_tok));
+    }
+    punct(token_type::right_paren, ")");
+    if (has_spec) {
+        punct(token_type::comma, ",");
+        token spec(token_type::string_literal, symbolizer_->intern_with_view(spec_text).second, at);
+        spec.string_value = spec_text;
+        out.push_back(std::move(spec));
+    }
+    if (callee != 0) {
+        punct(token_type::right_paren, ")");
+    }
+}
+
 void lexer::scan_template_string() {
     // Desugar `hello ${expr} world` into: ("" + "hello " + (expr) + " world")
     // The leading "" ensures string context so + auto-converts non-strings.
@@ -569,92 +663,8 @@ void lexer::scan_template_string() {
             std::vector<token> expr_tokens;
             std::string spec_text;
             bool has_spec = false;
-            bool splice_failed = false;
-            int brace_depth = 1;
-            int paren_depth = 0;
-            int bracket_depth = 0;
-            int ternary_depth = 0;   // top-level '?' awaiting its ':' — ternaries keep working
-            while (!is_at_end() && brace_depth > 0) {
-                // Recursive next_token() is safe here because pending_tokens_
-                // is not being used (we're building into local `result`).
-                // Depth bookkeeping happens on the LEXED brace tokens, not raw peeks:
-                // whitespace before a brace made next_token() consume it without a
-                // depth adjustment (`${ x }` was a parse error, and a space-prefixed
-                // '{' swallowed the splice terminator).
-                token expr_tok = next_token();
-                if (expr_tok.type == token_type::eof) break;
-                if (expr_tok.type == token_type::error) {
-                    result.push_back(expr_tok);   // surface the lexer's message, not a cascade
-                    splice_failed = true;
-                    break;
-                }
-                const bool at_top_level = brace_depth == 1 && paren_depth == 0 && bracket_depth == 0;
-                if (expr_tok.type == token_type::left_brace) {
-                    ++brace_depth;
-                } else if (expr_tok.type == token_type::right_brace) {
-                    --brace_depth;
-                    if (brace_depth == 0) {
-                        break;   // splice terminator: not part of the expression
-                    }
-                } else if (expr_tok.type == token_type::left_paren) {
-                    ++paren_depth;
-                } else if (expr_tok.type == token_type::right_paren) {
-                    --paren_depth;
-                } else if (expr_tok.type == token_type::left_bracket) {
-                    ++bracket_depth;
-                } else if (expr_tok.type == token_type::right_bracket) {
-                    --bracket_depth;
-                } else if (expr_tok.type == token_type::question && at_top_level) {
-                    ++ternary_depth;
-                } else if (expr_tok.type == token_type::colon && at_top_level) {
-                    if (ternary_depth > 0) {
-                        --ternary_depth;   // ternary's ':' — part of the expression
-                    } else {
-                        // A top-level ':' that closes no ternary starts a format spec:
-                        // raw chars from here to the closing '}' (a bare ':' is never a
-                        // valid expression continuation, so this claims nothing legal).
-                        size_t spec_start = current_;
-                        while (!is_at_end() && peek() != '}' && peek() != '`' && peek() != '\n') {
-                            advance();
-                        }
-                        if (is_at_end() || peek() != '}') {
-                            result.push_back(error_token("unterminated format spec in template string"));
-                            splice_failed = true;
-                        } else {
-                            spec_text = source_.substr(spec_start, current_ - spec_start);
-                            advance();   // consume '}': splice terminator
-                            brace_depth = 0;
-                            detail::format_spec parsed;
-                            if (!detail::parse_format_spec(spec_text, parsed)) {
-                                result.push_back(error_token("unsupported format spec ':" + spec_text + "' in template string"));
-                                splice_failed = true;
-                            } else {
-                                has_spec = true;
-                            }
-                        }
-                        break;
-                    }
-                }
-                expr_tokens.push_back(expr_tok);
-            }
-
-            if (!splice_failed) {
-                if (has_spec) {
-                    // format_value((expr), "spec")
-                    uint64_t fv_id = symbolizer_->intern("format_value");
-                    result.push_back(token(token_type::identifier, symbolizer_->get_string(fv_id), fv_id, current_location()));
-                    result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, current_location()));
-                }
-                result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, current_location()));
-                for (auto& expr_tok : expr_tokens) {
-                    result.push_back(std::move(expr_tok));
-                }
-                result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
-                if (has_spec) {
-                    result.push_back(token(token_type::comma, symbolizer_->intern_with_view(",").second, current_location()));
-                    emit_string_part(spec_text);
-                    result.push_back(token(token_type::right_paren, symbolizer_->intern_with_view(")").second, current_location()));
-                }
+            if (scan_splice(result, expr_tokens, spec_text, has_spec)) {
+                emit_splice_call(result, has_spec ? symbolizer_->intern("format_value") : 0, expr_tokens, spec_text, has_spec);
             }
 
         } else if (peek() == '\\') {
@@ -696,6 +706,64 @@ void lexer::scan_template_string() {
 
     pending_tokens_ = std::move(result);
     pending_index_ = 0;
+}
+
+// A template's text (docs/site/guide/19-templates.html): joiner(part, splice((expr)), ...) then eof. Only "\${" is an escape (a
+// literal "${"); every other byte, a backtick or a backslash included, is the page's own. Line endings read as '\n'.
+std::vector<token> lexer::tokenize_template(uint64_t joiner, uint64_t splice) {
+    std::vector<token> result;
+    const source_location start = current_location();
+    auto punct = [&](token_type type, const char* text) { result.push_back(token(type, symbolizer_->intern_with_view(text).second, current_location())); };
+    result.push_back(token(token_type::identifier, symbolizer_->get_string(joiner), joiner, start));
+    result.push_back(token(token_type::left_paren, symbolizer_->intern_with_view("(").second, start));
+    bool first = true;
+    std::string current_part;
+    source_location part_at = current_location();
+    auto separate = [&] {
+        if (!first) { punct(token_type::comma, ","); }
+        first = false;
+    };
+    auto emit_literal = [&] {
+        if (current_part.empty()) { return; }
+        separate();
+        token tok(token_type::string_literal, symbolizer_->intern_with_view(current_part).second, part_at);
+        tok.string_value = std::move(current_part);
+        current_part.clear();
+        result.push_back(std::move(tok));
+    };
+    auto note_part_start = [&] { if (current_part.empty()) { part_at = current_location(); } };
+    while (!is_at_end()) {
+        if (peek() == '$' && peek_next() == '{') {
+            emit_literal();
+            advance();
+            advance();
+            std::vector<token> expr_tokens;
+            std::string spec_text;
+            bool has_spec = false;
+            separate();
+            if (!scan_splice(result, expr_tokens, spec_text, has_spec)) { break; }
+            emit_splice_call(result, splice, expr_tokens, spec_text, has_spec);
+        } else if (peek() == '\\' && peek_next() == '$' && current_ + 2 < source_.size() && source_[current_ + 2] == '{') {
+            note_part_start();
+            advance();
+            current_part += advance();
+            current_part += advance();
+        } else if (peek() == '\r') {
+            note_part_start();
+            advance();
+            if (peek() == '\n') advance();
+            current_part += '\n';
+            line_++; column_ = 1;
+        } else {
+            note_part_start();
+            if (peek() == '\n') { line_++; column_ = 0; }
+            current_part += advance();
+        }
+    }
+    emit_literal();
+    punct(token_type::right_paren, ")");
+    result.push_back(token(token_type::eof, std::string_view(), current_location()));
+    return result;
 }
 
 namespace {

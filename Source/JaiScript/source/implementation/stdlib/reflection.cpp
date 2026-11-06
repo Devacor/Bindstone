@@ -772,6 +772,7 @@ void register_reflection_functions(engine& eng_ref) {
         for (auto& [name_view, value] : detail::engine_access::get_global_environment(*eng)->get_all_variables()) {
             if (!value.is_function()) { continue; }
             std::string name{name_view};
+            if (name.find('#') != std::string::npos) { continue; }   // a builtin a desugaring calls (template#html): no script names it
             if (detail::engine_access::get_class_definition(*eng, name)) { continue; }   // constructors: classes() owns them
             names.insert(std::move(name));
         }

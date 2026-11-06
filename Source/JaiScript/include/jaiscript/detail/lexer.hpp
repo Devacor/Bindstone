@@ -94,6 +94,8 @@ namespace jai {
         lexer(const std::string& source, string_symbolizer* symbolizer, const std::string& filename = "<script>");
 
         std::vector<token> tokenize();
+        // the source as a template file's text: joiner(part, splice((expr)), splice((expr), "spec"), ...) then eof
+        std::vector<token> tokenize_template(uint64_t joiner, uint64_t splice);
         token next_token();
         bool is_at_end() const { return current_ >= source_.length(); }
         static bool is_reserved_word(std::string_view word);
@@ -133,6 +135,8 @@ namespace jai {
         token scan_char();
         token scan_identifier();
         void scan_template_string();
+        bool scan_splice(std::vector<token>& out, std::vector<token>& expr_tokens, std::string& spec_text, bool& has_spec);
+        void emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec);
 
         // Pending token queue for template string desugaring
         std::vector<token> pending_tokens_;

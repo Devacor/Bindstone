@@ -611,6 +611,11 @@ void workspace::analyze(unit& u, bool want_model) {
 		fd.col = d.column ? static_cast<uint32_t>(d.column - 1) : 0;
 		fd.error = d.severity == jai::check_diagnostic::level::error;
 		fd.message = d.message;
+		if (!d.file.empty()) {   // a template's own line: shown at the unit's start, naming the template's place
+			fd.line = 0;
+			fd.col = 0;
+			fd.message = d.file + ":" + std::to_string(d.line) + ":" + std::to_string(d.column) + ": " + d.message;
+		}
 		if (d.related_line) {
 			fd.related_line = static_cast<uint32_t>(d.related_line - 1);
 			fd.related_col = d.related_column ? static_cast<uint32_t>(d.related_column - 1) : 0;

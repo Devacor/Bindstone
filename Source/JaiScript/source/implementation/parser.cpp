@@ -8,6 +8,7 @@
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
 #include "../../include/jaiscript/detail/expr_children.hpp"
 #include "../../include/jaiscript/detail/program_slots.hpp"
+#include "../../include/jaiscript/detail/template_library.hpp"
 #include <algorithm>
 #include <fstream>
 #include <iterator>
@@ -1406,6 +1407,11 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
     }
 
     // Keywords
+    if (!template_barriers_.empty() && (check(token_type::this_keyword) || check(token_type::super_keyword))) {
+        report_error("a template sees only the names passed to it and the program's names; '" + std::string(check(token_type::this_keyword) ? "this" : "super") +
+                     "' is not one of them (pass a local instead)", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
     if (match(token_type::this_keyword)) {
 		check_instance_capture(previous());
         return std::make_shared<this_expr>(previous().location);
@@ -1443,6 +1449,11 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
         }
         JAISCRIPT_TRY_ASSIGN(std::string path, include_literal_path());
         return std::make_shared<include_expr>(includeToken.location, path);
+    }
+
+    if (template_call_ahead()) {
+        if (peek().lexeme == "template") { return template_call(); }
+        return scoped_template_call(peek().lexeme == "scoped_template_text");
     }
 
     // import(...) in expression position: true when a module (re)ran (`if (import(MODULES)) { ... }`)
@@ -1494,7 +1505,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
             // This is a keyword being used as a namespace name
             token nameToken = advance();
             auto id_expr = std::make_shared<identifier_expr>(nameToken.location, nameToken.lexeme, get_symbol_id(nameToken));
-            id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+            resolve_name(*id_expr);
             return id_expr;
         }
     }
@@ -1519,12 +1530,265 @@ JAI_NOINLINE checked_result<expression_ptr> parser::primary_rest() {
     if (match(token_type::identifier)) {
         token name = previous();
         auto id_expr = std::make_shared<identifier_expr>(name.location, name.lexeme, get_symbol_id(name));
-        id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+        resolve_name(*id_expr);
         return id_expr;
     }
 
     report_error("expected expression", peek());
     return make_error_code(parse_error_code::syntax_error);
+}
+
+bool parser::template_call_ahead() const {
+    if (!check(token_type::identifier) || current_ + 1 >= stream_->size() || (*stream_)[current_ + 1].type != token_type::left_paren) { return false; }
+    const std::string_view word = peek().lexeme;
+    return word == "template" || word == "scoped_template" || word == "scoped_template_text";
+}
+
+// A name the innermost barriers do not admit: neither declared in the template's own scopes nor passed through every barrier
+// between the use and its declaration. A scoped barrier admits its own names and ends the walk.
+bool parser::template_hides(uint64_t symbol_id) const {
+    size_t top = function_scope_stack_.size();
+    for (size_t b = template_barriers_.size(); b-- > 0;) {
+        const template_barrier& barrier = template_barriers_[b];
+        for (size_t i = barrier.scope_count; i < top; ++i) {
+            if (function_scope_stack_[i].symbol_to_slot.count(symbol_id)) { return false; }
+        }
+        if (std::find(barrier.names.begin(), barrier.names.end(), symbol_id) == barrier.names.end()) { return true; }
+        if (barrier.scoped) { return false; }
+        top = barrier.scope_count;
+    }
+    return false;
+}
+
+// A use of a name: its slot, or, in a template body that does not see the enclosing name, the program's name (::name). A
+// trusted template's raw is its builtin.
+void parser::resolve_name(identifier_expr& id) {
+    if (!template_barriers_.empty() && template_hides(id.symbol_id)) {
+        if (id.name == "raw" && !template_barriers_.back().scoped) {
+            auto [raw_id, raw_view] = symbolizer_->intern_with_view(detail::template_library::k_raw);
+            id.name = raw_view;
+            id.symbol_id = raw_id;
+        }
+        id.global_qualified = true;
+        id.slot_index = SIZE_MAX;
+        return;
+    }
+    id.slot_index = lookup_slot(id.symbol_id);
+}
+
+expression_ptr parser::template_builtin(std::string_view name, const source_location& at, std::vector<expression_ptr> arguments) {
+    auto [id, view] = symbolizer_->intern_with_view(name);
+    auto callee = std::make_shared<identifier_expr>(at, view, id);
+    callee->global_qualified = true;
+    return std::make_shared<call_expr>(at, std::move(callee), std::move(arguments));
+}
+
+// A template's text parsed here, under `barrier`: its tokens replace the stream until the body ends
+checked_result<expression_ptr> parser::template_text_body(const std::string& content, const std::string& file, template_barrier barrier) {
+    lexer lex(content, symbolizer_, file);
+    const std::vector<token> tokens = lex.tokenize_template(symbolizer_->intern(detail::template_library::k_joiner), symbolizer_->intern(detail::template_library::k_splice));
+    const std::vector<token>* saved_stream = stream_;
+    const size_t saved_current = current_;
+    const std::optional<token> saved_pushed_back = pushed_back_token_;
+    stream_ = &tokens; current_ = 0; pushed_back_token_.reset();
+    template_barriers_.push_back(std::move(barrier));
+    const size_t errors_before = errors_.size();
+    auto body = expression();
+    if (body && !is_at_end()) {
+        report_error("unexpected text after the template body", peek());
+    }
+    template_barriers_.pop_back();
+    stream_ = saved_stream; current_ = saved_current; pushed_back_token_ = saved_pushed_back;
+    paren_close_.erase(&tokens);
+    if (!body) {
+        if (errors_.size() == errors_before) { report_error_at(format_error(body, *symbolizer_), source_location{file, 1, 1}); }
+        return body.error_value();
+    }
+    if (errors_.size() != errors_before) { return make_error_code(parse_error_code::syntax_error); }
+    return body;
+}
+
+// template(path, a, b, ...): a literal path renders here, in the caller, seeing a, b, ... by name and the program; any other
+// path, or a file that is already being expanded (a template rendering itself), renders through template#dynamic
+JAI_NOINLINE checked_result<expression_ptr> parser::template_call() {
+    const token name = advance();
+    advance();   // '('
+    const source_location at = name.location;
+    if (check(token_type::right_paren)) {
+        report_error("template() takes a path, then the names the template sees", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
+    JAISCRIPT_TRY_ASSIGN(expression_ptr path, expression());
+    std::vector<token> names;
+    size_t position = 1;
+    bool named = true;
+    while (match(token_type::comma)) {
+        ++position;
+        const bool plain = check(token_type::identifier) && current_ + 1 < stream_->size() &&
+            ((*stream_)[current_ + 1].type == token_type::comma || (*stream_)[current_ + 1].type == token_type::right_paren);
+        if (plain) {
+            const token& n = advance();
+            for (const token& earlier : names) {
+                if (earlier.lexeme == n.lexeme) { report_error("template() names '" + std::string(n.lexeme) + "' twice", n); named = false; }
+            }
+            names.push_back(n);
+            continue;
+        }
+        const token bad = peek();
+        JAISCRIPT_TRY(expression());
+        report_error("template() argument " + std::to_string(position) +
+                     " is not a plain variable name: the template sees each argument by its name, so name the value first (auto entry = rows[0];) and pass the name", bad);
+        named = false;
+    }
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after template arguments"));
+    auto reported = [&]() -> checked_result<expression_ptr> {   // the error is listed; the parse goes on past the call
+        return expression_ptr(std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, std::monostate{})));
+    };
+    if (!named) { return reported(); }
+
+    std::vector<expression_ptr> passed;
+    std::string spelled;
+    template_barrier barrier;
+    barrier.scope_count = function_scope_stack_.size();
+    for (const token& n : names) {
+        auto id = std::make_shared<identifier_expr>(n.location, n.lexeme, get_symbol_id(n));
+        resolve_name(*id);
+        barrier.names.push_back(id->symbol_id);
+        if (!spelled.empty()) { spelled += ','; }
+        spelled += n.lexeme;
+        passed.push_back(std::move(id));
+    }
+    auto literal_text = [&](const std::string& text) {
+        return std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, text));
+    };
+    auto dynamic = [&](expression_ptr path_value) -> expression_ptr {
+        std::vector<expression_ptr> load;
+        load.push_back(std::move(path_value));
+        load.push_back(literal_text(spelled));
+        load.push_back(literal_text(at.filename));
+        return std::make_shared<call_expr>(at, template_builtin(detail::template_library::k_dynamic, at, std::move(load)), std::move(passed));
+    };
+    const bool literal = path->get_type() == node_type::literal_expr &&
+        static_cast<literal_expr*>(path.get())->value.raw_storage_index() == script_value::TYPEID_STRING;
+    if (!literal) { return dynamic(std::move(path)); }
+    const std::string spelled_path(static_cast<literal_expr*>(path.get())->value.unchecked_as_string());
+    if (!engine_->is_enabled(privilege::filesystem)) {
+        report_error("template() reads '" + spelled_path + "': the engine does not grant the filesystem privilege", name);
+        return reported();
+    }
+    auto resolved = resolve_include_path(spelled_path, engine_, at.filename);
+    if (!resolved) {
+        report_error("template file '" + spelled_path + "' not found", name);
+        return reported();
+    }
+    if (std::find(template_chain_.begin(), template_chain_.end(), resolved.value()) != template_chain_.end() || template_chain_.size() >= 32) {
+        return dynamic(literal_text(resolved.value()));
+    }
+    std::ifstream file(resolved.value(), std::ios::binary);
+    if (!file) {
+        report_error("template file '" + spelled_path + "' cannot be read", name);
+        return reported();
+    }
+    const std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    spliced_files_.push_back(resolved.value());
+    template_chain_.push_back(resolved.value());
+    auto body = template_text_body(content, resolved.value(), std::move(barrier));
+    template_chain_.pop_back();
+    if (!body) { return reported(); }
+    return body;
+}
+
+// scoped_template(path, map) / scoped_template_text(text, map): a literal source is checked here against the scoped rules, and
+// the call renders its text (kept in the call, so the program runs the version it loaded) through template#scoped
+JAI_NOINLINE checked_result<expression_ptr> parser::scoped_template_call(bool text_form) {
+    const token name = advance();
+    advance();   // '('
+    const source_location at = name.location;
+    const std::string spelling = text_form ? "scoped_template_text(text, map)" : "scoped_template(path, map)";
+    std::vector<expression_ptr> arguments;
+    if (!check(token_type::right_paren)) {
+        do {
+            JAISCRIPT_TRY_ASSIGN(expression_ptr arg, expression());
+            arguments.push_back(std::move(arg));
+        } while (match(token_type::comma));
+    }
+    JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after " + spelling.substr(0, spelling.find('(')) + " arguments"));
+    auto reported = [&]() -> checked_result<expression_ptr> {   // the error is listed; the parse goes on past the call
+        return expression_ptr(std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, std::monostate{})));
+    };
+    if (arguments.size() != 2) {
+        report_error(spelling + " takes 2 arguments, got " + std::to_string(arguments.size()), name);
+        return reported();
+    }
+    auto literal_text = [&](const std::string& text) {
+        return std::make_shared<literal_expr>(at, script_value(script_value::ast_literal_tag{}, text));
+    };
+    const bool literal = arguments[0]->get_type() == node_type::literal_expr &&
+        static_cast<literal_expr*>(arguments[0].get())->value.raw_storage_index() == script_value::TYPEID_STRING;
+    std::vector<expression_ptr> call;
+    if (!literal) {
+        call.push_back(std::move(arguments[0]));
+        call.push_back(literal_text(text_form ? std::string(detail::template_library::k_text_label) : at.filename));
+        call.push_back(std::move(arguments[1]));
+        return template_builtin(text_form ? detail::template_library::k_scoped : detail::template_library::k_scoped_file, at, std::move(call));
+    }
+    const std::string source(static_cast<literal_expr*>(arguments[0].get())->value.unchecked_as_string());
+    std::string content = source;
+    std::string label(detail::template_library::k_text_label);
+    if (!text_form) {
+        if (!engine_->is_enabled(privilege::filesystem)) {
+            report_error("scoped_template() reads '" + source + "': the engine does not grant the filesystem privilege", name);
+            return reported();
+        }
+        auto resolved = resolve_include_path(source, engine_, at.filename);
+        if (!resolved) {
+            report_error("template file '" + source + "' not found", name);
+            return reported();
+        }
+        std::ifstream file(resolved.value(), std::ios::binary);
+        if (!file) {
+            report_error("template file '" + source + "' cannot be read", name);
+            return reported();
+        }
+        content.assign((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        spliced_files_.push_back(resolved.value());
+        label = resolved.value();
+    }
+    template_barrier barrier;
+    barrier.scope_count = function_scope_stack_.size();
+    barrier.names.push_back(symbolizer_->intern("args"));
+    barrier.scoped = true;
+    auto body = template_text_body(content, label, std::move(barrier));
+    if (!body) { return reported(); }
+    std::vector<detail::template_library::violation> violations;
+    detail::template_library::scoped_violations(*body.value(), *symbolizer_, violations);
+    for (const auto& v : violations) { report_error_at(v.message, v.at); }
+    if (!violations.empty()) { return reported(); }
+    call.push_back(literal_text(content));
+    call.push_back(literal_text(label));
+    call.push_back(std::move(arguments[1]));
+    return template_builtin(detail::template_library::k_scoped, at, std::move(call));
+}
+
+checked_result<expression_ptr> parser::parse_scoped_template_body() {
+    template_barrier barrier;
+    barrier.names.push_back(symbolizer_->intern("args"));
+    barrier.scoped = true;
+    template_barriers_.push_back(std::move(barrier));
+    auto body = expression();
+    if (body && !is_at_end()) { report_error("unexpected text after the template body", peek()); }
+    template_barriers_.pop_back();
+    if (body && errors_.empty()) {
+        std::vector<detail::template_library::violation> violations;
+        detail::template_library::scoped_violations(*body.value(), *symbolizer_, violations);
+        for (const auto& v : violations) { report_error_at(v.message, v.at); }
+    }
+    if (!body && errors_.empty()) { report_error(format_error(body, *symbolizer_), peek()); }
+    if (!errors_.empty()) {
+        auto failed = failed_parse();
+        return failed.error_value();
+    }
+    return body;
 }
 
 JAI_NOINLINE checked_result<expression_ptr> parser::new_expression(bool make_shared_spelling) {
@@ -1583,7 +1847,7 @@ JAI_NOINLINE checked_result<expression_ptr> parser::identifier_expression() {
     }
 
     auto id_expr = std::make_shared<identifier_expr>(identToken.location, identToken.lexeme, get_symbol_id(identToken));
-    id_expr->slot_index = lookup_slot(id_expr->symbol_id);
+    resolve_name(*id_expr);
     return id_expr;
 }
 
@@ -3304,6 +3568,9 @@ JAI_NOINLINE checked_result<void> parser::lambda_captures(lambda_expr& lambda) {
     lambda.default_capture = capture_result.second;
     for (auto& cap : lambda.captures) {
         if (cap.symbol_id == UINT64_MAX && symbolizer_) cap.symbol_id = symbolizer_->intern(cap.name);
+        if (cap.symbol_id != UINT64_MAX && !cap.initializer && !template_barriers_.empty() && template_hides(cap.symbol_id)) {
+            report_error("a lambda in a template captures '" + std::string(cap.name) + "', which the template does not see", previous());
+        }
         if (cap.symbol_id != UINT64_MAX && !cap.initializer) cap.outer_slot = lookup_capture_slot(cap.symbol_id);   // an init-capture names no outer variable
     }
     return expect(token_type::right_bracket, "expected ']' after capture list");

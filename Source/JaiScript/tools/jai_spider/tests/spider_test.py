@@ -543,6 +543,16 @@ def run_guestbook(exe, backend, verbose):
 		suite.check("guestbook: the JSON API lists the entries", [e["name"] for e in r.json()] == ["Bot", "Ada"], r.text())
 		r = suite.request("GET", "/entries/1")
 		suite.check("guestbook: an entry has its own page", r.status == 200 and b"Ada signed the guestbook" in r.body)
+		card = app_dir / "views" / "card.spider"
+		original = card.read_text(encoding="utf-8")
+		card.write_text(original.replace("<article>", '<article class="edited">'), encoding="utf-8")
+		r = suite.request("GET", "/")
+		suite.check("guestbook: an edited template applies on the next request", b'<article class="edited">' in r.body, r.text()[:400])
+		card.write_text(original.replace('${entry["message"]}', "${missing_name}"), encoding="utf-8")
+		r = suite.request("GET", "/")
+		suite.check("guestbook: a template edit that does not check leaves the last version serving",
+			r.status == 200 and b'<article class="edited">' in r.body and b"&lt;b&gt;hi&lt;/b&gt;" in r.body, r.text()[:400])
+		suite.check("guestbook: the rejected template edit is reported", "missing_name" in server.log_text(), server.log_text()[-400:])
 	finally:
 		server.stop()
 		if suite.failures or verbose:

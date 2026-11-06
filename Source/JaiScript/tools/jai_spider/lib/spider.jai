@@ -88,6 +88,9 @@ spider::Response html(string text, int status = 200) {
 	return r;
 }
 
+// a page a template made (web::html), sent as it is
+spider::Response html(web::html page, int status = 200) { return spider::html(page.to_string(), status); }
+
 spider::Response plain_text(string text, int status = 200) {
 	spider::Response r = spider::Response(status, text);
 	r.header("Content-Type", "text/plain; charset=utf-8");
@@ -124,12 +127,13 @@ spider::Response file(string path, string content_type = "") {
 
 spider::Response not_found(string text = "Not Found") { return spider::plain_text(text, 404); }
 
-// a handler may answer a Response, a string (an HTML page), null (204) or any other value (JSON)
+// a handler may answer a Response, a string or a web::html (an HTML page), null (204) or any other value (JSON)
 spider::Response to_response(var result) {
 	if (result == null) { return spider::Response(204); }
 	string kind = type_of(result);
 	if (kind == "spider::Response") { return result; }
 	if (kind == "string" || kind == "utf8_string") { return spider::html(result); }
+	if (kind == "web::html") { return spider::html(result.to_string()); }
 	return spider::json(result);
 }
 

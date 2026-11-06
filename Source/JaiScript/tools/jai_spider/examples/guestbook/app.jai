@@ -1,6 +1,6 @@
 // Guestbook: a page that lists signatures, a form that adds one, a JSON API over the same table, a cookie session
 // that remembers the visitor's name. Run it with `jai_spider examples/guestbook/app.jai` and open http://127.0.0.1:8080/;
-// edit this file or views.jai while it runs and reload the page.
+// edit this file, views.jai or a template under views/ while it runs and reload the page.
 import "spider.jai";
 import "session.jai";
 import "views.jai";

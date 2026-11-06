@@ -604,7 +604,8 @@ bool lexer::scan_splice(std::vector<token>& out, std::vector<token>& expr_tokens
 }
 
 // `callee((expr))` or `callee((expr), "spec")`, or `(expr)` when callee is 0: a splice as a call
-void lexer::emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec) {
+void lexer::emit_splice_call(std::vector<token>& out, uint64_t callee, std::vector<token>& expr_tokens, const std::string& spec_text, bool has_spec,
+                             const std::string* description) {
     const source_location at = current_location();
     auto punct = [&](token_type type, const char* text) { out.push_back(token(type, symbolizer_->intern_with_view(text).second, at)); };
     if (callee != 0) {
@@ -616,12 +617,14 @@ void lexer::emit_splice_call(std::vector<token>& out, uint64_t callee, std::vect
         out.push_back(std::move(expr_tok));
     }
     punct(token_type::right_paren, ")");
-    if (has_spec) {
+    auto text = [&](const std::string& value) {
         punct(token_type::comma, ",");
-        token spec(token_type::string_literal, symbolizer_->intern_with_view(spec_text).second, at);
-        spec.string_value = spec_text;
-        out.push_back(std::move(spec));
-    }
+        token literal(token_type::string_literal, symbolizer_->intern_with_view(value).second, at);
+        literal.string_value = value;
+        out.push_back(std::move(literal));
+    };
+    if (has_spec || description) { text(has_spec ? spec_text : std::string()); }
+    if (description) { text(*description); }
     if (callee != 0) {
         punct(token_type::right_paren, ")");
     }
@@ -757,8 +760,12 @@ std::vector<token> lexer::tokenize_template(uint64_t joiner, uint64_t splice) {
             std::string spec_text;
             bool has_spec = false;
             separate();
+            const size_t splice_start = current_;
+            const size_t splice_line = line_;
             if (!scan_splice(result, expr_tokens, spec_text, has_spec)) { break; }
-            emit_splice_call(result, splice, expr_tokens, spec_text, has_spec);
+            // the splice as written and where, for the error a null value raises
+            const std::string description = "${" + source_.substr(splice_start, current_ - splice_start) + " at " + filename_ + ":" + std::to_string(splice_line);
+            emit_splice_call(result, splice, expr_tokens, spec_text, has_spec, &description);
         } else if (peek() == '\\' && peek_next() == '$' && current_ + 2 < source_.size() && source_[current_ + 2] == '{') {
             note_part_start();
             advance();

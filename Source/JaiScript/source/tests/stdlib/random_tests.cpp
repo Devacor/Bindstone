@@ -105,7 +105,7 @@ public:
 			check_eq(saved.generator.next(), binary.generator.next());
 		});
 
-		test("refused_draws_raise_their_catalogued_texts", [this, caught]() {
+		test("refused_draws_raise_their_catalogued_texts", [this, caught, es]() {
 			check_eq(std::string("random::next_int range is inverted (max < min)"), caught("random r(1); r.next_int(5, 1);"));
 			check_eq(std::string("random::next_float range is inverted (max < min)"), caught("random r(1); r.next_float(2.0, 1.0);"));
 			check_eq(std::string("random::next_float bounds must be finite"), caught("random r(1); r.next_float(0.0, math::INF);"));
@@ -117,7 +117,9 @@ public:
 			check_eq(std::string("random::pick expects a non-empty array"), caught("random r(1); r.pick([]);"));
 			check_eq(std::string("random::next_bytes count cannot be negative"), caught("random r(1); r.next_bytes(-1);"));
 			check_eq(std::string("random::shuffle expects an array"), caught("random r(1); var s = \"text\"; r.shuffle(s);"));
-			check_eq(std::string("Undefined variable 'math::random'"), caught("var f = math::random;"));
+			std::string refused;
+			try { es("var f = math::random;"); } catch (const jai::static_check_error& e) { refused = e.what(); }
+			check_true(refused.find("error: no member 'random' in namespace 'math'") != std::string::npos, refused);
 		});
 
 		test("the_checker_holds_constructions_and_draws_to_their_signatures", [this]() {

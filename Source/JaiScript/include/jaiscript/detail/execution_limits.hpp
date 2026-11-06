@@ -36,8 +36,10 @@ namespace jai::detail {
 
 		// The longest NUL scan one binary::reader read runs (engine::binary_scan_limit); only the host sets it
 		size_t binary_scan_limit = size_t(1) << 20;
-		// The bytes one scoped_template render may write (engine::template_output_limit); 0 = no limit
-		size_t template_output_limit = size_t(1) << 20;
+		// The bytes one template() render may write (engine::template_output_limit) and one scoped_template render
+		// (engine::scoped_template_output_limit); 0 = no limit
+		size_t template_output_limit = size_t(10) << 20;
+		size_t scoped_template_output_limit = size_t(1) << 20;
 		// The engine's clock sample: a real steady_clock reading (ticks) written where the engine reads that clock anyway -
 		// every host entry (the reading the budget deadline starts from), the budget check's periodic samples (every 1024
 		// ticks, budget or not) and a time:: read of the system clock; never by a host engine_time::source. The import window reads

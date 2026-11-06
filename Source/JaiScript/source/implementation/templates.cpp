@@ -340,7 +340,7 @@ namespace {
 	public:
 		scoped_render(library& a_lib, const std::shared_ptr<const scoped_program>& a_program)
 			: lib_(a_lib), eng_(a_lib.eng), program_(a_program), limits_(engine_access::execution_limits(*a_lib.eng)),
-			  ids_(*engine_access::get_symbolizer(*a_lib.eng)) {}
+			  ids_(*engine_access::get_symbolizer(*a_lib.eng)), limit_(limits_.scoped_template_output_limit) {}
 		~scoped_render() { *alive_ = false; }
 		scoped_render(const scoped_render&) = delete;
 		scoped_render& operator=(const scoped_render&) = delete;
@@ -380,6 +380,7 @@ namespace {
 		library_view_ids ids_;
 		std::vector<std::pair<uint64_t, script_value>> names_;
 		size_t output_ = 0;
+		size_t limit_ = 0;   // the limit when the render started: a host change applies to the next render
 		uint32_t ticks_ = 0;
 		bool data_has_objects_ = false;
 		native_stack_mark stack_;
@@ -452,9 +453,8 @@ namespace {
 		R method(const script_value& a_receiver, const member_expr* a_callee, std::vector<script_value> a_args);
 		checked_result<std::string> plain_text(const script_value& v, const std::string* a_spec);
 		bool counts(size_t a_bytes) {
-			const size_t limit = limits_.template_output_limit;
 			output_ += a_bytes;
-			return limit == 0 || output_ <= limit;
+			return limit_ == 0 || output_ <= limit_;
 		}
 	};
 
@@ -771,7 +771,11 @@ namespace {
 	}
 
 	JAI_NOINLINE R scoped_render::output_limit() const {
-		return refusal(lib_, "a scoped template's output passed its " + std::to_string(limits_.template_output_limit) + "-byte limit (engine::template_output_limit)");
+		return refusal(lib_, "a scoped template's output passed its " + std::to_string(limit_) + "-byte limit: the host raises it with engine::scoped_template_output_limit");
+	}
+
+	JAI_NOINLINE R trusted_output_limit(const library& a_lib, size_t a_limit) {
+		return refusal(a_lib, "template()'s output passed its " + std::to_string(a_limit) + "-byte limit: the host raises it with engine::template_output_limit");
 	}
 
 	R scoped_render::splice(const call_expr* c) {
@@ -878,9 +882,9 @@ namespace {
 		ctx.backend_self = this;
 		script_value self = a_receiver;
 		R result = found->second(ctx, self, a_args);
-		if (result && limits_.template_output_limit != 0) {
+		if (result && limit_ != 0) {
 			const script_value& made = result.value().deref();
-			if (made.raw_storage_index() == script_value::TYPEID_STRING && made.unchecked_as_string().size() > limits_.template_output_limit) { return output_limit(); }
+			if (made.raw_storage_index() == script_value::TYPEID_STRING && made.unchecked_as_string().size() > limit_) { return output_limit(); }
 		}
 		return result;
 	}
@@ -948,6 +952,7 @@ void register_library(engine& eng) {
 			if (text.raw_storage_index() != script_value::TYPEID_STRING) { return lib->refused("a template part is not text"); }
 			total += text.unchecked_as_string().size();
 		}
+		if (const size_t limit = engine_access::execution_limits(*lib->eng).template_output_limit; limit != 0 && total > limit) { return trusted_output_limit(*lib, limit); }
 		if (!builtin_memory_charge(lib->eng, total)) [[unlikely]] { return builtin_memory_cap(lib->eng); }
 		std::string out;
 		out.reserve(total);
@@ -968,6 +973,7 @@ void register_library(engine& eng) {
 		auto appended = append_splice(*lib, a_args[0], spec, false, out, [&lib](const script_value& a_value, const std::string* a_spec) { return trusted_text(*lib, a_value, a_spec); });
 		if (!appended) { return appended.error_value(); }
 		if (engine_access::backend_unwinding(*lib->eng)) { return script_value(std::monostate{}, lib->eng); }
+		if (const size_t limit = engine_access::execution_limits(*lib->eng).template_output_limit; limit != 0 && out.size() > limit) { return trusted_output_limit(*lib, limit); }
 		if (!builtin_memory_charge(lib->eng, out.size())) [[unlikely]] { return builtin_memory_cap(lib->eng); }
 		return script_value(std::move(out), lib->eng);
 	});
@@ -991,9 +997,7 @@ void register_library(engine& eng) {
 	eng.add_variadic_function(std::string(k_scoped_file), [lib](const std::vector<script_value>& a_args) -> R {
 		if (a_args.size() != 3 || !a_args[0].deref().is_string() || !a_args[1].deref().is_string()) { return lib->refused("scoped_template(path, map) takes a path and a map"); }
 		engine& e = *lib->eng;
-		if (!e.is_enabled(privilege::filesystem)) {
-			return R(make_error_code(runtime_error_code::insufficient_privilege), "{0}", engine_access::park_error_text(e, "scoped_template() reads '" + a_args[0].deref().as_string() + "': the engine does not grant the filesystem privilege"));
-		}
+		if (auto allowed = e.require_privilege(privilege::filesystem); !allowed) { return allowed.error_value(); }
 		auto resolved = resolve_include_path(a_args[0].deref().as_string(), &e, a_args[1].deref().as_string());
 		if (!resolved) { return lib->refused("template file '" + a_args[0].deref().as_string() + "' not found"); }
 		scoped_file_entry& file = lib->scoped_files[resolved.value()];
@@ -1037,9 +1041,7 @@ void register_library(engine& eng) {
 		engine& e = *lib->eng;
 		if (!a_args[0].deref().is_string()) { return R(make_error_code(runtime_error_code::type_mismatch), "{0}", engine_access::park_error_text(e, "template() path is not a string")); }
 		const std::string path = a_args[0].deref().as_string();
-		if (!e.is_enabled(privilege::filesystem)) {
-			return R(make_error_code(runtime_error_code::insufficient_privilege), "{0}", engine_access::park_error_text(e, "template() reads '" + path + "': the engine does not grant the filesystem privilege"));
-		}
+		if (auto allowed = e.require_privilege(privilege::filesystem); !allowed) { return allowed.error_value(); }
 		auto resolved = resolve_include_path(path, &e, a_args[2].deref().as_string());
 		if (!resolved) { return lib->refused("template file '" + path + "' not found"); }
 		const std::string names = a_args[1].deref().as_string();

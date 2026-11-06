@@ -7688,7 +7688,7 @@
       "signature": "template(path: string, names: variable names...) -> web::html",
       "provider": "core",
       "effect": "execute",
-      "notes": "Renders the template file at path, seeing each passed name by reference with its declared type, and the program; every splice HTML-escaped. A literal path compiles and checks at load; another path at its first render.",
+      "notes": "Renders the template file at path, seeing each passed name by reference with its declared type, and the program; every splice HTML-escaped. A literal path compiles and checks at load; another path at its first render. A render writes at most engine::template_output_limit bytes.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
       "availability": "Every engine (reads the file under the filesystem privilege)",
@@ -7700,7 +7700,7 @@
       "signature": "scoped_template(path: string, args: map) -> web::html",
       "provider": "core",
       "effect": "execute",
-      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values, always escapes, and writes at most engine::template_output_limit bytes.",
+      "notes": "Renders an untrusted template file over a copy of args, which is the only name it sees; it calls only built-in methods of built-in values, always escapes, and writes at most engine::scoped_template_output_limit bytes.",
       "source": "source/implementation/parser.cpp",
       "form": "function",
       "availability": "Every engine (reads the file under the filesystem privilege)",
@@ -7745,6 +7745,30 @@
       "form": "method",
       "availability": "Every engine",
       "display": "web::html.to_string() -> string"
+    },
+    {
+      "owner": "reflect",
+      "name": "template_output_limit",
+      "signature": "template_output_limit() -> int",
+      "provider": "core",
+      "effect": "observe",
+      "source": "source/implementation/engine.cpp",
+      "notes": "The bytes one template() render may write, as the host set it (default 10485760; 0 = no limit); scripts read it, hosts change it.",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "reflect::template_output_limit() -> int"
+    },
+    {
+      "owner": "reflect",
+      "name": "scoped_template_output_limit",
+      "signature": "scoped_template_output_limit() -> int",
+      "provider": "core",
+      "effect": "observe",
+      "source": "source/implementation/engine.cpp",
+      "notes": "The bytes one scoped_template / scoped_template_text render may write, as the host set it (default 1048576; 0 = no limit); scripts read it, hosts change it.",
+      "form": "function",
+      "availability": "Every engine",
+      "display": "reflect::scoped_template_output_limit() -> int"
     }
   ],
   "fields": [

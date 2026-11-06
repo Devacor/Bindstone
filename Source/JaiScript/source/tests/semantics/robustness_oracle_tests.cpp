@@ -374,8 +374,14 @@ private:
 				try { e->execute(src); } catch (const std::exception& ex) { return std::string(ex.what()); }
 				return std::string("no error");
 			};
-			const std::string en = parse_text("enum F { a, b = 5 }");
-			check_true(en.find("enum values take no initializer: 'b' is 1, its position in the enum") != std::string::npos, en);
+			const std::string en = parse_text("enum F { a, b = c }");
+			check_true(en.find("enum value 'b' names 'c', which is not an earlier value of 'F'") != std::string::npos, en);
+			const std::string shift = parse_text("enum F { a = 1 << 64 }");
+			check_true(shift.find("enum value 'a' shifts by 64: the shift amount must be between 0 and 63") != std::string::npos, shift);
+			const std::string text = parse_text("enum F { a = \"one\" }");
+			check_true(text.find("enum value 'a' needs a constant integer") != std::string::npos, text);
+			const std::string last = parse_text("enum F { a = 9223372036854775807, b }");
+			check_true(last.find("enum value 'b' overflows the int range: the value before it is the largest int") != std::string::npos, last);
 			const std::string sp = parse_text("array<int> a = [1, 2]; auto b = [...a, 3];");
 			check_true(sp.find("JaiScript has no spread '...': join arrays with array::concat(a, b)") != std::string::npos, sp);
 			// a lambda body that fails to parse leaves no scope behind: the enclosing function's own local reads as its own

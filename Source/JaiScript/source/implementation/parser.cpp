@@ -2,6 +2,7 @@
 #include "../../include/jaiscript/core/engine.hpp"
 #include "../../include/jaiscript/core/script_namespace.hpp"
 #include "../../include/jaiscript/detail/integer_ops.hpp"  // checked constant folding
+#include "../../include/jaiscript/detail/scalar_ops.hpp"  // an enumerator initializer's arithmetic
 #include "../../include/jaiscript/detail/transient_read.hpp"
 #include "../../include/jaiscript/detail/lexer.hpp"  // a spliced include is lexed here
 #include "../../include/jaiscript/detail/map_entry_binding.hpp"
@@ -2272,6 +2273,78 @@ JAI_NOINLINE checked_result<expression_ptr> parser::coalesce_rest(expression_ptr
     return std::make_shared<binary_expr>(op.location, left, op, right);
 }
 
+// An enumerator's initializer, evaluated at parse time as C++ evaluates it: an integer or char literal, an earlier enumerator
+// (bare or through the enum's name), and the integer operators over them, under the run time's overflow and shift rules.
+// The failing case comes back as the error text's tail.
+static bool enum_initializer_value(const expression* e, const enum_decl& d, std::vector<script_int>& known, script_int& out, std::string& why) {
+    switch (e->get_type()) {
+        case node_type::literal_expr: {
+            const script_value& v = static_cast<const literal_expr*>(e)->value;
+            if (v.is_int()) { out = v.unchecked_as_int(); return true; }
+            if (v.raw_storage_index() == script_value::TYPEID_CHAR) { out = static_cast<script_int>(v.unchecked_as_char()); return true; }
+            why = "needs a constant integer";
+            return false;
+        }
+        case node_type::identifier_expr:
+        case node_type::member_expr: {
+            std::string_view name;
+            if (e->get_type() == node_type::identifier_expr) {
+                name = static_cast<const identifier_expr*>(e)->name;
+            } else {
+                const auto* m = static_cast<const member_expr*>(e);
+                if (m->null_safe || m->is_arrow || !m->object || m->object->get_type() != node_type::identifier_expr ||
+                    static_cast<const identifier_expr*>(m->object.get())->name != d.name) {
+                    why = "needs a constant integer";
+                    return false;
+                }
+                name = m->member;
+            }
+            for (size_t i = 0; i < known.size(); ++i) {
+                if (d.values[i].first == name) { out = known[i]; return true; }
+            }
+            why = "names '" + std::string(name) + "', which is not an earlier value of '" + std::string(d.name) + "'";
+            return false;
+        }
+        case node_type::unary_expr: {
+            const auto* u = static_cast<const unary_expr*>(e);
+            script_int v = 0;
+            if (u->is_postfix || !enum_initializer_value(u->operand.get(), d, known, v, why)) { if (why.empty()) { why = "needs a constant integer"; } return false; }
+            switch (u->op.type) {
+                case token_type::plus: out = v; return true;
+                case token_type::tilde: out = ~v; return true;
+                case token_type::minus:
+                    if (!ints::try_neg(v, out)) { why = "overflows the int range"; return false; }
+                    return true;
+                default: why = "needs a constant integer"; return false;
+            }
+        }
+        case node_type::binary_expr: {
+            const auto* b = static_cast<const binary_expr*>(e);
+            script_int l = 0, r = 0;
+            if (!enum_initializer_value(b->left.get(), d, known, l, why) || !enum_initializer_value(b->right.get(), d, known, r, why)) { return false; }
+            switch (b->op.type) {
+                case token_type::plus: case token_type::minus: case token_type::star: case token_type::slash: case token_type::percent:
+                    switch (detail::int_arith(b->op.type, l, r, out)) {
+                        case detail::scalar_fault::none: return true;
+                        case detail::scalar_fault::overflow: why = "overflows the int range"; return false;
+                        default: why = "divides by zero"; return false;
+                    }
+                case token_type::ampersand: out = l & r; return true;
+                case token_type::pipe: out = l | r; return true;
+                case token_type::caret: out = l ^ r; return true;
+                case token_type::left_shift: case token_type::right_shift:
+                    if (r < 0 || r > 63) { why = "shifts by " + std::to_string(r) + ": the shift amount must be between 0 and 63"; return false; }
+                    out = b->op.type == token_type::left_shift ? (l << r) : (l >> r);
+                    return true;
+                default: why = "needs a constant integer"; return false;
+            }
+        }
+        default:
+            why = "needs a constant integer";
+            return false;
+    }
+}
+
 // Constant folding optimization: evaluates literal operations at parse time
 // If both operands are literals, compute the result now instead of at runtime
 JAI_NOINLINE expression_ptr parser::try_constant_fold(expression_ptr left, const token& op, expression_ptr right) {
@@ -2836,11 +2909,20 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
                 JAISCRIPT_TRY_ASSIGN(token val_tok, keyword_value ? checked_result<token>(advance()) : consume(token_type::identifier, "expected enum value name"));
                 auto [val_id, val_view] = symbolizer_->intern_with_view(val_tok.lexeme);
                 decl->values.push_back({val_view, val_id});
-                if (check(token_type::equal)) {
-                    report_error("enum values take no initializer: '" + std::string(val_tok.lexeme) + "' is " +
-                                 std::to_string(decl->values.size() - 1) + ", its position in the enum", peek());
+                script_int number = 0;
+                if (match(token_type::equal)) {
+                    const token& at = peek();
+                    JAISCRIPT_TRY_ASSIGN(expression_ptr init, expression());
+                    std::string why;
+                    if (!enum_initializer_value(init.get(), *decl, decl->numbers, number, why)) {
+                        report_error("enum value '" + std::string(val_tok.lexeme) + "' " + why, at);
+                        return make_error_code(parse_error_code::syntax_error);
+                    }
+                } else if (!decl->numbers.empty() && !ints::try_add(decl->numbers.back(), 1, number)) {
+                    report_error("enum value '" + std::string(val_tok.lexeme) + "' overflows the int range: the value before it is the largest int", val_tok);
                     return make_error_code(parse_error_code::syntax_error);
                 }
+                decl->numbers.push_back(number);
             } while (match(token_type::comma));
         }
 

@@ -352,7 +352,7 @@ public:
 
         test("roundtrip_kitchen_sink", [check_roundtrip]() {
             check_roundtrip(R"(
-                enum Color { Red, Green, Blue }
+                enum Color { Red, Green, Blue = 40, Teal }
                 namespace util { int twice(int v) { return v * 2; } }
                 auto [dx, dy] = [4, 7];
                 int pick = 2;
@@ -368,7 +368,7 @@ public:
                 var t = n == 3 ? "yes" : "no";
                 var maybe = null;
                 var q = maybe?.anything;
-                name + "|" + t + "|" + to_string(dx + dy) + "|" + to_string(util::twice(21)) + "|" + to_string(q == null) + "|" + to_string(Color::Blue);
+                name + "|" + t + "|" + to_string(dx + dy) + "|" + to_string(util::twice(21)) + "|" + to_string(q == null) + "|" + to_string(Color::Blue) + "|" + to_string(Color::Teal);
             )");
         });
 
@@ -460,7 +460,7 @@ public:
             // the format version sits right after the 4-byte magic
             using namespace jaibite_test_detail;
             auto bytes = fresh_engine(false, {})->jaibite("[[warn_mode]];\nextern int q;\nvar v = 1;").save_bytes();
-            check_eq((int)52, (int)bytes[4], "jaibite format version");
+            check_eq((int)53, (int)bytes[4], "jaibite format version");
             {   // import(...) round-trips: literal paths, a group, computed arguments and jai::force
                 const auto dir = jai::foundry::test_temp_directory();
                 { std::ofstream(dir / "jb_imp_a.jai") << "int JB_A = 3;\n"; }

@@ -1090,6 +1090,7 @@ namespace jai {
         std::string_view name;
         uint64_t name_id;
         std::vector<std::pair<std::string_view, uint64_t>> values;  // name, symbol_id pairs
+        std::vector<int64_t> numbers;   // each value's integer: its initializer, else the one before it plus one (the first 0)
 
         enum_decl(const source_location& loc, std::string_view n, uint64_t nid)
             : declaration(loc, node_type::enum_decl), name(n), name_id(nid) {}

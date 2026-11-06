@@ -10117,7 +10117,7 @@ checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
 
     for (size_t i = 0; i < decl->values.size(); ++i) {
         auto key = script_value(std::string(decl->values[i].first), engine_);
-        map_ref[std::move(key)] = make_value(static_cast<script_int>(i));
+        map_ref[std::move(key)] = make_value(static_cast<script_int>(decl->numbers[i]));
     }
 
     environment_->define(decl->name_id, std::move(enum_map));

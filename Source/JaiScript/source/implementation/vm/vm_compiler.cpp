@@ -4084,10 +4084,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		       !o.is_subscript() && o.member_node == k_invalid_u32 && o.load_flags == 0;
 	};
 	// a container binding: a frame slot (a value or a reference the entry resolves), an environment array, or a member of a
-	// frame-slot instance (a plain field the entry resolves once; a user accessor keeps the site on the general form)
+	// frame-slot or environment instance (a plain field the entry resolves once; a user accessor keeps the site on the general form)
 	auto container_operand = [&](const fused_operand& o) {
 		if (o.const_index != k_invalid_u32 || o.is_subscript() || o.load_flags != 0) return false;
-		if (o.member_node != k_invalid_u32) return o.slot != k_invalid_u32 && o.slot < k_typed_slot_mask;
+		if (o.member_node != k_invalid_u32) return o.slot != k_invalid_u32 ? o.slot < k_typed_slot_mask : o.symbol != k_invalid_u32 && !o.direct;
 		return o.slot != k_invalid_u32 || o.symbol != k_invalid_u32;
 	};
 	auto array_site = [&](const fused_index_proto& fp) { return fp.receiver != 3 && container_operand(fp.container); };   // a container the checker proved a map is no element site: its statement stays general (a boundary)

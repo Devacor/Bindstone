@@ -2,6 +2,7 @@
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
+#include <jaiscript/detail/builtin_api_arities.hpp>
 #include <jaiscript/stdlib/containers.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
 #include <jaiscript/core/class_registry.hpp>
@@ -27,6 +28,19 @@
 namespace jai {
 
 namespace {
+    // An in-place builtin (it returns nothing) changes its receiver: the API catalog, which the const rules read, says so too
+    constexpr bool in_place_methods_write() {
+        const auto writes = [](std::string_view a_name) {
+            const detail::BuiltinEffect* effect = detail::findBuiltinEffect(a_name);
+            return effect && effect->effect == detail::BuiltinReceiverEffect::writes;
+        };
+        for (const auto& m : k_array_in_place_methods) { if (!writes(m.name)) { return false; } }
+        for (const auto& m : k_map_in_place_methods) { if (!writes(m.name)) { return false; } }
+        for (std::string_view m : k_string_mutator_method_names) { if (!writes(m)) { return false; } }
+        return writes("reset");
+    }
+    static_assert(in_place_methods_write(), "an in-place builtin the API catalog does not list as mutate");
+
     struct pad_texts { const char* arity; const char* width; const char* empty; const char* fill; };
 
     // pad_left (side -1), pad_right (1) and pad_center (0, the odd byte on the right): the fill tiles from its start on each

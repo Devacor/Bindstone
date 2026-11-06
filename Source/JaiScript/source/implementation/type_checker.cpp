@@ -1955,7 +1955,14 @@ private:
         size_t line = 0;
         if (h.final_known && h.final_library) {
             builtin = true;
-            if (ref_write_reading_method(m->member)) { verdict = const_none; }
+            if (ref_write_reading_method(m->member)) {
+                verdict = const_none;
+            } else if (ref_write_element_callback(m->member)) {
+                const bool text = h.final_ti && (h.final_ti->base_type == script_value_type::jai_string_type || h.final_ti->base_type == script_value_type::jai_utf8_string_type);
+                const callback_write w = text ? callback_write::reads : element_callback_writes(c, m->member, checker_receiver_view().functions);
+                if (w == callback_write::reads) { verdict = const_none; }
+                else if (w == callback_write::unseen) { verdict = const_runtime; }
+            }
         } else if (h.final_known && !h.final_cls.empty()) {
             detail::receiver_write_analysis analysis(checker_receiver_view());
             detail::receiver_write w = analysis.analyze_methods(h.final_cls, m->member);

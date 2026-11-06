@@ -69,8 +69,34 @@ def generated_header(entries):
 	lines += ['\t}};', '', '\tinline const BuiltinArity* findBuiltinArity(uint8_t a_receiver, std::string_view a_name) {',
 		'\t\tfor (const auto& entry : BUILTIN_ARITIES) {',
 		'\t\t\tif (entry.receiver == a_receiver && entry.name == a_name) { return &entry; }',
+		'\t\t}', '\t\treturn nullptr;', '\t}', '']
+	effects = receiver_effects(entries)
+	lines += ["\t// What a builtin method does to its receiver, by name over every builtin receiver (the catalog's effect): one that",
+		'\t// mutates any receiver writes; one that hands the elements to a callback reads unless the callback writes them',
+		'\tenum class BuiltinReceiverEffect : uint8_t { reads, element_callback, writes };',
+		'\tstruct BuiltinEffect {', '\t\tstd::string_view name;', '\t\tBuiltinReceiverEffect effect;', '\t};', '',
+		f'\tinline constexpr std::array<BuiltinEffect, {len(effects)}> BUILTIN_RECEIVER_EFFECTS{{{{']
+	for name, effect in sorted(effects.items()):
+		lines.append(f'\t\t{{"{name}", BuiltinReceiverEffect::{effect}}},')
+	lines += ['\t}};', '', '\tconstexpr const BuiltinEffect* findBuiltinEffect(std::string_view a_name) {',
+		'\t\tfor (const auto& entry : BUILTIN_RECEIVER_EFFECTS) {',
+		'\t\t\tif (entry.name == a_name) { return &entry; }',
 		'\t\t}', '\t\treturn nullptr;', '\t}', '}', '']
 	return '\n'.join(lines)
+
+def receiver_effects(entries):
+	receivers = {'array<T>', 'map<K,V>', 'string', 'utf8_string', 'shared_ptr<T>', 'weak_ptr<T>'}
+	rank = {'reads': 0, 'element_callback': 1, 'writes': 2}
+	result = {}
+	for entry in entries:
+		if entry['form'] != 'method' or entry['owner'] not in receivers: continue
+		words = set(re.split(r'[,;]\s*', entry['effect']))
+		if 'mutate' in words: effect = 'writes'
+		elif 'callback' in words: effect = 'element_callback'
+		elif words <= {'observe', 'copy'}: effect = 'reads'
+		else: raise ValueError('No receiver effect for ' + entry['owner'] + '.' + entry['name'] + ': ' + entry['effect'])
+		if entry['name'] not in result or rank[effect] > rank[result[entry['name']]]: result[entry['name']] = effect
+	return result
 
 def page(data):
 	entries = sorted(data['entries'], key=lambda e: (e['owner'], e['form'], e['name'], e['signature'], e['provider']))

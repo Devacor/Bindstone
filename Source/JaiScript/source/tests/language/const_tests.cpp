@@ -88,6 +88,42 @@ public:
             check_true(contains(r.error, "cannot call 'push' on 'xs': 'xs' is const and 'push' changes it"), r.error);
         });
 
+        test("builtin_methods_write_a_const_as_the_reference_states", [this]() {
+            // the reference's effect column decides: a reading method loads on a const, a mutator is an error, and a method that
+            // hands the elements to a callback reads unless the callback writes through the reference its element binds
+            const auto r = run(R"JS(
+                const array<int> xs = [1, 2, 3, 4];
+                bool big(int x) { return x > 2; }
+                int total = 0;
+                xs.for_each([&](int x) { total += x; });
+                xs.for_each([](int& x) { total += x; });
+                print(xs.reduce((a, b) => a + b, 0), " ", xs.some(x => x > 3), " ", xs.every(big), " ", xs.find_index(x => x == 3), " ", xs.find(x => x > 1));
+                print(total, " ", array::map(xs, x => x * 2), " ", xs);
+                const string s = "abc";
+                print(s.is_valid_utf8(), " ", s.to_bytes().size(), " ", s.find("b"));
+                class C { }
+                const shared_ptr<C> h = new C();
+                print(h.same_as(h), " ", h.cpp_ref_count() > 0);
+                int sum(array<int>& v) { return v.reduce((a, b) => a + b, 0); }
+                print(sum([5, 6]));
+            )JS");
+            check_eq(std::string(""), r.error);
+            check_eq(std::string("10 true false 2 2\n20 [2, 4, 6, 8] [1, 2, 3, 4]\ntrue 3 1\ntrue true\n11\n"), r.output);
+            CHECK_ERROR("const array<int> xs = [1, 2]; xs.slice(1);", "cannot call 'slice' on 'xs': 'xs' is const and 'slice' changes it");
+            CHECK_ERROR("const array<int> xs = [1, 2]; xs.find([](int& x) { x = 0; return true; });", "'xs' is const and 'find' changes it");
+            CHECK_ERROR("const array<int> xs = [1, 2]; xs.for_each([](int& x) { x += 1; });", "'xs' is const and 'for_each' changes it");
+            CHECK_ERROR("void zero(int& x) { x = 0; } const array<int> xs = [1, 2]; xs.for_each(zero);", "'xs' is const and 'for_each' changes it");
+            CHECK_ERROR("void clear_all(array<int>& v) { v.for_each([](int& x) { x = 0; }); } clear_all([1]);", "'clear_all' writes through parameter 'v'");
+            const auto held = run(R"JS(
+                const array<int> xs = [1, 2];
+                function bump = [](int& x) { x += 1; };
+                try { xs.for_each(bump); } catch (e) { print(e); }
+                print(xs);
+            )JS");
+            check_eq(std::string(""), held.error);
+            check_eq(std::string("Cannot call 'for_each' on 'xs': 'xs' is const and 'for_each' changes it\n[1, 2]\n"), held.output);
+        });
+
         // ------------------------------------------------------------------ deep through values
         test("a_const_value_is_deeply_read_only", [this]() {
             CHECK_ERROR("const array<int> a = [1, 2]; a[0] = 5;", "cannot assign to 'a[0]': 'a' is const");

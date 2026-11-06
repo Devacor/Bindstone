@@ -179,4 +179,109 @@ namespace jai::detail {
 		}
 		return nullptr;
 	}
+
+	// What a builtin method does to its receiver, by name over every builtin receiver (the catalog's effect): one that
+	// mutates any receiver writes; one that hands the elements to a callback reads unless the callback writes them
+	enum class BuiltinReceiverEffect : uint8_t { reads, element_callback, writes };
+	struct BuiltinEffect {
+		std::string_view name;
+		BuiltinReceiverEffect effect;
+	};
+
+	inline constexpr std::array<BuiltinEffect, 87> BUILTIN_RECEIVER_EFFECTS{{
+		{"append", BuiltinReceiverEffect::writes},
+		{"at", BuiltinReceiverEffect::reads},
+		{"back", BuiltinReceiverEffect::reads},
+		{"byte_size", BuiltinReceiverEffect::reads},
+		{"clear", BuiltinReceiverEffect::writes},
+		{"code", BuiltinReceiverEffect::reads},
+		{"compare", BuiltinReceiverEffect::reads},
+		{"concat", BuiltinReceiverEffect::writes},
+		{"contains", BuiltinReceiverEffect::reads},
+		{"count", BuiltinReceiverEffect::reads},
+		{"cpp_ref_count", BuiltinReceiverEffect::reads},
+		{"empty", BuiltinReceiverEffect::reads},
+		{"ends_with", BuiltinReceiverEffect::reads},
+		{"erase", BuiltinReceiverEffect::writes},
+		{"every", BuiltinReceiverEffect::element_callback},
+		{"expired", BuiltinReceiverEffect::reads},
+		{"explode", BuiltinReceiverEffect::reads},
+		{"filter", BuiltinReceiverEffect::writes},
+		{"find", BuiltinReceiverEffect::element_callback},
+		{"find_first_not_of", BuiltinReceiverEffect::reads},
+		{"find_first_of", BuiltinReceiverEffect::reads},
+		{"find_index", BuiltinReceiverEffect::element_callback},
+		{"find_last_not_of", BuiltinReceiverEffect::reads},
+		{"find_last_of", BuiltinReceiverEffect::reads},
+		{"first", BuiltinReceiverEffect::reads},
+		{"for_each", BuiltinReceiverEffect::element_callback},
+		{"front", BuiltinReceiverEffect::reads},
+		{"get", BuiltinReceiverEffect::reads},
+		{"has", BuiltinReceiverEffect::reads},
+		{"index_of", BuiltinReceiverEffect::reads},
+		{"insert", BuiltinReceiverEffect::writes},
+		{"is_alnum", BuiltinReceiverEffect::reads},
+		{"is_alpha", BuiltinReceiverEffect::reads},
+		{"is_digit", BuiltinReceiverEffect::reads},
+		{"is_lower", BuiltinReceiverEffect::reads},
+		{"is_space", BuiltinReceiverEffect::reads},
+		{"is_upper", BuiltinReceiverEffect::reads},
+		{"is_valid_utf8", BuiltinReceiverEffect::reads},
+		{"join", BuiltinReceiverEffect::reads},
+		{"keys", BuiltinReceiverEffect::reads},
+		{"last", BuiltinReceiverEffect::reads},
+		{"length", BuiltinReceiverEffect::reads},
+		{"lines", BuiltinReceiverEffect::reads},
+		{"lock", BuiltinReceiverEffect::reads},
+		{"map", BuiltinReceiverEffect::writes},
+		{"pad_center", BuiltinReceiverEffect::writes},
+		{"pad_left", BuiltinReceiverEffect::writes},
+		{"pad_right", BuiltinReceiverEffect::writes},
+		{"partition", BuiltinReceiverEffect::reads},
+		{"pop", BuiltinReceiverEffect::writes},
+		{"push", BuiltinReceiverEffect::writes},
+		{"reader", BuiltinReceiverEffect::reads},
+		{"reduce", BuiltinReceiverEffect::element_callback},
+		{"remove", BuiltinReceiverEffect::writes},
+		{"remove_if", BuiltinReceiverEffect::writes},
+		{"remove_prefix", BuiltinReceiverEffect::writes},
+		{"remove_suffix", BuiltinReceiverEffect::writes},
+		{"repeat", BuiltinReceiverEffect::writes},
+		{"replace", BuiltinReceiverEffect::writes},
+		{"replace_first", BuiltinReceiverEffect::writes},
+		{"replace_last", BuiltinReceiverEffect::writes},
+		{"reset", BuiltinReceiverEffect::writes},
+		{"reverse", BuiltinReceiverEffect::writes},
+		{"rfind", BuiltinReceiverEffect::reads},
+		{"same_as", BuiltinReceiverEffect::reads},
+		{"size", BuiltinReceiverEffect::reads},
+		{"slice", BuiltinReceiverEffect::writes},
+		{"some", BuiltinReceiverEffect::element_callback},
+		{"sort", BuiltinReceiverEffect::writes},
+		{"split", BuiltinReceiverEffect::reads},
+		{"starts_with", BuiltinReceiverEffect::reads},
+		{"substr", BuiltinReceiverEffect::reads},
+		{"to_array", BuiltinReceiverEffect::reads},
+		{"to_bytes", BuiltinReceiverEffect::reads},
+		{"to_float", BuiltinReceiverEffect::reads},
+		{"to_int", BuiltinReceiverEffect::reads},
+		{"to_lower", BuiltinReceiverEffect::writes},
+		{"to_upper", BuiltinReceiverEffect::writes},
+		{"to_utf8", BuiltinReceiverEffect::reads},
+		{"trim", BuiltinReceiverEffect::writes},
+		{"trim_left", BuiltinReceiverEffect::writes},
+		{"trim_right", BuiltinReceiverEffect::writes},
+		{"unique", BuiltinReceiverEffect::reads},
+		{"use_count", BuiltinReceiverEffect::reads},
+		{"utf8_chars", BuiltinReceiverEffect::reads},
+		{"utf8_length", BuiltinReceiverEffect::reads},
+		{"values", BuiltinReceiverEffect::reads},
+	}};
+
+	constexpr const BuiltinEffect* findBuiltinEffect(std::string_view a_name) {
+		for (const auto& entry : BUILTIN_RECEIVER_EFFECTS) {
+			if (entry.name == a_name) { return &entry; }
+		}
+		return nullptr;
+	}
 }

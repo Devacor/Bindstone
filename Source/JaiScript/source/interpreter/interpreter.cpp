@@ -1334,8 +1334,8 @@ checked_result<void> interpreter::visit_unary_expr_t(unary_expr* expr, const rep
             break;
 
         case token_type::plus:
-            // C++'s unary plus: a number is itself, a char promotes to its int
-            if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT) { push_value(std::move(operand)); break; }
+            // C++'s unary plus: a number or a math value is itself, a char promotes to its int
+            if (oi == script_value::TYPEID_INT || oi == script_value::TYPEID_FLOAT || detail::math::is_kind(oi)) { push_value(std::move(operand)); break; }
             if (oi == script_value::TYPEID_CHAR) { push_value(detail::char_promoted(operand, engine_)); break; }
             if (auto landed = user_unary(token_type::plus)) { return std::move(*landed); }
             return checked_result<void>(make_error_code(runtime_error_code::invalid_numeric_operand), "Unary plus requires numeric operand");

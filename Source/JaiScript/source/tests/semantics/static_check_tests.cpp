@@ -1791,7 +1791,7 @@ public:
                 {"array<int> a = [1]; var z = -a;", "Unary minus requires numeric operand"},
                 {"class A {} A a; var z = -a;", "Unary minus requires numeric operand"},
                 {"var z = +\"s\";", "Unary plus requires numeric operand"},
-                {"using math::vec2; vec2 v = vec2(1.0, 2.0); var z = +v;", "Unary plus requires numeric operand"},
+                {"using math::vec2; vec2 v = vec2(1.0, 2.0); var z = ~v;", "Bitwise NOT requires integer operand"},
                 {"float f = 1.5; var z = ~f;", "Bitwise NOT requires integer operand"},
                 {"var z = ~false;", "Bitwise NOT requires integer operand"},
             };

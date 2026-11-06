@@ -4159,7 +4159,7 @@ private:
             case ctype::bool_k: case ctype::string_k: case ctype::utf8_k: case ctype::null_k:
             case ctype::array_k: case ctype::map_k: case ctype::function_k: refused = true; break;
             case ctype::float_k: refused = op == token_type::tilde; break;
-            case ctype::math_k: refused = op != token_type::minus; break;
+            case ctype::math_k: refused = op == token_type::tilde; break;
             case ctype::object_k: {
                 if (operand.cls.empty() || (operand.ti && operand.ti->base_type == script_value_type::jai_shared_ptr_type)) { break; }
                 const std::string_view name = op == token_type::minus ? "-" : op == token_type::plus ? "+" : "~";
@@ -4185,7 +4185,7 @@ private:
             case token_type::bang: return ctype::make(ctype::bool_k);
             case token_type::minus:
             case token_type::plus:
-                return is_numeric(operand.kind) ? operand : ctype{};
+                return is_numeric(operand.kind) || (operand.kind == ctype::math_k && u->op.type == token_type::plus) ? operand : ctype{};
             case token_type::plus_plus:
             case token_type::minus_minus:
                 check_incdec_target(u);

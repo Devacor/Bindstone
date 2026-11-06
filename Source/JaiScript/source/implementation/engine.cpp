@@ -4220,6 +4220,22 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
         // In case it was previously marked as non-serializable
         impl->nonSerializableGlobals.erase(name_view);
     }
+    publish_namespace_entry(name);
+}
+
+// Script reaches the entry as ns::member (and the namespace's own code by its bare name), read-only as every host entry; the
+// qualified global stays what the host API (get_variable, has_function, a later overload) reads
+void engine::publish_namespace_entry(const std::string& name) {
+    const size_t cut = name.rfind("::");
+    if (cut == std::string::npos || cut == 0 || cut + 2 >= name.size()) { return; }
+    auto value = impl->global_environment_->get(name);
+    if (!value) { return; }
+    auto& space = impl->script_namespaces_[symbolize(std::string_view(name).substr(0, cut))];
+    if (!space) { space = std::make_shared<script_namespace_data>(); }
+    const uint64_t member = symbolize(std::string_view(name).substr(cut + 2));
+    if (space->host_layer && !(space->scope && space->scope->get_own_value_ptr(member))) { space->host_layer->define(member, value.value()); }
+    space->variables[member] = std::move(value.value());
+    ++impl->check_surface_epoch_;
 }
 
 // A variadic callable takes its arguments by value: an element reference an argument site minted (`f(a[i])`) reaches it
@@ -4383,6 +4399,7 @@ void engine::register_overload_impl(const std::string& name, size_t arity, scrip
         impl->functionArities[name] = arity;
     }
     impl->refresh_operator_entry(name);
+    publish_namespace_entry(name);
 }
 
 void engine::add_function_with_arity(const std::string& name, script_function func, size_t arity) {

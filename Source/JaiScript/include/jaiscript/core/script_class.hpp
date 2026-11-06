@@ -166,6 +166,10 @@ public:
         return destructor_ast_;
     }
 
+    // The scope of the namespace that declares the class, where its implicit construction reads names; null at program scope
+    void set_namespace_scope(std::shared_ptr<environment> scope) { namespace_scope_ = std::move(scope); }
+    const std::shared_ptr<environment>& namespace_scope() const noexcept { return namespace_scope_; }
+
     // C++ implicit construction: a base chain that runs code (a declared constructor or a C++ class above) must be
     // constructed by a class that declares no constructor of its own
     // Some base runs code when the class is constructed: a C++ base, or a script base with a constructor or such a base of its own
@@ -293,6 +297,7 @@ private:
     std::vector<const function_decl*> private_ctors_;
     std::shared_ptr<function_decl> destructor_ast_;
     std::shared_ptr<function_decl> implicit_default_ctor_;
+    std::shared_ptr<environment> namespace_scope_;
     // Vector (not map) to preserve source declaration order for field initializers.
     std::vector<std::pair<uint64_t, expression_ptr>> field_initializer_asts_;
     mutable uint64_t literal_memo_epoch_ = UINT64_MAX;

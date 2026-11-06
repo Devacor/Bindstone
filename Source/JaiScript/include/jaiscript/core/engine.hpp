@@ -1592,6 +1592,8 @@ namespace jai {
         // only policy difference between the entry points.
         void register_overload_impl(const std::string& name, size_t arity, script_function func,
                                     const std::vector<param_type_info>& param_types, bool create_set_on_first);
+        // a qualified registration ("game::tick") is also a host entry of its namespace, as the library's namespaces register theirs
+        void publish_namespace_entry(const std::string& name);
         friend class held_value;
         void register_held(held_value* held);
         void unregister_held(held_value* held) noexcept;

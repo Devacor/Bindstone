@@ -472,6 +472,123 @@ public:
             check_eq((int64_t)11, result.as_int());
         });
 
+        // C++ [basic.lookup.unqual]: a bare name in a namespace's code finds the namespace's members, then the enclosing
+        // namespaces' (innermost first), then the globals; ::name reaches the global
+        test("namespace_code_reaches_its_members_by_their_bare_names", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                int a() { return 100; }
+                int k = 1000;
+                namespace ns {
+                    int k = 5;
+                    int b() { return a() + k; }
+                    int a() { return 1; }
+                    int c() { return ::a() + ::k; }
+                    auto mk() { return [](int x) { return a() + x; }; }
+                    int sq(int v) { return v * v; }
+                    int sq(int v, int w) { return v * w; }
+                    int pick() { return sq(3) + sq(2, 5); }
+                    coroutine int twice() { yield a(); yield a() + 1; }
+                    int drive() { int total = 0; for (var v : twice()) { total += v; } return total; }
+                }
+                `${ns::b()} ${ns::c()} ${ns::mk()(10)} ${ns::pick()} ${ns::drive()} ${a()} ${k}`
+            )");
+            check_eq(std::string("6 1100 11 19 3 100 1000"), result.as<std::string>());
+        });
+
+        test("a_nested_namespace_searches_the_enclosing_namespaces", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                int depth = 0;
+                namespace outer {
+                    int depth = 1;
+                    int f() { return 10; }
+                    namespace inner {
+                        int depth = 2;
+                        int g() { return f() + depth; }
+                    }
+                }
+                namespace outer::inner::deep { int h() { return f() * depth; } }
+                namespace outer { int f2() { return depth; } }
+                `${outer::inner::g()} ${outer::inner::deep::h()} ${outer::f2()} ${depth}`
+            )");
+            check_eq(std::string("12 20 1 0"), result.as<std::string>());
+        });
+
+        test("a_namespace_class_reads_the_namespace_by_bare_names", [&]() {
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            auto result = eng->execute(R"(
+                namespace shop {
+                    int tax = 3;
+                    int price(int v) { return v + tax; }
+                    class Item {
+                        int base = price(10);
+                        int cost() { return price(base); }
+                        static int listed() { return price(1); }
+                    }
+                    class Crate {
+                        int n = 0;
+                        Crate(int k) { n = price(k); }
+                    }
+                }
+                auto item = shop::Item();
+                `${item.base} ${item.cost()} ${shop::Item::listed()} ${shop::Crate(2).n}`
+            )");
+            check_eq(std::string("13 16 4 5"), result.as<std::string>());
+        });
+
+        test("a_namespace_reload_rebinds_its_bare_calls", [&]() {
+            const auto dir = jai::foundry::test_temp_directory();
+            const auto module = dir / "ns_reload_module.jai";
+            { std::ofstream(module) << "namespace mod { int v() { return 1; } int get() { return v(); } }\n"; }
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            eng->add_include_path(dir.string());
+            check_eq((int64_t)1, eng->execute("import \"ns_reload_module.jai\"; function reload() -> bool { return import(\"ns_reload_module.jai\"); } mod::get()").as_int());
+            { std::ofstream(module) << "namespace mod { int v() { return 22; } int get() { return v(); } int more() { return v() + 1; } }\n"; }
+            check_true(eng->execute("reload();").as_bool(), "the touched module re-ran");
+            check_eq(std::string("22 23"), eng->execute("`${mod::get()} ${mod::more()}`;").as<std::string>());
+            eng->execute("namespace mod { int v() override { return 5; } int v(int x) { return x; } int both() { return v() + v(30); } }");
+            check_eq(std::string("5 35"), eng->execute("`${mod::get()} ${mod::both()}`;").as<std::string>());
+            std::filesystem::remove(module);
+        });
+
+        test("a_qualified_host_registration_is_a_namespace_member", [&]() {
+            // add_global("game::tick") and add_function("game::spawn") register into namespace game, as the library's
+            // namespaces do: game::tick reads them, the namespace's code reads them bare, and script cannot assign them
+            auto eng = make_engine();
+            jai::stdlib::register_all(*eng);
+            int64_t host_tick = 41;
+            eng->add_global_ref("game::tick", host_tick);
+            eng->add_global("game::title", std::string("demo"));
+            eng->add_function("game::spawn", [](int64_t n) -> int64_t { return n * 2; });
+            eng->add_function("game::spawn", [](int64_t n, int64_t m) -> int64_t { return n * m; });
+            host_tick = 42;
+            check_true(eng->has_variable("game::tick") && eng->has_function("game::spawn"), "the host API still names the qualified global");
+            auto result = eng->execute(R"(
+                extern game::tick;
+                namespace game {
+                    int next() { return tick + spawn(1) + spawn(2, 3); }
+                    class Clock { int read() { return tick + 1; } }
+                }
+                var out = `${game::tick} ${game::title} ${game::spawn(5)} ${game::next()} ${game::Clock().read()}`;
+                try { game::tick = 1; } catch (e) { out = out + " | " + e; }
+                out
+            )");
+            check_eq(std::string("42 demo 10 50 43 | Cannot assign to 'tick': it is read-only"), result.as<std::string>());
+            bool refused = false;
+            try { eng->execute("print(game::tock);"); } catch (const static_check_error& err) { refused = std::string(err.what()).find("no member 'tock' in namespace 'game'") != std::string::npos; }
+            check_true(refused, "a member the host did not register");
+            auto bare = eng->check("namespace game { void poke() { tick = 9; } }");
+            check_true(bare.error_count() == 1 && bare.format().find("cannot assign to const 'tick'") != std::string::npos, "a bare store at load: " + bare.format());
+            auto lenient = eng->execute("[[warn_mode]]; namespace game { void poke() { tick = 9; } } var o = \"\"; try { game::poke(); } catch (e) { o = e; } o");
+            check_eq(std::string("Cannot assign to 'tick': it is read-only"), lenient.as<std::string>());
+            check_eq((int64_t)42, host_tick);
+        });
+
         test("namespace_variable_shared_by_every_unit", [&]() {
             auto eng = make_engine();
             jai::stdlib::register_all(*eng);
@@ -479,6 +596,9 @@ public:
             eng->execute("var x = 100; ns::x = 2;");
             auto result = eng->execute("to_string(x) + \" \" + to_string(ns::x) + \" \" + to_string(ns::get())");
             check_eq(std::string("100 2 2"), result.as<std::string>());
+            // a unit that declares the global again versions the global's cell, never the namespace's own
+            auto again = eng->execute("var x = 300; to_string(x) + \" \" + to_string(ns::x) + \" \" + to_string(ns::get())");
+            check_eq(std::string("300 2 2"), again.as<std::string>());
         });
 
         test("a_namespace_functions_frame_holds_its_locals_and_its_temporaries_apart", [&]() {

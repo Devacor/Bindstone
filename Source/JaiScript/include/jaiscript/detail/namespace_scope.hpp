@@ -3,9 +3,9 @@
 #ifndef __JAISCRIPT_DETAIL_NAMESPACE_SCOPE_HPP__
 #define __JAISCRIPT_DETAIL_NAMESPACE_SCOPE_HPP__
 
-// A namespace is a scope (C++): its script-declared variables are the cells of one environment per
-// namespace, parented on the global environment, so a namespace function reads and writes them by
-// their bare names and `ns::x = v` writes the same cell. Shared VERBATIM by the vm and the interpreter:
+// A namespace is a scope (C++): its script-declared variables and functions are the cells of one environment
+// per namespace, parented on the enclosing namespace's (else the global environment), so a namespace function
+// reads and writes them by their bare names and `ns::x = v` writes the same cell. Shared VERBATIM by the vm and the interpreter:
 // the scope, the qualified path of a static member chain and the store target of `ns::x = v`.
 // Host-registered entries (script_namespace_data::variables) stay values the host owns: readable
 // through `ns::name`, never assigned from script.
@@ -30,9 +30,20 @@ namespace jai::detail {
 		ns.classes[engine_access::get_symbolizer(eng)->intern(cut == std::string_view::npos ? decl.name : decl.name.substr(cut + 2))] = std::move(def);
 	}
 
-	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns) {
+	// "a::b" nests in "a" (C++17's nested namespace definition), so its scope is parented on a's and a bare name its code reads
+	// finds b's members, then a's, then the globals
+	inline const std::shared_ptr<environment>& namespace_scope(engine& eng, script_namespace_data& ns, uint64_t namespace_id) {
 		if (!ns.scope) {
-			ns.scope = std::make_shared<environment>(engine_access::get_global_environment(eng), engine_access::get_symbolizer(eng));
+			string_symbolizer& symbols = *engine_access::get_symbolizer(eng);
+			const std::string name(symbols.get_string(namespace_id));
+			std::shared_ptr<environment> parent = engine_access::get_global_environment(eng);
+			if (const size_t cut = name.rfind("::"); cut != std::string::npos) {
+				ns.enclosing = symbols.intern(std::string_view(name).substr(0, cut));
+				auto& enclosing = engine_access::script_namespaces(eng)[ns.enclosing];
+				if (!enclosing) { enclosing = std::make_shared<script_namespace_data>(); }
+				parent = namespace_scope(eng, *enclosing, ns.enclosing);
+			}
+			ns.scope = std::make_shared<environment>(std::move(parent), &symbols);
 			ns.scope->mark_namespace_scope();
 		}
 		return ns.scope;

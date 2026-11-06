@@ -2131,7 +2131,7 @@ namespace jai::vm {
         // compiles is handed to the sink disassembled, in compile order (engine::disassembly_sink)
         void arm_listing();
         void note_compiled(const chunk& compiled);
-        op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data);
+        op_status exec_namespace_variable(const declaration_ptr& member_decl, script_namespace_data& ns_data, uint64_t namespace_id);
         op_status invoke_callee(frame& f, script_value&& callee, std::vector<script_value>& arguments, const call_site& site);
         op_status invoke_native(frame& f, const script_function& func, std::vector<script_value>& arguments, const call_site& site);
         // Typed bound-method mint for this-fallback identifier resolutions (bare

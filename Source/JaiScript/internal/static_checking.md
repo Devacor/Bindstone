@@ -365,7 +365,7 @@ those paths reach, resolved exactly as the runtime resolves them (the importing 
 recursively, each file once (cycles are fine), parsed into the same cache entries the unit's
 later `import` executes through. The union of every unit's top-level names — functions,
 variables, destructured names, classes, enums and their values, namespaces with every `::`
-prefix, namespace members flattened — is handed to the checker as declared names, and the
+prefix, namespace members by their qualified names — is handed to the checker as declared names, and the
 root plus every closure unit whose entry is not already checked at the current surface epoch
 is checked against it. A function in one file may therefore use a global or class another
 file declares, whatever the import order (GLOOM's `maps.jai` reads `G`, declared in

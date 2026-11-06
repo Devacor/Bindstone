@@ -761,10 +761,14 @@ script_value* environment::same_unit_cell(uint64_t id) {
 // The binding of a versioned name for the running code: its own unit's cell when that unit declared the
 // name, else the cell declared most recently among those declared no later than the code's execution
 // (top-level code: its current run; a function: the run that minted it), else the flat cell (a forward
-// reference keeps today's late binding); the host outside any execution (unit 0) reads the newest
+// reference keeps today's late binding); the host outside any execution (unit 0) reads the newest. A nearer scope that
+// declares the name (a namespace's, a block's) holds its own cell, which no version of the global stands for
 script_value* environment::shadowed_cell(uint64_t id) const {
     const environment* root = this;
-    while (root->parent_) { root = root->parent_.get(); }
+    while (root->parent_) {
+        if (root->local_ids_.contains(id)) { return nullptr; }
+        root = root->parent_.get();
+    }
     if (!root->root_ || root->root_->versions.empty()) { return nullptr; }
     const root_tables& r = *root->root_;
     auto versions = r.versions.find(id);

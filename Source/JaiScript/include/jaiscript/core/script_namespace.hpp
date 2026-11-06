@@ -37,7 +37,9 @@ struct script_namespace_data {
     std::unordered_map<uint64_t, std::vector<std::shared_ptr<function_decl>>> functions;  // function_name_id -> overloads
     std::unordered_map<uint64_t, script_value> variables;                                 // variable_name_id -> value
     std::unordered_map<uint64_t, std::shared_ptr<class_definition>> classes;              // class_name_id -> definition
-    std::shared_ptr<environment> scope;   // the cells of the script-declared variables, parented on the global environment (detail/namespace_scope.hpp)
+    std::shared_ptr<environment> scope;   // the cells of the script-declared variables and functions, parented on the enclosing namespace's scope, else the global environment (detail/namespace_scope.hpp)
+    uint64_t enclosing = 0;   // the namespace "a" for "a::b" once the scope exists; 0 for one at program scope
+    std::shared_ptr<environment> host_layer;   // over the scope: the host entries its classes' members read by bare name (detail/namespace_function.hpp)
     std::unordered_map<uint64_t, host_entry_signature> signatures;   // variable_name_id -> a host entry's signature
 };
 

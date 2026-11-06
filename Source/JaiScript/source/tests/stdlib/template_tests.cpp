@@ -171,12 +171,12 @@ public:
 
 		test("scoped_template_renders_built_in_values_escaped", [=, this]() {
 			check_eq(std::string("&lt;ann&gt; Rex 002 B,A"),
-				scoped_error(data, "${args.name} ${args.pet.name} ${args[\"items\"].size():03} ${array::map(args.items, i => string::to_upper(i)).join(\",\")}"));
+				scoped_error(data, "${args[\"name\"]} ${args[\"pet\"].name} ${args[\"items\"].size():03} ${array::map(args[\"items\"], i => string::to_upper(i)).join(\",\")}"));
 			auto eng = engine_for();
-			check_eq(std::string("ab [\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${array::sort(args.items)}\", d).to_string() + \" \" + to_json(d[\"items\"]);").as_string(),
+			check_eq(std::string("ab [\"b\",\"a\"]"), eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; scoped_template_text(\"${array::sort(args[\\\"items\\\"])}\", d).to_string() + \" \" + to_json(d[\"items\"]);").as_string(),
 				"the string::, array:: and map:: functions work on copies");
-			check_eq(std::string("sort changes args.items in place and returns nothing; array::sort(args.items) returns a sorted copy"),
-				eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; string m = \"\"; try { scoped_template_text(\"${args.items.sort()}\", d); } catch (e) { m = e; } m;").as_string(),
+			check_eq(std::string("sort changes obj in place and returns nothing; array::sort(obj) returns a sorted copy"),
+				eng->execute("map<string, var> d = {\"items\": [\"b\", \"a\"]}; string m = \"\"; try { scoped_template_text(\"${args[\\\"items\\\"].sort()}\", d); } catch (e) { m = e; } m;").as_string(),
 				"an in-place method's result is the language's error");
 			check_eq(std::string(" \t\n\v\f\r|"), eng->execute("map<string, var> d; scoped_template_text(\"${string::whitespace}|\", d).to_string();").as_string(), "a namespace value reads");
 		});
@@ -189,7 +189,7 @@ public:
 		test("scoped_template_refuses_a_free_function_call", [=, this]() {
 			const std::string m = scoped_error(data, "${leak()}");
 			check(m.find("a scoped template calls only built-in methods and the string::, array:: and map:: functions: 'leak(...)' is not allowed") != std::string::npos, m);
-			const std::string other = scoped_error(data, "${web::html_escape(args.name)}");
+			const std::string other = scoped_error(data, "${web::html_escape(args[\"name\"])}");
 			check(other.find("a scoped template calls only built-in methods and the string::, array:: and map:: functions: 'html_escape(...)' is not allowed") != std::string::npos, "another namespace's function: " + other);
 			const std::string script_ns = scoped_error("namespace leaks { int f() { return 1; } } " + data, "${leaks::f()}");
 			check(script_ns.find("'f(...)' is not allowed") != std::string::npos, "a script namespace's function: " + script_ns);
@@ -197,33 +197,35 @@ public:
 
 		test("scoped_template_refuses_a_bound_cpp_method", [=, this]() {
 			check_eq(std::string("a scoped template does not call a method of a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${args.host.reveal()}"));
+				scoped_error(data, "${args[\"host\"].reveal()}"));
 			check_eq(std::string("a scoped template reads the plain fields of a script class instance: 'secret' is not one"),
-				scoped_error(data, "${args.host.secret}"), "a host property's getter is host code");
+				scoped_error(data, "${args[\"host\"].secret}"), "a host property's getter is host code");
 		});
 
 		test("scoped_template_refuses_a_script_class_method", [=, this]() {
 			check_eq(std::string("a scoped template does not call a method of a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${args.pet.speak()}"));
+				scoped_error(data, "${args[\"pet\"].speak()}"));
 			check_eq(std::string("a scoped template does not splice a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${args.pet}"), "splicing an instance would run its to_string()");
+				scoped_error(data, "${args[\"pet\"]}"), "splicing an instance would run its to_string()");
 			check_eq(std::string("a scoped template does not call a built-in method over a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${array::map(args.items, i => args.pet).size()}"), "a built-in that would reach an instance's code");
+				scoped_error(data, "${array::map(args[\"items\"], i => args[\"pet\"]).size()}"), "a built-in that would reach an instance's code");
 		});
 
 		test("scoped_template_refuses_an_operator_overload", [=, this]() {
 			check_eq(std::string("a scoped template does not apply an operator to a class instance, a host object or a function: its code could run"),
-				scoped_error(data, "${args.pet == args.pet}"));
+				scoped_error(data, "${args[\"pet\"] == args[\"pet\"]}"));
 		});
 
 		test("scoped_template_refuses_a_function_value_call", [=, this]() {
-			check_eq(std::string("a scoped template does not call function values: 'call(...)' is not allowed"), scoped_error(data, "${args.call()}"));
+			const std::string held = scoped_error(data, "${args[\"call\"]()}");
+			check(held.find("a scoped template does not call function values") != std::string::npos, "a function held in the map: " + held);
+			check_eq(std::string("map has no member 'call'; read the key as [\"call\"]"), scoped_error(data, "${({\"k\": 1}).call()}"), "a map has no methods past its built-ins");
 			const std::string m = scoped_error(data, "${(x => x)(1)}");
 			check(m.find("a scoped template does not call function values") != std::string::npos, m);
 		});
 
 		test("scoped_template_refuses_raw", [=, this]() {
-			const std::string m = scoped_error(data, "${raw(args.name)}");
+			const std::string m = scoped_error(data, "${raw(args[\"name\"])}");
 			check(m.find("raw() is not allowed in a scoped template: its output is always escaped") != std::string::npos, m);
 		});
 
@@ -233,13 +235,13 @@ public:
 				"a script reads both limits, at their defaults");
 			eng->scoped_template_output_limit(16);
 			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
-				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s}${args.s}\", d); } catch (e) { m = e; } m;").as_string());
-			check_eq(std::string("0123456789"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; scoped_template_text(\"${args.s}\", d).to_string();").as_string());
+				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args[\\\"s\\\"]}${args[\\\"s\\\"]}\", d); } catch (e) { m = e; } m;").as_string());
+			check_eq(std::string("0123456789"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; scoped_template_text(\"${args[\\\"s\\\"]}\", d).to_string();").as_string());
 			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
-				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${string::repeat(args.s, 2).size()}\", d); } catch (e) { m = e; } m;").as_string(),
+				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${string::repeat(args[\\\"s\\\"], 2).size()}\", d); } catch (e) { m = e; } m;").as_string(),
 				"a built-in that makes a longer string counts as writing it");
 			eng->scoped_template_output_limit(0);
-			check_eq(std::string("20"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; to_string(scoped_template_text(\"${args.s}${args.s}\", d).to_string().size());").as_string(), "0 is no limit");
+			check_eq(std::string("20"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; to_string(scoped_template_text(\"${args[\\\"s\\\"]}${args[\\\"s\\\"]}\", d).to_string().size());").as_string(), "0 is no limit");
 		});
 
 		test("template_caps_its_output", [=, this]() {
@@ -270,14 +272,28 @@ public:
 			check_eq(std::string("Insufficient privilege: filesystem."), caught("template(p, who)"), "a path known at run time");
 			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(\"" + page + "\", m)"), "a scoped file");
 			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(p, m)"), "a scoped file known at run time");
-			check_eq(std::string("<b>y</b>"), eng->execute("map<string, var> m = {\"who\": \"y\"}; scoped_template_text(\"<b>${args.who}</b>\", m).to_string();").as_string(), "template text needs no file");
+			check_eq(std::string("<b>y</b>"), eng->execute("map<string, var> m = {\"who\": \"y\"}; scoped_template_text(\"<b>${args[\\\"who\\\"]}</b>\", m).to_string();").as_string(), "template text needs no file");
 			eng->enable(privilege::filesystem);
 			check_eq(std::string("<rendered>"), caught("template(\"" + page + "\", who)"), "granted again, the same call renders");
 		});
 
+		test("scoped_template_reads_a_map_key_with_brackets_never_a_dot", [=, this]() {
+			auto eng = engine_for();
+			const std::string load = [&]() {
+				try { eng->execute("map<string, var> m = {\"name\": \"a\"}; scoped_template_text(\"x\\n${args.name}\", m);"); } catch (const std::exception& e) { return std::string(e.what()); }
+				return std::string("<no error>");
+			}();
+			check(load.find("<scoped_template_text>:2:8: error: map has no member 'name'; read the key as [\"name\"]") != std::string::npos, "args.k fails the load: " + load);
+			check_eq(std::string("map has no member 'k'; read the key as [\"k\"]"), eng->execute(
+				"map<string, var> m = {\"inner\": {\"k\": 1}}; string e = \"\"; try { scoped_template_text(\"${args[\\\"inner\\\"].k}\", m); } catch (err) { e = err; } e;").as_string(),
+				"a map the template reaches at run time raises when it renders");
+			check_eq(std::string("1 a"), eng->execute("map<string, var> m = {\"inner\": {\"k\": 1}, \"name\": \"a\"}; scoped_template_text(\"${args[\\\"inner\\\"][\\\"k\\\"]} ${array::map([1], args => args)[0] == 1 ? args[\\\"name\\\"] : \\\"\\\"}\", m).to_string();").as_string(),
+				"brackets read, and a lambda parameter named args is its own");
+		});
+
 		test("scoped_template_reads_a_file_checked_at_load", [=, this]() {
 			folder f("scoped");
-			f.write("card.spider", "<b>${args.name}</b>");
+			f.write("card.spider", "<b>${args[\"name\"]}</b>");
 			f.write("bad.spider", "\n${secret}");
 			auto eng = engine_for();
 			check_eq(std::string("<b>&lt;i&gt;</b>"), run(eng, f, "map<string, var> m = {\"name\": \"<i>\"}; scoped_template(\"card.spider\", m).to_string();"));

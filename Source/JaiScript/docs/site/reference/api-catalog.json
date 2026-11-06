@@ -7734,7 +7734,7 @@
       "availability": "Every engine",
       "display": "scoped_template_text(text: string, args: map) -> web::html",
       "example": {
-        "code": "print(scoped_template_text(\"<b>${args.name}</b>\", {\"name\": \"<i>\"}));",
+        "code": "print(scoped_template_text(\"<b>${args[\\\"name\\\"]}</b>\", {\"name\": \"<i>\"}));",
         "output": "<b>&lt;i&gt;</b>"
       }
     },

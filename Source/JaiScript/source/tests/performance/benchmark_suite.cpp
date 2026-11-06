@@ -1271,10 +1271,12 @@ public:
             )");
         });
 
-        benchmark("String Method Chaining", [this]() {
+        benchmark("String Methods In Place", [this]() {
             test_engine->execute(R"(
                 auto s = "  HELLO WORLD  ";
-                s.trim().to_lower().replace(" ", "_");
+                s.trim();
+                s.to_lower();
+                s.replace(" ", "_");
             )");
         });
     }

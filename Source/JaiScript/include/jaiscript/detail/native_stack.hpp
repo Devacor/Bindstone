@@ -29,7 +29,8 @@ namespace jai::detail {
 		return reinterpret_cast<std::uintptr_t>(__builtin_frame_address(0));
 #else
 		char probe;
-		return reinterpret_cast<std::uintptr_t>(&probe);
+		char* volatile where = &probe;   // MSVC warns C4172 at link-time code generation on &probe returned directly
+		return reinterpret_cast<std::uintptr_t>(where);
 #endif
 	}
 

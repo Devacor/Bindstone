@@ -202,6 +202,57 @@
     }
   }());
 
+  /* ---------------- tabs ---------------- */
+  // Without script every panel shows, stacked, and the tab strip stays hidden.
+  (function () {
+    var groups = document.querySelectorAll(".tabs");
+    for (var g = 0; g < groups.length; g++) {
+      (function (group) {
+        var list = group.querySelector('[role="tablist"]');
+        if (!list) return;
+        var tabs = list.querySelectorAll('[role="tab"]');
+        var select = function (index, focus) {
+          for (var i = 0; i < tabs.length; i++) {
+            var on = i === index;
+            tabs[i].setAttribute("aria-selected", on ? "true" : "false");
+            tabs[i].tabIndex = on ? 0 : -1;
+            var panel = document.getElementById(tabs[i].getAttribute("aria-controls"));
+            if (panel) { panel.hidden = !on; }
+          }
+          if (focus) { tabs[index].focus(); }
+        };
+        var showTarget = function () {
+          var id = decodeURIComponent(location.hash.slice(1));
+          var target = id && document.getElementById(id);
+          if (!target || !group.contains(target)) return;
+          for (var i = 0; i < tabs.length; i++) {
+            var panel = document.getElementById(tabs[i].getAttribute("aria-controls"));
+            if (panel && panel.contains(target)) { select(i, false); target.scrollIntoView(); return; }
+          }
+        };
+        for (var i = 0; i < tabs.length; i++) {
+          (function (index) {
+            tabs[index].addEventListener("click", function () { select(index, false); });
+            tabs[index].addEventListener("keydown", function (e) {
+              var next = -1;
+              if (e.key === "ArrowRight") next = (index + 1) % tabs.length;
+              else if (e.key === "ArrowLeft") next = (index + tabs.length - 1) % tabs.length;
+              else if (e.key === "Home") next = 0;
+              else if (e.key === "End") next = tabs.length - 1;
+              if (next < 0) return;
+              e.preventDefault();
+              select(next, true);
+            });
+          }(i));
+        }
+        list.hidden = false;
+        select(0, false);
+        showTarget();
+        window.addEventListener("hashchange", showTarget);
+      }(groups[g]));
+    }
+  }());
+
   /* ---------------- code + output pairs ---------------- */
   // A sample and the output verified under it become one .pair; the stylesheet puts them
   // side by side when both longest lines fit the column and stacks them otherwise.

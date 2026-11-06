@@ -80,8 +80,8 @@ if(MSVC)
         $<$<CONFIG:Release>:/OPT:REF>  # Remove unreferenced functions
         $<$<CONFIG:Release>:/OPT:ICF>  # Identical COMDAT folding
     )
-    # A /GL library turns every consumer's Release link into a whole-program link
-    if(JAISCRIPT_LTCG)
+    # A /GL library turns every consumer's Release link into a whole-program link (clang-cl accepts /GL and ignores it)
+    if(JAISCRIPT_LTCG AND CMAKE_CXX_COMPILER_ID STREQUAL "MSVC")
         add_compile_options($<$<CONFIG:Release>:/GL>)
         add_link_options($<$<CONFIG:Release>:/LTCG>)
     endif()
@@ -91,6 +91,10 @@ if(MSVC)
         $<$<CONFIG:RelWithDebInfo>:/Ob1>
         $<$<CONFIG:RelWithDebInfo>:/Zi>
     )
+    # The Visual Studio generator compiles one project's files one at a time unless asked
+    if(CMAKE_GENERATOR MATCHES "^Visual Studio")
+        add_compile_options(/MP)
+    endif()
     message(STATUS "JaiScript: MSVC optimizations configured for Release and RelWithDebInfo")
     message(STATUS "  Select 'Release' in Visual Studio dropdown for maximum performance")
 else()

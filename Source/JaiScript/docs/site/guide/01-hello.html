@@ -48,10 +48,10 @@ int v = r.as_int();                             // 4</code></pre></div>
 <p>Three things to know from the start:</p>
 <ol><li><strong>The last expression&#x27;s value is the result of <code>execute()</code>.</strong> No <code>return</code> needed at top level.</li><li><code>set_backend()</code> must be called <strong>before</strong> the first <code>execute()</code> (forbidden after).</li><li><strong>The checker runs first, and it is strict.</strong> A typed mistake it can see (or an undeclared name) throws out of <code>execute()</code> before any statement runs. <code>[[warn_mode]]</code> turns a region&#x27;s errors into warnings; see <a href="02-type-ladder.html#when-a-mismatch-is-caught">the Type Ladder</a>. <a href="13-strict-checking.html">Chapter 13</a> collects the whole story.</li></ol>
 <h2 id="try-it-from-a-terminal">Try it from a terminal<a class="hlink" href="#try-it-from-a-terminal" aria-label="link">&#8203;</a></h2>
-<p>You don&#x27;t need a host program to follow this guide. The build produces a standalone runner, <code>jaiscript</code>: hand it a file and it runs it. Building it is one CMake target, from the repository root:</p>
-<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target jaiscript_runner</code></pre></div>
-<p>The executable lands in <code>build/bin/jaiscript</code> (the target is <code>jaiscript_runner</code> because the library owns the name <code>jaiscript</code>). With that on your path:</p>
+<p>You don&#x27;t need a host program to follow this guide. The build produces a standalone runner, <code>jaiscript</code>: hand it a file and it runs it. The installer in <a href="../index.html#get-jaiscript">Get JaiScript</a> builds it and puts it on your PATH. In a clone, building it is one CMake target, from the repository root:</p>
+<div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --config Release --target jaiscript_runner</code></pre></div>
+<p>The executable lands in <code>build/bin/jaiscript</code> with every generator (the target is <code>jaiscript_runner</code> because the library owns the name <code>jaiscript</code>). With that on your path:</p>
 <div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">jaiscript hello.jai            # run a file, then exit
 jaiscript                      # interactive REPL (:help inside)
 jaiscript --watch hello.jai    # re-run the file every time you save it</code></pre></div>

@@ -78,12 +78,16 @@ classify() {
 			pick headers "the public headers compile alone and warning-free, and the whole-program samples show their includes ($p)" ;;
 	esac
 	case "$p" in
+		docs/site/install.*) pick ci-scripts "the installers ($p)" ;;
+	esac
+	case "$p" in
 		docs/site/* | docs/site_tools/*) pick site "the documentation site ($p)" ;;
 		*.md | internal/* | docs/* | LICENSE* | .gitignore | .gitattributes) NOTES="$NOTES $p" ;;
 		.github/*) pick ci-scripts "the CI workflow ($p)" ;;
 		tools/ci/*) pick ci-scripts "the CI scripts ($p)" ;;
 		tools/lsp/*) pick lsp "the language server ($p)" ;;
 		tools/vscode-jaiscript/*) NOTES="$NOTES $p" ;;
+		tools/install/*) pick ci-scripts "the installers' build script ($p)" ;;
 		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick selftest "the runner's smoke tests ($p)"; pick site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
 		tools/jai_spider/*) pick spider "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
@@ -200,7 +204,14 @@ for check in $CHECKS; do
 		ci-scripts)
 			bad=0
 			for script in "$JAI_ROOT"/tools/ci/*.sh; do bash -n "$script" || bad=1; done
-			if [ "$bad" = 0 ]; then echo "green: ci-scripts (every tools/ci script parses)"; else echo "red: ci-scripts"; FAILED="$FAILED ci-scripts"; fi
+			sh -n "$JAI_ROOT/docs/site/install.sh" || bad=1
+			install_ps1="$JAI_ROOT/docs/site/install.ps1"
+			! command -v cygpath > /dev/null 2>&1 || install_ps1="$(cygpath -m "$install_ps1")"
+			for ps in pwsh powershell; do
+				command -v "$ps" > /dev/null 2>&1 || continue
+				"$ps" -NoProfile -Command "\$e = \$null; [void][System.Management.Automation.Language.Parser]::ParseFile('$install_ps1', [ref]\$null, [ref]\$e); exit [int](\$e.Count -gt 0)" || bad=1
+			done
+			if [ "$bad" = 0 ]; then echo "green: ci-scripts (every tools/ci script and installer parses)"; else echo "red: ci-scripts"; FAILED="$FAILED ci-scripts"; fi
 			;;
 	esac
 done

@@ -450,11 +450,15 @@ namespace jai {
         void binary_scan_limit(size_t bytes);
         size_t binary_scan_limit() const;
 
-        // The most bytes one scoped_template or scoped_template_text render writes; a render that would write past it raises a
-        // catchable error naming the limit, so an untrusted template cannot build an unbounded page. Default 1 MiB (1048576);
-        // zero is no limit. Scripts cannot change it.
+        // The most bytes one template() render writes (default 10 MiB, 10485760) and one scoped_template or scoped_template_text
+        // render writes (default 1 MiB, 1048576); a render that would write past its limit raises a catchable error naming the
+        // limit. Zero is no limit. Scripts read them (reflect::template_output_limit()) and cannot change them; a change follows
+        // the privilege rules: idle or on the execution thread, never inside a parallel region, and a render already started
+        // keeps the limit it started with.
         void template_output_limit(size_t bytes);
         size_t template_output_limit() const;
+        void scoped_template_output_limit(size_t bytes);
+        size_t scoped_template_output_limit() const;
 
         // === PARALLEL EXECUTION (parallel_transform v0; internal/parallel_design.md) ===
         // Worker count the next parallel_transform uses (also the thread_count() builtin).

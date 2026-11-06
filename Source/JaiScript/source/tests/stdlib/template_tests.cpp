@@ -221,10 +221,50 @@ public:
 
 		test("scoped_template_caps_its_output", [=, this]() {
 			auto eng = engine_for();
-			eng->template_output_limit(16);
-			check_eq(std::string("a scoped template's output passed its 16-byte limit (engine::template_output_limit)"), eng->execute(
+			check_eq(std::string("1048576 10485760"), eng->execute("to_string(reflect::scoped_template_output_limit()) + \" \" + reflect::template_output_limit();").as_string(),
+				"a script reads both limits, at their defaults");
+			eng->scoped_template_output_limit(16);
+			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
 				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s}${args.s}\", d); } catch (e) { m = e; } m;").as_string());
 			check_eq(std::string("0123456789"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; scoped_template_text(\"${args.s}\", d).to_string();").as_string());
+			check_eq(std::string("a scoped template's output passed its 16-byte limit: the host raises it with engine::scoped_template_output_limit"), eng->execute(
+				"map<string, var> d = {\"s\": \"0123456789\"}; string m = \"\"; try { scoped_template_text(\"${args.s.repeat(2).size()}\", d); } catch (e) { m = e; } m;").as_string(),
+				"a built-in that makes a longer string counts as writing it");
+			eng->scoped_template_output_limit(0);
+			check_eq(std::string("20"), eng->execute("map<string, var> d = {\"s\": \"0123456789\"}; to_string(scoped_template_text(\"${args.s}${args.s}\", d).to_string().size());").as_string(), "0 is no limit");
+		});
+
+		test("template_caps_its_output", [=, this]() {
+			folder f("cap");
+			f.write("part.spider", "<i>${text}</i>");
+			f.write("page.spider", "<p>${template(\"part.spider\", text)}</p>");
+			auto eng = engine_for();
+			eng->template_output_limit(12);
+			check_eq(std::string("template()'s output passed its 12-byte limit: the host raises it with engine::template_output_limit"), run(eng, f,
+				"string text = \"ab\"; string m = \"\"; try { m = template(\"page.spider\", text).to_string(); } catch (e) { m = e; } m;"));
+			check_eq(std::string("12 1048576"), eng->execute("to_string(reflect::template_output_limit()) + \" \" + reflect::scoped_template_output_limit();").as_string());
+			eng->template_output_limit(16);
+			check_eq(std::string("<p><i>ab</i></p>"), run(eng, f, "string text = \"ab\"; template(\"page.spider\", text).to_string();"), "the host raises it");
+			eng->template_output_limit(0);
+			check_eq(std::string("<p><i>abcdefghijklmnop</i></p>"), run(eng, f, "string text = \"abcdefghijklmnop\"; template(\"page.spider\", text).to_string();"), "0 is no limit");
+		});
+
+		test("templates_read_files_under_the_filesystem_privilege", [=, this]() {
+			folder f("privilege");
+			f.write("page.spider", "<b>${who}</b>");
+			auto eng = engine_for();
+			const std::string page = (f.dir / "page.spider").generic_string();
+			eng->disable(privilege::filesystem);
+			auto caught = [&](const std::string& a_call) {
+				return eng->execute("string who = \"x\"; map<string, var> m = {\"who\": \"y\"}; string p = \"" + page + "\"; string e = \"<rendered>\"; try { " + a_call + "; } catch (err) { e = err; } e;").as_string();
+			};
+			check_eq(std::string("Insufficient privilege: filesystem."), caught("template(\"" + page + "\", who)"), "a literal path");
+			check_eq(std::string("Insufficient privilege: filesystem."), caught("template(p, who)"), "a path known at run time");
+			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(\"" + page + "\", m)"), "a scoped file");
+			check_eq(std::string("Insufficient privilege: filesystem."), caught("scoped_template(p, m)"), "a scoped file known at run time");
+			check_eq(std::string("<b>y</b>"), eng->execute("map<string, var> m = {\"who\": \"y\"}; scoped_template_text(\"<b>${args.who}</b>\", m).to_string();").as_string(), "template text needs no file");
+			eng->enable(privilege::filesystem);
+			check_eq(std::string("<rendered>"), caught("template(\"" + page + "\", who)"), "granted again, the same call renders");
 		});
 
 		test("scoped_template_reads_a_file_checked_at_load", [=, this]() {

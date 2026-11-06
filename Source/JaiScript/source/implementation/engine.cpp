@@ -5366,6 +5366,18 @@ void engine::register_privilege_builtins() {
             }
             return script_value(enabled, this);
         }, this);
+    // the template output limits a host set (engine::template_output_limit): scripts read them, 0 = no limit
+    auto limit_reader = [this](const char* a_name, size_t detail::execution_limits::* a_limit) {
+        return script_value::make_function([this, a_name, a_limit](const std::vector<script_value>& args) -> checked_result<script_value> {
+            if (!args.empty()) {
+                return checked_result<script_value>(make_error_code(runtime_error_code::argument_count_mismatch), "{0}", park_error_text(std::string("reflect::") + a_name + " takes no arguments"));
+            }
+            const size_t bytes = impl->limits_.*a_limit;
+            return script_value(static_cast<script_int>(std::min<size_t>(bytes, static_cast<size_t>(std::numeric_limits<script_int>::max()))), this);
+        }, this);
+    };
+    reflect_namespace->variables[symbolize("template_output_limit")] = limit_reader("template_output_limit", &detail::execution_limits::template_output_limit);
+    reflect_namespace->variables[symbolize("scoped_template_output_limit")] = limit_reader("scoped_template_output_limit", &detail::execution_limits::scoped_template_output_limit);
 }
 
 void engine::max_call_depth(backend_type type, size_t depth) {
@@ -5431,11 +5443,21 @@ size_t engine::binary_scan_limit() const {
 }
 
 void engine::template_output_limit(size_t bytes) {
+    check_privilege_mutation();
     impl->limits_.template_output_limit = bytes;
 }
 
 size_t engine::template_output_limit() const {
     return impl->limits_.template_output_limit;
+}
+
+void engine::scoped_template_output_limit(size_t bytes) {
+    check_privilege_mutation();
+    impl->limits_.scoped_template_output_limit = bytes;
+}
+
+size_t engine::scoped_template_output_limit() const {
+    return impl->limits_.scoped_template_output_limit;
 }
 
 checked_result<script_value> engine::run_template_unit(const std::string& unit, const std::string& source) {

@@ -113,6 +113,10 @@ token lexer::next_token() {
         }
     }
 
+    if (current_ == 0 && source_.compare(0, 2, "#!") == 0) {
+        skip_comment();   // a shebang line: the program loader's, never the script's
+    }
+
     skip_whitespace();
     token_line_ = line_;
     token_column_ = column_;
@@ -182,11 +186,23 @@ token lexer::next_token() {
             if (match('=')) return make_token(token_type::caret_equal);
             return make_token(token_type::caret);
         
-        // Handle #include and #import (# is optional/ignored)
-        case '#':
-            // Skip the # and process the next token
+        // #include and #import are include and import (C++ muscle memory); '#' begins nothing else
+        case '#': {
+            const size_t hash_line = token_line_;
+            const size_t hash_column = token_column_;
             skip_whitespace();
-            return next_token();
+            token next = next_token();
+            if (next.type == token_type::include_keyword || next.type == token_type::import_keyword) {
+                return next;
+            }
+            token_line_ = hash_line;
+            token_column_ = hash_column;
+            if (next.type == token_type::identifier) {
+                const std::string name(next.lexeme);
+                return error_token("unexpected '#' before '" + name + "': JaiScript has no length operator; write " + name + ".size()");
+            }
+            return error_token("unexpected '#': it begins only #include, #import and a first-line #! shebang");
+        }
         
         // Operators that might be compound
         case '+':

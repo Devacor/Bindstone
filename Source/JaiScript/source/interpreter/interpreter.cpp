@@ -4084,6 +4084,8 @@ checked_result<void> interpreter::visit_call_expr_t(call_expr* expr, const repla
             callOutcome.emplace(call_function(*callee_thunk->payload.fn, arguments));
         } else if (arguments.size() == 1 && engine_->sleep_callee(&func)) {
             callOutcome.emplace(engine_->sleep_builtin(arguments[0]));   // the builtin in place (vm op_sleep's twin)
+        } else if (const engine::format_literal_row* literal = expr->literal_format_call() ? engine_->format_literal_for(&func) : nullptr) {
+            callOutcome.emplace(call_value(literal->literal.unchecked_as_function(), arguments));   // its format string (vm op_format_call's twin)
         } else {
             callOutcome.emplace(call_value(func, arguments));
         }
@@ -6004,6 +6006,20 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
         auto out = detail::cast_char_value(operand, *expr, engine_, string_symbolizer_);
         if (!out) {
             return out.error_value();
+        }
+        script_value converted = std::move(out.value());
+        converted.set_type_info(expr->target);
+        push_value(std::move(converted));
+        return {};
+    }
+    if (detail::cast_text_rule_applies(operand, *expr->target)) {   // KEEP BYTE-PARALLEL with the vm's exec_cast
+        auto out = detail::cast_text_value(operand, *expr->target, engine_);
+        if (!out) {
+            return out.error_value();
+        }
+        if (is_unwinding_) [[unlikely]] {
+            push_value(make_value());
+            return {};
         }
         script_value converted = std::move(out.value());
         converted.set_type_info(expr->target);

@@ -206,6 +206,28 @@ public:
             check_eq(std::string("unterminated character literal"), std::string(first_error("var c = 'a").lexeme));
         });
 
+        // Lua's #xs is no length operator here: '#' begins only #include, #import and a first-line #! shebang
+        test("hash_is_a_lex_error_outside_include_import_and_shebang", [this]() {
+            string_symbolizer symbolizer;
+            auto first_error = [&](const std::string& source) {
+                lexer lex(source, &symbolizer, "test.jai");
+                for (const auto& t : lex.tokenize()) {
+                    if (t.type == token_type::error) { return t; }
+                }
+                return token(token_type::eof, "", source_location{});
+            };
+            const token length = first_error("var xs = [1];\nvar n = #xs;");
+            check_eq(std::string("unexpected '#' before 'xs': JaiScript has no length operator; write xs.size()"), std::string(length.lexeme));
+            check_eq(std::size_t(2), length.location.line);
+            check_eq(std::size_t(9), length.location.column);
+            check_eq(std::string("unexpected '#': it begins only #include, #import and a first-line #! shebang"), std::string(first_error("var n = 1 # 2;").lexeme));
+            check_eq(std::string("unexpected '#': it begins only #include, #import and a first-line #! shebang"), std::string(first_error("var n = 1;\n#!not first").lexeme));
+            check_eq(token_type::eof, first_error("#!/usr/bin/env jaiscript\nvar n = 1;").type);
+            check_eq(token_type::eof, first_error("#include \"x.jai\"\n# import \"y.jai\";").type);
+            auto engine = make_engine();
+            check_eq((int64_t)3, engine->execute("#!/usr/bin/env jaiscript\n1 + 2").as_int());
+        });
+
         test("utf16_le_bom_is_a_clear_encoding_error", [this]() {
             string_symbolizer symbolizer;
             lexer lex("\xFF\xFE" "foo", &symbolizer, "test.jai");

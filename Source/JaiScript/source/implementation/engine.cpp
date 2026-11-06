@@ -485,6 +485,7 @@ struct engine::implementation {
     std::array<engine::math_alias_row, engine::k_math_alias_rows> math_alias_rows_{};
     std::unordered_map<uint64_t, uint8_t> math_alias_symbols_;
     std::vector<engine::host_direct_row> host_direct_rows_;
+    std::vector<engine::format_literal_row> format_literal_rows_;
     const uint64_t host_direct_generation_ = 0;
 
     // Current parameter storage for function calls (replaces thread_local)
@@ -2871,6 +2872,7 @@ engine::~engine() {
         impl->runs.release_pools();
         impl->runs.sleep_function = script_value(std::monostate{}, nullptr);
         impl->runs.sleep_identity = nullptr;
+        impl->format_literal_rows_.clear();
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
         if (impl->backend && impl->global_environment_) {
@@ -4216,11 +4218,10 @@ void engine::add_global(const std::string& name, script_value value, bool is_ser
     }
 }
 
-void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
-    func = guard_function(std::move(func), required);
-    // A variadic callable takes its arguments by value: an element reference an argument site minted (`f(a[i])`) reaches it
-    // as the element's value, as a typed parameter's conversion already reads it
-    func = [inner = std::move(func)](const std::vector<script_value>& args) -> checked_result<script_value> {
+// A variadic callable takes its arguments by value: an element reference an argument site minted (`f(a[i])`) reaches it
+// as the element's value, as a typed parameter's conversion already reads it
+static script_function variadic_by_value(script_function func) {
+    return [inner = std::move(func)](const std::vector<script_value>& args) -> checked_result<script_value> {
         for (size_t i = 0; i < args.size(); ++i) {
             if (args[i].is_reference()) [[unlikely]] {
                 std::vector<script_value> values;
@@ -4236,6 +4237,10 @@ void engine::add_variadic_function(const std::string& name, script_function func
         }
         return inner(args);
     };
+}
+
+void engine::add_variadic_function(const std::string& name, script_function func, privilege required) {
+    func = variadic_by_value(guard_function(std::move(func), required));
     // Variadic function registration - handles any number of arguments
     // Register with SIZE_MAX to indicate it's a wildcard function
     constexpr size_t VARIADIC = SIZE_MAX;
@@ -5856,6 +5861,31 @@ void engine::debug_sync_point() {
 
 bool engine::sleep_callee(const void* function) const noexcept {
     return function && function == impl->runs.sleep_identity;
+}
+
+void engine::add_format_literal(std::string_view name, script_function literal, host_direct_invoke invoke, const void* target) {
+    const script_value* global = impl->global_environment_->get_value_ptr(impl->string_symbolizer_.intern(name));
+    if (!global || global->raw_storage_index() != script_value::TYPEID_FUNCTION) { return; }
+    const void* identity = &global->unchecked_as_function();
+    format_literal_row* row = nullptr;
+    for (auto& existing : impl->format_literal_rows_) {
+        if (existing.identity == identity) { row = &existing; }
+    }
+    if (!row) {
+        row = &impl->format_literal_rows_.emplace_back();
+        row->function = *global;
+        row->identity = &row->function.unchecked_as_function();
+    }
+    row->literal = script_value::make_function(variadic_by_value(std::move(literal)), this);
+    row->invoke = invoke;
+    row->target = target;
+}
+
+const engine::format_literal_row* engine::format_literal_for(const void* function) const noexcept {
+    for (const auto& row : impl->format_literal_rows_) {
+        if (row.identity == function) { return &row; }
+    }
+    return nullptr;
 }
 
 void engine::swap_run_entry_state(detail::run_entry_state& s) noexcept {

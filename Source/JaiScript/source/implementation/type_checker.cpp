@@ -318,6 +318,7 @@ public:
     std::unordered_set<std::string> get_registered_template_types() const { return engine_access::get_registered_template_types(engine_); }
     bool has_constant_arguments() const { return engine_access::has_constant_arguments(engine_); }
     bool sleep_callee(const void* fn) const noexcept { return engine_access::sleep_callee(engine_, fn); }
+    bool format_literal_callee(const void* fn) const noexcept { return engine_access::format_literal_for(engine_, fn) != nullptr; }
     uint8_t math_alias_fn(uint64_t symbol) const { return engine_access::math_alias_fn(engine_, symbol); }
     const std::unordered_set<uint64_t>& builtin_method_ids(int kind) const { return engine_access::builtin_method_ids(engine_, kind); }
     type_info* get_type_info_object(const std::string& cls) const { return engine_access::get_type_info_object(engine_, cls); }
@@ -643,6 +644,14 @@ private:
     bool core_sleep_bound() const {
         const script_value bound = eng_.get_variable("sleep");
         return bound.is_function() && eng_.sleep_callee(&bound.unchecked_as_function());
+    }
+    // format(text, values...) over a text the load can see is not a literal: as in C++20, only a constant is a format string
+    void check_format_text(const call_expr* c, const std::vector<ctype>& args) {
+        if (c->arguments.size() < 2 || c->literal_format_call() || args.empty() || (args[0].kind != ctype::string_k && args[0].kind != ctype::utf8_k)) { return; }
+        const script_value bound = eng_.get_variable("format");
+        if (!bound.is_function() || !eng_.format_literal_callee(&bound.unchecked_as_function())) { return; }
+        diag(diag_level::error, c->arguments[0]->location,
+             "the format text of 'format' must be a string literal: vformat(fmt, ...) formats a run-time text, and + or a template string joins text");
     }
     // sleep(seconds): one number, and a place where a run can suspend
     void check_sleep_call(const std::vector<ctype>& args, const source_location& loc) {
@@ -2509,6 +2518,9 @@ private:
 
     std::string assignment_detail(const ctype& src, const ctype& dst) {
         if (literal_int_overflow(src, dst)) { return ": float literal is outside the int range"; }
+        if ((dst.kind == ctype::string_k || dst.kind == ctype::utf8_k) && src.kind != ctype::string_k && src.kind != ctype::utf8_k) {
+            return ": stringify it with to_string(x) or `${x}`";
+        }
         if (dst.kind == ctype::array_k || dst.kind == ctype::map_k) {
             auto issue = container_issue(src, dst);
             if (!issue.empty()) { return ": " + issue; }
@@ -2531,8 +2543,8 @@ private:
                 return src.kind == ctype::float_k || src.kind == ctype::int_k || src.kind == ctype::bool_k ||
                        may_convert_via_method(src, "to_float");
             case ctype::bool_k: return true;     // truthy conversion accepts anything
-            case ctype::string_k: return true;   // to_string conversion accepts anything
-            case ctype::utf8_k: return true;     // the string row
+            case ctype::string_k:
+            case ctype::utf8_k: return src.kind == ctype::string_k || src.kind == ctype::utf8_k || may_convert_via_method(src, "to_string");
             case ctype::char_k: return src.kind == ctype::char_k || may_convert_via_method(src, "to_char");
             case ctype::array_k:
             case ctype::map_k: return container_issue(src, dst).empty();
@@ -4552,6 +4564,7 @@ private:
                 }
                 check_host_call(name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
+                if (name == "format") { check_format_text(c, args); }
                 // a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
                 if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine_access::k_math_alias_rows) { return ctype::make(ctype::float_k); }
                 return host_result_type(name);

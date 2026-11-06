@@ -576,7 +576,7 @@ public:
         const std::string use_int = "r.set(7); r.f = 9; r.show()";
         const std::string v2_string =
             "class R { string f = \"z\";\n"
-            "  int set(int v) { f = v; this.f = v; return v; }\n"
+            "  int set(int v) { f = to_string(v); this.f = to_string(v); return v; }\n"
             "  string show() { return f + \":\" + this.f + \":\" + type_of(f); } }";
         const std::string v2_var =
             "class R { var f = 0;\n"
@@ -590,9 +590,10 @@ public:
             arm(t, v1_int, use_int);
             step(t, v2_string, "reload int -> string");
             check_eq(std::string("VALUE 9:9:string"), step(t, "r.show()", "live value converted"));
-            check_eq(std::string("VALUE 7:7:string"), step(t, "r.set(7); r.show()", "int stores convert through the ladder"));
-            check_eq(std::string("VALUE 9:9:string"), step(t, use_int, "the armed use source converts"));
-            check_eq(std::string("VALUE 5:5:string"), step(t, "r.f = 5; r.show()", "member store converts"));
+            check_eq(std::string("VALUE 7:7:string"), step(t, "r.set(7); r.show()", "the reloaded body stores its text"));
+            const std::string stale = step(t, use_int, "the armed use source stores an int into the string field");
+            check(stale.rfind("ERROR", 0) == 0, "a string field takes no int, identically on both twins: " + stale);
+            check_eq(std::string("VALUE 5:5:string"), step(t, "r.f = \"5\"; r.show()", "member store of text"));
             step(t, v1_int, "the armed unit reloads the class back to int");
             check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "use after reloading back"));
         });
@@ -703,7 +704,8 @@ public:
             arm(t, v1, use);
             step(t, "class B { string bv = \"s\"; int extra = 3; }", "base reload retypes bv and gains a field");
             check_eq(std::string("VALUE 8:8:7:string"), step(t, "d.show()", "inherited value converted on the derived instance"));
-            check_eq(std::string("VALUE 8:8:7:string"), step(t, use, "armed derived stores convert"));
+            const std::string stale = step(t, use, "armed derived stores of an int into the string field");
+            check(stale.rfind("ERROR", 0) == 0, "a string field takes no int, identically on both twins: " + stale);
             check_eq(std::string("VALUE 3"), step(t, "to_string(d.extra)", "base gained a field"));
             const std::string as_int = step(t, "class E : B { int get() { return bv; } } E e = E(); e.get()", "a derived body returning the string field as int");
             check(as_int.rfind("ERROR", 0) == 0, "raises identically on both twins: " + as_int);
@@ -746,7 +748,10 @@ public:
             auto t = make_twins();
             arm(t, v1_int, use_int);
             step(t, v2_string, "reload -> string");
-            for (int pass = 0; pass < 3; ++pass) { check_eq(std::string("VALUE 9:9:string"), step(t, use_int, "reused use after the string retype " + std::to_string(pass))); }
+            for (int pass = 0; pass < 3; ++pass) {
+                const std::string stale = step(t, use_int, "reused use after the string retype " + std::to_string(pass));
+                check(stale.rfind("ERROR", 0) == 0, "an int store into the string field raises identically: " + stale);
+            }
             step(t, v1_int, "reload -> int");
             for (int pass = 0; pass < 3; ++pass) { check_eq(std::string("VALUE 9:9:int"), step(t, use_int, "reused use after reloading back " + std::to_string(pass))); }
             step(t, v2_var, "reload -> var");
@@ -789,7 +794,8 @@ public:
             run("function L(var x) { return x; } class R { static int s = 0; } R::s = 7;");
             run("class R { static string s = \"init\"; }");
             check_eq(std::string("7:int"), run("to_string(R::s) + \":\" + type_of(R::s)"), "value preserved verbatim, old type");
-            check_eq(std::string("9:string"), run("R::s = 9; R::s + \":\" + type_of(R::s)"), "the new declared type governs stores");
+            check_true(run("R::s = 9;").find("ERROR") == 0, "the new declared type governs stores: a string takes no int");
+            check_eq(std::string("9:string"), run("R::s = \"9\"; R::s + \":\" + type_of(R::s)"), "the new declared type governs stores");
             run("class R { static int s = 0; }");
             check_eq(std::string("9:string"), run("to_string(R::s) + \":\" + type_of(R::s)"), "reload back preserves the string verbatim");
             const std::string err = run("R::s = L(\"zz\");");

@@ -1050,7 +1050,7 @@ public:
             both_drained("coroutine function g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine function g()");
             both_drained("coroutine var g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine var g()");
             both_drained("coroutine auto g() { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine auto g()");
-            both_drained("coroutine string g() { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine string g(): the yields and the completion value convert");
+            both_drained("coroutine string g() { yield \"1\"; return \"2\"; }\n" + drive, "1|2#true", "coroutine string g()");
             both_drained("coroutine void g() { yield; yield; }\n" + drive, "null|null|null#true", "coroutine void g()");
         });
 
@@ -1059,7 +1059,7 @@ public:
             const std::string drive = "auto h = g(); drain(h) + \"#\" + to_string(h.done())";
             both_drained("coroutine g() -> int { yield 1; return 2.9; }\n" + drive, "1|2#true", "coroutine g() -> int");
             both_drained("coroutine g() -> auto { yield 1; return 2.9; }\n" + drive, "1|2.9#true", "coroutine g() -> auto");
-            both_drained("coroutine g() -> string { yield 1; return 2; }\n" + drive, "1|2#true", "coroutine g() -> string");
+            both_drained("coroutine g() -> string { yield \"1\"; return \"2\"; }\n" + drive, "1|2#true", "coroutine g() -> string");
         });
 
         test("decl_spellings_methods", [this, both_drained]() {
@@ -1170,8 +1170,8 @@ public:
         test("typed_completion_values", [this, both_drained]() {
             both_drained("coroutine int g() { yield 1.5; return 2.7; }\nauto h = g(); var a = h.next(); var b = h.next(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
                 "int:1|int:2", "the yields and the completion value convert to the declared type");
-            both_drained("coroutine string g() { yield 1; return 2; }\nauto h = g(); h.next(); var b = h.next(); type_of(b) + \":\" + b",
-                "string:2", "string completion converts");
+            both_drained("coroutine string g() { yield \"a\"; var n = 2; return n; }\nauto h = g(); h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
+                "Cannot return int from 'g' (declared -> string)", "a string completion takes text only");
             both_drained("coroutine int g() { yield 1; var x = \"s\"; return x; }\nauto h = g(); h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",
                 "Cannot return string from 'g' (declared -> int)|true", "a var-sourced wrong completion type raises the same text; the handle is done");
             both_drained("class C { coroutine int g() { yield 1; var x = [1]; return x; } }\nauto h = C().g(); h.next(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
@@ -1182,8 +1182,8 @@ public:
             // a yield hands out the declared type like a return: the slot table converts, a mismatch raises the yield's text
             both_drained("coroutine int g() { yield 2.9; yield true; return 0; }\nauto h = g(); var a = h.next(); var b = h.next(); type_of(a) + \":\" + to_string(a) + \"|\" + type_of(b) + \":\" + to_string(b)",
                 "int:2|int:1", "a float and a bool convert into int");
-            both_drained("coroutine string g() { yield 1; return \"x\"; }\nauto h = g(); var a = h.next(); type_of(a) + \":\" + a",
-                "string:1", "an int converts into string");
+            both_drained("coroutine string g() { yield 1; return \"x\"; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t",
+                "Cannot yield int from 'g' (declared -> string)", "an int never converts into string");
             both_drained("coroutine float g() { yield 1; yield 2; return 0.0; }\nstring s = \"\"; for (auto v : g()) { s += type_of(v); } s",
                 "floatfloat", "a range-for drive sees the converted values");
             both_drained("coroutine int g() { yield \"s\"; yield 2.9; return 0; }\nauto h = g(); string t = \"\"; try { h.next(); } catch (e) { t = to_string(e); } t + \"|\" + to_string(h.done())",

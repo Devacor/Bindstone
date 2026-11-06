@@ -2086,12 +2086,14 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
             return slot_conversion::of(verdict::reject);
         case script_value_type::jai_string_type:
             if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::of(verdict::identity);
+            if (ri == script_value::TYPEID_UTF8_STRING) return slot_conversion::converted_to(script_value(v.to_string(), eng));
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
-            return slot_conversion::converted_to(script_value(v.to_string(), eng));
+            return slot_conversion::of(verdict::reject);
         case script_value_type::jai_utf8_string_type:
             if (ri == script_value::TYPEID_UTF8_STRING) return slot_conversion::of(verdict::identity);
+            if (src == script_value_type::jai_string_type && primitive_src) return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
             if (object_src) return slot_conversion::of(verdict::needs_to_x);
-            return slot_conversion::converted_to(script_value::make_utf8(v.to_string(), eng));
+            return slot_conversion::of(verdict::reject);
         case script_value_type::jai_bool_type: {
             // is_truthy minus its object tail
             if (src == script_value_type::jai_bool_type && primitive_src) return slot_conversion::of(verdict::identity);
@@ -2672,6 +2674,19 @@ inline std::optional<script_value> field_store_convert_no_script(const script_va
 	return field_store_value(result.value(), value, declared, eng);
 }
 
+// A reload that retypes a field to text keeps the text a primitive or a container shows, as cast<string> would; an object's
+// to_string() is script, which a reload never runs
+inline std::optional<script_value> reload_retype_text(const script_value& value, const type_info& declared, engine* eng) {
+	const script_value_type target = declared.base_type;
+	const size_t ri = value.raw_storage_index();
+	if ((target != script_value_type::jai_string_type && target != script_value_type::jai_utf8_string_type) || ri == script_value::TYPEID_OBJECT ||
+	    (ri == script_value::TYPEID_CPP_BOUND && value.current_type() == script_value_type::jai_null_type)) {
+		return std::nullopt;
+	}
+	std::string text = value.to_string();
+	return target == script_value_type::jai_string_type ? script_value(std::move(text), eng) : script_value::make_utf8(std::move(text), eng);
+}
+
 // Script-surface member access enforcement kernel — the ONE check both backends call
 // verbatim at every member get/set/compound/call site (parity by construction).
 // ctx = the class whose method body is currently executing (nullptr at top level /
@@ -3212,13 +3227,15 @@ inline void class_instance::migrate_fields(const std::set<uint64_t>& old_field_i
         if (existing && !existing->is_reference() && !existing->is_null() &&
             declared && declared->base_type != script_value_type::jai_any_type) {
             // Hot-reload retype rule: a declared-type change CONVERTS the live
-            // value wherever the assignment table allows (float->int truncates, int->string
-            // via to_string, subtype objects stay); a value with NO conversion (object into
-            // int, string into int) or one that converts only through script (a converting
-            // ctor, to_X()) falls back to the new initializer default. Reloads stay permissive,
-            // never run script and never brick an instance. Same-type fields pass the
-            // kernel's same-type fast path and keep their value.
-            if (auto converted = detail::field_store_convert_no_script(*existing, declared, owner_)) {
+            // value wherever the assignment table allows (float->int truncates, subtype objects
+            // stay) and a retype to text keeps a primitive's or container's text (int->string as
+            // cast<string>); a value with NO conversion (object into int, string into int) or one
+            // that converts only through script (a converting ctor, to_X()) falls back to the new
+            // initializer default. Reloads stay permissive, never run script and never brick an
+            // instance. Same-type fields pass the kernel's same-type fast path and keep their value.
+            auto converted = detail::field_store_convert_no_script(*existing, declared, owner_);
+            if (!converted) { converted = detail::reload_retype_text(existing->deref(), *declared, owner_); }
+            if (converted) {
                 record(id, field_migration_outcome::converted, existing, &*converted);
                 *existing = std::move(*converted);
             } else {

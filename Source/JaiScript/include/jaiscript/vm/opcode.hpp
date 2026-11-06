@@ -326,6 +326,7 @@ namespace jai::vm {
         op_concat_operands, // a = concat_protos index: stack [acc] -> acc + piece1 + ... + pieceN, each piece read at its step (op_concat_append's join)
         op_concat_store,    // a = symbols index, b = frame slot (k_invalid_u32 = env), c = store_flag_*: [snapshot, tail] -> the target takes the tail in place when it still holds the snapshot's node, else op_store's tail over snapshot + tail; [null, value] -> op_store's tail
         op_sleep,           // op_call_from_scratch's word for `sleep(x)`: the pending callee is the core sleep, so engine::sleep_builtin runs in place; any other callee is the call
+        op_format_call,     // op_call_from_scratch's word for print/format with a string literal first (call_expr::literal_format_call): the pending callee a builtin formatter, its literal entry runs; any other callee is the call
         op_get_member_path, // a=nodes index (the chain's outer member_expr), b=member_path_protos index: `a.b.c`, `grid[y][x].cost` read through, each inner link borrowed where it lives, the final value pushed as op_get_member pushes it
         op_switch_table,    // b=switch_tables index: an int subject jumps through the table to its case's body; anything else runs the case tests that follow. In a cell copy a=the subject's cell, c=the first of the loop's switch_targets (per case, then no match)
         op_get_member_this, // a=nodes index (member_expr), b=symbols index of its object, c=the object's this-field slot + 1: `f.x` over a member-class body's bare field f, read where the field lives; a moved layout runs the LOAD and GET_MEMBER it stands for
@@ -686,6 +687,7 @@ namespace jai::vm {
             case opcode::op_concat_store: return "CONCAT_STORE";
             case opcode::op_concat_operands: return "CONCAT_OPERANDS";
             case opcode::op_sleep: return "SLEEP";
+            case opcode::op_format_call: return "FORMAT_CALL";
             case opcode::op_c_load_f: return "C_LOAD_F";
             case opcode::op_c_jlt_ff: return "C_JLT_FF";
             case opcode::op_c_jle_ff: return "C_JLE_FF";

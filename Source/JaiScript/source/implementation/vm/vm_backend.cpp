@@ -12511,6 +12511,40 @@ op_status vm_backend::exec_call_from_scratch(frame& f, const vm_instruction& ins
 	return exec_call_from_scratch_general(f, ins);
 }
 
+// print/format with a string literal first whose probe found a builtin formatter: its literal entry over the arguments where they are
+// (the interpreter's twin is visit_call_expr's); a reference argument takes the entry's general call, any other callee the call
+// op_call_from_scratch would make
+op_status vm_backend::exec_format_call(frame& f, const vm_instruction& ins) {
+	const pending_callee& top = pending_callees_.back();
+	const script_function* callee = top.fn ? nullptr : top.pin ? top.pin.get() : top.host_fn ? top.host_fn
+		: top.value.raw_storage_index() == script_value::TYPEID_FUNCTION ? &top.value.unchecked_as_function() : nullptr;
+	const engine::format_literal_row* literal = callee ? engine_->format_literal_for(callee) : nullptr;
+	if (!literal) { return exec_call_from_scratch(f, vm_instruction{opcode::op_call_from_scratch, ins.a, ins.b, ins.c}); }
+	const std::vector<uint32_t>* staged = top.staged_slots;
+	pop_back_detached(pending_callees_);
+	const size_t argc = ins.a;
+	const size_t base = stack_.size() - argc;
+	bool by_value = true;
+	for (size_t i = base; i < stack_.size(); ++i) { by_value = by_value && !stack_[i].is_reference(); }
+	if (!by_value) {
+		pending_callee& pc = pending_callees_.emplace_back();
+		pc.value = literal->literal;
+		pc.staged_slots = staged;
+		return exec_call_from_scratch_general(f, vm_instruction{opcode::op_call_from_scratch, ins.a, ins.b, ins.c});
+	}
+	struct running { uint32_t& n; explicit running(uint32_t& c) : n(c) { ++n; } ~running() { --n; } } run{host_site_calls_};
+	std::optional<checked_result<script_value>> called;
+	try {
+		called.emplace(literal->invoke(literal->target, stack_.data() + base, argc));
+	} catch (...) {
+		return call_threw(base);
+	}
+	stack_.truncate(base);
+	if (!*called) { return raise_from(*called); }
+	stack_.push_back(std::move(called->value()));
+	return {};
+}
+
 // `sleep(x)` whose probe found the core sleep: the builtin in place (the interpreter's twin is visit_call_expr's); any other callee
 // takes the call op_call_from_scratch would make
 op_status vm_backend::exec_sleep(frame& f, const vm_instruction& ins) {
@@ -19977,6 +20011,19 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		stack_.push_back(std::move(converted));
 		return {};
 	}
+	if (detail::cast_text_rule_applies(operand, *expr->target)) {   // KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr
+		auto out = detail::cast_text_value(operand, *expr->target, engine_);
+		if (!out) {
+			return raise_from(out);
+		}
+		if (is_unwinding_) [[unlikely]] {
+			return {};
+		}
+		script_value converted = std::move(out.value());
+		converted.set_type_info(expr->target);
+		stack_.push_back(std::move(converted));
+		return {};
+	}
 	if (lvalue_source) {
 		script_value copy = clone_for_assignment(operand);
 		operand = std::move(copy);
@@ -20072,6 +20119,8 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 			return exec_place_arg(f, ins);
 		case opcode::op_sleep:
 			return exec_sleep(f, ins);
+		case opcode::op_format_call:
+			return exec_format_call(f, ins);
 		default: return {};
 	}
 }
@@ -20533,6 +20582,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
 			case opcode::op_sleep:
+			case opcode::op_format_call:
 			case opcode::op_ctor_base:
 			case opcode::op_ctor_delegate:
 			case opcode::op_ctor_done:

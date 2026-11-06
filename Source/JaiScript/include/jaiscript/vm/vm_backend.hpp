@@ -2224,6 +2224,7 @@ namespace jai::vm {
         // regex(literal pattern[, flags]): the value over the pattern compiled at load while the callee is the engine's
         // constructor, else the call with the literal texts (the interpreter's visit_call_expr_t takes the same branch)
         op_status exec_regex_constant(frame& f, const vm_instruction& ins);
+        op_status exec_format_call(frame& f, const vm_instruction& ins);
         op_status exec_cells_enter(frame& f, const vm_instruction& ins);
         int math_alias_verdict(frame& f, const call_site& site, uint8_t fn, size_t cache_slot);   // 1 builtin, 0 parked, -1 raised
         op_status park_callee(frame& f, const call_site& site, size_t argc, const script_value& callee_value);

@@ -253,6 +253,45 @@ public:
             auto result = engine->execute("format(42);");
             check_eq(result.as<std::string>(), "42");
         });
+
+        // C++20's constant-format rule: only a string literal written as the first argument of print or format is a format
+        // string; any other text, user input included, prints as it is
+        test("only_a_string_literal_is_a_format_string", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            auto capture = std::make_shared<std::ostringstream>();
+            engine->set_output_stream(capture);
+            engine->execute(R"(
+                string user = "a{}b";
+                print(user, 5);
+                print("x{}y", 5);
+                var held = "{} {}";
+                print(held, 1, 2);
+                array<string> texts = ["{0}"];
+                print(texts[0], 3);
+                print(`t${1}{}`, 4);
+                auto p = print;
+                p("{}", 6);
+                print(vformat(user, 7));
+            )");
+            check_eq(std::string("a{}b5\nx5y\n{} {}12\n{0}3\nt1{}4\n{}6\na7b\n"), capture->str());
+            check_eq(std::string("{}1"), engine->execute(R"(var s = "{}"; format(s, 1);)").as<std::string>());
+            check_eq(std::string("1-{2}"), engine->execute(R"(string s = "{}-{{{}}}"; vformat(s, 1, 2);)").as<std::string>());
+            check_eq(std::string("mine"), engine->execute(R"(function format(a, b) { return "mine"; } format("{}", 1);)").as<std::string>());
+        });
+
+        test("format_of_a_runtime_text_is_a_load_error", [this]() {
+            auto engine = make_engine();
+            stdlib::register_all(*engine);
+            std::string message;
+            try {
+                engine->execute(R"(string s = "{}"; format(s, 1);)");
+            } catch (const static_check_error& e) {
+                message = e.what();
+            }
+            check(message.find("the format text of 'format' must be a string literal: vformat(fmt, ...) formats a run-time text, and + or a template string joins text") != std::string::npos, message);
+            check_eq(std::string("5 units"), engine->execute(R"(int n = 5; format(n, " units");)").as<std::string>());
+        });
     }
 };
 

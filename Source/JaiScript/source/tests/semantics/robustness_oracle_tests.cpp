@@ -122,7 +122,7 @@ private:
 				}
 				int free_f(int v) { return v; }
 				C c;
-				"" + c.f(true) + "," + c.h(5) + "," + c.g(true) + "," + c.b("x") + "," + c.b(0) + "," + C::sf(true) + "," + free_f(true);
+				"" + c.f(true) + "," + c.h("5") + "," + c.g(true) + "," + c.b("x") + "," + c.b(0) + "," + C::sf(true) + "," + free_f(true);
 			)", "1,5,1.0,true,false,101,1");
 		});
 		test("overloaded_methods_score_the_conversion_table", [this]() {
@@ -139,7 +139,7 @@ private:
 					string w(string s, int z) { return "s"; }
 				}
 				D d;
-				d.k(true) + "," + d.k(2.5) + "," + d.k('c') + "," + d.n(true) + "," + d.n(3) + "," + d.w(5) + "," + d.m(true);
+				d.k(true) + "," + d.k(2.5) + "," + d.k("c") + "," + d.n(true) + "," + d.n(3) + "," + d.w(5) + "," + d.m(true);
 			)", "int,int,string,float,float,P5,bool");
 		});
 		test("a_string_never_makes_a_bool_parameter_viable_among_overloads", [this]() {

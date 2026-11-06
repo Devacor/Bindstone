@@ -128,7 +128,7 @@ parameters, returns, instance and static field stores, and the container element
 <tr><td><code>int</code></td><td>int, float (truncates), bool, an object with <code>to_int()</code></td><td>string/char/null/containers = error</td></tr>
 <tr><td><code>float</code></td><td>float, int, bool, an object with <code>to_float()</code></td><td></td></tr>
 <tr><td><code>bool</code></td><td>anything</td><td>truthy conversion</td></tr>
-<tr><td><code>string</code></td><td>anything</td><td><code>to_string</code> conversion; objects use their own <code>to_string()</code> when they define one</td></tr>
+<tr><td><code>string</code></td><td>string, utf8_string, an object with <code>to_string()</code></td><td>int/float/bool/char/null/containers = error; <code>to_string(x)</code>, <code>`${x}`</code> or <code>cast&lt;string&gt;(x)</code> stringify</td></tr>
 <tr><td><code>char</code></td><td>char, an object with <code>to_char()</code></td><td><code>char c = 65</code> is an error at load and at run time; <code>cast&lt;char&gt;(65)</code> is the spelling</td></tr>
 <tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>the checker rejects a literal element, a <code>push</code> or an element store it can see (<code>cannot push into 'array&lt;int&gt;': expected 'int', got 'string'</code>); map keys, <code>var</code>-sourced values and untyped containers meet the runtime element boundary, which runs on every path: an element store says <code>Cannot assign 'string' to element of type 'int'</code>, a push <code>Cannot push 'string' to array&lt;int&gt;</code>, a whole container or literal <code>Cannot store string in array&lt;int&gt;</code>, a map key <code>Cannot use 'int' as a key of type 'string'</code></td></tr>
 <tr><td>object <code>C</code></td><td>null (a typed null); the same class; derived to base; a <code>shared_ptr&lt;C or derived&gt;</code> handle; a converting constructor <code>C(src)</code> through exactly one one-parameter constructor that takes <code>src</code> directly; on plain assignment, a user <code>operator=</code> of <code>C</code> (or an in-script base) that accepts <code>src</code></td><td>an unrelated class with no viable one-argument constructor or <code>operator=</code> = error; array/map/function into an object = error; a registered ancestor's <code>operator=</code> is lenient</td></tr>
@@ -173,14 +173,13 @@ print(Counter::total);
 <h2 id="what-gets-checked">What gets checked<a class="hlink" href="#what-gets-checked" aria-label="link">&#8203;</a></h2>
 <h3 id="calls">Calls<a class="hlink" href="#calls" aria-label="link">&#8203;</a></h3>
 <p>A call is checked when the callee resolves statically. Same-script functions, constructors and methods get
-arity (defaults counted) plus per-argument assignability through the table above. A
-<code>string</code> parameter therefore accepts anything. Overloads error only when <em>no</em> overload
+arity (defaults counted) plus per-argument assignability through the table above. Overloads error only when <em>no</em> overload
 matches. A reference parameter binds only compatible storage (<a href="#references">References</a>).</p>
 <p>Host (C++) functions are checked through <code>engine::host_function_signatures</code>: arity across
 overloads (variadic accepts anything) and only per-argument <em>certainties</em>: a known primitive with
 no builtin conversion to a primitive parameter, like <code>square("s")</code>. Numeric to numeric is fine;
-object and <code>script_value</code> parameters accept anything. One boundary difference to remember: the C++
-side has no numeric-to-string conversion, unlike a script <code>string</code> slot. Callables held in variables
+object and <code>script_value</code> parameters accept anything. Neither side converts a number to a string: a C++
+<code>std::string</code> parameter takes text, as a script <code>string</code> slot does. Callables held in variables
 (lambdas, cross-execute function values) are unchecked. A bound static method (<code>Gate::twice()</code>) is held to
 the arity of its binding; a second <code>static_method</code> of the same name replaces the first, and a binding of unknown
 arity accepts anything.</p>

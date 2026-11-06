@@ -63,7 +63,7 @@ namespace {
 		switch (o) {
 		case opcode::op_t_decl_mov: case opcode::op_t_decl_const: case opcode::op_t_store_mov: case opcode::op_t_store_const: return fam::typed_move;
 		case opcode::op_t_push: case opcode::op_t_load: return fam::typed_elem;
-		case opcode::op_call: case opcode::op_probe_callee: case opcode::op_regex_constant: case opcode::op_call_from_scratch: case opcode::op_sleep: case opcode::op_call_typed: case opcode::op_call_temp:
+		case opcode::op_call: case opcode::op_probe_callee: case opcode::op_regex_constant: case opcode::op_call_from_scratch: case opcode::op_sleep: case opcode::op_format_call: case opcode::op_call_typed: case opcode::op_call_temp:
 		case opcode::op_capture_arg: case opcode::op_take_temp: case opcode::op_inline_guard: case opcode::op_math_guard:
 			return fam::call;
 		case opcode::op_call_method: case opcode::op_probe_member: return fam::method;
@@ -163,7 +163,7 @@ namespace {
 	uint32_t call_site_of(const vm_instruction& ins) {
 		switch (ins.op) {
 		case opcode::op_probe_callee: case opcode::op_regex_constant: return ins.a;
-		case opcode::op_call_from_scratch: case opcode::op_sleep: case opcode::op_call_typed: case opcode::op_call_method: case opcode::op_call_builtin: case opcode::op_call: return ins.b;
+		case opcode::op_call_from_scratch: case opcode::op_sleep: case opcode::op_format_call: case opcode::op_call_typed: case opcode::op_call_method: case opcode::op_call_builtin: case opcode::op_call: return ins.b;
 		case opcode::op_size_temp: return ins.b;
 		case opcode::op_probe_member: return ins.a;
 		default: return k_invalid_u32;

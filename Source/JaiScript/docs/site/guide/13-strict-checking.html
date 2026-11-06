@@ -209,7 +209,7 @@ try { label(3); } catch (e) { print("caught: {}", e); }
 function twice(int n) -&gt; int { return n * 2; }
 var f = twice;
 try { f("four"); } catch (e) { print("caught: {}", e); }
-string s = 5;                                  // string accepts anything, via to_string
+string s = to_string(5);                       // a string takes text: stringify explicitly
 int truncated = 2.9;                           // float to int truncates
 print("{} {}", s + "!", truncated);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot return string from &#x27;label&#x27; (declared -&gt; int)
@@ -218,7 +218,7 @@ caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;twice&#x27; (decl
 <p>The return conversion is part of the <code>return</code> statement, as in C++. A <code>try</code> around the <code>return</code> inside <code>label</code> would catch it there; uncaught, <code>label</code> is the top frame of the stack trace and the error surfaces in the caller, which is what happened above. The other texts in the family follow the same pattern: <code>Cannot initialize 'x' (declared int) with string</code> for a declaration, <code>Cannot assign string to field 'hp' of Stats (declared int)</code> and <code>... to static 's' of C ...</code> for fields, <code>Cannot store string in array&lt;int&gt;</code> at the element boundary.</p>
 <h2 id="casts"><code>cast&lt;T&gt;(e)</code>: the explicit boundary<a class="hlink" href="#casts" aria-label="link">&#8203;</a></h2>
 <p><code>cast</code> is a keyword, and it is how you say &quot;I know&quot; to the type system. It has three forms, and the difference between them is the difference between a copy, an alias and a share, the same three relationships <a href="03-value-semantics.html">Value Semantics</a> is about.</p>
-<ul><li><code>cast&lt;T&gt;(e)</code> yields what <code>T tmp = e;</code> would hold. For primitives that is the conversion table (<code>cast&lt;int&gt;(2.7)</code> is <code>2</code>, <code>cast&lt;string&gt;(5)</code> is <code>"5"</code>). For a class it is a <strong>copy</strong>, typed <code>T</code>, when <code>e</code>&#x27;s class is <code>T</code> or derives from it.</li>
+<ul><li><code>cast&lt;T&gt;(e)</code> yields what <code>T tmp = e;</code> would hold. For primitives that is the conversion table (<code>cast&lt;int&gt;(2.7)</code> is <code>2</code>), and <code>cast&lt;string&gt;(e)</code> stringifies anything, as <code>to_string(e)</code> does (<code>cast&lt;string&gt;(5)</code> is <code>"5"</code>). For a class it is a <strong>copy</strong>, typed <code>T</code>, when <code>e</code>&#x27;s class is <code>T</code> or derives from it.</li>
 <li><code>cast&lt;T&amp;&gt;(e)</code> is a <strong>reference</strong> to the same object, seen as a <code>T</code>. Member reads and writes go through. This is the strict-mode fix for a subtype member on a base-typed receiver.</li>
 <li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing the instance.</li></ul>
 <p>Char converts <em>only</em> here: the assignment table has no char row, so <code>char c = 65</code> is a load error and <code>cast&lt;char&gt;(65)</code> is the spelling. <code>cast&lt;int&gt;(c)</code> and <code>cast&lt;float&gt;(c)</code> are the code point (0&ndash;255), <code>cast&lt;string&gt;(c)</code> the one-character string, and <code>cast&lt;char&gt;(e)</code> takes an int in range or a one-character string.</p>

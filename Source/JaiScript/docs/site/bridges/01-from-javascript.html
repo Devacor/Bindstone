@@ -267,16 +267,16 @@ print(string::to_lower(quiet), " ", quiet);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">ADA
 bob BOB</code></pre></div>
 <h3 id="map-keys">Map keys<a class="hlink" href="#map-keys" aria-label="link">&#8203;</a></h3>
-<p>A bare name before a colon is the key's text, as in JavaScript; a computed key goes through <code>[]</code>. A missing key reads <code>null</code> and adds nothing. A map walks its keys in key order, whatever order they were added in. A dot reads a key that exists (a missing one raises <code>map has no member or key 'mana'</code>, where <code>[]</code> reads null), and a store needs <code>[]</code>:</p>
+<p>A bare name before a colon is the key's text, as in JavaScript; a computed key goes through <code>[]</code>. A missing key reads <code>null</code> and adds nothing. A map walks its keys in key order, whatever order they were added in. Unlike JavaScript, a dot names only a map&#x27;s methods: a key is always read and written with <code>[]</code>, and <code>stats.hp</code> fails the load when the checker sees a map there, or raises when it runs:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var key = "speed";
 var stats = {speed: 3, hp: 10};          // the keys "speed" and "hp"
 stats[key] = 4;
 print(to_json(stats), " ", stats["mana"] == null, " ", stats.size());
-print(stats.hp);
-try { stats.hp = 1; } catch (e) { print("caught: ", e); }</code></pre></div>
+print(stats["hp"]);
+try { print(stats.hp); } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{"hp":10,"speed":4} true 2
 10
-caught: Cannot assign to member of non-object type</code></pre></div>
+caught: map has no member &#x27;hp&#x27;; read the key as [&quot;hp&quot;]</code></pre></div>
 <h3 id="array-helpers">The array helpers<a class="hlink" href="#array-helpers" aria-label="link">&#8203;</a></h3>
 <p>Arrays have JavaScript's helpers, spelled in snake_case: <code>map</code>, <code>reduce</code>, <code>for_each</code>, <code>find</code>, <code>find_index</code>, <code>some</code>, <code>every</code>, <code>concat</code> and <code>filter</code>, with <code>index_of</code> and <code>contains</code> for <code>indexOf</code> and <code>includes</code>, and <code>insert(i, x)</code> for an insert by <code>splice</code>. A callback takes the element, or the element and its index; a predicate answers with <code>true</code>. There is no <code>shift</code> or <code>splice</code>:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var a = [1, 2, 3, 4];

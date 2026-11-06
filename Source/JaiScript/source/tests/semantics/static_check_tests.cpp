@@ -1963,8 +1963,8 @@ public:
         });
 
         test("an_unknown_method_on_a_typed_container_or_string_is_a_load_error", [this]() {
-            // the builtin registry both backends dispatch through is the member list of a declared array, string or utf8_string,
-            // and of a map whose values cannot be called (a map answers other names through its keys)
+            // the builtin registry both backends dispatch through is the member list of a declared array, string, utf8_string or
+            // map (a map's keys are read with [], a stored callable called as m["f"](x))
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
                 jai::stdlib::register_all(*e);
@@ -1974,11 +1974,13 @@ public:
                 check_true(has_diag(r, dlevel::error, "no member 'splice' on 'array<string>'"), r.format());
                 check_true(has_diag(e->check("array<int> a = [1];\na.pusj(2);"), dlevel::error, "no member 'pusj' on 'array<int>' (did you mean 'push'?)"));
                 check_true(has_diag(e->check("string s = \"abc\";\ns.frobnicate();"), dlevel::error, "no member 'frobnicate' on 'string'"));
-                check_true(has_diag(e->check("map<string, int> m = {\"k\": 1};\nm.frobnicate();"), dlevel::error, "no member 'frobnicate' on 'map<string,int>'"));
+                check_true(has_diag(e->check("map<string, int> m = {\"k\": 1};\nm.frobnicate();"), dlevel::error, "map has no member 'frobnicate'; read the key as [\"frobnicate\"]"));
+                check_true(has_diag(e->check("map<string, int> m = {\"k\": 1};\nint v = m.k;"), dlevel::error, "map has no member 'k'; read the key as [\"k\"]"));
+                check_true(has_diag(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm.f(1);"), dlevel::error, "map has no member 'f'; read the key as [\"f\"]"));
                 check_eq((size_t)1, error_count(e->check("utf8_string u = \"a\";\nu.frobnicate();")));
                 // the registry's names, maps that may hold callables, dynamic and element receivers stay clean
                 check_eq((size_t)0, error_count(e->check("array<string> a = [\"x\"];\na.push(\"y\");\nint n = a.size();\nstring s = \"ab\";\ns.to_upper();\nvar k = s.find(\"b\");\nmap<string, int> m = {\"k\": 1};\nvar ks = m.keys();\nbool has = m.contains(\"k\");")));
-                check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm.f(1);\nvar vm = {\"g\": 1};\nvm.anything();\nvar d = [1];\nd.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
+                check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm[\"f\"](1);\nenum Dir { n, s }\nint d = Dir.s;\nvar vm = {\"g\": 1};\nvm.anything();\nvar d = [1];\nd.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
                 auto w = make_engine();
                 w->type_proofs(proofs);
                 check_eq(std::string("array has no member 'splice'"), w->execute("[[warn_mode]]; array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());

@@ -1788,7 +1788,7 @@ public:
                 var m = {"k": 1}; var caught = "";
                 try { m.nosuch(side()); } catch (e) { caught = e; }
                 log + "|" + caught;
-            )").c_str(), "|map has no member or key 'nosuch'", "map receiver", false);
+            )").c_str(), "|map has no member 'nosuch'; read the key as [\"nosuch\"]", "map receiver", false);
             expect_order((std::string(side_prelude) + R"(
                 class W { int x = 0; }
                 shared_ptr<W> o = W(); weak_ptr<W> w = o; var caught = "";
@@ -5871,7 +5871,7 @@ public:
                    " class C : Base { int array() { return 3; } C() : super() {} int map(int x) { return x * count; } static int string() { return 7; } }"
                    " auto c = C(); auto d = C(); to_string(c.map(5)) + \"|\" + to_string(c.array()) + \"|\" + to_string(C::string()) + \"|\" + to_string(Base::count);",
                    "10|3|7|2", "keyword members beside inherited statics");
-            expect("var m = {\"map\": 1}; m.map;", "1", "a map key read with a keyword after the dot");
+            expect("var m = {\"map\": 1}; m.map;", "ERROR: map has no member 'map'; read the key as [\"map\"]", "a keyword after the dot is a member name (a map's key reads with [])");
             expect("class C { int x = 0; } var c = C(); c.map();", "ERROR: C has no member 'map'", "an undeclared keyword member is the no-member error");
             expect("var a = [1, 2]; a.string(5);", "ERROR: array has no member 'string'", "an array answers a keyword member it lacks with the no-member error");
         });

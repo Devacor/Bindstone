@@ -216,7 +216,7 @@ public:
                               "'clear' is a method of map; call it with m.clear() or wrap the call in a lambda", "a map");
             expect("array<int> a = [1]; a.push(2); string s = \"ab\"; to_string(a.size()) + to_string(s.size());", "22",
                    "calls stay admitted", load::strict);
-            expect("map<string, int> m = {\"key\": 4}; m.key;", "4", "a map key that names no method reads", load::strict);
+            expect_load_error("map<string, int> m = {\"key\": 4}; m.key;", "map has no member 'key'; read the key as [\"key\"]", "a map key read with a dot");
         });
 
         test("a_using_name_redeclared_spells_its_qualified_name", [this]() {

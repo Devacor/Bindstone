@@ -288,11 +288,13 @@ def stage(args):
         shutil.rmtree(staging)
     os.makedirs(staging)
     tar = tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", commit, PACKAGE, binary=True)))
-    files = {}
+    files, executable = {}, set()
     for m in tar.getmembers():
         if m.isfile():
             rel = m.name[len(PACKAGE) + 1:]
             files[rel] = tar.extractfile(m).read()
+            if m.mode & 0o111:
+                executable.add(rel)
     note(f"source {commit}: {len(files)} tracked files under {PACKAGE}")
 
     # 2. allowlist, deny by default
@@ -404,7 +406,8 @@ def stage(args):
     manifest = {
         "source_commit": commit,
         "release_date": date,
-        "files": {rel: {"sha256": hashlib.sha256(data).hexdigest(), "rule": admitted.get(rel, "generated")}
+        "files": {rel: {"sha256": hashlib.sha256(data).hexdigest(), "rule": admitted.get(rel, "generated"),
+                        "executable": rel in executable}
                   for rel, data in sorted(kept.items())},
         "excluded": excluded,
     }
@@ -490,6 +493,10 @@ def publish(args):
     message = args.message or "JaiScript " + args.version
     # --force: tracked files an ignore rule covers (tools/vscode-jaiscript/out/, examples/jaidoom's jaidoom_net.json) ship too
     subprocess.run(["git", "-C", target, "add", "-A", "--force"], check=True)
+    # a Windows checkout adds every file as 100644: the source's executable bits are set in the index directly
+    executable = [rel for rel, entry in manifest["files"].items() if entry.get("executable")]
+    if executable:
+        subprocess.run(["git", "-C", target, "update-index", "--chmod=+x", "--"] + executable, check=True)
     subprocess.run(["git", "-C", target, "commit", "-q", "-m", message], check=True)
     subprocess.run(["git", "-C", target, "tag", "-a", "v" + args.version, "-m", message], check=True)
     print(f"published {message} (tag v{args.version}) to {target}")

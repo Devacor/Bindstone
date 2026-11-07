@@ -3,6 +3,7 @@
 // Admission violations ERROR with location text - never silently serial.
 
 #include <jaiscript/testing/foundry.hpp>
+#include "../case_table.hpp"
 #include <map>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
@@ -106,10 +107,13 @@ public:
 			e->parallel_thread_count(2);
 			check_true(e->execute(src + "pb[11] == 344.0;").as_bool(), "the second region reads the rebound globals");
 		});
-		test("worker_body_alternating_two_chunks_matches_serial", [this]() {
-			// each call pushes a frame of the other chunk: its first lookup has no rows yet, a reused record carries another chunk's
-			auto e = make_engine();
-			const std::string src = R"(
+		// every body shape (strings, float math, nested containers, recursion, captured scalars, maps and read-only methods,
+		// a weight fn) lands what the serial loop lands at every worker count
+		test("parallel_transform_lands_what_the_serial_loop_lands", [this]() {
+			struct serial_case { const char* code; std::vector<size_t> workers; bool stdlib = false; };
+			const serial_case cases[] = {
+				// each call pushes a frame of the other chunk: its first lookup has no rows yet, a reused record carries another chunk's
+				{R"(
 				array<float> G = [0.5, 1.5, 2.5];
 				int N = 3;
 				function fa(float x) -> float { float s = 0.0; for (int i = 0; i < N; ++i) { s += G[i] * x; } return s; }
@@ -123,12 +127,8 @@ public:
 				var p = parallel_transform(ys, row);
 				var s = []; for (auto y : ys) { s.push(row(y)); }
 				[p, s];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 4});
-		});
-		test("int_transform_matches_serial_1_2_8", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
+				)", {1, 2, 4}},
+				{R"(
 				var a = [];
 				for (var i = 0; i < 200; i++) { a.push(i); }
 				int f(int x) { return x * 3 - 1; }
@@ -136,14 +136,8 @@ public:
 				var sout = [];
 				for (auto x : a) { sout.push(f(x)); }
 				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
-		test("string_transform_with_methods_matches_serial", [this]() {
-			auto e = make_engine();
-			jai::stdlib::register_all(*e);
-			const std::string src = R"(
+				)", {1, 2, 8}},
+				{R"(
 				var a = [];
 				for (var i = 0; i < 64; i++) { a.push("item_" + to_string(i * 7)); }
 				string f(string s) {
@@ -154,8 +148,132 @@ public:
 				var sout = [];
 				for (auto x : a) { sout.push(f(x)); }
 				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
+				)", {1, 2, 8}, true},
+				{R"(
+				var a = [];
+				for (var i = 0; i < 128; i++) { a.push(1.0 + i * 0.37); }
+				float f(float x) { return math::sqrt(x) * 2.0 + math::pow(x, 0.25) - math::floor(x); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 2, 8}, true},
+				{R"(
+				var a = [];
+				for (var i = 0; i < 40; i++) { a.push([i, i * 2, i * 3]); }
+				int f(var row) {
+					var total = 0;
+					for (auto& v : row) { total += v; }
+					return total;
+				}
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+				{R"(
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push({"x": i, "y": i * i}); }
+				int f(var m) { return m["x"] + m["y"]; }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+				{R"(
+				int helper(int x) { return x % 7 + 1; }
+				int fib(int n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); }
+				int f(int x) { return fib(helper(x)) * 10 + helper(x); }
+				var a = [];
+				for (var i = 0; i < 60; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+				{R"(
+				var a = [];
+				for (var i = 0; i < 24; i++) { a.push(i); }
+				var f(int x) { return [x, x * x, "n" + to_string(x)]; }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}, true},
+				{R"(
+				var scale = 4;
+				var bias = 0.5;
+				var enabled = true;
+				var tag = "v";
+				string f(int x) {
+					var v = enabled ? x * scale + bias : 0.0;
+					return tag + to_string(v);
+				}
+				var a = [];
+				for (var i = 0; i < 48; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 2, 8}, true},
+				// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot
+				{R"(
+				var lut = {};
+				lut[1] = 10; lut[2] = 20; lut[3] = 30; lut[4] = 40;
+				var names = {"a": 1, "b": 2};
+				int f(int x) {
+					var hit = lut[x % 4 + 1];
+					return hit + names["a"] + names["b"];
+				}
+				var a = [];
+				for (var i = 0; i < 40; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+				// Nested containers (array of arrays) and by-VALUE iteration over a captured
+				// container: both provision as snapshots and match serial exactly
+				{R"(
+				var table = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
+				int f(int x) {
+					var total = table[x % 3][x % 2] * 100;
+					for (auto row : table) {
+						for (auto v : row) { total += v; }
+					}
+					return total + table.size();
+				}
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(i); }
+				var pout = parallel_transform(a, f);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+				// Read-only builtin methods on captured receivers are admitted (size/contains);
+				// the weight fn runs at the barrier on the engine backend, so its enclosing
+				// reads are plain global reads
+				{R"(
+				var pool = [5, 6, 7, 8];
+				var heavy = 3.0;
+				int f(int x) {
+					if (pool.contains(x % 10)) { return x + pool.size(); }
+					return x;
+				}
+				float w(int x) { return heavy; }
+				var a = [];
+				for (var i = 0; i < 40; i++) { a.push(i); }
+				var pout = parallel_transform(a, f, w);
+				var sout = [];
+				for (auto x : a) { sout.push(f(x)); }
+				return [pout, sout];
+				)", {1, 4}},
+			};
+			check_each(cases, [this](const serial_case& c) {
+				auto e = make_engine();
+				if (c.stdlib) { jai::stdlib::register_all(*e); }
+				for (size_t workers : c.workers) { check_matches_serial_at(e, c.code, {workers}); }
+			});
 		});
 
 		// A worker body that copies its element string and mutates the copy: the copy-on-write
@@ -188,21 +306,6 @@ public:
 			}
 		});
 
-		test("float_math_whitelist_matches_serial", [this]() {
-			auto e = make_engine();
-			jai::stdlib::register_all(*e);
-			const std::string src = R"(
-				var a = [];
-				for (var i = 0; i < 128; i++) { a.push(1.0 + i * 0.37); }
-				float f(float x) { return math::sqrt(x) * 2.0 + math::pow(x, 0.25) - math::floor(x); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
 		test("byte_identical_across_thread_counts", [this]() {
 			auto e = make_engine();
 			jai::stdlib::register_all(*e);
@@ -220,66 +323,6 @@ public:
 			auto r8 = e->execute(src);
 			check_true(arrays_equal(r1, r2));
 			check_true(arrays_equal(r1, r8));
-		});
-
-		test("nested_array_and_map_elements", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				var a = [];
-				for (var i = 0; i < 40; i++) { a.push([i, i * 2, i * 3]); }
-				int f(var row) {
-					var total = 0;
-					for (auto& v : row) { total += v; }
-					return total;
-				}
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 4});
-
-			const std::string map_src = R"(
-				var a = [];
-				for (var i = 0; i < 32; i++) { a.push({"x": i, "y": i * i}); }
-				int f(var m) { return m["x"] + m["y"]; }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, map_src, {1, 4});
-		});
-
-		test("transitive_calls_and_recursion", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				int helper(int x) { return x % 7 + 1; }
-				int fib(int n) { if (n < 2) { return n; } return fib(n - 1) + fib(n - 2); }
-				int f(int x) { return fib(helper(x)) * 10 + helper(x); }
-				var a = [];
-				for (var i = 0; i < 60; i++) { a.push(i); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 4});
-		});
-
-		test("fn_result_arrays", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				var a = [];
-				for (var i = 0; i < 24; i++) { a.push(i); }
-				var f(int x) { return [x, x * x, "n" + to_string(x)]; }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			jai::stdlib::register_all(*e);
-			check_matches_serial_at(e, src, {1, 4});
 		});
 
 		test("thread_count_builtin", [this]() {
@@ -331,42 +374,68 @@ public:
 
 		// === Admission: contract A - violations ERROR (never silent-serial) ===
 
-		test("rejects_enclosing_write", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+		// a body the region cannot admit is refused with its verdict (the run returns the caught error text)
+		test("parallel_transform_refuses_what_it_cannot_admit_with_its_verdict", [this]() {
+			struct verdict_case { const char* code; std::vector<const char*> verdict; };
+			const verdict_case cases[] = {
+				{R"(
 				var g = 0;
 				int f(int x) { g = x; return x; }
 				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
 				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_transform: body writes enclosing state 'g'") != std::string::npos);
-			check_true(msg.find(" at ") != std::string::npos);   // location suffix
+				)", {"parallel_transform: body writes enclosing state 'g'", " at "}},
+				{R"(
+				int f(int x) { print(x); return x; }
+				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				return "no-error";
+				)", {"host function 'print' is marked serial_function() and cannot be called in a parallel body"}},
+				// a coroutine's minted value is not a plain script function payload
+				{R"(
+				coroutine int f(int x) { yield x; return x; }
+				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				return "no-error";
+				)", {"parallel_transform"}},
+				{R"(
+				int f(int x) {
+					auto g = [](int y) { return y * 2; };
+					return g(x);
+				}
+				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				return "no-error";
+				)", {"lambdas are not allowed in a parallel body"}},
+				{R"(
+				int f(int x) { var h = 5; return h(x); }
+				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				return "no-error";
+				)", {"call target 'h' is not statically resolvable"}},
+				{R"(
+				int g(int& x) { return x; }
+				try { parallel_transform([1, 2, 3], g); } catch (e) { return e; }
+				return "no-error";
+				)", {"may not take its element by reference"}},
+				{R"(
+				int g(int y) { return y; }
+				int f(int x) { parallel_transform([1], g); return x; }
+				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
+				return "no-error";
+				)", {"host function 'parallel_transform' is marked serial_function() and cannot be called in a parallel body"}},
+				{R"(
+				try { parallel_transform(5, thread_count); } catch (e) { return e; }
+				return "no-error";
+				)", {"first argument must be an array"}},
+				{R"(
+				try { parallel_transform([1, 2], 7); } catch (e) { return e; }
+				return "no-error";
+				)", {"fn must be a script-defined function"}},
+			};
+			check_each(cases, [](const verdict_case& c) {
+				auto e = make_engine();
+				const auto msg = e->execute(c.code).as<std::string>();
+				for (const char* part : c.verdict) { check_true(msg.find(part) != std::string::npos, msg); }
+			});
 		});
 
 		// === Captured reads (v0.5): enclosing state is READABLE, proven-read-only ===
-
-		test("captures_enclosing_scalar_reads", [this]() {
-			auto e = make_engine();
-			jai::stdlib::register_all(*e);
-			const std::string src = R"(
-				var scale = 4;
-				var bias = 0.5;
-				var enabled = true;
-				var tag = "v";
-				string f(int x) {
-					var v = enabled ? x * scale + bias : 0.0;
-					return tag + to_string(v);
-				}
-				var a = [];
-				for (var i = 0; i < 48; i++) { a.push(i); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
 
 		test("captured_grid_subscript_borrow", [this]() {
 			auto e = make_engine();
@@ -755,73 +824,6 @@ public:
 			}
 		});
 
-		test("captured_map_reads", [this]() {
-			auto e = make_engine();
-			// Primitive-keyed primitive map -> borrow-eligible; string keys -> snapshot
-			const std::string src = R"(
-				var lut = {};
-				lut[1] = 10; lut[2] = 20; lut[3] = 30; lut[4] = 40;
-				var names = {"a": 1, "b": 2};
-				int f(int x) {
-					var hit = lut[x % 4 + 1];
-					return hit + names["a"] + names["b"];
-				}
-				var a = [];
-				for (var i = 0; i < 40; i++) { a.push(i); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 4});
-		});
-
-		test("captured_nested_containers_and_iteration", [this]() {
-			auto e = make_engine();
-			// Nested containers (array of arrays) and by-VALUE iteration over a captured
-			// container: both provision as snapshots and match serial exactly
-			const std::string src = R"(
-				var table = [[1, 2, 3], [4, 5, 6], [7, 8, 9]];
-				int f(int x) {
-					var total = table[x % 3][x % 2] * 100;
-					for (auto row : table) {
-						for (auto v : row) { total += v; }
-					}
-					return total + table.size();
-				}
-				var a = [];
-				for (var i = 0; i < 32; i++) { a.push(i); }
-				var pout = parallel_transform(a, f);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 4});
-		});
-
-		test("captured_readonly_methods_and_weight_fn_reads", [this]() {
-			auto e = make_engine();
-			// Read-only builtin methods on captured receivers are admitted (size/contains);
-			// the weight fn runs at the barrier on the engine backend, so its enclosing
-			// reads are plain global reads
-			const std::string src = R"(
-				var pool = [5, 6, 7, 8];
-				var heavy = 3.0;
-				int f(int x) {
-					if (pool.contains(x % 10)) { return x + pool.size(); }
-					return x;
-				}
-				float w(int x) { return heavy; }
-				var a = [];
-				for (var i = 0; i < 40; i++) { a.push(i); }
-				var pout = parallel_transform(a, f, w);
-				var sout = [];
-				for (auto x : a) { sout.push(f(x)); }
-				return [pout, sout];
-			)";
-			check_matches_serial_at(e, src, {1, 4});
-		});
-
 		test("captured_snapshot_result_never_aliases", [this]() {
 			auto e = make_engine();
 			// `return s` shares the worker's snapshot handle - the result path must
@@ -963,55 +965,6 @@ public:
 			check_eq((int64_t)21, vals[1].as_int());
 		});
 
-		test("rejects_host_call_print", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				int f(int x) { print(x); return x; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r.as<std::string>().find("host function 'print' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
-		});
-
-		test("rejects_yield_and_lambda", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				coroutine int f(int x) { yield x; return x; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
-			)");
-			// A coroutine's minted value is not a plain script function payload
-			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_transform") != std::string::npos);
-
-			auto r2 = e->execute(R"(
-				int f(int x) {
-					auto g = [](int y) { return y * 2; };
-					return g(x);
-				}
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r2.as<std::string>().find("lambdas are not allowed in a parallel body") != std::string::npos);
-		});
-
-		test("rejects_dynamic_callee_and_ref_param", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				int f(int x) { var h = 5; return h(x); }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r.as<std::string>().find("call target 'h' is not statically resolvable") != std::string::npos);
-
-			auto r2 = e->execute(R"(
-				int g(int& x) { return x; }
-				try { parallel_transform([1, 2, 3], g); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r2.as<std::string>().find("may not take its element by reference") != std::string::npos);
-		});
-
 		// Elements must be value-semantic: a class with an open (var) field is not a flat
 		// value class, and a shared_ptr element with a live alias would diverge from the
 		// serial loop (the barrier may not clone it apart) - both name the offending leaf
@@ -1127,17 +1080,6 @@ public:
 			)");
 			auto msg3 = r3.as<std::string>();
 			check_true(msg3.find("parallel_transform: element 0: value is not value-semantic (object)") != std::string::npos, msg3);
-		});
-
-		test("rejects_nested_parallel_transform", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				int g(int y) { return y; }
-				int f(int x) { parallel_transform([1], g); return x; }
-				try { parallel_transform([1, 2, 3], f); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r.as<std::string>().find("host function 'parallel_transform' is marked serial_function() and cannot be called in a parallel body") != std::string::npos);
 		});
 
 		// Member chains root at the element (the worker's private by-value copy), a local or a captured object (read only);
@@ -1856,20 +1798,6 @@ public:
 			check_eq((int64_t)64, r2.as_int());
 		});
 
-		test("usage_errors", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				try { parallel_transform(5, thread_count); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r.as<std::string>().find("first argument must be an array") != std::string::npos);
-
-			auto r2 = e->execute(R"(
-				try { parallel_transform([1, 2], 7); } catch (e) { return e; }
-				return "no-error";
-			)");
-			check_true(r2.as<std::string>().find("fn must be a script-defined function") != std::string::npos);
-		});
 	}
 };
 
@@ -2247,11 +2175,14 @@ public:
 			check_eq((int)detail::parallel_capture_kind::borrow, (int)capture_kind(e, "grid"));
 		});
 
-		test("inlined_leaf_inside_a_worker_body_matches_serial_1_2_8", [this]() {
-			// A leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
-			// worker's root, which the guard accepts); the values match the serial loop at every worker count
-			auto e = make_engine();
-			const std::string src = R"(
+		// in-place element writes (rows, typed objects and their nested fields, subclasses in a base array, references to members
+		// and map pairs) with captured reads, helper calls and grafted leaves land what the serial loop lands at every worker count
+		test("parallel_for_lands_what_the_serial_loop_lands", [this]() {
+			struct serial_case { const char* code; std::vector<size_t> workers; bool stdlib = false; };
+			const serial_case cases[] = {
+				// A leaf grafted into a parallel_for body runs in the workers too (the worker's copy of the callee closes over the
+				// worker's root, which the guard accepts); the values match the serial loop at every worker count
+				{R"(
 				class P { int kind = 1; float x = 0.0; float vx = 0.1; int life = 10; }
 				int CAP = 4;
 				void step(var& p) { int kind = p.kind; if (kind == 0) { return; } float x = p.x; float vx = p.vx; int life = p.life; life = life - 1;
@@ -2265,20 +2196,122 @@ public:
 				for (auto& p : a) { ra.push(p.x); ra.push(p.life); ra.push(p.kind); }
 				for (auto& p : b) { rb.push(p.x); rb.push(p.life); rb.push(p.kind); }
 				return [ra, rb];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-		test("inplace_row_mutation_matches_serial_1_2_8", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
+				)", {1, 2, 8}},
+				{R"(
 				var a = [];
 				var b = [];
 				for (var i = 0; i < 200; i++) { a.push([i, 0]); b.push([i, 0]); }
 				parallel_for (auto& p : a) { p[1] = p[0] * 3 - 1; }
 				for (auto& p : b) { p[1] = p[0] * 3 - 1; }
 				return [a, b];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
+				)", {1, 2, 8}},
+				// a reference bound to a member of the element or of a body local, a structured binding over the element's map and a
+				// map pair's .second write through as the serial loop's do
+				{R"(
+				class P { float x = 0.0; }
+				class B { P pos; array<int> hist; map<string, int> m = {"a": 1, "b": 2}; }
+				array<B> par = []; array<B> ser = [];
+				for (int k = 0; k < 40; k++) { par.push(B()); ser.push(B()); }
+				parallel_for (auto& b : par) {
+					auto& p = b.pos; p.x += 1.5;
+					auto& h = b.hist; h.push(cast<int>(p.x));
+					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
+					for (auto& [k, v] : b.m) { v += 10; }
+					for (auto& pr : b.m) { pr.second += 1; }
+					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
+				}
+				for (auto& b : ser) {
+					auto& p = b.pos; p.x += 1.5;
+					auto& h = b.hist; h.push(cast<int>(p.x));
+					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
+					for (auto& [k, v] : b.m) { v += 10; }
+					for (auto& pr : b.m) { pr.second += 1; }
+					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
+				}
+				return [to_json(par), to_json(ser)];
+				)", {1, 4, 16}, true},
+				{R"(
+				var scale = 7;
+				var lut = [];
+				for (var i = 0; i < 256; i++) { lut.push(i * 2); }
+				var a = [];
+				var b = [];
+				for (var i = 0; i < 128; i++) { a.push([i, 0]); b.push([i, 0]); }
+				parallel_for (auto& p : a) { p[1] = lut[p[0]] * scale; }
+				for (auto& p : b) { p[1] = lut[p[0]] * scale; }
+				return [a, b];
+				)", {1, 2, 8}},
+				{R"(
+				int shape(int v) { return v * v - 3; }
+				var a = [];
+				var b = [];
+				for (var i = 0; i < 96; i++) { a.push([i, 0]); b.push([i, 0]); }
+				parallel_for (auto& p : a) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
+				for (auto& p : b) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
+				return [a, b];
+				)", {1, 2, 8}},
+				{R"(
+				class K { int a = 1; int b = 0; K() {} K(int v) { a = v; } }
+				array<K> ks = [];
+				array<K> serial = [];
+				for (int i = 0; i < 300; i++) { ks.push(K(i)); serial.push(K(i)); }
+				parallel_for (auto k : ks) { k.a = 999; k.b = 999; }
+				parallel_for (auto& k : ks) { k.b = k.a * 2; k.a = k.a + 1; }
+				for (auto& k : serial) { k.b = k.a * 2; k.a = k.a + 1; }
+				var p = []; var q = [];
+				for (auto k : ks) { p.push(k.a); p.push(k.b); }
+				for (auto k : serial) { q.push(k.a); q.push(k.b); }
+				return [p, q];
+				)", {1, 2, 8}},
+				{R"(
+				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
+				class Inner { Leaf a = Leaf(0); Leaf b = Leaf(0); array<int> xs = []; string name = "inner"; Inner() {} Inner(int n) { a = Leaf(n); b = Leaf(n + 1); xs = [n, n + 1, n + 2]; } }
+				class Node { Inner first = Inner(0); array<Leaf> kids = []; map<string, int> counts = {}; Node() {} Node(int n) { first = Inner(n); kids = [Leaf(n), Leaf(n * 2)]; counts["a"] = n; } }
+				array<Node> nodes = [];
+				array<Node> serial = [];
+				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); serial.push(Node(i)); }
+				parallel_for (auto& n : nodes) {
+					n.first.a.v = n.first.a.v + 1;
+					n.first.xs[0] = n.first.xs[0] * 3;
+					n.kids[1].v = n.kids[1].v + 7;
+					n.counts["a"] = n.counts["a"] + 100;
+					n.first.b.v = n.first.a.v * 2;
+				}
+				for (auto& n : serial) {
+					n.first.a.v = n.first.a.v + 1;
+					n.first.xs[0] = n.first.xs[0] * 3;
+					n.kids[1].v = n.kids[1].v + 7;
+					n.counts["a"] = n.counts["a"] + 100;
+					n.first.b.v = n.first.a.v * 2;
+				}
+				var p = []; var q = [];
+				for (auto n : nodes) { p.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
+				for (auto n : serial) { q.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
+				return [p, q];
+				)", {1, 2, 8}},
+				{R"(
+				class B { int a = 1; B() {} B(int v) { a = v; } }
+				class D : B { int b = 2; string tag = "d"; D() {} D(int v) : super(v) { b = v * 2; } }
+				array<B> bs = [];
+				array<B> serial = [];
+				for (int i = 0; i < 90; i++) {
+					if (i % 3 == 0) { bs.push(D(i)); serial.push(D(i)); } else { bs.push(B(i)); serial.push(B(i)); }
+				}
+				parallel_for (auto& x : bs) { x.a = x.a + 10; }
+				for (auto& x : serial) { x.a = x.a + 10; }
+				var p = []; var q = [];
+				for (auto x : bs) { p.push(x.a); p.push(type_of(x)); }
+				for (auto x : serial) { q.push(x.a); q.push(type_of(x)); }
+				p.push(cast<D>(bs[3]).b); p.push(cast<D>(bs[3]).tag);
+				q.push(cast<D>(serial[3]).b); q.push(cast<D>(serial[3]).tag);
+				return [p, q];
+				)", {1, 2, 8}, true},
+			};
+			check_each(cases, [this](const serial_case& c) {
+				auto e = make_engine();
+				if (c.stdlib) { jai::stdlib::register_all(*e); }
+				for (size_t workers : c.workers) { check_matches_serial_at(e, c.code, {workers}); }
+			});
 		});
 
 		test("primitive_elements_mutate_in_place", [this]() {
@@ -2363,53 +2396,6 @@ public:
 			check_eq((int64_t)0, vals[1].as_int());
 		});
 
-		test("references_to_members_and_map_pairs_write_what_the_body_owns", [this]() {
-			// a reference bound to a member of the element or of a body local, a structured binding over the element's map and a
-			// map pair's .second write through as the serial loop's do
-			const std::string src = R"(
-				class P { float x = 0.0; }
-				class B { P pos; array<int> hist; map<string, int> m = {"a": 1, "b": 2}; }
-				array<B> par = []; array<B> ser = [];
-				for (int k = 0; k < 40; k++) { par.push(B()); ser.push(B()); }
-				parallel_for (auto& b : par) {
-					auto& p = b.pos; p.x += 1.5;
-					auto& h = b.hist; h.push(cast<int>(p.x));
-					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
-					for (auto& [k, v] : b.m) { v += 10; }
-					for (auto& pr : b.m) { pr.second += 1; }
-					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
-				}
-				for (auto& b : ser) {
-					auto& p = b.pos; p.x += 1.5;
-					auto& h = b.hist; h.push(cast<int>(p.x));
-					B local; auto& q = local.pos; q.x = 3.0; b.pos.x += q.x;
-					for (auto& [k, v] : b.m) { v += 10; }
-					for (auto& pr : b.m) { pr.second += 1; }
-					map<string, int> mine = {"z": 1}; for (auto& pr : mine) { pr.second += 5; } b.hist.push(mine["z"]);
-				}
-				return [to_json(par), to_json(ser)];
-			)";
-			auto e = make_engine();
-			jai::stdlib::register_all(*e);
-			check_matches_serial_at(e, src, {1, 4, 16});
-		});
-
-		test("captured_scalar_and_borrow_reads", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				var scale = 7;
-				var lut = [];
-				for (var i = 0; i < 256; i++) { lut.push(i * 2); }
-				var a = [];
-				var b = [];
-				for (var i = 0; i < 128; i++) { a.push([i, 0]); b.push([i, 0]); }
-				parallel_for (auto& p : a) { p[1] = lut[p[0]] * scale; }
-				for (auto& p : b) { p[1] = lut[p[0]] * scale; }
-				return [a, b];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
 		// The GLOOM shape: an in-place helper taking the OWNED ELEMENT by reference
 		// (gloom_particle_step). Caught red by GLOOM tick 8 when worker invokers became
 		// thunks: the in-loop call path must bind the by-ref param to the element
@@ -2429,72 +2415,84 @@ public:
 			check_eq((int64_t)315, vals[1].as_int());
 		});
 
-		test("helper_function_calls_in_body", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				int shape(int v) { return v * v - 3; }
-				var a = [];
-				var b = [];
-				for (var i = 0; i < 96; i++) { a.push([i, 0]); b.push([i, 0]); }
-				parallel_for (auto& p : a) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
-				for (auto& p : b) { p[1] = shape(p[0]) + math::itrunc(math::sqrt(1.0 * p[0])); }
-				return [a, b];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
 		// === Contract A: violations ERROR ===
-
-		test("enclosing_write_rejected", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+		// a body that writes enclosing or captured state, a container it mutates, an element it cannot prove exclusive, a shared
+		// write inside a method, an overloaded method or a class-changing assignment is refused with its verdict
+		test("parallel_for_refuses_what_it_cannot_admit_with_its_verdict", [this]() {
+			struct verdict_case { const char* code; std::vector<const char*> verdict; size_t workers = 0; };
+			const verdict_case cases[] = {
+				{R"(
 				var g = 0;
 				var a = [];
 				for (var i = 0; i < 32; i++) { a.push(i); }
 				try { parallel_for (auto& x : a) { g = x; } } catch (err) { return err; }
 				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("parallel_for: body writes enclosing state 'g'") != std::string::npos);
-		});
-
-		test("enclosing_member_store_rejected", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+				)", {"parallel_for: body writes enclosing state 'g'"}},
+				{R"(
 				class World { int hits = 0; }
 				var w = World();
 				var a = [];
 				for (var i = 0; i < 32; i++) { a.push(i); }
 				try { parallel_for (auto& x : a) { w.hits = x; } } catch (err) { return err; }
 				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("captured state 'w'") != std::string::npos);
-		});
-
-		test("mutated_container_borrow_capture_rejected", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+				)", {"captured state 'w'"}},
+				{R"(
 				var a = [];
 				for (var i = 0; i < 64; i++) { a.push(i); }
 				try { parallel_for (auto& x : a) { x = a[0] + x; } } catch (err) { return err; }
 				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("container being mutated") != std::string::npos);
-		});
-
-		test("non_value_semantic_element_rejected", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+				)", {"container being mutated"}},
+				{R"(
 				class Node { var payload = 0; }
 				var a = [];
 				for (var i = 0; i < 32; i++) { a.push(Node()); }
 				try { parallel_for (auto& x : a) { x.payload = 1; } } catch (err) { return err; }
 				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("cannot be proven exclusive") != std::string::npos);
+				)", {"cannot be proven exclusive"}},
+				{R"(
+				var total = 0;
+				class Cell { int v = 0; void sink() { total = total + v; } }
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Cell()); }
+				try { parallel_for (auto& c : a) { c.sink(); } } catch (err) { return err; }
+				return "no-error";
+				)", {"body writes enclosing state 'total'"}},
+				{R"(
+				class Cell {
+					int v = 0;
+					void set(int x) { v = x; }
+					void set(int x, int y) { v = x + y; }
+				}
+				var a = [];
+				for (var i = 0; i < 32; i++) { a.push(Cell()); }
+				try { parallel_for (auto& c : a) { c.set(1); } } catch (err) { return err; }
+				return "no-error";
+				)", {"only single-overload methods of the element's class or its bases"}},
+				// An assignment of another class into a by-value slot re-classes the slot's object (no
+				// slicing): its dropped levels' destructors and the class registry are not worker territory
+				{R"(
+				class Leaf { int v = 0; Leaf() {} }
+				class Leaf2 : Leaf { int w = 1; Leaf2() {} }
+				class Node { Leaf a = Leaf(); Leaf b = Leaf2(); Node() {} }
+				array<Node> nodes = [];
+				for (int i = 0; i < 64; i++) { nodes.push(Node()); }
+				try { parallel_for (auto& n : nodes) { n.a = n.b; } } catch (err) { return err; }
+				return "no-error";
+				)", {"an assignment that changes an object's class is not admitted in a parallel body"}, 4},
+				{R"(
+				class Node { var payload = 0; }
+				array<Node> a = [];
+				for (int i = 0; i < 32; i++) { a.push(Node()); }
+				try { parallel_for (auto& x : a) { x.payload = 1; } } catch (err) { return err; }
+				return "no-error";
+				)", {"cannot be proven exclusive"}},
+			};
+			check_each(cases, [](const verdict_case& c) {
+				auto e = make_engine();
+				if (c.workers) { e->parallel_thread_count(c.workers); }
+				const auto msg = e->execute(c.code).as<std::string>();
+				for (const char* part : c.verdict) { check_true(msg.find(part) != std::string::npos, msg); }
+			});
 		});
 
 		// shared_ptr-tagged elements alias by script-visible design: one object at two elements could be touched by two workers,
@@ -2645,37 +2643,6 @@ public:
 			}
 		});
 
-		test("method_shared_write_denied_with_verdict", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				var total = 0;
-				class Cell { int v = 0; void sink() { total = total + v; } }
-				var a = [];
-				for (var i = 0; i < 32; i++) { a.push(Cell()); }
-				try { parallel_for (auto& c : a) { c.sink(); } } catch (err) { return err; }
-				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("body writes enclosing state 'total'") != std::string::npos);
-		});
-
-		test("overloaded_method_denied_with_verdict", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				class Cell {
-					int v = 0;
-					void set(int x) { v = x; }
-					void set(int x, int y) { v = x + y; }
-				}
-				var a = [];
-				for (var i = 0; i < 32; i++) { a.push(Cell()); }
-				try { parallel_for (auto& c : a) { c.set(1); } } catch (err) { return err; }
-				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("only single-overload methods of the element's class or its bases") != std::string::npos);
-		});
-
 		test("custom_operator_refused_with_its_violation", [this]() {
 			// an operator whose body the region cannot admit (here it writes enclosing state) stays unpinned: dispatching it raises
 			// what its walk refused, and a custom op== never silently falls back to structural equality
@@ -2727,24 +2694,6 @@ public:
 				`${a}|${c}|${d}|${p}|${ps[0].v}|${vs[0].v}|${vs[1].v}`;
 			)");
 			check_eq(std::string("none|none|none|none|2|-2|-2"), r.as<std::string>());
-		});
-
-		test("class_changing_assignment_denied_with_verdict", [this]() {
-			// An assignment of another class into a by-value slot re-classes the slot's object (no
-			// slicing): its dropped levels' destructors and the class registry are not worker territory
-			auto e = make_engine();
-			e->parallel_thread_count(4);
-			auto r = e->execute(R"(
-				class Leaf { int v = 0; Leaf() {} }
-				class Leaf2 : Leaf { int w = 1; Leaf2() {} }
-				class Node { Leaf a = Leaf(); Leaf b = Leaf2(); Node() {} }
-				array<Node> nodes = [];
-				for (int i = 0; i < 64; i++) { nodes.push(Node()); }
-				try { parallel_for (auto& n : nodes) { n.a = n.b; } } catch (err) { return err; }
-				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("an assignment that changes an object's class is not admitted in a parallel body") != std::string::npos, msg);
 		});
 
 		test("method_calls_fan_out_on_warm_names", [this]() {
@@ -3816,24 +3765,6 @@ public:
 			check_eq((int64_t)65, vals[6].as_int());
 		});
 
-		test("typed_object_by_value_and_by_ref_bindings", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				class K { int a = 1; int b = 0; K() {} K(int v) { a = v; } }
-				array<K> ks = [];
-				array<K> serial = [];
-				for (int i = 0; i < 300; i++) { ks.push(K(i)); serial.push(K(i)); }
-				parallel_for (auto k : ks) { k.a = 999; k.b = 999; }
-				parallel_for (auto& k : ks) { k.b = k.a * 2; k.a = k.a + 1; }
-				for (auto& k : serial) { k.b = k.a * 2; k.a = k.a + 1; }
-				var p = []; var q = [];
-				for (auto k : ks) { p.push(k.a); p.push(k.b); }
-				for (auto k : serial) { q.push(k.a); q.push(k.b); }
-				return [p, q];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
 		test("typed_object_by_value_copies_never_race", [this]() {
 			// Workers clone the element (by-value binding) and destroy the copy: instance
 			// registration on the shared class definition must serialize, both node kinds
@@ -4025,37 +3956,6 @@ public:
 			}
 		});
 
-		test("typed_object_nested_field_writes_land", [this]() {
-			auto e = make_engine();
-			const std::string src = R"(
-				class Leaf { int v = 0; string tag = "leaf"; Leaf() {} Leaf(int n) { v = n; } }
-				class Inner { Leaf a = Leaf(0); Leaf b = Leaf(0); array<int> xs = []; string name = "inner"; Inner() {} Inner(int n) { a = Leaf(n); b = Leaf(n + 1); xs = [n, n + 1, n + 2]; } }
-				class Node { Inner first = Inner(0); array<Leaf> kids = []; map<string, int> counts = {}; Node() {} Node(int n) { first = Inner(n); kids = [Leaf(n), Leaf(n * 2)]; counts["a"] = n; } }
-				array<Node> nodes = [];
-				array<Node> serial = [];
-				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); serial.push(Node(i)); }
-				parallel_for (auto& n : nodes) {
-					n.first.a.v = n.first.a.v + 1;
-					n.first.xs[0] = n.first.xs[0] * 3;
-					n.kids[1].v = n.kids[1].v + 7;
-					n.counts["a"] = n.counts["a"] + 100;
-					n.first.b.v = n.first.a.v * 2;
-				}
-				for (auto& n : serial) {
-					n.first.a.v = n.first.a.v + 1;
-					n.first.xs[0] = n.first.xs[0] * 3;
-					n.kids[1].v = n.kids[1].v + 7;
-					n.counts["a"] = n.counts["a"] + 100;
-					n.first.b.v = n.first.a.v * 2;
-				}
-				var p = []; var q = [];
-				for (auto n : nodes) { p.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
-				for (auto n : serial) { q.push([n.first.a.v, n.first.b.v, n.first.xs[0], n.kids[1].v, n.counts["a"], n.first.b.tag]); }
-				return [p, q];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
-		});
-
 		test("typed_object_live_reference_pins_current_behavior", [this]() {
 			// A field reference minted THROUGH an element (auto& r = ks[3].a) counts as a live
 			// reference into the array: the fork takes the per-element walk, which detaches the
@@ -4100,29 +4000,6 @@ public:
 			check_eq((int64_t)14, vals[0].as_int());
 			check_eq((int64_t)126, vals[1].as_int());
 			check_eq((uint32_t)0, e->execute("ks").unchecked_array_node()->live_elem_refs);
-		});
-
-		test("typed_object_subclasses_in_base_array", [this]() {
-			auto e = make_engine();
-			jai::stdlib::register_all(e);
-			const std::string src = R"(
-				class B { int a = 1; B() {} B(int v) { a = v; } }
-				class D : B { int b = 2; string tag = "d"; D() {} D(int v) : super(v) { b = v * 2; } }
-				array<B> bs = [];
-				array<B> serial = [];
-				for (int i = 0; i < 90; i++) {
-					if (i % 3 == 0) { bs.push(D(i)); serial.push(D(i)); } else { bs.push(B(i)); serial.push(B(i)); }
-				}
-				parallel_for (auto& x : bs) { x.a = x.a + 10; }
-				for (auto& x : serial) { x.a = x.a + 10; }
-				var p = []; var q = [];
-				for (auto x : bs) { p.push(x.a); p.push(type_of(x)); }
-				for (auto x : serial) { q.push(x.a); q.push(type_of(x)); }
-				p.push(cast<D>(bs[3]).b); p.push(cast<D>(bs[3]).tag);
-				q.push(cast<D>(serial[3]).b); q.push(cast<D>(serial[3]).tag);
-				return [p, q];
-			)";
-			check_matches_serial_at(e, src, {1, 2, 8});
 		});
 
 		test("typed_object_empty_and_single_element", [this]() {
@@ -4201,19 +4078,6 @@ public:
 				return a[3].v * 1000 + a[31].v;
 			)");
 			check_eq((int64_t)6062, r.as_int());
-		});
-
-		test("typed_object_non_value_semantic_still_rejected", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
-				class Node { var payload = 0; }
-				array<Node> a = [];
-				for (int i = 0; i < 32; i++) { a.push(Node()); }
-				try { parallel_for (auto& x : a) { x.payload = 1; } } catch (err) { return err; }
-				return "no-error";
-			)");
-			auto msg = r.as<std::string>();
-			check_true(msg.find("cannot be proven exclusive") != std::string::npos);
 		});
 
 		test("prewarm_class_reached_through_typed_array_field", [this]() {

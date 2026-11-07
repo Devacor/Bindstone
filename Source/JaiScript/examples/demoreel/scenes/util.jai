@@ -206,7 +206,7 @@ class Gfx {
 				for (int x = 0; x < w; ++x) {
 					int k = (((x * 73856093 + y * 19349663) & 1048575) * 1274126177 >> 12) % 1000;
 					gm[idx] = k < kilo ? gb[idx] + off : ga[idx];
-					idx = idx + 1;
+					++idx;
 				}
 			}
 			return;
@@ -218,7 +218,7 @@ class Gfx {
 				for (int x = 0; x < w; ++x) {
 					int d = x - sh;
 					gm[idx] = d < 0 ? gb[idx] + off : (d < 2 ? edge : ga[idx]);
-					idx = idx + 1;
+					++idx;
 				}
 			}
 			return;
@@ -230,7 +230,7 @@ class Gfx {
 				int yb = (y + (y / band) % 2 * 3) % band;
 				for (int x = 0; x < w; ++x) {
 					gm[idx] = yb < e2 ? gb[idx] + off : (yb == e2 ? edge : ga[idx]);
-					idx = idx + 1;
+					++idx;
 				}
 			}
 			return;
@@ -241,14 +241,14 @@ class Gfx {
 			int rmax = cx * cx + cy * cy;
 			int r = itrunc(prog * prog * (rmax + 400.0));
 			int r2 = itrunc(math::sqrt(r * 1.0) + 2.0);
-			r2 = r2 * r2;
+			r2 *= r2;
 			for (int y = 0; y < h; ++y) {
 				int dy = y - cy;
 				for (int x = 0; x < w; ++x) {
 					int dx = x - cx;
 					int d2 = dx * dx + dy * dy;
 					gm[idx] = d2 < r ? gb[idx] + off : (d2 < r2 ? edge : ga[idx]);
-					idx = idx + 1;
+					++idx;
 				}
 			}
 			return;
@@ -278,13 +278,7 @@ class Gfx {
 		rows[y] = style + string::repeat(" ", pad) + text + string::repeat(" ", w - pad - n) + RESET;
 	}
 
-	void overlay_left(var& rows, int w, int y, string text, string style) {
-		if (y < 0 || y >= rows.size()) { return; }
-		int n = text.size();
-		if (n > w) {
-			text = text.substr(0, w);
-			n = w;
-		}
-		rows[y] = style + text + string::repeat(" ", w - n) + RESET;
-	}
 }
+
+function sgr_fg(int r, int g, int b) -> string { return `${ESC}[38;2;${r};${g};${b}m`; }
+function sgr_bg(int r, int g, int b) -> string { return `${ESC}[48;2;${r};${g};${b}m`; }

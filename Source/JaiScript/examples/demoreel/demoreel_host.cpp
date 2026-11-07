@@ -10,18 +10,28 @@
 
 #include "demoreel_host.hpp"
 
+#include <algorithm>
+#include <atomic>
 #include <cstdio>
 #include <cstdlib>
 #include <chrono>
+#include <cmath>
+#include <csignal>
 #include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <stdexcept>
+#include <thread>
 
 #ifdef _WIN32
+#define NOMINMAX
 #include <windows.h>
 #include <conio.h>
 #pragma comment(lib, "winmm.lib")
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 namespace demoreel {
@@ -196,6 +206,122 @@ std::string filter_vt(const std::string& in, sgr_state& st, int mode, int tol) {
 	return out;
 }
 
+// --ascii: terminals without the block glyphs (the Linux text console) get one
+// character per cell, its density from the cell's two pixels' mean brightness and
+// its color their mean. Rows carrying text (title handles, captions, the HUD)
+// pass through as they are.
+struct rgb_color {
+	int r = 0, g = 0, b = 0;
+};
+
+std::string ascii_row(const std::string& row) {
+	bool text_row = false;
+	for (size_t i = 0; i < row.size(); ++i) {
+		if (row[i] == '\x1b') {
+			while (i < row.size() && !(row[i] >= '@' && row[i] <= '~' && row[i] != '[')) { ++i; }
+			continue;
+		}
+		unsigned char c = static_cast<unsigned char>(row[i]);
+		if (c > ' ' && c < 127) { text_row = true; break; }
+	}
+	if (text_row) { return row; }
+
+	static const char ramp[] = " .:-=+*#%@";
+	std::string out;
+	out.reserve(row.size());
+	rgb_color fg{229, 229, 229};
+	rgb_color bg;
+	int last_key = -1;
+	auto cell = [&](const rgb_color& top, const rgb_color& bottom) {
+		int r = (top.r + bottom.r) / 2, g = (top.g + bottom.g) / 2, b = (top.b + bottom.b) / 2;
+		int luma = (r * 299 + g * 587 + b * 114) / 1000;
+		// density carries the brightness (square-root ramp, so dark scenes keep their shapes)
+		// and the color only the hue, at full value
+		int glyph = static_cast<int>(std::sqrt(luma / 255.0) * 9.99);
+		int peak = std::max(r, std::max(g, b));
+		int key = glyph == 0 ? 0 : (r << 16 | g << 8 | b) + 1;
+		if (key != last_key && glyph != 0) {
+			out += "\x1b[38;2;" + std::to_string(r * 255 / peak) + ';' + std::to_string(g * 255 / peak) + ';'
+				+ std::to_string(b * 255 / peak) + 'm';
+			last_key = key;
+		}
+		out += ramp[glyph];
+	};
+	out += "\x1b[48;2;0;0;0m";
+	size_t i = 0;
+	while (i < row.size()) {
+		if (row[i] == '\x1b' && i + 1 < row.size() && row[i + 1] == '[') {
+			size_t j = i + 2;
+			int params[16];
+			int np = 0;
+			int v = 0;
+			while (j < row.size() && !(row[j] >= '@' && row[j] <= '~')) {
+				if (row[j] >= '0' && row[j] <= '9') { v = v * 10 + (row[j] - '0'); }
+				else if (np < 16) { params[np++] = v; v = 0; }
+				++j;
+			}
+			if (j < row.size() && row[j] == 'm') {
+				if (np < 16) { params[np++] = v; }
+				for (int p = 0; p < np; ++p) {
+					if (params[p] == 0) { fg = {229, 229, 229}; bg = {}; }
+					else if ((params[p] == 38 || params[p] == 48) && p + 4 < np && params[p + 1] == 2) {
+						(params[p] == 38 ? fg : bg) = {params[p + 2], params[p + 3], params[p + 4]};
+						p += 4;
+					}
+				}
+			}
+			i = j + 1;
+			continue;
+		}
+		if (row.compare(i, 3, "\xE2\x96\x80") == 0) { cell(fg, bg); i += 3; }   // upper half block
+		else if (row.compare(i, 3, "\xE2\x96\x88") == 0) { cell(fg, fg); i += 3; }   // full block
+		else if (row[i] == ' ') { cell(bg, bg); ++i; }
+		else { ++i; }
+	}
+	return out + "\x1b[0m";
+}
+
+std::string ascii_frame(const std::string& frame) {
+	std::string out;
+	out.reserve(frame.size());
+	size_t start = 0;
+	for (;;) {
+		size_t nl = frame.find('\n', start);
+		out += ascii_row(frame.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
+		if (nl == std::string::npos) { break; }
+		out += '\n';
+		start = nl + 1;
+	}
+	return out;
+}
+
+// Ctrl+C, Ctrl+Break, SIGTERM and SIGHUP end the interactive loop through the
+// normal exit, so the console comes back with its cursor, colors and main screen.
+std::atomic<bool> g_quit_requested{false};
+
+#ifdef _WIN32
+BOOL WINAPI console_ctrl_handler(DWORD type) {
+	if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT) {
+		g_quit_requested.store(true);
+		return TRUE;
+	}
+	return FALSE;
+}
+#else
+void posix_quit_signal(int) { g_quit_requested.store(true); }
+#endif
+
+// COLORTERM=truecolor|24bit and Windows Terminal get 24-bit color; everything
+// else (macOS Terminal.app, the Linux console, legacy conhost) the xterm-256 cube.
+bool terminal_has_truecolor() {
+	const char* colorterm = std::getenv("COLORTERM");
+	if (colorterm) {
+		std::string value = colorterm;
+		if (value == "truecolor" || value == "24bit") { return true; }
+	}
+	return std::getenv("WT_SESSION") != nullptr;
+}
+
 struct console_host {
 	bool active = false;
 	bool is_console = false;   // stdout is a real console (not redirected)
@@ -203,6 +329,7 @@ struct console_host {
 	int mode = 1;              // filter mode (see filter_vt)
 	int tol = 8;
 	bool diff = false;         // row-diff redraw
+	bool ascii = false;        // one density character per cell instead of half blocks
 	std::vector<std::string> prev_rows;
 	uint64_t frames_drawn = 0;
 	uint64_t bytes_raw = 0;
@@ -210,6 +337,10 @@ struct console_host {
 	double last_draw_ms = 0.0;
 #ifdef _WIN32
 	HANDLE hout = INVALID_HANDLE_VALUE;
+	UINT saved_output_cp = 0;
+#else
+	bool raw_input = false;
+	termios saved_input{};
 #endif
 
 	void init() {
@@ -220,8 +351,23 @@ struct console_host {
 			is_console = true;
 			SetConsoleMode(hout, mode_flags | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
 		}
+		saved_output_cp = GetConsoleOutputCP();
 		SetConsoleOutputCP(CP_UTF8);
+		SetConsoleCtrlHandler(console_ctrl_handler, TRUE);
 		timeBeginPeriod(1);
+#else
+		is_console = isatty(STDOUT_FILENO) != 0;
+		if (isatty(STDIN_FILENO) && tcgetattr(STDIN_FILENO, &saved_input) == 0) {
+			termios raw = saved_input;
+			raw.c_lflag &= ~(ICANON | ECHO);
+			raw.c_cc[VMIN] = 0;
+			raw.c_cc[VTIME] = 0;
+			raw_input = tcsetattr(STDIN_FILENO, TCSANOW, &raw) == 0;
+		}
+		struct sigaction quit{};
+		quit.sa_handler = posix_quit_signal;
+		sigemptyset(&quit.sa_mask);
+		for (int sig : {SIGINT, SIGTERM, SIGHUP}) { sigaction(sig, &quit, nullptr); }
 #endif
 		is_wt = std::getenv("WT_SESSION") != nullptr;
 		std::fputs("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H", stdout);
@@ -234,7 +380,12 @@ struct console_host {
 		std::fputs("\x1b[0m\x1b[?1049l\x1b[?25h", stdout);
 		std::fflush(stdout);
 #ifdef _WIN32
+		if (saved_output_cp != 0) { SetConsoleOutputCP(saved_output_cp); }
+		SetConsoleCtrlHandler(console_ctrl_handler, FALSE);
 		timeEndPeriod(1);
+#else
+		if (raw_input) { tcsetattr(STDIN_FILENO, TCSANOW, &saved_input); }
+		for (int sig : {SIGINT, SIGTERM, SIGHUP}) { std::signal(sig, SIG_DFL); }
 #endif
 		active = false;
 	}
@@ -254,10 +405,11 @@ struct console_host {
 		std::fflush(stdout);
 	}
 
-	void draw(const std::string& frame) {
+	void draw(const std::string& script_frame) {
 		double t0 = now_seconds();
 		++frames_drawn;
-		bytes_raw += frame.size();
+		bytes_raw += script_frame.size();
+		const std::string& frame = ascii ? ascii_frame(script_frame) : script_frame;
 		std::string out;
 		out.reserve(frame.size() + 16);
 		if (!diff) {
@@ -301,6 +453,12 @@ struct console_host {
 			w = info.srWindow.Right - info.srWindow.Left;      // one column spare: no wrap
 			h = info.srWindow.Bottom - info.srWindow.Top;      // one row spare: no scroll
 		}
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
+			w = ws.ws_col - 1;
+			h = ws.ws_row - 1;
+		}
 #endif
 		if (w > 110) { w = 110; }
 		if (h > 44) { h = 44; }
@@ -330,6 +488,28 @@ struct console_host {
 			default: break;
 		}
 		if (c >= 'A' && c <= 'Z') { c += 32; }
+		if (c >= 32 && c < 127) { return std::string(1, static_cast<char>(c)); }
+#else
+		if (!raw_input) { return ""; }
+		unsigned char c = 0;
+		if (read(STDIN_FILENO, &c, 1) != 1) { return ""; }
+		if (c == 27) {
+			unsigned char seq[2] = {0, 0};
+			if (read(STDIN_FILENO, &seq[0], 1) != 1) { return "esc"; }
+			if (seq[0] != '[' && seq[0] != 'O') { return "esc"; }
+			unsigned char fin = 0;
+			while (read(STDIN_FILENO, &fin, 1) == 1 && fin >= 0x20 && fin <= 0x3F) {}
+			switch (fin) {
+				case 'A': return "up";
+				case 'B': return "down";
+				case 'C': return "right";
+				case 'D': return "left";
+				default: return "";
+			}
+		}
+		if (c == 9) { return "tab"; }
+		if (c == 10 || c == 13) { return "enter"; }
+		if (c >= 'A' && c <= 'Z') { c = static_cast<unsigned char>(c + 32); }
 		if (c >= 32 && c < 127) { return std::string(1, static_cast<char>(c)); }
 #endif
 		return "";
@@ -556,7 +736,7 @@ int run_capture(script_adapter& adapter, const host_options& opt) {
 	for (int i = 0; i < 75; ++i) {
 		frame = run_frame(sl, headless_args(cap_t + i * dt, dt));
 	}
-	std::string plain = strip_ansi(frame);
+	std::string plain = strip_ansi(opt.ascii ? ascii_frame(frame) : frame);
 	std::fwrite(plain.data(), 1, plain.size(), stdout);
 	std::fputc('\n', stdout);
 	return 0;
@@ -599,11 +779,17 @@ int run_reload_test(script_adapter& adapter, const host_options& opt) {
 int run_interactive(script_adapter& adapter, const host_options& opt) {
 	console_host console;
 	console.init();
-	// legacy conhost parses VT slowly; default it to the cheap escape stream
-	const bool legacy_conhost = console.is_console && !console.is_wt;
-	console.mode = (opt.filter_mode >= 0) ? static_cast<int>(opt.filter_mode) : (legacy_conhost ? 2 : 1);
+	// legacy conhost parses VT slowly, and a terminal without 24-bit color quantizes it badly:
+	// both get the xterm-256 cube
+#ifdef _WIN32
+	const bool legacy_conhost = console.is_console && !console.is_wt && std::getenv("COLORTERM") == nullptr;
+#else
+	const bool legacy_conhost = false;
+#endif
+	console.mode = (opt.filter_mode >= 0) ? static_cast<int>(opt.filter_mode) : (terminal_has_truecolor() ? 1 : 2);
 	console.tol = static_cast<int>(opt.tol);
 	console.diff = opt.diff;
+	console.ascii = opt.ascii;
 	int w = 100, h = 40;
 	console.size(w, h);
 	if (opt.width > 0) { w = static_cast<int>(opt.width); }
@@ -644,7 +830,7 @@ int run_interactive(script_adapter& adapter, const host_options& opt) {
 			if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
 
 			std::string key = console.poll_key();
-			if (key == "q" || key == "esc") { break; }
+			if (key == "q" || key == "esc" || g_quit_requested.load()) { break; }
 			if (key == "tab") {
 				if (slots.size() > 1) {
 					int64_t idx = slots[active].session->scene_index();
@@ -688,11 +874,7 @@ int run_interactive(script_adapter& adapter, const host_options& opt) {
 
 			double budget = 1.0 / opt.target_fps;
 			double used = now_seconds() - frame_start;
-			if (used < budget) {
-#ifdef _WIN32
-				Sleep(static_cast<DWORD>((budget - used) * 1000.0));
-#endif
-			}
+			if (used < budget) { std::this_thread::sleep_for(std::chrono::duration<double>(budget - used)); }
 		}
 	} catch (const std::exception& ex) {
 		console.shutdown();
@@ -802,14 +984,16 @@ void print_usage(script_adapter& adapter) {
 		"  --perf-warmup N  untimed frames on the same runtime before each measured scene\n"
 		"  --csv P          perf: also write rows to file P\n"
 		"  --workers N      parallel width (-1 engine default, 1 serial; ports always serial)\n"
-		"  --capture I      print scene I as a plain-text frame and exit\n"
+		"  --capture I      print scene I as a plain-text frame and exit (--ascii: a density map)\n"
 		"  --reload-test    headless hot-reload + backend-swap self-test\n"
 		"  --scenes DIR     override the scenes directory\n"
 		"  --bench N        run N frames of the real loop, report sim/write split, exit\n"
 		"  --scene I        select one zero-based scene for --perf or --bench\n"
 		"  --bench-out P    also write the bench report to file P\n"
-		"  --truecolor      24-bit output with tolerance run-merging (default off conhost)\n"
-		"  --256color       xterm-256 output (short escapes, long runs; conhost default)\n"
+		"  --truecolor      24-bit output with tolerance run-merging (the default under\n"
+		"                   COLORTERM=truecolor|24bit and in Windows Terminal)\n"
+		"  --256color       xterm-256 output (short escapes, long runs; every other terminal)\n"
+		"  --ascii          one density character per cell, for terminals without block glyphs\n"
 		"  --no-filter      byte-exact legacy output (no escape trimming)\n"
 		"  --tol N          per-channel merge tolerance for --truecolor (default 8)\n"
 		"  --diff           row-diff redraw: skip rows unchanged since last frame");
@@ -858,6 +1042,7 @@ int run_demoreel(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--no-filter") { opt.filter_mode = 0; }
 		else if (a == "--tol") { opt.tol = std::stoll(next_arg("--tol")); }
 		else if (a == "--diff") { opt.diff = true; }
+		else if (a == "--ascii") { opt.ascii = true; }
 		else if (a == "--dev") { /* hot reload is always on; accepted for muscle memory */ }
 		else if (a == "--help" || a == "-h") { print_usage(adapter); return 0; }
 		else {

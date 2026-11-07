@@ -39,7 +39,7 @@ function julia_row(int y) -> array<int> {
 			y2 = zy * zy;
 			float m = x2 + y2;
 			trap = m < trap ? m : trap;
-			k = k + 1;
+			++k;
 		}
 		if (k >= mi) {
 			int tl = math::sqrt(trap) * 40.0;
@@ -89,7 +89,7 @@ class Julia : Scene {
 			var& row = rows[y];
 			for (int x = 0; x < w; ++x) {
 				grid[idx] = row[x];
-				idx = idx + 1;
+				++idx;
 			}
 		}
 	}

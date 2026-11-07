@@ -117,7 +117,7 @@ class Pipes : Scene {
 		int ci = cell_idx(nx, ny, nz);
 		cells[ci] = 1 + p * 3;
 		pending.push(ci);
-		filled = filled + 1;
+		++filled;
 	}
 
 	void respawn(int p) {
@@ -133,7 +133,7 @@ class Pipes : Scene {
 				hd[p] = rng.next(6);
 				cells[ci] = 1 + p * 3;
 				pending.push(ci);
-				filled = filled + 1;
+				++filled;
 				return;
 			}
 		}

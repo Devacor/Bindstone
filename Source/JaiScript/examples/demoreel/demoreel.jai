@@ -1,33 +1,33 @@
 // demoreel.jai — drag-drop shim: runs the demoreel on the standalone jaiscript
 // runner with zero C++ beyond the runner itself. Recreates the C++ host contract
-// from the C++ host (demoreel_host.cpp) in pure script — the ESC global, itrunc/ifloor casts, host_log,
-// and the seeded xorshift64* Rng class (bit-exact, checked-int64-safe: 16-bit-limb
-// mul, mask-after-shift logical shifts) — then imports the scene files in the
-// host's load order and pumps demo_frame at 30 fps.
+// (demoreel_host.cpp) in script: the ESC global, the itrunc/ifloor casts, host_log
+// and the seeded xorshift64* Rng class, bit-exact under checked int64 (16-bit-limb
+// multiplies, masked logical shifts). Then it imports the scene files in the host's
+// load order and pumps demo_frame at 30 fps.
 //
-// Deliberately NOT ported from the C++ host: the VT escape filter, xterm-256 rewrite,
-// and row-diff redraw (frames are presented whole; the scripts' own run-length
-// escape elision still applies), the TAB dual-engine backend swap (one engine
-// here — TAB is swallowed), and 'r' hot reload (no script-side eval; swallowed).
+// Not ported from the C++ host: its escape filter and row-diff redraw (frames
+// present whole; the scripts' own run-length escapes still apply), TAB's backend
+// swap (one engine here) and 'r' hot reload.
 //
 //   jaiscript demoreel.jai                        the reel (q or esc quits)
-//   jaiscript demoreel.jai -- frames 60           headless self-test: N smoke
-//                                                 frames (100x40, seed 20260705,
-//                                                 fixed dt 1/30), prints sizes,
-//                                                 a stream hash, and timing
-//   jaiscript demoreel.jai -- frames 60 dump P    also write frames 0/N-2/N-1
-//                                                 to P_<i>.txt (+ P_<i>.bmp, the
-//                                                 pixel grid) for byte diffing
+//   jaiscript demoreel.jai -- color 256           the reel quantized to the xterm-256 cube
+//   jaiscript demoreel.jai -- ascii 1             one density character per cell, no block glyphs
+//   jaiscript demoreel.jai -- frames 60           headless self-test: N smoke frames (100x40,
+//                                                 seed 20260705, fixed dt 1/30), sizes, a stream
+//                                                 hash and timing
+//   jaiscript demoreel.jai -- frames 60 dump P    also write frames 0/N-2/N-1 to P_<i>.txt
+//                                                 (+ P_<i>.bmp, the pixel grid) for byte diffing
 //   jaiscript demoreel.jai -- bench 60            per-scene ms/frame + bytes/frame
-//   jaiscript demoreel.jai -- shot I at T dump P  scene I from scene time T-0.2,
-//                                                 frame n (default 6) -> P.txt + P.bmp
+//   jaiscript demoreel.jai -- shot I at T dump P  scene I from scene time T-0.2, frame n
+//                                                 (default 6) -> P.txt (as presented, so color
+//                                                 and ascii apply) + P.bmp
 //   jaiscript demoreel.jai -- midi F.mid          write the soundtrack and exit
 //   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent)
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
 
 // ---------------------------------------------------------------- host API ---
 
-var ESC = "" + to_char(27);
+string ESC = to_string(to_char(27));
 var RUNNER_BACKEND = "vm";   // HUD label only; the reel never branches on it
 
 function itrunc(float v) -> int { return math::itrunc(v); }
@@ -123,6 +123,8 @@ var OPT_AT = 4.0;
 var OPT_SHOTN = 6;
 var OPT_MUSIC = true;
 var OPT_MIDI = "";
+var OPT_CUBE = false;         // xterm-256 instead of 24-bit color
+var OPT_ASCII = false;
 
 for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	string k = ARGS[i];
@@ -140,7 +142,9 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	else if (k == "n") { OPT_SHOTN = v.to_int(); }
 	else if (k == "music") { OPT_MUSIC = v != "0"; }
 	else if (k == "midi") { OPT_MIDI = v; }
-	else { print("demoreel.jai: unknown arg '" + k + "' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi)"); }
+	else if (k == "color") { OPT_CUBE = v == "256"; }
+	else if (k == "ascii") { OPT_ASCII = v != "0"; }
+	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii)`); }
 }
 
 // ---------------------------------------------------------------- headless ---
@@ -244,7 +248,10 @@ function run_shot(int scene, float at) -> int {
 	string fr = "";
 	for (int f = 0; f < OPT_SHOTN; ++f) { fr = demo_frame(at, 1.0 / 30.0, "", 0.0, 0.0, 0.0, 0.0); }
 	string p = OPT_DUMP != "" ? OPT_DUMP : "shot";
-	write_file(p + ".txt", fr);
+	var terminal = Terminal();
+	terminal.cube = OPT_CUBE;
+	terminal.ascii = OPT_ASCII;
+	write_file(p + ".txt", terminal.present(fr));
 	write_bmp(p + ".bmp");
 	print(format("shot: scene {0} {1} at {2}s -> {3}.txt / {3}.bmp ({4} bytes)", scene + 1, reel.cur.name, at, p, fr.size()));
 	return 0;
@@ -386,6 +393,88 @@ function write_soundtrack() -> string {
 	return path;
 }
 
+// ---------------------------------------------------------------- terminal ---
+// The runner reads no environment, so the color depth is an argument: `color 256`
+// quantizes every 24-bit escape to the xterm-256 cube (macOS Terminal.app, the Linux
+// console), `ascii 1` draws one density character per cell for terminals without the
+// block glyphs. Only the interactive reel presents through here; the headless modes
+// hash the reel's own frames.
+
+string CSI = ESC + "[";
+
+function cube_axis(int v) -> int {
+	if (v < 48) { return 0; }
+	if (v < 115) { return 1; }
+	return (v - 35) / 40;
+}
+
+class Terminal {
+	bool cube = false;
+	bool ascii = false;
+	string ramp = " .:-=+*#%@";
+	map<string, string> cube_params = {};   // "38;2;r;g;b" -> "38;5;n", one entry per color seen
+
+	string present(string frame) {
+		if (!ascii) { return cube ? quantize(frame) : frame; }
+		var rows = frame.split("\n");
+		for (int cy = 0; cy < rows.size(); ++cy) {
+			// rows carrying text (the HUD, a title's handle, a caption) keep their glyphs
+			if (rows[cy].find_first_of("abcdefghijklnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ") >= 0) {
+				if (cube) { rows[cy] = quantize(rows[cy]); }
+			} else {
+				rows[cy] = density_row(cy);
+			}
+		}
+		return rows.join("\n");
+	}
+
+	string quantize(string text) {
+		string result = "";
+		int pos = 0;
+		while (true) {
+			int at = text.find(CSI, pos);
+			if (at < 0) { break; }
+			int end = text.find("m", at);
+			string params = text.substr(at + 2, end - at - 2);
+			if (!cube_params.has(params)) { cube_params[params] = cube_color(params); }
+			result += text.substr(pos, at - pos) + CSI + cube_params[params] + "m";
+			pos = end + 1;
+		}
+		return result + text.substr(pos);
+	}
+
+	string cube_color(string params) {
+		var parts = params.split(";");
+		if (parts.size() != 5 || parts[1] != "2") { return params; }
+		int n = 16 + 36 * cube_axis(parts[2].to_int()) + 6 * cube_axis(parts[3].to_int()) + cube_axis(parts[4].to_int());
+		return `${parts[0]};5;${n}`;
+	}
+
+	// a cell's density carries its two pixels' mean brightness (a square-root ramp, so
+	// dark scenes keep their shapes) and its color only their hue, at full value
+	string density_row(int cy) {
+		string result = cube ? CSI + "48;5;16m" : CSI + "48;2;0;0;0m";
+		int last = -1;
+		int top_row = cy * 2 * HB_W;
+		for (int x = 0; x < HB_W; ++x) {
+			int top = HB_RGB[HB_PIX[top_row + x]];
+			int bottom = HB_RGB[HB_PIX[top_row + HB_W + x]];
+			int r = ((top >> 16) + (bottom >> 16)) / 2;
+			int g = (((top >> 8) & 255) + ((bottom >> 8) & 255)) / 2;
+			int b = ((top & 255) + (bottom & 255)) / 2;
+			int glyph = itrunc(math::sqrt((r * 299 + g * 587 + b * 114) / 255000.0) * 9.99);
+			if (glyph > 0 && r * 65536 + g * 256 + b != last) {
+				last = r * 65536 + g * 256 + b;
+				int peak = math::max(r, math::max(g, b));
+				string rgb = `${r * 255 / peak};${g * 255 / peak};${b * 255 / peak}`;
+				result += cube ? CSI + cube_color(`38;2;${rgb}`) + "m" : `${CSI}38;2;${rgb}m`;
+			}
+			result += ramp[glyph];
+		}
+		return result + RESET;
+	}
+}
+
 // -------------------------------------------------------------------- pump ---
 // the host's interactive loop: clock dt (clamped 0.1s) + fps EMA, poll one key
 // edge, run demo_frame, present with a home escape, sleep off the fps budget.
@@ -401,6 +490,9 @@ function run_interactive() -> int {
 	string music_path = OPT_MUSIC ? write_soundtrack() : "";
 	var music = music_path != "" ? play_sound(music_path, true) : null;
 
+	var terminal = Terminal();
+	terminal.cube = OPT_CUBE;
+	terminal.ascii = OPT_ASCII;
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline);
 	time::stopwatch show;
 	time::stopwatch pace;
@@ -422,7 +514,7 @@ function run_interactive() -> int {
 
 		string frame = demo_frame(t, dt, key, fps_ema, sim_ms, draw_ms, 0.0);
 		sim_ms = pace.delta() * 1000;
-		print(ESC + "[H" + frame + ESC + "[0m", skip_newline);
+		print(ESC + "[H" + terminal.present(frame) + ESC + "[0m", skip_newline);
 		draw_ms = pace.delta() * 1000;
 
 

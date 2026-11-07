@@ -156,7 +156,7 @@ class SandBox : Scene {
 
 	void update(float t, float dt) override {
 		for (int sub = 0; sub < 2; ++sub) {
-			fr = fr + 1;
+			++fr;
 			do_spawn();
 			do_fall();
 			do_smoke();
@@ -244,7 +244,7 @@ class SandBox : Scene {
 					else if (t == 6) { int sa = a[idx] / 7; g = p_smoke + (sa > 3 ? 3 : sa); }
 				}
 				grid[idx] = g;
-				idx = idx + 1;
+				++idx;
 			}
 		}
 		for (int i = ww; i < ww * hh - ww; ++i) {

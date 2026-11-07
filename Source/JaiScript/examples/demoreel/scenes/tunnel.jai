@@ -60,8 +60,8 @@ class Tunnel : Scene {
 				int plate = ((u + (row % 2) * 8) / 16 + row * 5) % 7;
 				int lv = 5 + plate % 4;
 				if (bu == 0 || bv == 0) { lv = 1; }
-				else if (bu == 1 || bv == 1) { lv = lv + 3; }
-				else if (bu == 15 || bv == 15) { lv = lv - 3; }
+				else if (bu == 1 || bv == 1) { lv += 3; }
+				else if (bu == 15 || bv == 15) { lv -= 3; }
 				if ((bu == 3 || bu == 12) && (bv == 3 || bv == 12)) { lv = 11; }
 				if (v >= 28 && v < 36) {
 					int d = v < 32 ? v - 28 : 35 - v;
@@ -101,7 +101,7 @@ class Tunnel : Scene {
 				int u = (an[ti] + rot + ((d * twist) >> 5)) & 63;
 				int v = (d + mv) & 63;
 				grid[idx] = fo[ti] + tx[v * 64 + u];
-				idx = idx + 1;
+				++idx;
 			}
 		}
 	}

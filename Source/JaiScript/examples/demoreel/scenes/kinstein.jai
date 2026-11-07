@@ -211,8 +211,8 @@ class Kinstein : Scene {
 						int bv = v % 4;
 						int brick = hash2((u + (row % 2) * 4) / 8 + row * 7, t);
 						c = 1 + brick % 4;
-						if (bv == 1) { c = c + 1; }
-						if (bv == 3 && c > 1) { c = c - 1; }
+						if (bv == 1) { ++c; }
+						if (bv == 3 && c > 1) { --c; }
 						if (bu == 0 || bv == 0) { c = 0; }
 						if (t == 1 && c != 0) {
 							int m = hash2(u * 3 + v, v * 5 + 11) % 100;
@@ -248,7 +248,7 @@ class Kinstein : Scene {
 	}
 
 	var path_at(float s) {
-		s = s - math::floor(s / path_len) * path_len;
+		s -= math::floor(s / path_len) * path_len;
 		for (int i = 0; i < nwp; ++i) {
 			float L = seglen[i];
 			if (s <= L) {
@@ -330,7 +330,7 @@ class Kinstein : Scene {
 			if (best >= 0) {
 				es[best] = 1;
 				est[best] = 0.0;
-				kills = kills + 1;
+				++kills;
 				cool = 0.7;
 				muzzle_t = 0.12;
 				tracer_t = 0.14;
@@ -470,14 +470,14 @@ class Kinstein : Scene {
 				else { sdy += ddy; my += stepy; side = 1; }
 				int cellv = wm[my * mw + mx];
 				hitv = cellv;
-				guard = guard + 1;
+				++guard;
 			}
 			hitv = hitv == 0 ? 1 : hitv;
 			float pdist = side == 0 ? sdx - ddx : sdy - ddy;   // perpendicular: no fisheye
 			pdist = pdist < 0.05 ? 0.05 : pdist;
 			zc[x] = pdist;
 			float wallx = side == 0 ? posy + pdist * rdy : posx + pdist * rdx;
-			wallx = wallx - math::floor(wallx);
+			wallx -= math::floor(wallx);
 			int tu = itrunc(wallx * 16.0) & 15;
 			float lineh = hh / pdist;
 			float topf = (hh - lineh) * 0.5;

@@ -166,12 +166,12 @@ class BannerFall : Scene {
 		if (t > 5.0) {
 			float g = (t - 5.0) * 0.4;
 			g = g > 1.0 ? 1.0 : g;
-			A = A + g * (14.0 + 6.0 * math::sin(t * 1.9) + 3.0 * math::sin(t * 3.7));
+			A += g * (14.0 + 6.0 * math::sin(t * 1.9) + 3.0 * math::sin(t * 3.7));
 		}
 		if (free_t >= 0.0) {   // the gust dies the moment the banner parts: the tumble stays framed
 			float dk = (t - free_t) * 0.55;
 			dk = dk > 0.88 ? 0.88 : dk;
-			A = A * (1.0 - dk);
+			A *= 1.0 - dk;
 		}
 		// bind every hot array via var& (plain assignment would deep-copy it —
 		// value semantics — and the physics state must persist) and copy hot
@@ -221,7 +221,7 @@ class BannerFall : Scene {
 				px[p] = cx + (cx - lox) * 0.986 + fxv * dt2;
 				py[p] = cy + (cy - loy) * 0.986 + fyv * dt2;
 				pz[p] = cz + (cz - loz) * 0.984 + fzv * dt2;
-				p = p + 1;
+				++p;
 			}
 		}
 		// hidden assist: from 9.6s the topmost intact seam thread is cut every
@@ -234,7 +234,7 @@ class BannerFall : Scene {
 					cn[sid] = 0;
 					tearpt = js * cww;
 					tear_t = 0.14;
-					seamn = seamn - 1;
+					--seamn;
 					break;
 				}
 			}
@@ -248,7 +248,7 @@ class BannerFall : Scene {
 			while (shred_at < lim) {
 				int cxx = shred[shred_at];
 				cn[cxx] = 0;
-				shred_at = shred_at + 1;
+				++shred_at;
 			}
 		}
 		// relaxation: Jakobsen sqrt-free correction; overstretch breaks for real.
@@ -273,7 +273,7 @@ class BannerFall : Scene {
 							cn[cid] = 0;
 							tearpt = a;
 							tear_t = 0.14;
-							if (ih == 0) { seamn = seamn - 1; }
+							if (ih == 0) { --seamn; }
 						} else {
 							float k = 1.0 / (d2 + 1.0) - 0.5;
 							px[a] -= ddx * k;
@@ -284,8 +284,8 @@ class BannerFall : Scene {
 							pz[a + 1] += ddz * k;
 						}
 					}
-					cid = cid + 1;
-					a = a + 1;
+					++cid;
+					++a;
 				}
 			}
 			// vertical: a = j*cw+i <-> a+cw, rest2 = 1; i==0 weak seam
@@ -311,8 +311,8 @@ class BannerFall : Scene {
 							pz[a2 + cww] += dvz * k2;
 						}
 					}
-					cid = cid + 1;
-					a2 = a2 + 1;
+					++cid;
+					++a2;
 				}
 			}
 			// shear, first pass only (honest tuning: the second shear pass cost
@@ -341,8 +341,8 @@ class BannerFall : Scene {
 							pz[a3 + cww + 1] += daz * k3;
 						}
 					}
-					cid = cid + 1;
-					a3 = a3 + 1;
+					++cid;
+					++a3;
 				}
 			}
 			// shear B: a+1 <-> a+cw, rest2 = 2
@@ -368,8 +368,8 @@ class BannerFall : Scene {
 							pz[a4 + cww] += dbz * k4;
 						}
 					}
-					cid = cid + 1;
-					a4 = a4 + 1;
+					++cid;
+					++a4;
 				}
 			}
 			}
@@ -432,7 +432,7 @@ class BannerFall : Scene {
 		// dusk gradient backdrop (row entries 0..h-1)
 		int gi = 0;
 		for (int y = 0; y < hh; ++y) {
-			for (int x = 0; x < ww; ++x) { grid[gi] = y; gi = gi + 1; }
+			for (int x = 0; x < ww; ++x) { grid[gi] = y; ++gi; }
 		}
 		// the pole: a shaded round staff, a gold finial on top
 		int pbot = poley + itrunc(chh * ky) + 10;

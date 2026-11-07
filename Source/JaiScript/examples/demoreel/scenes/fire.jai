@@ -65,7 +65,7 @@ class Fire : Scene {
 
 	void update(float t, float dt) override {
 		tt = t;
-		fr = fr + 1;
+		++fr;
 		rainbow_on = t > 5.5 ? 1 : 0;
 		if (rainbow_on == 1) { hue_t += dt * 3.0; }
 		seed_rows(40, 33);

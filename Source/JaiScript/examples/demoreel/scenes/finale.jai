@@ -32,7 +32,7 @@ class Finale : Fire {
 
 	void update(float t, float dt) override {
 		tt = t;
-		fr = fr + 1;
+		++fr;
 		rainbow_on = t > 4.5 ? 1 : 0;             // the word burns rainbow
 		if (rainbow_on == 1) { hue_t += dt * 3.0; }
 		// the fire wall roars for the reveal, then dies down for the afterglow

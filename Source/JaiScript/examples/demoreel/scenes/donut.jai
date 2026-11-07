@@ -169,7 +169,7 @@ class Donut : Scene {
 			var& row = rows[y];
 			for (int x = 0; x < w; ++x) {
 				grid[idx] = row[x];
-				idx = idx + 1;
+				++idx;
 			}
 		}
 	}

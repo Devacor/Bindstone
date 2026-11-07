@@ -74,7 +74,7 @@ class Boids : Scene {
 					sky[y2 * w + x2] = lit ? 31 * 8 + 1 : 7;
 				}
 			}
-			hx0 = hx0 + bw + rng.next(3);
+			hx0 += bw + rng.next(3);
 		}
 		for (int i = 0; i < nb; ++i) {
 			var b2 = Boid();
@@ -142,7 +142,7 @@ class Boids : Scene {
 			float dy = o.y - by;
 			float d2 = dx * dx + dy * dy;
 			if (d2 > 220.0) { continue; }
-			near = near + 1;
+			++near;
 			mx += o.x;
 			my += o.y;
 			vx_sum += o.vx;
@@ -199,7 +199,7 @@ class Boids : Scene {
 		bool fade = (itrunc(tt * 30.0) & 1) == 0;
 		for (int i = 0; i < n; ++i) {
 			int tv = tr[i];
-			if (fade && tv > 0) { tv = tv - 1; tr[i] = tv; }
+			if (fade && tv > 0) { --tv; tr[i] = tv; }
 			int s = sk[i];
 			int dk = s % 8;
 			grid[i] = s + (tv > dk ? tv - dk : 0);

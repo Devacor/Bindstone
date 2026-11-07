@@ -206,7 +206,7 @@ class CanyonRun : Scene {
 			float zr = i / (nsteps - 1.0);
 			int hzv = itrunc(zr * zr * (nhaze + 0.6));
 			hazes.push(hzv > nhaze - 1 ? nhaze - 1 : hzv);
-			z = z * 1.058;
+			z *= 1.058;
 		}
 		// the sun: a glow ramp toward white, drawn only where sky shows through
 		sunb = pal.gradient(6, [[255.0, 170.0, 110.0], [255.0, 210.0, 150.0], [255.0, 244.0, 214.0]]);
@@ -321,7 +321,7 @@ class CanyonRun : Scene {
 						int pi = tb + (tv & 31) * nh + hz;
 						int gi = sy * ww + x2;
 						int yy = sy;
-						while (yy < ybv) { grid[gi] = pi; gi += ww; yy = yy + 1; }
+						while (yy < ybv) { grid[gi] = pi; gi += ww; ++yy; }
 						yb[x2] = sy;
 					}
 				}
@@ -334,7 +334,7 @@ class CanyonRun : Scene {
 			int yb2 = yb[x3];
 			int gi2 = x3;
 			int yy2 = 0;
-			while (yy2 < yb2) { grid[gi2] = yy2; gi2 += ww; yy2 = yy2 + 1; }
+			while (yy2 < yb2) { grid[gi2] = yy2; gi2 += ww; ++yy2; }
 		}
 		// the sun sits at a fixed bearing: its screen column follows the heading
 		float rel = math::atan2(dx_, dy_) - 0.55;

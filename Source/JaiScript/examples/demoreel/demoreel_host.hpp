@@ -38,6 +38,7 @@ struct host_options {
 	int64_t filter_mode = -1;            // -1 auto, 0 off, 1 truecolor+tolerance, 2 xterm-256
 	int64_t tol = 8;                     // per-channel merge tolerance for mode 1
 	bool diff = false;                   // row-diff redraw (skip unchanged rows)
+	bool ascii = false;                  // one density character per cell, no block glyphs
 	const char* argv0 = "";
 };
 

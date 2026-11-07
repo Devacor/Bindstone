@@ -53,7 +53,7 @@ class Plasma : Scene {
 			for (int x = 0; x < ww; ++x) {
 				int v = s[(x * zoom + t1) & 1023] + ys + s[(dt_[drow + x] + t3) & 1023] + s[(x * 11 + yx) & 1023];
 				grid[idx] = ((v >> 4) + phase) & 255;
-				idx = idx + 1;
+				++idx;
 			}
 		}
 	}

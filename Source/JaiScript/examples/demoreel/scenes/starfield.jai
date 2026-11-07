@@ -43,7 +43,7 @@ class Starfield : Scene {
 				float cr = c[0]; float cg = c[1]; float cb = c[2];
 				for (int lv = 0; lv < 8; ++lv) {
 					float s = (lv + 1) / 8.0;
-					s = s * (0.6 + 0.4 * s);
+					s *= 0.6 + 0.4 * s;
 					pal.add(nr + cr * s, ng + cg * s, nb + cb * s);
 				}
 			}
@@ -88,11 +88,11 @@ class Starfield : Scene {
 					int bot = c + (d - c) * fx / 256;
 					acc += (top + (bot - top) * fy / 256) * wgt;
 					cell = cell / 2;
-					n = n * 2;
+					n *= 2;
 					wgt = wgt / 2;
 				}
 				int v = acc / 14;                 // 0..255
-				v = v - 60;
+				v -= 60;
 				v = v < 0 ? 0 : v;
 				v = v * v / 110;
 				v = v * (nlev - 1) / 255;
@@ -140,7 +140,7 @@ class Starfield : Scene {
 			for (int x = 0; x < ww; ++x) {
 				int l = nb[row + ((x + ox) & 127)] + boost;
 				grid[idx] = (l > nl1 ? nl1 : l) * pr;
-				idx = idx + 1;
+				++idx;
 			}
 		}
 		float cx = ww * 0.5;

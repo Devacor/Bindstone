@@ -26,6 +26,29 @@ class Scene {
 	string caption() { return ""; }
 }
 
+// one HUD row: styled segments clipped to the row's width, with a second line's
+// segments right-aligned after them when both fit
+class HudLine {
+	int width = 0;
+	int used = 0;
+	string text = "";
+
+	HudLine(int w) { width = w; }
+
+	void put(string style, string s) {
+		if (used >= width) { return; }
+		string shown = s.size() > width - used ? s.substr(0, width - used) : s;
+		text += style + shown;
+		used += shown.size();
+	}
+
+	string finish(string fill, var& right) {
+		int gap = width - used - right.used;
+		if (gap < 0) { return text + fill + string::repeat(" ", width - used) + RESET; }
+		return text + fill + string::repeat(" ", gap) + right.text + RESET;
+	}
+}
+
 class Reel {
 	int w = 0;
 	int h = 0;           // terminal rows
@@ -93,23 +116,25 @@ class Reel {
 	}
 
 	var make_scene(int idx) {
-		if (idx == 0) { return Plasma(); }
-		if (idx == 1) { return Starfield(); }
-		if (idx == 2) { return Tunnel(); }
-		if (idx == 3) { return Donut(); }
-		if (idx == 4) { return Julia(); }
-		if (idx == 5) { return Lava(); }
-		if (idx == 6) { return Pipes(); }
-		if (idx == 7) { return SandBox(); }
-		if (idx == 8) { return Boids(); }
-		if (idx == 9) { return Kinstein(); }
-		if (idx == 10) { return CanyonRun(); }
-		if (idx == 11) { return SpongeWorks(); }
-		if (idx == 12) { return BannerFall(); }
-		if (idx == 13) { return Chrome(); }
-		if (idx == 14) { return Fire(); }
-		if (idx == 15) { return Ossuary(); }
-		return Finale();
+		switch (idx) {
+			case 0: return Plasma();
+			case 1: return Starfield();
+			case 2: return Tunnel();
+			case 3: return Donut();
+			case 4: return Julia();
+			case 5: return Lava();
+			case 6: return Pipes();
+			case 7: return SandBox();
+			case 8: return Boids();
+			case 9: return Kinstein();
+			case 10: return CanyonRun();
+			case 11: return SpongeWorks();
+			case 12: return BannerFall();
+			case 13: return Chrome();
+			case 14: return Fire();
+			case 15: return Ossuary();
+			default: return Finale();
+		}
 	}
 
 	float dur_for(int idx) {
@@ -172,10 +197,10 @@ class Reel {
 		in_trans = true;
 		trans_t = 0.0;
 		trans_kind = (trans_count + seed) % 5;
-		trans_count = trans_count + 1;
+		++trans_count;
 		int m = 0;
 		for (int x = 0; x < w; ++x) {
-			m = m + ((x * 7 + trans_count * 13 + (x * x) % 11) % 3) - 1;
+			m += ((x * 7 + trans_count * 13 + (x * x) % 11) % 3) - 1;
 			m = m < 0 ? 0 : (m > 14 ? 14 : m);
 			melt[x] = m * 1.0;
 		}
@@ -266,19 +291,43 @@ class Reel {
 	void title_text(var& rows, int row) {
 		if (row < 0) { return; }
 		int c = HB_RGB[ui_off + ui_band + 10];
-		string bgc = `${ESC}[48;2;${(c / 65536)};${((c / 256) % 256)};${(c % 256)}m`;
-		gfx.overlay_center(rows, w, row, cur.handle, bgc + ESC + "[38;2;170;184;240m");
+		gfx.overlay_center(rows, w, row, cur.handle, sgr_bg(c / 65536, (c / 256) % 256, c % 256) + sgr_fg(170, 184, 240));
 	}
 
-	// ms_sim = script update + frame string; ms_draw = host console write.
-	// The headline number is their SUM — the honest wall cost of a frame.
+	// The HUD: a status bar on top (the scene, then the frame's cost: ms_sim is the
+	// script's update and frame string, ms_draw the host's console write, and the
+	// headline is their sum) and a key bar below that fills as the scene plays.
+	// The headless runs boot with the HUD off, so it never reaches a hash.
 	void hud_overlay(var& rows, float fps, float ms_sim, float ms_draw, float ms_other) {
-		string other = backend == "vm" ? "interp" : "vm";
-		string ms_o = "";
-		if (ms_other > 0.0) { ms_o = " (" + other + " " + gfx.fmt1(ms_other) + ")"; }
-		string flow = paused ? " [FROZEN]" : "";
-		string txt = ` JAISCRIPT DEMOREEL ${(cur_idx + 1)}/${nscenes} ${cur.name} | ${backend} ${gfx.fmt1(ms_sim + ms_draw)}ms = sim ${gfx.fmt1(ms_sim)} + draw ${gfx.fmt1(ms_draw)}${ms_o} | ${gfx.fmt1(fps)} fps${flow} | ${w}x${ph} px | tab r h f n p q`;
-		gfx.overlay_left(rows, w, 0, txt, ESC + "[48;2;24;16;48m" + ESC + "[38;2;235;235;255m");
+		string band = sgr_bg(16, 11, 34);
+		var top = HudLine(w);
+		top.put(sgr_bg(255, 206, 110) + sgr_fg(30, 16, 44), " JAISCRIPT DEMOREEL ");
+		top.put(band + sgr_fg(120, 112, 168), `  ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  `);
+		top.put(band + sgr_fg(255, 226, 160), cur.name);
+		var stats = hud_stats(band, fps, ms_sim, ms_draw, ms_other, true);
+		if (top.used + stats.used > w) { stats = hud_stats(band, fps, ms_sim, ms_draw, ms_other, false); }
+		rows[0] = top.finish(band, stats);
+
+		string keys = " n p  next/prev    1-9 0  jump    f  freeze    h  hud    r  reload    q  quit";
+		keys = keys.size() > w ? keys.substr(0, w) : keys + string::repeat(" ", w - keys.size());
+		float played = scene_t / dur_cur;
+		int filled = itrunc((played > 1.0 ? 1.0 : played) * w);
+		rows[h - 1] = sgr_bg(52, 38, 96) + sgr_fg(214, 206, 255) + keys.substr(0, filled)
+			+ band + sgr_fg(120, 112, 168) + keys.substr(filled) + RESET;
+	}
+
+	// the frame's cost, with its split and the grid size when the row has room for them
+	HudLine hud_stats(string band, float fps, float ms_sim, float ms_draw, float ms_other, bool detail) {
+		var result = HudLine(w);
+		string label = band + sgr_fg(120, 112, 168);
+		string value = band + sgr_fg(238, 236, 255);
+		if (paused) { result.put(sgr_bg(214, 52, 92) + sgr_fg(255, 250, 230), " FROZEN "); }
+		result.put(value, `  ${backend} ${gfx.fmt1(ms_sim + ms_draw)} ms`);
+		if (detail) { result.put(label, ` (sim ${gfx.fmt1(ms_sim)} + draw ${gfx.fmt1(ms_draw)})`); }
+		if (detail && ms_other > 0.0) { result.put(label, ` other ${gfx.fmt1(ms_other)} ms`); }
+		result.put(value, `  ${gfx.fmt1(fps)}`);
+		result.put(label, detail ? ` fps  ${w}x${ph} px ` : " fps ");
+		return result;
 	}
 
 	string frame(float t, float dt, string key, float fps, float ms_sim, float ms_draw, float ms_other) {
@@ -308,7 +357,7 @@ class Reel {
 		title_text(rows, trow);
 		if (!in_trans) {
 			string cap = cur.caption();
-			if (cap != "") { gfx.overlay_center(rows, w, h - 3, cap, ESC + "[48;2;6;4;12m" + ESC + "[38;2;255;226;160m"); }
+			if (cap != "") { gfx.overlay_center(rows, w, h - 3, cap, sgr_bg(6, 4, 12) + sgr_fg(255, 226, 160)); }
 		}
 		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
 		return rows.join("\n");

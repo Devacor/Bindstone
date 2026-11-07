@@ -108,7 +108,7 @@ function sponge_row(int py) -> array<float> {
 			// (refreshed every 4th frame) is a near-perfect march start under
 			// a slow orbit - back up 15% and surface rays converge in a few steps
 			float tc0 = SP_T[base + px];
-			tc0 = tc0 * 0.85;
+			tc0 *= 0.85;
 			tray = tc0 > tray ? tc0 : tray;
 			int fit = 3;
 			float fsc = 0.037037037;
@@ -136,7 +136,7 @@ function sponge_row(int py) -> array<float> {
 					qx = qx * 3.0 - 2.0;
 					qy = qy * 3.0 - 2.0;
 					qz = qz * 3.0 - 2.0;
-					if (qz < -1.0) { qz = qz + 2.0; }
+					if (qz < -1.0) { qz += 2.0; }
 				}
 				float aq = qx < 0.0 ? -qx : qx;
 				float aq2 = qy < 0.0 ? -qy : qy;
@@ -145,9 +145,9 @@ function sponge_row(int py) -> array<float> {
 				mq = aq3 > mq ? aq3 : mq;
 				d = (mq - 1.0) * fsc;
 				if (d < 0.002 + tray * 0.0035) { hit = 1; break; }
-				tray = tray + d;
+				tray += d;
 				if (tray > tf) { break; }
-				stp = stp + 1;
+				++stp;
 			}
 			if (hit == 1) {
 				// exact face normal from ONE tracked re-fold: carry which world
@@ -184,7 +184,7 @@ function sponge_row(int py) -> array<float> {
 					qx2 = qx2 * 3.0 - 2.0;
 					qy2 = qy2 * 3.0 - 2.0;
 					qz2 = qz2 * 3.0 - 2.0;
-					if (qz2 < -1.0) { qz2 = qz2 + 2.0; }
+					if (qz2 < -1.0) { qz2 += 2.0; }
 				}
 				float bq = qx2 < 0.0 ? -qx2 : qx2;
 				float bq2 = qy2 < 0.0 ? -qy2 : qy2;
@@ -218,7 +218,7 @@ function sponge_row(int py) -> array<float> {
 					aopx = aopx * 3.0 - 2.0;
 					aopy = aopy * 3.0 - 2.0;
 					aopz = aopz * 3.0 - 2.0;
-					if (aopz < -1.0) { aopz = aopz + 2.0; }
+					if (aopz < -1.0) { aopz += 2.0; }
 				}
 				float cq = aopx < 0.0 ? -aopx : aopx;
 				float cq2 = aopy < 0.0 ? -aopy : aopy;
@@ -341,7 +341,7 @@ class SpongeWorks : Scene {
 	}
 
 	void render(var& grid) override {
-		rframe = rframe + 1;
+		++rframe;
 		SP_PHASE = rframe & 3;
 		SP_W = rw;
 		SP_H = rh;
@@ -368,7 +368,7 @@ class SpongeWorks : Scene {
 				SP_PIX[idx] = pv;
 				SP_T[idx] = row[rww + x];
 				grid[idx] = pv;
-				idx = idx + 1;
+				++idx;
 			}
 		}
 	}

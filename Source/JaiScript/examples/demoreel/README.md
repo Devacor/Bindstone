@@ -74,10 +74,12 @@ reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
 
 ```
 jaiscript demoreel.jai                       # the reel, 30 fps, with its soundtrack (q/esc quits; h/f/n/p/space/digits work)
+jaiscript demoreel.jai -- color 256          # the reel quantized to the xterm-256 cube (no 24-bit color)
+jaiscript demoreel.jai -- ascii 1            # one density character per cell (no block glyphs)
 jaiscript demoreel.jai -- frames 1700        # headless self-test: smoke frames, sizes + stream hash + timing
 jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt (+ P_<i>.bmp, the pixel grid)
 jaiscript demoreel.jai -- bench 60           # every scene mid-flight: script ms/frame and KB/frame
-jaiscript demoreel.jai -- shot 14 at 4 dump P   # one frame of scene 14 at scene time 4 -> P.txt + P.bmp
+jaiscript demoreel.jai -- shot 14 at 4 dump P   # one frame of scene 14 at scene time 4 -> P.txt (as presented) + P.bmp
 jaiscript demoreel.jai -- midi song.mid      # write the soundtrack and exit
 jaiscript demoreel.jai -- music 0            # the reel, silent
 ```
@@ -90,16 +92,27 @@ through the runner's `play_sound`.
 
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
-Not ported from the C++ host: the VT escape filter / xterm-256 rewrite /
-row-diff (frames present whole) and `r` hot reload.
+The runner reads no environment variables, so the shim cannot see `COLORTERM`:
+it draws 24-bit color unless `color 256` or `ascii 1` says otherwise. Not ported
+from the C++ host: its escape trimming and row-diff redraw (frames present
+whole) and `r` hot reload.
+
+On Windows the runner sets the console to UTF-8 and VT output, and swallows
+Ctrl+C (q or ESC quits). On Linux and macOS, Ctrl+C ends the runner with the
+terminal's input mode restored, but it leaves the reel's alternate screen up
+and the cursor hidden: `reset` (or `tput cnorm; tput rmcup`) brings them back.
+`jai_demoreel` restores all of it on Ctrl+C.
 
 ## Run
 
 ```
 jai_demoreel                     # the reel, 30 fps pacing
+jai_demoreel --ascii             # one density character per cell, for terminals without block glyphs
+jai_demoreel --256color          # force the xterm-256 cube (--truecolor forces 24-bit)
 jai_demoreel --smoke             # headless: frame-stream hash + perf
 jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
 jai_demoreel --capture I         # print scene I as plain text (ANSI stripped: half blocks and spaces)
+jai_demoreel --capture I --ascii # the same frame as a density map
 jai_demoreel --reload-test       # headless hot-reload self-test
 jai_demoreel --precompiled       # boot from demoreel.jaibite (saved on first run)
 ```
@@ -109,13 +122,15 @@ Keys while running:
 | key | action |
 | --- | ------ |
 | `r` | hot-reload every `scenes/*.jai` from disk |
-| `h` | toggle the HUD (scene, ACTIVE BACKEND, frame ms, fps, pixel size) |
+| `h` | toggle the HUD: a status bar (scene, backend, frame ms split into sim and draw, fps, pixel size) and a key bar that fills as the scene plays |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
 | `1`..`9`, `0` | jump straight to a scene (`0` = scene 17, the finale) |
 | `q` / `ESC` | quit |
 
-The HUD shows the backend and its frame cost.
+The HUD shows the backend and its frame cost. Ctrl+C, Ctrl+Break and SIGTERM
+end the reel through the same exit as `q`: the cursor, the colors, the
+main screen and (on Linux and macOS) the terminal's input mode come back.
 
 ## The scenes
 
@@ -222,10 +237,15 @@ are untouched by it, so parity hashes don't move):
   24-bit with per-channel merge tolerance (`--tol N`, default 8); `--no-filter`
   is the byte-exact legacy stream. The filter tracks foreground and background
   separately, which is exactly the half-block stream's shape.
-- **Terminal detection.** `WT_SESSION` distinguishes Windows Terminal from legacy
-  conhost. Conhost defaults to 256-color mode and shows a one-line tip on the
-  title card ("Windows Terminal renders this reel much faster"); everything else
-  defaults to truecolor + tolerance merging.
+- **Terminal detection.** `COLORTERM=truecolor` (or `24bit`) and Windows
+  Terminal (`WT_SESSION`) get 24-bit color with tolerance merging; every other
+  terminal (macOS Terminal.app, the Linux console, legacy conhost) gets the
+  xterm-256 cube. Conhost also shows a one-line tip on the title card ("Windows
+  Terminal renders this reel much faster"). `--truecolor` and `--256color`
+  override the choice, and `--ascii` replaces the half blocks with one density
+  character per cell (its brightness the cell's, its color the cell's hue at
+  full value) for terminals without the block glyphs; rows carrying text keep
+  their characters.
 - **One buffered write per frame**, via `WriteConsoleA` on a real console.
 - **`--diff`** row-diff redraw: only rows that changed since the last frame are
   rewritten (cursor-move + row). Not the default — most scenes change every

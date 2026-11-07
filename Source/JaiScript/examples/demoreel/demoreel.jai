@@ -6,8 +6,8 @@
 // load order and pumps demo_frame at 30 fps.
 //
 // Not ported from the C++ host: its escape filter and row-diff redraw (frames
-// present whole; the scripts' own run-length escapes still apply), TAB's backend
-// swap (one engine here) and 'r' hot reload.
+// present whole; the scripts' own run-length escapes still apply) and 'r' hot
+// reload.
 //
 //   jaiscript demoreel.jai                        the reel (q or esc quits)
 //   jaiscript demoreel.jai -- color 256           the reel quantized to the xterm-256 cube (color 24: 24-bit)
@@ -511,7 +511,7 @@ function run_interactive() -> int {
 
 		string key = read_key();
 		if (key == "q" || key == "esc") { break; }
-		if (key == "tab" || key == "r") { key = ""; }   // single engine, no eval: unsupported here
+		if (key == "r") { key = ""; }   // hot reload is the C++ host's
 
 		string frame = demo_frame(t, dt, key, fps_ema, sim_ms, draw_ms, 0.0);
 		sim_ms = pace.delta() * 1000;

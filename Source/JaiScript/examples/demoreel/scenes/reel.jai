@@ -207,8 +207,8 @@ class Reel {
 		bind_palettes();
 	}
 
-	// backend swap lands here: same scene, same clock; stateful scenes replay
-	// up to 3 sim-seconds so they arrive mid-flight instead of empty.
+	// a jump to a scene mid-flight: same scene, same clock; stateful scenes
+	// replay up to 3 sim-seconds so they arrive mid-flight instead of empty.
 	void jump(int idx, float at_t) {
 		start_scene(idx, at_t);
 		int steps = itrunc(at_t * 30.0);

@@ -20,8 +20,7 @@ ports/<lang>/                           your scripts
 SGR output filter and row-diff redraw), key polling, frame timing and pacing,
 the `demo_rng` xorshift64\* struct, every `--flag`, the `--smoke` parity table
 and its FNV-1a frame-stream hash, `--perf` (per-scene ms/frame and scene hash),
-`--bench`, `--capture`, `--reload-test`, and TAB (cycle the live session,
-re-synced through `scene_index`/`scene_time`/`jump`).
+`--bench`, `--capture` and `--reload-test`.
 
 **Your adapter owns**: creating the runtime, binding the host API (below),
 loading your scripts, forwarding the entry points (the `script_session` table).
@@ -40,10 +39,9 @@ title cards, HUD, and all 17 scenes. The host only blits the string
 |---|---|
 | `program_name()` | exe name used in messages, e.g. `"demoreel_lua"` |
 | `language()` | human name, e.g. `"Lua 5.4 / sol2"` |
-| `backends()` | runtimes `--smoke`/`--perf` run in order and `--backend` accepts. Single-runtime ports return one name (`{"lua"}`); JaiScript returns `{"interpreter","vm"}` |
+| `backends()` | runtimes `--smoke`/`--perf` run in order and `--backend` accepts. Every adapter returns one name (`{"lua"}`, `{"squirrel"}`, JaiScript `{"vm"}`) |
 | `default_backend()` | defaults to `backends().back()` |
-| `normalize_backend(b)` | optional alias (jai: `interp` -> `interpreter`) |
-| `interactive_backends(opt)` | sessions the interactive loop keeps live (TAB cycles them); defaults to `backends()` |
+| `normalize_backend(b)` | optional alias for a `--backend` name |
 | `parse_flag(argc, argv, i)` / `usage()` | optional adapter-only flags; return the number of args consumed, 0 = unknown |
 | `make_session(backend, services, opt)` | a fresh runtime with every host-API binding in place; scripts NOT loaded yet |
 
@@ -55,7 +53,7 @@ title cards, HUD, and all 17 scenes. The host only blits the string
 | `load_kind()` | - | 4-char tag for the smoke table (`prse`, `bite`, `lua`, ...) |
 | `boot(w, h, seed, backend, smoke, hud)` | `demo_boot(w, h, seed, backend, smoke, hud)` | builds a fresh `Reel`; called again to restart (perf boots once per scene) |
 | `frame(a)` | `demo_frame(t, dt, key, fps, ms_sim, ms_draw, ms_other) -> string` | the FULL frame, rows joined by `\n`; hashed byte for byte. Smoke/perf pass `key=""` and zero perf floats |
-| `scene_index()` / `scene_time()` | `demo_scene_index()` / `demo_scene_time()` | TAB state sync |
+| `scene_index()` / `scene_time()` | `demo_scene_index()` / `demo_scene_time()` | `--reload-test`'s jump back onto the scene |
 | `scene_count()` / `scene_name()` | `demo_scene_count()` / `demo_scene_name()` | perf rows |
 | `jump(idx, at_t)` | `demo_jump(idx, at_t)` | start scene idx at scene time at_t (stateful scenes replay up to 3 s) |
 | `reload()` | re-execute scene files + `demo_reload()` | optional hot reload; return false when unsupported |

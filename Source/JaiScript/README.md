@@ -237,8 +237,8 @@ of the actual program in script; Gator Quest and JaiDoom run on the stock runner
 - **GRUBWELL** (`examples/crawler`) — a step-based first-person dungeon crawler, and the hot
   reload showpiece: run it with `--dev`, edit a script, press `R`, and the dungeon changes
   under you.
-- **demoreel** (`examples/demoreel`) — seventeen truecolor demoscene scenes running on *two*
-  live engines at once; TAB swaps the backend mid-scene and the picture does not change.
+- **demoreel** (`examples/demoreel`) — seventeen truecolor demoscene scenes, every pixel computed
+  by script on the VM; press `r` after editing a scene file and the change appears mid-scene.
 - **Gator Quest** (`examples/gatorquest`) — a terminal RPG across six realms, with combat, spells,
   crafting, bots and netplay; the world, the art, the sound effects and the music are generated
   by the scripts. It needs nothing but the runner:

@@ -128,7 +128,9 @@ Keys while running:
 | `1`..`9`, `0` | jump straight to a scene (`0` = scene 17, the finale) |
 | `q` / `ESC` | quit |
 
-The HUD shows the backend and its frame cost. Ctrl+C, Ctrl+Break and SIGTERM
+`jai_demoreel` runs one engine, on the VM: it links the library without the
+interpreter, so the two backends are compared on the standalone runner
+(`--backend=interp`, above). The HUD shows the backend and its frame cost. Ctrl+C, Ctrl+Break and SIGTERM
 end the reel through the same exit as `q`: the cursor, the colors, the
 main screen and (on Linux and macOS) the terminal's input mode come back.
 

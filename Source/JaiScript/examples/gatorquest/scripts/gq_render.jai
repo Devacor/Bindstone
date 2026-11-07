@@ -16,7 +16,9 @@ int prand(int n) {
 float prandf() { return prand(10000) / 10000.0; }
 
 // ---- per-world night tints
-array<int> WORLD_TINT = [18, 22, 48, 18, 34, 22, 8, 26, 50, 22, 32, 20, 30, 42, 64, 64, 16, 8, 60, 70, 104, 26, 26, 12, 34, 22, 10];
+array<int> WORLD_TINT = [22, 30, 66, 18, 36, 44, 8, 26, 50, 22, 32, 20, 30, 42, 64, 64, 16, 8, 60, 70, 104, 26, 26, 12, 34, 22, 10];
+// how warm torchlight, dawn and dusk run in each realm (percent): ice and the deep stay cooler, the sky not at all
+array<int> WORLD_WARM = [100, 100, 60, 100, 45, 100, 0, 100, 100];
 
 void ensure_shade(ClientView& v) {
 	int ghost = v.ghost;
@@ -24,7 +26,8 @@ void ensure_shade(ClientView& v) {
 	SHADE_WORLD = v.world;
 	SHADE_GHOST = ghost;
 	int w = v.world;
-	shade_build(WORLD_TINT[w * 3], WORLD_TINT[w * 3 + 1], WORLD_TINT[w * 3 + 2], ghost != 0);
+	// the day/night realms get warm sunlight
+	shade_build(WORLD_TINT[w * 3], WORLD_TINT[w * 3 + 1], WORLD_TINT[w * 3 + 2], ghost != 0, WORLD_WARM[w], WORLDS[w].ambient == 0 ? 22 : 0);
 }
 
 // 0..15 ambient light for the view
@@ -36,9 +39,9 @@ int ambient_level(ClientView& v) {
 		int hour = (v.tod * 24 / DAY_TICKS + 7) % 24;
 		int minute = (v.tod * 24 * 60 / DAY_TICKS) % 60;
 		if (hour >= 8 && hour < 18) { lvl = 15; }
-		else if (hour >= 20 || hour < 5) { lvl = 2; }
-		else if (hour >= 18) { lvl = 15 - ((hour - 18) * 60 + minute) * 13 / 120; }
-		else { lvl = 2 + ((hour - 5) * 60 + minute) * 13 / 180; }
+		else if (hour >= 20 || hour < 5) { lvl = 3; }
+		else if (hour >= 18) { lvl = 15 - ((hour - 18) * 60 + minute) * 12 / 120; }
+		else { lvl = 3 + ((hour - 5) * 60 + minute) * 12 / 180; }
 	}
 	if (v.weather == 3) { lvl = lvl - 3; }
 	else if (v.weather == 4) { lvl = lvl - 2; }
@@ -165,6 +168,19 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 			if ((P_FLAGS[p] & 1) != 0 && P_LIFE[p] > 0 && p % 3 == 0) { light_emit(P_X[p], P_Y[p], 1.6, 10); }
 		}
 	}
+	// past a walled realm's edge the rock fades into the dark over four tiles
+	if (w != 0 && w != 6) {
+		for (int ly = 0; ly < LG_H; ++ly) {
+			int wy = LG_Y0 + ly;
+			int oy = wy < 0 ? -wy : (wy >= W_H[w] ? wy - W_H[w] + 1 : 0);
+			for (int lx = 0; lx < LG_W; ++lx) {
+				int wx = LG_X0 + lx;
+				int ox = wx < 0 ? -wx : (wx >= W_W[w] ? wx - W_W[w] + 1 : 0);
+				int out = imax(ox, oy);
+				if (out > 0) { LG[ly * LG_W + lx] = LG[ly * LG_W + lx] * imax(0, 4 - out) / 5; }
+			}
+		}
+	}
 	int nb = NBASE;
 	for (int ty = ty0; ty < ty0 + th; ++ty) {
 		int sy0 = ty * S - camy + VH / 2;
@@ -173,8 +189,12 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 			int sx0 = tx * S - camx + VW / 2;
 			if (sx0 >= VW || sx0 + S <= 0) { continue; }
 			int t = cv_tile(v, tx, ty);
-			int vr = in_world(w, tx, ty) ? TVAR[W_OFF[w] + ty * W_W[w] + tx] & 3 : 0;
-			int f = TILE_ANIM[t] != 0 ? (frame + vr) % 4 : 0;
+			int vr = in_world(w, tx, ty) ? TVAR[W_OFF[w] + ty * W_W[w] + tx] & 3 : hash3(tx, ty, 7) & 3;
+			int anim = TILE_ANIM[t];
+			int f = 0;
+			if (anim == ANIM_WATER) { f = frame; }
+			else if (anim == ANIM_FLICKER) { f = (frame + vr) % 4; }
+			else if (anim == ANIM_BREEZE) { f = (FRAME / 10 - ((tx + ty) >> 2)) & 3; }
 			int src = TEX_OFF[(t * 4 + vr) * 4 + f];
 			// the four corner light levels: averages of the tile centers that meet there
 			int lx = tx - LG_X0;
@@ -209,6 +229,40 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 					if (lev > 15) { lev = 15; }
 					PIX[dst + px] = SHADE[lev * nb + TEX[s2 + px]];
 				}
+			}
+		}
+	}
+	draw_shore_foam(v, tx0, ty0, tw, th, camx, camy);
+}
+
+// foam along every water edge that meets land, its gaps crawling along the shore
+void draw_shore_foam(ClientView& v, int tx0, int ty0, int tw, int th, int camx, int camy) {
+	int S = TS;
+	int nb = NBASE;
+	int ph = FRAME / 8;
+	for (int ty = ty0; ty < ty0 + th; ++ty) {
+		int sy0 = ty * S - camy + VH / 2;
+		if (sy0 >= VH || sy0 + S <= 0) { continue; }
+		for (int tx = tx0; tx < tx0 + tw; ++tx) {
+			int sx0 = tx * S - camx + VW / 2;
+			if (sx0 >= VW || sx0 + S <= 0) { continue; }
+			if (TILE_FOAMS[cv_tile(v, tx, ty)] == 0) { continue; }
+			bool n = TILE_WET[cv_tile(v, tx, ty - 1)] == 0;
+			bool s = TILE_WET[cv_tile(v, tx, ty + 1)] == 0;
+			bool we = TILE_WET[cv_tile(v, tx - 1, ty)] == 0;
+			bool ea = TILE_WET[cv_tile(v, tx + 1, ty)] == 0;
+			if (!n && !s && !we && !ea) { continue; }
+			int lev = light_at(tx, ty);
+			int fa = SHADE[lev * nb + FOAM_A];
+			int fb = SHADE[lev * nb + FOAM_B];
+			for (int k = 0; k < S; ++k) {
+				int along = (tx + ty) * S + k;
+				bool lit = (along + ph) % 5 != 0;
+				bool lap = (along - ph) % 4 == 0;
+				if (n) { pset(sx0 + k, sy0, lit ? fa : fb); if (lap) { pset(sx0 + k, sy0 + 1, fb); } }
+				if (s) { pset(sx0 + k, sy0 + S - 1, lit ? fa : fb); if (lap) { pset(sx0 + k, sy0 + S - 2, fb); } }
+				if (we) { pset(sx0, sy0 + k, lit ? fa : fb); if (lap) { pset(sx0 + 1, sy0 + k, fb); } }
+				if (ea) { pset(sx0 + S - 1, sy0 + k, lit ? fa : fb); if (lap) { pset(sx0 + S - 2, sy0 + k, fb); } }
 			}
 		}
 	}
@@ -299,7 +353,7 @@ void draw_sprite(int off, int sx, int sy, bool flip, int lev, int mode, int cut)
 			if (x < 0 || x >= VW) { continue; }
 			if (mode == 1) { PIX[y * VW + x] = COL_WHITE; }
 			else if (mode == 2) {
-				if ((x + y + FRAME / 4) % 2 == 0) { PIX[y * VW + x] = SHADE[15 * nb + c]; }
+				if ((x + y + FRAME / 4) % 2 == 0) { PIX[y * VW + x] = SHADE_GHOST != 0 ? SHADE[15 * nb + c] : c; }
 			} else { PIX[y * VW + x] = SHADE[sh + c]; }
 		}
 	}

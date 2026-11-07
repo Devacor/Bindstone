@@ -116,6 +116,11 @@ void tour_ticks(int n) {
 	}
 }
 
+// on to the next time the clock reads `hour`:00
+void tour_clock(int hour) {
+	TICK = TICK + (DAY_TICKS - time_of_day()) + ((hour - 7 + 24) % 24) * DAY_TICKS / 24;
+}
+
 void tour_shot(string dir, string name) {
 	NOW_MS = NOW_MS + 60;
 	render_frame(CV);
@@ -153,7 +158,7 @@ int run_tour() {
 	}
 	// night in Gatorland: torchlight and the forge glow
 	travel(me, 0, W_ARRIVE_X[0], W_ARRIVE_Y[0]);
-	TICK = TICK + (DAY_TICKS - time_of_day()) + DAY_TICKS * 15 / 24;
+	tour_clock(22);
 	tour_ticks(10);
 	tour_shot(dir, "10_swampton_night");
 	// a boss fight: the health bar, damage numbers, adds
@@ -188,6 +193,18 @@ int run_tour() {
 	tour_ticks(6);
 	tour_shot(dir, "13_journal");
 	UI_MODE = "play";
+	// the lakeside by Gatorland's Lilygate (river, bridge, beach, meadow) at noon, then by torchlight
+	array<int> lake = find_free_spot(0, 40, 41, 6, LAND_MASK);
+	travel(me, 0, lake[0], lake[1]);
+	MOB_POISON[me] = 0;
+	W_WEATHER[0] = 0;
+	W_WEATHER_T[0] = TICK + DAY_TICKS * 2;
+	tour_clock(12);
+	tour_ticks(12);
+	tour_shot(dir, "14_lakeside_noon");
+	tour_clock(22);
+	tour_ticks(12);
+	tour_shot(dir, "15_lakeside_night");
 	print(`tour: done (STATE_HASH ${state_hash()})`);
 	return 0;
 }

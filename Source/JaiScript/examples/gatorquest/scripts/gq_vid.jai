@@ -156,13 +156,17 @@ int SHADE_TINT_R;
 int SHADE_TINT_G;
 int SHADE_TINT_B;
 
-void shade_build(int tr, int tg, int tb, bool ghost) {
+// warm_pct scales the warm middle levels (torchlight, dawn, dusk), day_warm warms full light (outdoor daylight)
+void shade_build(int tr, int tg, int tb, bool ghost, int warm_pct, int day_warm) {
 	SHADE_TINT_R = tr;
 	SHADE_TINT_G = tg;
 	SHADE_TINT_B = tb;
 	SHADE = [];
 	int n = NBASE;
 	for (int lev = 0; lev < NLEV; ++lev) {
+		// shadows stay cool, the middle levels glow amber, peaking at level 11
+		int warm = lev == NLEV - 1 ? day_warm : iclamp(100 - iabs(lev - 11) * 22, 0, 100) * warm_pct / 100;
+		if (ghost) { warm = 0; }
 		for (int c = 0; c < n; ++c) {
 			int r = PAL_R[c];
 			int g = PAL_G[c];
@@ -178,12 +182,19 @@ void shade_build(int tr, int tg, int tb, bool ghost) {
 				r = (r * lev + tr * (NLEV - 1 - lev)) / (NLEV - 1);
 				g = (g * lev + tg * (NLEV - 1 - lev)) / (NLEV - 1);
 				b = (b * lev + tb * (NLEV - 1 - lev)) / (NLEV - 1);
-				// quantize a little so the palette stays small
-				r = r & 0xFC;
-				g = g & 0xFC;
-				b = b & 0xFC;
 			}
-			SHADE.push(lev == NLEV - 1 && !ghost ? c : rgb(r, g, b));
+			if (warm > 0) {
+				r = r * (100 + warm * 10 / 100) / 100 + warm / 7;
+				g = g * (100 + warm * 4 / 100) / 100 + warm / 30;
+				b = b * (100 - warm * 17 / 100) / 100;
+			}
+			if (lev < NLEV - 1 || warm > 0) {
+				// quantize a little so the palette stays small
+				r = iclamp(r, 0, 255) & 0xFC;
+				g = iclamp(g, 0, 255) & 0xFC;
+				b = iclamp(b, 0, 255) & 0xFC;
+			}
+			SHADE.push(lev == NLEV - 1 && !ghost && warm == 0 ? c : rgb(r, g, b));
 		}
 	}
 }
@@ -275,9 +286,11 @@ string canvas_row(int cy) {
 string PANE_ROW;
 int PANE_W;
 int PANE_MAX;
+string SGR_PANE_BG = "48;2;20;26;22";
 
+// every pane row starts on the panel's own dark ground
 void pane_begin(int width) {
-	PANE_ROW = "";
+	PANE_ROW = ESC + "[" + sgr_params(SGR_PANE_BG) + "m";
 	PANE_W = 0;
 	PANE_MAX = width;
 }
@@ -309,11 +322,11 @@ string pane_line(string sgr, string text, int width) {
 	return pane_end();
 }
 
-// a bar of `width` cells: filled part in one color, rest dim
+// a bar of `width` cells: filled part in one color, the rest a solid dark track
 string bar(int value, int maxv, int width, string fill_sgr, string empty_sgr) {
 	int n = maxv > 0 ? iclamp(value * width / maxv, 0, width) : 0;
 	if (value > 0 && n == 0) { n = 1; }
 	string full = string::repeat("\xe2\x96\x88", n);
-	string empty = string::repeat("\xe2\x96\x91", width - n);
+	string empty = string::repeat("\xe2\x96\x88", width - n);
 	return ESC + "[" + sgr_params(fill_sgr) + "m" + full + ESC + "[" + sgr_params(empty_sgr) + "m" + empty;
 }

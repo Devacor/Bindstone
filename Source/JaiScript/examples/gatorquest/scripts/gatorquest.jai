@@ -187,7 +187,7 @@ int run_play() {
 int run_sheet() {
 	sim_init(1);
 	art_init(8);
-	shade_build(18, 22, 48, false);
+	shade_build(18, 22, 48, false, 100, 22);
 	int cols = 12;
 	int cell = 40;
 	int nspr = SPRITE_SRC.size();

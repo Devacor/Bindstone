@@ -198,7 +198,7 @@ powershell -File nettest2.ps1 [-Backend interp]                  # a dedicated h
 jaiscript scripts/gatorquest.jai -- predtest [lag N jitter N loss N]   # movement prediction under a simulated link
 jaiscript scripts/gatorquest.jai -- menutest                     # the title's host and join pages, every refusal, leaving
 jaiscript scripts/gatorquest.jai -- endgame                      # the six tyrants and the Six Scales, start to crown
-jaiscript scripts/gatorquest.jai -- tour [screen 200x56]         # captures of every realm, night, a boss fight, fishing
+jaiscript scripts/gatorquest.jai -- tour [screen 200x56]         # captures of every realm, night, a boss fight, fishing, the lakeside
 jaiscript scripts/gatorquest.jai -- shot ticks 900 every 300     # frame captures (.ans, .txt sketch, .png)
 jaiscript scripts/gatorquest.jai -- shot title                   # every title page as a capture
 jaiscript scripts/gatorquest.jai -- demo frames 600              # the real play loop driven by a bot

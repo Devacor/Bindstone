@@ -1,19 +1,19 @@
-// FINALE — an eight-dimensional climax. An 8-cube (256 vertices, 1024 edges)
-// unfolds out of a point one dimension at a time, a line, a square, a cube, on
-// up to eight, every edge glowing in the hue of the axis it runs along. It turns
-// the way a world turns in Fez: eased quarter-turns that snap on the beat, each
-// one a symmetry of the cube, so every snap lands back on a perfect figure. Behind
-// it the hyperbolic plane opens ring by ring as each dimension does, Escher's
-// Circle Limit geometry: octagons meeting three at a corner in the Poincare disk,
-// shrinking without end toward the rim, flowing forever under hyperbolic
-// translation. At eight dimensions the snaps double up on every half beat and the
-// plane accelerates into a warp; then it shatters: the vertices burst into sparks
-// that swirl onto the pixels of the word JAISCRIPT, and the word slams in with a
-// white flash, two shockwaves and a screen shake as the fire wall erupts beneath
-// it. The flames pump on every beat and burn into rainbow with the hypercube still
-// turning behind them; then the wall dies, the letters cool to neon and the
-// credits roll. It is the fire scene's subclass: the letters are heat sources
-// stamped from the pixel font and fed to the same convection pass.
+// FINALE — JaiScript in eight dimensions: a music video at the soundtrack's 124
+// bpm. After the title card it counts the language in, ONE to EIGHT, a slide of
+// four bars each (scenes/show.jai): a code card types itself, a live demonstration
+// plays beside it, captions run along the lower third, and every slide opens one
+// more axis of an 8-cube that turns in a window above the demonstration, the way a
+// world turns in Fez: eased quarter-turns snapping on the beat, each a symmetry of
+// the cube. The cube sits on Escher's hyperbolic plane: the {8,3} tiling (octagons
+// meeting three at a corner) in the Poincare disk, opening ring by ring with the
+// dimensions and mirrored through the circle at infinity to fill the screen. With
+// all eight shown the cube takes the whole screen, the snaps double up every half
+// beat, the scene turns, swirls and ripples as one and the plane accelerates into
+// a warp; then it shatters into a vortex of sparks that wind onto JAISCRIPT, which
+// slams in with a flash, shockwaves and a shake as the fire wall erupts, pumping
+// in rainbow on the beat with the plane behind it, before the neon and the
+// credits. The fire is the fire scene's: this class extends it, and the letters
+// are heat sources stamped from the pixel font.
 
 // The {8,3} tiling, one row per parallel_transform body. A pixel is first carried
 // through the scene's warp (a turn, a swirl tightest at the centre, a ripple
@@ -144,8 +144,9 @@ function hyper_row(int y) -> array<int> {
 		float rim = (1.0 - r2) * 2.5;
 		float fade = (0.3 + 0.7 * (rim > 1.0 ? 1.0 : rim)) * gain * side;
 		float edge = math::sqrt(e2) - er;
-		if (reveal - dh < 0.22 || edge < 0.02) {
-			int le = itrunc((reveal - dh < 0.22 ? 7.9 : 6.0 - edge * 150.0) * fade);
+		bool front = side == 1.0 && reveal - dh < 0.22;
+		if (front || edge < 0.02) {
+			int le = itrunc((front ? 7.9 : 6.0 - edge * 150.0) * fade);
 			out.push(packed + HY_EDGE + 1 + (le < 0 ? 0 : (le > 7 ? 7 : le)));
 			continue;
 		}
@@ -197,16 +198,23 @@ class Finale : Fire {
 	array<int> snap_qb = [];
 	float landed = -9.0;         // when the last snap clicked home
 
-	float unfold_t = 0.8;        // the first dimension opens
-	float snaps_t = 1.935;       // the first quarter-turn, once there is a cube to turn
-	float dance_t = 5.32;        // eight dimensions: the snaps double up
-	float shatter_t = 8.235;     // the cube bursts
-	float slam_t = 9.685;        // the word lands and the fire erupts
-	float rainbow_t = 11.635;
-	float wall_out_t = 16.435;   // the wall starts dying
-	float embers_t = 17.435;     // the letters stop feeding the flames
-	float neon_t = 19.435;       // ... and have cooled to neon
-	float credits_t = 18.435;
+	var deck = null;             // the eight slides
+	float cube_cx = 0.0;         // where the cube and its disk sit, and their size
+	float cube_cy = 0.0;
+	float cube_scale = 1.0;
+	float disk_r = 1.0;
+	float view_mix = 0.0;        // 0 in the slides' window, 1 filling the screen
+
+	// the timeline in bars of the 124 bpm soundtrack, set in build
+	float snaps_t = 0.0;         // the first quarter-turn: the second slide's square
+	float dance_t = 0.0;         // all eight shown: the snaps double up
+	float shatter_t = 0.0;       // the cube bursts
+	float slam_t = 0.0;          // the word lands and the fire erupts
+	float rainbow_t = 0.0;
+	float wall_out_t = 0.0;      // the wall starts dying
+	float embers_t = 0.0;        // the letters stop feeding the flames
+	float neon_t = 0.0;          // ... and have cooled to neon
+	float credits_t = 0.0;
 	float credit_rows_per_s = 5.0;
 
 	// [kind, left column, right column]: a "role" row splits at the gutter
@@ -216,19 +224,28 @@ class Finale : Fire {
 		["body", "eleven scenes . five transitions", ""],
 		["body", "every pixel computed by the jaiscript vm", ""],
 		["", "", ""],
+		["role", "ONE", "scripting"],
+		["role", "TWO", "serialization"],
+		["role", "THREE", "reflection"],
+		["role", "FOUR", "hot reload"],
+		["role", "FIVE", "parallel"],
+		["role", "SIX", "signals"],
+		["role", "SEVEN", "debugging"],
+		["role", "EIGHT", "embedding"],
+		["", "", ""],
 		["role", "DONUT", "a sphere-traced torus"],
 		["role", "JULIA", "a morphing julia set"],
 		["role", "LAVALAMP", "lit metaballs"],
-		["role", "PIPEDREAM", "the 3d pipes screensaver"],
+		["role", "PIPEDREAM", "chrome pipes on a synthwave set"],
 		["role", "BOIDS", "a murmuration and a falcon"],
-		["role", "GLOBHUNTER", "a textured raycaster"],
-		["role", "CANYONRUN", "voxelspace terrain"],
-		["role", "CHROME", "a ray tracer"],
-		["role", "OSSUARY", "a skull spider on a morphing gyroid"],
+		["role", "GLOBHUNTER", "a torchlit raycaster hunt"],
+		["role", "CANYONRUN", "a golden-hour voxelspace canyon"],
+		["role", "CHROME", "chrome, glass and a polished floor"],
+		["role", "OSSUARY", "a skull spider, a web, a moth"],
 		["role", "MAELSTROM", "navier-stokes ink"],
-		["role", "FINALE", "an 8-cube, and you are here"],
+		["role", "FINALE", "jaiscript in eight dimensions"],
 		["", "", ""],
-		["body", "half-block pixels, two to a cell", ""],
+		["body", "sextant pixels, six to a cell", ""],
 		["body", "deterministic to the last byte", ""],
 		["", "", ""],
 		["", "", ""],
@@ -239,7 +256,17 @@ class Finale : Fire {
 	void build() override {
 		name = "FINALE";
 		handle = "eight dimensions . jaiscript forever";
-		replay = 26.0;
+		replay = 30.0;
+		float bar = beat * 4.0;
+		snaps_t = bar * 7.0;
+		dance_t = bar * 35.0;
+		shatter_t = bar * 37.0;
+		slam_t = shatter_t + beat * 3.0;
+		rainbow_t = slam_t + bar;
+		wall_out_t = slam_t + 6.75;
+		embers_t = slam_t + 7.75;
+		neon_t = slam_t + 9.75;
+		credits_t = slam_t + 8.75;
 		build_fire();
 		fuel = gfx.make_grid(w);
 		stamp_word("JAISCRIPT");
@@ -282,18 +309,26 @@ class Finale : Fire {
 		HY_EDGE_R = (1.0 / HY_MID - HY_MID) * 0.5;
 		HY_NX = 0.0 - math::sin(0.3926991);
 		HY_NY = math::cos(0.3926991);
+		deck = Deck();
+		deck.hyper = hyper;
+		deck.build(pal);
 		plan_snaps();
 	}
 
-	// a quarter-turn on every beat once there is a cube, through planes of the axes
-	// already open; at eight dimensions two disjoint planes snap every half beat
+	// how many axes the slides have opened by time t
+	int dims_at(float t) {
+		int d = deck.section(t);
+		return d > 8 ? 8 : d;
+	}
+
+	// a quarter-turn every other beat once there is a square, through planes of the
+	// axes already open; with all eight shown two disjoint planes snap every half beat
 	void plan_snaps() {
 		int k = 0;
 		float t = snaps_t;
 		while (t < shatter_t - 0.1) {
 			bool dance = t >= dance_t - 0.01;
-			int dims = itrunc((t - unfold_t) / 0.55) + 1;
-			dims = dims > 8 ? 8 : dims;
+			int dims = dims_at(t);
 			int a = k % dims;
 			int b = (a + 1 + (k / dims) % (dims - 1)) % dims;
 			int qa = -1;
@@ -310,30 +345,30 @@ class Finale : Fire {
 			snap_pb.push(b);
 			snap_qa.push(qa);
 			snap_qb.push(qb);
-			t += dance ? beat * 0.5 : beat;
+			t += dance ? beat * 0.5 : beat * 2.0;
 			++k;
 		}
 	}
 
-	// the 5x7 font at double size, its second column kept single so a glyph is
-	// 9 px wide on a 10 px pitch; narrow screens get it at single size
+	// the 5x7 font stretched to most of the width (columns at a fractional scale,
+	// rows at the nearest whole one)
 	void stamp_word(string text) {
-		bool big = w >= 95;
-		array<int> font_col = [0, 1, 2, 3, 4];
-		if (big) { font_col = [0, 0, 1, 2, 2, 3, 3, 4, 4]; }
-		int sy_ = big ? 2 : 1;
-		int pitch = font_col.size() + 1;
-		word_w = text.size() * pitch - 1;
+		float fx = w * 0.86 / (text.size() * 6.0);
+		fx = fx < 1.0 ? 1.0 : (fx > 5.0 ? 5.0 : fx);
+		int gw = itrunc(fx * 5.0 + 0.5);
+		int pitch = itrunc(fx * 6.0 + 0.5);
+		int s = itrunc(fx + 0.5);
+		word_w = text.size() * pitch - (pitch - gw);
 		word_x = (w - word_w) / 2;
-		word_rows = 7 * sy_;
+		word_rows = 7 * s;
 		word_top = h / 2 - word_rows - 2;
 		array<int> mask = gfx.make_grid(w * h);
 		for (int li = 0; li < text.size(); ++li) {
 			var bits = FONT5[text.substr(li, 1)];
 			for (int ry = 0; ry < word_rows; ++ry) {
-				int b = bits[ry / sy_];
-				for (int rx = 0; rx < font_col.size(); ++rx) {
-					if (((b >> (4 - font_col[rx])) & 1) == 1) {
+				int b = bits[ry / s];
+				for (int rx = 0; rx < gw; ++rx) {
+					if (((b >> (4 - rx * 5 / gw)) & 1) == 1) {
 						int i = (word_top + ry) * w + word_x + li * pitch + rx;
 						mask[i] = 1;
 						letter_at.push(i);
@@ -372,23 +407,50 @@ class Finale : Fire {
 		convect();
 		if (t > slam_t) { burn_letters(t); }
 		move_sparks(dt, amp > 12);
+		place(t);
 		turn_cube(t);
 		set_warp(t);
 		if (t > shatter_t && t < slam_t) { fly_sparks(t); }
 	}
 
-	// the whole scene turns, faster through the dance and fastest through the
-	// shatter, easing to a drift behind the fire; it swirls hardest at the centre and
-	// ripples outward, both throbbing on the beat
+	// where the cube and its disk sit: a point at the centre before the slides, the
+	// window above the demonstrations during them, the whole screen from the dance on
+	void place(float t) {
+		int cols = HB_COLS > 0 ? HB_COLS : w;
+		int rows = HB_ROWS > 0 ? HB_ROWS : h / 2;
+		int split = cols * 56 / 100;
+		float vx = col_px((split + 2 + cols - 2) / 2);
+		float vy = row_px((4 + rows / 2) / 2) + 1.0;
+		float vh = row_px(rows / 2) - row_px(4);
+		float into = (t - (deck.first - 0.7)) / 0.7;
+		into = into < 0.0 ? 0.0 : (into > 1.0 ? 1.0 : into);
+		into = into * into * (3.0 - 2.0 * into);
+		float wide = (t - (dance_t - 0.35)) / 0.9;
+		wide = wide < 0.0 ? 0.0 : (wide > 1.0 ? 1.0 : wide);
+		wide = wide * wide * (3.0 - 2.0 * wide);
+		float mx = w * 0.5 + (vx - w * 0.5) * into;
+		float my = h * 0.5 + (vy - h * 0.5) * into;
+		cube_cx = mx + (w * 0.5 - mx) * wide;
+		cube_cy = my + (h * 0.5 - my) * wide;
+		float small = vh * 0.15;
+		float slide_scale = h * 0.07 + (small - h * 0.07) * into;
+		cube_scale = slide_scale + (h * 0.12 - slide_scale) * wide;
+		float slide_r = h * 0.3 + (vh * 0.55 - h * 0.3) * into;
+		disk_r = slide_r + (h * 0.5 - 0.5 - slide_r) * wide;
+		view_mix = wide;
+	}
+
+	// from the dance on the whole scene turns, faster through the dance and fastest
+	// through the shatter, easing to a drift behind the fire; it swirls hardest at
+	// the centre and ripples outward, both throbbing on the beat
 	void set_warp(float t) {
 		float t1 = t < shatter_t ? t : shatter_t;
-		float spin = 0.22 * t1 + (t1 > dance_t ? 0.35 * (t1 - dance_t) * (t1 - dance_t) : 0.0);
+		float into = t1 - dance_t;
+		float spin = into > 0.0 ? 0.22 * into + 0.35 * into * into : 0.0;
 		if (t > shatter_t) { spin += 2.26 * ((t < slam_t ? t : slam_t) - shatter_t); }
 		if (t > slam_t) { spin += 0.5 * (t - slam_t); }
 		float swirl = 0.0;
-		float ripple = 0.012 * (t - unfold_t) / 3.0;
-		ripple = ripple > 0.012 ? 0.012 : ripple;
-		if (t > snaps_t) { swirl = 0.5 * (t - snaps_t) / (dance_t - snaps_t); }
+		float ripple = t > deck.first ? 0.006 : 0.0;
 		if (t > dance_t) {
 			swirl = 0.5 + 0.6 * pulse(t) + (t - dance_t) * 0.4;
 			ripple = 0.015 + 0.025 * pulse(t);
@@ -406,9 +468,9 @@ class Finale : Fire {
 		HY_SWIRL = swirl;
 		HY_RIPPLE = ripple;
 		HY_WAVE = t * 5.0;
-		HY_CX = w * 0.5;
-		HY_CY = h * 0.5;
-		HY_INV_R = 1.0 / (h * 0.5 - 0.5);
+		HY_CX = cube_cx;
+		HY_CY = cube_cy;
+		HY_INV_R = 1.0 / disk_r;
 		HY_W = w;
 		HY_H = h;
 		set_plane(t);
@@ -432,7 +494,7 @@ class Finale : Fire {
 		var& c = cube;
 		array<float> open = [];
 		for (int d = 0; d < 8; ++d) {
-			float f = (t - unfold_t - d * 0.55) / 0.45;
+			float f = (t - deck.start(d + 1)) / 0.45;
 			open.push(f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f * f * (3.0 - 2.0 * f)));
 		}
 		for (int v = 0; v < 256; ++v) {
@@ -457,9 +519,9 @@ class Finale : Fire {
 		// down to the screen: the 16-gon Petrie projection, its axes dealt out in
 		// bit-reversed order so the first two open as a square and the third as a
 		// cube; it breathes on the beat (the warp turns it with the plane)
-		float scale = h * 0.12 * (1.0 + (t > 3.9 && t < shatter_t ? pulse(t) * 0.12 : 0.0));
-		float cx = w * 0.5;
-		float cy = h * 0.5;
+		float scale = cube_scale * (1.0 + (t > deck.first && t < shatter_t ? pulse(t) * 0.12 : 0.0));
+		float cx = cube_cx;
+		float cy = cube_cy;
 		array<float> dir_x = [];
 		array<float> dir_y = [];
 		array<float> dir_z = [];
@@ -571,9 +633,9 @@ class Finale : Fire {
 		var& gh = glow_hue;
 		int n = w * h;
 		for (int i = 0; i < n; ++i) { g[i] = 0.0; }
-		float cx = w * 0.5;
-		float cy = h * 0.5;
-		float outer = 1.0 / (h * 0.36);
+		float cx = cube_cx;
+		float cy = cube_cy;
+		float outer = 1.0 / (cube_scale * 3.0);
 		for (int v = 0; v < 256; ++v) {
 			for (int d = 0; d < 8; ++d) {
 				if (((v >> d) & 1) == 1) { continue; }
@@ -627,8 +689,8 @@ class Finale : Fire {
 			for (int c = 0; c < n; ++c) { g[c] = 0.0; }
 		}
 		if (flight) { draw_flight(); }
-		bool tiles_on = tt > unfold_t && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5));
-		bool warped = tt > unfold_t && (cube_on || flight || tiles_on);
+		bool tiles_on = tt > deck.first - 0.7 && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5));
+		bool warped = tt > deck.first - 0.7 && (cube_on || flight || tiles_on);
 		HY_SHOW = tiles_on;
 		var rows = [];
 		if (warped) { rows = open_plane(); }
@@ -665,7 +727,10 @@ class Finale : Fire {
 			draw_letters(grid, b);
 		}
 		draw_sparks(grid, b);
-		if (tt < shatter_t) { draw_dimension(grid); }
+		if (tt < shatter_t) {
+			deck.draw(grid, w, h, tt, 0);
+			draw_dimension(grid);
+		}
 		slam(grid);
 	}
 
@@ -693,8 +758,11 @@ class Finale : Fire {
 		float along = (e - 1.0) / (e + 1.0);
 		HY_AX = along;
 		HY_AY = 0.0;
-		HY_REVEAL = t < 5.2 ? (t - unfold_t) * 1.1 : 4.84 + (t - 5.2) * 6.0;
-		float gain = t < dance_t ? 1.0 : 0.85 + pulse(t) * 0.3;
+		int d = deck.section(t);
+		float opening = d >= 1 && d <= 8 ? (t - deck.start(d)) / 0.6 : 1.0;
+		opening = opening > 1.0 ? 1.0 : opening;
+		HY_REVEAL = d == 0 ? 0.0 : (t < dance_t ? (d - 1 + opening) * 0.6 + 0.25 : 5.05 + (t - dance_t) * 6.0);
+		float gain = t < dance_t ? 0.55 + 0.15 * pulse(t) : 0.85 + pulse(t) * 0.3;
 		if (t > shatter_t) { gain = 1.0 - (t - shatter_t) / (slam_t - shatter_t); }
 		int spun = 0;
 		for (int k = 0; k < snap_at.size(); ++k) {
@@ -727,13 +795,17 @@ class Finale : Fire {
 		}
 	}
 
-	// the dimension counter in the corner: 1D, 2D, ... 8D as each axis opens
+	// the dimension counter under the cube: 1D, 2D, ... 8D as each axis opens
 	void draw_dimension(var& grid) {
-		int dims = itrunc((tt - unfold_t) / 0.55) + 1;
-		if (tt < unfold_t) { return; }
-		dims = dims > 8 ? 8 : dims;
+		int dims = dims_at(tt);
+		if (dims < 1 || view_mix > 0.5) { return; }
 		string label = `${dims}D`;
-		gfx.draw_text(grid, w, h, label, 3, h - 18, 2, 2, hyper + ((dims - 1) % 8) * 12 + 4, 8, -1, 2);
+		int col = cell_col(itrunc(cube_cx)) - 1;
+		int row = cell_row(itrunc(cube_cy + cube_scale * 3.6)) + 1;
+		row = row > HB_ROWS / 2 - 1 ? HB_ROWS / 2 - 1 : row;
+		var c = gfx.rainbow_rgb((dims - 1) * 0.7853982 + 0.4);
+		float cr = c[0]; float cg = c[1]; float cb = c[2];
+		txt_put(col, row, label, rgb(itrunc(cr), itrunc(cg), itrunc(cb)));
 	}
 
 	// the slam: a white flash, two shockwave rings racing out from the word
@@ -813,8 +885,8 @@ class Finale : Fire {
 	// last lines resting midway; rows near the edges of the band dim
 	void text_rows(var& rows) override {
 		if (tt < credits_t) { return; }
-		int top = (word_top + word_rows) / 2 + 2;
-		int bottom = h / 2 - 2;
+		int top = cell_row(word_top + word_rows) + 2;
+		int bottom = HB_ROWS - 2;
 		if (bottom - top < 2) { return; }
 		int last = credits.size() - 1;
 		int rest = bottom + last - (top + bottom) / 2;
@@ -835,19 +907,20 @@ class Finale : Fire {
 		string left = line[1];
 		string right = line[2];
 		string result = sgr_bg(0, 0, 0);
+		int cw = HB_COLS;
 		if (kind == "role") {
-			int gutter = w / 2;
+			int gutter = cw / 2;
 			left = left.size() > gutter - 2 ? left.substr(0, gutter - 2) : left;
-			right = right.size() > w - gutter - 1 ? right.substr(0, w - gutter - 1) : right;
+			right = right.size() > cw - gutter - 1 ? right.substr(0, cw - gutter - 1) : right;
 			result += string::repeat(" ", gutter - 1 - left.size()) + credit_ink(255, 206, 110, dim) + left
-				+ "  " + credit_ink(186, 180, 236, dim) + right + string::repeat(" ", w - gutter - 1 - right.size());
+				+ "  " + credit_ink(186, 180, 236, dim) + right + string::repeat(" ", cw - gutter - 1 - right.size());
 		} else {
-			left = left.size() > w ? left.substr(0, w) : left;
-			int pad = (w - left.size()) / 2;
+			left = left.size() > cw ? left.substr(0, cw) : left;
+			int pad = (cw - left.size()) / 2;
 			string ink = credit_ink(214, 208, 255, dim);
 			if (kind == "title") { ink = credit_ink(255, 236, 190, dim); }
 			if (kind == "link") { ink = credit_ink(120, 200, 255, dim); }
-			result += string::repeat(" ", pad) + ink + left + string::repeat(" ", w - pad - left.size());
+			result += string::repeat(" ", pad) + ink + left + string::repeat(" ", cw - pad - left.size());
 		}
 		return result + RESET;
 	}

@@ -100,6 +100,7 @@ import "scenes/voxelspace.jai";
 import "scenes/chrome.jai";
 import "scenes/skull.jai";
 import "scenes/fluid.jai";
+import "scenes/show.jai";
 import "scenes/finale.jai";
 import "scenes/main.jai";
 

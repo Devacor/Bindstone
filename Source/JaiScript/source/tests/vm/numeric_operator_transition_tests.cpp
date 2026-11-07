@@ -2,6 +2,8 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/testing/foundry.hpp>
 #include <string>
+#include <tuple>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -94,168 +96,135 @@ public:
 				}
 			}
 		});
-		// var operands in frame slots take the dynamic slot-operand ops (op_d_*): every kind pair, landing and failure
-		// reads as the interpreter reads it, with proofs and without
-		test("dynamic_slot_operand_ops_match_the_interpreter", [this]() {
-			const std::string script =
-				"function f(var a, var b) {\n"
-				"    var t = a + b;\n"
-				"    var u = 0; u = a * b;\n"
-				"    var w = (a - b) * 2;\n"
-				"    float g = a + b;\n"
-				"    if (a < b) { t = t + 1; }\n"
-				"    if (a == b) { t = t - 1; }\n"
-				"    return to_string(t) + \",\" + to_string(u) + \",\" + to_string(w) + \",\" + to_string(g) + \",\" + type_of(u);\n"
-				"}\n"
-				"function bits(var a, var b) { var r = (a & b) | (a ^ b); r = r << 2; var s = r >> 1; return to_string(r) + \",\" + to_string(s); }\n"
-				"function fail(var a, var b, var k) {\n"
-				"    try {\n"
-				"        if (k == 0) { var q = a / b; return to_string(q); }\n"
-				"        if (k == 1) { var q = a % b; return to_string(q); }\n"
-				"        if (k == 2) { var q = a * b; return to_string(q); }\n"
-				"        if (k == 3) { var q = a << b; return to_string(q); }\n"
-				"        if (k == 5) { var q = a + b; return to_string(q); }\n"
-				"        var q = a - b; return to_string(q);\n"
-				"    } catch (e) { return \"caught: \" + e; }\n"
-				"}\n"
-				"var out = f(3, 4) + \"|\" + f(2.5, 4) + \"|\" + f(7, 2.0) + \"|\" + f(6, 6) + \"|\" + bits(12, 10) + \"|\" + fail(\"x\", \"y\", 5);\n"
-				"out = out + \"|\" + fail(1, 0, 0) + \"|\" + fail(1.0, 0.0, 0) + \"|\" + fail(5, 0, 1) + \"|\" + fail(9223372036854775807, 2, 2);\n"
-				"out = out + \"|\" + fail(1, 64, 3) + \"|\" + fail(-9223372036854775807, 2, 4) + \"|\" + fail(\"s\", 1, 4);\n"
-				"out;\n";
-			auto run = [&](backend_type type, bool proofs) {
-				auto eng = jai::foundry::make_default_engine();
-				eng->set_backend(type);
-				eng->type_proofs(proofs);
-				jai::stdlib::register_all(*eng);
-				return eng->execute(script).as_string();
+		// every row runs on the interpreter (the oracle) and on the vm with proofs on and off; the oracle shows the failure rows ran
+		test("numeric_operators_match_the_interpreter_on_every_operand_path", [this]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// var operands in frame slots take the dynamic slot-operand ops (op_d_*): every kind pair, landing and failure
+				// reads as the interpreter reads it, with proofs and without
+				{"dynamic_slot_operand_ops_match_the_interpreter",
+					"function f(var a, var b) {\n"
+					"    var t = a + b;\n"
+					"    var u = 0; u = a * b;\n"
+					"    var w = (a - b) * 2;\n"
+					"    float g = a + b;\n"
+					"    if (a < b) { t = t + 1; }\n"
+					"    if (a == b) { t = t - 1; }\n"
+					"    return to_string(t) + \",\" + to_string(u) + \",\" + to_string(w) + \",\" + to_string(g) + \",\" + type_of(u);\n"
+					"}\n"
+					"function bits(var a, var b) { var r = (a & b) | (a ^ b); r = r << 2; var s = r >> 1; return to_string(r) + \",\" + to_string(s); }\n"
+					"function fail(var a, var b, var k) {\n"
+					"    try {\n"
+					"        if (k == 0) { var q = a / b; return to_string(q); }\n"
+					"        if (k == 1) { var q = a % b; return to_string(q); }\n"
+					"        if (k == 2) { var q = a * b; return to_string(q); }\n"
+					"        if (k == 3) { var q = a << b; return to_string(q); }\n"
+					"        if (k == 5) { var q = a + b; return to_string(q); }\n"
+					"        var q = a - b; return to_string(q);\n"
+					"    } catch (e) { return \"caught: \" + e; }\n"
+					"}\n"
+					"var out = f(3, 4) + \"|\" + f(2.5, 4) + \"|\" + f(7, 2.0) + \"|\" + f(6, 6) + \"|\" + bits(12, 10) + \"|\" + fail(\"x\", \"y\", 5);\n"
+					"out = out + \"|\" + fail(1, 0, 0) + \"|\" + fail(1.0, 0.0, 0) + \"|\" + fail(5, 0, 1) + \"|\" + fail(9223372036854775807, 2, 2);\n"
+					"out = out + \"|\" + fail(1, 64, 3) + \"|\" + fail(-9223372036854775807, 2, 4) + \"|\" + fail(\"s\", 1, 4);\n"
+					"out;\n",
+					"caught"},
+				// operands that reach a binary through the stack (call results, member reads): the numeric rows, the failures and an
+				// operator registered mid-run read as the interpreter reads them
+				{"stack_operand_binaries_match_the_interpreter",
+					"class P { var a = 0; var b = 0; P(var x, var y) { a = x; b = y; } }\n"
+					"function id(var v) { return v; }\n"
+					"function rows(var x, var y) {\n"
+					"    var p = P(x, y);\n"
+					"    var out = [];\n"
+					"    out.push(p.a + p.b); out.push(p.a - p.b); out.push(p.a * p.b); out.push(id(x) < id(y)); out.push(id(x) >= id(y));\n"
+					"    out.push(id(x) == id(y)); out.push(id(x) != id(y)); out.push(p.a <= p.b); out.push(p.a > p.b);\n"
+					"    try { out.push(id(x) / id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
+					"    try { out.push(id(x) % id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
+					"    return to_string(out);\n"
+					"}\n"
+					"function big(var x) { try { return to_string(id(x) * id(x)); } catch (e) { return \"caught: \" + e; } }\n"
+					"rows(7, 3) + \"|\" + rows(2.5, 4) + \"|\" + rows(9, 0) + \"|\" + rows(1.0, 0.0) + \"|\" + rows(-4, 2.0) + \"|\" + big(4000000000) + \"|\" + big(3.0);\n",
+					"caught"},
+				// the census rows: float compounds, string compares and concats through the dynamic ops, string appends, environment stores
+				{"general_form_string_float_and_environment_rows_match_the_interpreter",
+					"var g = 0; int gi = 1; float gf = 0.5; var gs = \"a\"; string gt = \"t\";\n"
+					"function floats(float x, float y) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += x; s -= y * 0.5; s *= 1.5; } return s; }\n"
+					"function widen(int k) { float w = 1.5; float v = 0.25; for (int i = 0; i < 3; ++i) { w = k; v = i; } var q = (w = k + 1); var big = 9007199254740993; w = big; return `${to_string(w)},${to_string(v)},${to_string(q)},${type_of(q)}${type_of(w)}`; }\n"
+					"function strs(var a, var b) {\n"
+					"    var out = \"\";\n"
+					"    if (a < b) { out += \"lt\"; } if (a == b) { out += \"eq\"; } if (a != b) { out += \"ne\"; } if (a >= b) { out += \"ge\"; }\n"
+					"    var c = a + b; string d = a + b; var e = \"\"; e = c + d; var n = null;\n"
+					"    if (n == a) { out += \"null\"; }\n"
+					"    for (int i = 0; i < 3; ++i) { out += a; out += \"-\"; }\n"
+					"    return `${out}|${c}|${d}|${e}`;\n"
+					"}\n"
+					"function globals() {\n"
+					"    for (int i = 0; i < 5; ++i) { g = i; gi = i * 2; gf = i + 0.25; gs = `s${to_string(i)}`; gt = gs; }\n"
+					"    g = 2.5; g = true; g = 'c';\n"
+					"    var r = `${to_string(g)},${to_string(gi)},${to_string(gf)},${gs},${gt},${type_of(g)}${type_of(gi)}${type_of(gf)}`;\n"
+					"    var bad = \"no\"; var frac = 2.75;\n"
+					"    try { gi = bad; } catch (e) { r = `${r},caught: ${e}`; }\n"
+					"    try { gi = frac; } catch (e) { r = `${r},caught: ${e}`; }\n"
+					"    return `${r},${to_string(gi)}`;\n"
+					"}\n"
+					"class Body { var v = 0; int n = 0; float w = 0.0; }\n"
+					"function sq(var k) { return k * k; }\n"
+					"function mixed(var a, var b) {\n"
+					"    var s = 0.5; var t = 1; var arr = [1, 2.5, 3]; var m = {\"k\": 4}; var acc = 0.0;\n"
+					"    var o = Body();\n"
+					"    for (var i = 0; i < 3; ++i) {\n"
+					"        s += a * b; s -= a; s *= 1.25; s /= b; s += i; s += 2; t += a;\n"
+					"        acc = acc + arr[i] * sq(i); acc = acc + m[\"k\"] * sq(i);\n"
+					"        o.v = i; o.v = s; o.v = \"str\"; o.n = i; o.w = s; var d = i; var e = s; d = d + 1;\n"
+					"    }\n"
+					"    try { s /= 0; } catch (e) { s = s + 1000; }\n"
+					"    return `${to_string(s)},${to_string(t)},${to_string(acc)},${to_string(o.v)}${to_string(o.n)}${to_string(o.w)}`;\n"
+					"}\n"
+					"class Node2 { var v = 0; var next = null; }\n"
+					"function setr(var& r, var v) { r = v; }\n"
+					"function refs() {\n"
+					"    var a = 1; var b = null; var arr = [1, 2]; int ti = 3;\n"
+					"    setr(a, 2.5); setr(b, Node2()); var n = b; n.v = 7; setr(arr[0], \"e\"); setr(a, b);\n"
+					"    var& ra = a; ra = 11; ra = \"s\"; setr(b, null);\n"
+					"    try { setr(ti, \"bad\"); } catch (e) { ra = `${ra} caught: ${e}`; }\n"
+					"    return `${to_string(a)},${to_string(b)},${to_string(arr)},${to_string(n.v)},${to_string(ti)}`;\n"
+					"}\n"
+					"g = 9; gi = 3;\n"
+					"`${floats(2.0, 1.0)}|${widen(7)}|${strs(\"x\", \"y\")}|${strs(\"q\", \"q\")}|${globals()}|${to_string(g)}${to_string(gi)}|${mixed(2.0, 4)}|${mixed(3, 2)}|${refs()}`;\n",
+					"caught"},
+				// `return a op b` over every numeric row, the declining rows (overflow, a zero divisor) and the non-numeric operands
+				{"return_binary_rows_match_the_interpreter",
+					"function id(var v) { return v; }\n"
+					"int ti(int v) { return v; }\n"
+					"function r(var a, var b, int k) {\n"
+					"    if (k == 0) { return id(a) + id(b); } if (k == 1) { return id(a) - id(b); } if (k == 2) { return id(a) * id(b); } if (k == 3) { return id(a) / id(b); }\n"
+					"    if (k == 4) { return id(a) % id(b); } if (k == 5) { return id(a) < id(b); } if (k == 6) { return id(a) <= id(b); } if (k == 7) { return id(a) > id(b); }\n"
+					"    if (k == 8) { return id(a) >= id(b); } if (k == 9) { return id(a) == id(b); } return id(a) != id(b);\n"
+					"}\n"
+					"int typed(int a, int b) { return ti(a) * ti(b); }\n"
+					"float mixed(int a, float b) { return id(a) / id(b); }\n"
+					"function row(var a, var b) { var out = \"\"; for (int k = 0; k < 11; ++k) { try { out += to_string(r(a, b, k)) + \",\"; } catch (e) { out += \"[\" + e + \"],\"; } } return out; }\n"
+					"var out = row(7, 3) + \"|\" + row(2.5, 4) + \"|\" + row(9, 0) + \"|\" + row(1.0, 0.0) + \"|\" + row(-7, 2.0) + \"|\" + row(\"a\", \"b\");\n"
+					"out += \"|\" + row(9223372036854775807, 2) + \"|\" + to_string(typed(6, 7)) + \",\" + to_string(mixed(1, 4.0));\n"
+					"try { typed(4611686018427387904, 4); } catch (e) { out += \",\" + e; }\n"
+					"bool lt(var x, var y) { return id(x) < id(y); }\n"
+					"var xs = [3, 1.5, 2, -4]; xs.sort(lt); out += \",\" + to_string(xs);\n"
+					"out;\n",
+					"["},
 			};
-			const std::string oracle = run(backend_type::interpreter, true);
-			check_true(oracle.find("caught") != std::string::npos);
-			for (bool proofs : {true, false}) {
-				check_eq(oracle, run(backend_type::vm, proofs));
-			}
-		});
-		// operands that reach a binary through the stack (call results, member reads): the numeric rows, the failures and an
-		// operator registered mid-run read as the interpreter reads them
-		test("stack_operand_binaries_match_the_interpreter", [this]() {
-			const std::string script =
-				"class P { var a = 0; var b = 0; P(var x, var y) { a = x; b = y; } }\n"
-				"function id(var v) { return v; }\n"
-				"function rows(var x, var y) {\n"
-				"    var p = P(x, y);\n"
-				"    var out = [];\n"
-				"    out.push(p.a + p.b); out.push(p.a - p.b); out.push(p.a * p.b); out.push(id(x) < id(y)); out.push(id(x) >= id(y));\n"
-				"    out.push(id(x) == id(y)); out.push(id(x) != id(y)); out.push(p.a <= p.b); out.push(p.a > p.b);\n"
-				"    try { out.push(id(x) / id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
-				"    try { out.push(id(x) % id(y)); } catch (e) { out.push(\"caught: \" + e); }\n"
-				"    return to_string(out);\n"
-				"}\n"
-				"function big(var x) { try { return to_string(id(x) * id(x)); } catch (e) { return \"caught: \" + e; } }\n"
-				"rows(7, 3) + \"|\" + rows(2.5, 4) + \"|\" + rows(9, 0) + \"|\" + rows(1.0, 0.0) + \"|\" + rows(-4, 2.0) + \"|\" + big(4000000000) + \"|\" + big(3.0);\n";
-			auto run = [&](backend_type type, bool proofs) {
-				auto eng = jai::foundry::make_default_engine();
-				eng->set_backend(type);
-				eng->type_proofs(proofs);
-				jai::stdlib::register_all(*eng);
-				return eng->execute(script).as_string();
-			};
-			const std::string oracle = run(backend_type::interpreter, true);
-			check_true(oracle.find("caught") != std::string::npos);
-			for (bool proofs : {true, false}) {
-				check_eq(oracle, run(backend_type::vm, proofs));
-			}
-		});
-		// the census rows: float compounds, string compares and concats through the dynamic ops, string appends, environment stores
-		test("general_form_string_float_and_environment_rows_match_the_interpreter", [this]() {
-			const std::string script =
-				"var g = 0; int gi = 1; float gf = 0.5; var gs = \"a\"; string gt = \"t\";\n"
-				"function floats(float x, float y) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += x; s -= y * 0.5; s *= 1.5; } return s; }\n"
-				"function widen(int k) { float w = 1.5; float v = 0.25; for (int i = 0; i < 3; ++i) { w = k; v = i; } var q = (w = k + 1); var big = 9007199254740993; w = big; return `${to_string(w)},${to_string(v)},${to_string(q)},${type_of(q)}${type_of(w)}`; }\n"
-				"function strs(var a, var b) {\n"
-				"    var out = \"\";\n"
-				"    if (a < b) { out += \"lt\"; } if (a == b) { out += \"eq\"; } if (a != b) { out += \"ne\"; } if (a >= b) { out += \"ge\"; }\n"
-				"    var c = a + b; string d = a + b; var e = \"\"; e = c + d; var n = null;\n"
-				"    if (n == a) { out += \"null\"; }\n"
-				"    for (int i = 0; i < 3; ++i) { out += a; out += \"-\"; }\n"
-				"    return `${out}|${c}|${d}|${e}`;\n"
-				"}\n"
-				"function globals() {\n"
-				"    for (int i = 0; i < 5; ++i) { g = i; gi = i * 2; gf = i + 0.25; gs = `s${to_string(i)}`; gt = gs; }\n"
-				"    g = 2.5; g = true; g = 'c';\n"
-				"    var r = `${to_string(g)},${to_string(gi)},${to_string(gf)},${gs},${gt},${type_of(g)}${type_of(gi)}${type_of(gf)}`;\n"
-				"    var bad = \"no\"; var frac = 2.75;\n"
-				"    try { gi = bad; } catch (e) { r = `${r},caught: ${e}`; }\n"
-				"    try { gi = frac; } catch (e) { r = `${r},caught: ${e}`; }\n"
-				"    return `${r},${to_string(gi)}`;\n"
-				"}\n"
-				"class Body { var v = 0; int n = 0; float w = 0.0; }\n"
-				"function sq(var k) { return k * k; }\n"
-				"function mixed(var a, var b) {\n"
-				"    var s = 0.5; var t = 1; var arr = [1, 2.5, 3]; var m = {\"k\": 4}; var acc = 0.0;\n"
-				"    var o = Body();\n"
-				"    for (var i = 0; i < 3; ++i) {\n"
-				"        s += a * b; s -= a; s *= 1.25; s /= b; s += i; s += 2; t += a;\n"
-				"        acc = acc + arr[i] * sq(i); acc = acc + m[\"k\"] * sq(i);\n"
-				"        o.v = i; o.v = s; o.v = \"str\"; o.n = i; o.w = s; var d = i; var e = s; d = d + 1;\n"
-				"    }\n"
-				"    try { s /= 0; } catch (e) { s = s + 1000; }\n"
-				"    return `${to_string(s)},${to_string(t)},${to_string(acc)},${to_string(o.v)}${to_string(o.n)}${to_string(o.w)}`;\n"
-				"}\n"
-				"class Node2 { var v = 0; var next = null; }\n"
-				"function setr(var& r, var v) { r = v; }\n"
-				"function refs() {\n"
-				"    var a = 1; var b = null; var arr = [1, 2]; int ti = 3;\n"
-				"    setr(a, 2.5); setr(b, Node2()); var n = b; n.v = 7; setr(arr[0], \"e\"); setr(a, b);\n"
-				"    var& ra = a; ra = 11; ra = \"s\"; setr(b, null);\n"
-				"    try { setr(ti, \"bad\"); } catch (e) { ra = `${ra} caught: ${e}`; }\n"
-				"    return `${to_string(a)},${to_string(b)},${to_string(arr)},${to_string(n.v)},${to_string(ti)}`;\n"
-				"}\n"
-				"g = 9; gi = 3;\n"
-				"`${floats(2.0, 1.0)}|${widen(7)}|${strs(\"x\", \"y\")}|${strs(\"q\", \"q\")}|${globals()}|${to_string(g)}${to_string(gi)}|${mixed(2.0, 4)}|${mixed(3, 2)}|${refs()}`;\n";
-			auto run = [&](backend_type type, bool proofs) {
-				auto eng = jai::foundry::make_default_engine();
-				eng->set_backend(type);
-				eng->type_proofs(proofs);
-				jai::stdlib::register_all(*eng);
-				return eng->execute(script).as_string();
-			};
-			const std::string oracle = run(backend_type::interpreter, true);
-			check_true(oracle.find("caught") != std::string::npos);
-			for (bool proofs : {true, false}) {
-				check_eq(oracle, run(backend_type::vm, proofs));
-			}
-		});
-		// `return a op b` over every numeric row, the declining rows (overflow, a zero divisor) and the non-numeric operands
-		test("return_binary_rows_match_the_interpreter", [this]() {
-			const std::string script =
-				"function id(var v) { return v; }\n"
-				"int ti(int v) { return v; }\n"
-				"function r(var a, var b, int k) {\n"
-				"    if (k == 0) { return id(a) + id(b); } if (k == 1) { return id(a) - id(b); } if (k == 2) { return id(a) * id(b); } if (k == 3) { return id(a) / id(b); }\n"
-				"    if (k == 4) { return id(a) % id(b); } if (k == 5) { return id(a) < id(b); } if (k == 6) { return id(a) <= id(b); } if (k == 7) { return id(a) > id(b); }\n"
-				"    if (k == 8) { return id(a) >= id(b); } if (k == 9) { return id(a) == id(b); } return id(a) != id(b);\n"
-				"}\n"
-				"int typed(int a, int b) { return ti(a) * ti(b); }\n"
-				"float mixed(int a, float b) { return id(a) / id(b); }\n"
-				"function row(var a, var b) { var out = \"\"; for (int k = 0; k < 11; ++k) { try { out += to_string(r(a, b, k)) + \",\"; } catch (e) { out += \"[\" + e + \"],\"; } } return out; }\n"
-				"var out = row(7, 3) + \"|\" + row(2.5, 4) + \"|\" + row(9, 0) + \"|\" + row(1.0, 0.0) + \"|\" + row(-7, 2.0) + \"|\" + row(\"a\", \"b\");\n"
-				"out += \"|\" + row(9223372036854775807, 2) + \"|\" + to_string(typed(6, 7)) + \",\" + to_string(mixed(1, 4.0));\n"
-				"try { typed(4611686018427387904, 4); } catch (e) { out += \",\" + e; }\n"
-				"bool lt(var x, var y) { return id(x) < id(y); }\n"
-				"var xs = [3, 1.5, 2, -4]; xs.sort(lt); out += \",\" + to_string(xs);\n"
-				"out;\n";
-			auto run = [&](backend_type type, bool proofs) {
-				auto eng = jai::foundry::make_default_engine();
-				eng->set_backend(type);
-				eng->type_proofs(proofs);
-				jai::stdlib::register_all(*eng);
-				return eng->execute(script).as_string();
-			};
-			const std::string oracle = run(backend_type::interpreter, true);
-			check_true(oracle.find("[") != std::string::npos, oracle);
-			for (bool proofs : {true, false}) {
-				check_eq(oracle, run(backend_type::vm, proofs));
-			}
+			check_each(cases, [&](const auto& c) {
+				auto run = [&](backend_type type, bool proofs) {
+					auto eng = jai::foundry::make_default_engine();
+					eng->set_backend(type);
+					eng->type_proofs(proofs);
+					jai::stdlib::register_all(*eng);
+					return eng->execute(std::get<1>(c)).as_string();
+				};
+				const std::string oracle = run(backend_type::interpreter, true);
+				check_true(oracle.find(std::get<2>(c)) != std::string::npos, oracle);
+				for (bool proofs : {true, false}) {
+					check_eq(oracle, run(backend_type::vm, proofs));
+				}
+			});
 		});
 		// a numeric operator registered while a dynamic op's frame runs is consulted by its next execution
 		test("dynamic_slot_operand_ops_see_an_operator_registered_mid_function", [this]() {

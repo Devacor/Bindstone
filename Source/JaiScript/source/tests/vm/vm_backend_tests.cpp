@@ -11,6 +11,9 @@
 #include <functional>
 #include <iterator>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
+#include <tuple>
+#include <vector>
 #include <algorithm>
 #include <limits>
 #include <fstream>
@@ -208,9 +211,9 @@ public:
 			check_eq(std::string("Hello, World!"), e->execute("s += \", World!\"").as<std::string>());
 		});
 
-		test("while_loop", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)10, e->execute(R"(
+		test("loops_and_functions_run_on_the_vm", [this]() {
+			const std::pair<const char*, std::vector<std::pair<const char*, int64_t>>> cases[] = {
+				{"while_loop", {{R"(
 				var sum = 0;
 				var i = 1;
 				while (i <= 4) {
@@ -218,35 +221,23 @@ public:
 					i = i + 1;
 				}
 				sum;
-			)").as_int());
-		});
-
-		test("for_loop", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)45, e->execute(R"(
+			)", 10}}},
+				{"for_loop", {{R"(
 				var total = 0;
 				for (var i = 0; i < 10; i = i + 1) {
 					total = total + i;
 				}
 				total;
-			)").as_int());
-		});
-
-		test("for_loop_optional_clauses", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)5, e->execute(R"(
+			)", 45}}},
+				{"for_loop_optional_clauses", {{R"(
 				var i = 0;
 				for (;;) {
 					i = i + 1;
 					if (i >= 5) { break; }
 				}
 				i;
-			)").as_int());
-		});
-
-		test("nested_loops_break_continue", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)12, e->execute(R"(
+			)", 5}}},
+				{"nested_loops_break_continue", {{R"(
 				var count = 0;
 				for (var i = 0; i < 5; i = i + 1) {
 					if (i == 1) { continue; }
@@ -256,8 +247,7 @@ public:
 					}
 				}
 				count;
-			)").as_int());
-			check_eq((int64_t)6, e->execute(R"(
+			)", 12}, {R"(
 				var hits = 0;
 				var i = 0;
 				while (i < 6) {
@@ -271,15 +261,25 @@ public:
 					hits = hits + j;
 				}
 				hits;
-			)").as_int());
-		});
-
-		test("functions_basic", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)7, e->execute(R"(
+			)", 6}}},
+				{"functions_basic", {{R"(
 				function add(int a, int b) -> int { return a + b; }
 				add(3, 4);
-			)").as_int());
+			)", 7}}},
+				{"function_recursion", {{R"(
+				function fact(int n) -> int {
+					if (n <= 1) { return 1; }
+					return n * fact(n - 1);
+				}
+				fact(5);
+			)", 120}}},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto e = vm_engine();
+				for (const auto& [code, expected] : c.second) {
+					check_eq(expected, e->execute(code).as_int(), code);
+				}
+			});
 		});
 
 		test("function_default_args", [this]() {
@@ -287,17 +287,6 @@ public:
 			e->execute("function scaled(int a, int b = 10) -> int { return a * b; }");
 			check_eq((int64_t)50, e->execute("scaled(5)").as_int());
 			check_eq((int64_t)15, e->execute("scaled(5, 3)").as_int());
-		});
-
-		test("function_recursion", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)120, e->execute(R"(
-				function fact(int n) -> int {
-					if (n <= 1) { return 1; }
-					return n * fact(n - 1);
-				}
-				fact(5);
-			)").as_int());
 		});
 
 		test("recursion_depth_error", [this]() {
@@ -420,39 +409,42 @@ public:
 			}
 		});
 
-		test("lazy_env_no_this_clear_from_method_block_scope", [this]() {
-			// Caller env at the call is a plain block env, so neither the eager two-level
-			// walk nor the lazy single-level rule clears this: the field stays readable
-			const char* src = R"(
+		test("lazy_env_calls_keep_the_callers_bindings", [this]() {
+			const std::tuple<const char*, const char*, int64_t> cases[] = {
+				// Caller env at the call is a plain block env, so neither the eager two-level
+				// walk nor the lazy single-level rule clears this: the field stays readable
+				{"lazy_env_no_this_clear_from_method_block_scope", R"(
 				int helper(int a) { return a + 1; }
 				class B { int x = 5; int m() { { var t = helper(1); return x + t; } } }
 				var b = B();
 				b.m();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)7, e->execute(src).as_int());
-			}
-		});
-
-		test("lazy_env_ref_param_binding", [this]() {
-			// Caller env metadata resolves through env == environment_.get() into a lazy
-			// callee's reference parameter; repeated calls exercise pooled-record reuse.
-			// (By-ref args THROUGH an intermediate function frame diverge between the
-			// backends today — pre-existing before lazy envs, deliberately not pinned here.)
-			const char* direct = R"(
+			)", 7},
+				// Caller env metadata resolves through env == environment_.get() into a lazy
+				// callee's reference parameter; repeated calls exercise pooled-record reuse.
+				// (By-ref args THROUGH an intermediate function frame diverge between the
+				// backends today — pre-existing before lazy envs, deliberately not pinned here.)
+				{"lazy_env_ref_param_binding", R"(
 				function bump(int& t) { t = t + 1; }
 				var v = 5;
 				bump(v);
 				bump(v);
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)7, e->execute(direct).as_int());
-			}
+			)", 7},
+				// op_decl_ref bodies stay eager (references capture env identity); semantics
+				// must remain byte-identical on both backends
+				{"lazy_env_ref_decl_callee_parity", R"(
+				var gv = 4;
+				function via_ref() -> int { int& r = gv; r = r * 3; return gv; }
+				via_ref();
+			)", 12},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					check_eq(std::get<2>(c), e->execute(std::get<1>(c)).as_int());
+				}
+			});
 		});
 
 		test("lazy_env_throw_caught_by_caller", [this]() {
@@ -466,21 +458,6 @@ public:
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq(std::string("lazy bang"), e->execute(src).as<std::string>());
-			}
-		});
-
-		test("lazy_env_ref_decl_callee_parity", [this]() {
-			// op_decl_ref bodies stay eager (references capture env identity); semantics
-			// must remain byte-identical on both backends
-			const char* src = R"(
-				var gv = 4;
-				function via_ref() -> int { int& r = gv; r = r * 3; return gv; }
-				via_ref();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)12, e->execute(src).as_int());
 			}
 		});
 
@@ -785,43 +762,26 @@ public:
 		// Metadata skip: ref-free direct callees skip the per-call arg-metadata
 		// build, so current_arg_metadata_ holds a stale outer snapshot while they run.
 		// Ref-param binding around and after such calls must be unaffected.
-		test("ref_param_call_surrounds_ref_free_call", [this]() {
-			const char* src = R"(
+		test("ref_params_bind_the_callers_variable_wherever_it_lives", [this]() {
+			const std::tuple<const char*, const char*, int64_t> cases[] = {
+				{"ref_param_call_surrounds_ref_free_call", R"(
 				int plain(int a) { return a + 1; }
 				function bump(int& t) { var w = plain(2); t = t + w; }
 				var v = 5;
 				bump(v);
 				bump(v);
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)11, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_free_call_inside_ref_call_arguments", [this]() {
-			// plain() runs (and skips metadata) while bump's argument list is being
-			// evaluated; bump's own ref metadata is built afterwards and must bind v
-			const char* src = R"(
+			)", 11},
+				// plain() runs (and skips metadata) while bump's argument list is being
+				// evaluated; bump's own ref metadata is built afterwards and must bind v
+				{"ref_free_call_inside_ref_call_arguments", R"(
 				int plain(int a) { return a * 2; }
 				function bump(int& t, int by) { t = t + by; }
 				var v = 1;
 				bump(v, plain(3));
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)7, e->execute(src).as_int());
-			}
-		});
-
-		// Ref-param binding across scopes: both backends must mutate the actual argument
-		// variable, wherever it lives (block env, method env, caller frame slot).
-		test("ref_param_from_block_and_loop_scopes", [this]() {
-			const char* src = R"(
+			)", 7},
+				{"ref_param_from_block_and_loop_scopes", R"(
 				function bump(int& t) { t = t + 1; }
 				var a = 0;
 				{ bump(a); }
@@ -831,32 +791,16 @@ public:
 				for (int k = 0; k < 3; k++) { bump(a); }
 				for (auto x : [1, 2]) { bump(a); }
 				a;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)9, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_binds_caller_slot_local_not_same_named_global", [this]() {
-			// The worst historical failure: the callee wrote through a same-named GLOBAL
-			// while the caller's slot local stayed untouched
-			const char* src = R"(
+			)", 9},
+				// The worst historical failure: the callee wrote through a same-named GLOBAL
+				// while the caller's slot local stayed untouched
+				{"ref_param_binds_caller_slot_local_not_same_named_global", R"(
 				var t = 100;
 				function bump(int& t) { t = t + 1; }
 				function caller() -> int { var t = 5; bump(t); return t; }
 				caller() * 1000 + t;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)6100, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_slot_local_from_inner_block_survives_block_exit", [this]() {
-			const char* src = R"(
+			)", 6100},
+				{"ref_param_slot_local_from_inner_block_survives_block_exit", R"(
 				function bump(int& t) { t = t + 1; }
 				function f() -> int {
 					var t = 5;
@@ -864,78 +808,38 @@ public:
 					return t;
 				}
 				f();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)6, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_global_from_method_body", [this]() {
-			const char* src = R"(
+			)", 6},
+				{"ref_param_global_from_method_body", R"(
 				var g = 1;
 				function bumpg(int& t) { t = t + 5; }
 				class C { int m() { bumpg(g); return g; } }
 				var c = C();
 				c.m();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)6, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_pass_through", [this]() {
-			const char* src = R"(
+			)", 6},
+				{"ref_param_pass_through", R"(
 				function inner(int& x) { x = x + 1; }
 				function outer(int& y) { inner(y); }
 				var v = 0;
 				outer(v);
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)1, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_pass_through_with_intermediate_local", [this]() {
-			// The extra local used to flip the vm intermediate into a framed env and
-			// change behavior; both shapes must work identically now
-			const char* src = R"(
+			)", 1},
+				// The extra local used to flip the vm intermediate into a framed env and
+				// change behavior; both shapes must work identically now
+				{"ref_param_pass_through_with_intermediate_local", R"(
 				function inner(int& x) { x = x + 1; }
 				function mid(int& x) { var t = x; inner(x); }
 				var x = 1;
 				mid(x);
 				x;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)2, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_array_mutation_from_try_block", [this]() {
-			const char* src = R"(
+			)", 2},
+				{"ref_param_array_mutation_from_try_block", R"(
 				var arr = [1];
 				function r1(auto& a) { a.push(4); }
 				var failed = 0;
 				try { r1(arr); } catch (e) { failed = 1; }
 				arr.size() * 10 + failed;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)20, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_default_arg_slow_path_from_function_local", [this]() {
-			const char* src = R"(
+			)", 20},
+				{"ref_param_default_arg_slow_path_from_function_local", R"(
 				function r4(auto& a, int z = 0) { a.push(9); }
 				function f() -> int {
 					var arr = [1];
@@ -943,16 +847,8 @@ public:
 					return arr.size();
 				}
 				f();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)2, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_two_same_named_block_locals", [this]() {
-			const char* src = R"(
+			)", 2},
+				{"ref_param_two_same_named_block_locals", R"(
 				function bump(int& t) { t = t + 1; }
 				function f() -> int {
 					var acc = 0;
@@ -961,16 +857,8 @@ public:
 					return acc;
 				}
 				f();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)32, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_interleaved_locals_in_loop", [this]() {
-			const char* src = R"(
+			)", 32},
+				{"ref_param_interleaved_locals_in_loop", R"(
 				function bump(int& t) { t = t + 1; }
 				function f() -> int {
 					var a = 0;
@@ -979,19 +867,11 @@ public:
 					return a * 1000 + b;
 				}
 				f();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)3103, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_instance_field_from_method_body", [this]() {
-			// The mutation must land in the instance field on both backends. (A bare
-			// field read right after a plain call in the same method body hits the
-			// separately-pinned caller-this-clear quirk, so the size is read outside.)
-			const char* src = R"(
+			)", 3103},
+				// The mutation must land in the instance field on both backends. (A bare
+				// field read right after a plain call in the same method body hits the
+				// separately-pinned caller-this-clear quirk, so the size is read outside.)
+				{"ref_param_instance_field_from_method_body", R"(
 				function pushRef(auto& a) { a.push(5); }
 				class Holder {
 					auto d = [1];
@@ -1000,86 +880,43 @@ public:
 				var h = Holder();
 				var r = h.go();
 				r * 10 + h.d.size();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)72, e->execute(src).as_int());
-			}
-		});
-
-		// Shared-holder pass-through: passing a bound reference onward shares the
-		// original holder instead of minting a new one per hop, so element refs keep their
-		// container re-resolution and env-anchored refs keep the origin anchor.
-		test("ref_param_pass_through_chain_depth3", [this]() {
-			// pre-fix: green both backends (slot-path flatten kept the origin anchor alive)
-			const char* src = R"(
+			)", 72},
+				// pre-fix: green both backends (slot-path flatten kept the origin anchor alive)
+				{"ref_param_pass_through_chain_depth3", R"(
 				function inc(int& x) { x = x + 1; }
 				function relay1(int& y) { inc(y); }
 				function relay2(int& z) { relay1(z); }
 				function origin() -> int { var t = 5; relay2(t); return t; }
 				origin();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)6, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_pass_through_env_origin_depth3", [this]() {
-			// pre-fix: green both backends
-			const char* src = R"(
+			)", 6},
+				// pre-fix: green both backends
+				{"ref_param_pass_through_env_origin_depth3", R"(
 				function inc(int& x) { x = x + 7; }
 				function relay1(int& y) { inc(y); }
 				function relay2(int& z) { relay1(z); }
 				var v = 1;
 				relay2(v);
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)8, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_env_visible_ref_decl_arg", [this]() {
-			// pre-fix: green both backends (env-path flatten of a global ref decl)
-			const char* src = R"(
+			)", 8},
+				// pre-fix: green both backends (env-path flatten of a global ref decl)
+				{"ref_param_env_visible_ref_decl_arg", R"(
 				var v = 1;
 				auto& g = v;
 				function bump(int& t) { t = t + 9; }
 				bump(g);
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)10, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_element_ref_single_hop", [this]() {
-			// pre-fix: green both backends (no realloc, creation-time element address valid)
-			const char* src = R"(
+			)", 10},
+				// pre-fix: green both backends (no realloc, creation-time element address valid)
+				{"ref_param_element_ref_single_hop", R"(
 				var arr = [1, 2, 3];
 				function inc(int& x) { x = x + 10; }
 				function driver() { for (auto& el : arr) { inc(el); } }
 				driver();
 				arr[0] + arr[1] + arr[2];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)36, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_element_ref_pass_through_realloc", [this]() {
-			// Sanctioned fix (b): pre-fix the bind flatten pinned the creation-time element
-			// address, so the write landed in the freed pre-realloc buffer (arr[0] stayed 7)
-			const char* src = R"(
+			)", 36},
+				// Sanctioned fix (b): pre-fix the bind flatten pinned the creation-time element
+				// address, so the write landed in the freed pre-realloc buffer (arr[0] stayed 7)
+				{"ref_param_element_ref_pass_through_realloc", R"(
 				var arr = [7];
 				function grow(int& x) {
 					for (int i = 0; i < 64; i = i + 1) { arr.push(0); }
@@ -1089,13 +926,36 @@ public:
 				function driver() { for (auto& el : arr) { relay(el); break; } }
 				driver();
 				arr[0];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)42, e->execute(src).as_int());
-			}
+			)", 42},
+				// Compound stores on a ref param bound to an array element go through the
+				// re-resolving deref (the shared holder is container-based, not a pointer).
+				// (++ on a ref param is a separate pre-existing gap on both backends.)
+				{"ref_param_element_compound_store", R"(
+				var arr = [5, 6];
+				function addTo(int& x) { x += 10; }
+				function driver() { for (auto& el : arr) { addTo(el); } }
+				driver();
+				arr[0] * 100 + arr[1];
+			)", 1516},
+				// pre-fix: green both backends (one fresh holder per hop); post-fix shares one holder
+				{"ref_param_recursive_pass_down", R"(
+				function down(int& x, int n) { if (n > 0) { down(x, n - 1); } else { x = 99; } }
+				function go() -> int { var v = 0; down(v, 40); return v; }
+				go();
+			)", 99},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					check_eq(std::get<2>(c), e->execute(std::get<1>(c)).as_int());
+				}
+			});
 		});
+
+		// Shared-holder pass-through: passing a bound reference onward shares the
+		// original holder instead of minting a new one per hop, so element refs keep their
+		// container re-resolution and env-anchored refs keep the origin anchor.
 
 		test("ref_param_element_ref_shrink_errors", [this]() {
 			// Sanctioned fix (b): pre-fix the write went through a stale pointer into the
@@ -1116,24 +976,6 @@ public:
 				check_true(msg.find("removed array element") != std::string::npos,
 					"shrunk element write errors");
 				if (!use_vm) { first = msg; } else { check_eq(first, msg, "identical error text on both backends"); }
-			}
-		});
-
-		test("ref_param_element_compound_store", [this]() {
-			// Compound stores on a ref param bound to an array element go through the
-			// re-resolving deref (the shared holder is container-based, not a pointer).
-			// (++ on a ref param is a separate pre-existing gap on both backends.)
-			const char* src = R"(
-				var arr = [5, 6];
-				function addTo(int& x) { x += 10; }
-				function driver() { for (auto& el : arr) { addTo(el); } }
-				driver();
-				arr[0] * 100 + arr[1];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)1516, e->execute(src).as_int());
 			}
 		});
 
@@ -1242,54 +1084,94 @@ public:
 			}
 		});
 
-		test("ref_param_recursive_pass_down", [this]() {
-			// pre-fix: green both backends (one fresh holder per hop); post-fix shares one holder
-			const char* src = R"(
-				function down(int& x, int n) { if (n > 0) { down(x, n - 1); } else { x = 99; } }
-				function go() -> int { var v = 0; down(v, 40); return v; }
-				go();
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)99, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_decl_shares_env_ref", [this]() {
-			// pre-fix: green both backends (decl flatten re-targeted v directly)
-			const char* src = R"(
+		test("ref_decls_share_their_target", [this]() {
+			const std::tuple<const char*, const char*, int64_t> cases[] = {
+				// pre-fix: green both backends (decl flatten re-targeted v directly)
+				{"ref_decl_shares_env_ref", R"(
 				var v = 1;
 				auto& g = v;
 				auto& h = g;
 				h = h + 3;
 				v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)4, e->execute(src).as_int());
-			}
+			)", 4},
+				// Sanctioned fix (b) at the decl site: pre-fix auto& flattened the element ref
+				// into a raw pointer, so the post-realloc write was lost (arr[1] stayed 8)
+				{"ref_decl_element_ref_survives_realloc", R"(
+				var arr = [7, 8];
+				auto& x = arr[1];
+				for (int i = 0; i < 64; i = i + 1) { arr.push(0); }
+				x = 42;
+				arr[1];
+			)", 42},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					check_eq(std::get<2>(c), e->execute(std::get<1>(c)).as_int());
+				}
+			});
 		});
 
-		test("ref_decl_element_constraint_enforced", [this]() {
-			// Element refs from typed containers CARRY the container's element type, so
-			// the retyping write through an auto& decl errors with the same text as
-			// direct element assignment, and the element keeps its value.
-			const char* src = R"(
+		test("element_and_hop_references_keep_their_element_type", [this]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// Element refs from typed containers CARRY the container's element type, so
+				// the retyping write through an auto& decl errors with the same text as
+				// direct element assignment, and the element keeps its value.
+				{"ref_decl_element_constraint_enforced", R"(
 				array<int> arr = [1, 2, 3];
 				auto& x = arr[1];
 				var msg = "";
 				try { x = "s"; } catch (e) { msg = e; }
 				msg + "|" + type_of(arr[1]) + "|" + to_string(arr[1]);
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				jai::stdlib::register_all(e);
-				check_eq(std::string("Cannot assign 'string' to element of type 'int'|int|2"),
-				         e->execute(src).as<std::string>());
-			}
+			)", "Cannot assign 'string' to element of type 'int'|int|2"},
+				// A ref decl aliasing another constrained element ref decl shares the holder
+				// AND its constraint (the alias writes through and enforces identically)
+				{"ref_decl_element_constraint_through_alias_chain", R"(
+				array<int> arr = [5];
+				auto& outer = arr[0];
+				auto& local = outer;
+				var msg = "";
+				try { local = "s"; } catch (e) { msg = e; }
+				local = 6;
+				msg + "|" + to_string(arr[0]);
+			)", "Cannot assign 'string' to element of type 'int'|6"},
+				// Wrapper-tag canary: sharing keeps the origin's reference tag; type_of must
+				// keep reporting the referent type at every hop
+				{"ref_param_type_of_stable_through_hops", R"(
+				function leaf(int& x) -> string { return type_of(x); }
+				function mid(int& y) -> string { return type_of(y) + ":" + leaf(y); }
+				var v = 5;
+				mid(v);
+			)", "int:int"},
+				// pre-fix: "6|" both backends (the [&] capture snapshots the ref param's value,
+				// so the escaped lambda works on its own copy). Sharing must not change this.
+				{"ref_escape_via_lambda_after_frame_death", R"(
+				var f = null;
+				function trap(int& x) { f = [&]() { x = x + 1; return x; }; }
+				function run() -> int { var v = 5; trap(v); return v; }
+				run();
+				var msg = "";
+				var got = -1;
+				try { got = f(); } catch (e) { msg = e; }
+				to_string(got) + "|" + msg;
+			)", "6|"},
+				// Reads through the bound ref see live field state; type_of reports the referent
+				{"tier1_type_of_and_read_back_through_bound_field_ref", R"(
+				class Box { int v = 7; }
+				function probe(int& x) -> string { var t = type_of(x); x = x + 1; return t + ":" + to_string(x); }
+				var b = Box();
+				probe(b.v) + ":" + to_string(b.v);
+			)", "int:8:8"},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					jai::stdlib::register_all(e);
+					check_eq(std::string(std::get<2>(c)), e->execute(std::get<1>(c)).as<std::string>());
+				}
+			});
 		});
 
 		test("ref_element_constraint_all_shapes", [this]() {
@@ -1329,82 +1211,6 @@ public:
 			}
 		});
 
-		test("ref_decl_element_constraint_through_alias_chain", [this]() {
-			// A ref decl aliasing another constrained element ref decl shares the holder
-			// AND its constraint (the alias writes through and enforces identically)
-			const char* src = R"(
-				array<int> arr = [5];
-				auto& outer = arr[0];
-				auto& local = outer;
-				var msg = "";
-				try { local = "s"; } catch (e) { msg = e; }
-				local = 6;
-				msg + "|" + to_string(arr[0]);
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				jai::stdlib::register_all(e);
-				check_eq(std::string("Cannot assign 'string' to element of type 'int'|6"),
-				         e->execute(src).as<std::string>());
-			}
-		});
-
-		test("ref_decl_element_ref_survives_realloc", [this]() {
-			// Sanctioned fix (b) at the decl site: pre-fix auto& flattened the element ref
-			// into a raw pointer, so the post-realloc write was lost (arr[1] stayed 8)
-			const char* src = R"(
-				var arr = [7, 8];
-				auto& x = arr[1];
-				for (int i = 0; i < 64; i = i + 1) { arr.push(0); }
-				x = 42;
-				arr[1];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)42, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_param_type_of_stable_through_hops", [this]() {
-			// Wrapper-tag canary: sharing keeps the origin's reference tag; type_of must
-			// keep reporting the referent type at every hop
-			const char* src = R"(
-				function leaf(int& x) -> string { return type_of(x); }
-				function mid(int& y) -> string { return type_of(y) + ":" + leaf(y); }
-				var v = 5;
-				mid(v);
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				jai::stdlib::register_all(e);
-				check_eq(std::string("int:int"), e->execute(src).as<std::string>());
-			}
-		});
-
-		test("ref_escape_via_lambda_after_frame_death", [this]() {
-			// pre-fix: "6|" both backends (the [&] capture snapshots the ref param's value,
-			// so the escaped lambda works on its own copy). Sharing must not change this.
-			const char* src = R"(
-				var f = null;
-				function trap(int& x) { f = [&]() { x = x + 1; return x; }; }
-				function run() -> int { var v = 5; trap(v); return v; }
-				run();
-				var msg = "";
-				var got = -1;
-				try { got = f(); } catch (e) { msg = e; }
-				to_string(got) + "|" + msg;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				jai::stdlib::register_all(e);
-				check_eq(std::string("6|"), e->execute(src).as<std::string>());
-			}
-		});
-
 		test("ref_param_calls_inside_coroutine_across_yields", [this]() {
 			// Metadata invariant: inner ref-param calls complete before each yield, so the
 			// suspended fiber never holds in-flight arg metadata
@@ -1435,44 +1241,29 @@ public:
 		// Stage C (cells): typed reference returns. int& f() / -> auto& returns a
 		// usable reference; the holder's owner pin (cell/element/field) is the
 		// lifetime, so the returned ref outliving the frame is legal.
-		test("ref_return_grammar_example", [this]() {
-			// The exact internal/grammar.md shape: reference returns + reference locals
-			const char* src = R"(
+		test("ref_returns_name_storage_that_outlives_the_frame", [this]() {
+			const std::tuple<const char*, const char*, int64_t> cases[] = {
+				// The exact internal/grammar.md shape: reference returns + reference locals
+				{"ref_return_grammar_example", R"(
 				int& pick(array<int>& a, int i) { return a[i]; }
 				array<int> nums = [10, 20, 30, 40];
 				auto& slot = pick(nums, 2);
 				slot = 99;
 				nums[2];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)99, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_return_local_cell_outlives_frame", [this]() {
-			// Returning a ref to a LOCAL is legal: the local boxes into a cell and the
-			// returned handle keeps it alive after the frame dies. Each call boxes a
-			// FRESH cell (no cross-call sharing).
-			const char* src = R"(
+			)", 99},
+				// Returning a ref to a LOCAL is legal: the local boxes into a cell and the
+				// returned handle keeps it alive after the frame dies. Each call boxes a
+				// FRESH cell (no cross-call sharing).
+				{"ref_return_local_cell_outlives_frame", R"(
 				int& leak() { int v = 7; return v; }
 				auto& a = leak();
 				auto& b = leak();
 				a = a + 1;
 				b = b + 3;
 				a * 100 + b;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)810, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_return_method_field_trailing_arrow", [this]() {
-			// Method ref return (-> int&) over this.field: instance-pinned field ref
-			const char* src = R"(
+			)", 810},
+				// Method ref return (-> int&) over this.field: instance-pinned field ref
+				{"ref_return_method_field_trailing_arrow", R"(
 				class Orc {
 					int hp = 10;
 					function heal() -> int& { return this.hp; }
@@ -1481,27 +1272,22 @@ public:
 				auto& h = o.heal();
 				h = 50;
 				o.hp;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)50, e->execute(src).as_int());
-			}
-		});
-
-		test("ref_return_chained_member_read", [this]() {
-			// f().field reads through the returned reference without an alias decl
-			const char* src = R"(
+			)", 50},
+				// f().field reads through the returned reference without an alias decl
+				{"ref_return_chained_member_read", R"(
 				class Box { int v = 3; }
 				Box b = Box();
 				Box& get() { return b; }
 				get().v + 1;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)4, e->execute(src).as_int());
-			}
+			)", 4},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					check_eq(std::get<2>(c), e->execute(std::get<1>(c)).as_int());
+				}
+			});
 		});
 
 		test("ref_return_non_lvalue_rejects", [this]() {
@@ -1618,9 +1404,10 @@ public:
 		// parameters through the shared resolver (detail/ref_lvalue.hpp). Field refs pin
 		// the instance, element refs pin the vector; typed fields/elements enforce their
 		// bind-time tag on assign-through.
-		test("tier1_bst_insert_by_ref", [this]() {
-			// The headline: recursive insert through field refs, no return-reassign
-			const char* src = R"(
+		test("tier1_field_and_element_references_write_through", [this]() {
+			const std::tuple<const char*, const char*, int64_t> cases[] = {
+				// The headline: recursive insert through field refs, no return-reassign
+				{"tier1_bst_insert_by_ref", R"(
 				class TreeNode { int value = 0; TreeNode left = null; TreeNode right = null; TreeNode(int val) { value = val; } }
 				function insertNode(var& node, int val) {
 					if (node == null) { node = TreeNode(val); return; }
@@ -1639,32 +1426,16 @@ public:
 				insertNode(root, 10);
 				insertNode(root, 14);
 				inorderSum(root);
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)56, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_field_ref_write_through", [this]() {
-			const char* src = R"(
+			)", 56},
+				{"tier1_field_ref_write_through", R"(
 				class Box { int v = 1; }
 				function set9(int& x) { x = 9; }
 				var b = Box();
 				set9(b.v);
 				b.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)9, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_chain_and_mixed_lvalue_args", [this]() {
-			// a.b.c, arr[i].field, obj.arr[j] chains all resolve to the innermost node
-			const char* src = R"(
+			)", 9},
+				// a.b.c, arr[i].field, obj.arr[j] chains all resolve to the innermost node
+				{"tier1_chain_and_mixed_lvalue_args", R"(
 				class Inner { int val = 1; }
 				class Outer { Inner inner = null; var arr = [0, 0]; Outer() { inner = Inner(); } }
 				function bump(int& x) { x = x + 10; }
@@ -1675,17 +1446,9 @@ public:
 				var j = 0;
 				bump(o.arr[j]);
 				o.inner.val * 10000 + boxes[1].val * 100 + o.arr[0];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)111110, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_subscript_literal_and_identifier_index", [this]() {
-			// Literal index, env-resolved identifier index, and slot-local identifier index
-			const char* src = R"(
+			)", 111110},
+				// Literal index, env-resolved identifier index, and slot-local identifier index
+				{"tier1_subscript_literal_and_identifier_index", R"(
 				function set(int& x, int val) { x = val; }
 				var arr = [1, 2, 3];
 				set(arr[0], 7);
@@ -1694,12 +1457,95 @@ public:
 				function driver() { var li = 1; set(arr[li], 9); }
 				driver();
 				arr[0] * 100 + arr[1] * 10 + arr[2];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)798, e->execute(src).as_int());
-			}
+			)", 798},
+				// enter_script_method builds the same lvalue metadata as plain calls
+				{"tier1_method_callee_field_ref_arg", R"(
+				class Box { int v = 0; }
+				class Svc { void put(int& x, int val) { x = val; } }
+				var b = Box();
+				var s = Svc();
+				s.put(b.v, 42);
+				b.v;
+			)", 42},
+				{"tier1_shared_ptr_base_field_ref", R"(
+				class N { int v = 1; N(int val) { v = val; } }
+				function bump(int& x) { x = x + 1; }
+				var sp = shared_ptr<N>(5);
+				bump(sp.v);
+				sp.v;
+			)", 6},
+				// The holder pins the instance/vector: dropping the caller's last handle
+				// mid-call must leave the ref writable (Debug 0xDD canary covers dangling)
+				{"tier1_owner_pinned_past_caller_handle_drop", R"(
+				class Box { int v = 5; }
+				var g = Box();
+				var arr = [1, 2, 3];
+				function fldWrite(int& x) { g = null; x = x + 1; return x; }
+				function elemWrite(int& x) { arr = null; x = x + 1; return x; }
+				var a = fldWrite(g.v);
+				var b = elemWrite(arr[1]);
+				a * 10 + b;
+			)", 63},
+				// Chain resolution happens at bind time, after ALL args evaluate: a later
+				// arg that swaps the chain spine changes what binds (identifier precedent)
+				{"tier1_bind_time_ordering_pinned", R"(
+				class B { int v = 1; }
+				class A { B b = null; A() { b = B(); } }
+				var a = A();
+				var keep = a.b;
+				function swapB() -> int { a.b = B(); return 0; }
+				function f(int& x, int ignored) { x = 50; }
+				f(a.b.v, swapB());
+				a.b.v * 10 + keep.v;
+			)", 501},
+				// Tier 1 x Tier 2: the bound field ref shares its holder through further hops
+				{"tier1_field_ref_pass_through_hop", R"(
+				class Box { int v = 1; }
+				function leaf(int& x) { x = x + 1; }
+				function mid(int& x) { leaf(x); x = x + 10; }
+				var b = Box();
+				mid(b.v);
+				b.v;
+			)", 12},
+				// var&, auto&, int&, ClassName&, array<int>& all parse, bind, and write through
+				{"tier1_ref_param_type_forms", R"(
+				class P { int v = 1; }
+				function f1(var& x) { x = x + 1; }
+				function f2(auto& x) { x = x + 2; }
+				function f3(int& x) { x = x + 3; }
+				function f4(P& p) { p = P(); p.v = 99; }
+				function f5(array<int>& a) { a[0] = 9; }
+				class H { int n = 10; P p = null; var arr = null; H() { p = P(); arr = [0]; } }
+				var h = H();
+				f1(h.n);
+				f2(h.n);
+				f3(h.n);
+				f4(h.p);
+				f5(h.arr);
+				h.n * 1000 + h.p.v * 10 + h.arr[0];
+			)", 16999},
+				// R5: member/subscript args to REF-FREE callees consume no lvalue metadata
+				// and stay pure rvalue reads, surrounded by live ref-param calls
+				{"tier1_member_args_to_ref_free_functions_unaffected", R"(
+				class Box { int v = 3; }
+				int plain(int a) { return a + 1; }
+				function bump(int& t) { t = t + 1; }
+				var b = Box();
+				var arr = [5];
+				var r1 = plain(b.v);
+				bump(b.v);
+				var r2 = plain(arr[0]);
+				bump(b.v);
+				r1 * 1000 + r2 * 10 + b.v;
+			)", 4065},
+			};
+			check_each(cases, [&](const auto& c) {
+				for (bool use_vm : {false, true}) {
+					auto e = jai::foundry::make_default_engine();
+					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+					check_eq(std::get<2>(c), e->execute(std::get<1>(c)).as_int());
+				}
+			});
 		});
 
 		test("tier1_this_field_ref_from_method", [this]() {
@@ -1724,38 +1570,6 @@ public:
 				auto e = jai::foundry::make_default_engine();
 				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 				check_eq((int64_t)640, e->execute(src).as_int(), use_vm ? "vm" : "interp");
-			}
-		});
-
-		test("tier1_method_callee_field_ref_arg", [this]() {
-			// enter_script_method builds the same lvalue metadata as plain calls
-			const char* src = R"(
-				class Box { int v = 0; }
-				class Svc { void put(int& x, int val) { x = val; } }
-				var b = Box();
-				var s = Svc();
-				s.put(b.v, 42);
-				b.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)42, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_shared_ptr_base_field_ref", [this]() {
-			const char* src = R"(
-				class N { int v = 1; N(int val) { v = val; } }
-				function bump(int& x) { x = x + 1; }
-				var sp = shared_ptr<N>(5);
-				bump(sp.v);
-				sp.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)6, e->execute(src).as_int());
 			}
 		});
 
@@ -1856,26 +1670,6 @@ public:
 			}
 		});
 
-		test("tier1_owner_pinned_past_caller_handle_drop", [this]() {
-			// The holder pins the instance/vector: dropping the caller's last handle
-			// mid-call must leave the ref writable (Debug 0xDD canary covers dangling)
-			const char* src = R"(
-				class Box { int v = 5; }
-				var g = Box();
-				var arr = [1, 2, 3];
-				function fldWrite(int& x) { g = null; x = x + 1; return x; }
-				function elemWrite(int& x) { arr = null; x = x + 1; return x; }
-				var a = fldWrite(g.v);
-				var b = elemWrite(arr[1]);
-				a * 10 + b;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)63, e->execute(src).as_int());
-			}
-		});
-
 		test("tier1_element_ref_realloc_and_shrink", [this]() {
 			// Tier-1-bound element refs re-resolve container+index: writes survive
 			// realloc, shrink errors instead of corrupting
@@ -1943,26 +1737,6 @@ public:
 				auto msg = e->execute(std::string(setup) + "try { f(s[0]); } catch (e) { msg = e; } msg;").as<std::string>();
 				check_true(msg.find("Cannot pass non-lvalue to reference parameter") != std::string::npos,
 					std::string("string subscript arg is a char rvalue: non-lvalue ref-bind error, got: ") + msg);
-			}
-		});
-
-		test("tier1_bind_time_ordering_pinned", [this]() {
-			// Chain resolution happens at bind time, after ALL args evaluate: a later
-			// arg that swaps the chain spine changes what binds (identifier precedent)
-			const char* src = R"(
-				class B { int v = 1; }
-				class A { B b = null; A() { b = B(); } }
-				var a = A();
-				var keep = a.b;
-				function swapB() -> int { a.b = B(); return 0; }
-				function f(int& x, int ignored) { x = 50; }
-				f(a.b.v, swapB());
-				a.b.v * 10 + keep.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)501, e->execute(src).as_int());
 			}
 		});
 
@@ -2091,48 +1865,6 @@ public:
 			}
 		});
 
-		test("tier1_field_ref_pass_through_hop", [this]() {
-			// Tier 1 x Tier 2: the bound field ref shares its holder through further hops
-			const char* src = R"(
-				class Box { int v = 1; }
-				function leaf(int& x) { x = x + 1; }
-				function mid(int& x) { leaf(x); x = x + 10; }
-				var b = Box();
-				mid(b.v);
-				b.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)12, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_ref_param_type_forms", [this]() {
-			// var&, auto&, int&, ClassName&, array<int>& all parse, bind, and write through
-			const char* src = R"(
-				class P { int v = 1; }
-				function f1(var& x) { x = x + 1; }
-				function f2(auto& x) { x = x + 2; }
-				function f3(int& x) { x = x + 3; }
-				function f4(P& p) { p = P(); p.v = 99; }
-				function f5(array<int>& a) { a[0] = 9; }
-				class H { int n = 10; P p = null; var arr = null; H() { p = P(); arr = [0]; } }
-				var h = H();
-				f1(h.n);
-				f2(h.n);
-				f3(h.n);
-				f4(h.p);
-				f5(h.arr);
-				h.n * 1000 + h.p.v * 10 + h.arr[0];
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)16999, e->execute(src).as_int());
-			}
-		});
-
 		test("tier1_hot_reload_field_ref", [this]() {
 			// Field refs re-resolve by (pinned instance, field id): a kept field stays
 			// writable across a mid-call reload; a removed field errors on write
@@ -2171,44 +1903,6 @@ public:
 			}
 		});
 
-		test("tier1_member_args_to_ref_free_functions_unaffected", [this]() {
-			// R5: member/subscript args to REF-FREE callees consume no lvalue metadata
-			// and stay pure rvalue reads, surrounded by live ref-param calls
-			const char* src = R"(
-				class Box { int v = 3; }
-				int plain(int a) { return a + 1; }
-				function bump(int& t) { t = t + 1; }
-				var b = Box();
-				var arr = [5];
-				var r1 = plain(b.v);
-				bump(b.v);
-				var r2 = plain(arr[0]);
-				bump(b.v);
-				r1 * 1000 + r2 * 10 + b.v;
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				check_eq((int64_t)4065, e->execute(src).as_int());
-			}
-		});
-
-		test("tier1_type_of_and_read_back_through_bound_field_ref", [this]() {
-			// Reads through the bound ref see live field state; type_of reports the referent
-			const char* src = R"(
-				class Box { int v = 7; }
-				function probe(int& x) -> string { var t = type_of(x); x = x + 1; return t + ":" + to_string(x); }
-				var b = Box();
-				probe(b.v) + ":" + to_string(b.v);
-			)";
-			for (bool use_vm : {false, true}) {
-				auto e = jai::foundry::make_default_engine();
-				e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-				jai::stdlib::register_all(e);
-				check_eq(std::string("int:8:8"), e->execute(src).as<std::string>());
-			}
-		});
-
 		test("variadic_cpp_function", [this]() {
 			auto e = vm_engine();
 			e->add_variadic_function("sum_all", [eng = e.get()](const std::vector<script_value>& args) -> checked_result<script_value> {
@@ -2222,75 +1916,47 @@ public:
 			check_eq((int64_t)15, e->execute("sum_all(1, 2, 3, 4, 5)").as_int());
 		});
 
-		test("by_ref_params_mutate_caller", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)11, e->execute(R"(
+		test("parameters_and_lambda_captures_run_on_the_vm", [this]() {
+			const std::pair<const char*, std::vector<std::pair<const char*, int64_t>>> cases[] = {
+				{"by_ref_params_mutate_caller", {{R"(
 				function bump(int& target) { target = target + 10; }
 				var value = 1;
 				bump(value);
 				value;
-			)").as_int());
-		});
-
-		test("value_params_do_not_mutate_caller", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)1, e->execute(R"(
+			)", 11}}},
+				{"value_params_do_not_mutate_caller", {{R"(
 				function tweak(int copy) { [[warn_mode]] copy = copy + 10; }
 				var original = 1;
 				tweak(original);
 				original;
-			)").as_int());
-		});
-
-		test("lambda_basic", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)10, e->execute(R"(
+			)", 1}}},
+				{"lambda_basic", {{R"(
 				var double_it = [](int x) { return x * 2; };
 				double_it(5);
-			)").as_int());
-		});
-
-		test("lambda_capture_by_value", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)1, e->execute(R"(
+			)", 10}}},
+				{"lambda_capture_by_value", {{R"(
 				function run() { var x = 1; var f = [=]() { return x; }; x = 2; return f(); }
 				run();
-			)").as_int());
-		});
-
-		test("lambda_capture_by_reference", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)3, e->execute(R"(
+			)", 1}}},
+				{"lambda_capture_by_reference", {{R"(
 				var c = 0;
 				var inc = [&]() { c = c + 1; };
 				inc();
 				inc();
 				inc();
 				c;
-			)").as_int());
-		});
-
-		test("lambda_explicit_captures", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)15, e->execute(R"(
+			)", 3}}},
+				{"lambda_explicit_captures", {{R"(
 				var base = 10;
 				var f = [base](int x) { return base + x; };
 				f(5);
-			)").as_int());
-		});
-
-		test("lambda_auto_capture", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)30, e->execute(R"(
+			)", 15}}},
+				{"lambda_auto_capture", {{R"(
 				var outer = 20;
 				var f = [](int x) { return outer + x; };
 				f(10);
-			)").as_int());
-		});
-
-		test("lambda_closure_over_loop_vars", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)0, e->execute(R"(
+			)", 30}}},
+				{"lambda_closure_over_loop_vars", {{R"(
 				var captured = null;
 				for (var i = 0; i < 3; i = i + 1) {
 					if (i == 0) {
@@ -2298,19 +1964,22 @@ public:
 					}
 				}
 				captured();
-			)").as_int());
-		});
-
-		test("lambda_inside_function_captures_locals", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)42, e->execute(R"(
+			)", 0}}},
+				{"lambda_inside_function_captures_locals", {{R"(
 				function make_getter() -> auto {
 					var secret = 42;
 					return [=]() { return secret; };
 				}
 				var g = make_getter();
 				g();
-			)").as_int());
+			)", 42}}},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto e = vm_engine();
+				for (const auto& [code, expected] : c.second) {
+					check_eq(expected, e->execute(code).as_int(), code);
+				}
+			});
 		});
 
 		test("array_literal_and_index", [this]() {
@@ -2329,16 +1998,45 @@ public:
 			check_throws([&]() { e->execute("m[\"missing\"] == null"); }, "a missing key raises");
 		});
 
-		test("nested_containers", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)4, e->execute(R"(
+		test("containers_classes_statics_and_enums_run_on_the_vm", [this]() {
+			const std::pair<const char*, std::vector<std::pair<const char*, int64_t>>> cases[] = {
+				{"nested_containers", {{R"(
 				var grid = [[1, 2], [3, 4]];
 				grid[1][1];
-			)").as_int());
-			check_eq((int64_t)9, e->execute(R"(
+			)", 4}, {R"(
 				grid[1][1] = 9;
 				grid[1][1];
-			)").as_int());
+			)", 9}}},
+				{"class_inheritance_and_super", {{R"(
+				class Cat { int a = 0; Cat(int v) { a = v; } int get() { return a; } }
+				class Tiger : Cat { Tiger() : super(5) {} int roar() { return a * 2; } }
+				auto t = Tiger();
+				t.roar()
+			)", 10}, {"auto t2 = Tiger(); t2.get()", 5}}},
+				{"ctor_delegation_field_defaults", {{R"(
+				class D { int a = 1; D() : this(5) {} D(int v) { a = v; } }
+				auto d = D();
+				d.a
+			)", 5}}},
+				{"static_fields_and_methods", {{R"(
+				class Counter {
+					static int count = 0;
+					static int next() { count = count + 1; return count; }
+				}
+				Counter::next();
+				Counter::next()
+			)", 2}, {"Counter::count", 2}}},
+				{"enum_and_namespace_dispatch", {{"enum Color { red, green, blue } Color.green", 1}, {R"(
+				namespace vmmath { int add(int a, int b) { return a + b; } }
+				vmmath::add(2, 3)
+			)", 5}}},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto e = vm_engine();
+				for (const auto& [code, expected] : c.second) {
+					check_eq(expected, e->execute(code).as_int(), code);
+				}
+			});
 		});
 
 		test("budget_overrun_raises", [this]() {
@@ -2458,39 +2156,6 @@ public:
 			check_true(used);
 		});
 
-		test("class_inheritance_and_super", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)10, e->execute(R"(
-				class Cat { int a = 0; Cat(int v) { a = v; } int get() { return a; } }
-				class Tiger : Cat { Tiger() : super(5) {} int roar() { return a * 2; } }
-				auto t = Tiger();
-				t.roar()
-			)").as_int());
-			check_eq((int64_t)5, e->execute("auto t2 = Tiger(); t2.get()").as_int());
-		});
-
-		test("ctor_delegation_field_defaults", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)5, e->execute(R"(
-				class D { int a = 1; D() : this(5) {} D(int v) { a = v; } }
-				auto d = D();
-				d.a
-			)").as_int());
-		});
-
-		test("static_fields_and_methods", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)2, e->execute(R"(
-				class Counter {
-					static int count = 0;
-					static int next() { count = count + 1; return count; }
-				}
-				Counter::next();
-				Counter::next()
-			)").as_int());
-			check_eq((int64_t)2, e->execute("Counter::count").as_int());
-		});
-
 		test("builtin_container_and_string_methods", [this]() {
 			auto e = vm_engine();
 			check_eq((int64_t)3, e->execute("auto arr = [1, 2]; arr.push(3); arr.size()").as_int());
@@ -2498,15 +2163,6 @@ public:
 			check_true(e->execute("auto m = {\"k\": 1}; m.contains(\"k\")").as<bool>());
 			check_eq(std::string("cba"), e->execute("var s = \"abc\"; s.reverse(); s").as<std::string>());
 			check_throws([&]() { e->execute("array<int> typed = [1]; typed.push(\"nope\");"); }, "typed push mismatch throws");
-		});
-
-		test("enum_and_namespace_dispatch", [this]() {
-			auto e = vm_engine();
-			check_eq((int64_t)1, e->execute("enum Color { red, green, blue } Color.green").as_int());
-			check_eq((int64_t)5, e->execute(R"(
-				namespace vmmath { int add(int a, int b) { return a + b; } }
-				vmmath::add(2, 3)
-			)").as_int());
 		});
 
 		test("null_safe_member_and_method", [this]() {
@@ -2724,8 +2380,9 @@ public:
 			return run_both_backends_in(false, src, interpreter_depth);
 		};
 
-		test("tier1_field_ref_call_inside_coroutine_body", [this, run_both_backends]() {
-			const char* src = R"(
+		test("tier1_references_survive_coroutine_resumes", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				{"tier1_field_ref_call_inside_coroutine_body", R"(
 				class Box { int v = 0; }
 				function bump(int& x) { x = x + 1; }
 				coroutine int gen(var b) {
@@ -2742,14 +2399,8 @@ public:
 				auto r2 = g.next();
 				auto r3 = g.next();
 				r1 * 1000 + r2 * 100 + r3 * 10 + box.v;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("1230"), i_out, "interp: tier1 field ref inside coroutine body");
-			check_eq(std::string("1230"), v_out, "vm: tier1 field ref inside coroutine body");
-		});
-
-		test("tier1_global_refs_across_resumes_with_mutation", [this, run_both_backends]() {
-			const char* src = R"(
+			)", "1230"},
+				{"tier1_global_refs_across_resumes_with_mutation", R"(
 				class Box { int v = 10; }
 				var box = Box();
 				var arr = [1, 2, 3];
@@ -2768,16 +2419,10 @@ public:
 				auto r2 = g.next();
 				auto r3 = g.next();
 				r1 * 100000 + r2 * 100 + r3;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("10215252"), i_out, "interp: global tier1 refs across resumes");
-			check_eq(std::string("10215252"), v_out, "vm: global tier1 refs across resumes");
-		});
-
-		test("stale_metadata_first_resume_lvalue", [this, run_both_backends]() {
-			// resume() during argument evaluation of an enclosing call: the enclosing
-			// call's arg metadata must NOT leak into the coroutine's first-resume bind
-			const char* src = R"(
+			)", "10215252"},
+				// resume() during argument evaluation of an enclosing call: the enclosing
+				// call's arg metadata must NOT leak into the coroutine's first-resume bind
+				{"stale_metadata_first_resume_lvalue", R"(
 				class Box { int v = 7; }
 				var box = Box();
 				coroutine int gen(int x) { x = 99; yield x; return 2; }
@@ -2785,30 +2430,45 @@ public:
 				auto g = gen(555);
 				take(box.v, g.next());
 				box.v;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("7"), i_out, "interp: stale lvalue metadata must not leak into first resume");
-			check_eq(std::string("7"), v_out, "vm: stale lvalue metadata must not leak into first resume");
-		});
-
-		test("stale_metadata_first_resume_identifier", [this, run_both_backends]() {
-			const char* src = R"(
+			)", "7"},
+				{"stale_metadata_first_resume_identifier", R"(
 				var y = 7;
 				coroutine int gen(int x) { x = 99; yield x; return 2; }
 				function take(var a, var b) -> int { return a + b; }
 				auto g = gen(555);
 				take(y, g.next());
 				y;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("7"), i_out, "interp: stale identifier metadata must not leak into first resume");
-			check_eq(std::string("7"), v_out, "vm: stale identifier metadata must not leak into first resume");
+			)", "7"},
+				{"tier1_ref_call_in_loop_yield_replay", R"(
+				class Box { int v = 0; }
+				var box = Box();
+				function bump(int& x) { x = x + 1; }
+				coroutine int gen() {
+					for (int i = 0; i < 3; ++i) {
+						bump(box.v);
+						yield box.v;
+					}
+					return 0;
+				}
+				auto g = gen();
+				auto a = g.next();
+				auto b = g.next();
+				auto c = g.next();
+				a * 1000 + b * 100 + c * 10 + box.v;
+			)", "1233"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
-		test("deep_tier1_bst_sequential", [this, run_both_backends]() {
-			// Worst-case (right-spine) ref-BST: 200 sequential inserts = ~20k calls with a
-			// Tier-1 lvalue arg per hop; superlinear per-call cost turns this into minutes
-			const char* src = R"(
+		test("tier1_field_references_bind_subtypes_and_deep_chains", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// Worst-case (right-spine) ref-BST: 200 sequential inserts = ~20k calls with a
+				// Tier-1 lvalue arg per hop; superlinear per-call cost turns this into minutes
+				{"deep_tier1_bst_sequential", R"(
 				class TreeNode { int value = 0; TreeNode left = null; TreeNode right = null; TreeNode(int v) { value = v; } }
 				function insertNode(var& node, int val) {
 					if (node == null) { node = TreeNode(val); return; }
@@ -2821,10 +2481,43 @@ public:
 				var last = 0;
 				while (cur != null) { count = count + 1; last = cur.value; cur = cur.right; }
 				count * 10000 + last;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("2000200"), i_out, "interp: 200-deep tier1 ref BST");
-			check_eq(std::string("2000200"), v_out, "vm: 200-deep tier1 ref BST");
+			)", "2000200"},
+				// Derived-to-base through a Tier-1 field ref: the constraint accepts subtypes,
+				// like typed parameter conversion and every direct field-write path do
+				{"tier1_field_ref_accepts_subtype", R"(
+				class Animal { int id = 0; }
+				class Dog : Animal { int extra = 1; }
+				class Holder { Animal pet = null; Holder() { pet = Animal(); } }
+				function put(var& x, var val) { x = val; }
+				var h = Holder();
+				var d = Dog();
+				d.id = 4;
+				shared_ptr<Animal> kept = h.pet;
+				put(h.pet, d);
+				same_object(kept, h.pet) ? h.pet.id * 10 + h.pet.extra : -1;
+			)", "41"},
+				// A var local's tag is 'any'; the constraint check resolves the actual instance
+				// class instead of rejecting on the declaration tag
+				{"tier1_field_ref_accepts_var_held_instance", R"(
+				class Node { int v = 1; }
+				class Holder { Node n = null; Holder() { n = Node(); } }
+				function put(var& x, var val) { x = val; }
+				var h = Holder();
+				var src = Node();
+				src.v = 42;
+				put(h.n, src);
+				var sp = shared_ptr<Node>();
+				sp.v = 7;
+				var h2 = Holder();
+				put(h2.n, sp);
+				h.n.v * 100 + h2.n.v;
+			)", "4207"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("deep_tier2_passthrough_800", [this, run_both_backends]() {
@@ -2854,29 +2547,6 @@ public:
 			)";
 			auto [i_out, v_out] = run_both_backends(src);
 			check_eq(i_out, v_out, "yield below a ref-param frame must agree across backends");
-		});
-
-		test("tier1_ref_call_in_loop_yield_replay", [this, run_both_backends]() {
-			const char* src = R"(
-				class Box { int v = 0; }
-				var box = Box();
-				function bump(int& x) { x = x + 1; }
-				coroutine int gen() {
-					for (int i = 0; i < 3; ++i) {
-						bump(box.v);
-						yield box.v;
-					}
-					return 0;
-				}
-				auto g = gen();
-				auto a = g.next();
-				auto b = g.next();
-				auto c = g.next();
-				a * 1000 + b * 100 + c * 10 + box.v;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("1233"), i_out, "interp: tier1 ref call replayed inside loop+yield");
-			check_eq(std::string("1233"), v_out, "vm: tier1 ref call replayed inside loop+yield");
 		});
 
 		// The generic-binary custom-operator consult used to walk the caller env chain,
@@ -2990,48 +2660,6 @@ public:
 			check_true(i_type.find("Cannot assign 'string' to element of type 'int'") != std::string::npos,
 				"interp: constraint violation error text");
 			check_eq(i_type, v_type, "constraint violation catchability parity");
-		});
-
-		// Derived-to-base through a Tier-1 field ref: the constraint accepts subtypes,
-		// like typed parameter conversion and every direct field-write path do
-		test("tier1_field_ref_accepts_subtype", [this, run_both_backends]() {
-			const char* src = R"(
-				class Animal { int id = 0; }
-				class Dog : Animal { int extra = 1; }
-				class Holder { Animal pet = null; Holder() { pet = Animal(); } }
-				function put(var& x, var val) { x = val; }
-				var h = Holder();
-				var d = Dog();
-				d.id = 4;
-				shared_ptr<Animal> kept = h.pet;
-				put(h.pet, d);
-				same_object(kept, h.pet) ? h.pet.id * 10 + h.pet.extra : -1;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("41"), i_out, "interp: Dog takes the Animal-constrained field in place through a field ref");
-			check_eq(std::string("41"), v_out, "vm: Dog takes the Animal-constrained field in place through a field ref");
-		});
-
-		// A var local's tag is 'any'; the constraint check resolves the actual instance
-		// class instead of rejecting on the declaration tag
-		test("tier1_field_ref_accepts_var_held_instance", [this, run_both_backends]() {
-			const char* src = R"(
-				class Node { int v = 1; }
-				class Holder { Node n = null; Holder() { n = Node(); } }
-				function put(var& x, var val) { x = val; }
-				var h = Holder();
-				var src = Node();
-				src.v = 42;
-				put(h.n, src);
-				var sp = shared_ptr<Node>();
-				sp.v = 7;
-				var h2 = Holder();
-				put(h2.n, sp);
-				h.n.v * 100 + h2.n.v;
-			)";
-			auto [i_out, v_out] = run_both_backends(src);
-			check_eq(std::string("4207"), i_out, "interp: var-held Node and shared_ptr<Node> assign through Node field ref");
-			check_eq(std::string("4207"), v_out, "vm: var-held Node and shared_ptr<Node> assign through Node field ref");
 		});
 
 		// Genuinely incompatible classes still error, naming the ACTUAL class (never 'any')
@@ -3390,31 +3018,22 @@ public:
 				"bare literal rhs values (got: " + i1 + ")");
 		});
 
-		test("compound_fused_bare_result_value", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
+		test("compound_assignment_fusion_matches_the_interpreter", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				{"compound_fused_bare_result_value", R"(
 				var a = 10; var b = 4;
 				var r = (a += b);
 				var r2 = (a += 1);
 				`${r},${r2},${a}`;
-			)");
-			check_eq(std::string("14,15,15"), i1, "interp compound-expression result value");
-			check_eq(i1, v1, "compound-expression result parity");
-		});
-
-		test("compound_fused_ident_ident_rhs", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
+			)", "14,15,15"},
+				{"compound_fused_ident_ident_rhs", R"(
 				auto sum = 0; auto j = 7;
 				for (auto i = 0; i < 100; ++i) { sum += i + j; }
 				sum;
-			)");
-			check_eq(std::string("5650"), i1, "interp ident+ident rhs");
-			check_eq(i1, v1, "ident+ident rhs parity");
-		});
-
-		test("compound_fused_bare_mixed_type_bails", [this, run_both_backends]() {
-			// int target, float ident rhs: the int-only fast path must bail and the pair's
-			// typed store-back converts each iteration (0+2.5->2, 2+2.5->4, 4+2.5->6, 6+2.5->8)
-			auto [i1, v1] = run_both_backends(R"(
+			)", "5650"},
+				// int target, float ident rhs: the int-only fast path must bail and the pair's
+				// typed store-back converts each iteration (0+2.5->2, 2+2.5->4, 4+2.5->6, 6+2.5->8)
+				{"compound_fused_bare_mixed_type_bails", R"(
 				function h() -> string {
 					int x = 0;
 					float f = 2.5;
@@ -3422,33 +3041,49 @@ public:
 					return `${x}`;
 				}
 				h();
-			)");
-			check_eq(std::string("8"), i1, "interp bare mixed-type conversion");
-			check_eq(i1, v1, "bare mixed-type parity");
-		});
-
-		test("compound_fused_bare_catch_var_rhs", [this, run_both_backends]() {
-			// current_catch_var_id_ bails the fast path; the pair's exec_load resolves the
-			// catch variable from the active exception
-			auto [i1, v1] = run_both_backends(R"(
+			)", "8"},
+				// current_catch_var_id_ bails the fast path; the pair's exec_load resolves the
+				// catch variable from the active exception
+				{"compound_fused_bare_catch_var_rhs", R"(
 				var s = 10;
 				try { throw 5; } catch (err) { s += err.value; }
 				s;
-			)");
-			check_eq(std::string("15"), i1, "interp catch-var rhs");
-			check_eq(i1, v1, "catch-var rhs parity");
-		});
-
-		test("compound_fused_bare_ref_rhs", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
+			)", "15"},
+				{"compound_fused_bare_ref_rhs", R"(
 				var arr = [1, 2, 3];
 				var& r = arr[1];
 				var s = 10;
 				s += r;
 				s;
-			)");
-			check_eq(std::string("12"), i1, "interp reference rhs derefs");
-			check_eq(i1, v1, "reference rhs parity");
+			)", "12"},
+				// The peephole rewrites code.back() in place, so a ternary rhs/condition whose
+				// else-arm leaves a fusable tail must NOT fuse: the then-arm's exit jump targets one
+				// past that tail, and rewriting it made the then path skip the store/test entirely.
+				{"ternary_tail_compound_not_fused", R"(
+				var i = 3;
+				var sum = 10; var c = true;
+				sum += c ? 5 : i * 2;
+				var sum2 = 10; var d = false;
+				sum2 += d ? 5 : i * 2;
+				var sum3 = 10;
+				sum3 += c ? i : 7;
+				var sum4 = 10;
+				sum4 += c ? 5 : i;
+				`${sum},${sum2},${sum3},${sum4}`;
+			)", "15,16,13,15"},
+				{"ternary_tail_condition_not_fused", R"(
+				var i = 0; var c = true;
+				while (c ? false : i < 2) { i += 100; c = false; }
+				var j = 0;
+				if (c ? false : j < 5) { j = 999; }
+				`${i},${j}`;
+			)", "0,0"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("compound_fused_overflow_error_texts", [this]() {
@@ -3504,38 +3139,6 @@ public:
 			}
 		});
 
-		// The peephole rewrites code.back() in place, so a ternary rhs/condition whose
-		// else-arm leaves a fusable tail must NOT fuse: the then-arm's exit jump targets one
-		// past that tail, and rewriting it made the then path skip the store/test entirely.
-		test("ternary_tail_compound_not_fused", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
-				var i = 3;
-				var sum = 10; var c = true;
-				sum += c ? 5 : i * 2;
-				var sum2 = 10; var d = false;
-				sum2 += d ? 5 : i * 2;
-				var sum3 = 10;
-				sum3 += c ? i : 7;
-				var sum4 = 10;
-				sum4 += c ? 5 : i;
-				`${sum},${sum2},${sum3},${sum4}`;
-			)");
-			check_eq(std::string("15,16,13,15"), i1, "interp ternary compound rhs");
-			check_eq(i1, v1, "ternary compound rhs parity (no tail fusion)");
-		});
-
-		test("ternary_tail_condition_not_fused", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
-				var i = 0; var c = true;
-				while (c ? false : i < 2) { i += 100; c = false; }
-				var j = 0;
-				if (c ? false : j < 5) { j = 999; }
-				`${i},${j}`;
-			)");
-			check_eq(std::string("0,0"), i1, "interp ternary condition");
-			check_eq(i1, v1, "ternary condition parity (no tail cmp fusion)");
-		});
-
 		// === Callee inline cache + return classification pins ===
 
 		test("stage1_callee_cache_revalidates_on_redefinition", [this, run_both_backends]() {
@@ -3559,10 +3162,11 @@ public:
 			check_eq(i1, v1, "redefinition parity (vm cache revalidates)");
 		});
 
-		test("stage1_callee_cache_polymorphic_site", [this, run_both_backends]() {
-			// One call site alternating between two function values: the monomorphic
-			// cache must revalidate per callee, never call the wrong body
-			auto [i1, v1] = run_both_backends(R"(
+		test("stage1_callee_caches_keep_lifetimes", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// One call site alternating between two function values: the monomorphic
+				// cache must revalidate per callee, never call the wrong body
+				{"stage1_callee_cache_polymorphic_site", R"(
 				function inc(auto x) -> auto { return x + 1; }
 				function dbl(auto x) -> auto { return x * 2; }
 				var h = inc;
@@ -3572,19 +3176,14 @@ public:
 					h = (i % 2 == 0) ? dbl : inc;
 				}
 				s;
-			)");
-			check_eq(std::string("4,6,4,6,"), i1, "interp polymorphic site");
-			check_eq(i1, v1, "polymorphic site parity");
-		});
-
-		test("stage1_closure_callee_capture_dies_with_scope", [this, run_both_backends]() {
-			// A DEAD lambda's captures keep
-			// nothing: a freed pool slot drops its parent chain (the capture env)
-			// at release on both backends, so both report expiry, and the vm's callee
-			// cache must never re-add a pin (closures are excluded from it; the
-			// capture-env leak class is also guarded by C++ alive counts in
-			// Comprehensive Scope Tests::mixed_scopes_comprehensive).
-			auto [i1, v1] = run_both_backends(R"(
+			)", "4,6,4,6,"},
+				// A DEAD lambda's captures keep
+				// nothing: a freed pool slot drops its parent chain (the capture env)
+				// at release on both backends, so both report expiry, and the vm's callee
+				// cache must never re-add a pin (closures are excluded from it; the
+				// capture-env leak class is also guarded by C++ alive counts in
+				// Comprehensive Scope Tests::mixed_scopes_comprehensive).
+				{"stage1_closure_callee_capture_dies_with_scope", R"(
 				class T { int x = 1; }
 				shared_ptr<T> a = T();
 				var w = weak_ptr<T>(a);
@@ -3597,16 +3196,11 @@ public:
 				var s = run(a);
 				a = null;
 				`${s}:${w.expired()}`;
-			)");
-			check_eq(std::string("3:true"), i1, "interp: dead lambda keeps nothing (ruled)");
-			check_eq(i1, v1, "capture-lifetime parity (vm callee cache adds no pin)");
-		});
-
-		test("stage1_live_lambda_capture_keeps_object_alive", [this, run_both_backends]() {
-			// Positive twin: a LIVE lambda's by-value shared_ptr capture keeps
-			// the object alive after every other alias dies; dropping the lambda
-			// releases it.
-			auto [i1, v1] = run_both_backends(R"(
+			)", "3:true"},
+				// Positive twin: a LIVE lambda's by-value shared_ptr capture keeps
+				// the object alive after every other alias dies; dropping the lambda
+				// releases it.
+				{"stage1_live_lambda_capture_keeps_object_alive", R"(
 				class T { int x = 1; }
 				shared_ptr<T> a = T();
 				var w = weak_ptr<T>(a);
@@ -3617,16 +3211,11 @@ public:
 				var r = l();
 				l = null;
 				`${r}:${alive_while_held}:${w.expired()}`;
-			)");
-			check_eq(std::string("1:true:true"), i1, "interp live-capture lifetime (ruled)");
-			check_eq(i1, v1, "live-capture lifetime parity");
-		});
-
-		test("stage1_weak_expiry_at_return_boundary", [this, run_both_backends]() {
-			// Callee locals die AT return (stage-2 lifetime pin: frame windows must
-			// destroy the frame's values at the same boundary pop_script_frame_core
-			// does today)
-			auto [i1, v1] = run_both_backends(R"(
+			)", "1:true:true"},
+				// Callee locals die AT return (stage-2 lifetime pin: frame windows must
+				// destroy the frame's values at the same boundary pop_script_frame_core
+				// does today)
+				{"stage1_weak_expiry_at_return_boundary", R"(
 				class T { int x = 1; }
 				var w = null;
 				function make() -> auto {
@@ -3636,16 +3225,11 @@ public:
 				}
 				var r = make();
 				`${r}:${w.expired()}`;
-			)");
-			check_eq(std::string("7:true"), i1, "interp return-boundary expiry");
-			check_eq(i1, v1, "return-boundary expiry parity");
-		});
-
-		test("stage1_arg_copies_do_not_outlive_call", [this, run_both_backends]() {
-			// No stray argument copy (stack slice, pooled vector, cache pin) may keep
-			// the object alive once the caller's own alias is gone (stage-2 pin: the
-			// in-place-args design must keep this exact boundary)
-			auto [i1, v1] = run_both_backends(R"(
+			)", "7:true"},
+				// No stray argument copy (stack slice, pooled vector, cache pin) may keep
+				// the object alive once the caller's own alias is gone (stage-2 pin: the
+				// in-place-args design must keep this exact boundary)
+				{"stage1_arg_copies_do_not_outlive_call", R"(
 				class T { int x = 5; }
 				function take(auto p) -> auto { return p.x; }
 				shared_ptr<T> a = T();
@@ -3655,9 +3239,13 @@ public:
 				var before = w.expired();
 				a = null;
 				`${r}:${before}:${w.expired()}`;
-			)");
-			check_eq(std::string("15:false:true"), i1, "interp arg-copy lifetime");
-			check_eq(i1, v1, "arg-copy lifetime parity");
+			)", "15:false:true"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("stage1_typed_return_classification_routes", [this, run_both_backends]() {
@@ -3699,10 +3287,11 @@ public:
 		// the cast identifier arm, fused operands, callees and builtin-method receivers
 		// exactly like op_load (the compiler dropped it on the RETURN_IDENT fusion) ===
 
-		test("global_qualified_return_ident_fusion", [this, run_both_backends]() {
-			// `return ::hp;` fuses to op_return_ident; a shadowing field, a shadowing
-			// local and captured shadows must all still answer the global
-			auto [i1, v1] = run_both_backends(R"(
+		test("global_qualified_names_run_like_bare_names", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// `return ::hp;` fuses to op_return_ident; a shadowing field, a shadowing
+				// local and captured shadows must all still answer the global
+				{"global_qualified_return_ident_fusion", R"(
 				int hp = 1000;
 				class U {
 					int hp = 5;
@@ -3715,15 +3304,10 @@ public:
 				int cap_ref() { int hp = 5; auto l = [&hp]() { return ::hp; }; return l(); }
 				int free_fn() { int hp = 9; return ::hp; }
 				`${u.by_field()}|${u.by_local()}|${u.bare()}|${cap_copy()}|${cap_ref()}|${free_fn()}`;
-			)");
-			check_eq(std::string("1000|1000|5|1000|1000|1000"), i1, "interp: return ::name answers the global");
-			check_eq(i1, v1, "return ::name parity");
-		});
-
-		test("global_qualified_fused_operand_positions", [this, run_both_backends]() {
-			// ::name as a fused operand: return-binary, cmp-jump, decl init, compound,
-			// equality, mixed with the bare (member) spelling, literal-left, both sides
-			auto [i1, v1] = run_both_backends(R"(
+			)", "1000|1000|5|1000|1000|1000"},
+				// ::name as a fused operand: return-binary, cmp-jump, decl init, compound,
+				// equality, mixed with the bare (member) spelling, literal-left, both sides
+				{"global_qualified_fused_operand_positions", R"(
 				int hp = 1000;
 				class P {
 					int hp = 5;
@@ -3738,13 +3322,8 @@ public:
 				}
 				auto p = P();
 				`${p.plus()}|${p.cmp()}|${p.decl()}|${p.compound()}|${p.eq()}|${p.mixed()}|${p.lit_left()}|${p.both()}`;
-			)");
-			check_eq(std::string("1001|2|1000|1001|true|1995|1001|0"), i1, "interp: fused ::name operands");
-			check_eq(i1, v1, "fused ::name operand parity");
-		});
-
-		test("global_qualified_callee", [this, run_both_backends]() {
-			auto [i1, v1] = run_both_backends(R"(
+			)", "1001|2|1000|1001|true|1995|1001|0"},
+				{"global_qualified_callee", R"(
 				int f() { return 1; }
 				int g(int n) { return n * 10; }
 				class C {
@@ -3757,15 +3336,10 @@ public:
 				auto c = C();
 				int f_local() { int f = 5; return ::f() + f; }
 				`${c.call_f()}|${c.call_g()}|${c.held()}|${f_local()}`;
-			)");
-			check_eq(std::string("1|40|11|6"), i1, "interp: ::f() reaches the global function");
-			check_eq(i1, v1, "::f() parity");
-		});
-
-		test("global_qualified_reference_binds", [this, run_both_backends]() {
-			// Ref decl, cast<T&>, and ref-return producers under env-resident shadows
-			// (block locals, captures): every bind lands on the GLOBAL cell
-			auto [i1, v1] = run_both_backends(R"(
+			)", "1|40|11|6"},
+				// Ref decl, cast<T&>, and ref-return producers under env-resident shadows
+				// (block locals, captures): every bind lands on the GLOBAL cell
+				{"global_qualified_reference_binds", R"(
 				int hp = 1000;
 				string log = "";
 				{ int hp = 5; auto& r = ::hp; r = r + 1; log = log + cast<string>(hp) + ":" + cast<string>(::hp); }
@@ -3779,15 +3353,10 @@ public:
 				int ref_cap() { int hp = 5; auto l = [&hp]() -> auto& { return ::hp; }; auto& r = l(); r = r + 1; return hp; }
 				log = `${log}|${ref_cap()}:${hp}`;
 				log;
-			)");
-			check_eq(std::string("5:1001|5:1002|5:1003|5:1004|5:1006"), i1, "interp: ::name reference binds hit the global");
-			check_eq(i1, v1, "::name reference bind parity");
-		});
-
-		test("global_qualified_string_builtin_receiver", [this, run_both_backends]() {
-			// `::s.insert(...)`: the in-place string builtin mutates the GLOBAL string,
-			// never a block-local, captured or field shadow
-			auto [i1, v1] = run_both_backends(R"(
+			)", "5:1001|5:1002|5:1003|5:1004|5:1006"},
+				// `::s.insert(...)`: the in-place string builtin mutates the GLOBAL string,
+				// never a block-local, captured or field shadow
+				{"global_qualified_string_builtin_receiver", R"(
 				string s = "glob";
 				string log = "";
 				{ string s = "blk"; ::s.insert(0, "x"); log = s + ":" + ::s; }
@@ -3797,15 +3366,20 @@ public:
 				auto h = H();
 				log = log + "|" + h.m() + ":" + s;
 				log;
-			)");
-			check_eq(std::string("blk:xglob|loc:yxglob|fld:zyxglob"), i1, "interp: ::s builtin receiver is the global");
-			check_eq(i1, v1, "::s builtin receiver parity");
+			)", "blk:xglob|loc:yxglob|fld:zyxglob"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
-		test("builtin_callback_entry_parity", [this, run_both_backends_stdlib]() {
-			// a builtin's callback runs on one prepared frame per builtin call: captures, a [this] lambda, a named function, a
-			// defaulted parameter, a nested builtin, a throw out of a comparator, a T& element, a destructor in the body
-			auto [i1, v1] = run_both_backends_stdlib(R"(
+		test("call_entries_and_reference_bindings_match_the_interpreter", [this, run_both_backends_stdlib]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// a builtin's callback runs on one prepared frame per builtin call: captures, a [this] lambda, a named function, a
+				// defaulted parameter, a nested builtin, a throw out of a comparator, a T& element, a destructor in the body
+				{"builtin_callback_entry_parity", R"(
 				class Tally {
 					int hits = 0;
 					int big(array<int> xs, int limit) { xs.filter([this, limit](int x) -> bool { hits += 1; return x > limit; }); return xs.size(); }
@@ -3835,9 +3409,209 @@ public:
 				[1, 2].for_each([](int k) { Noisy n = Noisy(k); });
 				log = log + "|" + to_string([1, 2, 3].find([](int x) -> bool { return x > 1; }));
 				log;
-			)");
-			check_eq(std::string("91:13|1:9|4:7|1|53|cmp|60~1~2|2"), i1, "interp: builtin callbacks");
-			check_eq(i1, v1, "builtin callback parity");
+			)", "91:13|1:9|4:7|1|53|cmp|60~1~2|2"},
+				// string parameters, element/field/cell reference arguments into by-value slots, closures and nested functions, a
+				// callee that writes its copies, a block-scope caller, a parallel body calling a plain function
+				{"plain_frame_argument_rows_parity", R"(
+				string log = "";
+				int bump(int v) { v += 1; return v; }
+				float half(float x) { return x / 2; }
+				string tag(string a, var b, int n) { a += "!"; b += "?"; return a + b + to_string(n); }
+				int pick(var a, var b) { return a > b ? 1 : 2; }
+				int clamp_at(int v, int& hi) { if (v > hi) { hi = v; } return hi; }
+				class Cell { int n = 4; float w = 2.5; string t = "f"; }
+				array<int> xs = [10, 20, 30];
+				array<float> fs = [1.5, 2.5];
+				var vs = [7, "s", 2.0];
+				var c = Cell();
+				int total = 0;
+				for (int i = 0; i < 3; ++i) { total += bump(xs[i]); }
+				log = log + to_string(total) + ":" + to_string(xs[0]) + to_string(xs[2]) + "|" + to_string(half(fs[1])) + "," + to_string(half(c.w)) + "," + to_string(bump(c.n)) + "," + to_string(c.n);
+				string s = "base";
+				log = log + "|" + tag(s, s, 1) + "," + s + "," + tag(c.t, vs[1], vs[0]) + "," + c.t + "," + to_string(vs[0]) + vs[1];
+				int x = 5; int& rx = x;
+				log = log + "|" + to_string(bump(rx)) + "," + to_string(x) + "," + to_string(pick(vs[0], xs[0])) + "," + to_string(pick("b", "a"));
+				int hi = 0;
+				for (int i = 0; i < 3; ++i) { clamp_at(xs[i], hi); }
+				log = log + "|" + to_string(hi);
+				int k = 3;
+				var add = [k](int v) { return v + k; };
+				var acc = [&](int v) { total += v; return total; };
+				function outer(int v) { int inner(int w) { return w * 2; } return inner(v) + 1; }
+				for (int i = 0; i < 3; ++i) { add(i); acc(xs[i]); }
+				log = log + "|" + to_string(add(xs[2])) + "," + to_string(total) + "," + to_string(outer(4));
+				{ int blk = 2; log = log + "|" + to_string(bump(blk)) + "," + to_string(add(blk)); }
+				var bad = "no"; try { bump(bad); } catch (e) { log = log + "|" + e; }
+				array<int> ps = [1, 2, 3, 4, 5, 6, 7, 8];
+				parallel_for (auto& p : ps) { p = bump(p) * 2; }
+				log = log + "|" + to_string(ps[0]) + "," + to_string(ps[7]);
+				log;
+			)", "63:1030|1.25,1.25,5,4|base!base?1,base,f!s?7,f,7s|6,5,2,1|30|33,123,9|3,5|Cannot pass string to parameter 'v' of 'bump' (declared int)|4,18"},
+				// `var& x = G` inside functions, loops, a lambda and a method: the reference names the global's cell every time, across
+				// stores of other kinds, a block local of the same name and a method frame's own field
+				{"reference_to_global_declaration_parity", R"(
+				var G = 1;
+				array<int> BUF = [0, 0, 0];
+				string log = "";
+				void bump() { for (int i = 0; i < 4; ++i) { var& x = G; x = x + 1; } }
+				void fill() { for (int i = 0; i < 3; ++i) { auto& b = BUF; b[i] = b[i] + i * 10; } }
+				function shadow() { var G = 100; var& x = G; x = x + 1; return G; }
+				class H { var G = 7; int touch() { var& x = G; x = x + 1; return G; } }
+				var lam = []() { var& x = G; x = x + 3; return x; };
+				bump(); fill(); fill();
+				log = log + to_string(G) + "," + to_string(BUF[0]) + to_string(BUF[1]) + to_string(BUF[2]);
+				G = 2.5; bump();
+				log = log + "|" + to_string(G) + "," + to_string(lam()) + "," + to_string(shadow()) + "," + to_string(G);
+				var h = H(); log = log + "|" + to_string(h.touch()) + to_string(h.touch()) + "," + to_string(G);
+				G = 10; for (int i = 0; i < 2; ++i) { { var G = 50; var& y = G; y = y + 1; } var& z = G; z = z + 1; }
+				log = log + "|" + to_string(G);
+				log;
+			)", "5,02040|6.5,9.5,101,9.5|89,9.5|12"},
+				// stores through `var&` aliases (a local cell, a var field, a shared_ptr field) in statement and expression position: a
+				// string, a shared handle and a by-value instance land as copies, the source keeps its value, handles share, and a
+				// replaced handle's object dies at the store
+				{"reference_alias_store_value_parity", R"(
+				string log = "";
+				class P { var n = 0; ~P() { log = log + "~" + to_string(n); } }
+				class V { var n = 0; }
+				class Box { var item = null; shared_ptr<P> held = null; }
+				void put(var& r, var v) { r = v; }
+				void run() {
+					var cell = 0;
+					var& r = cell;
+					string s = "ab";
+					r = s; s = s + "c";
+					log = log + cell + s;
+					var p1 = new P(); p1.n = 1;
+					r = p1; p1.n = 2;
+					log = log + "|" + to_string(cell.n);
+					r = new P();
+					log = log + "|";
+					r = null;
+					var cell2 = 0;
+					var& r2 = cell2;
+					V v; v.n = 3;
+					r2 = v; v.n = 4;
+					log = log + to_string(cell2.n);
+					var res = (r2 = "x");
+					log = log + "|" + res + cell2;
+					Box b;
+					var& it = b.item;
+					it = "y"; put(it, p1); p1.n = 5;
+					log = log + "|" + to_string(b.item.n);
+					auto& h = b.held;
+					h = p1; var other = new P(); other.n = 9; h = other; other = null;
+					log = log + "|" + to_string(b.held.n);
+					var got = (h = null);
+					log = log + "|" + to_string(got == null);
+				}
+				run();
+				log;
+			)", "ababc|2|~03|xx|5|9~9|true~5"},
+				// a field argument a frame-slot local names binds where it is evaluated: by reference when the callee's parameter is a
+				// T&, by value otherwise, through a rebound callee, an overload set, a typed parameter, a field holding a reference, a null
+				// receiver and a private field, in functions, recursion and the plain frame
+				{"field_argument_place_binding_parity", R"(
+				class O { var x = 1; int n = 2; var left = null; }
+				class P { private: int secret = 3; public: int open = 4; }
+				string log = "";
+				void bump(var& r) { r = r + 10; }
+				void bump_int(int& r) { r = r + 100; }
+				int read(var v) { return v; }
+				void two(var& a, var& b) { a = 7; b = 8; }
+				function chain(var o, int depth) { if (depth == 0) { return 0; } bump(o.x); return chain(o, depth - 1); }
+				void run() {
+					var o = new O();
+					bump(o.x); bump_int(o.n);
+					log = `${log}${o.x},${o.n},${read(o.x)}`;
+					var g = bump; g(o.x);
+					g = read; log = `${log}|${g(o.x)},${o.x}`;
+					var p = new O(); p.left = new O();
+					two(p.x, p.left);
+					log = `${log}|${p.x},${p.left}`;
+					var c = new O(); chain(c, 3); log = `${log}|${c.x}`;
+					var none = null; string err = "";
+					try { bump(none.x); } catch (e) { err = e; }
+					log = `${log}|${(err != "")}`;
+					var q = new P(); string perr = "";
+					try { bump(q.secret); } catch (e) { perr = e; }
+					bump(q.open);
+					log = `${log}|${(perr != "")},${q.open}`;
+				}
+				run();
+				class S { void mix(var& r, string s) { r = 50; } void mix(var r, int n) { r = 60; } }
+				var s = S(); var t = new O();
+				s.mix(t.x, "a"); log = `${log}|${t.x}`;
+				log;
+			)", "11,102,11|21,21|7,8|31|true|true,14|50"},
+				// A reference argument binds when it is evaluated, left to right, as in C++: a later argument that
+				// reassigns the receiver, moves the index, or replaces a nested receiver leaves the binding where evaluation put it, for
+				// functions, methods, constructors, a mixed-mode overload and a later conversion that runs code
+				{"reference_argument_binds_at_evaluation_parity", R"(
+				class O { var x = 0; }
+				string log = "";
+				void put(var& r, var unused) { r = 99; }
+				var first = new O(); first.x = 1;
+				var second = new O(); second.x = 2;
+				var o = first;
+				put(o.x, o = second);
+				log = log + to_string(first.x) + "," + to_string(second.x);
+				var a = [10, 20, 30];
+				var i = 0;
+				put(a[i], i++);
+				log = log + "|" + to_string(a[0]) + "," + to_string(a[1]) + "," + to_string(i);
+				var p = new O(); p.x = 5;
+				var q = new O(); q.x = 6;
+				var holder = p;
+				function swap_holder() { holder = q; return 0; }
+				put(holder.x, swap_holder());
+				log = log + "|" + to_string(p.x) + "," + to_string(q.x);
+				class Box { var item = null; }
+				var b = Box(); b.item = new O();
+				var old_item = b.item;
+				function replace_item() { b.item = new O(); return 0; }
+				put(b.item.x, replace_item());
+				log = log + "|" + to_string(old_item.x) + "," + to_string(b.item.x);
+				void local_case() {
+					var f = new O(); var s = new O(); var w = f;
+					put(w.x, w = s);
+					array<int> e = [1, 2, 3]; int k = 0;
+					put(e[k], k = 2);
+					log = log + "|" + to_string(f.x) + "," + to_string(s.x) + "," + to_string(e[0]) + to_string(e[2]);
+				}
+				local_case();
+				class M { void put(var& r, var u) { r = 5; } }
+				var m = M();
+				var m1 = new O(); var m2 = new O(); var mh = m1;
+				m.put(mh.x, mh = m2);
+				log = log + "|" + to_string(m1.x) + "," + to_string(m2.x);
+				class Setter { Setter(var& r, var u) { r = 7; } }
+				var k1 = new O(); var k2 = new O(); var kh = k1;
+				Setter(kh.x, kh = k2);
+				var made = new Setter(kh.x, kh = k1);
+				log = log + "|" + to_string(k1.x) + "," + to_string(k2.x);
+				var c1 = new O(); var c2 = new O(); var ch = c1;
+				class Conv { var n = 0; Conv(int v) { n = v; ch = c2; } }
+				void take(Conv c, var& r) { r = 77; }
+				take(5, ch.x);
+				log = log + "|" + to_string(c1.x) + "," + to_string(c2.x);
+				var x1 = new O(); var x2 = new O(); var xh = x1;
+				function set_xh() { xh = x2; return "s"; }
+				class Mixer { void mix(int& r, string n) { log = log + "A"; r = 33; } void mix(int r, int n) { log = log + "B"; [[warn_mode]] r = 44; } }
+				var mx = Mixer();
+				mx.mix(xh.x, set_xh());
+				log = log + "|" + to_string(x1.x) + "," + to_string(x2.x);
+				var y1 = new O(); var yh = y1;
+				put(yh.x, 3);
+				log = log + "|" + to_string(y1.x);
+				log;
+			)", "99,2|99,20,1|99,6|99,0|99,0,993|5,0|7,7|77,0A|33,0|99"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends_stdlib(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("opaque_callee_call_parity", [this, run_both_backends_stdlib]() {
@@ -3874,48 +3648,6 @@ public:
 			)");
 			check_true(i1.find("boom 2") != std::string::npos, i1);
 			check_eq(i1, v1, "opaque callee parity");
-		});
-
-		test("plain_frame_argument_rows_parity", [this, run_both_backends_stdlib]() {
-			// string parameters, element/field/cell reference arguments into by-value slots, closures and nested functions, a
-			// callee that writes its copies, a block-scope caller, a parallel body calling a plain function
-			auto [i1, v1] = run_both_backends_stdlib(R"(
-				string log = "";
-				int bump(int v) { v += 1; return v; }
-				float half(float x) { return x / 2; }
-				string tag(string a, var b, int n) { a += "!"; b += "?"; return a + b + to_string(n); }
-				int pick(var a, var b) { return a > b ? 1 : 2; }
-				int clamp_at(int v, int& hi) { if (v > hi) { hi = v; } return hi; }
-				class Cell { int n = 4; float w = 2.5; string t = "f"; }
-				array<int> xs = [10, 20, 30];
-				array<float> fs = [1.5, 2.5];
-				var vs = [7, "s", 2.0];
-				var c = Cell();
-				int total = 0;
-				for (int i = 0; i < 3; ++i) { total += bump(xs[i]); }
-				log = log + to_string(total) + ":" + to_string(xs[0]) + to_string(xs[2]) + "|" + to_string(half(fs[1])) + "," + to_string(half(c.w)) + "," + to_string(bump(c.n)) + "," + to_string(c.n);
-				string s = "base";
-				log = log + "|" + tag(s, s, 1) + "," + s + "," + tag(c.t, vs[1], vs[0]) + "," + c.t + "," + to_string(vs[0]) + vs[1];
-				int x = 5; int& rx = x;
-				log = log + "|" + to_string(bump(rx)) + "," + to_string(x) + "," + to_string(pick(vs[0], xs[0])) + "," + to_string(pick("b", "a"));
-				int hi = 0;
-				for (int i = 0; i < 3; ++i) { clamp_at(xs[i], hi); }
-				log = log + "|" + to_string(hi);
-				int k = 3;
-				var add = [k](int v) { return v + k; };
-				var acc = [&](int v) { total += v; return total; };
-				function outer(int v) { int inner(int w) { return w * 2; } return inner(v) + 1; }
-				for (int i = 0; i < 3; ++i) { add(i); acc(xs[i]); }
-				log = log + "|" + to_string(add(xs[2])) + "," + to_string(total) + "," + to_string(outer(4));
-				{ int blk = 2; log = log + "|" + to_string(bump(blk)) + "," + to_string(add(blk)); }
-				var bad = "no"; try { bump(bad); } catch (e) { log = log + "|" + e; }
-				array<int> ps = [1, 2, 3, 4, 5, 6, 7, 8];
-				parallel_for (auto& p : ps) { p = bump(p) * 2; }
-				log = log + "|" + to_string(ps[0]) + "," + to_string(ps[7]);
-				log;
-			)");
-			check_eq(std::string("63:1030|1.25,1.25,5,4|base!base?1,base,f!s?7,f,7s|6,5,2,1|30|33,123,9|3,5|Cannot pass string to parameter 'v' of 'bump' (declared int)|4,18"), i1, "interp: plain frame argument rows");
-			check_eq(i1, v1, "plain frame argument rows parity");
 		});
 
 		test("an_inlined_untyped_result_outlives_the_graft_block", [this]() {
@@ -4342,118 +4074,6 @@ public:
 			check_eq(out[0], out[1], "join parity");
 		});
 
-		test("reference_to_global_declaration_parity", [this, run_both_backends_stdlib]() {
-			// `var& x = G` inside functions, loops, a lambda and a method: the reference names the global's cell every time, across
-			// stores of other kinds, a block local of the same name and a method frame's own field
-			auto [i2, v2] = run_both_backends_stdlib(R"(
-				var G = 1;
-				array<int> BUF = [0, 0, 0];
-				string log = "";
-				void bump() { for (int i = 0; i < 4; ++i) { var& x = G; x = x + 1; } }
-				void fill() { for (int i = 0; i < 3; ++i) { auto& b = BUF; b[i] = b[i] + i * 10; } }
-				function shadow() { var G = 100; var& x = G; x = x + 1; return G; }
-				class H { var G = 7; int touch() { var& x = G; x = x + 1; return G; } }
-				var lam = []() { var& x = G; x = x + 3; return x; };
-				bump(); fill(); fill();
-				log = log + to_string(G) + "," + to_string(BUF[0]) + to_string(BUF[1]) + to_string(BUF[2]);
-				G = 2.5; bump();
-				log = log + "|" + to_string(G) + "," + to_string(lam()) + "," + to_string(shadow()) + "," + to_string(G);
-				var h = H(); log = log + "|" + to_string(h.touch()) + to_string(h.touch()) + "," + to_string(G);
-				G = 10; for (int i = 0; i < 2; ++i) { { var G = 50; var& y = G; y = y + 1; } var& z = G; z = z + 1; }
-				log = log + "|" + to_string(G);
-				log;
-			)");
-			check_eq(std::string("5,02040|6.5,9.5,101,9.5|89,9.5|12"), i2, "interp: reference to global");
-			check_eq(i2, v2, "reference to global parity");
-		});
-
-		test("reference_alias_store_value_parity", [this, run_both_backends_stdlib]() {
-			// stores through `var&` aliases (a local cell, a var field, a shared_ptr field) in statement and expression position: a
-			// string, a shared handle and a by-value instance land as copies, the source keeps its value, handles share, and a
-			// replaced handle's object dies at the store
-			auto [i2, v2] = run_both_backends_stdlib(R"(
-				string log = "";
-				class P { var n = 0; ~P() { log = log + "~" + to_string(n); } }
-				class V { var n = 0; }
-				class Box { var item = null; shared_ptr<P> held = null; }
-				void put(var& r, var v) { r = v; }
-				void run() {
-					var cell = 0;
-					var& r = cell;
-					string s = "ab";
-					r = s; s = s + "c";
-					log = log + cell + s;
-					var p1 = new P(); p1.n = 1;
-					r = p1; p1.n = 2;
-					log = log + "|" + to_string(cell.n);
-					r = new P();
-					log = log + "|";
-					r = null;
-					var cell2 = 0;
-					var& r2 = cell2;
-					V v; v.n = 3;
-					r2 = v; v.n = 4;
-					log = log + to_string(cell2.n);
-					var res = (r2 = "x");
-					log = log + "|" + res + cell2;
-					Box b;
-					var& it = b.item;
-					it = "y"; put(it, p1); p1.n = 5;
-					log = log + "|" + to_string(b.item.n);
-					auto& h = b.held;
-					h = p1; var other = new P(); other.n = 9; h = other; other = null;
-					log = log + "|" + to_string(b.held.n);
-					var got = (h = null);
-					log = log + "|" + to_string(got == null);
-				}
-				run();
-				log;
-			)");
-			check_eq(std::string("ababc|2|~03|xx|5|9~9|true~5"), i2, "interp: reference alias stores");
-			check_eq(i2, v2, "reference alias store parity");
-		});
-
-		test("field_argument_place_binding_parity", [this, run_both_backends_stdlib]() {
-			// a field argument a frame-slot local names binds where it is evaluated: by reference when the callee's parameter is a
-			// T&, by value otherwise, through a rebound callee, an overload set, a typed parameter, a field holding a reference, a null
-			// receiver and a private field, in functions, recursion and the plain frame
-			auto [i2, v2] = run_both_backends_stdlib(R"(
-				class O { var x = 1; int n = 2; var left = null; }
-				class P { private: int secret = 3; public: int open = 4; }
-				string log = "";
-				void bump(var& r) { r = r + 10; }
-				void bump_int(int& r) { r = r + 100; }
-				int read(var v) { return v; }
-				void two(var& a, var& b) { a = 7; b = 8; }
-				function chain(var o, int depth) { if (depth == 0) { return 0; } bump(o.x); return chain(o, depth - 1); }
-				void run() {
-					var o = new O();
-					bump(o.x); bump_int(o.n);
-					log = `${log}${o.x},${o.n},${read(o.x)}`;
-					var g = bump; g(o.x);
-					g = read; log = `${log}|${g(o.x)},${o.x}`;
-					var p = new O(); p.left = new O();
-					two(p.x, p.left);
-					log = `${log}|${p.x},${p.left}`;
-					var c = new O(); chain(c, 3); log = `${log}|${c.x}`;
-					var none = null; string err = "";
-					try { bump(none.x); } catch (e) { err = e; }
-					log = `${log}|${(err != "")}`;
-					var q = new P(); string perr = "";
-					try { bump(q.secret); } catch (e) { perr = e; }
-					bump(q.open);
-					log = `${log}|${(perr != "")},${q.open}`;
-				}
-				run();
-				class S { void mix(var& r, string s) { r = 50; } void mix(var r, int n) { r = 60; } }
-				var s = S(); var t = new O();
-				s.mix(t.x, "a"); log = `${log}|${t.x}`;
-				log;
-			)");
-			check_eq(std::string("11,102,11|21,21|7,8|31|true|true,14|50"), i2, "interp: field argument binding");
-			check_eq(i2, v2, "field argument binding parity");
-		});
-
 		test("field_argument_place_binding_follows_a_redefined_callee", [this]() {
 			// the same call site, its callee redefined between runs from a T& parameter to a value parameter and back, then to an
 			// overload set: each call binds as the callee it reaches does (both backends)
@@ -4476,73 +4096,6 @@ public:
 			}
 			check_eq(std::string("2,3,3,30,300,"), out[0], "interp: a redefined callee");
 			check_eq(out[0], out[1], "a redefined callee parity");
-		});
-
-		test("reference_argument_binds_at_evaluation_parity", [this, run_both_backends_stdlib]() {
-			// A reference argument binds when it is evaluated, left to right, as in C++: a later argument that
-			// reassigns the receiver, moves the index, or replaces a nested receiver leaves the binding where evaluation put it, for
-			// functions, methods, constructors, a mixed-mode overload and a later conversion that runs code
-			auto [i2, v2] = run_both_backends_stdlib(R"(
-				class O { var x = 0; }
-				string log = "";
-				void put(var& r, var unused) { r = 99; }
-				var first = new O(); first.x = 1;
-				var second = new O(); second.x = 2;
-				var o = first;
-				put(o.x, o = second);
-				log = log + to_string(first.x) + "," + to_string(second.x);
-				var a = [10, 20, 30];
-				var i = 0;
-				put(a[i], i++);
-				log = log + "|" + to_string(a[0]) + "," + to_string(a[1]) + "," + to_string(i);
-				var p = new O(); p.x = 5;
-				var q = new O(); q.x = 6;
-				var holder = p;
-				function swap_holder() { holder = q; return 0; }
-				put(holder.x, swap_holder());
-				log = log + "|" + to_string(p.x) + "," + to_string(q.x);
-				class Box { var item = null; }
-				var b = Box(); b.item = new O();
-				var old_item = b.item;
-				function replace_item() { b.item = new O(); return 0; }
-				put(b.item.x, replace_item());
-				log = log + "|" + to_string(old_item.x) + "," + to_string(b.item.x);
-				void local_case() {
-					var f = new O(); var s = new O(); var w = f;
-					put(w.x, w = s);
-					array<int> e = [1, 2, 3]; int k = 0;
-					put(e[k], k = 2);
-					log = log + "|" + to_string(f.x) + "," + to_string(s.x) + "," + to_string(e[0]) + to_string(e[2]);
-				}
-				local_case();
-				class M { void put(var& r, var u) { r = 5; } }
-				var m = M();
-				var m1 = new O(); var m2 = new O(); var mh = m1;
-				m.put(mh.x, mh = m2);
-				log = log + "|" + to_string(m1.x) + "," + to_string(m2.x);
-				class Setter { Setter(var& r, var u) { r = 7; } }
-				var k1 = new O(); var k2 = new O(); var kh = k1;
-				Setter(kh.x, kh = k2);
-				var made = new Setter(kh.x, kh = k1);
-				log = log + "|" + to_string(k1.x) + "," + to_string(k2.x);
-				var c1 = new O(); var c2 = new O(); var ch = c1;
-				class Conv { var n = 0; Conv(int v) { n = v; ch = c2; } }
-				void take(Conv c, var& r) { r = 77; }
-				take(5, ch.x);
-				log = log + "|" + to_string(c1.x) + "," + to_string(c2.x);
-				var x1 = new O(); var x2 = new O(); var xh = x1;
-				function set_xh() { xh = x2; return "s"; }
-				class Mixer { void mix(int& r, string n) { log = log + "A"; r = 33; } void mix(int r, int n) { log = log + "B"; [[warn_mode]] r = 44; } }
-				var mx = Mixer();
-				mx.mix(xh.x, set_xh());
-				log = log + "|" + to_string(x1.x) + "," + to_string(x2.x);
-				var y1 = new O(); var yh = y1;
-				put(yh.x, 3);
-				log = log + "|" + to_string(y1.x);
-				log;
-			)");
-			check_eq(std::string("99,2|99,20,1|99,6|99,0|99,0,993|5,0|7,7|77,0A|33,0|99"), i2, "interp: reference arguments bind at evaluation");
-			check_eq(i2, v2, "reference argument evaluation-order parity");
 		});
 
 		test("host_function_direct_entry_parity", [this]() {
@@ -4656,25 +4209,21 @@ public:
 			check_eq(n1, nv1, "null-callee ordering parity");
 		});
 
-		test("callee_first_not_a_function_before_args", [this, run_both_backends]() {
-			// A defined-but-not-callable callee errors BEFORE argument side effects
-			// (the vm's old post-args check was a latent divergence; the probe fixed it)
-			auto [i1, v1] = run_both_backends(R"(
+		test("the_callee_resolves_before_its_arguments", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// A defined-but-not-callable callee errors BEFORE argument side effects
+				// (the vm's old post-args check was a latent divergence; the probe fixed it)
+				{"callee_first_not_a_function_before_args", R"(
 				var notFn = 42;
 				var ran = false;
 				function side() -> auto { ran = true; return 1; }
 				var msg = "";
 				try { notFn(side()); } catch (e) { msg = "caught"; }
 				`${msg}:${ran}`;
-			)");
-			check_eq(std::string("caught:false"), i1, "interp: not-a-function beats arg side effects");
-			check_eq(i1, v1, "not-a-function ordering parity");
-		});
-
-		test("callee_first_rebind_in_args_calls_original", [this, run_both_backends]() {
-			// The callee is RESOLVED before args: an argument that rebinds the name
-			// still invokes the original callable
-			auto [i1, v1] = run_both_backends(R"(
+			)", "caught:false"},
+				// The callee is RESOLVED before args: an argument that rebinds the name
+				// still invokes the original callable
+				{"callee_first_rebind_in_args_calls_original", R"(
 				function orig(auto x) -> auto { return `orig:${x}`; }
 				function repl(auto x) -> auto { return `repl:${x}`; }
 				var h = orig;
@@ -4682,23 +4231,22 @@ public:
 				var first = h(swap_h());
 				var second = h(1);
 				`${first}|${second}`;
-			)");
-			check_eq(std::string("orig:7|repl:1"), i1, "interp: rebind-in-args calls the original");
-			check_eq(i1, v1, "rebind-in-args parity");
-		});
-
-		test("callee_first_pending_survives_throw_in_args", [this, run_both_backends]() {
-			// An argument throw unwinding to a catch must drop the parked callee so
-			// later calls stay aligned (pending-register hygiene)
-			auto [i1, v1] = run_both_backends(R"(
+			)", "orig:7|repl:1"},
+				// An argument throw unwinding to a catch must drop the parked callee so
+				// later calls stay aligned (pending-register hygiene)
+				{"callee_first_pending_survives_throw_in_args", R"(
 				function boom() -> auto { throw "x"; }
 				function ok(auto v) -> auto { return v + 1; }
 				var r = 0;
 				try { ok(boom()); } catch (e) { r = ok(41); }
 				`${r}:${ok(1)}`;
-			)");
-			check_eq(std::string("42:2"), i1, "interp: post-catch calls aligned");
-			check_eq(i1, v1, "throw-in-args pending hygiene parity");
+			)", "42:2"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("callee_first_pending_survives_yield_in_args", [this, run_both_backends]() {
@@ -4724,10 +4272,11 @@ public:
 		// indexes (`a[i + 1]` runs the index through binary_fused_compute in-op). Every
 		// test below runs both backends; the exotic shapes exercise the verbatim replays.
 
-		test("fused_member_index_read_store_hot", [this, run_both_backends]() {
-			// Typed + untyped array fields and a map field, read and stored through hot
-			// loops inside a function frame (the IC-hit shape) and at top level
-			auto [i1, v1] = run_both_backends(R"(
+		test("fused_member_index_reads_and_stores_match_the_interpreter", [this, run_both_backends]() {
+			const std::tuple<const char*, const char*, const char*> cases[] = {
+				// Typed + untyped array fields and a map field, read and stored through hot
+				// loops inside a function frame (the IC-hit shape) and at top level
+				{"fused_member_index_read_store_hot", R"(
 				class C {
 					array<int> buf = [10, 20, 30, 40];
 					var arr = [1.5, 2.5, 3.5];
@@ -4747,15 +4296,10 @@ public:
 				c.lut["a"] = c.lut["a"] + 7;
 				c.lut[key] = c.lut[key] + 1;
 				`${total}:${c.arr[1]}:${c.lut["a"]}:${c.lut["b"]}`;
-			)");
-			check_eq(std::string("204:12.5:107:201"), i1, "interp: member-container reads/stores");
-			check_eq(i1, v1, "member-container fusion parity");
-		});
-
-		test("fused_member_index_getter_and_shadow", [this, run_both_backends]() {
-			// A user getter fires per access whether the name is a NON-field or a DECLARED
-			// field (the fused site stays negative and rides the ladder to the getter)
-			auto [i1, v1] = run_both_backends(R"(
+			)", "204:12.5:107:201"},
+				// A user getter fires per access whether the name is a NON-field or a DECLARED
+				// field (the fused site stays negative and rides the ladder to the getter)
+				{"fused_member_index_getter_and_shadow", R"(
 				class G {
 					var arr = [1, 2, 3];
 					int calls = 0;
@@ -4767,9 +4311,13 @@ public:
 				for (int i = 0; i < 3; ++i) { s += g.virt[i]; }
 				var declared = g.arr[0];
 				`${s}:${g.calls}:${declared}`;
-			)");
-			check_eq(std::string("24:3:666"), i1, "interp: getter fires per access, the declared field's getter owns the fused site");
-			check_eq(i1, v1, "getter/shadow parity at fused member sites");
+			)", "24:3:666"},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto [i, v] = run_both_backends(std::get<1>(c));
+				check_eq(std::string(std::get<2>(c)), i, "interpreter");
+				check_eq(i, v, "vm against the interpreter");
+			});
 		});
 
 		test("fused_member_index_errors_and_unwind", [this, run_both_backends]() {

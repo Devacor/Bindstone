@@ -2918,9 +2918,6 @@ namespace {
 		slot.limits.vm_call_depth_limit = outer.vm_call_depth_limit;
 		slot.limits.vm_depth_gate = 0;
 		slot.limits.terminal_error = false;
-		slot.limits.interrupt_request = outer.interrupt_request;
-		slot.limits.interrupted = outer.interrupted;
-		slot.limits.interrupt_reads_only = true;
 		slot.limits.memory_used = 0;
 		slot.limits.memory_raises = 0;
 		slot.limits.memory_cap = outer.memory_cap;
@@ -6221,7 +6218,6 @@ struct region_run {
 			}
 			if (winner->terminal) {
 				engine_access::execution_limits(eng).terminal_error = true;
-				if (winner->code == make_error_code(runtime_error_code::script_interrupted)) { engine_access::execution_limits(eng).interrupt_withdraw(); }
 			}
 			std::error_code code = winner->code ? winner->code
 				: make_error_code(runtime_error_code::unsupported_operation);

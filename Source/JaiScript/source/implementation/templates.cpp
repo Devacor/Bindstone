@@ -464,7 +464,7 @@ namespace {
 			if (limits_.memory_tripped()) { return raise_memory_cap(limits_); }
 			const auto now = std::chrono::steady_clock::now();
 			limits_.note_clock_sample(now);
-			if (limits_.step_budget_spent() || limits_.interrupt_taken()) { limits_.terminal_error = true; return raise_execution_budget(limits_); }
+			if (limits_.step_budget_spent()) { limits_.terminal_error = true; return raise_execution_budget(limits_); }
 			if (execution_backend* backend = engine_access::get_execution_backend(*eng_)) {
 				const auto deadline = backend->execution_deadline();
 				if (deadline != std::chrono::steady_clock::time_point{} && now >= deadline) {

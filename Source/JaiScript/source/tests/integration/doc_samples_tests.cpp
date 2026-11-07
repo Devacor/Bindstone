@@ -24,7 +24,6 @@
 #include <iostream>
 #include <sstream>
 #include <string>
-#include <thread>
 #include <vector>
 
 // [sample quickstart-run]
@@ -1347,19 +1346,6 @@ public:
 			eng->execution_step_budget(0);       // off
 			// [/sample]
 			steps.finish();
-			eng->execution_budget(0);
-			cpp_sample interrupt(*this, page, "safety-interrupt");
-			// [sample safety-interrupt]
-			std::thread stopper([&] { eng->interrupt(); });   // any thread, or a signal handler
-			try {
-			    eng->execute("class D { ~D() { print(\"cleaned up\"); } } { D d; try { while (true) { } } catch (e) { print(\"caught\"); } }");
-			} catch (const std::exception& e) {
-			    std::cout << e.what() << "\n";
-			}
-			stopper.join();
-			std::cout << eng->execute("2 + 2").as_int() << "\n";   // the request stopped one entry
-			// [/sample]
-			interrupt.finish();
 		});
 
 		test("hot_reload_fields", [this]() {

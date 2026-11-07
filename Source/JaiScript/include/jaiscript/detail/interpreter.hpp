@@ -992,7 +992,6 @@ namespace jai {
             const auto now = std::chrono::steady_clock::now();
             limits_->note_clock_sample(now);
             if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; return true; }   // the clock-free bound (vm twin)
-            if (limits_->interrupt_taken()) [[unlikely]] { limits_->terminal_error = true; return true; }   // engine::interrupt (vm twin)
             if (!budget_active_ || debug_hook_) { return false; }
             if (now < execution_deadline_) { return false; }
             // Budget overruns are TERMINAL: no script catch may swallow a timeout

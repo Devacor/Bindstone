@@ -282,15 +282,6 @@ void detail::destroy_run_fiber(run_fiber* fiber) noexcept {
 
 // ---- engine side ----
 
-namespace {
-    // engine::interrupt reaching a sleep, before its wait and after it
-    bool sleep_interrupted(detail::execution_limits& a_limits) noexcept {
-        if (!a_limits.interrupt_taken()) { return false; }
-        a_limits.terminal_error = true;
-        return true;
-    }
-}
-
 checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds) {
     const script_value& v = a_seconds.deref();
     double seconds = 0.0;
@@ -298,7 +289,6 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
     else if (v.is_float()) { seconds = v.unchecked_as_float(); }
     else { return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), detail::k_sleep_expects_number); }
     detail::run_record* run = run_registry().active;
-    if (sleep_interrupted(execution_limits())) { return detail::raise_execution_budget(execution_limits()); }
     if (!(seconds > 0.0)) {   // no wait: the debugger's sync point, never a suspension
         debug_sync_point();
         return script_value(std::monostate{}, this);
@@ -306,7 +296,6 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
     const auto duration = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::duration<double>(std::min(seconds, 1e9)));
     if (!run || parallel_region_active()) {
         time().sleep_for(duration);
-        if (sleep_interrupted(execution_limits())) { return detail::raise_execution_budget(execution_limits()); }
         return script_value(std::monostate{}, this);
     }
     if (run->pins > 0) {
@@ -315,7 +304,6 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
             report_script_warning(std::string(detail::k_sleep_pinned_warning));
         }
         time().sleep_for(duration);
-        if (sleep_interrupted(execution_limits())) { return detail::raise_execution_budget(execution_limits()); }
         return script_value(std::monostate{}, this);
     }
     if (run->cancel) {   // a cancelled run that reaches another sleep ends there too
@@ -332,7 +320,6 @@ checked_result<script_value> engine::sleep_builtin(const script_value& a_seconds
         execution_limits().terminal_error = true;
         return checked_result<script_value>(make_error_code(runtime_error_code::run_cancelled), detail::k_run_cancelled);
     }
-    if (sleep_interrupted(execution_limits())) { return detail::raise_execution_budget(execution_limits()); }
     return script_value(std::monostate{}, this);
 }
 
@@ -490,7 +477,7 @@ script_run::status script_run::resume() {
     if (done()) { return state(); }
     if (run.state == detail::run_record::phase::running) { throw runtime_error(std::string(detail::k_run_running)); }
     if (std::this_thread::get_id() != run.thread) { throw runtime_error(std::string(detail::k_run_wrong_thread)); }
-    if (!detail::engine_access::execution_limits(*run.eng).interrupt_pending() && run.eng->time().monotonic_now() < run.wake) { return status::suspended; }
+    if (run.eng->time().monotonic_now() < run.wake) { return status::suspended; }
     switch_into(run, true);
     settle(run, true);
     return state();

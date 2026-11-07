@@ -415,11 +415,6 @@ namespace jai {
         // backend and program; zero (the default) disables it.
         void execution_step_budget(uint64_t checks);
         uint64_t execution_step_budget() const;
-        // Stops the running script: safe from any thread and from a signal handler while the engine lives. The next budget
-        // check or sleep raises the terminal error `Script interrupted` (catches are skipped, destructors run), and a
-        // suspended run's resume() continues into it at once. A request made while no script runs stays pending until a
-        // check takes it; each request stops one host entry.
-        void interrupt() noexcept;
 
         // Maximum active call depth for each built-in backend: interpreter 256,
         // VM 250000 by default. Configure between executions; depth must be in

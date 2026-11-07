@@ -37,7 +37,6 @@
 #include <fstream>
 #include <iostream>
 #include <map>
-#include <mutex>
 #include <optional>
 #include <sstream>
 #include <string>
@@ -67,8 +66,6 @@ namespace fs = std::filesystem;
 using namespace jai_runner;
 
 // ---------------------------------------------------------------- console ---
-
-std::atomic<bool> g_interrupted{false};  // Ctrl+C / Ctrl+Break (host-exe state, not engine state)
 
 // The console as the runner found it, put back at exit
 struct console_found_state {
@@ -522,7 +519,7 @@ void win_pump_input() {
 // Linux and macOS share this branch (identical termios/ioctl); macOS
 // Terminal.app may send SS3 arrows (ESC O A) — both prefixes are parsed.
 struct posix_input_state {
-	std::atomic<bool> raw{false};   // read by the interrupt handler
+	std::atomic<bool> raw{false};   // read by the Ctrl+C exit
 	termios saved{};
 	std::vector<std::string> edges;
 	std::map<std::string, int64_t> last_press;
@@ -679,10 +676,9 @@ void register_console_game_io(jai::engine& eng) {
 	});
 }
 
-// --------------------------------------------------------------- interrupt ---
-// Ctrl+C and Ctrl+Break (Windows), SIGINT, SIGTERM and SIGHUP (POSIX): the first stops the running script through
-// engine::interrupt, so its destructors run, and the runner then restores the terminal and exits as the signal would; a
-// second one while that runs restores the terminal at once and exits.
+// ------------------------------------------------------------- exit and ^C ---
+// Ctrl+C and Ctrl+Break (Windows), SIGINT, SIGTERM and SIGHUP (POSIX) end the runner at once: the terminal goes back to
+// how the runner found it, then the process exits as the signal would. A runaway script is the execution budget's job.
 
 // What the script's output changed in the terminal, read from the escape sequences it writes: a runner API would reach only
 // the scripts written for it, while every terminal program already writes these.
@@ -755,32 +751,7 @@ private:
 terminal_watch g_terminal_watch;
 std::ostream g_watched_out(&g_terminal_watch);
 
-std::atomic<jai::engine*> g_interrupt_target{nullptr};
-std::atomic<int> g_interrupt_signal{0};   // the first one's signal number (SIGINT for Ctrl+C and Ctrl+Break); 0 = none
-std::atomic<int> g_interrupt_count{0};
-#ifdef _WIN32
-std::mutex g_interrupt_target_lock;   // the console runs the handler on a thread of its own: no engine dies under it
-#else
-pthread_t g_main_thread;
-#endif
-
-bool interrupted() { return g_interrupt_signal.load() != 0; }
-
-// The engine whose script an interrupt stops, published for the scope's lifetime (declared after the engine, so it ends first)
-struct interrupt_target {
-	explicit interrupt_target(jai::engine& eng) { publish(&eng); }
-	~interrupt_target() { publish(nullptr); }
-	interrupt_target(const interrupt_target&) = delete;
-	interrupt_target& operator=(const interrupt_target&) = delete;
-	static void publish(jai::engine* eng) {
-#ifdef _WIN32
-		std::lock_guard<std::mutex> lock(g_interrupt_target_lock);
-#endif
-		g_interrupt_target.store(eng);
-	}
-};
-
-// Raw writes only: the force-exit path runs in a signal handler, or beside a main thread that may hold stdio's lock
+// Raw writes only: the Ctrl+C exit runs in a signal handler, or beside a main thread that may hold stdio's lock
 void write_raw(const char* text, size_t size) {
 #ifdef _WIN32
 	DWORD written = 0;
@@ -823,14 +794,21 @@ void restore_console() {
 #endif
 }
 
-[[noreturn]] void force_exit(int sig) {
+#ifdef _WIN32
+// The console runs this on a thread of its own while the script's thread runs on: TerminateProcess, because ExitProcess's
+// teardown can wait on a CRT lock that terminated thread held
+BOOL WINAPI ctrl_handler(DWORD type) {
+	if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT) { return FALSE; }
 	restore_terminal_output();
 	restore_console();
-#ifdef _WIN32
-	(void)sig;
 	TerminateProcess(GetCurrentProcess(), 130);
-	_exit(130);
+	return TRUE;
+}
 #else
+// Async-signal-safe throughout: write(2), tcsetattr and the default disposition re-raised, so the shell sees the signal
+void posix_exit_on_signal(int sig) {
+	restore_terminal_output();
+	restore_console();
 	signal(sig, SIG_DFL);
 	sigset_t unblock;
 	sigemptyset(&unblock);
@@ -838,47 +816,10 @@ void restore_console() {
 	pthread_sigmask(SIG_UNBLOCK, &unblock, nullptr);
 	raise(sig);
 	_exit(128 + sig);
-#endif
-}
-
-void interrupt_requested(int sig) {
-	if (g_interrupt_count.fetch_add(1) > 0) { force_exit(g_interrupt_signal.load() ? g_interrupt_signal.load() : sig); }
-	int none = 0;
-	g_interrupt_signal.compare_exchange_strong(none, sig);
-	g_interrupted.store(true);
-#ifdef _WIN32
-	std::lock_guard<std::mutex> lock(g_interrupt_target_lock);
-#endif
-	if (jai::engine* eng = g_interrupt_target.load()) { eng->interrupt(); }
-}
-
-// The REPL takes an interrupt that stopped a chunk and goes on reading
-void forget_interrupt() {
-	g_interrupt_signal.store(0);
-	g_interrupt_count.store(0);
-	g_interrupted.store(false);
-}
-
-#ifdef _WIN32
-BOOL WINAPI ctrl_handler(DWORD type) {
-	if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT) { return FALSE; }
-	interrupt_requested(SIGINT);
-	return TRUE;   // the runner exits itself; a blocked console read fails meanwhile
-}
-#else
-// Taken on the main thread (another thread forwards it), so the engine it interrupts is the one main still holds
-void posix_interrupt_handler(int sig) {
-	if (!pthread_equal(pthread_self(), g_main_thread)) {
-		pthread_kill(g_main_thread, sig);
-		return;
-	}
-	const int saved_errno = errno;
-	interrupt_requested(sig);
-	errno = saved_errno;
 }
 #endif
 
-void install_interrupt_handlers() {
+void install_exit_handlers() {
 	std::atexit([] {
 		restore_terminal_output();
 		restore_console();
@@ -886,35 +827,23 @@ void install_interrupt_handlers() {
 #ifdef _WIN32
 	SetConsoleCtrlHandler(ctrl_handler, TRUE);
 #else
-	g_main_thread = pthread_self();
 	for (int sig : {SIGINT, SIGTERM, SIGHUP}) {
 		struct sigaction current {};
 		if (sigaction(sig, nullptr, &current) == 0 && current.sa_handler == SIG_IGN) { continue; }   // nohup, a background job
 		struct sigaction action {};
-		action.sa_handler = posix_interrupt_handler;
+		action.sa_handler = posix_exit_on_signal;
 		sigemptyset(&action.sa_mask);
-		action.sa_flags = 0;   // no SA_RESTART: a blocked read returns, so the script reaches its next check
 		sigaction(sig, &action, nullptr);
 	}
 #endif
 }
 
-// The exit after the mode returns: the terminal restored first, then the code an interrupt gives (on POSIX the signal itself,
-// so a calling shell sees the process end by it)
+// A mode's end: what the script left changed goes back before the exit code does
 int runner_exit(int code) {
 	std::fflush(stdout);
 	std::fflush(stderr);
 	restore_terminal_output();
-	const int sig = g_interrupt_signal.load();
-	if (sig == 0) { return code; }
-	restore_console();
-#ifdef _WIN32
-	return 130;
-#else
-	signal(sig, SIG_DFL);
-	raise(sig);
-	return 128 + sig;
-#endif
+	return code;
 }
 
 // -------------------------------------------------------------- networking ---
@@ -1524,7 +1453,6 @@ int run_file_mode(const options& opt, const console_state& con) {
 		return 2;
 	}
 	auto eng = make_runner_engine(opt, nullptr);
-	interrupt_target target(*eng);
 	std::ostringstream debug_note;
 	wire_debugger(opt, *eng, con, debug_note);
 	if (!debug_note.str().empty()) { std::fputs(debug_note.str().c_str(), stderr); }
@@ -1560,7 +1488,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 	}
 	std::fflush(stdout);
 	restore_terminal_output();   // an error lands on the normal screen
-	if (!r.ok && !interrupted()) {
+	if (!r.ok) {
 		std::fprintf(stderr, "%s\n", con.red("jaiscript: " + r.error).c_str());
 		if (!r.stack_trace.empty()) { std::fprintf(stderr, "%s\n", r.stack_trace.c_str()); }
 	}
@@ -1574,7 +1502,7 @@ int run_file_mode(const options& opt, const console_state& con) {
 		std::snprintf(text, sizeof(text), "[%.3f ms]", r.ms);
 		std::fprintf(stderr, "%s\n", con.dim(text).c_str());
 	}
-	bool pause = !interrupted() && (opt.pause_mode == 1 || (opt.pause_mode == -1 && con.solo_console));
+	bool pause = opt.pause_mode == 1 || (opt.pause_mode == -1 && con.solo_console);
 	if (pause) {
 		std::fputs(con.dim("[press Enter to close]").c_str(), stderr);
 		std::fputc('\n', stderr);
@@ -1597,7 +1525,7 @@ int run_watch_mode(const options& opt, const console_state& con) {
 	std::error_code ec;
 	fs::file_time_type last_mtime = fs::last_write_time(opt.script, ec);
 	bool first = true;
-	while (!g_interrupted.load()) {
+	while (true) {   // Ctrl+C ends the runner
 		if (!first) {
 			fs::file_time_type now_mtime = fs::last_write_time(opt.script, ec);
 			if (ec || now_mtime == last_mtime) {
@@ -1612,12 +1540,10 @@ int run_watch_mode(const options& opt, const console_state& con) {
 		run_result r;
 		{
 			auto eng = make_runner_engine(run_opt, nullptr);   // fresh world every save
-			interrupt_target target(*eng);
 			r = run_file_in_engine(*eng, opt.script);
 		}
 		std::fflush(stdout);
 		restore_terminal_output();
-		if (interrupted()) { break; }
 		if (!r.ok) {
 			std::fprintf(stderr, "%s\n", con.red("jaiscript: " + r.error).c_str());
 			if (!r.stack_trace.empty()) { std::fprintf(stderr, "%s\n", r.stack_trace.c_str()); }
@@ -1638,8 +1564,6 @@ int run_watch_mode(const options& opt, const console_state& con) {
 		std::fprintf(stdout, "%s\n", line.c_str());
 		std::fflush(stdout);
 	}
-	std::fprintf(stdout, "\n%s\n", con.dim("[watch] stopped").c_str());
-	return 0;
 }
 
 // ---------------------------------------------------------------- balancer ---
@@ -1725,21 +1649,14 @@ struct repl_session {
 	bool debugger_wired = false;
 	bool had_error = false;   // a piped session exits 1 once any input failed
 
-	repl_session() = default;
-	repl_session(const repl_session&) = delete;
-	repl_session& operator=(const repl_session&) = delete;
-	~repl_session() { interrupt_target::publish(nullptr); }
-
 	// The engine holds the connector (jai::debug::listen attaches it), so releasing the old
 	// engine frees the port before the new listener binds.
 	void build(std::ostream& out, bool announce) {
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		if (eng) { eng->set_debug_connector(nullptr); }
 #endif
-		interrupt_target::publish(nullptr);
 		eng.reset();
 		eng = make_runner_engine(opt, engine_out);
-		interrupt_target::publish(eng.get());
 		eng->add_include_path(fs::current_path().string());
 		if (opt.debug) {
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
@@ -1795,7 +1712,6 @@ struct repl_session {
 			std::string trace = trim(eng->format_stack_trace());
 			if (!trace.empty()) { out << con->dim(trace) << "\n"; }
 		}
-		if (interrupted()) { forget_interrupt(); }   // Ctrl+C stopped the chunk, not the session
 		if (show_time) {
 			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 			char text[64];
@@ -1826,7 +1742,6 @@ struct repl_session {
 			std::string trace = trim(eng->format_stack_trace());
 			if (!trace.empty()) { out << con->dim(trace) << "\n"; }
 		}
-		if (interrupted()) { forget_interrupt(); }   // Ctrl+C stopped the chunk, not the session
 		if (show_time) {
 			double ms = std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count();
 			char text[64];
@@ -1896,9 +1811,8 @@ struct repl_session {
 			std::string line;
 			if (!std::getline(in, line)) {
 				if (interactive) { out << "\n"; }
-				break;   // EOF (Ctrl+Z+Enter) or Ctrl+C aborting the read
+				break;   // EOF (Ctrl+Z+Enter, Ctrl+D)
 			}
-			if (g_interrupted.load()) { break; }
 			// piped input arrives with CRLF endings and sometimes a UTF-8 BOM up front
 			if (!line.empty() && line.back() == '\r') { line.pop_back(); }
 			if (line.rfind("\xEF\xBB\xBF", 0) == 0) { line.erase(0, 3); }
@@ -1950,7 +1864,7 @@ int run_selftest(const console_state& con) {
 		else { ++failed; std::printf("  %s  %s\n", con.red("FAIL").c_str(), name); }
 	};
 
-	{ // the terminal an interrupt or an exit restores, read from the script's escape sequences
+	{ // the terminal Ctrl+C or an exit restores, read from the script's escape sequences
 		terminal_watch watch;
 		watch.read_output("plain [?1049h text", 18);
 		expect(!watch.changed(), "terminal watch: text without an escape changes nothing");
@@ -1959,21 +1873,6 @@ int run_selftest(const console_state& con) {
 		expect(watch.alternate_screen && watch.cursor_hidden && watch.styled, "terminal watch: alternate screen, hidden cursor, colour");
 		watch.read_output("\x1b[0m\x1b[?1049;47l\x1b[?25h", 21);
 		expect(!watch.changed(), "terminal watch: the reset, a combined leave and the shown cursor restore all three");
-	}
-
-	{ // an interrupt from another thread wakes the run's wait, and its destructors run
-		std::ostringstream captured_out;
-		auto eng = make_runner_engine(options{}, &captured_out);
-		std::thread stopper([&eng] { eng->interrupt(); });
-		std::string error;
-		try {
-			finish_run(*eng, eng->start("class D { ~D() { print(\"dtor\"); } } { D d; while (true) { sleep(1000.0); } }"));
-		} catch (const std::exception& ex) {
-			error = ex.what();
-		}
-		stopper.join();
-		expect(error.find("Script interrupted") != std::string::npos && captured_out.str() == "dtor\n",
-			"interrupt: a sleeping run stops with its destructors run");
 	}
 
 	{ // balancer
@@ -2378,7 +2277,7 @@ int main(int argc, char** argv) {
 	if (parse_exit >= 0) { return parse_exit; }
 
 	if (opt.selftest) { return run_selftest(con); }
-	install_interrupt_handlers();
+	install_exit_handlers();
 	if (opt.watch) { return runner_exit(run_watch_mode(opt, con)); }
 	if (!opt.script.empty() || !opt.sources.empty()) { return runner_exit(run_file_mode(opt, con)); }
 	return runner_exit(run_repl_mode(opt, con));

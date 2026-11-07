@@ -6,7 +6,6 @@
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/checked_result.hpp>
 #include <jaiscript/core/runtime_errors.hpp>
-#include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -91,24 +90,8 @@ namespace jai::detail {
 		uint64_t steps_taken = 0;
 		bool step_budget_spent() noexcept { return step_budget != 0 && ++steps_taken > step_budget; }
 
-		// engine::interrupt: the engine's request, set from any thread or a signal handler (null on a backend no engine owns).
-		// The check that takes it latches interrupted until the raise, so a typed block's check and the general form's after
-		// it both see it. A parallel worker only reads it, so every worker stops, and the region's join takes it.
-		std::atomic<bool>* interrupt_request = nullptr;
-		bool interrupted = false;
-		bool interrupt_reads_only = false;
-		bool interrupt_pending() const noexcept { return interrupt_request && interrupt_request->load(std::memory_order_relaxed); }
-		bool interrupt_taken() noexcept {
-			if (!interrupted && interrupt_pending()) [[unlikely]] {
-				interrupted = interrupt_reads_only || interrupt_request->exchange(false, std::memory_order_relaxed);
-			}
-			return interrupted;
-		}
-		void interrupt_withdraw() noexcept { if (interrupt_request) { interrupt_request->store(false, std::memory_order_relaxed); } }
-
 		void reset_for_execute() noexcept {
 			terminal_error = false;
-			interrupted = false;
 			steps_taken = 0;
 			vm_depth_gate = 0;
 			vm_frame_bytes = 0;
@@ -155,16 +138,9 @@ namespace jai::detail {
 		call_depth_guard& operator=(const call_depth_guard&) = delete;
 	};
 
-	inline constexpr std::string_view k_script_interrupted = "Script interrupted";
-
-	// An interrupt a check took (engine::interrupt), its raise ending the latch so the destructors the unwind runs take no second
-	// one; else the budget that ran out names the knob that raises it: the step budget (engine::execution_step_budget) once its
-	// count is spent, else the wall-clock one (engine::execution_budget). Both backends raise through this.
-	inline error_propagator raise_execution_budget(execution_limits& limits) noexcept {
-		if (limits.interrupted) {
-			limits.interrupted = false;
-			return error_propagator{ make_error_code(runtime_error_code::script_interrupted), k_script_interrupted };
-		}
+	// The budget that ran out names the knob that raises it: the step budget (engine::execution_step_budget) once its count is
+	// spent, else the wall-clock one (engine::execution_budget). Both backends raise through this.
+	inline error_propagator raise_execution_budget(const execution_limits& limits) noexcept {
 		const bool steps = limits.step_budget != 0 && limits.steps_taken > limits.step_budget;
 		return error_propagator{ make_error_code(runtime_error_code::execution_budget_exceeded),
 			steps ? std::string_view("Script execution budget exceeded - raise engine::execution_step_budget or break up the work")

@@ -94,7 +94,7 @@ script_exception without_category_suffix(const script_exception& e) {
     const std::string_view text = e.what();
     const auto& errors = runtime_error_category();
     // matched as a whole suffix: a category text may itself hold ": "
-    for (int ev = 1; ev <= static_cast<int>(runtime_error_code::script_interrupted); ++ev) {
+    for (int ev = 1; ev <= static_cast<int>(runtime_error_code::run_cancelled); ++ev) {
         const std::string category = errors.message(ev);
         if (text.size() > category.size() + 2 && text.ends_with(category) &&
             text.substr(text.size() - category.size() - 2, 2) == ": ") {
@@ -498,7 +498,6 @@ struct engine::implementation {
     // Per-engine execution-limit state (terminal latch, memory accounting): the active
     // backend caches a pointer, so reentrant executes share one instance
     detail::execution_limits limits_;
-    std::atomic<bool> interrupt_request_{false};   // engine::interrupt; limits_ points at it
 
     // Parallel machinery (parallel_transform v0): null until first touched, so an engine
     // that never runs a region carries only this pointer
@@ -2752,7 +2751,6 @@ checked_result<void> host_reference_store(engine* eng, const host_slot& slot, sc
 engine::engine() : impl(std::make_unique<implementation>()) {
     assert(detail::object_ref::layout_holds() && "object_ref reads a shared_ptr as (stored pointer, control block)");
     impl->global_environment_->bind_engine(this);
-    impl->limits_.interrupt_request = &impl->interrupt_request_;
 }
 
 bool engine_loading(const engine* a_engine) {
@@ -5203,10 +5201,6 @@ void engine_time::extend_execution_deadline(std::chrono::nanoseconds by) {
     if (owner_->impl->backend) { owner_->impl->backend->extend_execution_deadline(by); }
 }
 
-void engine::interrupt() noexcept {
-    impl->interrupt_request_.store(true, std::memory_order_relaxed);
-}
-
 void engine::execution_step_budget(uint64_t checks) {
     execution_limits().step_budget = checks;
 }
@@ -5846,13 +5840,7 @@ void engine_time::sleep_for(std::chrono::nanoseconds duration) {
     if (impl->sleep_clock) { impl->sleep_clock(duration); }
     // with a debugger, the sleep is a debug sync point: a frame loop paced by sleeps takes an attach, breakpoints and a pause at once
     else if (impl->debugger_ && !owner_->parallel_region_active()) { impl->debugger_->sleep_for(duration); }
-    else if (duration.count() > 0) {
-        // in slices, so an engine::interrupt ends the wait
-        const auto until = std::chrono::steady_clock::now() + duration;
-        for (auto now = std::chrono::steady_clock::now(); now < until && !impl->interrupt_request_.load(std::memory_order_relaxed); now = std::chrono::steady_clock::now()) {
-            std::this_thread::sleep_for(std::min<std::chrono::steady_clock::duration>(until - now, std::chrono::milliseconds(50)));
-        }
-    }
+    else if (duration.count() > 0) { std::this_thread::sleep_for(duration); }
     if (!impl->monotonic_clock && !owner_->parallel_region_active()) { impl->limits_.note_clock_sample(std::chrono::steady_clock::now()); }
 }
 

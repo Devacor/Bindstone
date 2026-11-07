@@ -2,10 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include "../case_table.hpp"
-#include <atomic>
 #include <chrono>
-#include <memory>
-#include <sstream>
 #include <thread>
 
 using namespace jai;
@@ -135,71 +132,6 @@ public:
 		});
 
 		// ===== engine::memory_cap (approximate high-water accounting) =====
-
-		test("interrupt_is_terminal_runs_destructors_and_stops_one_entry", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0);
-			stdlib::register_all(*e);
-			auto out = std::make_shared<std::ostringstream>();
-			e->set_output_stream(out);
-			engine* raw = e.get();
-			e->add_function("request_stop", [raw]() { raw->interrupt(); });
-			std::string msg;
-			try {
-				e->execute(R"(
-					class D { string name; D(string n) { name = n; } ~D() { print("dtor {}", name); } }
-					int caught = 0;
-					void spin() { D b = D("b"); try { request_stop(); while (true) { } } catch (e) { caught = 1; } }
-					{ D a = D("a"); spin(); })");
-			} catch (const std::exception& ex) {
-				msg = ex.what();
-			}
-			check_true(msg.find("Script interrupted") != std::string::npos, "the interrupt's text: " + msg);
-			check_eq(std::string("dtor b\ndtor a\n"), out->str(), "the frames unwound through their destructors");
-			check_eq((int64_t)0, e->execute("caught").as_int(), "no catch ran");
-			check_eq((int64_t)100000, e->execute("int n = 0; while (n < 100000) { n++; } n").as_int(), "the request stopped one entry");
-		});
-
-		test("an_interrupt_made_while_idle_waits_for_a_check", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0);
-			e->interrupt();
-			check_eq((int64_t)4, e->execute("2 + 2").as_int(), "an entry that ends before its first check runs");
-			check_throws([&]() { e->execute("int n = 0; while (n < 100000) { n++; } n"); });
-			check_eq((int64_t)100000, e->execute("int n = 0; while (n < 100000) { n++; } n").as_int());
-		});
-
-		test("interrupt_from_another_thread_ends_a_loop_and_a_sleep", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0);
-			std::atomic<bool> started{false};
-			e->add_function("started", [&started]() { started.store(true); });
-			for (const char* body : {"started(); while (true) { }", "started(); sleep(1000.0);"}) {
-				started.store(false);
-				std::thread stopper([&] {
-					while (!started.load()) { std::this_thread::yield(); }
-					e->interrupt();
-				});
-				std::string msg;
-				try { e->execute(body); } catch (const std::exception& ex) { msg = ex.what(); }
-				stopper.join();
-				check_true(msg.find("Script interrupted") != std::string::npos, std::string(body) + ": " + msg);
-			}
-		});
-
-		test("interrupt_stops_every_parallel_worker", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0);
-			e->interrupt();
-			std::string msg;
-			try {
-				e->execute("array<int> xs = [1, 2, 3, 4, 5, 6, 7, 8];\nparallel_for (auto& x : xs) { while (true) { x = x + 1; } }");
-			} catch (const std::exception& ex) {
-				msg = ex.what();
-			}
-			check_true(msg.find("Script interrupted") != std::string::npos, "the region's text: " + msg);
-			check_eq((int64_t)100000, e->execute("int n = 0; while (n < 100000) { n++; } n").as_int(), "the join took the request");
-		});
 
 		test("memory_cap_defaults_to_zero_and_zero_is_unlimited", [this]() {
 			auto e = make_engine();

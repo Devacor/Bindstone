@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <array>
 #include <cmath>
 
@@ -41,80 +42,24 @@ public:
             check_eq((int64_t)2, v[4].as_int());
         });
 
-        test("basic_class_with_fields", [this]() {
-            auto js_engine = make_engine();
-            
-            const char* script = R"(
-                class Point {
-                    int x = 0;
-                    int y = 0;
-                }
-                
-                auto p = Point();
-                p.x = 10;
-                p.y = 20;
-                p.x + p.y
-            )";
-            
-            auto result = js_engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as_int(), 30);
+        test("classes_hold_fields_construct_and_call_methods", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"class Point { int x = 0; int y = 0; } auto p = Point(); p.x = 10; p.y = 20; p.x + p.y", 30},
+                {"class Point { int x = 0; int y = 0; Point(int x, int y) { this.x = x; this.y = y; } } auto p = Point(5, 7); p.x * p.y", 35},
+                {"class Rectangle { int width = 0; int height = 0; Rectangle(int w, int h) { this.width = w; this.height = h; } int area() { return this.width * this.height; } int perimeter() { return 2 * (this.width + this.height); } } auto rect = Rectangle(4, 3); rect.area() + rect.perimeter()", 12 + 14},
+                // a constructor assigns a field by its bare name; a field initializer holds without one
+                {"class Cat { int a = 0; Cat(int val) { a = val; } } auto cat = Cat(42); cat.a", 42},
+                {"class Cat { int a = 42; } auto cat = Cat(); cat.a", 42},
+                {"class Cat { int a = 0; Cat(int val) { a = val; } } auto cat = Cat(99); cat.a", 99},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto js_engine = make_engine();
+                auto result = js_engine->execute(c.first);
+                check(result.is_int());
+                check_eq(result.as_int(), c.second);
+            });
         });
-        
-        test("class_with_constructor", [this]() {
-            auto js_engine = make_engine();
-            
-            const char* script = R"(
-                class Point {
-                    int x = 0;
-                    int y = 0;
-                    
-                    Point(int x, int y) {
-                        this.x = x;
-                        this.y = y;
-                    }
-                }
-                
-                auto p = Point(5, 7);
-                p.x * p.y
-            )";
-            
-            auto result = js_engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as_int(), 35);
-        });
-        
-        test("class_with_methods", [this]() {
-            auto js_engine = make_engine();
-            
-            const char* script = R"(
-                class Rectangle {
-                    int width = 0;
-                    int height = 0;
-                    
-                    Rectangle(int w, int h) {
-                        this.width = w;
-                        this.height = h;
-                    }
-                    
-                    int area() {
-                        return this.width * this.height;
-                    }
-                    
-                    int perimeter() {
-                        return 2 * (this.width + this.height);
-                    }
-                }
-                
-                auto rect = Rectangle(4, 3);
-                rect.area() + rect.perimeter()
-            )";
-            
-            auto result = js_engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as_int(), 12 + 14); // area=12, perimeter=14
-        });
-        
+
         test("script_cpp_interop", [this]() {
             auto js_engine = make_engine();
             
@@ -924,33 +869,25 @@ public:
             check_eq(arr[4].as_int(), 0); // All destroyed after scope
         });
 
-        test("multiple_inheritance_basic_fields", [this]() {
-            auto js_engine = make_engine();
-
-            const char* script = R"(
-                class A {
-                    int x = 1;
+        // C++ semantics: every base contributes its fields and constructor; static members stay with the class that declares them
+        test("multiple_inheritance_builds_every_base", [this]() {
+            const std::pair<const char*, std::vector<int64_t>> cases[] = {
+                {"class A { int x = 1; } class B { int y = 2; } class C : A, B { int z = 3; } auto c = C(); [c.x, c.y, c.z]", {1, 2, 3}},
+                {"class A { int x = 0; A(int val) { this.x = val; } } class B { int y = 0; B(int val) { this.y = val; } } class C : A, B { int z = 0; C(int a, int b, int c) : super(a), B(b) { this.z = c; } } auto c = C(1, 2, 3); [c.x, c.y, c.z]", {1, 2, 3}},
+                {"class A { int a = 1; } class B : A { int b = 2; } class C { int c = 3; } class D : B, C { int d = 4; } auto obj = D(); [obj.a, obj.b, obj.c, obj.d]", {1, 2, 3, 4}},
+                {"class A { int a = 100; } class B { int b = 200; } class C : A, B { int c = 300; } auto obj = C(); [obj.a, obj.b, obj.c]", {100, 200, 300}},
+                {"class A { static int static_a = 100; } class B { static int static_b = 200; } class C : A, B { static int static_c = 300; } [A::static_a, B::static_b, C::static_c]", {100, 200, 300}},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto js_engine = make_engine();
+                auto result = js_engine->execute(c.first);
+                check(result.is_array());
+                auto arr = result.as_array();
+                check_eq(arr.size(), c.second.size());
+                for (size_t i = 0; i < c.second.size(); ++i) {
+                    check_eq(arr[i].as_int(), c.second[i]);
                 }
-
-                class B {
-                    int y = 2;
-                }
-
-                class C : A, B {
-                    int z = 3;
-                }
-
-                auto c = C();
-                [c.x, c.y, c.z]
-            )";
-
-            auto result = js_engine->execute(script);
-            check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 3);
-            check_eq(arr[0].as_int(), 1);
-            check_eq(arr[1].as_int(), 2);
-            check_eq(arr[2].as_int(), 3);
+            });
         });
 
         test("multiple_inheritance_method_lookup", [this]() {
@@ -1038,40 +975,6 @@ public:
             check_eq(result.as_int(), 30);  // Derived class wins
         });
 
-        test("multiple_inheritance_constructors", [this]() {
-            auto js_engine = make_engine();
-
-            const char* script = R"(
-                class A {
-                    int x = 0;
-                    A(int val) { this.x = val; }
-                }
-
-                class B {
-                    int y = 0;
-                    B(int val) { this.y = val; }
-                }
-
-                class C : A, B {
-                    int z = 0;
-                    C(int a, int b, int c) : super(a), B(b) {
-                        this.z = c;
-                    }
-                }
-
-                auto c = C(1, 2, 3);
-                [c.x, c.y, c.z]
-            )";
-
-            auto result = js_engine->execute(script);
-            check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 3);
-            check_eq(arr[0].as_int(), 1);
-            check_eq(arr[1].as_int(), 2);
-            check_eq(arr[2].as_int(), 3);
-        });
-
         test("multiple_inheritance_destructors", [this]() {
             auto js_engine = make_engine();
 
@@ -1101,99 +1004,6 @@ public:
             check(result.is_string());
             // C++: the derived destructor, then the bases in reverse declaration order
             check_eq(std::string("CBA"), result.as_string());
-        });
-
-        test("multiple_inheritance_three_levels", [this]() {
-            auto js_engine = make_engine();
-
-            const char* script = R"(
-                class A {
-                    int a = 1;
-                }
-
-                class B : A {
-                    int b = 2;
-                }
-
-                class C {
-                    int c = 3;
-                }
-
-                class D : B, C {
-                    int d = 4;
-                }
-
-                auto obj = D();
-                [obj.a, obj.b, obj.c, obj.d]
-            )";
-
-            auto result = js_engine->execute(script);
-            check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 4);
-            check_eq(arr[0].as_int(), 1);  // From A (via B)
-            check_eq(arr[1].as_int(), 2);  // From B
-            check_eq(arr[2].as_int(), 3);  // From C
-            check_eq(arr[3].as_int(), 4);  // From D
-        });
-
-        test("multiple_inheritance_mixed_fields", [this]() {
-            auto js_engine = make_engine();
-
-            const char* script = R"(
-                class A {
-                    int a = 100;
-                }
-
-                class B {
-                    int b = 200;
-                }
-
-                class C : A, B {
-                    int c = 300;
-                }
-
-                auto obj = C();
-                [obj.a, obj.b, obj.c]
-            )";
-
-            auto result = js_engine->execute(script);
-            check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 3);
-            check_eq(arr[0].as_int(), 100);
-            check_eq(arr[1].as_int(), 200);
-            check_eq(arr[2].as_int(), 300);
-        });
-
-        test("static_members_not_inherited", [this]() {
-            auto js_engine = make_engine();
-
-            const char* script = R"(
-                class A {
-                    static int static_a = 100;
-                }
-
-                class B {
-                    static int static_b = 200;
-                }
-
-                class C : A, B {
-                    static int static_c = 300;
-                }
-
-                // Static members are NOT inherited (C++ semantics)
-                // Must access via the class that owns them using :: operator
-                [A::static_a, B::static_b, C::static_c]
-            )";
-
-            auto result = js_engine->execute(script);
-            check(result.is_array());
-            auto arr = result.as_array();
-            check_eq(arr.size(), 3);
-            check_eq(arr[0].as_int(), 100);  // A's static
-            check_eq(arr[1].as_int(), 200);  // B's static
-            check_eq(arr[2].as_int(), 300);  // C's static
         });
 
         test("diamond_inheritance_should_fail", [this]() {

@@ -2,6 +2,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/coroutine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <chrono>
 
 using namespace jai;
@@ -15,24 +16,24 @@ public:
 
     void forge_tests() override {
 
-        test("basic_yield_with_value", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int counter() {
-                    yield 1;
-                    yield 2;
-                    yield 3;
-                    return 4;
-                }
-                auto c = counter();
-                auto a = c.next();
-                auto b = c.next();
-                auto d = c.next();
-                auto e = c.next();
-                a + b + d + e
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(10));
+        test("coroutines_yield_resume_report_done_and_return", [this]() {
+            const std::pair<const char*, script_int> cases[] = {
+                {"coroutine int counter() { yield 1; yield 2; yield 3; return 4; } auto c = counter(); auto a = c.next(); auto b = c.next(); auto d = c.next(); auto e = c.next(); a + b + d + e", static_cast<script_int>(10)},
+                {"coroutine int gen() { yield 42; return 0; } auto c = gen(); auto before = c.done(); c.next(); auto mid = c.done(); c.next(); auto after = c.done(); auto result = 0; if (!before && !mid && after) { result = 1; } result", static_cast<script_int>(1)},
+                {"coroutine int range_gen() { for (int i = 0; i < 5; ++i) { yield i; } return -1; } auto c = range_gen(); auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(9)},
+                {"coroutine int while_gen() { auto i = 0; while (i < 3) { yield i; i = i + 1; } return 99; } auto c = while_gen(); auto r0 = c.next(); auto r1 = c.next(); auto r2 = c.next(); auto r3 = c.next(); r0 * 1000 + r1 * 100 + r2 * 10 + r3", static_cast<script_int>(219)},
+                {"coroutine int branch_gen(int x) { if (x > 0) { yield 1; } else { yield -1; } return 0; } auto c1 = branch_gen(5); auto c2 = branch_gen(-3); auto r1 = c1.next(); auto r2 = c2.next(); r1 + r2", static_cast<script_int>(0)},
+                {"coroutine int seq() { yield 10; yield 20; yield 30; yield 40; yield 50; return 0; } auto c = seq(); auto sum = 0; sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum", static_cast<script_int>(150)},
+                {"coroutine int gen_a() { yield 1; yield 2; return 3; } coroutine int gen_b() { yield 10; yield 20; return 30; } auto a = gen_a(); auto b = gen_b(); auto r1 = a.next(); auto r2 = b.next(); auto r3 = a.next(); auto r4 = b.next(); auto r5 = a.next(); auto r6 = b.next(); r1 + r2 + r3 + r4 + r5 + r6", static_cast<script_int>(66)},
+                {"coroutine int multiply_gen(int start, int factor) { int val = start; yield val; val = val * factor; yield val; val = val * factor; return val; } auto c = multiply_gen(2, 3); auto r1 = c.next(); auto r2 = c.next(); auto r3 = c.next(); r1 * 100 + r2 * 10 + r3", static_cast<script_int>(278)},
+                {"coroutine int matrix_gen() { for (int i = 0; i < 2; ++i) { for (int j = 0; j < 3; ++j) { yield i * 10 + j; } } return -1; } auto c = matrix_gen(); auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(35)},
+                {"coroutine void stepper() { yield; yield; return; } auto c = stepper(); c.next(); c.next(); c.next(); auto result = 0; if (c.done()) { result = 1; } result", static_cast<script_int>(1)},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                jai::stdlib::register_all(engine);
+                check_eq(engine->execute(c.first).template as<script_int>(), c.second);
+            });
         });
 
         // Regression: the interpreter's continuation-replay path skipped the typed-return
@@ -69,165 +70,6 @@ public:
             check_eq(static_cast<script_int>(3), engine->execute("c.next();").as<script_int>());
         });
 
-        test("coroutine_done_check", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int gen() {
-                    yield 42;
-                    return 0;
-                }
-                auto c = gen();
-                auto before = c.done();
-                c.next();
-                auto mid = c.done();
-                c.next();
-                auto after = c.done();
-                auto result = 0;
-                if (!before && !mid && after) {
-                    result = 1;
-                }
-                result
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(1));
-        });
-
-        test("yield_inside_for_loop", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int range_gen() {
-                    for (int i = 0; i < 5; ++i) {
-                        yield i;
-                    }
-                    return -1;
-                }
-                auto c = range_gen();
-                auto sum = 0;
-                while (!c.done()) {
-                    sum = sum + c.next();
-                }
-                sum
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(9));
-        });
-
-        test("yield_inside_while_loop", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int while_gen() {
-                    auto i = 0;
-                    while (i < 3) {
-                        yield i;
-                        i = i + 1;
-                    }
-                    return 99;
-                }
-                auto c = while_gen();
-                auto r0 = c.next();
-                auto r1 = c.next();
-                auto r2 = c.next();
-                auto r3 = c.next();
-                r0 * 1000 + r1 * 100 + r2 * 10 + r3
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(219));
-        });
-
-        test("yield_inside_if_else", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int branch_gen(int x) {
-                    if (x > 0) {
-                        yield 1;
-                    } else {
-                        yield -1;
-                    }
-                    return 0;
-                }
-                auto c1 = branch_gen(5);
-                auto c2 = branch_gen(-3);
-                auto r1 = c1.next();
-                auto r2 = c2.next();
-                r1 + r2
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(0));
-        });
-
-        test("multiple_yields_in_sequence", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int seq() {
-                    yield 10;
-                    yield 20;
-                    yield 30;
-                    yield 40;
-                    yield 50;
-                    return 0;
-                }
-                auto c = seq();
-                auto sum = 0;
-                sum = sum + c.next();
-                sum = sum + c.next();
-                sum = sum + c.next();
-                sum = sum + c.next();
-                sum = sum + c.next();
-                sum = sum + c.next();
-                sum
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(150));
-        });
-
-        test("multiple_concurrent_coroutines", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int gen_a() {
-                    yield 1;
-                    yield 2;
-                    return 3;
-                }
-                coroutine int gen_b() {
-                    yield 10;
-                    yield 20;
-                    return 30;
-                }
-                auto a = gen_a();
-                auto b = gen_b();
-                auto r1 = a.next();
-                auto r2 = b.next();
-                auto r3 = a.next();
-                auto r4 = b.next();
-                auto r5 = a.next();
-                auto r6 = b.next();
-                r1 + r2 + r3 + r4 + r5 + r6
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(66));
-        });
-
-        test("coroutine_with_parameters", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int multiply_gen(int start, int factor) {
-                    int val = start;
-                    yield val;
-                    val = val * factor;
-                    yield val;
-                    val = val * factor;
-                    return val;
-                }
-                auto c = multiply_gen(2, 3);
-                auto r1 = c.next();
-                auto r2 = c.next();
-                auto r3 = c.next();
-                r1 * 100 + r2 * 10 + r3
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(278));
-        });
-
         test("yield_string_values", [this]() {
             auto engine = make_engine();
             jai::stdlib::register_all(engine);
@@ -246,50 +88,6 @@ public:
                 s
             )");
             check_eq(result.template as<std::string>(), std::string("hello world!"));
-        });
-
-        test("nested_loops_with_yield", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine int matrix_gen() {
-                    for (int i = 0; i < 2; ++i) {
-                        for (int j = 0; j < 3; ++j) {
-                            yield i * 10 + j;
-                        }
-                    }
-                    return -1;
-                }
-                auto c = matrix_gen();
-                auto sum = 0;
-                while (!c.done()) {
-                    sum = sum + c.next();
-                }
-                sum
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(35));
-        });
-
-        test("coroutine_void_yield", [this]() {
-            auto engine = make_engine();
-            jai::stdlib::register_all(engine);
-            auto result = engine->execute(R"(
-                coroutine void stepper() {
-                    yield;
-                    yield;
-                    return;
-                }
-                auto c = stepper();
-                c.next();
-                c.next();
-                c.next();
-                auto result = 0;
-                if (c.done()) {
-                    result = 1;
-                }
-                result
-            )");
-            check_eq(result.template as<script_int>(), static_cast<script_int>(1));
         });
 
         test("yield_no_duplicate_side_effects", [this]() {
@@ -377,27 +175,18 @@ public:
             check_eq(eng->get_variable("r3").as<int64_t>(), int64_t(99));
         });
 
-        test("nested_coroutine_handles_are_independent", [this]() {
-            // A coroutine declared inside a function takes what it needs as parameters (a named function captures
-            // nothing); each factory call mints its own independent handle.
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                function make_counter(auto start) -> auto {
-                    coroutine int counter(int first) {
-                        auto v = first;
-                        while (v < first + 3) {
-                            yield v;
-                            v = v + 1;
-                        }
-                        return 0 - 1;
-                    }
-                    return counter(start);
-                }
-                auto c1 = make_counter(5);
-                auto c2 = make_counter(50);
-                c1.next() + c2.next() + c1.next() + c2.next();
-            )");
-            check_eq(int64_t(112), result.as<int64_t>());
+        test("a_coroutine_declared_in_a_function_mints_independent_handles", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                // A coroutine declared inside a function takes what it needs as parameters (a named function captures
+                // nothing); each factory call mints its own independent handle.
+                {"function make_counter(auto start) -> auto { coroutine int counter(int first) { auto v = first; while (v < first + 3) { yield v; v = v + 1; } return 0 - 1; } return counter(start); } auto c1 = make_counter(5); auto c2 = make_counter(50); c1.next() + c2.next() + c1.next() + c2.next();", int64_t(112)},
+                {"function pair_sum(int base) -> int { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } auto g = gen(base); return g.next() + g.next(); } pair_sum(1) + pair_sum(2);", int64_t(62)},
+                {"function make_gen(int base) -> auto { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } return gen(base); } auto g1 = make_gen(1); auto g2 = make_gen(2); g1.next() + g1.next() + g2.next() + g2.next();", int64_t(62)},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto eng = jai::foundry::make_engine();
+                check_eq(c.second, eng->execute(c.first).as<int64_t>());
+            });
         });
 
         // A named coroutine declared in a function body captures nothing, like a nested named function: an
@@ -413,146 +202,24 @@ public:
             }
         });
 
-        test("resume_inside_running_function_keeps_caller_frame", [this]() {
-            // Suspending used to steal the CALLER's call frames into the coroutine
-            // state, leaving the rest of the caller's body frameless (hang/corruption)
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                coroutine int gen2() {
-                    yield 10;
-                    yield 11;
-                    return 0;
-                }
-                function pair() -> int {
-                    auto g = gen2();
-                    var local = 100;
-                    return g.next() + g.next() + local;
-                }
-                pair() + pair();
-            )");
-            check_eq(int64_t(242), result.as<int64_t>());
-        });
-
-        test("nested_coroutine_declared_and_resumed_inside_function", [this]() {
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                function pair_sum(int base) -> int {
-                    coroutine int gen(int b) {
-                        yield b * 10;
-                        yield b * 10 + 1;
-                        return 0;
-                    }
-                    auto g = gen(base);
-                    return g.next() + g.next();
-                }
-                pair_sum(1) + pair_sum(2);
-            )");
-            check_eq(int64_t(62), result.as<int64_t>());
-        });
-
-        test("coroutine_range_for_over_inner_coroutine", [this]() {
-            // Interpreter used to abort the whole process (env-cycle abort) here
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                coroutine int inner() {
-                    for (int i = 0; i < 3; i++) {
-                        yield i;
-                    }
-                }
-                coroutine int outer() {
-                    for (auto x : inner()) {
-                        yield x * 10;
-                    }
-                    return 0 - 1;
-                }
-                auto o = outer();
-                o.next() * 100 + o.next() * 10 + o.next();
-            )");
-            check_eq(int64_t(120), result.as<int64_t>());
-        });
-
-        test("failed_resume_marks_only_that_handle_done", [this]() {
-            // The failed handle must report done() even when an unrelated coroutine
-            // was resumed between its suspension and its failure
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                function boom() -> auto { throw "die"; }
-                coroutine int bad() { yield 1; boom(); yield 2; return 3; }
-                coroutine int good() { yield 10; yield 20; return 30; }
-                auto vb = bad();
-                auto vg = good();
-                auto d = 0;
-                auto r1 = vb.next();
-                if (vb.done()) { d = d + 1; }
-                auto r2 = vg.next();
-                if (vb.done()) { d = d + 2; }
-                auto caught = 0;
-                try { vb.next(); } catch (e) { caught = 1; }
-                if (vb.done()) { d = d + 4; }
-                if (!vg.done()) { d = d + 8; }
-                d * 10 + caught;
-            )");
-            check_eq(int64_t(121), result.as<int64_t>());
-        });
-
-        test("yield_per_element_inside_array_range_for", [this]() {
-            // Resume used to re-evaluate the container and restart iteration at 0
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                coroutine int walker() {
-                    auto acc = 1000;
-                    for (auto x : [3, 5, 7]) {
-                        yield x;
-                        acc = acc + x;
-                    }
-                    return acc;
-                }
-                auto w = walker();
-                w.next() * 1000 + w.next() * 100 + w.next() * 10 + (w.next() - 1000);
-            )");
-            check_eq(int64_t(3585), result.as<int64_t>());
-        });
-
-        test("resume_through_by_ref_helper_param", [this]() {
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                coroutine int gen() {
-                    for (int i = 1; i <= 4; i++) {
-                        yield i * i;
-                    }
-                    return 0;
-                }
-                function pump(auto& h) -> auto {
-                    auto local = 100;
-                    auto v = h.next();
-                    return local + v;
-                }
-                auto c = gen();
-                auto s = 0;
-                for (int i = 0; i < 4; i++) {
-                    s = s + pump(c);
-                }
-                s;
-            )");
-            check_eq(int64_t(430), result.as<int64_t>());
-        });
-
-        test("nested_coroutine_handles_keep_their_arguments", [this]() {
-            auto eng = jai::foundry::make_engine();
-            auto result = eng->execute(R"(
-                function make_gen(int base) -> auto {
-                    coroutine int gen(int b) {
-                        yield b * 10;
-                        yield b * 10 + 1;
-                        return 0;
-                    }
-                    return gen(base);
-                }
-                auto g1 = make_gen(1);
-                auto g2 = make_gen(2);
-                g1.next() + g1.next() + g2.next() + g2.next();
-            )");
-            check_eq(int64_t(62), result.as<int64_t>());
+        test("a_resumed_coroutine_keeps_its_callers_frame_and_its_iteration_state", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                // Suspending used to steal the CALLER's call frames into the coroutine
+                // state, leaving the rest of the caller's body frameless (hang/corruption)
+                {"coroutine int gen2() { yield 10; yield 11; return 0; } function pair() -> int { auto g = gen2(); var local = 100; return g.next() + g.next() + local; } pair() + pair();", int64_t(242)},
+                // Interpreter used to abort the whole process (env-cycle abort) here
+                {"coroutine int inner() { for (int i = 0; i < 3; i++) { yield i; } } coroutine int outer() { for (auto x : inner()) { yield x * 10; } return 0 - 1; } auto o = outer(); o.next() * 100 + o.next() * 10 + o.next();", int64_t(120)},
+                // The failed handle must report done() even when an unrelated coroutine
+                // was resumed between its suspension and its failure
+                {"function boom() -> auto { throw \"die\"; } coroutine int bad() { yield 1; boom(); yield 2; return 3; } coroutine int good() { yield 10; yield 20; return 30; } auto vb = bad(); auto vg = good(); auto d = 0; auto r1 = vb.next(); if (vb.done()) { d = d + 1; } auto r2 = vg.next(); if (vb.done()) { d = d + 2; } auto caught = 0; try { vb.next(); } catch (e) { caught = 1; } if (vb.done()) { d = d + 4; } if (!vg.done()) { d = d + 8; } d * 10 + caught;", int64_t(121)},
+                // Resume used to re-evaluate the container and restart iteration at 0
+                {"coroutine int walker() { auto acc = 1000; for (auto x : [3, 5, 7]) { yield x; acc = acc + x; } return acc; } auto w = walker(); w.next() * 1000 + w.next() * 100 + w.next() * 10 + (w.next() - 1000);", int64_t(3585)},
+                {"coroutine int gen() { for (int i = 1; i <= 4; i++) { yield i * i; } return 0; } function pump(auto& h) -> auto { auto local = 100; auto v = h.next(); return local + v; } auto c = gen(); auto s = 0; for (int i = 0; i < 4; i++) { s = s + pump(c); } s;", int64_t(430)},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto eng = jai::foundry::make_engine();
+                check_eq(c.second, eng->execute(c.first).as<int64_t>());
+            });
         });
 
         // ===== COROUTINE METHODS =====
@@ -607,8 +274,9 @@ public:
             check_eq(expected, v_out, std::string("vm: ") + what);
         };
 
-        test("method_coroutine_this_across_suspensions", [this, check_both]() {
-            check_both(R"(
+        test("a_method_coroutine_pins_its_receiver_across_suspensions", [this, check_both]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {R"(
                 class Counter {
                     int x = 10;
                     coroutine int steps() {
@@ -627,12 +295,8 @@ public:
                 var e = g.next();
                 to_string(a) + "|" + to_string(b) + "|" + to_string(d) + "|" +
                     type_of(e) + ":" + to_string(e) + "|" + to_string(g.done()) + "|" + to_string(c.x)
-            )", "1|10|15|int:2|true|15",
-                "this-field reads/writes across suspensions + typed final return + done()");
-        });
-
-        test("method_coroutine_range_for_drives", [this, check_both]() {
-            check_both(R"(
+            )", "1|10|15|int:2|true|15", "this-field reads/writes across suspensions + typed final return + done()"},
+                {R"(
                 class Gen {
                     int n = 3;
                     coroutine int items() { for (int i = 0; i < n; ++i) { yield i * 10; } }
@@ -641,38 +305,31 @@ public:
                 var sum = 0;
                 for (auto v : g.items()) { sum += v; }
                 sum
-            )", "30", "range-for drives a method coroutine");
-        });
-
-        test("method_coroutine_two_instances_interleaved", [this, check_both]() {
-            check_both(R"(
+            )", "30", "range-for drives a method coroutine"},
+                {R"(
                 class C { int id = 0; C(int i) { id = i; } coroutine int gen() { yield id; yield id * 2; } }
                 auto a = C(1); auto b = C(2);
                 auto ga = a.gen(); auto gb = b.gen();
                 to_string(ga.next()) + to_string(gb.next()) + to_string(ga.next()) + to_string(gb.next())
-            )", "1224", "two instances' coroutines interleave independently");
-        });
-
-        test("method_coroutine_pins_instance", [this, check_both]() {
-            // The only strong ref to the instance dies with make()'s frame; the handle
-            // keeps it alive (receiver + method env pin), so resumes still see fields
-            check_both(R"(
+            )", "1224", "two instances' coroutines interleave independently"},
+                // The only strong ref to the instance dies with make()'s frame; the handle
+                // keeps it alive (receiver + method env pin), so resumes still see fields
+                {R"(
                 class D { int v = 7; coroutine int g() { yield v; v = 99; yield v; } }
                 function make() { auto d = D(); return d.g(); }
                 auto h = make();
                 to_string(h.next()) + "|" + to_string(h.next())
-            )", "7|99", "handle keeps the instance alive while suspended");
-        });
-
-        test("method_coroutine_inherited_on_derived", [this, check_both]() {
-            check_both(R"(
+            )", "7|99", "handle keeps the instance alive while suspended"},
+                {R"(
                 class Base { int bv = 5; coroutine int gen() { yield bv; yield bv * 2; } }
                 class Derived : Base { int dv = 1; }
                 auto d = Derived();
                 d.bv = 6;
                 auto g = d.gen();
                 to_string(g.next()) + "|" + to_string(g.next())
-            )", "6|12", "base coroutine method binds the derived receiver");
+            )", "6|12", "base coroutine method binds the derived receiver"},
+            };
+            check_each(cases, [&](const auto& c) { check_both(std::get<0>(c), std::get<1>(c), std::get<2>(c)); });
         });
 
         // Static coroutine methods: every spelling (either modifier order) mints a handle
@@ -922,51 +579,40 @@ public:
         // the holder - value.cpp jai_object_type case). Field stores, aliases, by-value
         // params, and container elements all see the same resume/done state.
 
-        test("handle_stored_in_field_resumes", [this, check_both]() {
-            check_both(R"(
+        test("a_coroutine_handle_is_a_reference_every_copy_shares", [this, check_both]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {R"(
                 coroutine function co() { yield 1; yield 2; }
                 class B { var h = null; }
                 var b = B();
                 b.h = co();
                 to_string(b.h.next()) + "|" + to_string(b.h.next()) + "|" + to_string(b.h.done())
-            )", "1|2|false", "handle lives in a field; resume/done through the field");
-        });
-
-        test("handle_copies_share_the_coroutine", [this, check_both]() {
-            check_both(R"(
+            )", "1|2|false", "handle lives in a field; resume/done through the field"},
+                {R"(
                 coroutine function co() { yield 1; yield 2; yield 3; return 0; }
                 var h = co();
                 var h2 = h;
                 var a = h.next(); var b = h2.next(); var c = h.next(); h2.next();
                 to_string(a) + to_string(b) + to_string(c) + "|" +
                     to_string(h.done()) + "|" + to_string(h2.done())
-            )", "123|true|true", "aliases interleave one coroutine; done() agrees");
-        });
-
-        test("handle_in_array_and_map", [this, check_both]() {
-            check_both(R"(
+            )", "123|true|true", "aliases interleave one coroutine; done() agrees"},
+                {R"(
                 coroutine function co() { yield 7; yield 8; }
                 var a = [co()];
                 var m = {"k": a[0]};
                 to_string(a[0].next()) + "|" + to_string(m["k"].next())
-            )", "7|8", "array element and map entry share the stored handle");
-        });
-
-        test("handle_passed_by_value_resumes_shared", [this, check_both]() {
-            check_both(R"(
+            )", "7|8", "array element and map entry share the stored handle"},
+                {R"(
                 coroutine function co() { yield 42; return 0; }
                 function drive(var h) -> int { return h.next(); }
                 var h = co();
                 var a = drive(h);
                 h.next();
                 to_string(a) + "|" + to_string(h.done())
-            )", "42|true", "by-value param resumes the caller's coroutine");
-        });
-
-        test("instance_copy_shares_field_held_handle", [this, check_both]() {
-            // Object copies stay value-semantic (deep) - but the handle FIELD shares the
-            // one coroutine, exactly like a shared_ptr field would share its pointee.
-            check_both(R"(
+            )", "42|true", "by-value param resumes the caller's coroutine"},
+                // Object copies stay value-semantic (deep) - but the handle FIELD shares the
+                // one coroutine, exactly like a shared_ptr field would share its pointee.
+                {R"(
                 coroutine function co() { yield 10; yield 20; yield 30; }
                 class Holder { var h = null; int n = 0; }
                 var a = Holder();
@@ -975,14 +621,11 @@ public:
                 b.n = 99;
                 to_string(a.h.next()) + to_string(b.h.next()) + to_string(a.h.next()) +
                     "|" + to_string(a.n) + to_string(b.n)
-            )", "102030|099", "copied instance shares the coroutine, not the ints");
-        });
-
-        test("self_receiver_field_handle_boss_pattern", [this, check_both]() {
-            // The crawler boss shape: a Game method coroutine whose handle lives in a
-            // Game field (receiver pin + field-held handle = deliberate strong cycle;
-            // broken by re-assignment/null like any shared structure).
-            check_both(R"(
+            )", "102030|099", "copied instance shares the coroutine, not the ints"},
+                // The crawler boss shape: a Game method coroutine whose handle lives in a
+                // Game field (receiver pin + field-held handle = deliberate strong cycle;
+                // broken by re-assignment/null like any shared structure).
+                {R"(
                 class Game {
                     var boss_co = null;
                     int phase = 0;
@@ -995,7 +638,9 @@ public:
                 var g = Game();
                 g.tick(); g.tick(); g.tick();
                 to_string(g.phase)
-            )", "3", "own-method handle stored in own field drives across ticks");
+            )", "3", "own-method handle stored in own field drives across ticks"},
+            };
+            check_each(cases, [&](const auto& c) { check_both(std::get<0>(c), std::get<1>(c), std::get<2>(c)); });
         });
 
         test("field_held_handle_survives_field_changing_reload", [this, check_both]() {

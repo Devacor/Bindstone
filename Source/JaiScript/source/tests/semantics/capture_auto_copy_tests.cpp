@@ -4,6 +4,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 
 #include <functional>
 #include <memory>
@@ -814,6 +815,56 @@ public:
 				}
 				run_auto()
 			)"), "auto from a script class deriving a C++ class copies it");
+		});
+
+		test("a_this_capture_in_a_method_reads_the_instance", [this]() {
+			// the auto field and auto constructor parameter take the argument's type; a void method's own return still yields its value
+			const std::pair<const char*, int> rows[] = {
+				{R"(
+					class TestClass {
+						auto value;
+						TestClass(auto v) { value = v; }
+						auto test_lambda() {
+							auto lambda = [this]() { return value * 2; };
+							auto result = lambda();
+							return result;
+						}
+					}
+					auto obj = TestClass(42);
+					obj.test_lambda()
+				)", 84},
+				{R"(
+					class TestClass {
+						auto value;
+						TestClass(auto v) { value = v; }
+						void call_lambda() {
+							auto lambda = [this]() { return value; };
+							auto result = lambda();
+							return result;
+						}
+					}
+					auto obj = TestClass(42);
+					obj.call_lambda()
+				)", 42},
+				{R"(
+					class TestClass {
+						auto value;
+						TestClass(auto v) { value = v; }
+						void method_void() {
+							auto lambda = [this]() { print(`lambda: value = ${value}`); };
+							lambda();
+						}
+					}
+					auto obj = TestClass(99);
+					obj.method_void();
+					1
+				)", 1},
+			};
+			check_each(rows, [&](const auto& row) {
+				auto eng = make_engine();
+				jai::stdlib::register_all(*eng);
+				check_eq(row.second, eng->execute(row.first).as<int>());
+			});
 		});
 	}
 };

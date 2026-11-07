@@ -11930,6 +11930,11 @@ bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const cla
 	for (const uint64_t id : site.field_ids) {   // the clone reads the body's fields from the call site's class
 		if (cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first) || !detail::member_access_allowed(cd, id, ctx)) return false;
 	}
+	for (const uint64_t id : site.sibling_ids) {   // the clone calls the body's sibling methods on the receiver from the call site's class
+		if (!detail::member_access_allowed(cd, id, ctx) || cd->chain_declares_field(id) || cd->field_slot(id) != class_definition::k_no_field_slot || !cd->method_ptr(id)) return false;
+		const script_value getter = cd->get_method(symbolizer_->get_getter_id_with_view(id).first, false);
+		if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) return false;
+	}
 	const script_value mv = cd->get_method(site.member_id, false);
 	if (mv.is_null() || mv.is_invalid() || !mv.is_function()) return false;
 	const auto* dispatch = mv.as_function().target<script_method_dispatch>();
@@ -11957,7 +11962,7 @@ bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const cla
 // a worker's method graft: the receiver's class holds the region's pin of the method, whose body is the graft's, and the bare fields the
 // body names resolve as on the main engine; validated once per class and method epoch in the worker's own row
 bool vm_backend::worker_inline_method_holds(frame& f, const chunk::inline_site& site) {
-	if (site.receiver_slot == k_invalid_u32 || !site.global_ids.empty()) { return false; }   // the pinned call answers
+	if (site.receiver_slot == k_invalid_u32 || !site.global_ids.empty() || !site.sibling_ids.empty()) { return false; }   // the pinned call answers
 	const script_value* r = frame_slot(f, site.receiver_slot);
 	if (!r || !parallel_method_pins_) { return false; }
 	const script_value& v = r->deref();
@@ -12837,6 +12842,26 @@ static JAI_FORCEINLINE bool lean_parameter_type(script_value_type bt) {
 	       bt == script_value_type::jai_bool_type || bt == script_value_type::jai_char_type || bt == script_value_type::jai_string_type;
 }
 
+// a lean bind whose every parameter takes exactly one storage kind as it is (int, float, bool, char, string), packed: bit 0 set, bits 1..7 the
+// parameter count, byte i + 1 parameter i's storage index; 2 when a parameter takes more than one kind or there are more than seven
+static JAI_NOINLINE uint64_t lean_kinds_of(const std::vector<parameter>& ps) {
+	if (ps.size() > 7) { return 2; }
+	uint64_t kinds = 1 | (static_cast<uint64_t>(ps.size()) << 1);
+	for (size_t i = 0; i < ps.size(); ++i) {
+		size_t k = 0;
+		switch (ps[i].type ? ps[i].type->base_type : script_value_type::jai_any_type) {
+		case script_value_type::jai_int_type: k = script_value::TYPEID_INT; break;
+		case script_value_type::jai_float_type: k = script_value::TYPEID_FLOAT; break;
+		case script_value_type::jai_bool_type: k = script_value::TYPEID_BOOL; break;
+		case script_value_type::jai_char_type: k = script_value::TYPEID_CHAR; break;
+		case script_value_type::jai_string_type: k = script_value::TYPEID_STRING; break;
+		default: return 2;
+		}
+		kinds |= static_cast<uint64_t>(k) << (8 * (i + 1));
+	}
+	return kinds;
+}
+
 static JAI_NOINLINE uint8_t lean_bind_of(const script_defined_function& function) {
 	if (function.backend_lean_bind == 0) {
 		uint8_t lean = 1;
@@ -12846,6 +12871,7 @@ static JAI_NOINLINE uint8_t lean_bind_of(const script_defined_function& function
 			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
 			    !lean_parameter_type(p.type ? p.type->base_type : script_value_type::jai_any_type)) { lean = 2; break; }
 		}
+		function.backend_lean_kinds = lean == 1 ? lean_kinds_of(ps) : 2;
 		function.backend_lean_bind = lean;
 	}
 	return function.backend_lean_bind;
@@ -12880,6 +12906,15 @@ static JAI_FORCEINLINE void lean_var_stamp(const parameter& p, script_value& a, 
 	if (p.declared_var() && a.type_info_raw() != p.type.get()) { detail::var_stamp(a, p.type, eng); }
 }
 
+// the arguments of a lean bind with a kind signature, each the one storage its parameter takes: every slot is already its parameter
+static JAI_FORCEINLINE bool lean_kinds_match(uint64_t kinds, const script_value* args, size_t argc) {
+	if (!(kinds & 1) || argc != ((kinds >> 1) & 0x7F)) { return false; }
+	for (size_t i = 0; i < argc; ++i) {
+		if (args[i].raw_storage_index() != ((kinds >> (8 * (i + 1))) & 0xFF)) { return false; }
+	}
+	return true;
+}
+
 // a method's in-place arguments that are already its parameters, as bind_parameters' first rows take them: the function rows
 // (lean_slot_takes), and a handle or null already tagged with a shared_ptr parameter's exact type
 static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, script_value* args, size_t argc, engine* eng) {
@@ -12891,9 +12926,12 @@ static JAI_FORCEINLINE bool method_binds_in_place(const function_decl& ast, scri
 			if (p.is_reference || p.ref_escaping || p.default_value || p.slot_index != i ||
 			    !(lean_parameter_type(bt) || bt == script_value_type::jai_shared_ptr_type)) { lean = 2; break; }
 		}
+		ast.vm_lean_kinds = lean == 1 ? lean_kinds_of(ast.parameters) : 2;
 		ast.vm_lean_bind = lean;
 	}
-	if (ast.vm_lean_bind != 1 || argc != ast.parameters.size()) { return false; }
+	if (ast.vm_lean_bind != 1) { return false; }
+	if (lean_kinds_match(ast.vm_lean_kinds, args, argc)) { return true; }
+	if (argc != ast.parameters.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		const parameter& p = ast.parameters[i];
 		if (p.type && p.type->base_type == script_value_type::jai_shared_ptr_type) {
@@ -12973,6 +13011,7 @@ static JAI_NOINLINE bool bind_slice_references(const std::vector<parameter>& ps,
 static JAI_FORCEINLINE bool binds_slice_in_place(const script_defined_function& function, script_value* args, size_t argc, engine* eng) {
 	if ((function.backend_lean_bind ? function.backend_lean_bind : lean_bind_of(function)) != 1) { return false; }
 	const auto& ps = function.parameters();
+	if (lean_kinds_match(function.backend_lean_kinds, args, argc)) { return true; }
 	if (argc != ps.size()) { return false; }
 	for (size_t i = 0; i < argc; ++i) {
 		if (!lean_slot_takes(ps[i], args[i])) {
@@ -21363,7 +21402,12 @@ JAI_FORCEINLINE vm_backend::frame* vm_backend::push_lean_method_frame(frame& cal
 	rec.env_lazy = true;
 	rec.env_untouched = true;
 	rec.lean = true;
-	rec.locals.set_this(std::move(receiver));
+	if (rec.locals.this_object_ptr) [[likely]] {   // set_this's assignment, without its by-value parameter
+		*rec.locals.this_object_ptr = std::move(receiver);
+		rec.locals.is_method = true;
+	} else {
+		rec.locals.set_this(std::move(receiver));
+	}
 	if (rec.f.entry_env) { rec.f.entry_env = nullptr; }
 	open_record_frame(rec, body_chunk, args_base, argc, frame_base, decl.unit, nullptr);
 	if (body_chunk->member_class) { bind_member_layout(rec.f, *body_chunk, inst); } else { rec.f.this_inst = nullptr; }

@@ -773,6 +773,7 @@ namespace jai::vm {
             uint32_t receiver_this_field = 0;   // the frame's this-field holding a method graft's receiver: its slot + 1 (0: none)
             bool caller_globals = false;        // the body's program-scope names read in the caller's frame: its names resolve as the program's
             std::vector<uint64_t> global_ids;   // a method graft's program-scope names: the receiver's class takes no member of any
+            std::vector<uint64_t> sibling_ids;  // a method graft's sibling methods the clone calls on the receiver: each a method of the receiver's class
         };
         std::vector<inline_site> inline_sites;
         bool graft_calls = false;   // an inline site's body makes calls (the trace names its frame above them)

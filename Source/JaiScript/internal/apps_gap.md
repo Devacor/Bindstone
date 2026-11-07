@@ -98,10 +98,15 @@ method) is `MEMBER_TEMP_THIS`, where it was a stack read and a landing; a statem
   caller's class takes no member of it, else the call stays. The guard is the call's own resolution, per receiver class at its method
   epoch: the class resolves the method to the grafted body, each bare field to the declaration the method's class sees, and no
   program-scope name the body reads to a member; a body that reads program-scope names holds only while the caller's frame layout holds
-  and its environment is the program's. A frame receiver grafts only a body that makes no call (a call costs the graft more than the
-  frame it saves, and could move the receiver), and a field receiver only a body that stores into no other object and into no field
-  named like the receiver's field (either could be the caller's own field). The checker stamps no frame-receiver graft for a method a
-  derived class overrides: its guard would send most receivers to the real call.
+  and its environment is the program's. A graft compiled in a method body calls the body's sibling methods (named bare, proven by the
+  checker) on its receiver, where each grafts a level down as it would in the method's own frame; the guard checks each sibling from
+  the call site's class as it checks the fields (a method of the receiver's class, public to the caller, no field or getter of the
+  name), and a parallel worker takes the pinned call. A graft compiled in a free function keeps such a method's call: its siblings
+  graft in the method's frame, and the clone's could not resolve the body's program-scope names. `this` and a local receiver graft a
+  body that calls under the same node and loop limits; a field receiver grafts only a body that makes no call (a call could move the
+  receiver), and only one that stores into no other object and into no field named like the receiver's field (either could be the
+  caller's own field). The checker stamps no frame-receiver graft for a method a derived class overrides: its guard would send most
+  receivers to the real call.
 - **A bool method in a condition grafts as branches.** `if (r.m())`, `while (r.m())` over a body that is one proven `bool` return
   compiles the return's expression as the condition's own branches behind the guard, and the fallback branches on the real call: no
   result temp, no landing, no truth test. A raise inside the expression names the method's frame and its return's line.

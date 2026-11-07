@@ -57,6 +57,12 @@ own).
 The declaration stays pinned for the frame (`pin_method_decl`), so a reload during the call keeps the running body alive and
 the next call refetches through the epoch.
 
+A lean bind whose every parameter takes one storage kind as it is (`int`, `float`, `bool`, `char`, `string`) carries that
+signature packed beside its verdict (`lean_kinds_of`: the count and one storage index per parameter, up to seven): the arguments
+bind in place when each one's storage index is its parameter's, one compare per argument against the packed word; any other
+argument takes the per-parameter rows, which decide exactly as before. The method push moves the receiver into the record's
+pooled `this` directly.
+
 ## Measured
 
 Release LTCG, interleaved, pinned to one P core, against the base at an equal-length path (base2/base is the noise row).
@@ -80,3 +86,14 @@ the cell tier, where calls are few. On Richards a call and return goes from abou
   (fib 0.975 to 0.978 against noise up to 1.026); the plain push is already one layer below the call.
 - Writing what every entry of one body writes alike once per record measured nothing before this work
   (internal/apps_gap.md); the cost was in the layers between the instruction and the push, and in the loop head between frames.
+  Skipping those writes outright, as a bound, saved under 0.5 ns of a 33 ns method call.
+
+The kind signature and the direct receiver move, Release LTCG, pinned, near-empty callees (`switch (x) { default: return x; }`,
+which no graft takes): `l.m(i)` 34.3 to 32.2 ns, `this.m(i)` 33.9 to 32.4, a bare sibling `m(i)` 38.8 to 38.5, a free function
+`k(i)` 32.3 to 31.7; Richards, DeltaBlue and bytecode within their noise. What measured and was left out:
+
+- A return lane for lean frames (the identity return's pop and landing ahead of `return_with_result`, from `RETURN`,
+  `RETURN_IDENT` and `RETURN_BINARY`) saved about 1 ns per call, and made Richards 2.8% and DeltaBlue 1.2% slower in LTCG builds.
+- The lane from `op_call_from_scratch` into `push_plain_frame` again, with a lane for the probe's cached answers ahead of
+  `exec_probe_callee`: the free call 2 ns faster, DeltaBlue 1.8% and bytecode 1.0% slower.
+- Power-of-two try, loop and counted-for records, so the pushes and pops size their stacks with a shift: nothing.

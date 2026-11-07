@@ -1,6 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
-#include <sstream>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -217,25 +217,7 @@ public:
                 {"array<int> xs; xs.resize(\"2\");", "ERROR error: resize() size must be an int, got 'string'"},
                 {"array<int> a(1, 2, 3);", "ERROR array<T>(...) takes a size and an optional value, not 3 arguments"},
             };
-            std::string failures;
-            for (const auto& [code, expected] : cases) {
-                auto e = make_engine();
-                auto out = std::make_shared<std::ostringstream>();
-                e->set_output_stream(out);
-                std::string got;
-                try {
-                    e->execute(prelude + code);
-                    got = out->str();
-                    while (!got.empty() && got.back() == '\n') { got.pop_back(); }
-                } catch (const std::exception& ex) {
-                    got = std::string("ERROR ") + ex.what();
-                }
-                const std::string want = expected;
-                const bool error_case = want.rfind("ERROR ", 0) == 0;
-                const bool ok = error_case ? got.rfind("ERROR ", 0) == 0 && got.find(want.substr(6)) != std::string::npos : got == want;
-                if (!ok) { failures += std::string(code) + "\n  got: " + got + "\n"; }
-            }
-            check_true(failures.empty(), failures);
+            check_outputs(cases, prelude);
         });
     }
 };

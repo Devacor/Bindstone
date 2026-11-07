@@ -16,7 +16,7 @@ int prand(int n) {
 float prandf() { return prand(10000) / 10000.0; }
 
 // ---- per-world night tints
-array<int> WORLD_TINT = [18, 22, 48, 18, 34, 22, 8, 26, 50, 22, 32, 20, 30, 42, 64, 64, 16, 8, 60, 70, 104, 26, 26, 12];
+array<int> WORLD_TINT = [18, 22, 48, 18, 34, 22, 8, 26, 50, 22, 32, 20, 30, 42, 64, 64, 16, 8, 60, 70, 104, 26, 26, 12, 34, 22, 10];
 
 void ensure_shade(ClientView& v) {
 	int ghost = v.ghost;

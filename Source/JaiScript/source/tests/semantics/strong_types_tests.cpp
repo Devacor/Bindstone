@@ -4,10 +4,61 @@
 #include <jaiscript/core/bound_array.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <array>
+#include <functional>
 #include <string>
+#include <variant>
 #include <vector>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
+
+using namespace std::string_literals;
+
+namespace {
+
+using row_value = std::variant<int, double, bool, std::string>;
+
+struct value_row {
+    const char* code;
+    row_value expected;
+    const char* prelude = nullptr;
+};
+
+struct rejected_row {
+    const char* code;
+    const char* text = nullptr;   // a substring the error must hold; null accepts any error
+};
+
+// Each row runs its prelude and then its code on a fresh engine; the result is read with as<T>() of the expected type.
+void check_values(const std::vector<value_row>& a_rows, bool a_with_stdlib = false) {
+    check_each(a_rows, [&](const value_row& a_row) {
+        auto eng = make_engine();
+        if (a_with_stdlib) { jai::stdlib::register_all(*eng); }
+        if (a_row.prelude) { eng->execute(a_row.prelude); }
+        const auto result = eng->execute(a_row.code);
+        std::visit([&](const auto& a_value) {
+            check_eq(a_value, result.as<std::decay_t<decltype(a_value)>>());
+        }, a_row.expected);
+    });
+}
+
+void check_rejected(const std::vector<rejected_row>& a_rows) {
+    check_each(a_rows, [](const rejected_row& a_row) {
+        auto eng = make_engine();
+        bool caught = false;
+        std::string message;
+        try {
+            eng->execute(a_row.code);
+        } catch (const std::exception& error) {
+            caught = true;
+            message = error.what();
+        }
+        check_true(caught, "expected an error");
+        if (a_row.text) { check_true(message.find(a_row.text) != std::string::npos, "error was: " + message); }
+    });
+}
+
+} // namespace
 
 class strong_types_tests : public suite {
 public:
@@ -301,16 +352,25 @@ public:
 			for (size_t i = 0; i < expected.size() && i < seen[0].size(); ++i) { check_eq(expected[i], seen[0][i], "row " + std::to_string(i)); }
 		});
 
-		// ===== AUTO KEYWORD TESTS =====
-
-        test("auto_with_initializer_locks_type", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 5;
-                x = 10;  // OK: int to int
-                x
-            )");
-            check_eq(result.as<int>(), 10);
+        test("auto_locks_to_its_first_values_type", [this]() {
+            check_values({
+                {"auto x = 5; x = 10; x", 10},
+                {"auto x; x = 5; x = 10; x", 10},
+                {"function get_number() -> int { return 42; } auto x = get_number(); x = 100; x", 100},
+                {"auto x = 5 + 3; auto y = 5.0 + 3; auto z = x + 2; z", 10},
+                {"auto b = 5 > 3; b", true},
+                {"auto x = true ? 42 : 0; x = x + 8; x", 50},
+                {"auto x = 5; { auto x = \"hello\"; x = \"world\"; } x = 10; x", 10},
+                {"auto x = 10; x += 5; x -= 3; x *= 2; x", 24},
+                {"auto x = 10.0; x += 2.5; x", 12.5},
+                {"auto s = \"hello\"; s += \" \"; s += \"world\"; s", "hello world"s},
+                {"auto x = 10; auto fn = [=]() { return x * 2; }; fn()", 20},
+            });
+            check_values({
+                {"auto a = 5; auto b = \"hello\"; auto c = 3.14; auto d = true; a = 10; b = \"world\"; c = 2.0; d = false; "
+                 "to_string(a) + \" \" + b + \" \" + to_string(c) + \" \" + to_string(d)", "10 world 2.0 false"s},
+            }, true);
+            check_rejected({{"auto x; x = 5; x = \"hello\";"}});
         });
 
         test("auto_rejects_incompatible_type", [this]() {
@@ -420,272 +480,52 @@ public:
             }
         });
 
-        test("auto_uninitialized_locks_on_first_assignment", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x;
-                x = 5;      // Locks to int
-                x = 10;     // OK: int to int
-                x
-            )");
-            check_eq(result.as<int>(), 10);
+        test("var_takes_any_value_and_keeps_its_methods", [this]() {
+            check_values({
+                {"var x = 5; x = \"hello\"; x = 3.14; x = true; x", true},
+                {"var x; x = \"first\"; x = 42; x = [1, 2, 3]; x.size()", 3},
+                {"var arr = [1, 2, 3, 4, 5]; arr.index_of(3)", 2},
+                {"var m = {\"a\": 1, \"b\": 2}; m.has(\"a\")", true},
+                {"var x = [1, 2, 3]; x = {\"key\": \"value\"}; x.has(\"key\")", true},
+                {"var x = [[1, 2], [3, 4]]; x = {\"key\": [5, 6, 7]}; x[\"key\"][2]", 7},
+                {"var arr = []; arr.push(1); arr.push(\"two\"); arr.push(3.0); arr.push(true); arr.size()", 4},
+            });
+            check_values({
+                {"function stringify(var x) -> string { return to_string(x); } stringify(42) + \" \" + stringify(\"hello\") + \" \" + stringify(true)",
+                 "42 hello true"s},
+                {"class Container { var data = null; function set(var val) { data = val; } function get() { return data; } } "
+                 "auto c = Container(); c.set(42); auto v1 = c.get(); c.set(\"hello\"); auto v2 = c.get(); to_string(v1) + \" \" + v2", "42 hello"s},
+            }, true);
         });
 
-        test("auto_uninitialized_rejects_after_lock", [this]() {
-            auto eng = make_engine();
-            bool caught = false;
-            try {
-                eng->execute(R"(
-                    auto x;
-                    x = 5;        // Locks to int
-                    x = "hello";  // ERROR: string to int
-                )");
-            } catch (const std::exception&) {
-                caught = true;
-            }
-            check_eq(caught, true, "Should reject string after locking to int");
+        test("scalar_slots_convert_between_numbers_and_bools", [this]() {
+            check_values({
+                {"float x = 3.14; x = 10; x", 10.0},
+                {"bool b = true; b = 0; b", false},
+                {"int x = 0; x = true; auto y = x; x = false; y + x", 1},
+            });
         });
 
-        test("auto_float_allows_int_widening", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 3.14;
-                x = 5;  // OK: int widens to float
-                x
-            )");
-            check_eq(result.as<double>(), 5.0);
+        test("auto_containers_nest_and_keep_their_methods", [this]() {
+            check_values({
+                {"auto arr = [[1, 2], [3, 4], [5, 6]]; arr[1][0]", 3},
+                {"auto arr = [{\"a\": 1}, {\"b\": 2}]; arr[0][\"a\"]", 1},
+                {"auto m = {\"nums\": [10, 20, 30]}; m[\"nums\"][1]", 20},
+                {"auto arr = [1, 2, 3, 4, 5, 6]; auto evens = array::filter(arr, [](x) { return x % 2 == 0; }); evens.size()", 3},
+                {"auto arr = [5, 2, 8, 1, 9]; arr.sort(); arr[0]", 1},
+                {"auto m = {\"a\": 1, \"b\": 2, \"c\": 3}; m.keys().size()", 3},
+                {"auto numbers = [1, 2, 3, 4, 5]; auto doubled = []; for (auto n : numbers) { doubled.push(n * 2); } doubled[2]", 6},
+            });
         });
 
-        test("auto_int_truncates_float", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 5;
-                x = 3.9;  // Truncates to 3
-                x
-            )");
-            check_eq(result.as<int>(), 3);
+        test("object_and_handle_slots_take_null_and_keep_their_class", [this]() {
+            const char* test_class = "class TestClass { int value = 42; }";
+            check_values({
+                {"auto obj = shared_ptr<TestClass>(); obj = null; obj == null", true, test_class},
+                {"auto shared = shared_ptr<TestClass>(); auto weak = weak_ptr<TestClass>(shared); shared = null; weak.expired()", true, test_class},
+                {"auto obj = TestObj(); obj = null; obj = TestObj(); obj.x", 1, "class TestObj { int x = 1; }"},
+            });
         });
-
-        // ===== VAR KEYWORD TESTS =====
-
-        test("var_allows_any_type", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var x = 5;
-                x = "hello";
-                x = 3.14;
-                x = true;
-                x
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("var_uninitialized_allows_any", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var x;
-                x = "first";
-                x = 42;
-                x = [1, 2, 3];
-                x.size()
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        test("var_array_methods_work", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var arr = [1, 2, 3, 4, 5];
-                arr.index_of(3)
-            )");
-            check_eq(result.as<int>(), 2);
-        });
-
-        test("var_map_methods_work", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var m = {"a": 1, "b": 2};
-                m.has("a")
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("var_can_change_to_different_container", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var x = [1, 2, 3];
-                x = {"key": "value"};
-                x.has("key")
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        // ===== EXPLICIT TYPE TESTS =====
-
-        test("int_type_enforced", [this]() {
-            auto eng = make_engine();
-            bool caught = false;
-            try {
-                eng->execute(R"(
-                    int x = 5;
-                    x = "hello";
-                )");
-            } catch (const std::exception&) {
-                caught = true;
-            }
-            check_eq(caught, true, "int variable should reject string");
-        });
-
-        test("float_type_accepts_int", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                float x = 3.14;
-                x = 10;  // int widens to float
-                x
-            )");
-            check_eq(result.as<double>(), 10.0);
-        });
-
-        test("bool_converts_truthy", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                bool b = true;
-                b = 0;  // 0 is falsy
-                b
-            )");
-            check_eq(result.as<bool>(), false);
-        });
-
-        // ===== NESTED CONTAINER TESTS =====
-
-        test("auto_nested_array_in_array", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [[1, 2], [3, 4], [5, 6]];
-                arr[1][0]
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        test("auto_nested_map_in_array", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [{"a": 1}, {"b": 2}];
-                arr[0]["a"]
-            )");
-            check_eq(result.as<int>(), 1);
-        });
-
-        test("auto_nested_array_in_map", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto m = {"nums": [10, 20, 30]};
-                m["nums"][1]
-            )");
-            check_eq(result.as<int>(), 20);
-        });
-
-        test("var_nested_containers_reassignable", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var x = [[1, 2], [3, 4]];
-                x = {"key": [5, 6, 7]};
-                x["key"][2]
-            )");
-            check_eq(result.as<int>(), 7);
-        });
-
-        // ===== ARRAY/MAP METHOD COMPATIBILITY =====
-
-        test("auto_array_push_preserves_type", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [1, 2, 3];
-                arr.push(4);
-                arr.push(5);
-                arr.size()
-            )");
-            check_eq(result.as<int>(), 5);
-        });
-
-        test("auto_array_filter_works", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [1, 2, 3, 4, 5, 6];
-                auto evens = array::filter(arr, [](x) { return x % 2 == 0; });
-                evens.size()
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        test("auto_array_sort_works", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [5, 2, 8, 1, 9];
-                arr.sort();
-                arr[0]
-            )");
-            check_eq(result.as<int>(), 1);
-        });
-
-        test("auto_map_keys_values_work", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto m = {"a": 1, "b": 2, "c": 3};
-                m.keys().size()
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        // ===== POINTER TYPE TESTS =====
-
-        test("shared_ptr_null_assignment", [this]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class TestClass {
-                    int value = 42;
-                }
-            )");
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<TestClass>();
-                obj = null;
-                obj == null
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("weak_ptr_null_assignment", [this]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class TestClass {
-                    int value = 42;
-                }
-            )");
-            auto result = eng->execute(R"(
-                auto shared = shared_ptr<TestClass>();
-                auto weak = weak_ptr<TestClass>(shared);
-                shared = null;
-                weak.expired()
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("auto_locks_to_object_type", [this]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class Cat { string name = ""; }
-                class Dog { string name = ""; }
-            )");
-            // This should work - assigning same type
-            auto result = eng->execute(R"(
-                auto c = Cat();
-                c.name = "Whiskers";
-                c.name
-            )");
-            check_eq(result.as<std::string>(), "Whiskers");
-        });
-
-        // ===== FUNCTION PARAMETER TESTS =====
 
         test("function_with_typed_params", [this]() {
             auto eng = make_engine();
@@ -709,69 +549,17 @@ public:
             check_eq(result.as<double>(), 10.0);
         });
 
-        test("function_returns_to_typed_var", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                function get_number() -> int {
-                    return 42;
-                }
-                auto x = get_number();
-                x = 100;  // OK: int to int
-                x
-            )");
-            check_eq(result.as<int>(), 100);
-        });
-
-        test("function_with_var_param_accepts_any", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);  // for to_string
-            auto result = eng->execute(R"(
-                function stringify(var x) -> string {
-                    return to_string(x);
-                }
-                stringify(42) + " " + stringify("hello") + " " + stringify(true)
-            )");
-            check_eq(result.as<std::string>(), "42 hello true");
-        });
-
-        // ===== LOOP TESTS =====
-
-        test("for_loop_int_counter", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto sum = 0;
-                for (int i = 0; i < 5; i = i + 1) {
-                    sum = sum + i;
-                }
-                sum
-            )");
-            check_eq(result.as<int>(), 10);  // 0+1+2+3+4
-        });
-
-        test("for_loop_auto_counter_locks", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto sum = 0;
-                for (auto i = 0; i < 5; i = i + 1) {
-                    sum = sum + i;
-                }
-                sum
-            )");
-            check_eq(result.as<int>(), 10);
-        });
-
-        test("for_loop_var_counter_flexible", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);  // for to_string
-            // var counter can be reassigned to different types (unusual but valid)
-            auto result = eng->execute(R"(
-                var result = "";
-                for (var i = 0; i < 3; i = i + 1) {
-                    result = result + to_string(i);
-                }
-                result
-            )");
-            check_eq(result.as<std::string>(), "012");
+        test("loop_counters_and_range_elements_take_their_declared_kind", [this]() {
+            check_values({
+                {"auto sum = 0; for (int i = 0; i < 5; i = i + 1) { sum = sum + i; } sum", 10},
+                {"auto sum = 0; for (auto i = 0; i < 5; i = i + 1) { sum = sum + i; } sum", 10},
+                {"auto arr = [1, 2, 3, 4, 5]; auto sum = 0; for (auto x : arr) { sum = sum + x; } sum", 15},
+                {"var arr = [1, 2, 3]; var sum = 0; for (var x : arr) { sum = sum + x; } sum", 6},
+                {"var total = 0; auto arr = [1, 2, 3, 4, 5]; for (auto x : arr) { total = total + x; } total", 15},
+            });
+            check_values({
+                {"var result = \"\"; for (var i = 0; i < 3; i = i + 1) { result = result + to_string(i); } result", "012"s},
+            }, true);
         });
 
         // Test that fast path gracefully falls back to slow path when type changes
@@ -793,273 +581,32 @@ public:
             check_eq(result.as<int>(), 5);
         });
 
-        test("range_for_auto_element", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto arr = [1, 2, 3, 4, 5];
-                auto sum = 0;
-                for (auto x : arr) {
-                    sum = sum + x;
-                }
-                sum
-            )");
-            check_eq(result.as<int>(), 15);
+        test("cpp_values_flow_into_auto_slots_and_var_values_into_cpp_calls", [this]() {
+            struct crossing {
+                const char* code;
+                std::function<void()> run;
+            };
+            const crossing rows[] = {
+                {"auto x = cpp_int; x = x + 10; x", [this]() {
+                    auto eng = make_engine();
+                    int cpp_value = 42;
+                    eng->add_global_ref("cpp_int", cpp_value);
+                    check_eq(eng->execute("auto x = cpp_int; x = x + 10; x").as<int>(), 52);
+                }},
+                {"auto s = cpp_str; s = s + \" world\"; s", [this]() {
+                    auto eng = make_engine();
+                    std::string cpp_str = "hello";
+                    eng->add_global_ref("cpp_str", cpp_str);
+                    check_eq(eng->execute("auto s = cpp_str; s = s + \" world\"; s").as<std::string>(), std::string("hello world"));
+                }},
+                {"var x = 10; var y = 20; sum_ints(x, y)", [this]() {
+                    auto eng = make_engine();
+                    eng->add_function("sum_ints", [](int a, int b) { return a + b; });
+                    check_eq(eng->execute("var x = 10; var y = 20; sum_ints(x, y)").as<int>(), 30);
+                }},
+            };
+            check_each(rows, [](const crossing& a_row) { a_row.run(); });
         });
-
-        test("range_for_var_element", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var arr = [1, 2, 3];
-                var sum = 0;
-                for (var x : arr) {
-                    sum = sum + x;
-                }
-                sum
-            )");
-            check_eq(result.as<int>(), 6);
-        });
-
-        // ===== C++ INTEROP TESTS =====
-
-        test("cpp_bound_int_to_script_auto", [this]() {
-            auto eng = make_engine();
-            int cpp_value = 42;
-            eng->add_global_ref("cpp_int", cpp_value);
-
-            auto result = eng->execute(R"(
-                auto x = cpp_int;
-                x = x + 10;
-                x
-            )");
-            check_eq(result.as<int>(), 52);
-        });
-
-        test("cpp_bound_string_to_script_auto", [this]() {
-            auto eng = make_engine();
-            std::string cpp_str = "hello";
-            eng->add_global_ref("cpp_str", cpp_str);
-
-            auto result = eng->execute(R"(
-                auto s = cpp_str;
-                s = s + " world";
-                s
-            )");
-            check_eq(result.as<std::string>(), "hello world");
-        });
-
-        test("script_var_to_cpp_function", [this]() {
-            auto eng = make_engine();
-            eng->add_function("sum_ints", [](int a, int b) { return a + b; });
-
-            auto result = eng->execute(R"(
-                var x = 10;
-                var y = 20;
-                sum_ints(x, y)
-            )");
-            check_eq(result.as<int>(), 30);
-        });
-
-        // ===== COMPOUND ASSIGNMENT TESTS =====
-
-        test("auto_compound_assignment_int", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 10;
-                x += 5;
-                x -= 3;
-                x *= 2;
-                x
-            )");
-            check_eq(result.as<int>(), 24);  // ((10+5)-3)*2
-        });
-
-        test("auto_compound_assignment_float", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 10.0;
-                x += 2.5;
-                x
-            )");
-            check_eq(result.as<double>(), 12.5);
-        });
-
-        test("auto_compound_string_concat", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto s = "hello";
-                s += " ";
-                s += "world";
-                s
-            )");
-            check_eq(result.as<std::string>(), "hello world");
-        });
-
-        // ===== CLASS FIELD TYPE TESTS =====
-
-        test("class_int_field_enforced", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                class Counter {
-                    int count = 0;
-
-                    function increment() {
-                        count = count + 1;
-                    }
-
-                    function get() -> int {
-                        return count;
-                    }
-                }
-
-                auto c = Counter();
-                c.increment();
-                c.increment();
-                c.increment();
-                c.get()
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        test("class_var_field_flexible", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);  // for to_string
-            auto result = eng->execute(R"(
-                class Container {
-                    var data = null;
-
-                    function set(var val) {
-                        data = val;
-                    }
-
-                    function get() {
-                        return data;
-                    }
-                }
-
-                auto c = Container();
-                c.set(42);
-                auto v1 = c.get();
-                c.set("hello");
-                auto v2 = c.get();
-                to_string(v1) + " " + v2
-            )");
-            check_eq(result.as<std::string>(), "42 hello");
-        });
-
-        // ===== TYPE INFERENCE IN EXPRESSIONS =====
-
-        test("auto_infers_from_arithmetic", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 5 + 3;      // int
-                auto y = 5.0 + 3;    // float
-                auto z = x + 2;      // int
-                z
-            )");
-            check_eq(result.as<int>(), 10);
-        });
-
-        test("auto_infers_from_comparison", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto b = 5 > 3;  // bool
-                b
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("auto_infers_from_ternary", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = true ? 42 : 0;
-                x = x + 8;  // Should work since x is int
-                x
-            )");
-            check_eq(result.as<int>(), 50);
-        });
-
-        // ===== LAMBDA CAPTURE TYPE TESTS =====
-
-        test("lambda_captures_typed_var", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 10;
-                auto fn = [=]() { return x * 2; };
-                fn()
-            )");
-            check_eq(result.as<int>(), 20);
-        });
-
-        test("lambda_modifies_var_capture", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var total = 0;
-                auto arr = [1, 2, 3, 4, 5];
-                for (auto x : arr) {
-                    total = total + x;
-                }
-                total
-            )");
-            check_eq(result.as<int>(), 15);
-        });
-
-        // ===== NULL HANDLING =====
-
-        test("null_to_auto_object", [this]() {
-            auto eng = make_engine();
-            eng->execute("class TestObj { int x = 1; }");
-            // Verify null can be assigned to typed object variable
-            // and the variable can be reassigned to a valid object
-            auto result = eng->execute(R"(
-                auto obj = TestObj();
-                obj = null;
-                obj = TestObj();  // Reassign - should work since type is preserved
-                obj.x
-            )");
-            check_eq(result.as<int>(), 1);
-        });
-
-        test("null_preserves_type_for_reassignment", [this]() {
-            auto eng = make_engine();
-            eng->execute("class TestObj { int x = 1; }");
-            auto result = eng->execute(R"(
-                auto obj = TestObj();
-                obj = null;
-                obj = TestObj();  // Can reassign same type
-                obj.x
-            )");
-            check_eq(result.as<int>(), 1);
-        });
-
-        // ===== ARRAY TYPE COMPATIBILITY =====
-
-        test("auto_array_iteration_types", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto numbers = [1, 2, 3, 4, 5];
-                auto doubled = [];
-                for (auto n : numbers) {
-                    doubled.push(n * 2);
-                }
-                doubled[2]
-            )");
-            check_eq(result.as<int>(), 6);
-        });
-
-        test("var_array_mixed_types", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                var arr = [];
-                arr.push(1);
-                arr.push("two");
-                arr.push(3.0);
-                arr.push(true);
-                arr.size()
-            )");
-            check_eq(result.as<int>(), 4);
-        });
-
-        // ===== ERROR MESSAGES =====
 
         test("type_error_message_is_descriptive", [this]() {
             auto eng = make_engine();
@@ -1083,67 +630,25 @@ public:
                   "Error should indicate type issue: " + error_msg);
         });
 
-        // ===== SPECIAL CASES =====
-
-        test("bool_to_int_conversion", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                int x = 0;
-                x = true;   // bool converts to 1
-                auto y = x;
-                x = false;  // bool converts to 0
-                y + x
-            )");
-            check_eq(result.as<int>(), 1);  // 1 + 0
-        });
-
-        test("multiple_auto_declarations_independent", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);  // for to_string
-            auto result = eng->execute(R"(
-                auto a = 5;
-                auto b = "hello";
-                auto c = 3.14;
-                auto d = true;
-
-                a = 10;      // OK
-                b = "world"; // OK
-                c = 2.0;     // OK
-                d = false;   // OK
-
-                to_string(a) + " " + b + " " + to_string(c) + " " + to_string(d)
-            )");
-            // std::to_string for floats includes trailing zeros: "2.0"
-            check_eq(result.as<std::string>(), "10 world 2.0 false");
-        });
-
-        test("nested_scope_same_name_different_type", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
-                auto x = 5;  // outer x is int
-                {
-                    auto x = "hello";  // inner x is string (shadows outer)
-                    x = "world";       // OK for inner
-                }
-                x = 10;  // OK for outer int
-                x
-            )");
-            check_eq(result.as<int>(), 10);
-        });
-
-        // ===== CLASS TYPE ENFORCEMENT =====
-        // These tests verify that the type system correctly handles script class types
-
-        test("class_type_same_class_allowed", [this]() {
-            auto eng = make_engine();
-            // Assigning same class type should always work
-            auto result = eng->execute(R"(
-                class Dog { var name = "Fido"; }
-                auto pet = Dog();
-                pet = Dog();  // Same type - OK
-                pet.name
-            )");
-            check_eq(result.as<std::string>(), "Fido");
+        test("a_class_slot_takes_its_class_or_a_subclass_and_rejects_the_rest", [this]() {
+            check_values({
+                {"class Dog { var name = \"Fido\"; } auto pet = Dog(); pet = Dog(); pet.name", "Fido"s},
+                {"class Dog { var name = \"Fido\"; } class Cat { var name = \"Whiskers\"; } var pet = Dog(); pet = Cat(); pet.name", "Whiskers"s},
+                {"class Animal { var species = \"unknown\"; } class Bird : Animal { var canFly = true; } auto pet = Animal(); pet = Bird(); pet.species", "unknown"s},
+                {"class Dog { var name = \"Fido\"; } auto pet = Dog(); pet = null; pet = Dog(); pet.name", "Fido"s},
+                {"class Entity { var id = 0; } class LivingEntity : Entity { var health = 100; } class Player : LivingEntity { var score = 0; } "
+                 "auto entity = Entity(); entity = Player(); entity.id", 0},
+                {"auto c = Cat(); c.name = \"Whiskers\"; c.name", "Whiskers"s, "class Cat { string name = \"\"; } class Dog { string name = \"\"; }"},
+                {"class Counter { int count = 0; function increment() { count = count + 1; } function get() -> int { return count; } } "
+                 "auto c = Counter(); c.increment(); c.increment(); c.increment(); c.get()", 3},
+            });
+            check_rejected({
+                {"class Animal { var species = \"unknown\"; } class Bird : Animal { var canFly = true; } auto bird = Bird(); bird = Animal();"},
+                {"class Dog { var name = \"Fido\"; } class Cat { var name = \"Whiskers\"; } auto pet = Dog(); pet = null; pet = Cat();"},
+                {"class Point2D { var x = 0; var y = 0; } class Vector2D { var x = 0; var y = 0; } auto p = Point2D(); p = Vector2D();"},
+                {"class Animal { var name = \"\"; } class Dog : Animal { var breed = \"mutt\"; } class Cat : Animal { var indoor = true; } auto pet = Dog(); pet = Cat();"},
+                {"class TypeA { var a = 1; } class TypeB { var b = 2; } auto x = TypeA(); auto y = TypeB(); x = y;"},
+            });
         });
 
         test("class_type_different_class_rejected", [this]() {
@@ -1169,131 +674,6 @@ public:
             check(threw, "Expected type error when assigning Cat to Dog variable");
         });
 
-        test("class_type_var_allows_any_class", [this]() {
-            auto eng = make_engine();
-            // 'var' should allow any class type
-            auto result = eng->execute(R"(
-                class Dog { var name = "Fido"; }
-                class Cat { var name = "Whiskers"; }
-                var pet = Dog();
-                pet = Cat();  // var allows any type
-                pet.name
-            )");
-            check_eq(result.as<std::string>(), "Whiskers");
-        });
-
-        test("class_inheritance_child_to_parent_allowed", [this]() {
-            auto eng = make_engine();
-            // Assigning derived class to base class variable should work (Liskov)
-            auto result = eng->execute(R"(
-                class Animal { var species = "unknown"; }
-                class Bird : Animal { var canFly = true; }
-                auto pet = Animal();
-                pet = Bird();  // Bird IS-A Animal - should be allowed
-                pet.species
-            )");
-            check_eq(result.as<std::string>(), "unknown");
-        });
-
-        test("class_inheritance_parent_to_child_rejected", [this]() {
-            auto eng = make_engine();
-            // Assigning base class to derived class variable should FAIL
-            bool threw = false;
-            try {
-                eng->execute(R"(
-                    class Animal { var species = "unknown"; }
-                    class Bird : Animal { var canFly = true; }
-                    auto bird = Bird();
-                    bird = Animal();  // Animal is NOT-A Bird - SHOULD FAIL
-                )");
-            } catch (const std::exception&) {
-                threw = true;
-            }
-            check(threw, "Expected type error when assigning Animal to Bird variable");
-        });
-
-        test("class_type_null_preserves_type", [this]() {
-            auto eng = make_engine();
-            // After assigning null, should still enforce original type
-            bool threw = false;
-            try {
-                eng->execute(R"(
-                    class Dog { var name = "Fido"; }
-                    class Cat { var name = "Whiskers"; }
-                    auto pet = Dog();
-                    pet = null;   // OK - null is allowed for objects
-                    pet = Cat();  // SHOULD FAIL - pet is still typed as Dog
-                )");
-            } catch (const std::exception&) {
-                threw = true;
-            }
-            check(threw, "Expected type error when assigning Cat to Dog variable (even after null)");
-        });
-
-        test("class_type_reassign_after_null_same_type", [this]() {
-            auto eng = make_engine();
-            // After null, can reassign same type
-            auto result = eng->execute(R"(
-                class Dog { var name = "Fido"; }
-                auto pet = Dog();
-                pet = null;
-                pet = Dog();  // Same type - OK
-                pet.name
-            )");
-            check_eq(result.as<std::string>(), "Fido");
-        });
-
-        test("class_type_unrelated_classes_with_same_fields_rejected", [this]() {
-            auto eng = make_engine();
-            // Classes with identical structure are still different types
-            bool threw = false;
-            try {
-                eng->execute(R"(
-                    class Point2D { var x = 0; var y = 0; }
-                    class Vector2D { var x = 0; var y = 0; }  // Same fields!
-                    auto p = Point2D();
-                    p = Vector2D();  // SHOULD FAIL - structural equality != type equality
-                )");
-            } catch (const std::exception&) {
-                threw = true;
-            }
-            check(threw, "Expected type error for structurally equivalent but different classes");
-        });
-
-        test("class_type_sibling_classes_rejected", [this]() {
-            auto eng = make_engine();
-            // Sibling classes (same parent) are not assignable to each other
-            bool threw = false;
-            try {
-                eng->execute(R"(
-                    class Animal { var name = ""; }
-                    class Dog : Animal { var breed = "mutt"; }
-                    class Cat : Animal { var indoor = true; }
-                    auto pet = Dog();
-                    pet = Cat();  // SHOULD FAIL - Cat is not a Dog (even though both are Animals)
-                )");
-            } catch (const std::exception&) {
-                threw = true;
-            }
-            check(threw, "Expected type error when assigning Cat to Dog (sibling classes)");
-        });
-
-        test("class_type_deep_inheritance_allowed", [this]() {
-            auto eng = make_engine();
-            // Multi-level inheritance should work
-            auto result = eng->execute(R"(
-                class Entity { var id = 0; }
-                class LivingEntity : Entity { var health = 100; }
-                class Player : LivingEntity { var score = 0; }
-
-                auto entity = Entity();
-                entity = Player();  // Player IS-A Entity (via LivingEntity)
-                entity.id
-            )");
-            check_eq(result.as<int>(), 0);
-        });
-
-        // ===== ASSIGNMENT OPERATOR TYPE CONVERSIONS =====
         // These tests verify that custom assignment operators enable type conversions
 
         // TODO: Parser doesn't support "function operator=(Type arg)" syntax yet
@@ -1358,25 +738,6 @@ public:
         // TODO: These C++ dynamic_binder tests require assignment_from<T> API to be implemented
         // test("cpp_class_assignment_operator_conversion") - needs dynamic_binder::assignment_from<T>
         // test("cpp_class_assignment_from_script_class") - needs dynamic_binder::assignment_from_script
-
-        test("assignment_operator_not_found_rejected", [this]() {
-            auto eng = make_engine();
-            // When no valid assignment operator exists, should fail
-            bool threw = false;
-            try {
-                eng->execute(R"(
-                    class TypeA { var a = 1; }
-                    class TypeB { var b = 2; }  // No assignment operator for TypeA
-
-                    auto x = TypeA();
-                    auto y = TypeB();
-                    x = y;  // No conversion available - SHOULD FAIL
-                )");
-            } catch (const std::exception&) {
-                threw = true;
-            }
-            check(threw, "Expected type error when no assignment operator exists");
-        });
 
         test("script_class_implicit_conversion_via_constructor", [this]() {
             auto eng = make_engine();

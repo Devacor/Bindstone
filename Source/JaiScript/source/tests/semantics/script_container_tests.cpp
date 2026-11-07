@@ -50,144 +50,87 @@ public:
     }
     
     void forge_tests() override {
-        test("bound_array_reference_semantics", [this]() {
+        test("a_bound_array_views_its_array_by_reference_and_owns_a_copy_by_value", [this]() {
             auto eng = make_engine();
-
             script_value arr_val = eng->make_array();
             auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(10));
-            arr.push_back(eng->make_value(20));
-            arr.push_back(eng->make_value(30));
+            arr.push_back(eng->make_value(1));
+            arr.push_back(eng->make_value(2));
+            arr.push_back(eng->make_value(3));
 
             bound_array<int> arr_ref(arr_val, eng.get());
             check_eq(arr_ref.size(), 3u);
             check(!arr_ref.is_owned());
-
-            arr_ref.push_back(40);
-            check_eq(arr_val.as_array().size(), 4u);
-            check_eq(arr_ref.size(), 4u);
-        });
-        
-        test("bound_array_value_semantics", [this]() {
-            auto eng = make_engine();
-
-            script_value arr_val = eng->make_array();
-            auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(10));
-            arr.push_back(eng->make_value(20));
-
-            bound_array<int> arr_copy(arr_val);
-            check_eq(arr_copy.size(), 2u);
-            check(arr_copy.is_owned());
-
-            arr_copy.push_back(30);
-            check_eq(arr_val.as_array().size(), 2u);
-            check_eq(arr_copy.size(), 3u);
-        });
-        
-        test("bound_array_copy_constructor", [this]() {
-            auto eng = make_engine();
-            
-            script_value arr_val = eng->make_array();
-            auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(100));
-
-            bound_array<int> arr_ref(arr_val, eng.get());
-
-            // Copy from reference creates owned copy
-            bound_array<int> arr_copy(arr_ref);
-            check(arr_copy.is_owned());
-            
-            arr_copy.push_back(200);
-            check_eq(arr_ref.size(), 1u);  // Original unchanged
-            check_eq(arr_copy.size(), 2u);
-        });
-        
-        test("bound_array_function_parameters", [this]() {
-            auto eng = make_engine();
-            
-            script_value arr_val = eng->make_array();
-            auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(1));
-            arr.push_back(eng->make_value(2));
-            arr.push_back(eng->make_value(3));
-            
-            bound_array<int> arr_ref(arr_val, eng.get());
-
-            // By value - should copy
-            auto by_value = [](bound_array<int> arr) {
-                arr.push_back(999);
-                return arr.size();
-            };
-            
-            size_t new_size = by_value(arr_ref);
-            check_eq(new_size, 4u);
-            check_eq(arr_ref.size(), 3u);  // Original unchanged
-            
-            // By reference - no copy
-            auto by_ref = [](bound_array<int>& arr) {
-                arr.push_back(777);
-                return arr.size();
-            };
-            
-            new_size = by_ref(arr_ref);
-            check_eq(new_size, 4u);
-            check_eq(arr_ref.size(), 4u);  // Original changed
-            
-            // By const reference - no copy
-            auto by_const_ref = [](const bound_array<int>& arr) {
-                int sum = 0;
-                for (int val : arr) {
-                    sum += val;
-                }
-                return sum;
-            };
-            
-            int sum = by_const_ref(arr_ref);
-            check_eq(sum, 1 + 2 + 3 + 777);
-        });
-        
-        test("bound_array_element_access", [this]() {
-            auto eng = make_engine();
-            
-            script_value arr_val = eng->make_array();
-            auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(10));
-            arr.push_back(eng->make_value(20));
-            
-            bound_array<int> barr(arr_val, eng.get());
-
-            check_eq(barr[0], 10);
-            check_eq(barr[1], 20);
-
-            barr[0] = 100;
-            check_eq(barr[0], 100);
-            check_eq(arr_val.as_array()[0].as<int>(), 100);  // Original modified
-        });
-        
-        test("bound_array_iteration", [this]() {
-            auto eng = make_engine();
-            
-            script_value arr_val = eng->make_array();
-            auto& arr = arr_val.as_array();
-            arr.push_back(eng->make_value(1));
-            arr.push_back(eng->make_value(2));
-            arr.push_back(eng->make_value(3));
-            
-            bound_array<int> barr(arr_val, eng.get());
-
             int sum = 0;
-            for (int val : barr) {
+            for (int val : arr_ref) {
                 sum += val;
             }
             check_eq(sum, 6);
-
-            auto it = barr.begin();
+            auto it = arr_ref.begin();
             check_eq(*it, 1);
             ++it;
             check_eq(*it, 2);
+
+            bound_array<int> arr_copy(arr_val);
+            check(arr_copy.is_owned());
+            arr_copy.push_back(30);
+            check_eq(arr_val.as_array().size(), 3u);
+            check_eq(arr_copy.size(), 4u);
+
+            bound_array<int> copy_of_ref(arr_ref);
+            check(copy_of_ref.is_owned());
+            copy_of_ref.push_back(200);
+            check_eq(arr_ref.size(), 3u);
+            check_eq(copy_of_ref.size(), 4u);
+
+            auto by_value = [](bound_array<int> a_arr) {
+                a_arr.push_back(999);
+                return a_arr.size();
+            };
+            check_eq(by_value(arr_ref), 4u);
+            check_eq(arr_ref.size(), 3u);
+
+            auto by_ref = [](bound_array<int>& a_arr) {
+                a_arr.push_back(777);
+                return a_arr.size();
+            };
+            check_eq(by_ref(arr_ref), 4u);
+            check_eq(arr_ref.size(), 4u);
+            check_eq(arr_val.as_array().size(), 4u);
+
+            auto by_const_ref = [](const bound_array<int>& a_arr) {
+                int result = 0;
+                for (int val : a_arr) {
+                    result += val;
+                }
+                return result;
+            };
+            check_eq(by_const_ref(arr_ref), 1 + 2 + 3 + 777);
+
+            check_eq(arr_ref[0], 1);
+            arr_ref[0] = 100;
+            check_eq(arr_ref[0], 100);
+            check_eq(arr_val.as_array()[0].as<int>(), 100);
         });
-        
+
+        // move and move-assignment carry engine_ref_: the moved-to array builds its next element through it
+        test("move_preserves_engine_ref", [this]() {
+            auto eng = make_engine();
+            script_value holder = script_value::make_array(nullptr, eng.get());
+            auto& backing = const_cast<std::vector<script_value>&>(holder.as_array());
+
+            bound_array<script_int> ref(holder, eng.get());
+            bound_array<script_int> moved = std::move(ref);
+            moved.push_back((script_int)7);
+            check_eq((size_t)1, backing.size());
+            check(backing[0].get_type_info().get() == detail::engine_access::get_type_info_int(*eng), "moved bound_array lost its engine_ref_");
+
+            bound_array<script_int> assigned(holder, eng.get());
+            assigned = std::move(moved);
+            assigned.push_back((script_int)9);
+            check(backing.back().get_type_info().get() == detail::engine_access::get_type_info_int(*eng), "move-assigned bound_array lost its engine_ref_");
+        });
+
         test("bound_array_custom_objects", [this]() {
             auto eng = make_engine();
             
@@ -220,128 +163,43 @@ public:
             check_eq(TestWidget::copy_count, 2);  // Deep copy of elements
         });
         
-        test("bound_map_reference_semantics", [this]() {
+        test("a_bound_map_views_its_map_by_reference_and_owns_a_copy_by_value", [this]() {
             auto eng = make_engine();
-
-            script_value map_val = eng->make_map();
-            auto& map = map_val.as_map();
-            map.insert_or_assign(eng->make_value("one"), eng->make_value(1));
-            map.insert_or_assign(eng->make_value("two"), eng->make_value(2));
-
-            bound_map<std::string, int> map_ref(map_val.as_map(), eng.get());
-            check_eq(map_ref.size(), 2u);
-            check(!map_ref.is_owned());
-
-            map_ref.insert("three", 3);
-            check_eq(map_val.as_map().size(), 3u);
-            check_eq(map_ref.size(), 3u);
-        });
-        
-        test("bound_map_value_semantics", [this]() {
-            auto eng = make_engine();
-            
-            script_value map_val = eng->make_map();
-            auto& jmap = map_val.as_map();
-            jmap.insert_or_assign(eng->make_value("alpha"), eng->make_value(10));
-            jmap.insert_or_assign(eng->make_value("beta"), eng->make_value(20));
-
-            bound_map<std::string, int> map_copy(map_val);
-            check_eq(map_copy.size(), 2u);
-            check(map_copy.is_owned());
-
-            map_copy.insert("gamma", 30);
-            check_eq(map_val.as_map().size(), 2u);
-            check_eq(map_copy.size(), 3u);
-        });
-        
-        test("bound_map_element_access", [this]() {
-            auto eng = make_engine();
-            
             script_value map_val = eng->make_map();
             auto& jmap = map_val.as_map();
             jmap.insert_or_assign(eng->make_value("x"), eng->make_value(100));
             jmap.insert_or_assign(eng->make_value("y"), eng->make_value(200));
-            
-            bound_map<std::string, int> map(map_val.as_map(), eng.get());
 
+            bound_map<std::string, int> map_copy(map_val);
+            check_eq(map_copy.size(), 2u);
+            check(map_copy.is_owned());
+            map_copy.insert("gamma", 30);
+            check_eq(map_val.as_map().size(), 2u);
+            check_eq(map_copy.size(), 3u);
+
+            bound_map<std::string, int> map(map_val.as_map(), eng.get());
+            check_eq(map.size(), 2u);
+            check(!map.is_owned());
             check_eq(map.at("x"), 100);
             check_eq(map.at("y"), 200);
             check(map.contains("x"));
             check(!map.contains("z"));
-
-            map["x"] = 1000;
-            check_eq(map.at("x"), 1000);
-
-            map["z"] = 300;
-            check_eq(map.size(), 3u);
-            check_eq(map.at("z"), 300);
-        });
-        
-        test("bound_map_iteration", [this]() {
-            auto eng = make_engine();
-            
-            script_value map_val = eng->make_map();
-            auto& jmap = map_val.as_map();
-            jmap.insert_or_assign(eng->make_value("a"), eng->make_value(1));
-            jmap.insert_or_assign(eng->make_value("b"), eng->make_value(2));
-            jmap.insert_or_assign(eng->make_value("c"), eng->make_value(3));
-            
-            bound_map<std::string, int> map(map_val.as_map(), eng.get());
-
             int sum = 0;
             for (const auto& [key, value] : map) {
                 sum += value;
             }
-            check_eq(sum, 6);
+            check_eq(sum, 300);
+
+            map["x"] = 1000;
+            check_eq(map.at("x"), 1000);
+            map["z"] = 300;
+            check_eq(map.size(), 3u);
+            check_eq(map.at("z"), 300);
+            map.insert("three", 3);
+            check_eq(map_val.as_map().size(), 4u);
+            check_eq(map.size(), 4u);
         });
-        
-        // Commented out for now as they test compile-time failures
-        
-        /*
-        test("reject_vector_reference_bindings", [this]() {
-            auto eng = make_engine();
-            
-            // These should compile and work
-            eng->add_function("take_vector_by_value", 
-                [](std::vector<int> vec) { return vec.size(); });
-            
-            eng->add_function("take_bound_array_ref", 
-                [](bound_array<int>& arr) { arr.push_back(42); });
-            
-            eng->add_function("take_bound_array_const_ref", 
-                [](const bound_array<int>& arr) { return arr.size(); });
-            
-            // These should fail to compile if uncommented:
-            // eng->add_function("bad_const_vector_ref", 
-            //     [](const std::vector<int>& vec) { return vec.size(); });
-            
-            // eng->add_function("bad_vector_ref", 
-            //     [](std::vector<int>& vec) { vec.push_back(42); });
-            
-            check(true);  // If we get here, rejection is working
-        });
-        
-        test("reject_map_reference_bindings", [this]() {
-            auto eng = make_engine();
-            
-            // These should compile and work
-            eng->add_function("take_map_by_value", 
-                [](std::map<std::string, int> m) { return m.size(); });
-            
-            eng->add_function("take_bound_map_ref", 
-                [](bound_map<std::string, int>& m) { m.insert("key", 42); });
-            
-            // These should fail to compile if uncommented:
-            // eng->add_function("bad_const_map_ref", 
-            //     [](const std::map<std::string, int>& m) { return m.size(); });
-            
-            // eng->add_function("bad_map_ref", 
-            //     [](std::map<std::string, int>& m) { m["key"] = 42; });
-            
-            check(true);  // If we get here, rejection is working
-        });
-        */
-        
+
         test("bound_array_zero_copy_shares_the_node", [this]() {
             auto eng = make_engine();
 

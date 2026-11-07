@@ -246,7 +246,7 @@ function shim_run_live(int bench_frames) -> int {
 	bool bench = bench_frames > 0;
 	if (bench) { gloom_force_autopilot(); }
 	gloom_boot(w, h);
-	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", true);   // alt screen, hide cursor
+	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", skip_newline);   // alt screen, hide cursor
 	// steady pacing as gloom_host.cpp's frame_pacer: frames start on a grid of
 	// deadlines, and a dt within a sixth of the period counts as exactly one period
 	float period = 1.0 / SHIM_FPS;
@@ -276,7 +276,7 @@ function shim_run_live(int bench_frames) -> int {
 		split.start();
 		var text = gloom_frame(dt, key, fps_ema, last_sim, last_draw);
 		last_sim = split.delta() * 1000;
-		print(ESC + "[H" + text + ESC + "[0m", true);
+		print(ESC + "[H" + text + ESC + "[0m", skip_newline);
 		last_draw = split.delta() * 1000;
 
 		if (bench) {
@@ -292,7 +292,7 @@ function shim_run_live(int bench_frames) -> int {
 		if (after > deadline + period) { deadline = after; }
 		else if (deadline > after) { sleep(deadline - after); }
 	}
-	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", true);   // restore screen + cursor
+	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);   // restore screen + cursor
 	if (bench && done > 0) {
 		float fr = 1.0 * done;
 		print(`bench: ${done} frames @ ${w}x${h}`);

@@ -86,7 +86,6 @@ function hud_status_row() -> string {
 // five panel rows: vitals | ammo | face | weapon art
 function hud_panel_rows(float fps, float ms_sim, float ms_draw) -> var {
 	var w = WEAPONS[G.weapon];
-	int ammo_now = G.ammo[w["ammo"]];
 	var face = FACES[face_name()];
 
 	// weapon art with walk-bob shift and fire frame

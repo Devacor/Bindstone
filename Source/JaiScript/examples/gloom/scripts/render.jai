@@ -302,10 +302,8 @@ function sprite_lut(string name, int band, int flash) -> array<int> {
 }
 
 // -------------------------------------------------------------- the view ----
-// var& DECLARATIONS can't bind member expressions (only locals/self-fields),
-// but member expressions ARE valid lvalue ARGUMENTS — so the entry point binds
-// G's buffers into reference parameters once and everything below works on
-// plain locals. (Language feedback: the decl/arg asymmetry is surprising.)
+// The entry point hands G's buffers to reference parameters once, so every
+// stage below works on plain locals.
 function render_view() -> var {
 	return render_view_impl(PIX, G.zbuf, G.rowparts);
 }
@@ -339,9 +337,8 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		t.planex = planex;
 		t.planey = planey;
 	}
-	// Serial unless workers are EXPLICITLY requested: at this grain the region
-	// barrier costs more than the ray work it distributes (measured: serial
-	// 3.42 ms/tick beats every worker count)
+	// serial unless workers are requested: at this grain the region barrier
+	// costs more than the ray work it distributes
 	if (HOST_WORKERS <= 0) {
 		for (auto& t : WALL_WS) { gloom_ray_chunk_step(t); }
 	} else {

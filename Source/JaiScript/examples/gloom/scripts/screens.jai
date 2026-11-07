@@ -108,12 +108,11 @@ function showcase_hud_rows(float fps, float ms_sim, float ms_draw) -> array<stri
 	stat_block(c, x_armor, stat_w, "ARMOR", G.armor, G.armor, 100, blue_digits, rgb_idx(90, 150, 240));
 
 	c.rect(x_face, 2, 12, 10, rgb_idx(18, 16, 22));
-	var& face = FACES_ART[face_name()];
 	if (HOST_ASCII) {
 		var& lines = FACES[face_name()];
 		for (int r = 0; r < 5; ++r) { c.text(x_face + 1, r + 1, lines[r], rgb_idx(226, 180, 140)); }
 	} else {
-		c.art(face, x_face + 1, 2, FACE_LUTS[face_name()]);
+		c.art(FACES_ART[face_name()], x_face + 1, 2, FACE_LUTS[face_name()]);
 	}
 
 	var weapon = WEAPONS[G.weapon];

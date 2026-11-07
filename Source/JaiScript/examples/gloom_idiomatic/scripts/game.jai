@@ -1,9 +1,23 @@
-// Game: the orchestrator. Owns the subsystem objects (World, Player,
-// ParticleSystem, Renderer, Hud, Pilot) plus the entity registries and
-// episode flow — where canonical kept a 50-field blob and free-function
-// pipelines. The fixed-timestep tick delegates to subsystem methods.
-// G is a TYPED shared_ptr global (declared under the class): reference
-// semantics by construction — no accidental deep copy can fork the world.
+// Game: owns the subsystems (World, Player, ParticleSystem, Renderer, Hud,
+// Pilot), the entity registries and the episode's flow, and runs the
+// fixed-timestep tick. G, declared under the class, is a typed shared_ptr:
+// every use of it reaches the one world.
+
+// one tick of intent, from the keyboard or the autopilot
+class Input {
+public:
+	bool fwd = false;
+	bool back = false;
+	bool sl = false;
+	bool sr = false;
+	bool tl = false;
+	bool tr = false;
+	bool run = false;
+	bool fire = false;
+	bool use = false;
+	int weapon = -1;
+	bool start = false;
+}
 
 class Game {
 public:
@@ -23,17 +37,17 @@ public:
 	int map_i = 0;
 
 	// subsystems
-	var world = null;      // shared_ptr<World>
-	var player = null;     // shared_ptr<Player>
-	var fx = null;         // shared_ptr<ParticleSystem>
-	var renderer = null;   // shared_ptr<Renderer>
-	var hud = null;        // shared_ptr<Hud>
-	var pilot = null;      // shared_ptr<Pilot>
+	shared_ptr<World> world = null;
+	shared_ptr<Player> player = null;
+	shared_ptr<ParticleSystem> fx = null;
+	shared_ptr<Renderer> renderer = null;
+	shared_ptr<Hud> hud = null;
+	shared_ptr<Pilot> pilot = null;
 
-	// world content (registries of handles; iterate with auto&)
-	var enemies = [];
-	var items = [];
-	var shots = [];
+	// what is on the floor
+	array<shared_ptr<Enemy>> enemies = [];
+	array<shared_ptr<Item>> items = [];
+	array<shared_ptr<Shot>> shots = [];
 	int noise = 0;         // alertness: gunfire/doors wake nearby enemies
 	bool warden_down = false;
 
@@ -50,7 +64,7 @@ public:
 	int ep_ticks = 0;
 	int deaths = 0;
 
-	var input = {};
+	shared_ptr<Input> input = null;   // this tick's
 
 	Game(int w_, int h_) {
 		w = w_;
@@ -144,30 +158,29 @@ public:
 		shots.push(new Shot(kind, ax + dx * 0.45, ay + dy * 0.45, dx * speed, dy * speed));
 	}
 
-	// deterministic input for this tick, human or coroutine
-	function gather_input() -> var {
+	// this tick's intent, from the keyboard or the autopilot
+	shared_ptr<Input> gather_input() {
 		if (autopilot) { return pilot.next(); }
-		var fire_edge = frame_key == " " || frame_key == "enter";
-		return {
-			"fwd": key_down("w") || key_down("up"),
-			"back": key_down("s") || key_down("down"),
-			"sl": key_down("a"),
-			"sr": key_down("d"),
-			"tl": key_down("left"),
-			"tr": key_down("right"),
-			"run": key_down("shift"),
-			"fire": key_down("space") || key_down("ctrl"),
-			"use": frame_key == "e",
-			"weapon": frame_key == "1" ? 0 : (frame_key == "2" ? 1 : (frame_key == "3" ? 2 : -1)),
-			"start": fire_edge || key_down("space") || key_down("ctrl")
-		};
+		shared_ptr<Input> keys = new Input();
+		keys.fwd = key_down("w") || key_down("up");
+		keys.back = key_down("s") || key_down("down");
+		keys.sl = key_down("a");
+		keys.sr = key_down("d");
+		keys.tl = key_down("left");
+		keys.tr = key_down("right");
+		keys.run = key_down("shift");
+		keys.fire = key_down("space") || key_down("ctrl");
+		keys.use = frame_key == "e";
+		keys.weapon = frame_key == "1" ? 0 : (frame_key == "2" ? 1 : (frame_key == "3" ? 2 : -1));
+		keys.start = frame_key == " " || frame_key == "enter" || keys.fire;
+		return keys;
 	}
 
 	// ------------------------------------------------------------ the tick --
 	void run_tick() {
 		tick = tick + 1;
 		input = gather_input();
-		var start_pressed = input["start"];
+		bool start_pressed = input.start;
 		if (mode == 0) {
 			mode_t = mode_t + 1;
 			if (start_pressed && mode_t > 8) { start_episode(); }
@@ -197,24 +210,22 @@ public:
 		}
 
 		// --- play ---
-		int wsel = input["weapon"];
+		int wsel = input.weapon;
 		if (wsel >= 0 && player.have[wsel] == 1 && wsel != player.weapon) {
 			player.weapon = wsel;
 			player.cooldown = 8;
 			hud.show(`${WEAPONS[wsel].name} ready`, "97");
 		}
 		if (frame_key == "m") { renderer.automap = !renderer.automap; }
-		var use_pressed = input["use"];
-		if (use_pressed) { player.use_action(); }
+		if (input.use) { player.use_action(); }
 		player.move(input);
-		var fire_held = input["fire"];
-		if (fire_held) { player.fire(); }
+		if (input.fire) { player.fire(); }
 
 		player.tick_timers();
 		if (noise > 0) { noise = noise - 1; }
 		hud.update();
 
-		for (auto& e : enemies) { e.tick(); }   // auto& — a by-value binding would tick a deep COPY
+		for (auto& e : enemies) { e.tick(); }
 		update_shots();
 		fx.update();
 		map_ticks = map_ticks + 1;
@@ -222,23 +233,20 @@ public:
 	}
 
 	void update_shots() {
-		var kept = [];
+		array<shared_ptr<Shot>> kept = [];
 		for (int i = 0; i < shots.size(); ++i) {
 			if (shots[i].tick()) { kept.push(shots[i]); }
 		}
 		shots = kept;
-		// glow trail
-		int i2 = 0;
-		for (auto& s : shots) {
-			if ((tick + i2) % 2 == 0) {
-				fx.spawn(s.kind == 1 ? 6 : (s.kind == 2 ? 1 : 6), s.x, s.y, 0.5, 0.0, 0.0, 0.0, 4);
-			}
-			i2 = i2 + 1;
+		// glow trails
+		for (int i = 0; i < shots.size(); ++i) {
+			auto& s = shots[i];
+			if ((tick + i) % 2 == 0) { fx.spawn(s.kind == 2 ? 1 : 6, s.x, s.y, 0.5, 0.0, 0.0, 0.0, 4); }
 		}
 	}
 
 	void accumulate_hash() {
-		var hh = hash;
+		int hh = hash;
 		hh = mix32(hh, tick);
 		hh = mix32(hh, mode * 31 + map_i);
 		hh = mix32(hh, math::itrunc(player.px * 256.0) * 4096 + math::itrunc(player.py * 256.0));
@@ -246,8 +254,8 @@ public:
 		hh = mix32(hh, player.hp * 512 + player.armor);
 		hh = mix32(hh, player.ammo[0] * 65536 + player.ammo[1] * 256 + player.ammo[2]);
 		hh = mix32(hh, player.weapon * 64 + (player.key_r ? 2 : 0) + (player.key_b ? 1 : 0));
-		var live = 0;
-		var acc = 0;
+		int live = 0;
+		int acc = 0;
 		for (auto& e : enemies) {
 			if (!e.alive) { continue; }
 			live = live + 1;
@@ -255,11 +263,10 @@ public:
 		}
 		hh = mix32(hh, live);
 		hh = mix32(hh, acc);
-		var pacc = 0;
+		int pacc = 0;
 		for (auto& p : fx.pool) {
-			int pk = p[0];
-			if (pk == 0) { continue; }
-			pacc = (pacc + pk * 131 + (math::itrunc(p[1] * 16.0) * 61 + math::itrunc(p[2] * 16.0)) * 17 + p[7]) & 0xFFFFFFFF;
+			if (p.kind == 0) { continue; }
+			pacc = (pacc + p.kind * 131 + (math::itrunc(p.x * 16.0) * 61 + math::itrunc(p.y * 16.0)) * 17 + p.life) & 0xFFFFFFFF;
 		}
 		hh = mix32(hh, pacc);
 		hh = mix32(hh, shots.size() * 8191 + kills * 127 + secrets * 31);
@@ -269,14 +276,12 @@ public:
 }
 
 // ------------------------------------------------------------ autopilot -----
-// One coroutine, one yield per tick, every decision from game state + RNG.
-// Fights what it sees, loots what remains, hunts secrets it "remembers",
-// opens what its keys allow, and pulls the exit switch. Idiomatic pass: its
-// own class — the brain handle, the goal memory and the command builder no
-// longer live on the Game blob.
+// One coroutine, one yield per tick, every decision from game state and RNG.
+// It fights what it sees, loots what remains, hunts the secrets it
+// "remembers", opens what its keys allow, and pulls the exit switch.
 class Pilot {
 public:
-	function next() -> var {
+	shared_ptr<Input> next() {
 		if (brain == null || brain.done()) { brain = think(); }
 		return brain.next();
 	}
@@ -285,10 +290,9 @@ private:
 	var brain = null;
 
 	coroutine function think() -> var {
-		var dist_field = [];
+		array<int> dist_field = [];
 		int field_age = 999;
-		int goal_x = -1;
-		int goal_y = -1;
+		math::ivec2 goal = math::ivec2(-1, -1);
 		int strafe_dir = 1;
 		int strafe_t = 0;
 		while (true) {
@@ -348,21 +352,19 @@ private:
 			// periodically so newly opened doors shorten the route; a stale
 			// valve breaks any pathological commitment.
 			field_age = field_age + 1;
-			bool goal_gone = goal_x < 0 || field_age > 240;
-			if (!goal_gone) {
-				// goal completed? (item taken / secret opened / enemy dead handled above)
-				if (G.world.tile_at(goal_x, goal_y) == 0 && math::ifloor(G.player.px) == goal_x && math::ifloor(G.player.py) == goal_y) { goal_gone = true; }
+			bool goal_gone = goal.x < 0 || field_age > 240;
+			if (!goal_gone && G.world.tile_at(goal.x, goal.y) == 0
+					&& math::ifloor(G.player.px) == goal.x && math::ifloor(G.player.py) == goal.y) {
+				goal_gone = true;     // stood on it
 			}
 			if (goal_gone) {
-				var goal = pick_goal();
-				goal_x = goal[0];
-				goal_y = goal[1];
-				dist_field = G.world.bfs_field(goal_x, goal_y, G.player.key_r, G.player.key_b);
+				goal = pick_goal();
+				dist_field = G.world.bfs_field(goal, G.player.key_r, G.player.key_b);
 				field_age = 0;
 			} else if (field_age % 45 == 0) {
-				dist_field = G.world.bfs_field(goal_x, goal_y, G.player.key_r, G.player.key_b);
+				dist_field = G.world.bfs_field(goal, G.player.key_r, G.player.key_b);
 			}
-			if (goal_x < 0) {
+			if (goal.x < 0) {
 				// nothing to want: spin slowly (a lost pilot is still deterministic)
 				yield command(false, false, false, false, 1, false, false, -1, false);
 				continue;
@@ -371,23 +373,22 @@ private:
 			int mh = G.world.mh;
 			int ptx = math::ifloor(G.player.px);
 			int pty = math::ifloor(G.player.py);
-			var here = dist_field[pty * mw + ptx];
+			int here = dist_field[pty * mw + ptx];
 			if (here < 0) {
 				// goal unreachable from here (shouldn't happen): drop it
-				goal_x = -1;
+				goal = math::ivec2(-1, -1);
 				yield command(false, false, false, false, 0, false, false, -1, false);
 				continue;
 			}
 			// pick the walkable-or-door neighbor closest to the goal
 			int nx = ptx;
 			int ny = pty;
-			var bestv = here;
-			var dirs = [[1, 0], [-1, 0], [0, 1], [0, -1]];
-			for (auto& d2 : dirs) {
-				int cx = ptx + d2[0];
-				int cy = pty + d2[1];
+			int bestv = here;
+			for (auto& step : NEIGHBORS) {
+				int cx = ptx + step.x;
+				int cy = pty + step.y;
 				if (cx < 0 || cy < 0 || cx >= mw || cy >= mh) { continue; }
-				var v = dist_field[cy * mw + cx];
+				int v = dist_field[cy * mw + cx];
 				if (v >= 0 && v < bestv) {
 					bestv = v;
 					nx = cx;
@@ -410,55 +411,56 @@ private:
 		}
 	}
 
-	function command(bool fwd, bool back, bool sl, bool sr, int turn, bool fire, bool use, int wsel, bool start) -> var {
-		return {
-			"fwd": fwd, "back": back, "sl": sl, "sr": sr,
-			"tl": turn < 0, "tr": turn > 0,
-			"run": true, "fire": fire, "use": use,
-			"weapon": wsel, "start": start
-		};
+	shared_ptr<Input> command(bool fwd, bool back, bool sl, bool sr, int turn, bool fire, bool use, int wsel, bool start) {
+		shared_ptr<Input> intent = new Input();
+		intent.fwd = fwd;
+		intent.back = back;
+		intent.sl = sl;
+		intent.sr = sr;
+		intent.tl = turn < 0;
+		intent.tr = turn > 0;
+		intent.run = true;
+		intent.fire = fire;
+		intent.use = use;
+		intent.weapon = wsel;
+		intent.start = start;
+		return intent;
 	}
 
 	// goal priority: medkits when hurting -> live enemies -> loot -> unfound
 	// secrets (the pilot "remembers the walls") -> keyed doors -> the exit
-	function pick_goal() -> var {
+	math::ivec2 pick_goal() {
 		if (G.player.hp < 55) {
-			var med = nearest_item([0, 1, 10]);
-			if (med[0] >= 0) { return med; }
+			math::ivec2 med = nearest_item([0, 1, 10]);
+			if (med.x >= 0) { return med; }
 		}
-		var hunt_x = -1;
-		var hunt_y = -1;
+		math::ivec2 hunt = math::ivec2(-1, -1);
 		float hd = 9999.0;
 		for (auto& e : G.enemies) {
 			if (!e.alive) { continue; }
 			float d = dist2(e.x, e.y, G.player.px, G.player.py);
 			if (d < hd) {
 				hd = d;
-				hunt_x = math::ifloor(e.x);
-				hunt_y = math::ifloor(e.y);
+				hunt = math::ivec2(math::ifloor(e.x), math::ifloor(e.y));
 			}
 		}
-		if (hunt_x >= 0) { return [hunt_x, hunt_y]; }
-		var loot = nearest_item([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
-		if (loot[0] >= 0) { return loot; }
+		if (hunt.x >= 0) { return hunt; }
+		math::ivec2 loot = nearest_item([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+		if (loot.x >= 0) { return loot; }
 		if (G.secrets < G.secret_total) {
-			var sgoal = nearest_secret();
-			var sx = sgoal[0];
-			if (sx >= 0) { return sgoal; }
+			math::ivec2 secret = nearest_secret();
+			if (secret.x >= 0) { return secret; }
 		}
 		return exit_tile();
 	}
 
-	function nearest_item(var kinds) -> var {
-		int bx = -1;
-		int by = -1;
+	math::ivec2 nearest_item(array<int> kinds) {
+		math::ivec2 best = math::ivec2(-1, -1);
 		float bd = 9999.0;
 		for (auto& it : G.items) {
 			if (it.taken) { continue; }
 			int k = it.kind;
-			bool wanted = false;
-			for (auto kk : kinds) { if (kk == k) { wanted = true; } }
-			if (!wanted) { continue; }
+			if (!kinds.contains(k)) { continue; }
 			// skip anything the pickup code would refuse — otherwise the pilot
 			// orbits a stimpack it can't absorb until the heat death of the run
 			if ((k == 0 || k == 1) && G.player.hp >= 100) { continue; }
@@ -473,16 +475,14 @@ private:
 			float d = dist2(it.x, it.y, G.player.px, G.player.py);
 			if (d < bd) {
 				bd = d;
-				bx = math::ifloor(it.x);
-				by = math::ifloor(it.y);
+				best = math::ivec2(math::ifloor(it.x), math::ifloor(it.y));
 			}
 		}
-		return [bx, by];
+		return best;
 	}
 
-	function nearest_secret() -> var {
-		int bx = -1;
-		int by = -1;
+	math::ivec2 nearest_secret() {
+		math::ivec2 best = math::ivec2(-1, -1);
 		float bd = 9999.0;
 		for (int ty = 0; ty < G.world.mh; ++ty) {
 			for (int tx = 0; tx < G.world.mw; ++tx) {
@@ -490,21 +490,20 @@ private:
 				float d = dist2(tx + 0.5, ty + 0.5, G.player.px, G.player.py);
 				if (d < bd) {
 					bd = d;
-					bx = tx;
-					by = ty;
+					best = math::ivec2(tx, ty);
 				}
 			}
 		}
-		return [bx, by];
+		return best;
 	}
 
-	function exit_tile() -> var {
+	math::ivec2 exit_tile() {
 		for (int ty = 0; ty < G.world.mh; ++ty) {
 			for (int tx = 0; tx < G.world.mw; ++tx) {
-				if (G.world.tiles[ty * G.world.mw + tx] == 6) { return [tx, ty]; }
+				if (G.world.tiles[ty * G.world.mw + tx] == 6) { return math::ivec2(tx, ty); }
 			}
 		}
-		return [-1, -1];
+		return math::ivec2(-1, -1);
 	}
 }
 

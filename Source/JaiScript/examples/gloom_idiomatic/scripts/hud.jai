@@ -1,7 +1,8 @@
-// The Hud: status strip, vitals with bars, ammo rack, the face, the bobbing
-// weapon art — plus the full-screen states (title, tally, death, victory).
-// Idiomatic pass: a class owning the message ticker (canonical scattered
-// msg/msg_color/msg_t over the Game blob) and every screen builder.
+// The Hud: the message ticker, and the frame around the view. In the
+// reference look it draws the status strip, the vitals with bars, the ammo
+// rack, the face, the bobbing weapon art and the full-screen states (title,
+// tally, death, victory): the frames --smoke hashes and the ports reproduce.
+// The showcase look hands all of that to Screens (screens.jai).
 
 class Hud {
 public:
@@ -9,7 +10,7 @@ public:
 	string msg_color = "97";
 	int msg_t = 0;
 
-	var faces = {
+	map<string, array<string>> faces = {
 		"ok": [
 			" .-----. ",
 			" | o.o | ",
@@ -54,7 +55,7 @@ public:
 			" '-----' "]
 	};
 
-	var logo = [
+	array<string> logo = [
 		"  ..|'''.|  '||'       ..|''||    ..|''||   '||    ||' ",
 		" .|'     '   ||       .|'    ||  .|'    ||   |||  |||  ",
 		" ||    ....  ||       ||      || ||      ||  |'|..'||  ",
@@ -72,8 +73,14 @@ public:
 		if (msg_t > 0) { msg_t = msg_t - 1; }
 	}
 
+	// after the Renderer's palette exists
+	void init() {
+		if (SHOWCASE) { screens = new Screens(G.w, G.h); }
+	}
+
 	// the per-frame entry point: full-screen state or the play view + panel
 	string frame(float fps, float ms_sim, float ms_draw) {
+		if (SHOWCASE) { return screens.frame(fps, ms_sim, ms_draw); }
 		if (G.mode == 0) { return title(); }
 		if (G.mode == 2) { return tally(); }
 		if (G.mode == 3) { return dead(); }
@@ -81,7 +88,6 @@ public:
 		return play(fps, ms_sim, ms_draw);
 	}
 
-private:
 	string face_name() {
 		if (G.mode == 3) { return "dead"; }
 		if (G.player.face_pain > 0) { return "pain"; }
@@ -91,6 +97,9 @@ private:
 		if (G.player.hp > 18) { return "bad"; }
 		return "crit";
 	}
+
+private:
+	shared_ptr<Screens> screens = null;
 
 	string meter(int val, int cap, int slots) {
 		int fill = iclamp(val * slots / imax(1, cap), 0, slots);
@@ -111,27 +120,24 @@ private:
 		return strip + body + RESET;
 	}
 
-	// five panel rows: vitals | ammo | face | weapon art.
-	// (Wanted `auto& p = G.player;` here — var& declarations cannot bind
-	// member expressions, so every read spells out the G.player chain.)
-	var panel_rows(float fps, float ms_sim, float ms_draw) {
+	// five panel rows: vitals | ammo | face | weapon art
+	array<string> panel_rows(float fps, float ms_sim, float ms_draw) {
 		auto& wpn = WEAPONS[G.player.weapon];
-		int ammo_now = G.player.ammo[wpn.ammo];
-		var face = faces[face_name()];
+		auto& face = faces[face_name()];
 
 		// weapon art with walk-bob shift and fire frame
-		var art = G.player.cooldown > wpn.cd - 4 || G.player.gun_kick > 0
+		array<string> art = G.player.cooldown > wpn.cd - 4 || G.player.gun_kick > 0
 			? WGFX_FIRE[G.player.weapon] : WGFX_IDLE[G.player.weapon];
 		int bob_shift = 1 + math::itrunc((math::sin(G.player.bob) + 1.0) * 1.4);
 
-		var left = [
+		array<string> left = [
 			` HP  [${meter(G.player.hp, 100, 12)}] ${G.player.hp}`,
 			` ARM [${meter(G.player.armor, 100, 12)}] ${G.player.armor}`,
 			` `,
 			` ${G.player.key_r ? "[R]" : " . "} ${G.player.key_b ? "[B]" : " . "}  ${wpn.name}`,
 			` ${G.autopilot ? "AUTOPILOT" : ""}`
 		];
-		var mid = [
+		array<string> mid = [
 			`BUL ${G.player.ammo[0]}/${AMMO_MAX[0]}`,
 			`SHL ${G.player.ammo[1]}/${AMMO_MAX[1]}`,
 			`CEL ${G.player.ammo[2]}/${AMMO_MAX[2]}`,
@@ -139,7 +145,7 @@ private:
 			fps > 0.0 ? `${fps:.0f}fps ${ms_sim + ms_draw:.1f}ms` : ""
 		];
 
-		var rows = [];
+		array<string> rows = [];
 		int left_w = 34;
 		int mid_w = 18;
 		int face_w = 11;
@@ -162,8 +168,8 @@ private:
 
 	// ------------------------------------------------- full-screen modes ----
 	// center the payload block on a dark field, pad every row to full width
-	var screen_rows(var& lines, string tint) {
-		var rows = [];
+	array<string> screen_rows(array<string> lines, string tint) {
+		array<string> rows = [];
 		int total = G.h;
 		int top = imax(0, (total - lines.size()) / 2);
 		for (int y = 0; y < total; ++y) {
@@ -177,7 +183,7 @@ private:
 	}
 
 	string title() {
-		var lines = [];
+		array<string> lines = [];
 		for (auto l : logo) { lines.push(l); }
 		lines.push("");
 		lines.push("a  t e r m i n a l  r a y c a s t e r ,  a l l  J a i S c r i p t");
@@ -196,7 +202,7 @@ private:
 		int sp = G.secret_total > 0 ? G.secrets * 100 / G.secret_total : 100;
 		int secs = G.map_ticks / 30;
 		int par_secs = G.world.par / 30;
-		var lines = [
+		array<string> lines = [
 			G.world.map_name,
 			"",
 			"=== FLOOR CLEARED ===",
@@ -211,7 +217,7 @@ private:
 	}
 
 	string dead() {
-		var lines = [
+		array<string> lines = [
 			"Y O U   D I E D",
 			"",
 			`slain by ${G.player.death_cause}`,
@@ -227,7 +233,7 @@ private:
 	string victory() {
 		int mins = G.ep_ticks / 1800;
 		int secs = (G.ep_ticks / 30) % 60;
-		var lines = [];
+		array<string> lines = [];
 		for (auto l : logo) { lines.push(l); }
 		lines.push("");
 		lines.push("T H E   W A R D E N   I S   D O W N");
@@ -242,7 +248,7 @@ private:
 
 	// the play-mode frame: world rows + status strip + panel
 	string play(float fps, float ms_sim, float ms_draw) {
-		var rows = G.renderer.draw_world();
+		array<string> rows = G.renderer.draw_world();
 		rows.push(status_row());
 		for (auto r : panel_rows(fps, ms_sim, ms_draw)) { rows.push(r); }
 		return rows.join("\n");

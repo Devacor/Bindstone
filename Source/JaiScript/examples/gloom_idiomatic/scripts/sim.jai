@@ -1,7 +1,5 @@
 // The Player: pose, vitals, arsenal, movement with wall sliding, the 'use'
 // action (doors, secrets, the exit switch), pickups, hitscan fire, damage.
-// Canonical spread this over free functions in sim.jai + combat.jai mutating
-// G's flat fields; here it is one object that owns its state.
 
 class Player {
 public:
@@ -10,8 +8,8 @@ public:
 	float pang = 0.0;
 	int hp = 100;
 	int armor = 0;
-	var ammo = [48, 0, 0];
-	var have = [1, 0, 0];
+	array<int> ammo = [48, 0, 0];
+	array<int> have = [1, 0, 0];
 	int weapon = 0;
 	bool key_r = false;
 	bool key_b = false;
@@ -32,8 +30,7 @@ public:
 		pang = 0.0;
 	}
 
-	// reset_vitals, not reset: a method named reset() collides with the builtin
-	// shared_ptr reset() (the engine warns and the builtin becomes unreachable)
+	// reset_vitals, not reset: a shared_ptr's own reset() would answer player.reset()
 	void reset_vitals() {
 		hp = 100;
 		armor = 0;
@@ -44,12 +41,10 @@ public:
 		bob = 0.0;
 	}
 
-	void move(var& input) {
+	void move(shared_ptr<Input> input) {
 		float turn = 0.0;
-		var tl = input["tl"];
-		var tr = input["tr"];
-		if (tl) { turn -= 1.0; }
-		if (tr) { turn += 1.0; }
+		if (input.tl) { turn -= 1.0; }
+		if (input.tr) { turn += 1.0; }
 		pang = pang + turn * 2.7 * TICK;
 		while (pang > 6.2831853) { pang -= 6.2831853; }
 		while (pang < 0.0) { pang += 6.2831853; }
@@ -58,18 +53,13 @@ public:
 		float diry = math::sin(pang);
 		float wx = 0.0;
 		float wy = 0.0;
-		var fwd = input["fwd"];
-		var back = input["back"];
-		var sl = input["sl"];
-		var sr = input["sr"];
-		if (fwd) { wx += dirx; wy += diry; }
-		if (back) { wx -= dirx; wy -= diry; }
-		if (sl) { wx += diry; wy -= dirx; }
-		if (sr) { wx -= diry; wy += dirx; }
+		if (input.fwd) { wx += dirx; wy += diry; }
+		if (input.back) { wx -= dirx; wy -= diry; }
+		if (input.sl) { wx += diry; wy -= dirx; }
+		if (input.sr) { wx -= diry; wy += dirx; }
 		float wl = math::sqrt(wx * wx + wy * wy);
 		if (wl > 0.001) {
-			var run = input["run"];
-			float speed = (run ? 5.0 : 3.4) * TICK;
+			float speed = (input.run ? 5.0 : 3.4) * TICK;
 			wx = wx / wl * speed;
 			wy = wy / wl * speed;
 			float nx = px + wx;
@@ -78,7 +68,7 @@ public:
 			if (G.world.spot_free(nx, py, 0.26)) { px = nx; moved = true; }
 			if (G.world.spot_free(px, ny, 0.26)) { py = ny; moved = true; }
 			if (moved) {
-				bob = bob + (run ? 0.30 : 0.22);
+				bob = bob + (input.run ? 0.30 : 0.22);
 				check_pickups();
 			}
 		}
@@ -89,7 +79,7 @@ public:
 	void use_action() {
 		float dirx = math::cos(pang);
 		float diry = math::sin(pang);
-		var probes = [0.5, 0.9, 1.3];
+		array<float> probes = [0.5, 0.9, 1.3];
 		for (auto p : probes) {
 			int tx = math::ifloor(px + dirx * p);
 			int ty = math::ifloor(py + diry * p);
@@ -131,12 +121,10 @@ public:
 		}
 	}
 
-	// nearest live enemy along a unit ray from the player, cross-checked
-	// against the wall. NOTE: `var e = G.enemies[i]` would DEEP-COPY the enemy
-	// — mutations must go through auto& bindings or chained calls.
+	// the nearest live enemy along a unit ray, short of the wall; hurt it, or chip the wall
 	bool hitscan(float dx, float dy, int lo, int hi) {
 		float wd = G.world.wall_dist(px, py, dx, dy);
-		var best = -1;
+		int best = -1;
 		float best_t = 999.0;
 		int i = 0;
 		for (auto& e : G.enemies) {

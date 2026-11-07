@@ -128,8 +128,21 @@ jaiscript.exe gloom.jai -- --256color            # the shim cannot read COLORTER
 ```
 
 `--smoke` exits 0 only when `STATE_HASH` matches the reference checkpoint
-table. The idiomatic rewrite has the same shim:
-`../gloom_idiomatic/gloom_idiomatic.jai`.
+table.
+
+### The same game, written idiomatically
+
+`../gloom_idiomatic` is GLOOM as you would write it today: subsystem classes
+(World, Player, Renderer, Hud, Pilot), an enemy hierarchy whose subclasses
+override one coroutine brain, typed records (`Input`, `Particle`, `WallChunk`,
+`Billboard`), enums and `math::ivec2` paths. It draws the same frames and
+reaches the same `STATE_HASH` in both looks, so the native host plays it too:
+
+```bash
+jai_gloom.exe --scripts ../gloom_idiomatic/scripts
+jai_gloom.exe --smoke --ticks 300 --scripts ../gloom_idiomatic/scripts   # the hashes above
+jaiscript.exe ../gloom_idiomatic/gloom_idiomatic.jai                     # or its own shim
+```
 
 ## The game
 

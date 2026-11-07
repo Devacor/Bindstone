@@ -1,4 +1,3 @@
-// Idiomatic GLOOM — persistent globals that must exist before anything else
-// loads. RNG is the host-bound seeded rng and the ONLY randomness allowed.
-// (The world handle G lives in game.jai as a typed shared_ptr<Game>.)
+// RNG is the host-bound seeded generator, the only randomness the game may
+// touch. The world handle G lives in game.jai.
 var RNG = null;

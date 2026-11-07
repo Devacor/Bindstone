@@ -1,8 +1,7 @@
-// GLOOM entry point (idiomatic rewrite). The host executes: import "main.jai";
-// then calls gloom_boot(w, h) once and gloom_frame(dt, key, fps, ms_sim,
-// ms_draw) per frame; --smoke additionally calls gloom_state_hash() /
-// gloom_summary(). Same contract, same tick structure as canonical — only the
-// internal style differs.
+// GLOOM entry point. The host executes import "main.jai"; then calls
+// gloom_boot(w, h) once and gloom_frame(dt, key, fps, ms_sim, ms_draw) per
+// frame; --smoke also calls gloom_state_hash() and gloom_summary(). The
+// contract and the tick are ../gloom's; only the style differs.
 
 import "state.jai";
 import "util.jai";
@@ -13,23 +12,31 @@ import "particles.jai";
 import "enemies.jai";
 import "combat.jai";
 import "sim.jai";
+import "look.jai";
+import "viewmodel.jai";
 import "render.jai";
+import "canvas.jai";
+import "screens.jai";
 import "hud.jai";
 import "game.jai";
 
-var FORCE_PILOT = false;
+bool FORCE_PILOT = false;
 
 function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
 
 function gloom_boot(int w, int h) -> void {
 	RNG = Rng(HOST_SEED);
-	if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
+	SHOWCASE = HOST_LOOK == "showcase";
+	if (HOST_ASCII) { PIXW = 1; PIXH = 1; }
+	else if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
 	else if (HOST_PIX == 2) { PIXW = 2; PIXH = 3; }
 	else { PIXW = 2; PIXH = 2; }
 	parse_arts();
+	parse_viewmodels();
 	validate_all_maps();
 	G = new Game(w, h);
 	G.renderer.init();
+	G.hud.init();
 	G.autopilot = HOST_SMOKE || FORCE_PILOT;
 }
 

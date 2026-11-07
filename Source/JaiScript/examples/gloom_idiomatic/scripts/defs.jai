@@ -1,10 +1,8 @@
-// Data: weapons, bestiary, pickup tables, and every sprite as pixel art.
-// Idiomatic pass: the anonymous string-keyed records become real classes with
-// typed fields and constructors — WEAPONS[i].cd instead of WEAPONS[i]["cd"].
-// Art format is unchanged: rows of chars, '.' = transparent, everything else
-// indexes the art's own tiny rgb palette. parse_arts() flattens each into an
-// Art instance at boot; the renderer maps codes -> truecolor via per-(art,
-// shade, flash) LUTs.
+// Data: weapons, bestiary, pickup tables, and every sprite as pixel art. Art
+// is rows of chars, '.' transparent, every other char a key into the art's own
+// tiny rgb palette; parse_art() turns each into an Art at boot, and the
+// renderer maps its codes to palette indices through per-(art, shade, flash)
+// tables.
 
 // ---------------------------------------------------------------- weapons ---
 // kind: 0 hitscan, 1 projectile
@@ -31,13 +29,13 @@ public:
 	}
 }
 
-var WEAPONS = [
+array<shared_ptr<WeaponDef>> WEAPONS = [
 	new WeaponDef("PISTOL",     0, 11, 1, 0.012, 6,  12, 0),
 	new WeaponDef("SCATTERGUN", 1, 28, 6, 0.11,  3,  7,  0),
 	new WeaponDef("HEXCASTER",  2, 22, 1, 0.0,   24, 40, 1)
 ];
-var AMMO_NAMES = ["BULLET", "SHELL", "CELL"];
-var AMMO_MAX = [200, 50, 120];
+array<string> AMMO_NAMES = ["BULLET", "SHELL", "CELL"];
+array<int> AMMO_MAX = [200, 50, 120];
 
 // ---------------------------------------------------------------- bestiary --
 // kind indexes: 0 grunt (melee rusher), 1 spitter (ranged), 2 turret, 3 warden (boss)
@@ -64,7 +62,7 @@ public:
 	}
 }
 
-var ENEMY_DEFS = [
+array<shared_ptr<EnemyDef>> ENEMY_DEFS = [
 	new EnemyDef("GRUNT",   30,  3.1, 0.34, 55, 0.72, 4,  10),
 	new EnemyDef("SPITTER", 45,  2.2, 0.36, 40, 0.78, 3,  7),
 	new EnemyDef("TURRET",  60,  0.0, 0.38, 15, 0.60, 0,  0),
@@ -87,7 +85,7 @@ public:
 	}
 }
 
-var ITEM_DEFS = [
+array<shared_ptr<ItemDef>> ITEM_DEFS = [
 	new ItemDef("stimpack",     "it_stim",   0.22),
 	new ItemDef("medikit",      "it_medkit", 0.28),
 	new ItemDef("flak vest",    "it_armor",  0.30),
@@ -102,8 +100,7 @@ var ITEM_DEFS = [
 ];
 
 // ------------------------------------------------------------- sprite art ---
-// Raw art stays a literal data table (chars + tiny palettes) — this is asset
-// data, not behavior; a class would add nothing. Kept identical to canonical.
+// Asset data: a literal table of chars and tiny palettes.
 var ART_SRC = {
 	// GRUNT - a hunched green rusher, all shoulders and appetite
 	"grunt_w0": {"pal": {"h": [86, 158, 62], "d": [52, 104, 40], "E": [255, 60, 40], "m": [240, 226, 190], "c": [220, 210, 170], "l": [46, 70, 36]},
@@ -604,56 +601,51 @@ var ART_SRC = {
 		".rr."]}
 };
 
-// parsed at boot: a real class per sprite instead of an anonymous record
+// a parsed sprite: codes row-major (0 transparent), a color and a palette key per code
 class Art {
 public:
 	int w = 0;
 	int h = 0;
-	var pix = [];          // flat codes, 0 transparent (kept untyped like canonical)
-	var rgb = [];          // [[r,g,b] ...] per code
-
-	Art(int w_, int h_, var pix_, var rgb_) {
-		w = w_;
-		h = h_;
-		pix = pix_;
-		rgb = rgb_;
-	}
+	array<int> pix = [];
+	array<array<int>> rgb = [];
+	array<string> keys = [];
 }
 
-var ARTS = {};    // name -> shared_ptr<Art>
+map<string, shared_ptr<Art>> ARTS = {};
 
 function parse_arts() -> void {
 	ARTS = {};
-	for (auto kv : ART_SRC) {
-		var name = kv.first;
-		var rows = ART_SRC[name]["rows"];
-		var pal = ART_SRC[name]["pal"];
-		var codes = {};    // char string -> code
-		var rgb = [[0, 0, 0]];
-		int next_code = 1;
-		int h = rows.size();
-		int w = rows[0].size();
-		var pix = [];
-		for (int y = 0; y < h; ++y) {
-			var row = rows[y];
-			for (int x = 0; x < w; ++x) {
-				var ch = row.substr(x, 1);
-				if (ch == ".") { pix.push(0); continue; }
-				if (!codes.has(ch)) {
-					codes[ch] = next_code;
-					next_code = next_code + 1;
-					rgb.push(pal[ch]);
-				}
-				pix.push(codes[ch]);
+	for (auto kv : ART_SRC) { ARTS[kv.first] = parse_art(kv.second); }
+}
+
+function parse_art(var src) -> shared_ptr<Art> {
+	var rows = src["rows"];
+	var pal = src["pal"];
+	map<string, int> codes = {};
+	shared_ptr<Art> art = new Art();
+	art.h = rows.size();
+	art.w = rows[0].size();
+	art.rgb = [[0, 0, 0]];
+	art.keys = ["."];
+	for (int y = 0; y < art.h; ++y) {
+		string row = rows[y];
+		for (int x = 0; x < art.w; ++x) {
+			string ch = row.substr(x, 1);
+			if (ch == ".") { art.pix.push(0); continue; }
+			if (!codes.has(ch)) {
+				codes[ch] = art.rgb.size();
+				art.rgb.push(pal[ch]);
+				art.keys.push(ch);
 			}
+			art.pix.push(codes[ch]);
 		}
-		ARTS[name] = new Art(w, h, pix, rgb);
 	}
+	return art;
 }
 
 // ------------------------------------------------------- weapon HUD art -----
-// 5 rows each, ASCII, drawn at the HUD's right edge with a walk-bob shift.
-var WGFX_IDLE = [
+// the reference look's panel: 5 rows each, ASCII, at the panel's right edge with a walk-bob shift
+array<array<string>> WGFX_IDLE = [
 	[
 	"      ____   ",
 	"  ___|__  |  ",
@@ -673,7 +665,7 @@ var WGFX_IDLE = [
 	"  \\__\\|/__/  ",
 	"     |=|     "]
 ];
-var WGFX_FIRE = [
+array<array<string>> WGFX_FIRE = [
 	[
 	" \\!/  ____   ",
 	" -*-_|__  |  ",

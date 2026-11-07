@@ -1,31 +1,35 @@
-// The Renderer, idiomatic: one class owning the view geometry, z-buffer, wall
-// tone tables, texture strips, sprite LUT cache, ray workspaces and the
-// automap — where canonical used ~20 file-scope globals + free functions.
+// The Renderer: one class owning the view geometry, the z-buffer, the wall
+// tone tables and texture strips, the sprite shading cache, the ray
+// workspaces and the automap. The view is a palette-index pixel grid blitted
+// through sub-cell block glyphs:
 //
-// What COULD NOT move into the class (parallel admission is the boundary):
-//   PIX / VW / ROWIDX / QUADG / RESET (+ PAL_* in util.jai) are read by
-//   gloom_row_quad, a parallel_transform body — captured reads only admit
-//   globals, member access on a captured instance is rejected. So the pixel
-//   grid and the glyph/palette tables stay globals, and the row/ray bodies
-//   stay free functions. Everything serial lives on the class.
+//   half  (--pix half): 1x2 px/cell, upper-half-block, fg=top bg=bottom
+//   quad  (--pix quad): 2x2 px/cell, quadrant glyphs, 2 colors by luminosity
+//   sext  (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
+//   ascii (--ascii):    1x1 px/cell, a density character over a dimmed background
+//
+// The tables come from the reference look (build_reference_tables) or the
+// showcase look (look.jai); the per-pixel work is the same for both. The
+// parallel row body reads its inputs as captured globals, and captured reads
+// admit only globals, so the pixel grid and the glyph tables live outside the
+// class.
 
-var PIXW = 2;        // pixels per cell horizontally (set by gloom_boot)
-var PIXH = 2;        // pixels per cell vertically
-array<int> PIX = [];  // the flat pixel grid (parallel bodies borrow it)
-var VW = 0;
-var VH = 0;
-array<int> ROWIDX = [];   // parallel_transform input: one element per glyph row
-var QUADG = [];      // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
-var RESET = "";
+int PIXW = 2;           // pixels per cell horizontally (set by gloom_boot)
+int PIXH = 2;           // pixels per cell vertically
+array<int> PIX = [];    // the pixel grid; the parallel row body borrows it
+int VW = 0;
+int VH = 0;
+array<int> ROWIDX = []; // parallel_transform input: one element per glyph row
+array<string> QUADG = [];   // quadrant glyphs by TL|TR<<1|BL<<2|BR<<3
+string HALFG = "";      // upper half block
+string RESET = "";
 
-// quad mode row builder: 2x2 pixels per cell, two colors by luminosity
-// partition. A parallel_transform body over CAPTURED globals (PIX and PAL_LUM
-// borrow zero-copy; PAL_FG/PAL_BG/QUADG snapshot per worker; VW/RESET are
-// scalar copies). No var& aliases of captured names (admission rejects them) —
-// subscript the globals directly. The SAME function runs in a plain serial
-// loop when HOST_WORKERS == 0.
+// quad mode: one glyph row, 2x2 pixels per cell, two colors by luminosity
+// partition. A parallel_transform body over captured globals: PIX and PAL_LUM
+// are borrowed zero-copy, PAL_FG, PAL_BG and QUADG snapshot per worker, VW and
+// RESET copy as scalars. The same function runs in a serial loop without workers.
 function gloom_row_quad(int ry) -> string {
-	var parts = [];
+	array<string> parts = [];
 	int vw = VW;
 	int cells = vw / 2;
 	int pfg = -1;
@@ -43,9 +47,8 @@ function gloom_row_quad(int ry) -> string {
 			parts.push(" ");
 			continue;
 		}
-		// wall slices split cells into vertical or horizontal halves far
-		// more often than not - cheap two-color paths before the full
-		// luminosity partition
+		// wall slices split cells into vertical or horizontal halves far more
+		// often than not: two-color paths before the full partition
 		if (p0 == p2 && p1 == p3) {
 			if (p0 != pfg) { parts.push(PAL_FG[p0]); pfg = p0; }
 			if (p1 != pbg) { parts.push(PAL_BG[p1]); pbg = p1; }
@@ -86,14 +89,68 @@ function gloom_row_quad(int ry) -> string {
 	return parts.join("");
 }
 
-// ------------------------------------------------------------ the class -----
+// A column range of wall rays, owned by one parallel_for iteration: the pose
+// (rewritten each frame), the map snapshot, and the per-column results.
+class WallChunk {
+public:
+	int x0 = 0;
+	int x1 = 0;
+	int vw = 0;
+	float posx = 0.0;
+	float posy = 0.0;
+	float dirx = 0.0;
+	float diry = 0.0;
+	float planex = 0.0;
+	float planey = 0.0;
+	int mw = 0;
+	array<int> pack = [];         // tile snapshot, 15 cells x 4 bits per int64
+	array<float> odist = [];      // per column: perpendicular distance
+	array<int> oside = [];        // per column: 0 x-side, 1 y-side
+	array<int> okind = [];        // per column: wall kind
+	array<int> otex = [];         // per column: texture column 0..63
+
+	WallChunk(int x0_, int x1_, int vw_, int mw_, array<int> pack_) {
+		x0 = x0_;
+		x1 = x1_;
+		vw = vw_;
+		mw = mw_;
+		pack = pack_;
+		for (int k = 0; k < x1_ - x0_; ++k) {
+			odist.push(0.0);
+			oside.push(0);
+			okind.push(0);
+			otex.push(0);
+		}
+	}
+}
+
+// a sprite queued for the far-to-near paint
+class Billboard {
+public:
+	float depth = 0.0;
+	int scx = 0;
+	string art = "";
+	float size = 0.0;
+	float zlift = 0.0;
+	int flash = 0;
+
+	Billboard(float depth_, int scx_, string art_, float size_, float zlift_, int flash_) {
+		depth = depth_;
+		scx = scx_;
+		art = art_;
+		size = size_;
+		zlift = zlift_;
+		flash = flash_;
+	}
+}
+
 class Renderer {
 public:
 	int view_w = 0;
 	int view_h = 0;
 	bool automap = false;
 	array<float> zbuf = [];
-	var rowparts = [];
+	array<string> rowparts = [];
 
 	Renderer(int w, int h) {
 		view_w = w * PIXW;
@@ -103,20 +160,17 @@ public:
 		PIX = [];
 		for (int i = 0; i < view_w * view_h; ++i) { PIX.push(0); }
 		ROWIDX = [];
-		int vrows = PIXH == 3 ? view_h / 3 : view_h / 2;
-		for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
-		zbuf = [];
+		for (int r = 0; r < view_h / PIXH; ++r) { ROWIDX.push(r); }
 		for (int i = 0; i < view_w; ++i) { zbuf.push(99.0); }
 	}
 
-	// boot-time glyph tables + fixed colors (order matches canonical so the
-	// palette intern indices — and therefore the frame bytes — are identical)
+	// glyph tables and fixed colors; palette index 0 is black, the grid's clear value
 	void init() {
-		RESET = ESC + "[0m";
-		rgb_idx(0, 0, 0);                 // palette index 0 is black (grid clear value)
-		halfg = utf8(0x2580);
+		RESET = `${ESC}[0m`;
+		rgb_idx(0, 0, 0);
+		HALFG = utf8(0x2580);
 		QUADG = [" "];
-		var quad_cps = [0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
+		array<int> quad_cps = [0x2598, 0x259D, 0x2580, 0x2596, 0x258C, 0x259E, 0x259B,
 			0x2597, 0x259A, 0x2590, 0x259C, 0x2584, 0x2599, 0x259F, 0x2588];
 		for (auto cp : quad_cps) { QUADG.push(utf8(cp)); }
 		sextg = [];
@@ -144,78 +198,35 @@ public:
 		G.fx.build_colors();
 	}
 
-	// per-map tone tables + the prebaked ceiling/floor background
+	// per-map tone tables, the prebaked ceiling/floor background, fresh caches
 	void build_tables(int mi) {
-		var theme = MAPS[mi]["theme"];
-		wallt = [];
-		// kind 0 (never rendered): flat dark
-		var zero = [10.0, 10.0, 12.0];
-		push_wall_tones(zero, zero);
-		// kinds 1..4 from the theme
-		for (int k = 0; k < 4; ++k) {
-			var base = theme["walls"][k];
-			push_wall_tones(base, base);
+		if (SHOWCASE) {
+			wallt = showcase_wall_tones(mi);
+			showcase_backdrop(mi, view_h, ceilp, floorp);
+		} else {
+			build_reference_tables(mi);
 		}
-		// kind 5 door, 6 exit, 7 red door, 8 blue door (episode constants)
-		var door_b = [138.0, 116.0, 94.0];
-		var door_a = [188.0, 164.0, 132.0];
-		push_wall_tones(door_b, door_a);
-		var exit_b = [64.0, 160.0, 84.0];
-		var exit_a = [220.0, 235.0, 120.0];
-		push_wall_tones(exit_b, exit_a);
-		var red_b = [176.0, 50.0, 42.0];
-		var red_a = [245.0, 130.0, 96.0];
-		push_wall_tones(red_b, red_a);
-		var blue_b = [62.0, 94.0, 198.0];
-		var blue_a = [136.0, 176.0, 255.0];
-		push_wall_tones(blue_b, blue_a);
-
-		// ceiling / floor gradients (dark at the horizon), quantized to CELL rows
-		// so flat regions hit the row builder's uniform-cell fast path
-		ceilp = [];
-		floorp = [];
-		var crgb = theme["ceil"];
-		var frgb = theme["floor"];
+		// one deep-copy assignment per frame replaces the per-pixel ceiling/floor loops
 		int half = view_h / 2;
+		bg = [];
 		for (int y = 0; y < view_h; ++y) {
-			int yq = (y / PIXH) * PIXH;
-			if (y < half) {
-				float t = half > 1 ? 1.0 * yq / (half - 1) : 1.0;
-				float lum = 1.0 - 0.72 * t;
-				ceilp.push(rgb_idx(math::itrunc(crgb[0] * lum), math::itrunc(crgb[1] * lum), math::itrunc(crgb[2] * lum)));
-				floorp.push(0);
-			} else {
-				float t2 = 1.0 * (yq - half) / imax(1, view_h - 1 - half);
-				t2 = t2 > 1.0 ? 1.0 : (t2 < 0.0 ? 0.0 : t2);
-				float lum2 = 0.26 + 0.74 * t2;
-				ceilp.push(0);
-				floorp.push(rgb_idx(math::itrunc(frgb[0] * lum2), math::itrunc(frgb[1] * lum2), math::itrunc(frgb[2] * lum2)));
-			}
-		}
-		// prebaked background: one deep-copy assignment per frame replaces the
-		// per-pixel ceiling/floor loops outright
-		var newbg = [];
-		for (int y2 = 0; y2 < view_h; ++y2) {
-			// (a ternary of two element reads mis-types into an int local; if/else works)
 			int c = 0;
-			if (y2 < half) { c = ceilp[y2]; }
-			else { c = floorp[y2]; }
-			for (int x2 = 0; x2 < view_w; ++x2) { newbg.push(c); }
+			if (y < half) { c = ceilp[y]; }
+			else { c = floorp[y]; }
+			for (int x = 0; x < view_w; ++x) { bg.push(c); }
 		}
-		bg = newbg;
-		// wall tone strips (32-tall texture columns) build lazily per combination
+		// 32-tall texture strips build lazily per (kind, side, shade, column)
 		strips = [];
 		strip_set = [];
-		int nstrips = 10 * 2 * 16 * 32;
-		for (int i2 = 0; i2 < nstrips; ++i2) {
-			strips.push(0);
-			strip_set.push(0);
+		for (int i = 0; i < 10 * 2 * 16 * 32; ++i) {
+			strips.push([]);
+			strip_set.push(false);
 		}
 		lutc = {};
 	}
 
 	// ---------------------------------------------------------- the view ----
-	var draw_world() {
+	array<string> draw_world() {
 		int vw = view_w;
 		int vh = view_h;
 		float px = G.player.px;
@@ -225,9 +236,7 @@ public:
 		float planex = 0.0 - diry * 0.78;
 		float planey = dirx * 0.78;
 
-		// --- 1. the rays: ONE ray per cell column, parallel_for over
-		// PERSISTENT column-chunk workspaces (built on map change, pose header
-		// rewritten per frame) - zero per-frame array traffic, in-place outputs.
+		// --- 1. the rays: one per cell column, over persistent column chunks
 		int pxw = PIXW;
 		int ncols = vw / pxw;
 		if (ws_mapgen != G.world.mapgen) {
@@ -235,34 +244,34 @@ public:
 			ws_mapgen = G.world.mapgen;
 		}
 		for (auto& t : wall_ws) {
-			t[3] = px;
-			t[4] = py;
-			t[5] = dirx;
-			t[6] = diry;
-			t[7] = planex;
-			t[8] = planey;
+			t.posx = px;
+			t.posy = py;
+			t.dirx = dirx;
+			t.diry = diry;
+			t.planex = planex;
+			t.planey = planey;
 		}
-		if (HOST_WORKERS == 0) {
+		// serial unless workers are requested: at this grain the region barrier
+		// costs more than the ray work it distributes
+		if (HOST_WORKERS <= 0) {
 			for (auto& t : wall_ws) { gloom_ray_chunk_step(t); }
 		} else {
 			parallel_for (auto& t : wall_ws) { gloom_ray_chunk_step(t); }
 		}
 
-		// --- 2. columns: prebaked background + textured wall slices ---
-		PIX = bg;                          // ceiling + floor in ONE deep-copy assign
+		// --- 2. columns: prebaked background + textured wall slices
+		PIX = bg;
 		auto& pix = PIX;
 		auto& zb = zbuf;
 		int boost = G.player.muzzle > 0 ? 2 : 0;
 		int x = 0;
 		for (auto& ch : wall_ws) {
-			int cn = ch.size();
-			int ci = ch[10];
-			while (ci < cn) {
-				float dist = ch[ci];
-				int side = ch[ci + 1];
-				int kind = ch[ci + 2];
-				int tx = ch[ci + 3] >> 1;             // 0..31
-				ci += 4;
+			int cols = ch.x1 - ch.x0;
+			for (int ci = 0; ci < cols; ++ci) {
+				float dist = ch.odist[ci];
+				int side = ch.oside[ci];
+				int kind = ch.okind[ci];
+				int tx = ch.otex[ci] >> 1;            // 0..31
 				int px0 = x * pxw;
 				zb[px0] = dist;
 				if (pxw == 2) { zb[px0 + 1] = dist; }
@@ -275,9 +284,9 @@ public:
 				int shade = 15 - math::itrunc(dist * 1.55) + boost;
 				shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
 				int sidx = ((kind * 2 + side) * 16 + shade) * 32 + tx;
-				if (strip_set[sidx] == 0) {
+				if (!strip_set[sidx]) {
 					strips[sidx] = build_strip(kind, side, shade, tx);
-					strip_set[sidx] = 1;
+					strip_set[sidx] = true;
 				}
 				auto& strip = strips[sidx];
 				int tstep = 65536 / lineh;            // (32 << 11) / lineh
@@ -305,82 +314,60 @@ public:
 			}
 		}
 
-		// --- 3. billboards: enemies, pickups, projectiles (far to near) ---
+		// --- 3. billboards: enemies, pickups, projectiles, far to near
 		float det = planex * diry - dirx * planey;
 		if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
 		float inv = 1.0 / det;
-		var sp = [];
+		array<shared_ptr<Billboard>> sprites = [];
 		for (auto& e : G.enemies) {
-			collect(sp, e.x, e.y, e.art_name(), ENEMY_DEFS[e.kind].size, 0.0,
+			collect(sprites, e.x, e.y, e.art_name(), ENEMY_DEFS[e.kind].size, 0.0,
 				e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
 		}
 		for (auto& it : G.items) {
 			if (it.taken) { continue; }
-			auto& idef = ITEM_DEFS[it.kind];
-			collect(sp, it.x, it.y, idef.art, idef.size, 0.0, 0, inv, dirx, diry, planex, planey);
+			auto& def = ITEM_DEFS[it.kind];
+			collect(sprites, it.x, it.y, def.art, def.size, 0.0, 0, inv, dirx, diry, planex, planey);
 		}
-		var shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
+		array<string> shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
 		for (auto& s : G.shots) {
-			collect(sp, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
+			collect(sprites, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
 		}
-		// insertion sort, far first (records: [depth, scx, name, size, zlift, flash])
-		for (int i3 = 1; i3 < sp.size(); ++i3) {
-			var rec = sp[i3];
-			int j = i3 - 1;
-			while (j >= 0) {
-				var cmp = sp[j];
-				float dj = cmp[0];
-				float di = rec[0];
-				if (dj >= di) { break; }
-				sp[j + 1] = cmp;
+		for (int i = 1; i < sprites.size(); ++i) {   // insertion sort, stable, far first
+			shared_ptr<Billboard> rec = sprites[i];
+			int j = i - 1;
+			while (j >= 0 && sprites[j].depth < rec.depth) {
+				sprites[j + 1] = sprites[j];
 				j = j - 1;
 			}
-			sp[j + 1] = rec;
+			sprites[j + 1] = rec;
 		}
-		for (auto& rec2 : sp) { draw_billboard(rec2); }
+		for (auto& rec : sprites) { draw_billboard(rec); }
 
-		// --- 4. particles: pixel confetti with z-buffer clipping ---
-		draw_particles(G.fx.cols, inv, dirx, diry, planex, planey, px, py);
+		// --- 4. particles, the gun in hand, overlays
+		draw_particles(inv, dirx, diry, planex, planey, px, py);
+		if (SHOWCASE) { draw_viewmodel(); }
+		if (automap) { draw_automap(); }
+		if (G.player.hurt_flash > 0) { draw_hurt_border(); }
 
-		// --- 5. overlays: automap, hurt flash ---
-		if (automap) { draw_automap(G.world.tiles); }
-		if (G.player.hurt_flash > 0) {
-			int red = hurt_red;
-			int thick = pxw * 2;
-			for (int x4 = 0; x4 < vw; ++x4) {
-				pix[x4] = red;
-				pix[vw + x4] = red;
-				pix[(vh - 2) * vw + x4] = red;
-				pix[(vh - 1) * vw + x4] = red;
-			}
-			for (int y4 = 0; y4 < vh; ++y4) {
-				int rb = y4 * vw;
-				for (int t4 = 0; t4 < thick; ++t4) {
-					pix[rb + t4] = red;
-					pix[rb + vw - 1 - t4] = red;
-				}
-			}
-		}
-
-		// --- 6. pixel grid -> sub-cell glyph rows ---
+		// --- 5. pixel grid -> glyph rows
+		if (HOST_ASCII) { return rows_ascii(); }
 		if (PIXH == 3) { return rows_sext(); }
 		if (PIXW == 2) { return rows_quad(); }
 		return rows_half();
 	}
 
 private:
-	var bg = [];
-	var lutc = {};
-	var wallt = [];       // [kind 0..9][side 0..1][shade 0..15][tone 0..2] flattened
-	var ceilp = [];       // per pixel-row ceiling color
-	var floorp = [];      // per pixel-row floor color
-	var strips = [];      // lazy 33-tall wall texture strips by (kind,side,shade,tx)
-	var strip_set = [];
-	var wall_ws = [];     // persistent ray-chunk pair workspaces (parallel_for v1)
+	array<int> bg = [];
+	map<string, array<int>> lutc = {};
+	array<int> wallt = [];        // [kind 0..8][side 0..1][shade 0..15][tone] flattened
+	array<int> ceilp = [];        // per pixel-row ceiling color
+	array<int> floorp = [];       // per pixel-row floor color
+	array<array<int>> strips = [];
+	array<bool> strip_set = [];
+	array<WallChunk> wall_ws = [];
 	int ws_mapgen = -1;
-	string halfg = "";    // upper half block
-	var sextg = [];       // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
-	var am_cols = [];     // automap tile colors (built at init)
+	array<string> sextg = [];     // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
+	array<int> am_cols = [];      // automap tile colors
 	int am_floor = 0;
 	int am_blink = 0;
 	int am_item = 0;
@@ -388,34 +375,66 @@ private:
 	int am_self = 0;
 	int am_head = 0;
 	int hurt_red = 0;
-	var band_lum = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
+	array<float> band_lum = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
 
 	void build_wall_ws(int ncols) {
 		wall_ws = [];
-		int nchunks = 16;
-		int per_chunk = (ncols + nchunks - 1) / nchunks;
+		int per_chunk = (ncols + 15) / 16;
 		int bx0 = 0;
 		while (bx0 < ncols) {
-			int bx1 = bx0 + per_chunk;
-			if (bx1 > ncols) { bx1 = ncols; }
-			var rec = [bx0, bx1, ncols, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, G.world.mw, 0];
-			for (auto wv : G.world.mappack) { rec.push(wv); }
-			rec[10] = rec.size();          // out_base: outputs start after the pack
-			int outn = (bx1 - bx0) * 4;
-			for (int k = 0; k < outn; ++k) { rec.push(0); }
-			wall_ws.push(rec);
+			int bx1 = imin(bx0 + per_chunk, ncols);
+			wall_ws.push(WallChunk(bx0, bx1, ncols, G.world.mw, G.world.mappack));
 			bx0 = bx1;
 		}
 	}
 
-	void push_wall_tones(var& base, var& accent) {
+	// ------------------------------------------------- the reference look ----
+	// the tables of ../gloom/reference/README.md section 4.2: three tones per shade
+	void build_reference_tables(int mi) {
+		var theme = MAPS[mi]["theme"];
+		wallt = [];
+		array<float> unseen = [10.0, 10.0, 12.0];
+		push_wall_tones(unseen, unseen);
+		for (int k = 0; k < 4; ++k) {
+			array<float> base = theme["walls"][k];
+			push_wall_tones(base, base);
+		}
+		// kind 5 door, 6 exit, 7 red door, 8 blue door
+		push_wall_tones([138.0, 116.0, 94.0], [188.0, 164.0, 132.0]);
+		push_wall_tones([64.0, 160.0, 84.0], [220.0, 235.0, 120.0]);
+		push_wall_tones([176.0, 50.0, 42.0], [245.0, 130.0, 96.0]);
+		push_wall_tones([62.0, 94.0, 198.0], [136.0, 176.0, 255.0]);
+
+		// ceiling / floor gradients, dark at the horizon, quantized to cell rows
+		// so flat regions hit the row builders' uniform-cell fast path
+		ceilp = [];
+		floorp = [];
+		array<float> crgb = theme["ceil"];
+		array<float> frgb = theme["floor"];
+		int half = view_h / 2;
+		for (int y = 0; y < view_h; ++y) {
+			int yq = (y / PIXH) * PIXH;
+			if (y < half) {
+				float t = half > 1 ? 1.0 * yq / (half - 1) : 1.0;
+				float lum = 1.0 - 0.72 * t;
+				ceilp.push(rgb_idx(math::itrunc(crgb[0] * lum), math::itrunc(crgb[1] * lum), math::itrunc(crgb[2] * lum)));
+				floorp.push(0);
+			} else {
+				float t = math::clamp(1.0 * (yq - half) / imax(1, view_h - 1 - half), 0.0, 1.0);
+				float lum = 0.26 + 0.74 * t;
+				ceilp.push(0);
+				floorp.push(rgb_idx(math::itrunc(frgb[0] * lum), math::itrunc(frgb[1] * lum), math::itrunc(frgb[2] * lum)));
+			}
+		}
+	}
+
+	void push_wall_tones(array<float> base, array<float> accent) {
 		for (int side = 0; side < 2; ++side) {
 			float facing = side == 1 ? 0.70 : 1.0;
 			for (int s = 0; s < 16; ++s) {
 				float lum = (0.13 + 0.87 * s / 15.0) * facing;
 				wallt.push(rgb_idx(math::itrunc(base[0] * lum), math::itrunc(base[1] * lum), math::itrunc(base[2] * lum)));
-				float alum = lum * 1.35;
-				alum = alum > 1.0 ? 1.0 : alum;
+				float alum = math::min(lum * 1.35, 1.0);
 				wallt.push(rgb_idx(math::itrunc(accent[0] * alum), math::itrunc(accent[1] * alum), math::itrunc(accent[2] * alum)));
 				float mlum = lum * 0.42;
 				wallt.push(rgb_idx(math::itrunc(base[0] * mlum), math::itrunc(base[1] * mlum), math::itrunc(base[2] * mlum)));
@@ -457,40 +476,48 @@ private:
 		return 0;
 	}
 
-	var build_strip(int kind, int side, int shade, int tx) {
-		int tbase = ((kind * 2 + side) * 16 + shade) * 3;
-		var s = [];
-		for (int ty = 0; ty < 32; ++ty) {
-			s.push(wallt[tbase + tex_tone(kind, tx, ty)]);
+	array<int> build_strip(int kind, int side, int shade, int tx) {
+		array<int> strip = [];
+		if (SHOWCASE) {
+			int base = ((kind * 2 + side) * 16 + shade) * TONES;
+			for (int ty = 0; ty < 32; ++ty) { strip.push(wallt[base + showcase_tone(kind, tx, ty)]); }
+		} else {
+			int base = ((kind * 2 + side) * 16 + shade) * 3;
+			for (int ty = 0; ty < 32; ++ty) { strip.push(wallt[base + tex_tone(kind, tx, ty)]); }
 		}
-		s.push(s[31]);        // fixed-point overshoot guard
-		return s;
+		strip.push(strip[31]);        // fixed-point overshoot guard
+		return strip;
 	}
 
-	// per (art, shade band 0..7, flash) palette-code -> palette-index LUT, cached
-	var sprite_lut(string name, int band, int flash) {
+	// palette code -> palette index for an art at a shade band, flashing or not; cached
+	array<int> sprite_lut(string name, int band, int flash) {
 		string key = `${name}:${band}:${flash}`;
 		if (lutc.has(key)) { return lutc[key]; }
-		auto& art = ARTS[name];
-		float lum = band_lum[band];
-		var lut = [0];
-		for (int c = 1; c < art.rgb.size(); ++c) {
-			int r = art.rgb[c][0];
-			int g = art.rgb[c][1];
-			int b = art.rgb[c][2];
-			if (flash == 1) {
-				r = imin(255, r + 170);
-				g = imin(255, g + 150);
-				b = imin(255, b + 140);
+		array<int> lut = [0];
+		if (SHOWCASE) {
+			lut = showcase_sprite_lut(name, band, flash);
+		} else {
+			shared_ptr<Art> art = ARTS[name];
+			float lum = band_lum[band];
+			for (int c = 1; c < art.rgb.size(); ++c) {
+				int r = art.rgb[c][0];
+				int g = art.rgb[c][1];
+				int b = art.rgb[c][2];
+				if (flash == 1) {
+					r = imin(255, r + 170);
+					g = imin(255, g + 150);
+					b = imin(255, b + 140);
+				}
+				lut.push(rgb_idx(math::itrunc(r * lum), math::itrunc(g * lum), math::itrunc(b * lum)));
 			}
-			lut.push(rgb_idx(math::itrunc(r * lum), math::itrunc(g * lum), math::itrunc(b * lum)));
 		}
 		lutc[key] = lut;
 		return lut;
 	}
 
-	// world -> camera -> screen; appends [depth, scx, art, size, zlift, flash]
-	void collect(var& sp, float wx, float wy, string art, float size, float zlift,
+	// ----------------------------------------------------------- sprites ----
+	// world -> camera -> screen
+	void collect(array<shared_ptr<Billboard>>& sprites, float wx, float wy, string art, float size, float zlift,
 			int flash, float inv, float dirx, float diry, float planex, float planey) {
 		float rx = wx - G.player.px;
 		float ry = wy - G.player.py;
@@ -499,107 +526,135 @@ private:
 		float ttx = inv * (diry * rx - dirx * ry);
 		int scx = (view_w / 2.0) * (1.0 + ttx / depth);
 		if (scx < -view_w || scx > view_w * 2) { return; }
-		sp.push([depth, scx, art, size, zlift, flash]);
+		sprites.push(new Billboard(depth, scx, art, size, zlift, flash));
 	}
 
-	void draw_billboard(var& rec) {
-		float depth = rec[0];
-		int scx = rec[1];
-		string name = rec[2];
-		float size = rec[3];
-		float zlift = rec[4];
-		int flash = rec[5];
-		auto& art = ARTS[name];
+	void draw_billboard(shared_ptr<Billboard> rec) {
+		shared_ptr<Art> art = ARTS[rec.art];
 		int aw = art.w;
 		int ah = art.h;
 		int vh = view_h;
+		float depth = rec.depth;
 		float span = 1.0 * vh / depth;
-		int ph = span * size;
-		if (ph < 2) { ph = 2; }
+		int ph = imax(2, math::itrunc(span * rec.size));
 		// pixel aspect: a cell is ~1:2 (w:h) split into PIXW x PIXH
-		int pw = ph * aw * 2 * PIXW / (ah * PIXH);
-		if (pw < 2) { pw = 2; }
-		int band = math::itrunc(depth * 0.85) - (G.player.muzzle > 0 ? 1 : 0);
-		band = band < 0 ? 0 : (band > 7 ? 7 : band);
-		var lut = sprite_lut(name, band, flash);
-		int bottom = vh / 2 + span * 0.5 - zlift * span;
+		int pw = imax(2, ph * aw * 2 * PIXW / (ah * PIXH));
+		int band = iclamp(math::itrunc(depth * 0.85) - (G.player.muzzle > 0 ? 1 : 0), 0, 7);
+		array<int> lut = sprite_lut(rec.art, band, rec.flash);
+		int bottom = vh / 2 + span * 0.5 - rec.zlift * span;
 		int top = bottom - ph;
-		int x0 = scx - pw / 2;
-		int x1 = x0 + pw;
-		int cx0 = x0 < 0 ? 0 : x0;
-		int cx1 = x1 > view_w ? view_w : x1;
-		int cy0 = top < 0 ? 0 : top;
-		int cy1 = bottom > vh ? vh : bottom;
-		// art.pix can't bind to an auto& DECLARATION (member expression), but it
-		// IS a valid lvalue ARGUMENT — hence the blit helper. (A naive inline
-		// with chained art.pix[...] reads measured the same within noise at
-		// GLOOM's billboard load.)
-		blit_sprite(art.pix, lut, aw, ah, depth, x0, top, pw, ph, cx0, cx1, cy0, cy1);
-	}
-
-	void blit_sprite(var& apix, var& lut, int aw, int ah, float depth,
-			int x0, int top, int pw, int ph, int cx0, int cx1, int cy0, int cy1) {
+		int x0 = rec.scx - pw / 2;
+		int cx0 = imax(0, x0);
+		int cx1 = imin(view_w, x0 + pw);
+		int cy0 = imax(0, top);
+		int cy1 = imin(vh, bottom);
 		auto& pix = PIX;
 		auto& zb = zbuf;
 		int vw = view_w;
 		for (int x = cx0; x < cx1; ++x) {
-			float zd = zb[x];
-			if (depth >= zd) { continue; }
+			if (depth >= zb[x]) { continue; }
 			int ax = (x - x0) * aw / pw;
 			for (int y = cy0; y < cy1; ++y) {
-				int ay = (y - top) * ah / ph;
-				int code = apix[ay * aw + ax];
+				int code = art.pix[((y - top) * ah / ph) * aw + ax];
 				if (code > 0) { pix[y * vw + x] = lut[code]; }
 			}
 		}
 	}
 
-	void draw_particles(var& pcols, float inv, float dirx, float diry,
-			float planex, float planey, float px, float py) {
+	// pixel confetti, clipped by the z-buffer
+	void draw_particles(float inv, float dirx, float diry, float planex, float planey, float px, float py) {
 		auto& pix = PIX;
 		auto& zb = zbuf;
+		auto& colors = G.fx.colors;
 		int vw = view_w;
 		int vh = view_h;
-		int half2 = vh / 2;
+		int half = vh / 2;
 		int pxw = PIXW;
 		int pxh = PIXH;
-		for (auto& prt : G.fx.pool) {
-			int pk = prt[0];
-			if (pk == 0) { continue; }
-			float rx = prt[1] - px;
-			float ry = prt[2] - py;
+		for (auto& p : G.fx.pool) {
+			int kind = p.kind;
+			if (kind == 0) { continue; }
+			float rx = p.x - px;
+			float ry = p.y - py;
 			float depth = inv * (planex * ry - planey * rx);
 			if (depth < 0.15 || depth > 14.0) { continue; }
 			float ttx = inv * (diry * rx - dirx * ry);
 			int scx = (vw / 2.0) * (1.0 + ttx / depth);
 			if (scx < 0 || scx >= vw) { continue; }
-			float zd = zb[scx];
-			if (depth >= zd) { continue; }
+			if (depth >= zb[scx]) { continue; }
 			float span = 1.0 * vh / depth;
-			int pyx = half2 + span * 0.5 - prt[3] * span;
-			int life = prt[7];
-			int phase = 3 - imin(3, life / 5);
-			int color = pcols[pk * 4 + phase];
-			int psz = math::itrunc(0.07 * span) + 1;
-			psz = psz > 3 ? 3 : psz;
-			int psx = (psz * 2 * pxw) / pxh;           // square-ish regardless of mode
-			psx = psx < 1 ? 1 : psx;
+			int top = half + span * 0.5 - p.z * span;
+			int phase = 3 - imin(3, p.life / 5);
+			int color = colors[kind * 4 + phase];
+			int psz = imin(3, math::itrunc(0.07 * span) + 1);
+			int psx = imax(1, (psz * 2 * pxw) / pxh);    // square-ish in every mode
 			for (int oy = 0; oy < psz; ++oy) {
-				int yy = pyx + oy;
+				int yy = top + oy;
 				if (yy < 0 || yy >= vh) { continue; }
 				for (int ox = 0; ox < psx; ++ox) {
 					int xx = scx + ox;
-					if (xx >= vw) { continue; }
-					float zx = zb[xx];
-					if (depth < zx) { pix[yy * vw + xx] = color; }
+					if (xx < vw && depth < zb[xx]) { pix[yy * vw + xx] = color; }
 				}
 			}
 		}
 	}
 
-	// arcade automap: square tiles, walls in kind colors, live blips
-	void draw_automap(var& tiles) {
+	// the showcase look's gun in hand: sways with the walk, kicks on each shot
+	void draw_viewmodel() {
+		if (automap) { return; }
+		auto& player = G.player;
+		bool firing = player.cooldown > WEAPONS[player.weapon].cd - 4 || player.gun_kick > 0;
+		string name = VIEWMODEL_NAMES[player.weapon];
+		if (firing && player.muzzle > 0) { name = `${name}_fire`; }
+		shared_ptr<Art> art = VIEWMODELS[name];
+		array<int> lut = viewmodel_lut(name, player.muzzle > 0);
+		int vw = view_w;
+		int vh = view_h;
+		// art pixels are square: a view pixel is PIXW x PIXH of a 1:2 cell
+		float scale = vh * 0.4 / 24.0;
+		int ph = math::itrunc(art.h * scale);
+		int pw = ph * art.w * 2 * PIXW / (art.h * PIXH);
+		int sway = math::itrunc(math::sin(player.bob * 0.5) * vw * 0.025);
+		int lift = math::itrunc(math::abs(math::cos(player.bob * 0.5)) * scale * 1.5) + player.gun_kick * math::itrunc(scale * 0.9);
+		int x0 = vw / 2 - pw / 2 + sway;
+		int y0 = vh - ph + lift;
+		int cx0 = imax(0, x0);
+		int cx1 = imin(vw, x0 + pw);
+		int cy1 = imin(vh, y0 + ph);
 		auto& pix = PIX;
+		for (int y = imax(0, y0); y < cy1; ++y) {
+			int row = ((y - y0) * art.h / ph) * art.w;
+			int base = y * vw;
+			for (int x = cx0; x < cx1; ++x) {
+				int code = art.pix[row + (x - x0) * art.w / pw];
+				if (code > 0) { pix[base + x] = lut[code]; }
+			}
+		}
+	}
+
+	// palette code -> index for a gun under this floor's light, brighter in its own flash
+	array<int> viewmodel_lut(string name, bool flashing) {
+		string key = `${name}:${flashing}`;
+		if (lutc.has(key)) { return lutc[key]; }
+		auto& mood = MOODS[G.map_i];
+		shared_ptr<Art> art = VIEWMODELS[name];
+		math::color light = math::mix_rgb(mood.light, rgb(255, 255, 255), 0.4) * (flashing ? 1.25 : 0.85);
+		array<int> lut = [0];
+		for (int c = 1; c < art.rgb.size(); ++c) {
+			math::color color = rgb(art.rgb[c][0], art.rgb[c][1], art.rgb[c][2]);
+			string key_char = art.keys[c];
+			if (key_char >= "A" && key_char <= "Z") { lut.push(color_idx(color)); }
+			else { lut.push(color_idx(math::clamp(color * light, 0.0, 1.0))); }
+		}
+		lutc[key] = lut;
+		return lut;
+	}
+
+	// ---------------------------------------------------------- overlays ----
+	// arcade automap: square tiles, walls in kind colors, live blips
+	void draw_automap() {
+		auto& pix = PIX;
+		auto& tiles = G.world.tiles;
 		int vw = view_w;
 		int mw = G.world.mw;
 		int mh = G.world.mh;
@@ -607,11 +662,10 @@ private:
 		int sy = PIXH;
 		int ox = sx * 2;
 		int oy = sy * 2;
-		auto& kc = am_cols;
 		for (int ty = 0; ty < mh; ++ty) {
 			for (int tx = 0; tx < mw; ++tx) {
 				int t = tiles[ty * mw + tx];
-				int c = t == 0 ? am_floor : kc[t];
+				int c = t == 0 ? am_floor : am_cols[t];
 				if (t == 6 && (G.tick & 8) == 0) { c = am_blink; }
 				int bx = ox + tx * sx;
 				int by = oy + ty * sy;
@@ -621,7 +675,7 @@ private:
 				}
 			}
 		}
-		// blips: items gold, live enemies red, you white (+ heading pixel)
+		// blips: items gold, live enemies red, you white, and your heading
 		for (auto& it : G.items) {
 			if (it.taken) { continue; }
 			blip(ox + math::itrunc(it.x) * sx, oy + math::itrunc(it.y) * sy, am_item);
@@ -630,34 +684,52 @@ private:
 			if (!e.alive) { continue; }
 			blip(ox + math::itrunc(e.x) * sx, oy + math::itrunc(e.y) * sy, am_enemy);
 		}
-		blip(ox + math::itrunc(G.player.px) * sx, oy + math::itrunc(G.player.py) * sy, am_self);
-		blip(ox + math::itrunc(G.player.px + math::cos(G.player.pang) * 1.4) * sx,
-			oy + math::itrunc(G.player.py + math::sin(G.player.pang) * 1.4) * sy, am_head);
+		auto& player = G.player;
+		blip(ox + math::itrunc(player.px) * sx, oy + math::itrunc(player.py) * sy, am_self);
+		blip(ox + math::itrunc(player.px + math::cos(player.pang) * 1.4) * sx,
+			oy + math::itrunc(player.py + math::sin(player.pang) * 1.4) * sy, am_head);
 	}
 
 	void blip(int bx, int by, int c) {
 		auto& pix = PIX;
 		int vw = view_w;
-		int vh = view_h;
-		if (bx < 0 || by < 0 || bx + 1 >= vw || by + 1 >= vh) { return; }
+		if (bx < 0 || by < 0 || bx + 1 >= vw || by + 1 >= view_h) { return; }
 		pix[by * vw + bx] = c;
 		pix[by * vw + bx + 1] = c;
 		pix[(by + 1) * vw + bx] = c;
 		pix[(by + 1) * vw + bx + 1] = c;
 	}
 
+	// the red border of a hit
+	void draw_hurt_border() {
+		auto& pix = PIX;
+		int vw = view_w;
+		int vh = view_h;
+		int red = hurt_red;
+		int thick = PIXW * 2;
+		for (int x = 0; x < vw; ++x) {
+			pix[x] = red;
+			pix[vw + x] = red;
+			pix[(vh - 2) * vw + x] = red;
+			pix[(vh - 1) * vw + x] = red;
+		}
+		for (int y = 0; y < vh; ++y) {
+			int rb = y * vw;
+			for (int t = 0; t < thick; ++t) {
+				pix[rb + t] = red;
+				pix[rb + vw - 1 - t] = red;
+			}
+		}
+	}
+
 	// ------------------------------------------- pixel grid -> glyph rows ---
 	// half mode: fg = top pixel, bg = bottom pixel, upper-half-block glyph
-	var rows_half() {
+	array<string> rows_half() {
 		int vw = view_w;
 		auto& pix = PIX;
-		auto& fgs = PAL_FG;
-		auto& bgs = PAL_BG;
 		auto& parts = rowparts;
-		string hb = halfg;
-		var rows = [];
-		int vrows = view_h / 2;
-		for (int ry = 0; ry < vrows; ++ry) {
+		array<string> rows = [];
+		for (int ry = 0; ry < view_h / 2; ++ry) {
 			parts.clear();
 			int ptop = -1;
 			int pbot = -1;
@@ -666,9 +738,9 @@ private:
 			for (int x = 0; x < vw; ++x) {
 				int tc = pix[itop + x];
 				int bc = pix[ibot + x];
-				if (tc != ptop) { parts.push(fgs[tc]); ptop = tc; }
-				if (bc != pbot) { parts.push(bgs[bc]); pbot = bc; }
-				parts.push(hb);
+				if (tc != ptop) { parts.push(PAL_FG[tc]); ptop = tc; }
+				if (bc != pbot) { parts.push(PAL_BG[bc]); pbot = bc; }
+				parts.push(HALFG);
 			}
 			parts.push(RESET);
 			rows.push(parts.join(""));
@@ -676,31 +748,25 @@ private:
 		return rows;
 	}
 
-	// quad mode: ONE glyph row per gloom_row_quad call — a parallel_transform
-	// over ROWIDX when the host grants workers, a serial loop otherwise
-	var rows_quad() {
-		if (HOST_WORKERS == 0) {
-			var rows = [];
-			int vrows = VH / 2;
-			for (int ry = 0; ry < vrows; ++ry) { rows.push(gloom_row_quad(ry)); }
+	// quad mode: gloom_row_quad per row, through parallel_transform when the host grants workers
+	array<string> rows_quad() {
+		if (HOST_WORKERS <= 0) {
+			array<string> rows = [];
+			for (int ry = 0; ry < VH / 2; ++ry) { rows.push(gloom_row_quad(ry)); }
 			return rows;
 		}
 		return parallel_transform(ROWIDX, gloom_row_quad);
 	}
 
 	// sext mode: 2x3 pixels per cell (Unicode 13 "Symbols for Legacy Computing")
-	var rows_sext() {
+	array<string> rows_sext() {
 		int vw = view_w;
 		auto& pix = PIX;
-		auto& fgs = PAL_FG;
-		auto& bgs = PAL_BG;
 		auto& lums = PAL_LUM;
-		auto& sg = sextg;
 		auto& parts = rowparts;
-		var rows = [];
-		int vrows = view_h / 3;
+		array<string> rows = [];
 		int cells = vw / 2;
-		for (int ry = 0; ry < vrows; ++ry) {
+		for (int ry = 0; ry < view_h / 3; ++ry) {
 			parts.clear();
 			int pfg = -1;
 			int pbg = -1;
@@ -716,7 +782,7 @@ private:
 				int p4 = pix[r2 + xx];
 				int p5 = pix[r2 + xx + 1];
 				if (p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5) {
-					if (p0 != pbg) { parts.push(bgs[p0]); pbg = p0; }
+					if (p0 != pbg) { parts.push(PAL_BG[p0]); pbg = p0; }
 					parts.push(" ");
 					continue;
 				}
@@ -748,9 +814,30 @@ private:
 				if (l3 >= thr) { bits += 8; }
 				if (l4 >= thr) { bits += 16; }
 				if (l5 >= thr) { bits += 32; }
-				if (fgp != pfg) { parts.push(fgs[fgp]); pfg = fgp; }
-				if (bits != 63 && bgp != pbg) { parts.push(bgs[bgp]); pbg = bgp; }
-				parts.push(sg[bits]);
+				if (fgp != pfg) { parts.push(PAL_FG[fgp]); pfg = fgp; }
+				if (bits != 63 && bgp != pbg) { parts.push(PAL_BG[bgp]); pbg = bgp; }
+				parts.push(sextg[bits]);
+			}
+			parts.push(RESET);
+			rows.push(parts.join(""));
+		}
+		return rows;
+	}
+
+	// --ascii: one pixel per cell, a density character over a dimmed background
+	array<string> rows_ascii() {
+		int vw = view_w;
+		auto& pix = PIX;
+		auto& parts = rowparts;
+		array<string> rows = [];
+		for (int ry = 0; ry < view_h; ++ry) {
+			parts.clear();
+			int prev = -1;
+			int base = ry * vw;
+			for (int x = 0; x < vw; ++x) {
+				int p = pix[base + x];
+				if (p != prev) { parts.push(PAL_ASCII[p]); prev = p; }
+				else { parts.push(PAL_ASCII_CHAR[p]); }
 			}
 			parts.push(RESET);
 			rows.push(parts.join(""));

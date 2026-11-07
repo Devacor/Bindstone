@@ -1,7 +1,6 @@
-// Combat, idiomatic: projectiles are Shot objects that step themselves and
-// explode themselves. The rest of the canonical file moved to where it now
-// belongs: LOS / wall_dist onto World (maps.jai), hitscan / damage / firing
-// onto Player (sim.jai), the turret bolt onto Turret (enemies.jai).
+// Projectiles: Shot objects that step themselves and explode themselves.
+// Sight lines live on World, hitscan and damage on Player, the turret's bolt
+// on Turret.
 
 // kind 1 spitter gob | 2 warden hollow fire | 3 player hex bolt
 class Shot {
@@ -37,7 +36,7 @@ public:
 				break;
 			}
 			if (kind == 3) {
-				// player bolt vs enemies (auto&: element reads deep-copy)
+				// player bolt vs enemies
 				for (auto& e : G.enemies) {
 					if (!e.alive) { continue; }
 					if (dist2(x, y, e.x, e.y) < (e.radius + 0.2) * (e.radius + 0.2)) {

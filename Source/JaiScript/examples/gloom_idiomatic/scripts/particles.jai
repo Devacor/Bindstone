@@ -1,41 +1,58 @@
-// Particle system: fixed pool of [kind, x, y, z, vx, vy, vz, life] VALUE rows,
-// stepped IN PLACE by the pure gloom_particle_step body (pure.jai) through
-// parallel_for. Idiomatic pass: the free fx_* burst kit becomes methods on the
-// system (G.fx.explosion(x, y) instead of fx_explosion(x, y)), and the color
-// ramp table becomes a field. The pool rows themselves CANNOT become Particle
-// class instances: parallel admission needs all-primitive rows to prove
-// exclusive ownership at the barrier — a registry of class handles would be
-// rejected (and script-class instances cross regions by deep clone anyway).
+// The particle system: a fixed pool of Particle records stepped in place by
+// the pure gloom_particle_step body (pure.jai), through parallel_for when the
+// host grants workers, and the burst kit every effect spawns from.
 
-var PART_MAX = 288;
+int PART_MAX = 288;
+
+// kind 0 dead | 1 spark | 2 blood | 3 gib | 4 smoke | 5 flash | 6 hexmote
+class Particle {
+public:
+	int kind = 0;
+	float x = 0.0;
+	float y = 0.0;
+	float z = 0.0;
+	float vx = 0.0;
+	float vy = 0.0;
+	float vz = 0.0;
+	int life = 0;
+
+	Particle() {}
+
+	Particle(int kind_, float x_, float y_, float z_, float vx_, float vy_, float vz_, int life_) {
+		kind = kind_;
+		x = x_;
+		y = y_;
+		z = z_;
+		vx = vx_;
+		vy = vy_;
+		vz = vz_;
+		life = life_;
+	}
+}
 
 class ParticleSystem {
 public:
-	var pool = [];
-	var cols = [];    // per-kind life-phase ramps, palette indices (render reads cols[kind * 4 + phase])
+	array<Particle> pool = [];
+	array<int> colors = [];    // palette index per kind and life phase: colors[kind * 4 + phase]
 
 	ParticleSystem() { reset_pool(); }
 
-	// reset_pool, not reset: the builtin shared_ptr reset() shadows same-named
-	// class methods, so fx.reset() would silently no-op (canonical lesson).
+	// reset_pool, not reset: a shared_ptr's own reset() would answer fx.reset()
 	void reset_pool() {
 		pool = [];
-		for (int i = 0; i < PART_MAX; ++i) {
-			pool.push([0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0]);
-		}
+		for (int i = 0; i < PART_MAX; ++i) { pool.push(Particle()); }
 		cursor = 0;
 	}
 
 	void spawn(int kind, float x, float y, float z, float vx, float vy, float vz, int life) {
-		pool[cursor] = [kind, x, y, z, vx, vy, vz, life];
+		pool[cursor] = Particle(kind, x, y, z, vx, vy, vz, life);
 		cursor = (cursor + 1) % PART_MAX;
 	}
 
-	// the whole pool steps through ONE pure in-place function — parallel_for owns
-	// each element exclusively when the host grants workers, the same function in
-	// a serial range-for when HOST_WORKERS == 0.
+	// one pure in-place function steps the whole pool: parallel_for owns each
+	// element exclusively when the host grants workers
 	void update() {
-		if (HOST_WORKERS == 0) {
+		if (HOST_WORKERS <= 0) {
 			for (auto& p : pool) { gloom_particle_step(p); }
 		} else {
 			parallel_for (auto& p : pool) { gloom_particle_step(p); }
@@ -105,10 +122,16 @@ public:
 		}
 	}
 
-	// per-kind life-phase color ramps, interned at boot (phase 0 = fresh);
-	// called from Renderer.init() so the palette intern order matches canonical
+	// per-kind life-phase color ramps (phase 0 = fresh); the showcase look's come from look.jai
 	void build_colors() {
-		var ramps = [
+		colors = [];
+		if (SHOWCASE) {
+			for (auto& ramp : SHOWCASE_PARTICLE_RAMPS) {
+				for (auto& color : ramp) { colors.push(color_idx(color)); }
+			}
+			return;
+		}
+		array<array<array<int>>> ramps = [
 			[[0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]],                          // 0 dead (unused)
 			[[255, 240, 160], [255, 200, 90], [230, 130, 50], [140, 70, 30]],      // 1 spark
 			[[210, 40, 30], [180, 34, 26], [140, 26, 20], [95, 18, 14]],           // 2 blood
@@ -117,11 +140,8 @@ public:
 			[[255, 252, 220], [255, 236, 160], [255, 190, 90], [200, 120, 50]],    // 5 flash
 			[[150, 255, 170], [110, 235, 200], [90, 190, 250], [80, 120, 220]]     // 6 hexmote
 		];
-		cols = [];
 		for (auto& ramp : ramps) {
-			for (auto& rgb : ramp) {
-				cols.push(rgb_idx(rgb[0], rgb[1], rgb[2]));
-			}
+			for (auto& rgb : ramp) { colors.push(rgb_idx(rgb[0], rgb[1], rgb[2])); }
 		}
 	}
 

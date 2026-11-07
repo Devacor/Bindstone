@@ -132,19 +132,22 @@ gate_fuzz_order() {
 
 vm_only() { hash_on vm || { echo "$1: its one backend is the VM, which HASH_BACKENDS leaves out; skipped"; return 1; }; }
 
-# gloom_hashes <ticks> <workers> <frame hash> <STATE_HASH> [look]: the reference look draws the frames the ports
-# reproduce, the showcase look the game as played; both run the same simulation, so STATE_HASH is one number
+# gloom_hashes <ticks> <workers> <frame hash> <STATE_HASH> [look] [example]: the reference look draws the frames the
+# ports reproduce, the showcase look the game as played; both run the same simulation, so STATE_HASH is one number.
+# gloom_idiomatic is the same game in another style and must draw the same frames.
 gloom_hashes() {
 	vm_only gloom || return 0
 	cd "$ROOT/examples/gloom"
-	local look="${5:-reference}"
-	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" --look "$look"
-	want "GLOOM vm ($1 ticks, $2 workers, $look look): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
+	local look="${5:-reference}" example="${6:-gloom}"
+	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" --look "$look" --scripts "$ROOT/examples/$example/scripts"
+	want "$example vm ($1 ticks, $2 workers, $look look): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
 }
 
 gate_gloom() {
 	gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"
 	gloom_hashes 300 0 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase
+	gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE" reference gloom_idiomatic
+	gloom_hashes 300 0 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase gloom_idiomatic
 }
 gate_gloom_workers() {
 	gloom_hashes 300 8 "$GLOOM_FRAME" "$GLOOM_STATE"

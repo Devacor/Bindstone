@@ -1,16 +1,9 @@
-// Enemies, idiomatic: a real class HIERARCHY. The canonical version is one
-// Enemy class switching on `kind` to pick a brain; here each bestiary entry is
-// a subclass — Grunt, Spitter, Turret, Warden — overriding the coroutine
-// make_brain() (virtual dispatch mints the right brain, phase state lives in
-// the coroutine frame), plus template-method hooks for death effects and art.
-// Instances live in G.enemies as shared_ptr handles; iterate with auto& —
-// element reads deep-copy even for shared_ptr elements.
+// Enemies: one class per bestiary entry. Each overrides the coroutine method
+// make_brain(), whose handle lives in a field: a phase is a loop in the
+// coroutine frame, and pain interrupts by dropping the handle. Hooks give the
+// death effects and the art. G.enemies holds them as shared_ptr handles.
 
-var ENEMY_STATE_DORMANT = 0;
-var ENEMY_STATE_HUNT = 1;
-var ENEMY_STATE_ATTACK = 2;
-var ENEMY_STATE_DYING = 3;
-var ENEMY_STATE_DEAD = 4;
+enum EnemyState { dormant, hunt, attack, dying, dead }
 
 class Enemy {
 public:
@@ -20,7 +13,7 @@ public:
 	float y = 0.0;
 	int hp = 30;
 	bool alive = true;
-	int state = 0;         // ENEMY_STATE_*
+	int state = EnemyState.dormant;
 	int anim = 0;          // ticks in current state (drives art frames)
 	int walk = 0;          // walk cycle counter (advances only when moving)
 	int flash = 0;         // damage flash ticks (renderer whitens the LUT)
@@ -28,7 +21,7 @@ public:
 	float radius = 0.34;
 	float speed = 3.0;
 	int gib_count = 7;
-	var brain = null;      // coroutine handle in a field: the whole point
+	var brain = null;      // the coroutine handle
 
 	Enemy(int kind_, string art_, float x_, float y_) {
 		kind = kind_;
@@ -97,14 +90,14 @@ public:
 		if (RNG.chance(ENEMY_DEFS[kind].pain)) {
 			stun = 5 + RNG.next(5);
 			brain = null;
-			state = ENEMY_STATE_HUNT;
+			state = EnemyState.hunt;
 			anim = 0;
 		}
 	}
 
 	void die() {
 		alive = false;
-		state = ENEMY_STATE_DYING;
+		state = EnemyState.dying;
 		anim = 0;
 		brain = null;
 		G.kills = G.kills + 1;
@@ -119,7 +112,7 @@ public:
 	// which art this body renders as, given its state machinery
 	string art_name() {
 		if (alive) {
-			if (state == ENEMY_STATE_ATTACK) { return art_base + "_at"; }
+			if (state == EnemyState.attack) { return art_base + "_at"; }
 			return (walk / 6) % 2 == 0 ? art_base + "_w0" : art_base + "_w1";
 		}
 		if (anim < 6) { return art_base + "_d0"; }
@@ -135,24 +128,24 @@ public:
 	Grunt(float x_, float y_) : super(0, "grunt", x_, y_) {}
 
 	coroutine void make_brain() override {
-		while (state == ENEMY_STATE_DORMANT) {
+		while (state == EnemyState.dormant) {
 			if ((sees_player() && player_dist() < 11.0) || hears_player()) { break; }
 			yield;
 		}
-		state = ENEMY_STATE_HUNT;
+		state = EnemyState.hunt;
 		anim = 0;
 		for (int i = 0; i < 7; ++i) { yield; }   // the roar (it commits)
 		int zig = RNG.next(2) == 0 ? 1 : -1;
 		while (true) {
 			float d = player_dist();
 			if (d < 1.3) {
-				state = ENEMY_STATE_ATTACK;
+				state = EnemyState.attack;
 				anim = 0;
 				for (int i = 0; i < 6; ++i) { yield; }     // lunge windup
 				if (player_dist() < 1.6 && G.world.los_clear(x, y, G.player.px, G.player.py)) {
 					G.player.damage(RNG.roll(ENEMY_DEFS[0].melee_lo, ENEMY_DEFS[0].melee_hi), "a grunt's claws");
 				}
-				state = ENEMY_STATE_HUNT;
+				state = EnemyState.hunt;
 				anim = 0;
 				for (int i = 0; i < 5; ++i) { yield; }     // recover
 				continue;
@@ -177,11 +170,11 @@ public:
 	Spitter(float x_, float y_) : super(1, "spit", x_, y_) {}
 
 	coroutine void make_brain() override {
-		while (state == ENEMY_STATE_DORMANT) {
+		while (state == EnemyState.dormant) {
 			if ((sees_player() && player_dist() < 12.0) || hears_player()) { break; }
 			yield;
 		}
-		state = ENEMY_STATE_HUNT;
+		state = EnemyState.hunt;
 		anim = 0;
 		int orbit = RNG.next(2) == 0 ? 1 : -1;
 		while (true) {
@@ -189,13 +182,13 @@ public:
 			bool los = G.world.los_clear(x, y, G.player.px, G.player.py);
 			if (los && d < 9.5 && d > 2.0) {
 				// telegraph glow, then the gob
-				state = ENEMY_STATE_ATTACK;
+				state = EnemyState.attack;
 				anim = 0;
 				for (int i = 0; i < 9; ++i) { yield; }
 				if (G.world.los_clear(x, y, G.player.px, G.player.py)) {
 					G.spawn_shot(1, x, y, G.player.px, G.player.py, 6.5);
 				}
-				state = ENEMY_STATE_HUNT;
+				state = EnemyState.hunt;
 				anim = 0;
 				// cooldown spent orbiting sideways
 				for (int i = 0; i < 16; ++i) {
@@ -233,21 +226,21 @@ public:
 	coroutine void make_brain() override {
 		while (true) {
 			while (!(sees_player() && player_dist() < 11.0)) {
-				state = ENEMY_STATE_DORMANT;
+				state = EnemyState.dormant;
 				yield;
 			}
-			state = ENEMY_STATE_HUNT;     // waking whir
+			state = EnemyState.hunt;     // waking whir
 			anim = 0;
 			for (int i = 0; i < 8; ++i) { yield; }
 			while (sees_player() && player_dist() < 12.0) {
-				state = ENEMY_STATE_ATTACK;
+				state = EnemyState.attack;
 				anim = 0;
 				for (int burst = 0; burst < 3; ++burst) {
 					shoot();
 					yield;
 					yield;
 				}
-				state = ENEMY_STATE_HUNT;
+				state = EnemyState.hunt;
 				anim = 0;
 				for (int i = 0; i < 13; ++i) { yield; }
 			}
@@ -276,7 +269,7 @@ public:
 	// the turret has its own frame set (no walk cycle — it is furniture)
 	string art_name() override {
 		if (alive) {
-			if (state == ENEMY_STATE_ATTACK) { return "tur_fire"; }
+			if (state == EnemyState.attack) { return "tur_fire"; }
 			return "tur_idle";
 		}
 		if (anim < 6) { return "tur_d0"; }
@@ -297,11 +290,11 @@ public:
 	coroutine void make_brain() override {
 		bool enraged = false;
 		bool summoned = false;
-		while (state == ENEMY_STATE_DORMANT) {
+		while (state == EnemyState.dormant) {
 			if ((sees_player() && player_dist() < 13.0) || hears_player()) { break; }
 			yield;
 		}
-		state = ENEMY_STATE_HUNT;
+		state = EnemyState.hunt;
 		anim = 0;
 		G.hud.show("THE WARDEN HAS SEEN YOU", "91");
 		for (int i = 0; i < 10; ++i) { yield; }
@@ -319,7 +312,7 @@ public:
 			float d = player_dist();
 			bool los = G.world.los_clear(x, y, G.player.px, G.player.py);
 			if (los && d > 2.4) {
-				state = ENEMY_STATE_ATTACK;
+				state = EnemyState.attack;
 				anim = 0;
 				for (int i = 0; i < 8; ++i) { yield; }
 				int volleys = enraged ? 2 : 1;
@@ -329,7 +322,7 @@ public:
 					}
 					for (int i = 0; i < 4; ++i) { yield; }
 				}
-				state = ENEMY_STATE_HUNT;
+				state = EnemyState.hunt;
 				anim = 0;
 				int rest = enraged ? 6 : 12;
 				for (int i = 0; i < rest; ++i) {
@@ -339,13 +332,13 @@ public:
 				continue;
 			}
 			if (d < 1.7) {
-				state = ENEMY_STATE_ATTACK;
+				state = EnemyState.attack;
 				anim = 0;
 				for (int i = 0; i < 5; ++i) { yield; }
 				if (player_dist() < 2.0) {
 					G.player.damage(RNG.roll(ENEMY_DEFS[3].melee_lo, ENEMY_DEFS[3].melee_hi), "the Warden's fist");
 				}
-				state = ENEMY_STATE_HUNT;
+				state = EnemyState.hunt;
 				anim = 0;
 				for (int i = 0; i < 4; ++i) { yield; }
 				continue;
@@ -358,12 +351,12 @@ public:
 	// warden's reinforcements: grunts at the nearest free tiles around him.
 	// They count toward the map total (an honest 100% asks for the whole family).
 	void summon_pack() {
-		var offs = [[2, 0], [-2, 0], [0, 2], [0, -2]];
+		array<math::ivec2> offsets = [math::ivec2(2, 0), math::ivec2(-2, 0), math::ivec2(0, 2), math::ivec2(0, -2)];
 		int placed = 0;
-		for (auto& o : offs) {
+		for (auto& offset : offsets) {
 			if (placed >= 2) { break; }
-			int tx = math::ifloor(x) + o[0];
-			int ty = math::ifloor(y) + o[1];
+			int tx = math::ifloor(x) + offset.x;
+			int ty = math::ifloor(y) + offset.y;
 			if (!G.world.walkable(tx, ty)) { continue; }
 			G.spawn_enemy(0, tx, ty);
 			G.fx.explosion(tx + 0.5, ty + 0.5);

@@ -4,7 +4,8 @@ A playable DOOM engine written in JaiScript: the WAD loader, BSP renderer, plays
 sound and music decoding, savegames, demos and 16-player netplay are all script. It draws
 to the terminal in sextants (Unicode 13's 2x3 blocks, six pixels to a cell) where the font has them,
 which a script can only infer from Windows Terminal (its Cascadia font does), and in half blocks (two
-pixels to a cell) everywhere else; `-- --pix sext` and `-- --pix half` choose. Colour is 24-bit where
+pixels to a cell) everywhere else; the menu's OPTIONS (HIGH DETAIL) turns sextants off or on for good, and
+`-- --pix sext` and `-- --pix half` choose for one run. Colour is 24-bit where
 the terminal says it takes it (`COLORTERM`, Windows Terminal, any Windows console), the xterm 256-colour
 palette elsewhere (macOS Terminal.app); `-- --truecolor` and `-- --256color` choose.
 

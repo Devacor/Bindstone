@@ -21,7 +21,8 @@
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //           jaiscript jaidoom.jai -- uncapped    (no frame cap: the camera eases between 35 Hz tics; U toggles in game)
 //           jaiscript jaidoom.jai -- --pix sext  (2x3 sextant pixels per cell, the default in Windows Terminal, whose
-//              font has them; --pix half keeps the 1x2 half blocks every terminal font draws)
+//              font has them; --pix half keeps the 1x2 half blocks every terminal font draws; the menu's
+//              OPTIONS -> HIGH DETAIL sets either for later runs, a --pix on the command line wins for its run)
 //
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
 //           jaiscript jaidoom.jai -- doom2.wad mypack.wad   (further WADs merge over the first; a
@@ -54,7 +55,8 @@ import "boot.jai";
 
 float TICK_MS = 1000.0 / 35.0;
 bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
-string PIX_MODE = "";        // --pix half|sext; "" = sextants where the font has them (Windows Terminal)
+string PIX_MODE = "";        // --pix half|sext, else the OPTIONS choice; "" = sextants where the font has them (Windows Terminal)
+string PIX_SETTING = "";     // the OPTIONS render mode, saved with the config; "" until it is changed
 float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
 bool RUN_TOGGLE = false;
 
@@ -243,6 +245,11 @@ function menu_build() -> void {
 		MENU_ITEMS.push("QUIT");                     // never into stale gameplay
 		return;
 	}
+	if (MENU_MODE == 7) {
+		MENU_ITEMS.push(SEXTANTS ? "HIGH DETAIL: ON" : "HIGH DETAIL: OFF");
+		MENU_ITEMS.push("BACK");
+		return;
+	}
 	if (MENU_MODE == 6) {
 		for (auto m : map_list()) { MENU_ITEMS.push(m); }
 		MENU_ITEMS.push("BACK");
@@ -253,6 +260,7 @@ function menu_build() -> void {
 	MENU_ITEMS.push("LEVEL SELECT");
 	MENU_ITEMS.push("MULTIPLAYER");
 	MENU_ITEMS.push("DEMOS");
+	MENU_ITEMS.push("OPTIONS");
 	if (MID_GAME) { MENU_ITEMS.push("SAVE GAME"); }
 	if (file_exists(data_path(SAVE_PATH))) { MENU_ITEMS.push("LOAD GAME"); }
 	MENU_ITEMS.push("QUIT");
@@ -301,7 +309,7 @@ string DEMO_LAST_NAME = "demo.json"; // record target + play prefill: zero-typin
 bool DEMO_MENU_ARMED = false; // skill-pick esc disarms a DEMOS-armed tape
 
 function cfg_save() -> void {
-	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME}));
+	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME, "pix": PIX_SETTING}));
 }
 
 function addr_save() -> void {
@@ -315,6 +323,20 @@ function addr_load() -> void {
 	if (cfg == null) { return; }
 	if (cfg.has("addr")) { NP_LAST_ADDR = "" + cfg["addr"]; }
 	if (cfg.has("demo")) { DEMO_LAST_NAME = "" + cfg["demo"]; }
+	if (cfg.has("pix")) { PIX_SETTING = "" + cfg["pix"]; }
+	if (PIX_MODE == "") { PIX_MODE = PIX_SETTING; }   // --pix on the command line wins for its run
+}
+
+// OPTIONS: flip between sextants and half blocks, kept for later runs and applied at once
+function render_mode_toggle() -> void {
+	PIX_SETTING = SEXTANTS ? "half" : "sext";
+	PIX_MODE = PIX_SETTING;
+	cfg_save();
+	if (SCREEN_COLS > 0) {
+		screen_fit();
+		print(ESC + "[2J", skip_newline);
+	}
+	menu_build();
 }
 
 // "host", "host:port" or bare port after ':' -> starts the join lobby
@@ -380,7 +402,7 @@ function menu_key(string k) -> bool {
 	else if (k == "down") { MENU_SEL = (MENU_SEL + 1) % n; }
 	else if (k == "esc") {
 		if (MENU_MODE == 1 && DEMO_MENU_ARMED) { DEMO_ARM = ""; DEMO_MENU_ARMED = false; }
-		if (MENU_MODE == 1 || MENU_MODE == 2 || MENU_MODE == 4 || MENU_MODE == 6) { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+		if (MENU_MODE == 1 || MENU_MODE == 2 || MENU_MODE == 4 || MENU_MODE == 6 || MENU_MODE == 7) { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
 		else if (NP_WI_HOLD) { GSTATE = 3; }
 		else if (MID_GAME) { GSTATE = 2; }
 		else { GSTATE = 0; }
@@ -401,6 +423,9 @@ function menu_key(string k) -> bool {
 				MENU_MODE = 5;
 				DEMO_NAME_EDIT = DEMO_LAST_NAME;
 			}
+		} else if (MENU_MODE == 7) {
+			if (MENU_ITEMS[MENU_SEL] == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+			else { render_mode_toggle(); }
 		} else if (MENU_MODE == 6) {
 			var lsel = MENU_ITEMS[MENU_SEL];
 			if (lsel == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
@@ -420,6 +445,7 @@ function menu_key(string k) -> bool {
 			else if (sel == "LEVEL SELECT") { MENU_MODE = 6; MENU_SEL = 0; menu_build(); }
 			else if (sel == "MULTIPLAYER") { MENU_MODE = 2; MENU_SEL = 0; menu_build(); }
 			else if (sel == "DEMOS") { MENU_MODE = 4; MENU_SEL = 0; menu_build(); }
+			else if (sel == "OPTIONS") { MENU_MODE = 7; MENU_SEL = 0; menu_build(); }
 			else if (sel == "SAVE GAME") {
 				if (game_save(SAVE_PATH)) { GSTATE = 2; set_msg("game saved"); }
 				else { set_msg("save failed"); }
@@ -913,7 +939,7 @@ function flowtest() -> int {
 	GSTATE = 0;
 	title_draw();
 	menu_open();                                     // the any-key-at-title path
-	if (GSTATE != 1 || MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL title -> menu"); }
+	if (GSTATE != 1 || MENU_ITEMS.size() != 6 + mload) { fails = fails + 1; print("FAIL title -> menu"); }
 	menu_draw(MENU_ITEMS, MENU_SEL, "");
 	menu_key("down");
 	menu_key("up");
@@ -931,7 +957,7 @@ function flowtest() -> int {
 	automap_draw();
 	game_key("tab");
 	game_key("esc");                                 // mid-game menu gains RESUME + SAVE GAME
-	if (GSTATE != 1 || MENU_ITEMS.size() != 7 + mload) { fails = fails + 1; print("FAIL mid-game menu"); }
+	if (GSTATE != 1 || MENU_ITEMS.size() != 8 + mload) { fails = fails + 1; print("FAIL mid-game menu"); }
 	menu_key("esc");                                 // esc resumes
 	if (GSTATE != 2) { fails = fails + 1; print("FAIL menu resume"); }
 	LEVEL_DONE = true;                               // exit -> intermission
@@ -952,7 +978,7 @@ function flowtest() -> int {
 	MID_GAME = false;
 	title_draw();
 	menu_open();
-	if (MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL RESUME lingered past episode end"); }
+	if (MENU_ITEMS.size() != 6 + mload) { fails = fails + 1; print("FAIL RESUME lingered past episode end"); }
 
 	// ---- multiplayer menu + address entry (no sockets: p9 owns the wire) ----
 	menu_open();
@@ -1035,6 +1061,21 @@ function flowtest() -> int {
 	addr_load();
 	delete_file(data_path(NET_CFG));
 	if (DEMO_LAST_NAME != "mytape.json") { fails = fails + 1; print(`FAIL demo name round-trip (${DEMO_LAST_NAME})`); }
+	menu_open();                                     // OPTIONS: the render mode flips and persists
+	for (int oi = 0; oi < MENU_ITEMS.size(); ++oi) { if (MENU_ITEMS[oi] == "OPTIONS") { MENU_SEL = oi; } }
+	menu_key("enter");
+	if (MENU_MODE != 7 || MENU_ITEMS[0] != "HIGH DETAIL: OFF") { fails = fails + 1; print("FAIL options submenu"); }
+	menu_draw(MENU_ITEMS, MENU_SEL, "");
+	menu_key("enter");
+	PIX_SETTING = "";
+	PIX_MODE = "";
+	addr_load();
+	delete_file(data_path(NET_CFG));
+	if (PIX_SETTING != "sext" || PIX_MODE != "sext") { fails = fails + 1; print(`FAIL render mode round-trip (${PIX_SETTING})`); }
+	menu_key("esc");
+	if (MENU_MODE != 0) { fails = fails + 1; print("FAIL options esc"); }
+	PIX_SETTING = "";
+	PIX_MODE = "";
 	// menu-armed record -> tape writes at level exit -> menu replay matches the hash
 	DEMO_LAST_NAME = "jaidoom_menudemo.json";
 	menu_open();
@@ -1078,7 +1119,7 @@ function flowtest() -> int {
 	attract_start();                                 // the title's attract loop plays the shipped tape
 	if (!ATTRACT || !DEMO_PLAY || GSTATE != 2 || MID_GAME || GAME_MAP != DEMO_MAP) { fails = fails + 1; print("FAIL attract start"); }
 	attract_end(true);                               // a key: the menu, never RESUME into the tape
-	if (ATTRACT || DEMO_PLAY || GSTATE != 1 || MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL attract key to menu"); }
+	if (ATTRACT || DEMO_PLAY || GSTATE != 1 || MENU_ITEMS.size() != 6 + mload) { fails = fails + 1; print("FAIL attract key to menu"); }
 	WIPE_TICS = 0;
 	delete_file(data_path("jaidoom_menudemo.json"));
 	DEMO_LAST_NAME = "demo.json";

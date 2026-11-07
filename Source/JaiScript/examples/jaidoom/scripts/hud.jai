@@ -423,8 +423,9 @@ function menu_entry_draw(string label, int x, int y, float ms) -> int {
 		draw_patch(lu, x, y, w, h);
 		return x;
 	}
-	if (x < 0) { x = (VW - text_width(label, ms * 2.0)) / 2; }
-	draw_text(label, x, y, ms * 2.0);
+	float fs = fit_scale(label, ms * 2.0);
+	if (x < 0) { x = (VW - text_width(label, fs)) / 2; }
+	draw_text(label, x, y, fs);
 	return x;
 }
 

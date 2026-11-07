@@ -10,7 +10,9 @@
 //   quicksave: Z   quickload: X   menu: esc (resume/new/multiplayer/demos/save/load/quit)
 //   skills: I'M TOO YOUNG..ULTRA-VIOLENCE + NIGHTMARE! (fast monsters, corpses respawn)
 //   demos: menu DEMOS -> RECORD NEW GAME (tape writes at level exit or quit; REC shows
-//          top-right) / PLAY DEMO (filename entry, esc stops playback back to the title)
+//          top-right) / PLAY DEMO (filename entry, esc stops playback back to the title);
+//          left at the title, the game plays the shipped demo.json between title showings, as DOOM
+//          does (on the IWAD it was recorded on), and any key opens the menu
 //   cheats (type them): iddqd idkfa idfa idclip idclev## (E#M#)
 //                       idbehold + s/i/r/a/l, iddt (map reveal cycle)
 //
@@ -114,12 +116,41 @@ function demo_play_start() -> void {
 	GSTATE = 2;
 }
 
+// the title's attract loop, as DOOM runs it: the title for a while, then the shipped demo, then the title again; any
+// key opens the menu. Only on the IWAD the tape was recorded on, with nothing merged over it: elsewhere it desyncs.
+bool ATTRACT = false;
+bool ATTRACT_OFF = false;     // no tape this WAD can play: the title stays
+float TITLE_MS = 0.0;         // time on the title since it last came up
+float ATTRACT_WAIT_MS = 170 * 1000.0 / 35.0;   // DOOM's 170 tics of TITLEPIC
+
+function attract_start() -> void {
+	if (NET_GAME) { TITLE_MS = 0.0; return; }
+	if (WAD_FILES.size() != 1 || !demo_load(game_root() + "/demo.json") || DEMO_WAD != WAD_BASE || lump_num(DEMO_MAP) < 0) {
+		ATTRACT_OFF = true;
+		return;
+	}
+	wipe_begin();
+	demo_play_start();
+	MID_GAME = false;
+	ATTRACT = true;
+}
+
+function attract_end(bool to_menu) -> void {
+	ATTRACT = false;
+	DEMO_PLAY = false;
+	LEVEL_DONE = false;
+	TITLE_MS = 0.0;
+	GSTATE = 0;
+	if (to_menu) { menu_open(); }
+	else { wipe_begin(); }
+}
+
 function read_input() -> void {
 	if (DEMO_PLAY) {
 		if (!demo_feed()) {                          // tape ran out: hand the controls over
 			CMD_FWD = 0.0; CMD_SIDE = 0.0; CMD_TURN = 0.0;
 			CMD_USE = false; CMD_FIRE = false;
-			set_msg("demo end");
+			if (!ATTRACT) { set_msg("demo end"); }
 		}
 		return;
 	}
@@ -616,12 +647,19 @@ function play(string mapname) -> int {
 				read_input();
 				game_tic();
 				accum = accum - TICK_MS;
+				if (ATTRACT && (!DEMO_PLAY || LEVEL_DONE)) { break; }
 			}
+			if (ATTRACT && (!DEMO_PLAY || LEVEL_DONE)) { attract_end(false); }
 		} else { accum = 0.0; }
+		if (GSTATE == 0) {
+			TITLE_MS = TITLE_MS + dt;
+			if (TITLE_MS >= ATTRACT_WAIT_MS && !ATTRACT_OFF) { attract_start(); }
+		} else if (!ATTRACT) { TITLE_MS = 0.0; }
 
 		var edge = read_key();                       // drain ALL pending edges each frame
 		while (edge != "") {
-			if (GSTATE == 0) { menu_open(); }
+			if (ATTRACT) { attract_end(true); }
+			else if (GSTATE == 0) { menu_open(); }
 			else if (GSTATE == 1) { if (menu_key(edge)) { quit = true; } }
 			else if (GSTATE == 5) {                  // net lobby: esc backs out,
 				if (edge == "esc") { np_cancel(); menu_open(); }
@@ -737,9 +775,9 @@ function play(string mapname) -> int {
 				scoreboard_draw(slines);
 			}
 			msg_draw();
-			fps_draw();
+			if (!ATTRACT) { fps_draw(); }
 			if (DEMO_REC) { tape_draw("REC"); }
-			else if (DEMO_PLAY) { tape_draw("DEMO"); }
+			else if (DEMO_PLAY && !ATTRACT) { tape_draw("DEMO"); }
 		} else {
 			set_palette_bank(0);
 			if (GSTATE == 0) { title_draw(); }
@@ -757,11 +795,11 @@ function play(string mapname) -> int {
 			}
 			else if (GSTATE == 3) { wi_screen(); }
 			else { end_draw(); }
-			// the melt: departing frame over the fresh draw, one step per frame
-			if (WIPE_TICS > 0 && (GSTATE == 3 || GSTATE == 4)) {
-				wipe_overlay();
-				if (wipe_tic()) { WIPE_TICS = 0; }
-			}
+		}
+		// the melt: departing frame over the fresh draw, one step per frame
+		if (WIPE_TICS > 0 && (GSTATE == 0 || GSTATE == 3 || GSTATE == 4 || ATTRACT)) {
+			wipe_overlay();
+			if (wipe_tic()) { WIPE_TICS = 0; }
 		}
 		print(VIEW_HOME + vid_blit(), skip_newline);
 
@@ -1037,6 +1075,11 @@ function flowtest() -> int {
 	else { print(`menu demo round-trip pinned: ${mfed} tics replay to hash ${mh1}`); }
 	demo_stop();                                     // the esc path
 	if (DEMO_PLAY || GSTATE != 0 || MID_GAME) { fails = fails + 1; print("FAIL demo esc stop"); }
+	attract_start();                                 // the title's attract loop plays the shipped tape
+	if (!ATTRACT || !DEMO_PLAY || GSTATE != 2 || MID_GAME || GAME_MAP != DEMO_MAP) { fails = fails + 1; print("FAIL attract start"); }
+	attract_end(true);                               // a key: the menu, never RESUME into the tape
+	if (ATTRACT || DEMO_PLAY || GSTATE != 1 || MENU_ITEMS.size() != 5 + mload) { fails = fails + 1; print("FAIL attract key to menu"); }
+	WIPE_TICS = 0;
 	delete_file(data_path("jaidoom_menudemo.json"));
 	DEMO_LAST_NAME = "demo.json";
 

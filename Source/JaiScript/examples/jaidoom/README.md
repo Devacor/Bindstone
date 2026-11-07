@@ -58,7 +58,7 @@ jaiscript jaidoom.jai -- freedoom2 MAP01         # another IWAD and map (MAPxx n
 jaiscript jaidoom.jai -- doom2 MAP07             # your own registered WAD from wads/ (a path works as well)
 jaiscript jaidoom.jai -- doom2 mypack.wad        # a map pack merged over it
 jaiscript jaidoom.jai -- record demo.json        # demos: record, then
-jaiscript jaidoom.jai -- playdemo demo.json
+jaiscript jaidoom.jai -- playdemo demo.json      # left at the title, the game plays demo.json between showings (on its own IWAD)
 jaiscript jaidoom.jai -- host [port] [coop]      # netplay: host (deathmatch or co-op)
 jaiscript jaidoom.jai -- join <host> [port]      #          join
 jaiscript jaidoom.jai -- bootstrap               # fetch the data without the screen

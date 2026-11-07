@@ -4,8 +4,8 @@ Eleven auto-advancing truecolor scenes, five kinds of transition, pixel-font
 title cards, and a finale where an eight-dimensional hypercube unfolds over
 Escher's hyperbolic plane, shatters into the word JAISCRIPT and slams it into a
 wall of rainbow fire before the credits roll — every effect coded in
-`scenes/*.jai`, every frame drawn at **double vertical resolution** with
-half-block pixels. A ray tracer, a sphere
+`scenes/*.jai`, every frame drawn in **Unicode sextants**, six pixels a cell
+(half blocks on request or on very large terminals). A ray tracer, a sphere
 tracer, a textured Wolfenstein raycaster, a VoxelSpace terrain flight,
 metaballs, a murmuration, a skull-headed spider crawling a morphing gyroid
 labyrinth, a Navier-Stokes ink tank and the classics. The C++ host (`demoreel_host.cpp`) is a
@@ -18,13 +18,25 @@ against a reference. Six scenes trace their rows across every core with
 
 ## How a frame is drawn
 
-Each scene paints a `w x 2h` grid of palette indices (square pixels, two per
-terminal row) and the presenter in `util.jai` packs them into cells through the
-upper-half-block glyph `▀`: the **foreground** truecolor escape paints the top
-pixel, the **background** escape the bottom one (JaiDoom's `vid_row_half`
-technique). Escapes are emitted only when a color changes along the row, and a
-cell whose two pixels agree collapses to a space (a background run) or a full
-block (a foreground run), so smooth regions cost one byte per cell. Palettes
+Each scene paints a grid of palette indices in square pixels, and the presenter
+in `util.jai` packs them into cells one of two ways:
+
+- **Sextants** (the default): a cell is 2x3 pixels drawn with one of the 64
+  Unicode 13 sextant glyphs, fitted as JaiDoom fits them (`vid_row_sext`): the
+  cell's brightest pixel is the foreground, its darkest the background, and each
+  pixel takes the nearer in luminance. A sextant is 2/3 as wide as it is tall, so
+  the grid is three pixels a row tall and one and a half a column wide, and each
+  of a cell's two glyph columns shows the grid column nearest it.
+- **Half blocks**: a cell is 1x2 pixels through the upper-half-block glyph `▀`:
+  the **foreground** truecolor escape paints the top pixel, the **background**
+  escape the bottom one (JaiDoom's `vid_row_half`).
+
+`pix half|sext|auto` (`--pix` on `jai_demoreel`) picks; auto takes sextants while
+the grid stays within 48,000 pixels (about 160x60 cells) and half blocks above,
+and the density map always reads half blocks. Escapes are emitted only when a
+color changes along the row, and a cell whose pixels agree collapses to a space
+(a background run) or a full block (a foreground run), so smooth regions cost one
+byte per cell. Palettes
 precompute both escape strings per entry; a transition simply concatenates the
 two scenes' tables (the incoming scene's indices shift by an offset) and the
 reel's own UI entries ride at the end. `hb_row` is written as a
@@ -33,8 +45,11 @@ the serial loop and, with `HB_WORKERS` set (the standalone runner does on wide
 terminals), a parallel presentation.
 
 Text stays crisp on top: the HUD, the scene handle under each title card and
-the finale's credits are ordinary glyph rows; the big title letters themselves
-are pixels from a 5x7 font (`FONT5`), typed in with a shine sweeping across.
+the finale's credits are ordinary glyph rows, and a scene can lay characters on
+any cell through the text layer (`txt_put`, `txt_glyph`: a codepoint and a color
+per cell, drawn over the cell's darkest pixel). The big title letters themselves
+are pixels from a 5x7 font (`FONT5`), typed in with a shine sweeping across, at
+the largest scale that fits.
 
 ## Run it
 
@@ -77,6 +92,7 @@ reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
 jaiscript demoreel.jai                       # the reel, 30 fps, with its soundtrack (q/esc quits; h/f/n/p/space/digits work)
 jaiscript demoreel.jai -- color 256          # the reel quantized to the xterm-256 cube (color 24 forces 24-bit)
 jaiscript demoreel.jai -- ascii 1            # one density character per cell (no block glyphs)
+jaiscript demoreel.jai -- pix half           # half blocks instead of sextants (for a font without them)
 jaiscript demoreel.jai -- frames 1700        # headless self-test: smoke frames, sizes + stream hash + timing
 jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt (+ P_<i>.bmp, the pixel grid)
 jaiscript demoreel.jai -- bench 60           # every scene mid-flight: script ms/frame and KB/frame
@@ -109,10 +125,11 @@ restored, on every platform, as `jai_demoreel` does.
 ```
 jai_demoreel                     # the reel, 30 fps pacing
 jai_demoreel --ascii             # one density character per cell, for terminals without block glyphs
+jai_demoreel --pix half          # half blocks instead of sextants (--pix sext forces sextants at any size)
 jai_demoreel --256color          # force the xterm-256 cube (--truecolor forces 24-bit)
 jai_demoreel --smoke             # headless: frame-stream hash + perf
 jai_demoreel --smoke --frames N  # smoke frame budget (default 1700)
-jai_demoreel --capture I         # print scene I as plain text (ANSI stripped: half blocks and spaces)
+jai_demoreel --capture I         # print scene I as plain text (ANSI stripped: block glyphs and spaces)
 jai_demoreel --capture I --ascii # the same frame as a density map
 jai_demoreel --reload-test       # headless hot-reload self-test
 jai_demoreel --precompiled       # boot from demoreel.jaibite (saved on first run)

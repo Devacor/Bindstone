@@ -35,6 +35,7 @@ struct jai_flags {
 	bool debug_wait = false;             // also hold boot until a debugger attaches
 	int64_t debug_port = 52472;
 	std::string coverage;                // the vm's execution-coverage census, written at exit (a build with JAISCRIPT_VM_COVERAGE)
+	std::string pix;                     // the cell shape: half, sext or auto (the script's default)
 };
 
 // The first diagnostic of a failed load as the reel shows it: "file.jai:line:col: error: ...", then the source line and
@@ -156,6 +157,7 @@ public:
 	std::string load_kind() override { return kind_; }
 
 	void boot(int64_t w, int64_t h, int64_t seed, const std::string& backend, bool smoke, bool hud) override {
+		if (!flags_.pix.empty()) { eng_->execute("demo_pixels(\"" + flags_.pix + "\");"); }
 		eng_->execute("demo_boot(" + std::to_string(w) + ", " + std::to_string(h) + ", " +
 			std::to_string(seed) + ", \"" + backend + "\", " + (smoke ? "true" : "false") + ", " +
 			(hud ? "true" : "false") + ");");
@@ -244,6 +246,7 @@ public:
 		if (a == "--precompiled") { flags_.precompiled = true; return 1; }
 		if (a == "--jaibite" && has_value()) { flags_.jaibite_path = argv[i + 1]; return 2; }
 		if (a == "--coverage" && has_value()) { flags_.coverage = argv[i + 1]; return 2; }
+		if (a == "--pix" && has_value()) { flags_.pix = argv[i + 1]; return 2; }
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 		if (a == "--debug") { flags_.debug = true; return 1; }
 		if (a == "--debug-wait") { flags_.debug = true; flags_.debug_wait = true; return 1; }
@@ -257,6 +260,7 @@ public:
 			"  --precompiled    boot from demoreel.jaibite (saved on first run)\n"
 			"  --jaibite PATH   .jaibite path for --precompiled\n"
 			"  --coverage PATH  write the vm's execution-coverage census to PATH at exit (a build with JAISCRIPT_VM_COVERAGE)\n"
+			"  --pix MODE       cells: sext (2x3 sextants), half (1x2 half blocks) or auto (sextants within the pixel budget)\n"
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
 			"  --debug          listen for a VS Code attach the whole run\n"
 			"  --debug-wait     like --debug, but also hold boot until you attach + press Enter\n"

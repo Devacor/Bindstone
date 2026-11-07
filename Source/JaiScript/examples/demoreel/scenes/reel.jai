@@ -1,6 +1,7 @@
 // Scene interface + the Reel manager: timed auto-advance, transitions, title
 // cards, HUD. Everything the host calls funnels through Reel.frame().
-// Scenes see h as PIXEL rows (two per terminal row) and paint square pixels.
+// Scenes see w and h in PIXELS (half blocks: one column and two rows a cell;
+// sextants: two columns and 9/4 rows a cell) and paint square pixels.
 
 class Scene {
 	string name = "SCENE";
@@ -51,8 +52,10 @@ class HudLine {
 }
 
 class Reel {
-	int w = 0;
+	int w = 0;           // terminal columns
 	int h = 0;           // terminal rows
+	bool sext = false;   // sextant cells, else half blocks
+	int pw = 0;          // pixel columns
 	int ph = 0;          // pixel rows
 	int seed = 0;
 	bool smoke = false;
@@ -97,14 +100,16 @@ class Reel {
 	Reel(int w_, int h_, int seed_, string backend_, bool smoke_, bool hud_) {
 		w = w_;
 		h = h_;
-		ph = h_ * 2;
+		sext = PIX_MODE == "sext" || (PIX_MODE == "" && hb_pixel_w(w_, true) * hb_pixel_h(h_, true) <= PIX_BUDGET);
+		pw = hb_pixel_w(w_, sext);
+		ph = hb_pixel_h(h_, sext);
 		seed = seed_;
 		backend = backend_;
 		smoke = smoke_;
 		hud = hud_;
-		grid_a = gfx.make_grid(w * ph);
-		grid_b = gfx.make_grid(w * ph);
-		melt = gfx.make_fgrid(w);
+		grid_a = gfx.make_grid(pw * ph);
+		grid_b = gfx.make_grid(pw * ph);
+		melt = gfx.make_fgrid(pw);
 		ui = Palette();
 		ui_band = ui.size();
 		for (int b = 0; b < 12; ++b) {
@@ -145,10 +150,11 @@ class Reel {
 	// the presenter's string tables: current scene, incoming scene (during a
 	// transition), then the reel's own UI entries
 	void bind_palettes() {
-		hb_ensure(w, h);
+		hb_ensure(w, h, sext);
 		HB_FG = [];
 		HB_BG = [];
 		HB_RGB = [];
+		HB_LUM = [];
 		absorb(cur.pal);
 		off_b = HB_RGB.size();
 		if (in_trans) { absorb(nxt.pal); }
@@ -161,14 +167,16 @@ class Reel {
 		for (int i = 0; i < n; ++i) {
 			HB_FG.push(p.fg[i]);
 			HB_BG.push(p.bg[i]);
-			HB_RGB.push(p.rgb[i]);
+			int c = p.rgb[i];
+			HB_RGB.push(c);
+			HB_LUM.push((c >> 16) * 2 + ((c >> 8) & 255) * 3 + (c & 255));
 		}
 	}
 
 	void start_scene(int idx, float at_t) {
 		cur_idx = ((idx % nscenes) + nscenes) % nscenes;
 		cur = make_scene(cur_idx);
-		cur.setup(w, ph, seed + seed_slots[cur_idx] * 7919);
+		cur.setup(pw, ph, seed + seed_slots[cur_idx] * 7919);
 		dur_cur = dur_for(cur_idx);
 		scene_t = at_t;
 		in_trans = false;
@@ -194,13 +202,13 @@ class Reel {
 	void begin_transition() {
 		pending_idx = (cur_idx + 1) % nscenes;
 		nxt = make_scene(pending_idx);
-		nxt.setup(w, ph, seed + seed_slots[pending_idx] * 7919);
+		nxt.setup(pw, ph, seed + seed_slots[pending_idx] * 7919);
 		in_trans = true;
 		trans_t = 0.0;
 		trans_kind = (trans_count + seed) % 5;
 		++trans_count;
 		int m = 0;
-		for (int x = 0; x < w; ++x) {
+		for (int x = 0; x < pw; ++x) {
 			m += ((x * 7 + trans_count * 13 + (x * x) % 11) % 3) - 1;
 			m = m < 0 ? 0 : (m > 14 ? 14 : m);
 			melt[x] = m * 1.0;
@@ -282,47 +290,53 @@ class Reel {
 
 	// the title card: a band opens from the screen's middle, the scene name
 	// types itself in big pixel letters (a shine sweeps across them), the
-	// handle sits under it as crisp text, and the band folds shut again
+	// handle sits under it as crisp text, and the band folds shut again; the
+	// letters take the largest scale that fits, so sextants draw them finer
 	int title_pixels() {
 		float open = scene_t / 0.28;
 		float close = (title_len - scene_t) / 0.3;
 		float k = open < close ? open : close;
 		k = k > 1.0 ? 1.0 : k;
 		if (k <= 0.0) { return -1; }
-		int y0 = ((ph / 2 - 12) / 2) * 2;
-		int mid = y0 + 12;
-		int reach = itrunc(k * 12.0 + 0.5);
+		string name = cur.name;
+		int sx = sext ? 4 : 2;
+		while (sx > 1 && gfx.text_width(name, sx) > pw - 6) { --sx; }
+		int sy = sext ? sx : 2;
+		int th = 7 * sy;
+		int band_h = th + th * 5 / 7 + 2;
+		int y0 = (ph - band_h) / 2 - ph / 24;
+		if (!sext) { y0 = (y0 / 2) * 2; }
+		int mid = y0 + band_h / 2;
+		int reach = itrunc(k * band_h * 0.5 + 0.5);
 		var& pix = HB_PIX;
 		int band = ui_off + ui_band;
 		for (int y = mid - reach; y < mid + reach; ++y) {
 			if (y < 0 || y >= ph) { continue; }
 			int ry = y - y0;
-			int c = ry == 0 ? ui_off + ui_rule : (ry == 23 ? ui_off + ui_rule + 1 : band + ry / 2);
-			int gi = y * w;
-			for (int x = 0; x < w; ++x) { pix[gi + x] = c; }
+			int c = ry == 0 ? ui_off + ui_rule : (ry == band_h - 1 ? ui_off + ui_rule + 1 : band + ry * 12 / band_h);
+			int gi = y * pw;
+			for (int x = 0; x < pw; ++x) { pix[gi + x] = c; }
 		}
 		if (k < 1.0) { return -1; }
-		string name = cur.name;
-		int sx = gfx.text_width(name, 2) <= w - 6 ? 2 : 1;
 		int tw = gfx.text_width(name, sx);
-		int tx = (w - tw) / 2;
+		int tx = (pw - tw) / 2;
 		int ty = y0 + 3;
 		int shown = itrunc((scene_t - 0.28) * 34.0) + 1;
-		gfx.draw_text(pix, w, ph, name, tx, ty, sx, 2, ui_off + ui_ink, 8, ui_off + ui_shadow, shown);
+		gfx.draw_text(pix, pw, ph, name, tx, ty, sx, sy, ui_off + ui_ink, 8, ui_off + ui_shadow, shown);
 		// the shine: a diagonal stripe of white sweeping over the ink
-		int sweep = itrunc((scene_t - 0.6) * 90.0) - 20;
+		int sweep = itrunc((scene_t - 0.6) * 90.0 * sx / 2) - 20;
 		int ink0 = ui_off + ui_ink;
-		for (int y2 = ty; y2 < ty + 14; ++y2) {
-			int gi2 = y2 * w;
+		for (int y2 = ty; y2 < ty + th; ++y2) {
+			int gi2 = y2 * pw;
 			for (int x2 = tx; x2 < tx + tw; ++x2) {
 				int d = x2 + (y2 - ty) - sweep - tx;
-				if (d >= 0 && d < 5) {
+				if (d >= 0 && d < 5 * sx / 2) {
 					int pv = pix[gi2 + x2];
 					if (pv >= ink0 && pv < ink0 + 8) { pix[gi2 + x2] = ui_off + ui_shine; }
 				}
 			}
 		}
-		return (y0 + 20) / 2;
+		return (ty + th + 2) * h / ph + 1;
 	}
 
 	void title_text(var& rows, int row) {
@@ -363,14 +377,15 @@ class Reel {
 		if (detail) { result.put(label, ` (sim ${gfx.fmt1(ms_sim)} + draw ${gfx.fmt1(ms_draw)})`); }
 		if (detail && ms_other > 0.0) { result.put(label, ` other ${gfx.fmt1(ms_other)} ms`); }
 		result.put(value, `  ${gfx.fmt1(fps)}`);
-		result.put(label, detail ? ` fps  ${w}x${ph} px ` : " fps ");
+		result.put(label, detail ? ` fps  ${pw}x${ph} px ${sext ? "sextants " : ""}` : " fps ");
 		return result;
 	}
 
 	string frame(float t, float dt, string key, float fps, float ms_sim, float ms_draw, float ms_other) {
 		if (finish_pending) { complete_transition(); }
 		handle_key(key);
-		hb_ensure(w, h);
+		hb_ensure(w, h, sext);
+		txt_clear();
 		if (HB_RGB.size() == 0) { bind_palettes(); }
 		float step = paused ? 0.0 : dt;
 		scene_t += step;
@@ -383,7 +398,7 @@ class Reel {
 			nxt.render(grid_b);
 			float prog = trans_t / trans_len;
 			prog = prog > 1.0 ? 1.0 : prog;
-			gfx.mix_grids(grid_a, grid_b, HB_PIX, w, ph, trans_kind, prog, off_b, ui_off + ui_edge, melt);
+			gfx.mix_grids(grid_a, grid_b, HB_PIX, pw, ph, trans_kind, prog, off_b, ui_off + ui_edge, melt);
 			if (trans_t >= trans_len) { finish_pending = true; }
 		} else {
 			cur.render(HB_PIX);

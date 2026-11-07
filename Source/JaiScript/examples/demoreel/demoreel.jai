@@ -22,7 +22,7 @@
 //                                                 (default 6) -> P.txt (as presented, so color
 //                                                 and ascii apply) + P.bmp
 //   jaiscript demoreel.jai -- midi F.mid          write the soundtrack and exit
-//   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent)
+//   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent) | pix half|sext|auto
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
 
 // ---------------------------------------------------------------- host API ---
@@ -121,6 +121,7 @@ var OPT_MIDI = "";
 // the xterm-256 cube unless the terminal says it takes 24-bit color (COLORTERM, Windows Terminal); `color 24` / `color 256` decide
 var OPT_CUBE = !(env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "");
 var OPT_ASCII = false;
+var OPT_PIX = "";
 
 for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	string k = ARGS[i];
@@ -140,8 +141,11 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	else if (k == "midi") { OPT_MIDI = v; }
 	else if (k == "color") { OPT_CUBE = v == "256"; }
 	else if (k == "ascii") { OPT_ASCII = v != "0"; }
-	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii)`); }
+	else if (k == "pix") { OPT_PIX = v; }
+	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii/pix)`); }
 }
+// the density map reads two pixels a cell
+demo_pixels(OPT_ASCII ? "half" : OPT_PIX);
 
 // ---------------------------------------------------------------- headless ---
 // Mirrors the host's run_smoke: 100x40, fixed dt 1/30, smoke=true, hud off,
@@ -189,7 +193,7 @@ function le32(int v) -> string {
 // the presenter's pixel grid as a 24-bit BMP (what the half blocks show)
 function write_bmp(string path) -> void {
 	int bw = HB_W;
-	int bh = HB_ROWS * 2;
+	int bh = HB_PH;
 	int pad = (4 - (bw * 3) % 4) % 4;
 	int stride = bw * 3 + pad;
 	string out = "BM" + le32(54 + stride * bh) + le32(0) + le32(54);
@@ -216,7 +220,7 @@ function run_bench(int frames) -> int {
 	float dt = 1.0 / 30.0;
 	demo_boot(w, h, OPT_SEED, "vm", false, false);
 	int n = reel.nscenes;
-	print(format("demoreel bench: {0} frames per scene @ {1}x{2} cells ({1}x{3} px)", frames, w, h, h * 2));
+	print(format("demoreel bench: {0} frames per scene @ {1}x{2} cells ({3}x{4} px)", frames, w, h, reel.pw, reel.ph));
 	float total = 0.0;
 	time::stopwatch scene;
 	for (int s = 0; s < n; ++s) {

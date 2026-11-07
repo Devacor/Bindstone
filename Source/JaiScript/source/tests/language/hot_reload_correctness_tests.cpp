@@ -4,6 +4,8 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <variant>
+#include "../case_table.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -85,61 +87,40 @@ public:
             }
         });
 
-        // RETYPE MIGRATION RULE: changing a field's declared type on reload
-        // CONVERTS the live value wherever the assignment conversion table allows
-        // (int -> string via to_string, float -> int truncation, int -> float widening);
-        // only a value with NO conversion (object into int, non-numeric string into int)
-        // falls back to the new initializer default. Hot reload stays permissive and never
-        // bricks an instance. Both backends share migrate_fields, so behavior is identical.
-        test("field_type_change_converts_value", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
-            eng->execute("class Box { string val = \"\"; }"); // int -> string: converts
-            check_eq(std::string("42"), eng->execute("b.val").as<std::string>());
-        });
-
-        test("field_type_change_numeric_conversions", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"( class Box { float f = 0.0; int i = 0; } auto b = Box(); b.f = 6.9; b.i = 3; )");
-            eng->execute("class Box { int f = 0; float i = 0.0; }"); // float<->int swap
-            check_eq(eng->execute("b.f").as<int>(), 6);      // 6.9 truncates toward zero
-            check_eq(eng->execute("b.i").as<double>(), 3.0); // widened
-        });
-
-        // No conversion exists (non-numeric string into int): fall back to the NEW default
-        // instead of erroring the reload.
-        test("field_type_change_unconvertible_adopts_default", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"( class Box { string s = ""; } auto b = Box(); b.s = "hello"; )");
-            eng->execute("class Box { int s = 5; }"); // string -> int: no conversion
-            check_eq(eng->execute("b.s").as<int>(), 5);
-        });
-
-        // The flip side: only a *type* change resets. Changing an initializer to a new value of
-        // the SAME type is not a type change — existing instances keep their runtime value (only
-        // new instances get the new default), matching established reload semantics.
-        test("same_type_initializer_change_keeps_value", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )");
-            eng->execute("class Box { int val = 7; }"); // initializer 0 -> 7, still int
-            check_eq(eng->execute("b.val").as<int>(), 42); // runtime value preserved, not reset
-        });
-
-        // An inherited field whose declared type changes when the BASE reloads converts on
-        // the derived instance too (retype ruling) — propagated through
-        // update_instances_from_base, resolving the declared type through the parent chain.
-        test("inherited_field_type_change_converts_on_derived", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
+        // RETYPE MIGRATION RULE: changing a field's declared type on reload CONVERTS the live value wherever the assignment
+        // conversion table allows (int -> string, float -> int truncation, int -> float widening), on derived instances too;
+        // a value with no conversion adopts the new initializer, and a same-type initializer change keeps the live value
+        test("a_reload_converts_a_retyped_fields_live_value_or_adopts_the_new_default", [this]() {
+            struct retype_case { const char* code; const char* before; const char* reload; std::variant<int, double, std::string> expected; };
+            const char* const derived = R"(
                 class Base { int bv = 0; }
                 class Derived : Base { int dv = 0; }
                 auto d = Derived();
                 d.bv = 42;
                 d.dv = 99;
-            )");
-            eng->execute("class Base { string bv = \"\"; }"); // inherited bv int -> string
-            check_eq(std::string("42"), eng->execute("d.bv").as<std::string>()); // retyped, converted
-            check_eq(eng->execute("d.dv").as<int>(), 99); // derived-own data preserved
+            )";
+            const retype_case cases[] = {
+                {"b.val", R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )", "class Box { string val = \"\"; }", std::string("42")},
+                {"b.f", R"( class Box { float f = 0.0; int i = 0; } auto b = Box(); b.f = 6.9; b.i = 3; )", "class Box { int f = 0; float i = 0.0; }", 6},
+                {"b.i", R"( class Box { float f = 0.0; int i = 0; } auto b = Box(); b.f = 6.9; b.i = 3; )", "class Box { int f = 0; float i = 0.0; }", 3.0},
+                {"b.s", R"( class Box { string s = ""; } auto b = Box(); b.s = "hello"; )", "class Box { int s = 5; }", 5},
+                {"b.val", R"( class Box { int val = 0; } auto b = Box(); b.val = 42; )", "class Box { int val = 7; }", 42},
+                {"d.bv", derived, "class Base { string bv = \"\"; }", std::string("42")},
+                {"d.dv", derived, "class Base { string bv = \"\"; }", 99},
+            };
+            check_each(cases, [](const retype_case& c) {
+                auto eng = make_engine();
+                eng->execute(c.before);
+                eng->execute(c.reload);
+                auto value = eng->execute(c.code);
+                if (const auto* i = std::get_if<int>(&c.expected)) {
+                    check_eq(value.as<int>(), *i);
+                } else if (const auto* f = std::get_if<double>(&c.expected)) {
+                    check_eq(value.as<double>(), *f);
+                } else {
+                    check_eq(std::get<std::string>(c.expected), value.as<std::string>());
+                }
+            });
         });
 
         // An error in one instance's hot_reload_migrate hook must not abort the reload for
@@ -214,26 +195,27 @@ public:
             check_eq(eng->execute("root.extra").as<int>(), 1);
         });
 
-        // A static method's body must update on reload (statics are rebuilt through
-        // add_static_script_method, the same door fresh classes use).
-        test("static_method_body_updates_on_reload", [&]() {
-            auto eng = make_engine();
-            eng->execute("class Util { static int ver() { return 1; } }");
-            check_eq(eng->execute("Util::ver()").as<int>(), 1);
-            eng->execute("class Util { static int ver() { return 2; } }"); // reload, new body
-            check_eq(eng->execute("Util::ver()").as<int>(), 2);
-        });
-
-        // A bound method cached before a reload must not keep running the old code.
-        test("bound_method_not_stale_after_reload", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class Greeter { int value() { return 1; } }
-                auto g = Greeter();
-            )");
-            check_eq(eng->execute("g.value()").as<int>(), 1); // populate any bound-method cache
-            eng->execute("class Greeter { int value() { return 2; } }"); // reload, new body
-            check_eq(eng->execute("g.value()").as<int>(), 2); // bug: stale cache returns 1
+        // A call site made warm (a bound-method or dispatch cache filled and hit) resolves anew after a reload: a new static or
+        // instance body, a derived override that arrives later, a method the base gains
+        test("a_warm_call_site_resolves_anew_after_a_reload", [this]() {
+            struct warm_case { const char* code; const char* setup; int64_t warm; const char* reload; const char* after_call; int64_t after; };
+            const warm_case cases[] = {
+                {"Util::ver()", "class Util { static int ver() { return 1; } }", 1, "class Util { static int ver() { return 2; } }", "Util::ver()", 2},
+                {"g.value()", "class Greeter { int value() { return 1; } } auto g = Greeter();", 1, "class Greeter { int value() { return 2; } }", "g.value()", 2},
+                {"mc.f();", "class MC { int v = 0; int f() { return 1; } } auto mc = MC();", 1, "class MC { int v = 0; int f() { return 2; } }", "mc.f();", 2},
+                {"od.f();", "class OvBase { int f() { return 1; } } class OvDer : OvBase { } auto od = OvDer();", 1,
+                 "class OvDer : OvBase { int f() override { return 5; } }", "od.f();", 5},
+                {"gd.f();", "class GBase { int f() { return 1; } } class GDer : GBase { } auto gd = GDer();", 1,
+                 "class GBase { int f() { return 1; } int g() { return 9; } }", "gd.g();", 9},
+            };
+            check_each(cases, [](const warm_case& c) {
+                auto eng = make_engine();
+                eng->execute(c.setup);
+                check_eq(c.warm, eng->execute(c.code).as_int());
+                check_eq(c.warm, eng->execute(c.code).as_int());
+                eng->execute(c.reload);
+                check_eq(c.after, eng->execute(c.after_call).as_int());
+            });
         });
 
         // Constructor overloads (arity-dispatched) must survive a reload. (Script *methods*
@@ -414,16 +396,6 @@ public:
         // strings, so a repeated call string exercises one call site's cache across
         // reloads - every invalidation edge below must resolve fresh.
 
-        // Redefining a class between calls: the same call site must use the new body.
-        test("method_cache_reload_between_calls", [&]() {
-            auto eng = make_engine();
-            eng->execute("class MC { int v = 0; int f() { return 1; } } auto mc = MC();");
-            check_eq((int64_t)1, eng->execute("mc.f();").as_int());
-            check_eq((int64_t)1, eng->execute("mc.f();").as_int());   // cache filled + hit
-            eng->execute("class MC { int v = 0; int f() { return 2; } }");
-            check_eq((int64_t)2, eng->execute("mc.f();").as_int());   // same AST site, new method
-        });
-
         // Redefinition INSIDE a loop: the loop-body call site flips mid-loop.
         test("method_cache_reload_mid_loop", [&]() {
             auto eng = make_engine();
@@ -440,34 +412,6 @@ public:
                 acc;
             )");
             check_eq((int64_t)1122, result.as_int());
-        });
-
-        // A derived override arriving on reload beats the cached base resolution.
-        test("method_cache_derived_override_arrives_later", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class OvBase { int f() { return 1; } }
-                class OvDer : OvBase { }
-                auto od = OvDer();
-            )");
-            check_eq((int64_t)1, eng->execute("od.f();").as_int());
-            check_eq((int64_t)1, eng->execute("od.f();").as_int());   // cache hot on base's f
-            eng->execute("class OvDer : OvBase { int f() override { return 5; } }");
-            check_eq((int64_t)5, eng->execute("od.f();").as_int());   // override wins now
-        });
-
-        // A method added to the BASE after the derived site is hot resolves fresh.
-        test("method_cache_base_gains_method_later", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class GBase { int f() { return 1; } }
-                class GDer : GBase { }
-                auto gd = GDer();
-            )");
-            check_eq((int64_t)1, eng->execute("gd.f();").as_int());
-            check_eq((int64_t)1, eng->execute("gd.f();").as_int());
-            eng->execute("class GBase { int f() { return 1; } int g() { return 9; } }");
-            check_eq((int64_t)9, eng->execute("gd.g();").as_int());
         });
 
         // Method removed on reload: the hot call site must error, not run the old body.

@@ -372,6 +372,7 @@ bool vm_backend::execution_budget_exhausted() {
 	// a spent budget stays spent and the next poll checks again (budget_tick_ re-armed): a block's inner back edge that finds it misses onto
 	// the general form, whose poll raises (the interpreter, which has no blocks, takes no re-arm)
 	if (limits_->step_budget_spent()) [[unlikely]] { limits_->terminal_error = true; budget_tick_ = 1023; return true; }   // the clock-free bound (interpreter twin)
+	if (limits_->interrupt_taken()) [[unlikely]] { limits_->terminal_error = true; budget_tick_ = 1023; return true; }   // engine::interrupt (interpreter twin)
 	if (!budget_active_ || debug_hook_) { return false; }
 	if (now < execution_deadline_) { return false; }
 	// Budget overruns are TERMINAL: no script catch may swallow a timeout

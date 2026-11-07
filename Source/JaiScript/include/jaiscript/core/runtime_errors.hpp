@@ -90,6 +90,7 @@ namespace jai {
         // statement that owns the expression, never surfaced by a correct replay
         coroutine_suspended = 127,
         run_cancelled = 128,   // script_run::cancel: the suspended run's sleep raises it, terminal
+        script_interrupted = 129,   // engine::interrupt: the next execution-limit check or sleep raises it, terminal
     };
 
     class runtime_error_category_impl : public std::error_category {

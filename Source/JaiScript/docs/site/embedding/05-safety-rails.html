@@ -105,6 +105,18 @@ std::cout &lt;&lt; eng-&gt;execute(&quot;int k = 0; for (int i = 0; i &lt; 3; i+
 eng-&gt;execution_step_budget(0);       // off</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Script execution budget exceeded - raise engine::execution_step_budget or break up the work
 3</code></pre></div>
+<p id="interrupt"><strong>Stopping a script from outside.</strong> <code>eng-&gt;interrupt()</code> asks the running script to stop, and is safe from any thread and from a signal handler while the engine lives: a UI&#x27;s stop button, a watchdog, Ctrl+C. The next of those budget checks, or a <code>sleep</code>, raises the terminal <code>Script interrupted</code>: no script <code>catch</code> runs, every frame unwinds and its destructors run, and the failure reaches the host. A <code>sleep</code> wakes for it at once, a suspended run&#x27;s <code>resume()</code> continues into it before its wake time, and every worker of a running <code>parallel_for</code> stops. Like the budget, it waits for a long host call to return. Each request stops one host entry; one made while no script runs waits for the next check, which stops the next entry that runs long enough to reach one. The standalone runner sends it on Ctrl+C.</p>
+<div class="codeblock cb-cpp" data-sample="safety-interrupt"><span class="cb-label">C++</span><pre><code class="lang-cpp">std::thread stopper([&amp;] { eng-&gt;interrupt(); });   // any thread, or a signal handler
+try {
+    eng-&gt;execute(&quot;class D { ~D() { print(\&quot;cleaned up\&quot;); } } { D d; try { while (true) { } } catch (e) { print(\&quot;caught\&quot;); } }&quot;);
+} catch (const std::exception&amp; e) {
+    std::cout &lt;&lt; e.what() &lt;&lt; &quot;\n&quot;;
+}
+stopper.join();
+std::cout &lt;&lt; eng-&gt;execute(&quot;2 + 2&quot;).as_int() &lt;&lt; &quot;\n&quot;;   // the request stopped one entry</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">cleaned up
+Script interrupted
+4</code></pre></div>
 <h2 id="2-memory-cap-deny-in-place-one-catchable-raise-then-terminal">2. Memory cap: deny-in-place, one catchable raise, then terminal<a class="hlink" href="#2-memory-cap-deny-in-place-one-catchable-raise-then-terminal" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;memory_cap(256 * 1024);   // approximate bytes per top-level execute()/next()
                                 // 0 disables; DEFAULT: 0 (unlimited)

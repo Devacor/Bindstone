@@ -62,7 +62,8 @@ pixel grid blitted through **sub-cell block glyphs**:
 Every color the game shows is interned once into a palette (pixel grids store small indices; the row builders emit
 prebuilt escapes only when a cell's colors change). The escapes are 24-bit where the terminal has 24-bit color (on
 Windows, and wherever `COLORTERM` is `truecolor` or `24bit`) and the nearest xterm-256 color elsewhere; `--truecolor`
-and `--256color` override the guess.
+and `--256color` override the guess. The `gloom.jai` shim reads the same through the runner's `env_var`, where Windows
+means Windows Terminal (`WT_SESSION`): legacy conhost gets xterm-256.
 
 ## Build & run
 
@@ -124,7 +125,7 @@ xorshift64\* `Rng` under checked overflow, `host_log`/`itrunc`/`ifloor`/`utf8`/
 jaiscript.exe gloom.jai                          # play (esc quits)
 jaiscript.exe gloom.jai -- --smoke --ticks 300   # headless parity self-test vs section 3.5
 jaiscript.exe gloom.jai -- --bench 300           # autopilot + sim/draw split
-jaiscript.exe gloom.jai -- --256color            # the shim cannot read COLORTERM: say so
+jaiscript.exe gloom.jai -- --256color            # force xterm-256 (the shim guesses as the exe does)
 ```
 
 `--smoke` exits 0 only when `STATE_HASH` matches the reference checkpoint

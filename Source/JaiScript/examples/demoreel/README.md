@@ -74,7 +74,7 @@ reel on the standalone runner — drag-drop it onto `jaiscript.exe` or:
 
 ```
 jaiscript demoreel.jai                       # the reel, 30 fps, with its soundtrack (q/esc quits; h/f/n/p/space/digits work)
-jaiscript demoreel.jai -- color 256          # the reel quantized to the xterm-256 cube (no 24-bit color)
+jaiscript demoreel.jai -- color 256          # the reel quantized to the xterm-256 cube (color 24 forces 24-bit)
 jaiscript demoreel.jai -- ascii 1            # one density character per cell (no block glyphs)
 jaiscript demoreel.jai -- frames 1700        # headless self-test: smoke frames, sizes + stream hash + timing
 jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt (+ P_<i>.bmp, the pixel grid)
@@ -92,16 +92,16 @@ through the runner's `play_sound`.
 
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
-The runner reads no environment variables, so the shim cannot see `COLORTERM`:
-it draws 24-bit color unless `color 256` or `ascii 1` says otherwise. Not ported
+The shim picks its color depth as `jai_demoreel` does, through the runner's
+`env_var`: 24-bit under `COLORTERM=truecolor` (or `24bit`) and in Windows Terminal
+(`WT_SESSION`), the xterm-256 cube elsewhere; `color 24`, `color 256` and `ascii 1`
+override it. Not ported
 from the C++ host: its escape trimming and row-diff redraw (frames present
 whole) and `r` hot reload.
 
-On Windows the runner sets the console to UTF-8 and VT output, and swallows
-Ctrl+C (q or ESC quits). On Linux and macOS, Ctrl+C ends the runner with the
-terminal's input mode restored, but it leaves the reel's alternate screen up
-and the cursor hidden: `reset` (or `tput cnorm; tput rmcup`) brings them back.
-`jai_demoreel` restores all of it on Ctrl+C.
+On Windows the runner sets the console to UTF-8 and VT output. q, ESC and
+Ctrl+C all end the reel with the cursor, the colors and the main screen
+restored, on every platform, as `jai_demoreel` does.
 
 ## Run
 

@@ -20,7 +20,8 @@ bool HOST_GOD = false;
 string HOST_BACKEND = "vm";  // label only; the real backend is the runner's --backend (before --)
 int HOST_PIX = 1;           // 0 half (1x2) | 1 quad (2x2) | 2 sext (2x3)
 string HOST_LOOK = "";      // showcase | reference; "" = reference under --smoke, else showcase
-bool HOST_TRUECOLOR = true; // --256color for terminals without 24-bit color
+// 24-bit where the terminal says it takes it (COLORTERM, Windows Terminal), else xterm-256; --truecolor / --256color decide
+bool HOST_TRUECOLOR = env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "";
 bool HOST_ASCII = false;    // --ascii for terminals without block glyphs
 
 // ---------------------------------------------------------- host API: Rng ---
@@ -133,7 +134,7 @@ function shim_usage() -> void {
 	print("  --god           god mode");
 	print("  --pix MODE      half (1x2) | quad (2x2, default) | sext (2x3)");
 	print("  --look L        showcase (default) | reference (the frames the ports draw; --smoke's default)");
-	print("  --256color      xterm-256 color, for terminals without 24-bit color");
+	print("  --truecolor / --256color  24-bit or xterm-256 color (default: 24-bit where COLORTERM or Windows Terminal says so)");
 	print("  --ascii         plain ASCII cells, for terminals without block glyphs");
 	print("  --workers N     >0 enables the parallel_transform paths (default serial)");
 	print("  --dump-frame N  smoke: dump frame N to gloom_frame_shim.txt");

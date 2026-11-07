@@ -88,7 +88,7 @@ Meta-commands (`:help` inside):
 | `:reset` | fresh engine (keeps backend, budget, debugger) |
 | `:backend vm\|interp\|vm-reference` | switch backend — resets the engine (backends can't swap mid-engine) |
 | `:time on\|off` | print wall time per execute |
-| `:quit` / `:exit` | leave (Ctrl+Z+Enter or Ctrl+C also work) |
+| `:quit` / `:exit` | leave (Ctrl+Z+Enter, or Ctrl+C at the prompt, also work; Ctrl+C while input runs stops it) |
 
 ## Mode 3 — live-coding watch
 
@@ -98,7 +98,7 @@ jaiscript --watch file.jai
 
 Runs the file, then re-runs it every time you save — **edit in your editor, save, see
 output**. The console clears between runs and a status line reports run #, duration,
-ok/ERROR and the time. Ctrl+C quits. Each run gets a **fresh engine** (deterministic
+ok/ERROR and the time. Ctrl+C stops the run and quits (see Ctrl+C below). Each run gets a **fresh engine** (deterministic
 world per save); because of that, the DAP listener is off in watch mode.
 
 `--watch` restarts the world on every save. A program that keeps its world and swaps code in
@@ -212,11 +212,32 @@ For hosting, `net_host_name()` returns this machine's name and `net_local_addres
 addresses (loopback left out), which is what a player hosting a game tells the others to type.
 
 `env_var(name)` returns an environment variable's value, `""` when it is unset; a terminal game
-reads `COLORTERM` (`truecolor` or `24bit`) to choose between 24-bit colour and the 256-colour
-palette. On Linux and macOS, Ctrl+C in a script that reads keys also resets the colours, shows the
-cursor and leaves the alternate screen before the runner exits.
+reads `COLORTERM` (`truecolor` or `24bit`), and on Windows `WT_SESSION` (Windows Terminal), to
+choose between 24-bit colour and the 256-colour palette.
 
 The strings after `--` are the global `ARGS`.
+
+## Ctrl+C
+
+Ctrl+C or Ctrl+Break on Windows, and SIGINT, SIGTERM or SIGHUP on Linux and macOS, stop the
+script through `engine::interrupt`: its next loop back-edge, call or `sleep` raises the terminal
+`Script interrupted`, so no `catch` runs and every destructor does. A script waiting in `sleep`
+or polling `read_key` stops at once; one inside a long host call stops when the call returns.
+The runner then gives the terminal back and exits: 130 for Ctrl+C, and on Linux and macOS by the
+signal itself, so the shell reports 130, 143 or 129. A file run prints no error for it and skips
+the exit pause; in the REPL, Ctrl+C stops the running input and the prompt comes back, and at the
+prompt it leaves the REPL. A second Ctrl+C while the first is still unwinding (a destructor that
+does not finish) gives the terminal back at once and exits with the same code. A signal the
+runner was started with ignored (`nohup`) stays ignored.
+
+Giving the terminal back means what the script's output changed: the runner reads the escape
+sequences the script prints, and on a terminal (not a pipe or a file) it resets the colours
+(`ESC[0m`) when a colour or attribute is still set, shows the cursor (`ESC[?25h`) when the script
+hid it, and leaves the alternate screen (`ESC[?1049l`) when the script entered it. It does the
+same when a script ends or fails that way, before printing the error, so the error lands on the
+normal screen. It also restores the terminal's input mode (the raw mode `read_key` sets on Linux
+and macOS), and on Windows the console's output mode and code pages. A script that prints no
+escape sequences sees none added.
 
 ## Debugging
 

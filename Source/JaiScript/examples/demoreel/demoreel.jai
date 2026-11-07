@@ -10,7 +10,7 @@
 // swap (one engine here) and 'r' hot reload.
 //
 //   jaiscript demoreel.jai                        the reel (q or esc quits)
-//   jaiscript demoreel.jai -- color 256           the reel quantized to the xterm-256 cube
+//   jaiscript demoreel.jai -- color 256           the reel quantized to the xterm-256 cube (color 24: 24-bit)
 //   jaiscript demoreel.jai -- ascii 1             one density character per cell, no block glyphs
 //   jaiscript demoreel.jai -- frames 60           headless self-test: N smoke frames (100x40,
 //                                                 seed 20260705, fixed dt 1/30), sizes, a stream
@@ -123,7 +123,8 @@ var OPT_AT = 4.0;
 var OPT_SHOTN = 6;
 var OPT_MUSIC = true;
 var OPT_MIDI = "";
-var OPT_CUBE = false;         // xterm-256 instead of 24-bit color
+// the xterm-256 cube unless the terminal says it takes 24-bit color (COLORTERM, Windows Terminal); `color 24` / `color 256` decide
+var OPT_CUBE = !(env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "");
 var OPT_ASCII = false;
 
 for (int i = 0; i + 1 < ARGS.size(); i += 2) {
@@ -394,10 +395,10 @@ function write_soundtrack() -> string {
 }
 
 // ---------------------------------------------------------------- terminal ---
-// The runner reads no environment, so the color depth is an argument: `color 256`
-// quantizes every 24-bit escape to the xterm-256 cube (macOS Terminal.app, the Linux
-// console), `ascii 1` draws one density character per cell for terminals without the
-// block glyphs. Only the interactive reel presents through here; the headless modes
+// The color depth comes from the terminal as jai_demoreel reads it (OPT_CUBE): the
+// cube quantizes every 24-bit escape to xterm-256 (macOS Terminal.app, the Linux
+// console, legacy conhost), `ascii 1` draws one density character per cell for
+// terminals without the block glyphs. Only the interactive reel presents through here; the headless modes
 // hash the reel's own frames.
 
 string CSI = ESC + "[";

@@ -22,6 +22,8 @@ std::string runtime_error_category_impl::message(int ev) const {
             return "Coroutine suspended inside an expression the replay does not cover";
         case runtime_error_code::run_cancelled:
             return "Run cancelled";
+        case runtime_error_code::script_interrupted:
+            return "Script interrupted";
 
         // Type errors
         case runtime_error_code::type_mismatch:

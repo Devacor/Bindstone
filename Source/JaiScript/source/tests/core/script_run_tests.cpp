@@ -344,6 +344,18 @@ public:
             check_eq(std::string("dtor dropped\n"), h.take(), "a run dropped while suspended is cancelled" + be);
         });
 
+        test("an_interrupt_resumes_a_suspended_run_into_its_error", [this]() {
+            run_host h;
+            const std::string be = backend_label(*h.eng);
+            script_run run = h.eng->start("class D { ~D() { print(\"dtor\"); } } { D d; try { sleep(5.0); } catch (e) { print(\"caught\"); } print(\"never\"); }");
+            h.eng->interrupt();
+            bool threw = false;
+            try { run.resume(); } catch (const std::exception&) { threw = true; }
+            check_true(threw && run.state() == script_run::status::failed, "the resume before the wake time ran the run into the interrupt" + be);
+            check_eq(std::string("Script interrupted"), h.eng->format_error(run.result()), "the terminal error" + be);
+            check_eq(std::string("dtor\n"), h.take(), "no catch ran, the destructor did" + be);
+        });
+
         test("a_suspended_frame_finishes_its_old_body_after_a_reload", [this]() {
             run_host h;
             const std::string be = backend_label(*h.eng);

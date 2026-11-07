@@ -989,6 +989,7 @@ public:
             for (const char* source : {
                 "void f() { int y = 1; { string y = \"s\"; } }",       // a nested block's own name shadows (a warning)
                 "int y = 1; string y = \"s\";",                          // a program's top level declares again, as a re-run does
+                "int y = 1; var y = [1]; int n = y.size(); int z = 2; string z = \"s\"; string w = z;",   // and the later declaration stands for it
                 "class C { void f() {} void f(int a) {} }",              // overloads
                 "void f(int a) { for (int i = 0; i < 1; i++) {} for (int i = 0; i < 1; i++) {} }",
                 "void f(int _) { auto _ = 1; auto _ = 2; auto [_, _] = [3, 4]; { auto _ = 5; print(_); } }",   // C++26's placeholder
@@ -1805,6 +1806,18 @@ public:
             check_true(message("int spd = random;").find("error: cannot initialize 'spd' declared 'int' with 'class random'") != std::string::npos, message("int spd = random;"));
             check_true(message("class C {} int c = C;").find("error: cannot initialize 'c' declared 'int' with 'class C'") != std::string::npos, message("class C {} int c = C;"));
             check_eq(std::string("loaded"), message("var r = random; var c = r(3); enum E { A } var e = E; namespace math { int twice(int x) { return 2 * x; } } math::twice(math::PI > 3.0 ? 1 : 0);"));
+            // an enum's name is its value table, a map<string,int>: a slot that takes that map takes it, any other refuses it at load
+            const std::pair<const char*, const char*> tables[] = {
+                {"enum E { A, B } int x = E;", "cannot initialize 'x' declared 'int' with 'enum E': an enum's name is its value table, a map<string,int>; name one of its values (E.A)"},
+                {"enum E { A, B } int x = 0; x = E;", "cannot assign 'enum E' to 'x' declared 'int': an enum's name is its value table"},
+                {"enum E { A, B } void f(string s) {} f(E);", "argument 1 of 'f': cannot pass 'enum E' to 's' declared 'string': an enum's name is its value table"},
+                {"enum E { A, B } int g() { return E; } g();", "cannot return 'enum E' from 'g' declared to return 'int': an enum's name is its value table"},
+                {"enum E { A, B } map<int,int> t = E;", "cannot initialize 't' declared 'map<int,int>' with 'enum E': an enum's name is its value table, a map<string,int> (map key type: expected 'int', got 'string')"},
+            };
+            for (const auto& [source, text] : tables) { check_true(message(source).find(std::string("error: ") + text) != std::string::npos, std::string(source) + " -> " + message(source)); }
+            check_eq(std::string("raised: Cannot initialize 'x' (declared int) with map"), message("[[warn_mode]]; enum E { A, B } int x = E;"));
+            check_eq(std::string("loaded"), message("enum E { A, B } map<string,int> t = E; map<string,float> f = E; auto a = E; bool b = E; array<map<string,int>> all = [E]; "
+                                                    "int n = 0; for (auto [k, v] : E) { n += v; } int one = E.B;"));
         });
 
         test("a_unary_operator_takes_only_the_operands_its_rows_or_a_class_operator_take", [this]() {
@@ -2059,9 +2072,10 @@ public:
             }
         });
 
-        test("an_unknown_method_on_a_typed_container_or_string_is_a_load_error", [this]() {
+        test("an_unknown_method_on_a_typed_container_string_or_scalar_is_a_load_error", [this]() {
             // the builtin registry both backends dispatch through is the member list of a declared array, string, utf8_string or
-            // map (a map's keys are read with [], a stored callable called as m["f"](x))
+            // map (a map's keys are read with [], a stored callable called as m["f"](x)); it gives an int, float, bool or char none,
+            // and same_as answers every value
             for (bool proofs : {true, false}) {
                 auto e = make_engine();
                 jai::stdlib::register_all(*e);
@@ -2075,6 +2089,26 @@ public:
                 check_true(has_diag(e->check("map<string, int> m = {\"k\": 1};\nint v = m.k;"), dlevel::error, "map has no member 'k'; read the key as [\"k\"]"));
                 check_true(has_diag(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm.f(1);"), dlevel::error, "map has no member 'f'; read the key as [\"f\"]"));
                 check_eq((size_t)1, error_count(e->check("utf8_string u = \"a\";\nu.frobnicate();")));
+                const std::pair<const char*, const char*> scalars[] = {
+                    {"int i = 5;\ni.abs();", "int has no member 'abs'"},
+                    {"print(5.abs());", "int has no member 'abs'"},
+                    {"var x = 1.foo;", "int has no member 'foo'"},
+                    {"int i = 5;\ni?.abs();", "int has no member 'abs'"},
+                    {"float f = 1.5;\nint n = f.to_int();", "float has no member 'to_int'"},
+                    {"bool b = true;\nvar v = b.size;", "bool has no member 'size'"},
+                    {"char c = 'a';\nc.to_upper();", "char has no member 'to_upper'"},
+                    {"int twice(int a) { return a * 2; }\ntwice(2).abs();", "int has no member 'abs'"},
+                    {"var f = 5.same_as;", "'same_as' is a method of int; call it with obj.same_as() or wrap the call in a lambda"},
+                };
+                for (const auto& [source, text] : scalars) {
+                    check_true(has_diag(e->check(source), dlevel::error, text), source);
+                    auto run = make_engine();
+                    run->type_proofs(proofs);
+                    std::string raised;
+                    try { run->execute(std::string("[[warn_mode]];\n") + source); } catch (const std::exception& error) { raised = error.what(); }
+                    check_eq(std::string(text), raised, source);
+                }
+                check_eq((size_t)0, error_count(e->check("bool same = 5.same_as(5);\nchar c = 'a';\nbool also = c.same_as('a');\nvar v = 5;\nv.anything();\narray<int> xs = [1];\nxs[0].whatever();")));
                 // the registry's names, maps that may hold callables, dynamic and element receivers stay clean
                 check_eq((size_t)0, error_count(e->check("array<string> a = [\"x\"];\na.push(\"y\");\nint n = a.size();\nstring s = \"ab\";\ns.to_upper();\nvar k = s.find(\"b\");\nmap<string, int> m = {\"k\": 1};\nvar ks = m.keys();\nbool has = m.contains(\"k\");")));
                 check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm[\"f\"](1);\nenum Dir { n, s }\nint d = Dir.s;\nvar vm = {\"g\": 1};\nvm.anything();\nvar d = [1];\nd.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
@@ -2082,6 +2116,36 @@ public:
                 w->type_proofs(proofs);
                 check_eq(std::string("array has no member 'splice'"), w->execute("[[warn_mode]]; array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());
                 check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "no member 'splice' on 'array<string>'"));
+            }
+        });
+
+        test("a_subscript_key_a_typed_map_refuses_is_a_load_error", [this]() {
+            // the key boundary checks the key's kind against the declared key type before any lookup (a char and its one-character
+            // string are one key): a known key it refuses is the run time's text, read or write
+            const std::pair<const char*, const char*> keys[] = {
+                {"map<int,int> m;\nvar v = m[\"x\"];", "Cannot use 'string' as a key of type 'int'"},
+                {"map<int,int> m;\nm[\"x\"] = 3;", "Cannot use 'string' as a key of type 'int'"},
+                {"map<int,int> m;\nm[\"x\"] += 3;", "Cannot use 'string' as a key of type 'int'"},
+                {"map<int,int> m = {1: 1};\nvar v = m[1.0];", "Cannot use 'float' as a key of type 'int'"},
+                {"map<float,int> m = {1.0: 1};\nvar v = m[1];", "Cannot use 'int' as a key of type 'float'"},
+                {"map<bool,int> m;\nm[1] = 2;", "Cannot use 'int' as a key of type 'bool'"},
+                {"map<string,int> m;\nm[1] = 2;", "Cannot use 'int' as a key of type 'string'"},
+                {"map<char,int> m;\nm[\"ab\"] = 2;", "Cannot convert 'string' to 'char': a char takes a string of exactly one character"},
+                {"map<char,int> m;\nvar v = m[\"\"];", "Cannot convert 'string' to 'char': a char takes a string of exactly one character"},
+            };
+            for (bool proofs : {true, false}) {
+                for (const auto& [source, text] : keys) {
+                    auto e = make_engine();
+                    e->type_proofs(proofs);
+                    check_true(has_diag(e->check(source), dlevel::error, text), source);
+                    std::string raised;
+                    try { e->execute(std::string("[[warn_mode]];\n") + source); } catch (const std::exception& error) { raised = error.what(); }
+                    check_eq(std::string(text), raised, source);
+                }
+                auto e = make_engine();
+                e->type_proofs(proofs);
+                check_eq((size_t)0, error_count(e->check("map<char,int> c;\nc[\"a\"] = 1;\nc['b'] = 2;\nmap<string,int> s;\ns['a'] = 1;\nvar k = \"x\";\nmap<int,int> m;\n"
+                                                         "var d = m.has(\"x\");\nvar g = m.get(\"x\", 0);\nmap<var,int> any;\nany[\"x\"] = 1;\nany[2] = 2;\nmap<auto,int> open;\nopen[1] = 1;")));
             }
         });
 

@@ -419,9 +419,22 @@ private:
 				{"auto a = A();\nclass A { int v = 1; }\n", "'A' is used before its declaration (line 2)"},
 				{"var f = fib2;\nint fib2() { return 1; }\n", "'fib2' is used before its declaration (line 2)"},
 				{"if (true) { print(G); }\nint G = 4;\n", "'G' is used before its declaration (line 2)"},
+				// a namespace's top-level code admits its members in order too, across its reopenings and nested blocks
+				{"namespace N {\n\tint x = f();\n\tint f() { return 3; }\n}\n", "'f' is called before its declaration (line 3): top-level code runs in order"},
+				{"namespace N {\n\tint x = y;\n\tint y = 3;\n}\n", "'y' is used before its declaration (line 3)"},
+				{"namespace N {\n\tvar k = f;\n\tint f() { return 3; }\n}\n", "'f' is used before its declaration (line 3)"},
+				{"namespace N { int x = f(); }\nnamespace N { int f() { return 3; } }\n", "'f' is called before its declaration (line 2)"},
+				{"namespace M { namespace N {\n\tint x = f();\n\tint f() { return 3; }\n} }\n", "'f' is called before its declaration (line 3)"},
 			};
 			for (const auto& [src, text] : uses) { check_true(strict_load_error(src).find(text) != std::string::npos, std::string(src) + ": " + strict_load_error(src)); }
+			expect("a namespace member is not there before its declaration runs",
+			       "namespace Q { int x = g(); int g() { return 3; } } Q::x;", "throw:Undefined variable 'g'", true);
 			check_eq(std::string(""), strict_load_error("int f() { return G + A().v; }\nint G = 4;\nclass A { int v = 1; }\nf();\n"), "a body may use names further down");
+			// before the namespace declares it, a bare name reaches an enclosing namespace's member or the global (C++); a body runs later
+			check_eq(std::string(""), strict_load_error("int f() { return 9; }\nnamespace N { int x = f(); int f() { return 3; } }\n"), "the global answers first");
+			check_eq(std::string(""), strict_load_error("namespace M { int f() { return 5; } namespace N { int x = f(); int f() { return 3; } } }\n"), "the enclosing namespace answers first");
+			check_eq(std::string(""), strict_load_error("namespace N { int f() { return g(); } int g() { return 3; } int x = f(); auto l = []() { return h(); }; int h() { return 1; } }\n"), "bodies run later");
+			check_eq(std::string(""), strict_load_error("namespace N { int a = 1; }\nnamespace N { int x = a + 1; }\n"), "an earlier block declared it");
 			// a name the engine already holds (an earlier run, another unit) is there when the use runs
 			auto e = robustness::make(robustness::configs()[0]);
 			e->execute("int G = 1; int fib2() { return 1; } class A { int v = 1; }");

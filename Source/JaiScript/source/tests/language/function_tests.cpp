@@ -1089,6 +1089,15 @@ public:
             check_eq(int64_t(12), engine->execute("f(5) * 10 + f(\"x\");").as_int(), "both units' overloads");
             engine->execute("int f(string a) { return 3; }");   // the same signature replaces, in any unit
             check_eq(int64_t(13), engine->execute("f(5) * 10 + f(\"x\");").as_int(), "the same signature replaces");
+            // the checker resolves a unit's call against the program's whole set: the earlier units' overloads and its own
+            auto split = make_engine();
+            split->execute("int g() { return 1; }");
+            check_eq(int64_t(15), split->execute("int g(int a) { return a; } g() * 10 + g(5);").as_int(), "another unit's overload takes the call");
+            check_eq(int64_t(2), split->execute("int g() { return 2; } g();").as_int(), "the same signature replaces the earlier unit's");
+            bool refused = false;
+            try { split->execute("int g(int a) { return a; } g(1, 2);"); }
+            catch (const static_check_error& err) { refused = std::string(err.what()).find("no overload of 'g' matches this call (2 argument(s))") != std::string::npos; }
+            check_true(refused, "a call no overload of the program takes is still a load error");
         });
 
         test("free_function_overload_reload_drops_only_its_own", [this, error_of]() {

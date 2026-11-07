@@ -23,6 +23,7 @@
 #include <jaiscript/core/script_class.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/detail/environment.hpp>
+#include <jaiscript/detail/function_overloads.hpp>
 #include <jaiscript/detail/builtin_methods.hpp>
 #include <jaiscript/detail/in_place_result.hpp>
 #include <jaiscript/detail/builtin_api_arities.hpp>
@@ -310,6 +311,22 @@ public:
         return result;
     }
     bool host_function_signatures(const std::string& name, std::vector<engine::host_overload_signature>& out) const { note(name); return engine_.host_function_signatures(name, out); }
+    // the script function declarations the engine holds at program scope under a name (an earlier unit's, one or an overload set)
+    std::vector<std::shared_ptr<script_defined_function>> held_function_declarations(std::string_view name) const {
+        note(name);
+        std::vector<std::shared_ptr<script_defined_function>> result;
+        const auto id = engine_access::get_symbolizer(engine_)->find(name);
+        const auto env = engine_access::get_global_environment(engine_);
+        const script_value* held = id && env ? env->get_own_value_ptr(*id) : nullptr;
+        const script_callable* callable = held ? detail::script_callable_of(*held, &engine_) : nullptr;
+        if (!callable) { return result; }
+        if (callable->kind == script_callable::kind_type::function && callable->fn && callable->fn->declared) {
+            result.push_back(callable->fn);
+        } else if (callable->kind == script_callable::kind_type::overload_set && callable->overloads()) {
+            result = callable->overloads()->members;
+        }
+        return result;
+    }
     bool host_function_result(const std::string& name, script_value_type& out) const { note(name); return engine_access::host_function_result(engine_, name, out); }
     bool host_nodiscard(const std::string& callable) const { note(callable); return engine_.is_nodiscard_function(callable); }
     std::vector<std::string> registered_class_names() const { return engine_.registered_class_names(); }
@@ -340,6 +357,8 @@ public:
     type_info* get_type_info_any() const { return engine_access::get_type_info_any(engine_); }
     type_info* get_type_info_uint8() const { return engine_access::get_type_info_uint8(engine_); }
     type_info* get_type_info_array(type_info* element) const { return engine_access::get_type_info_array(engine_, element); }
+    type_info* get_type_info_string() const { return engine_access::get_type_info_string(engine_); }
+    type_info* get_type_info_map(type_info* key, type_info* value) const { return engine_access::get_type_info_map(engine_, key, value); }
 
 private:
     engine& engine_;
@@ -506,6 +525,10 @@ private:
     std::vector<std::string>* deferred_out_ = nullptr;   // their names, for the engine's re-stamp test
     std::unordered_map<std::string_view, sclass> program_sclasses_;
     std::unordered_map<std::string_view, std::vector<const function_decl*>> functions_;
+    // A name's program-scope declarations outside this unit that a call's overload set also holds (foreign_overloads), and the
+    // declarations the checker spells for the engine's held functions
+    std::unordered_map<std::string_view, std::vector<const function_decl*>> foreign_overloads_;
+    std::vector<std::unique_ptr<function_decl>> held_declarations_;
     std::unordered_map<std::string_view, const enum_decl*> enums_;
     std::unordered_set<std::string_view> namespaces_;
     std::unordered_set<std::string> namespace_members_;   // this unit's namespace members and paths (collect_namespace_members)
@@ -527,6 +550,7 @@ private:
         if (collect_depth_ == 0 && !collecting_namespace_names_) { all_names_.insert(name); }   // a namespace's names: enclosing_namespace_member
     }
     std::unordered_map<std::string_view, source_location> program_decls_;   // this unit's program-scope variables, functions and classes: each name's first declaration
+    std::unordered_map<std::string, source_location> namespace_decls_;   // this unit's namespace functions and variables by qualified name: each one's first declaration
     void note_program_decl(std::string_view name, const source_location& at) {
         if (collect_depth_ == 0 && !collecting_namespace_names_) { program_decls_.emplace(name, at); }
     }
@@ -831,6 +855,8 @@ private:
         }
         if (scopes_.size() > 1) {
             diag(diag_level::error, at, "redeclaration of '" + std::string(name) + "' in the same scope", held->second.line, held->second.column);
+        } else {
+            held->second = std::move(entry);   // a program's later declaration stands for the name from here on, as it does at run time
         }
     }
 
@@ -1088,10 +1114,32 @@ private:
         return it->second;
     }
 
+    // each namespace function and variable's first declaration in this unit ("a::b::f"), for top-level code that names it earlier
+    void collect_namespace_declarations(const namespace_decl* n) {
+        stack_.guard(n->location);
+        const auto note = [&](std::string_view member, const source_location& at) {
+            auto [it, fresh] = namespace_decls_.try_emplace(std::string(n->name) + "::" + std::string(member), at);
+            if (!fresh && declared_after(it->second, at)) { it->second = at; }
+        };
+        for (const auto& d : n->declarations) {
+            if (!d) { continue; }
+            switch (d->get_type()) {
+                case node_type::function_decl: note(static_cast<const function_decl*>(d.get())->name, d->location); break;
+                case node_type::variable_decl: note(static_cast<const variable_decl*>(d.get())->name, d->location); break;
+                case node_type::destructuring_decl:
+                    for (const auto& [name, _] : static_cast<const destructuring_decl*>(d.get())->names) { note(name, d->location); }
+                    break;
+                case node_type::namespace_decl: collect_namespace_declarations(static_cast<const namespace_decl*>(d.get())); break;
+                default: break;
+            }
+        }
+    }
+
     void collect_top_level() {
         collect_scope_decls(decls_);
         for (const auto& d : decls_) {
             if (d && d->get_type() == node_type::namespace_decl) {
+                collect_namespace_declarations(static_cast<const namespace_decl*>(d.get()));
                 collect_namespace_vars(static_cast<const namespace_decl*>(d.get()), "");
                 collect_namespace_members(static_cast<const namespace_decl*>(d.get()), namespace_members_);
             } else if (d && d->get_type() == node_type::extern_decl && static_cast<const extern_decl*>(d.get())->qualified()) {
@@ -2633,7 +2681,17 @@ private:
         if (!issue.empty()) { diag(diag_level::error, a_at, method + "() cannot store into '" + ctype_name(a_array) + "': " + issue); }
     }
 
-    std::string container_element_issue(const ctype& src, const type_info* target, int depth = 0) {
+    // An enum's name read as a value is its value table, a map<string,int> (the enum's run-time value)
+    ctype enum_table(const ctype& t) {
+        if (t.kind != ctype::enum_ref_k) { return t; }
+        ctype result = ctype::make(ctype::map_k);
+        result.ti = eng_.get_type_info_map(eng_.get_type_info_string(), eng_.get_type_info_int());
+        result.tentative = t.tentative;
+        return result;
+    }
+
+    std::string container_element_issue(const ctype& a_src, const type_info* target, int depth = 0) {
+        const ctype src = enum_table(a_src);
         const ctype dst = ctype_from_type_info(target);
         if (src.is_unknown() || dst.is_unknown() || depth > 512) { return {}; }
         if (literal_int_overflow(src, dst)) { return "float literal is outside the int range"; }
@@ -2663,7 +2721,38 @@ private:
         return "expected '" + target->canonical_name() + "', got '" + ctype_name(src) + "'";
     }
 
-    std::string map_key_issue(const ctype& src, const type_info* target) {
+    static script_value_type scalar_key_kind(ctype::kind_t kind) {
+        switch (kind) {
+            case ctype::int_k: return script_value_type::jai_int_type;
+            case ctype::float_k: return script_value_type::jai_float_type;
+            case ctype::bool_k: return script_value_type::jai_bool_type;
+            case ctype::char_k: return script_value_type::jai_char_type;
+            case ctype::string_k: return script_value_type::jai_string_type;
+            default: return script_value_type::jai_invalid_type;
+        }
+    }
+
+    // m[k] on a map whose declared key type is a scalar: the key boundary checks the kind before any lookup (detail::map_key_kind_admits),
+    // and a char key takes a string of one character, so a known key the boundary refuses is the run time's text
+    void check_map_subscript_key(const binary_expr* b, const ctype& cont, const ctype& key) {
+        if (cont.kind != ctype::map_k || cont.tentative || cont.diagnostic_only || !cont.ti || key.tentative || key.diagnostic_only) { return; }
+        const type_info_ptr& declared = cont.ti->key_type();
+        if (!declared) { return; }
+        const script_value_type slot = declared->base_type;
+        const script_value_type given = scalar_key_kind(key.kind);
+        if (given == script_value_type::jai_invalid_type || scalar_key_kind(ctype_from_type_info(declared.get()).kind) != slot) { return; }
+        if (!detail::map_key_kind_admits(given, slot)) {
+            diag(diag_level::error, b->right->location, "Cannot use '" + std::string(base_type_spelling(given)) + "' as a key of type '" + detail::type_info_display_name(declared) + "'");
+            return;
+        }
+        if (slot == script_value_type::jai_char_type && given == script_value_type::jai_string_type && b->right->get_type() == node_type::literal_expr) {
+            const script_value& text = static_cast<const literal_expr*>(b->right.get())->value;
+            if (text.is_string() && text.unchecked_as_string().size() != 1) { diag(diag_level::error, b->right->location, std::string(detail::char_of_text_refused)); }
+        }
+    }
+
+    std::string map_key_issue(const ctype& a_src, const type_info* target) {
+        const ctype src = enum_table(a_src);
         const ctype dst = ctype_from_type_info(target);
         if (src.is_unknown() || dst.is_unknown()) { return {}; }
         // Keys never coerce numerically: a conversion could merge distinct entries. A char and its one-character string are one
@@ -2676,7 +2765,8 @@ private:
         return "expected '" + target->canonical_name() + "', got '" + ctype_name(src) + "'";
     }
 
-    std::string container_issue(const ctype& src, const ctype& dst, int depth = 0) {
+    std::string container_issue(const ctype& a_src, const ctype& dst, int depth = 0) {
+        const ctype src = enum_table(a_src);
         if (src.is_unknown() || dst.is_unknown() || depth > 512) { return {}; }
         if (src.kind != dst.kind) {
             return "expected '" + ctype_name(dst) + "', got '" + ctype_name(src) + "'";
@@ -2718,7 +2808,18 @@ private:
         return {};
     }
 
+    std::string enum_table_detail(const ctype& e, const ctype& dst) {
+        std::string result = ": an enum's name is its value table, a map<string,int>";
+        if (dst.kind == ctype::map_k) {
+            if (const std::string issue = container_issue(e, dst); !issue.empty()) { result += " (" + issue + ")"; }
+        } else if (const enum_decl* decl = find_enum(e.cls); decl && !decl->values.empty()) {
+            result += "; name one of its values (" + std::string(e.cls) + "." + std::string(decl->values.front().first) + ")";
+        }
+        return result;
+    }
+
     std::string assignment_detail(const ctype& src, const ctype& dst) {
+        if (src.kind == ctype::enum_ref_k) { return enum_table_detail(src, dst); }
         if (literal_int_overflow(src, dst)) { return ": float literal is outside the int range"; }
         if (literal_char_text_refused(src, dst)) { return ": " + char_text_reason(); }
         if ((dst.kind == ctype::string_k || dst.kind == ctype::utf8_k) && src.kind != ctype::string_k && src.kind != ctype::utf8_k) {
@@ -2742,6 +2843,7 @@ private:
         if (src.kind == ctype::class_ref_k && dst.kind != ctype::class_ref_k && dst.kind != ctype::enum_ref_k && class_name_constructs(src.cls)) {
             return assignable(ctype::make(ctype::function_k), dst);   // a class's name as a value is its constructor
         }
+        if (src.kind == ctype::enum_ref_k && dst.kind != ctype::class_ref_k && dst.kind != ctype::enum_ref_k) { return assignable(enum_table(src), dst); }
         if (dst.kind == ctype::class_ref_k || dst.kind == ctype::enum_ref_k ||
             src.kind == ctype::class_ref_k || src.kind == ctype::enum_ref_k) {
             return true;   // exotic; stay lenient
@@ -3366,6 +3468,24 @@ private:
         }
         diag(diag_level::error, m->location, detail::method_value_text(m->member, owner, detail::method_value_receiver(m), true));
     }
+    // A member of a known int, float, bool or char: the registry (BUILTIN_ARITIES) gives these kinds no methods and same_as answers
+    // every value, so any other name is the run time's text; same_as read without a call is the method-value text
+    void scalar_member_missing(const ctype& recv, const member_expr* m, bool called) {
+        script_value_type kind;
+        switch (recv.kind) {
+            case ctype::int_k: kind = script_value_type::jai_int_type; break;
+            case ctype::float_k: kind = script_value_type::jai_float_type; break;
+            case ctype::bool_k: kind = script_value_type::jai_bool_type; break;
+            case ctype::char_k: kind = script_value_type::jai_char_type; break;
+            default: return;
+        }
+        if (recv.tentative || recv.diagnostic_only || m->is_static) { return; }
+        if (m->member != "same_as") {
+            diag(diag_level::error, m->location, no_member_text(base_type_spelling(kind), m->member));
+        } else if (!called) {
+            diag(diag_level::error, m->location, detail::method_value_text(m->member, base_type_spelling(kind), detail::method_value_receiver(m), true));
+        }
+    }
     // a map's key is read with [] (only an enum's value table reads its keys with a dot, and an enum's name is no map here): the run time's text
     void map_dot_key(const member_expr* m) {
         diag(diag_level::error, m->location, "map has no member '" + std::string(m->member) + "'; read the key as [\"" + std::string(m->member) + "\"]");
@@ -3657,6 +3777,74 @@ private:
         bool checked = false;   // a statically known callee was actually validated
         ctype result{};
     };
+
+    // The declarations of a program-scope function name this unit declares that other units hold: the program's other units and
+    // what earlier executes left in the engine (detail::declare_function_overload's set), less any signature this unit declares again
+    const std::vector<const function_decl*>& foreign_overloads(std::string_view name, const std::vector<const function_decl*>& own) {
+        auto [entry, fresh] = foreign_overloads_.try_emplace(name);
+        std::vector<const function_decl*>& result = entry->second;
+        if (!fresh) { return result; }
+        const auto redeclared = [&](const std::vector<parameter>& params) {
+            for (const auto* fn : own) {
+                if (same_signature(fn->parameters, params) || differs_only_by_reference(fn->parameters, params)) { return true; }
+            }
+            for (const auto* fn : result) {
+                if (same_signature(fn->parameters, params)) { return true; }
+            }
+            return false;
+        };
+        const auto own_body = [&](const block_stmt* body) {
+            for (const auto* fn : own) { if (body && fn->body.get() == body) { return true; } }
+            return false;
+        };
+        if (program_functions_) {
+            eng_.note(name);
+            if (auto pit = program_functions_->find(std::string(name)); pit != program_functions_->end()) {
+                for (const auto& [path, decls] : pit->second) {
+                    for (const auto& d : decls) {
+                        if (d && !own_body(d->body.get()) && !redeclared(d->parameters)) { result.push_back(d.get()); }
+                    }
+                }
+            }
+        }
+        for (const auto& fn : eng_.held_function_declarations(name)) {
+            if (!fn || own_body(fn->body.get()) || redeclared(fn->parameters())) { continue; }
+            auto spelled = std::make_unique<function_decl>(source_location{}, name);
+            spelled->parameters = fn->parameters();
+            spelled->return_type = fn->return_type;
+            spelled->body = fn->body;
+            result.push_back(spelled.get());
+            held_declarations_.push_back(std::move(spelled));
+        }
+        return result;
+    }
+
+    // A call to a program-scope function whose overloads other units hold as well: an error only when no declaration of the
+    // program takes it; the result is typed only when the one that does is this unit's own, and no proof rests on the set
+    ctype check_program_overloads(std::string_view fname, const std::vector<const function_decl*>& own, const std::vector<const function_decl*>& foreign,
+                                  const std::vector<ctype>& args, const source_location& loc) {
+        std::vector<const function_decl*> all(own);
+        all.insert(all.end(), foreign.begin(), foreign.end());
+        const bool rivals = arity_rivals(all, args.size());
+        const function_decl* only_viable = nullptr;
+        int viable_count = 0;
+        int nodiscard_viable = 0;
+        for (const auto* fn : all) {
+            if (!script_fn_viable(fn, args, rivals)) { continue; }
+            ++viable_count;
+            nodiscard_viable += fn->is_nodiscard;
+            only_viable = fn;
+        }
+        if (viable_count == 0) {
+            report_no_overload(fname, all, args, loc);
+            return {};
+        }
+        if (nodiscard_viable == viable_count) { nodiscard_hit_ = {std::string(fname), {}}; }
+        if (viable_count > 1 || std::find(own.begin(), own.end(), only_viable) == own.end()) { return {}; }
+        ctype result = only_viable->is_coroutine ? ctype::make(ctype::coroutine_k) : ctype_from_type_info(only_viable->return_type.get());
+        if (only_viable->is_coroutine) { result.yields = only_viable->return_type.get(); }
+        return result;
+    }
 
     // args already inferred by the caller; foreign = the overloads belong to another unit's source; scored = the runtime picks
     // among them by type (methods); a program's free functions of one name are redefinitions, the last one taking the call
@@ -4250,6 +4438,7 @@ private:
                               : el.kind == ctype::float_k ? operand_class_float_float : operand_class_unknown;
             stamp(b->static_operand_class, cls, operand_class_unknown);
             if (cont.kind == ctype::map_k && !cont.tentative && r.kind == ctype::object_k && !r.tentative && !r.cls.empty()) { warn_identity_map_key(b, r.cls); }
+            check_map_subscript_key(b, cont, r);
             const uint8_t receiver = cont.tentative ? 0 : cont.kind == ctype::string_k ? 1 : cont.kind == ctype::array_k ? 2 : cont.kind == ctype::map_k ? 3 : 0;
             stamp(b->subscript_receiver, receiver, uint8_t(0));
             return el;
@@ -4590,7 +4779,10 @@ private:
         }
         if (!id->global_qualified) {
             const std::string space = enclosing_namespace_member(id->name);
-            if (!space.empty()) { return namespace_fns_.count(space + "::" + std::string(id->name)) ? ctype::make(ctype::function_k) : ctype{}; }
+            if (!space.empty()) {
+                if (namespace_member_unready(space, id->name, id->location, false)) { return {}; }
+                return namespace_fns_.count(space + "::" + std::string(id->name)) ? ctype::make(ctype::function_k) : ctype{};
+            }
         }
         if (functions_.count(id->name)) {
             note_global_use(id->name);
@@ -4741,7 +4933,10 @@ private:
             recv.kind == ctype::string_k || recv.kind == ctype::utf8_k || recv.kind == ctype::function_k || recv.kind == ctype::weak_k || recv.kind == ctype::null_k ||
             recv.kind == ctype::int_k || recv.kind == ctype::float_k || recv.kind == ctype::char_k ||
             recv.kind == ctype::bool_k) {
-            if (!writing && !recv.tentative && !m->is_static) { builtin_method_value(recv, m); }
+            if (!writing && !recv.tentative && !m->is_static) {
+                builtin_method_value(recv, m);
+                scalar_member_missing(recv, m, false);
+            }
             return {};   // builtin methods / map keys / dynamic: lenient
         }
         return infer_class_member(m, recv, writing, typed_field_out, hit_out);
@@ -5034,6 +5229,32 @@ private:
     void report_class_before_declaration(std::string_view name, const source_location& at) {
         report_use_before_declaration(name, at, false, [&] { return eng_.find_script_class(std::string(name)) != nullptr; });
     }
+    // A namespace's top-level code admits its members in order, as program scope does: a bare name the namespace (space) declares
+    // only further down is not its member yet, so it reaches what an enclosing namespace or the globals hold under the name, and
+    // nothing there is the program-scope rule's error. True when the member is not there yet (the caller stays lenient).
+    bool namespace_member_unready(const std::string& space, std::string_view name, const source_location& at, bool call) {
+        if (!top_level_code()) { return false; }
+        const auto first = namespace_decls_.find(space + "::" + std::string(name));
+        if (first == namespace_decls_.end() || !declared_after(first->second, at)) { return false; }
+        const std::string qualified = space + "::" + std::string(name);
+        if (eng_.has_variable(qualified) || eng_.has_function(qualified)) { return false; }
+        if (const script_namespace_data* ns = eng_.find_namespace(space)) {
+            const uint64_t id = eng_.symbolize(name);
+            if (ns->functions.count(id) || ns->variables.count(id) || (ns->scope && ns->scope->get_own_value_ptr(id) != nullptr)) { return false; }
+        }
+        const std::string bare(name);
+        bool outside = functions_.count(name) || all_names_.count(name) || find_sclass(name) || enums_.count(name) || extra_global(bare) || engine_knows_name(bare);
+        for (std::string outer = space; !outside && outer.rfind("::") != std::string::npos;) {
+            outer.resize(outer.rfind("::"));
+            outside = namespace_member_declared(outer, name);
+        }
+        if (!outside) {
+            const char* use = call ? "call" : "use";
+            diag(diag_level::error, at, "'" + bare + "' is " + (call ? "called" : "used") + " before its declaration (line " + std::to_string(first->second.line) +
+                                        "): top-level code runs in order, so declare it above the " + use + " or make the " + use + " after it");
+        }
+        return true;
+    }
 
     ctype infer_call_impl(call_expr* c, const std::vector<ctype>& args, const std::vector<const function_decl*>*& ov) {
         expression* callee = c->callee.get();
@@ -5064,6 +5285,7 @@ private:
             }
             if (!id->global_qualified) {
                 if (const std::string space = enclosing_namespace_member(id->name); !space.empty()) {
+                    if (namespace_member_unready(space, id->name, c->location, true)) { return {}; }
                     const std::string qualified = space + "::" + std::string(id->name);
                     if (auto fit = namespace_fns_.find(qualified); fit != namespace_fns_.end()) {
                         check_namespace_function_nodiscard(qualified, fit->second);
@@ -5075,6 +5297,9 @@ private:
             if (auto it = functions_.find(id->name); it != functions_.end()) {
                 note_global_use(id->name);
                 report_function_before_declaration(id->name, c->location, true);
+                if (const auto& foreign = foreign_overloads(id->name, it->second); !foreign.empty()) {
+                    return check_program_overloads(id->name, it->second, foreign, args, c->location);
+                }
                 ov = &it->second;
                 return check_script_overloads(id->name, it->second, args, c->location).result;
             }
@@ -5188,6 +5413,7 @@ private:
                 }
             }
             if (!recv.tentative && !m->is_static) {
+                scalar_member_missing(recv, m, true);
                 check_builtin_member(recv, m);
                 checkBuiltinArity(recv, m, c);
                 in_place_result_used(recv, m, c);
@@ -5438,6 +5664,7 @@ private:
                 const ctype recv = declared_container_receiver(subscript->left.get(), infer(subscript->left.get()));
                 const ctype key = infer(subscript->right.get());
                 if (recv.kind == ctype::map_k && !recv.tentative && key.kind == ctype::object_k && !key.tentative && !key.cls.empty()) { warn_identity_map_key(subscript, key.cls); }
+                check_map_subscript_key(subscript, recv, key);
                 stamp(subscript->static_operand_class, operand_class_unknown, operand_class_unknown);
                 if (recv.kind == ctype::object_k && !recv.tentative && subscript_returns_by_value(recv.cls)) {
                     std::string text(detail::by_value_subscript_store_text);
@@ -6840,7 +7067,7 @@ private:
     }
 
     JAI_NOINLINE void walk_range_for(range_for_stmt* f) {
-        const ctype container = infer(f->container.get());
+        const ctype container = enum_table(infer(f->container.get()));
         if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
             diag(diag_level::error, f->container->location, "a structured binding takes a map's entries, its key and value: cannot bind '" +
                  ctype_name(container) + "' to " + detail::map_entry_binding_spelling(*f));

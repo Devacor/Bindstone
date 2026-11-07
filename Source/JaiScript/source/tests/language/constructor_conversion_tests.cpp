@@ -30,6 +30,9 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/testing/foundry.hpp>
 #include <cmath>
+#include <variant>
+#include <vector>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -119,6 +122,30 @@ struct Temperature {
     bool to_bool() const { return celsius != 0.0f; }
 };
 
+struct conversion_read_case {
+    const char* code;
+    const char* read;
+    std::variant<script_int, double, std::string> expected;
+    void (*bind)(engine&) = nullptr;
+};
+
+// Each case runs code on a fresh engine (after bind, if any) and reads one value back: an int, a float within 0.001, or a string.
+void check_conversion_reads(const std::vector<conversion_read_case>& a_cases) {
+    check_each(a_cases, [](const conversion_read_case& c) {
+        auto eng = make_engine();
+        if (c.bind) { c.bind(*eng); }
+        eng->execute(c.code);
+        auto value = eng->execute(c.read);
+        if (const auto* i = std::get_if<script_int>(&c.expected)) {
+            check_eq(value.as<script_int>(), *i);
+        } else if (const auto* f = std::get_if<double>(&c.expected)) {
+            check(std::abs(value.as<script_float>() - *f) < 0.001);
+        } else {
+            check_eq(value.as<std::string>(), std::get<std::string>(c.expected));
+        }
+    });
+}
+
 // ============================================================================
 // Test Suite
 // ============================================================================
@@ -129,15 +156,9 @@ public:
 
     void forge_tests() override {
 
-        // ====================================================================
-        // SECTION 1: Explicit construction syntax (baseline - should work now)
-        // ====================================================================
-
-        test("explicit_constructor_call", [&]() {
-            auto eng = make_engine();
-
-            // Using two-argument constructor like the working test in script_class_tests.cpp
-            eng->execute(R"(
+        test("explicit_construction_calls_and_brace_initializes", [&]() {
+            check_conversion_reads({
+                {R"(
                 class Wrapper {
                     int value = 0;
                     int mult = 0;
@@ -149,16 +170,8 @@ public:
                 }
 
                 auto w = Wrapper(42, 2);
-            )");
-
-            auto value = eng->execute("w.value");
-            check_eq(value.as<script_int>(), 42);
-        });
-
-        test("explicit_constructor_brace_init", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "w.value", script_int{42}},
+                {R"(
                 class Wrapper {
                     int value = 0;
 
@@ -168,20 +181,13 @@ public:
                 }
 
                 Wrapper w{42};
-            )");
-
-            auto value = eng->execute("w.value");
-            check_eq(value.as<script_int>(), 42);
+                )", "w.value", script_int{42}},
+            });
         });
 
-        // ====================================================================
-        // SECTION 2: Implicit conversion in function parameters
-        // ====================================================================
-
-        test("implicit_conversion_function_param_int", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+        test("a_one_argument_constructor_converts_at_parameters_typed_assignments_and_returns", [&]() {
+            check_conversion_reads({
+                {R"(
                 class Wrapper {
                     int value = 0;
 
@@ -195,16 +201,8 @@ public:
                 }
 
                 var result = process(21);
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<script_int>(), 42);
-        });
-
-        test("implicit_conversion_function_param_string", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", script_int{42}},
+                {R"(
                 class Label {
                     string text = "";
 
@@ -218,16 +216,8 @@ public:
                 }
 
                 var result = get_length("Hello");
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<script_int>(), 5);
-        });
-
-        test("implicit_conversion_function_param_float", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", script_int{5}},
+                {R"(
                 class Percentage {
                     float value = 0.0;
 
@@ -241,16 +231,8 @@ public:
                 }
 
                 var result = scale(0.75);
-            )");
-
-            auto result = eng->execute("result");
-            check(std::abs(result.as<script_float>() - 75.0) < 0.001);
-        });
-
-        test("implicit_conversion_function_param_object", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", 75.0},
+                {R"(
                 class SourceType {
                     int x = 10;
                     int y = 20;
@@ -270,20 +252,8 @@ public:
 
                 var src = SourceType();
                 var result = get_sum(src);
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<script_int>(), 30);
-        });
-
-        // ====================================================================
-        // SECTION 3: Implicit conversion in assignment to typed variables
-        // ====================================================================
-
-        test("implicit_conversion_assignment_int", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", script_int{30}},
+                {R"(
                 class Wrapper {
                     int value = 0;
 
@@ -294,16 +264,8 @@ public:
 
                 Wrapper w = Wrapper(0);
                 w = 42;
-            )");
-
-            auto value = eng->execute("w.value");
-            check_eq(value.as<script_int>(), 42);
-        });
-
-        test("implicit_conversion_assignment_string", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "w.value", script_int{42}},
+                {R"(
                 class Label {
                     string text = "";
 
@@ -314,20 +276,8 @@ public:
 
                 Label lbl = Label("");
                 lbl = "Hello World";
-            )");
-
-            auto text = eng->execute("lbl.text");
-            check_eq(text.as<std::string>(), "Hello World");
-        });
-
-        // ====================================================================
-        // SECTION 4: Implicit conversion in return statements
-        // ====================================================================
-
-        test("implicit_conversion_return_int", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "lbl.text", std::string("Hello World")},
+                {R"(
                 class Wrapper {
                     int value = 0;
 
@@ -341,16 +291,8 @@ public:
                 }
 
                 auto w = make_wrapper();
-            )");
-
-            auto value = eng->execute("w.value");
-            check_eq(value.as<script_int>(), 42);
-        });
-
-        test("implicit_conversion_return_object", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "w.value", script_int{42}},
+                {R"(
                 class SourceType {
                     int x = 10;
                     int y = 20;
@@ -370,20 +312,13 @@ public:
                 }
 
                 auto t = convert();
-            )");
-
-            auto sum = eng->execute("t.sum");
-            check_eq(sum.as<script_int>(), 30);
+                )", "t.sum", script_int{30}},
+            });
         });
 
-        // ====================================================================
-        // SECTION 5: Script-side outbound conversions (to_X methods)
-        // ====================================================================
-
-        test("script_to_int_method", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+        test("a_to_x_method_converts_a_script_object_outbound", [&]() {
+            check_conversion_reads({
+                {R"(
                 class Counter {
                     int count = 42;
 
@@ -398,16 +333,8 @@ public:
 
                 var counter = Counter();
                 var result = double_it(counter);
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<script_int>(), 84);
-        });
-
-        test("script_to_float_method", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", script_int{84}},
+                {R"(
                 class Measurement {
                     float value = 3.14;
 
@@ -422,16 +349,8 @@ public:
 
                 var m = Measurement();
                 var result = add_one(m);
-            )");
-
-            auto result = eng->execute("result");
-            check(std::abs(result.as<script_float>() - 4.14) < 0.001);
-        });
-
-        test("script_to_string_method", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", 4.14},
+                {R"(
                 class Person {
                     string name = "Alice";
 
@@ -446,16 +365,8 @@ public:
 
                 var p = Person();
                 var result = greet(p);
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<std::string>(), "Hello, Person: Alice");
-        });
-
-        test("script_to_bool_in_conditional", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "result", std::string("Hello, Person: Alice")},
+                {R"(
                 class Truthy {
                     bool is_truthy = true;
 
@@ -486,18 +397,40 @@ public:
                 } else {
                     falsy_result = "falsy branch";
                 }
-            )");
+                )", "truthy_result", std::string("truthy branch")},
+                {R"(
+                class Truthy {
+                    bool is_truthy = true;
 
-            auto truthy_result = eng->execute("truthy_result");
-            auto falsy_result = eng->execute("falsy_result");
-            check_eq(truthy_result.as<std::string>(), "truthy branch");
-            check_eq(falsy_result.as<std::string>(), "falsy branch");
-        });
+                    bool to_bool() {
+                        return this.is_truthy;
+                    }
+                }
 
-        test("script_to_string_in_concatenation", [&]() {
-            auto eng = make_engine();
+                class Falsy {
+                    bool to_bool() {
+                        return false;
+                    }
+                }
 
-            eng->execute(R"(
+                var truthy = Truthy();
+                var falsy = Falsy();
+                var truthy_result = "not set";
+                var falsy_result = "not set";
+
+                if (truthy) {
+                    truthy_result = "truthy branch";
+                } else {
+                    truthy_result = "falsy branch";
+                }
+
+                if (falsy) {
+                    falsy_result = "truthy branch";
+                } else {
+                    falsy_result = "falsy branch";
+                }
+                )", "falsy_result", std::string("falsy branch")},
+                {R"(
                 class Version {
                     int major = 1;
                     int minor = 2;
@@ -510,96 +443,67 @@ public:
 
                 var v = Version();
                 var result = `Version: ${v}`;
-            )");
-
-            auto result = eng->execute("result");
-            check_eq(result.as<std::string>(), "Version: 1.2.3");
+                )", "result", std::string("Version: 1.2.3")},
+            });
         });
 
-        // ====================================================================
-        // SECTION 6: C++ inbound conversions via ClassBuilder
-        // ====================================================================
-
-        test("cpp_constructor_int_conversion", [&]() {
-            auto eng = make_engine();
-
-            dynamic_binder<Temperature>(*eng, "Temperature")
-                .constructor<>()
-                .constructor<float>()
-                .constructor<int>()
-                .property("celsius", &Temperature::celsius)
-                .build();
-
-            eng->execute(R"(
+        test("a_bound_cpp_constructor_converts_at_a_parameter", [&]() {
+            check_conversion_reads({
+                {R"(
                 auto get_celsius(Temperature t) -> float {
                     return t.celsius;
                 }
                 var result = get_celsius(25);
-            )");
-
-            auto result = eng->execute("result");
-            check(std::abs(result.as<script_float>() - 25.0) < 0.001);
-        });
-
-        test("cpp_constructor_object_conversion", [&]() {
-            auto eng = make_engine();
-
-            dynamic_binder<Point2D>(*eng, "Point2D")
-                .constructor<>()
-                .constructor<float, float>()
-                .property("x", &Point2D::x)
-                .property("y", &Point2D::y)
-                .build();
-
-            dynamic_binder<Point3D>(*eng, "Point3D")
-                .constructor<>()
-                .constructor<float, float, float>()
-                .constructor<Point2D>()
-                .property("x", &Point3D::x)
-                .property("y", &Point3D::y)
-                .property("z", &Point3D::z)
-                .build();
-
-            eng->execute(R"(
+                )", "result", 25.0, [](engine& a_eng) {
+                    dynamic_binder<Temperature>(a_eng, "Temperature")
+                        .constructor<>()
+                        .constructor<float>()
+                        .constructor<int>()
+                        .property("celsius", &Temperature::celsius)
+                        .build();
+                }},
+                {R"(
                 auto get_z(Point3D p) -> float {
                     return p.z;
                 }
 
                 var p2 = Point2D(3.0, 4.0);
                 var z_val = get_z(p2);
-            )");
+                )", "z_val", 0.0, [](engine& a_eng) {
+                    dynamic_binder<Point2D>(a_eng, "Point2D")
+                        .constructor<>()
+                        .constructor<float, float>()
+                        .property("x", &Point2D::x)
+                        .property("y", &Point2D::y)
+                        .build();
 
-            auto z = eng->execute("z_val");
-            check(std::abs(z.as<script_float>() - 0.0) < 0.001);
-        });
-
-        test("cpp_constructor_string_conversion", [&]() {
-            auto eng = make_engine();
-
-            dynamic_binder<Color>(*eng, "Color")
-                .constructor<>()
-                .constructor<int, int, int>()
-                .constructor<int>()
-                .constructor<std::string>()
-                .property("r", &Color::r)
-                .property("g", &Color::g)
-                .property("b", &Color::b)
-                .build();
-
-            eng->execute(R"(
+                    dynamic_binder<Point3D>(a_eng, "Point3D")
+                        .constructor<>()
+                        .constructor<float, float, float>()
+                        .constructor<Point2D>()
+                        .property("x", &Point3D::x)
+                        .property("y", &Point3D::y)
+                        .property("z", &Point3D::z)
+                        .build();
+                }},
+                {R"(
                 auto get_red(Color c) -> int {
                     return c.r;
                 }
                 var red = get_red("FF8000");
-            )");
-
-            auto red = eng->execute("red");
-            check_eq(red.as<script_int>(), 255);
+                )", "red", script_int{255}, [](engine& a_eng) {
+                    dynamic_binder<Color>(a_eng, "Color")
+                        .constructor<>()
+                        .constructor<int, int, int>()
+                        .constructor<int>()
+                        .constructor<std::string>()
+                        .property("r", &Color::r)
+                        .property("g", &Color::g)
+                        .property("b", &Color::b)
+                        .build();
+                }},
+            });
         });
-
-        // ====================================================================
-        // SECTION 7: Inheritance-based no-copy compatibility
-        // ====================================================================
 
         test("inheritance_ref_upcast_no_copy", [&]() {
             auto eng = make_engine();
@@ -662,10 +566,6 @@ public:
             check_eq(sound.as<std::string>(), "Woof!");
         });
 
-        // ====================================================================
-        // SECTION 8: Null handling
-        // ====================================================================
-
         test("null_assignment_no_conversion", [&]() {
             auto eng = make_engine();
 
@@ -691,10 +591,6 @@ public:
             auto called = eng->execute("constructor_called");
             check_eq(called.as<bool>(), false);
         });
-
-        // ====================================================================
-        // SECTION 9: Conversion priority
-        // ====================================================================
 
         test("exact_match_priority", [&]() {
             auto eng = make_engine();
@@ -724,39 +620,18 @@ public:
             check_eq(count.as<script_int>(), 0);
         });
 
-        // ====================================================================
-        // SECTION 10: Error cases
-        // ====================================================================
-
-        test("error_no_conversion_available", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+        // a conversion takes one constructor step: an argument no constructor accepts, or that only a chain of them reaches, is refused
+        test("an_argument_with_no_single_constructor_step_is_refused", [&]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {R"(
                 class TypeA { int a = 0; }
                 class TypeB { int b = 0; }
 
                 auto accept_b(TypeB b) -> int { return b.b; }
 
                 var a = TypeA();
-            )");
-
-            bool threw = false;
-            try {
-                eng->execute("accept_b(a);");
-            } catch (...) {
-                threw = true;
-            }
-            check(threw);
-        });
-
-        // ====================================================================
-        // SECTION 11: Chained conversions (should NOT be supported)
-        // ====================================================================
-
-        test("no_chained_conversions", [&]() {
-            auto eng = make_engine();
-
-            eng->execute(R"(
+                )", "accept_b(a);"},
+                {R"(
                 class TypeA { int value = 1; }
                 class TypeB {
                     int value = 0;
@@ -770,20 +645,14 @@ public:
                 auto accept_c(TypeC c) -> int { return c.value; }
 
                 var a = TypeA();
-            )");
-
-            bool threw = false;
-            try {
-                eng->execute("accept_c(a);");
-            } catch (...) {
-                threw = true;
-            }
-            check(threw);
+                )", "accept_c(a);"},
+            };
+            check_each(cases, [](const auto& c) {
+                auto eng = make_engine();
+                eng->execute(c.first);
+                check_throws([&]() { eng->execute(c.second); });
+            });
         });
-
-        // ====================================================================
-        // SECTION 12: Hot-reload scenarios
-        // ====================================================================
 
         test("hot_reload_adds_conversion", [&]() {
             auto eng = make_engine();
@@ -818,10 +687,6 @@ public:
             auto result = eng->execute("result");
             check_eq(result.as<script_int>(), 42);
         });
-
-        // ====================================================================
-        // SECTION 13: Multiple constructors / overload resolution
-        // ====================================================================
 
         test("multiple_constructors_exact_match", [&]() {
             auto eng = make_engine();
@@ -858,10 +723,6 @@ public:
             check_eq(from_float.as<std::string>(), "float");
             check_eq(from_string.as<std::string>(), "string");
         });
-
-        // ====================================================================
-        // SECTION 14: Edge cases
-        // ====================================================================
 
         test("conversion_preserves_value_semantics", [&]() {
             auto eng = make_engine();
@@ -1018,7 +879,6 @@ public:
             check(std::abs(f_temp.as<script_float>() - 212.0) < 0.1);
         });
 
-        // ---------------------------------------------- converting-ctor ruling pins
         // A defaulted-parameter constructor is NOT a converting
         // constructor - a deliberate C++ divergence for more control.
         // The idiom pair replaces C++'s explicit keyword: conversion is opted INTO

@@ -1,6 +1,9 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <optional>
+#include <variant>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -9,39 +12,72 @@ public:
     override_edge_cases() : suite("Override Edge Cases") {}
     
     void forge_tests() override {
-        test("override_on_multiple_inheritance_levels", [this]() {
-            auto engine = make_engine();
-            
-            // Deep inheritance hierarchy
-            engine->execute(R"(
-                class A {
-                    auto value() { return "A"; }
+        test("a_base_typed_slot_calls_the_most_derived_override", [this]() {
+            struct dispatch_case { const char* code; const char* classes; std::variant<int, std::string> expected; };
+            const char* const chain = R"(
+                class A { auto value() { return "A"; } }
+                class B : A { auto value() override { return "B"; } }
+                class C : B { auto value() override { return "C"; } }
+                class D : C { auto value() override { return "D"; } }
+            )";
+            const char* const animals = R"(
+                class Animal {
+                    auto speak() { return "..."; }
+                    auto move() { return "moves"; }
+                    auto eat() { return "eats"; }
                 }
-                
-                class B : A {
-                    auto value() override { return "B"; }
+                class Dog : Animal {
+                    auto speak() override { return "Woof!"; }
+                    auto move() override { return "runs"; }
                 }
-                
-                class C : B {
-                    auto value() override { return "C"; }
+            )";
+            const char* const devices = R"(
+                class Device { auto power() { return "Device power"; } }
+                class Phone : Device { auto power() override { return "Phone power"; } }
+                class Computer : Device { auto power() override { return "Computer power"; } }
+            )";
+            const char* const skip = R"(
+                class A { auto method() { return 1; } }
+                class B : A { auto other() { return 2; } }
+                class C : B { auto method() override { return 3; } }
+            )";
+            const char* const numbers = R"(
+                class A { auto value() { return 1; } }
+                class B : A { auto value() override { return 2; } }
+                class C : B { auto value() override { return 3; } }
+            )";
+            const char* const math = R"(
+                class Math { auto calculate(int x) { return x * 2; } }
+                class AdvancedMath : Math { auto calculate(int x) override { return x * x; } }
+            )";
+            const dispatch_case cases[] = {
+                {"A a = D(); a.value();", chain, std::string("D")},
+                {"B b = D(); b.value();", chain, std::string("D")},
+                {"C c = D(); c.value();", chain, std::string("D")},
+                {"Animal a = Dog(); a.speak();", animals, std::string("Woof!")},
+                {"Animal a = Dog(); a.move();", animals, std::string("runs")},
+                {"Animal a = Dog(); a.eat();", animals, std::string("eats")},
+                {"Device d = Phone(); d.power();", devices, std::string("Phone power")},
+                {"Device d = Computer(); d.power();", devices, std::string("Computer power")},
+                {"A a = C(); a.method();", skip, 3},
+                {"B b = C(); b.method();", skip, 3},
+                {"A a = B(); a.value();", numbers, 2},
+                {"A a = C(); a.value();", numbers, 3},
+                {"B b = C(); b.value();", numbers, 3},
+                {"Math m = AdvancedMath(); m.calculate(5);", math, 25},
+            };
+            check_each(cases, [](const dispatch_case& c) {
+                auto engine = make_engine();
+                engine->execute(c.classes);
+                auto result = engine->execute(c.code);
+                if (const auto* i = std::get_if<int>(&c.expected)) {
+                    check_eq(result.as<int>(), *i);
+                } else {
+                    check_eq(result.as<std::string>(), std::get<std::string>(c.expected));
                 }
-                
-                class D : C {
-                    auto value() override { return "D"; }
-                }
-            )");
-            
-            // Test polymorphism at each level
-            auto result1 = engine->execute("A a = D(); a.value();");
-            check_eq(result1.as<std::string>(), "D");
-            
-            auto result2 = engine->execute("B b = D(); b.value();");
-            check_eq(result2.as<std::string>(), "D");
-            
-            auto result3 = engine->execute("C c = D(); c.value();");
-            check_eq(result3.as<std::string>(), "D");
+            });
         });
-        
+
         test("override_with_different_return_types", [this]() {
             auto engine = make_engine();
             
@@ -59,62 +95,6 @@ public:
             
             auto result = engine->execute("Shape s = Circle(); s.area();");
             check_near(result.as<double>(), 78.53975, 0.001);
-        });
-        
-        test("override_with_multiple_base_methods", [this]() {
-            auto engine = make_engine();
-            
-            // Class with multiple methods, only some overridden
-            engine->execute(R"(
-                class Animal {
-                    auto speak() { return "..."; }
-                    auto move() { return "moves"; }
-                    auto eat() { return "eats"; }
-                }
-                
-                class Dog : Animal {
-                    auto speak() override { return "Woof!"; }
-                    auto move() override { return "runs"; }
-                    // eat() is not overridden
-                }
-            )");
-            
-            auto dog = engine->execute("Animal a = Dog(); a");
-            auto speak = engine->execute("Animal a = Dog(); a.speak();");
-            auto move = engine->execute("Animal a = Dog(); a.move();");
-            auto eat = engine->execute("Animal a = Dog(); a.eat();");
-            
-            check_eq(speak.as<std::string>(), "Woof!");
-            check_eq(move.as<std::string>(), "runs");
-            check_eq(eat.as<std::string>(), "eats");  // Uses base implementation
-        });
-        
-        test("override_in_diamond_inheritance", [this]() {
-            auto engine = make_engine();
-            
-            // Diamond inheritance pattern (single inheritance in JaiScript)
-            engine->execute(R"(
-                class Device {
-                    auto power() { return "Device power"; }
-                }
-                
-                class Phone : Device {
-                    auto power() override { return "Phone power"; }
-                }
-                
-                class Computer : Device {
-                    auto power() override { return "Computer power"; }
-                }
-                
-                // In JaiScript, we can only inherit from one class
-                // So we test that override works correctly in parallel hierarchies
-            )");
-            
-            auto phone = engine->execute("Device d = Phone(); d.power();");
-            auto computer = engine->execute("Device d = Computer(); d.power();");
-            
-            check_eq(phone.as<std::string>(), "Phone power");
-            check_eq(computer.as<std::string>(), "Computer power");
         });
         
         test("override_method_calling_super", [this]() {
@@ -227,33 +207,6 @@ public:
             check_eq(result.as<std::string>(), "Car with 4 wheels");
         });
         
-        test("override_chain_with_skip", [this]() {
-            auto engine = make_engine();
-            
-            // A->B->C where B doesn't override but C does
-            engine->execute(R"(
-                class A {
-                    auto method() { return 1; }
-                }
-                
-                class B : A {
-                    // B does NOT override method()
-                    auto other() { return 2; }
-                }
-                
-                class C : B {
-                    // C overrides A's method, skipping B
-                    auto method() override { return 3; }
-                }
-            )");
-            
-            auto result1 = engine->execute("A a = C(); a.method();");
-            check_eq(result1.as<int>(), 3);
-            
-            auto result2 = engine->execute("B b = C(); b.method();");
-            check_eq(result2.as<int>(), 3);
-        });
-        
         test("override_with_field_access", [this]() {
             auto engine = make_engine();
             
@@ -312,201 +265,78 @@ public:
             }
         });
         
-        test("override_static_vs_instance_methods", [this]() {
-            auto engine = make_engine();
-            
-            // When we add static method support, test that static methods
-            // cannot override instance methods and vice versa
-            // For now, test instance methods only
-            engine->execute(R"(
-                class Math {
-                    auto calculate(int x) { return x * 2; }
-                }
-                
-                class AdvancedMath : Math {
-                    auto calculate(int x) override { return x * x; }
-                }
-            )");
-            
-            auto result = engine->execute("Math m = AdvancedMath(); m.calculate(5);");
-            check_eq(result.as<int>(), 25);
-        });
-
-        test("static_method_cannot_use_override", [this]() {
-            auto engine = make_engine();
-
-            // Static methods cannot use 'override' keyword - they're not virtual
-            check_throws([&]() {
-                engine->execute(R"(
-                    class Base {
-                        auto method() { return 42; }
-                    }
-
-                    class Derived : Base {
-                        static auto method() override { return 99; }
-                    }
-                )");
+        test("override_never_crosses_static_and_instance", [this]() {
+            struct crossing_case { const char* code; };
+            const crossing_case cases[] = {
+                {R"(
+                    class Base { auto method() { return 42; } }
+                    class Derived : Base { static auto method() override { return 99; } }
+                )"},
+                {R"(
+                    class Base { static auto method() { return 42; } }
+                    class Derived : Base { auto method() override { return 99; } }
+                )"},
+            };
+            check_each(cases, [](const crossing_case& c) {
+                auto engine = make_engine();
+                check_throws([&]() { engine->execute(c.code); });
             });
         });
 
-        test("instance_method_cannot_override_static", [this]() {
-            auto engine = make_engine();
-
-            // Attempting to override static method with instance should fail
-            check_throws([&]() {
-                engine->execute(R"(
-                    class Base {
-                        static auto method() { return 42; }
-                    }
-
-                    class Derived : Base {
-                        auto method() override { return 99; }
-                    }
-                )");
-            });
-        });
-
-        test("static_in_base_static_in_derived_same_name", [this]() {
-            auto engine = make_engine();
-
-            // Both base and derived have static method with same name
-            // Static methods don't need override - they're fully qualified
-            engine->execute(R"(
-                class Base {
-                    static auto method() { return 1; }
-                }
-
-                class Derived : Base {
-                    static auto method() { return 2; }
-                }
-            )");
-
-            // Static methods: ONLY accessible via Class::method()
-            // 1. Base::method()
-            auto result1 = engine->execute("Base::method();");
-            check_eq(result1.as<int>(), 1);
-
-            // 2. Derived::method()
-            auto result2 = engine->execute("Derived::method();");
-            check_eq(result2.as<int>(), 2);
-
-            // 3. instance.method() should NOT work for static methods
-            check_throws([&]() {
-                engine->execute("Base b = Base(); b.method();");
-            });
-
-            check_throws([&]() {
-                engine->execute("Derived d = Derived(); d.method();");
-            });
-        });
-
-        test("instance_in_base_static_in_derived_same_name", [this]() {
-            auto engine = make_engine();
-
-            // Base has instance method, derived adds static with same name
-            // Different namespaces - both should work
-            engine->execute(R"(
-                class Base {
-                    auto method() { return 10; }
-                }
-
-                class Derived : Base {
-                    static auto method() { return 20; }
-                }
-            )");
-
-            // Test all 4 access patterns:
-            // 1. Base::method() - no static method in Base, should fail
-            check_throws([&]() {
-                engine->execute("Base::method();");
-            });
-
-            // 2. Base instance.method() - instance method
-            auto result2 = engine->execute("Base b = Base(); b.method();");
-            check_eq(result2.as<int>(), 10);
-
-            // 3. Derived::method() - static method
-            auto result3 = engine->execute("Derived::method();");
-            check_eq(result3.as<int>(), 20);
-
-            // 4. Derived instance.method() - inherited instance method
-            auto result4 = engine->execute("Derived d = Derived(); d.method();");
-            check_eq(result4.as<int>(), 10);  // Inherits Base's instance method
-        });
-
-        test("static_in_base_instance_in_derived_same_name", [this]() {
-            auto engine = make_engine();
-
-            // Base has static method, derived adds instance with same name
-            // Different namespaces - both should work
-            engine->execute(R"(
+        // static methods answer only Class::method() and instance methods only obj.method(); an instance method hides a base's
+        // static of the same name (C++ name hiding)
+        test("same_named_static_and_instance_methods_across_a_base_and_derived_class", [this]() {
+            struct same_name_case { const char* code; const char* classes; std::optional<int> expected; };
+            const char* const static_static = R"(
+                class Base { static auto method() { return 1; } }
+                class Derived : Base { static auto method() { return 2; } }
+            )";
+            const char* const instance_static = R"(
+                class Base { auto method() { return 10; } }
+                class Derived : Base { static auto method() { return 20; } }
+            )";
+            const char* const static_instance = R"(
                 class Base {
                     Base() {}
                     static auto method() { return 100; }
                 }
-
                 class Derived : Base {
                     Derived() : super() {}
                     auto method() { return 200; }
                 }
-            )");
-
-            // Base::method() - static method works
-            auto result1 = engine->execute("Base::method();");
-            check_eq(result1.as<int>(), 100);
-
-            // Base instance.method() - no instance method in Base, should fail
-            check_throws([&]() {
-                engine->execute("Base b = Base(); b.method();");
-            });
-
-            // Derived::method() - Derived's instance method hides Base's static (C++ name hiding),
-            // so the qualified call names no static
-            check_throws([&]() {
-                engine->execute("Derived::method();");
-            });
-
-            // Derived instance.method() - instance method works
-            auto result2 = engine->execute("Derived d = Derived(); d.method();");
-            check_eq(result2.as<int>(), 200);
-        });
-
-        test("instance_in_base_instance_in_derived_same_name", [this]() {
-            auto engine = make_engine();
-
-            // Both have instance methods - must use override
-            engine->execute(R"(
-                class Base {
-                    auto method() { return 5; }
+            )";
+            const char* const instance_instance = R"(
+                class Base { auto method() { return 5; } }
+                class Derived : Base { auto method() override { return 50; } }
+            )";
+            const same_name_case cases[] = {
+                {"Base::method();", static_static, 1},
+                {"Derived::method();", static_static, 2},
+                {"Base b = Base(); b.method();", static_static, std::nullopt},
+                {"Derived d = Derived(); d.method();", static_static, std::nullopt},
+                {"Base::method();", instance_static, std::nullopt},
+                {"Base b = Base(); b.method();", instance_static, 10},
+                {"Derived::method();", instance_static, 20},
+                {"Derived d = Derived(); d.method();", instance_static, 10},
+                {"Base::method();", static_instance, 100},
+                {"Base b = Base(); b.method();", static_instance, std::nullopt},
+                {"Derived::method();", static_instance, std::nullopt},
+                {"Derived d = Derived(); d.method();", static_instance, 200},
+                {"Base::method();", instance_instance, std::nullopt},
+                {"Base b = Base(); b.method();", instance_instance, 5},
+                {"Derived::method();", instance_instance, std::nullopt},
+                {"Derived d = Derived(); d.method();", instance_instance, 50},
+                {"Base b2 = Derived(); b2.method();", instance_instance, 50},
+            };
+            check_each(cases, [](const same_name_case& c) {
+                auto engine = make_engine();
+                engine->execute(c.classes);
+                if (c.expected) {
+                    check_eq(engine->execute(c.code).as<int>(), *c.expected);
+                } else {
+                    check_throws([&]() { engine->execute(c.code); });
                 }
-
-                class Derived : Base {
-                    auto method() override { return 50; }
-                }
-            )");
-
-            // Test all 4 access patterns:
-            // 1. Base::method() - no static method, should fail
-            check_throws([&]() {
-                engine->execute("Base::method();");
             });
-
-            // 2. Base instance.method() - instance method
-            auto result2 = engine->execute("Base b = Base(); b.method();");
-            check_eq(result2.as<int>(), 5);
-
-            // 3. Derived::method() - no static method, should fail
-            check_throws([&]() {
-                engine->execute("Derived::method();");
-            });
-
-            // 4. Derived instance.method() - overridden instance method
-            auto result4 = engine->execute("Derived d = Derived(); d.method();");
-            check_eq(result4.as<int>(), 50);
-
-            // Bonus: polymorphic call
-            auto result5 = engine->execute("Base b2 = Derived(); b2.method();");
-            check_eq(result5.as<int>(), 50);  // Virtual dispatch
         });
 
         test("static_methods_no_virtual_dispatch", [this]() {

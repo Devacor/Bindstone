@@ -1,6 +1,7 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/testing/foundry.hpp>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -38,18 +39,22 @@ public:
 	}
 
 	void forge_tests() override {
-		test("bound_type_shares_like_new", [this]() {
-			same_as_new(
-				"shared_ptr<Vec> m = make_shared<Vec>(1); var n = m; n.x = 7; m.x",
-				"shared_ptr<Vec> m = new Vec(1); var n = m; n.x = 7; m.x", "7");
-		});
-		test("bound_type_zero_args", [this]() {
-			same_as_new("auto m = make_shared<Vec>(); m.x", "auto m = new Vec(); m.x", "0");
-		});
-		test("script_class_with_constructor", [this]() {
-			same_as_new(
-				"class P { int a = 0; P(int v) { a = v; } } auto p = make_shared<P>(4); auto q = p; q.a = 9; p.a",
-				"class P { int a = 0; P(int v) { a = v; } } auto p = new P(4); auto q = p; q.a = 9; p.a", "9");
+		test("make_shared_answers_as_new_spells_it", [this]() {
+			struct spelling_case { const char* code; const char* spelled_new; const char* expected; };
+			const spelling_case cases[] = {
+				{"shared_ptr<Vec> m = make_shared<Vec>(1); var n = m; n.x = 7; m.x", "shared_ptr<Vec> m = new Vec(1); var n = m; n.x = 7; m.x", "7"},
+				{"auto m = make_shared<Vec>(); m.x", "auto m = new Vec(); m.x", "0"},
+				{"class P { int a = 0; P(int v) { a = v; } } auto p = make_shared<P>(4); auto q = p; q.a = 9; p.a",
+				 "class P { int a = 0; P(int v) { a = v; } } auto p = new P(4); auto q = p; q.a = 9; p.a", "9"},
+				{"namespace ns { class A { int x = 3; } } auto a = make_shared<ns::A>(); a.x", "namespace ns { class A { int x = 3; } } auto a = new ns::A(); a.x", "3"},
+				{"auto a = make_shared<array<int>>(); 1", "auto a = new array<int>(); 1", nullptr},
+				{"auto a = make_shared<Vec>(1, 2, 3); 1", "auto a = new Vec(1, 2, 3); 1", nullptr},
+			};
+			check_each(cases, [this](const spelling_case& c) {
+				const auto spelled = outcome(c.code);
+				if (c.expected) { check_eq(std::string(c.expected), spelled); }
+				check_eq(outcome(c.spelled_new), spelled);
+			});
 		});
 		test("checker_types_it_as_shared_ptr", [this]() {
 			same_as_new(
@@ -57,21 +62,10 @@ public:
 				"class P { int a = 2; } auto m = new P(); shared_ptr<P> n = m; n.a", "2");
 			check(outcome("class P { } auto m = make_shared<P>(); m = 5;").find("cannot assign 'int' to 'm' declared 'shared_ptr<P>'") != std::string::npos);
 		});
-		test("namespaced_type", [this]() {
-			same_as_new(
-				"namespace ns { class A { int x = 3; } } auto a = make_shared<ns::A>(); a.x",
-				"namespace ns { class A { int x = 3; } } auto a = new ns::A(); a.x", "3");
-		});
-		test("nested_template_argument", [this]() {
-			check_eq(outcome("auto a = new array<int>(); 1"), outcome("auto a = make_shared<array<int>>(); 1"));
-		});
 		test("unknown_type_errors_like_new", [this]() {
 			auto spelled = outcome("auto a = make_shared<Nope>(); 1");
 			check(spelled != "1");
 			check_eq(outcome("auto a = new Nope(); 1"), spelled);
-		});
-		test("constructor_mismatch_errors_like_new", [this]() {
-			check_eq(outcome("auto a = new Vec(1, 2, 3); 1"), outcome("auto a = make_shared<Vec>(1, 2, 3); 1"));
 		});
 		test("missing_arguments_is_a_parse_error", [this]() {
 			check_true(outcome("auto a = make_shared<Vec>; 1").rfind("error: parse failed:\n<script>:1:26: error: expected '(' after make_shared<T>", 0) == 0);

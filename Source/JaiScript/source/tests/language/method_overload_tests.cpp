@@ -3,6 +3,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include "../case_table.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -66,59 +67,33 @@ public:
         // (arity_accepts, core/overload_resolution.hpp); binding already evaluated
         // defaults on both backends.
 
-        test("defaults_instance_method", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class C { int f(int a, int b = 10, int c = 100) { return a + b + c; } }
-                auto c = C();
-            )");
-            check_eq(eng->execute("c.f(1)").as<int>(), 111);        // omit all defaults
-            check_eq(eng->execute("c.f(1, 2)").as<int>(), 103);     // omit one
-            check_eq(eng->execute("c.f(1, 2, 3)").as<int>(), 6);    // supply all
-        });
-
-        test("defaults_constructor_and_delegation", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class C {
-                    int v = 0;
-                    C(int a, int b = 10) { v = a + b; }
-                    C() : this(5) {}
-                }
-            )");
-            check_eq(eng->execute("C(1).v").as<int>(), 11);        // ctor omits default
-            check_eq(eng->execute("C(1, 2).v").as<int>(), 3);      // ctor supplies all
-            check_eq(eng->execute("C().v").as<int>(), 15);         // this(5) fills b=10
-        });
-
-        test("defaults_super_chain", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class Base { int bv = 0; Base(int a, int b = 7) { bv = a + b; } }
-                class D : Base { D(int x) : super(x) {} }
-            )");
-            check_eq(eng->execute("D(1).bv").as<int>(), 8);        // super(x) fills b=7
-        });
-
-        test("defaults_static_method_and_free_fn", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                class S { static int f(int a, int b = 10) { return a + b; } }
-                function g(int a, int b = 10) -> int { return a + b; }
-            )");
-            check_eq(eng->execute("S::f(1)").as<int>(), 11);
-            check_eq(eng->execute("S::f(1, 2)").as<int>(), 3);
-            check_eq(eng->execute("g(1)").as<int>(), 11);
-            check_eq(eng->execute("g(1, 2)").as<int>(), 3);
-        });
-
-        test("defaults_namespace_function", [&]() {
-            auto eng = make_engine();
-            eng->execute(R"(
-                namespace N { function f(int a, int b = 10) -> int { return a + b; } }
-            )");
-            check_eq(eng->execute("N::f(1)").as<int>(), 11);
-            check_eq(eng->execute("N::f(1, 2)").as<int>(), 3);
+        test("trailing_defaults_fill_at_every_callable_kind", [&]() {
+            struct defaults_case { const char* code; const char* setup; int expected; };
+            const char* const method = "class C { int f(int a, int b = 10, int c = 100) { return a + b + c; } } auto c = C();";
+            const char* const ctor = "class C { int v = 0; C(int a, int b = 10) { v = a + b; } C() : this(5) {} }";
+            const char* const super_chain = "class Base { int bv = 0; Base(int a, int b = 7) { bv = a + b; } } class D : Base { D(int x) : super(x) {} }";
+            const char* const statics = "class S { static int f(int a, int b = 10) { return a + b; } } function g(int a, int b = 10) -> int { return a + b; }";
+            const char* const space = "namespace N { function f(int a, int b = 10) -> int { return a + b; } }";
+            const defaults_case cases[] = {
+                {"c.f(1)", method, 111},
+                {"c.f(1, 2)", method, 103},
+                {"c.f(1, 2, 3)", method, 6},
+                {"C(1).v", ctor, 11},
+                {"C(1, 2).v", ctor, 3},
+                {"C().v", ctor, 15},
+                {"D(1).bv", super_chain, 8},
+                {"S::f(1)", statics, 11},
+                {"S::f(1, 2)", statics, 3},
+                {"g(1)", statics, 11},
+                {"g(1, 2)", statics, 3},
+                {"N::f(1)", space, 11},
+                {"N::f(1, 2)", space, 3},
+            };
+            check_each(cases, [](const defaults_case& c) {
+                auto eng = make_engine();
+                eng->execute(c.setup);
+                check_eq(eng->execute(c.code).as<int>(), c.expected);
+            });
         });
 
         test("defaults_coroutine_method", [&]() {

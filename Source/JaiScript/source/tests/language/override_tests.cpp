@@ -154,35 +154,6 @@ public:
             }
         });
         
-        test("multi_level_virtual_promotion", [this]() {
-            auto engine = make_engine();
-            
-            // Three levels of inheritance
-            engine->execute(R"(
-                class A {
-                    auto value() { return 1; }
-                }
-                
-                class B : A {
-                    auto value() override { return 2; }
-                }
-                
-                class C : B {
-                    auto value() override { return 3; }
-                }
-            )");
-            
-            // Test polymorphism at each level
-            auto result1 = engine->execute("A a = B(); a.value();");
-            check_eq(result1.as<int>(), 2);
-            
-            auto result2 = engine->execute("A a = C(); a.value();");
-            check_eq(result2.as<int>(), 3);
-            
-            auto result3 = engine->execute("B b = C(); b.value();");
-            check_eq(result3.as<int>(), 3);
-        });
-        
         test("constructor_not_affected_by_override", [this]() {
             auto engine = make_engine();
             

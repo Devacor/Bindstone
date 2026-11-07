@@ -3248,7 +3248,7 @@ uint32_t vm_compiler::this_field_slot_of(const identifier_expr* ident, bool note
 	const class_definition* cls = member_class_;
 	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return 0;
 	const uint64_t id = ident->symbol_id;
-	if (id == UINT64_MAX || id == 0 || !symbolizer_ || cls->chain_has_nonpublic() || !cls->is_script_class()) return 0;
+	if (id == UINT64_MAX || id == 0 || !symbolizer_ || !detail::member_access_allowed(cls, id, cls) || !cls->is_script_class()) return 0;
 	if (!cls->find_field_declaring_class(id)) return 0;
 	const uint32_t slot = cls->field_slot(id);
 	if (slot == class_definition::k_no_field_slot || cls->slot_is_cpp_property(slot)) return 0;
@@ -3267,7 +3267,7 @@ bool vm_compiler::this_global_of(const identifier_expr* ident, bool note) {
 	const class_definition* cls = member_class_;
 	if (!cls || reference_ || !chunk_ || chunk_->member_class != cls || !ident || ident->global_qualified || identifier_slot_operand(const_cast<identifier_expr*>(ident)) != k_invalid_u32) return false;
 	const uint64_t id = ident->symbol_id;
-	if (id == UINT64_MAX || id == 0 || cls->chain_has_nonpublic() || !cls->is_script_class() || cls->find_cpp_base_class()) return false;
+	if (id == UINT64_MAX || id == 0 || !cls->is_script_class() || cls->find_cpp_base_class()) return false;
 	if (cls->field_slot(id) != class_definition::k_no_field_slot || cls->chain_declares_field(id) || !cls->get_method(id, false).is_invalid()) return false;
 	if (const_cast<class_definition*>(cls)->find_static_field_in_chain(id) || const_cast<class_definition*>(cls)->find_static_method_in_chain(id)) return false;
 	if (note && std::find(chunk_->this_global_uses.begin(), chunk_->this_global_uses.end(), id) == chunk_->this_global_uses.end()) { chunk_->this_global_uses.push_back(id); }
@@ -3961,7 +3961,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			// two chain steps: flatten the proto into the site row
 			const fused_index_proto& fp = c.fused_index_protos[ins.a];
 			if (!fp.typed_lane || fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask) break;
-			if (fp.index_chain_ext.size() > 2) break;
+			if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext) break;
 			auto operand_of = [&](const fused_operand& o, uint32_t& out) -> bool {
 				if (o.const_index != k_invalid_u32) {
 					if (o.const_index >= k_typed_slot_mask) return false;
@@ -4875,7 +4875,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				const bool classed = site.decl_expect == kint || site.decl_expect == kflt;
 				if (site.orig.op == opcode::op_index_fused_decl && site.orig.a < c.fused_index_protos.size() && !array_site(c.fused_index_protos[site.orig.a])) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (site.stamp && stamp_kind(site.stamp) == 0 && site.stamp->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
-				for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
+				for (uint8_t k = 0; k <= site.fold_count && k < std::size(site.operands); ++k) { use_slot(site.operands[k], kint, false, 0, nullptr, ip); slot_read(op, site.operands[k]); }
 				{ const uint8_t ld = site.temp ? k_typed_dst_temp : decl_landing(st.a); use_slot(st.a, classed && (site.temp || stamp_kind(site.stamp) == site.decl_expect) ? site.decl_expect : 0, true, ld, ld == k_typed_dst_temp ? nullptr : site.stamp, ip); }
 				op.kind = ir::load; op.a = st.a; op.writes = st.a; op.container = site.cont_slot;
 			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && (st.b & index_flag_lvalue_shape) && ip + 1 < back && code[ip + 1].op == opcode::op_decl_ref_value
@@ -4885,7 +4885,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// reference (its payload the index) that only a flush where it is live materializes, as the element reference the declaration binds
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
 				const auto* decl = static_cast<const variable_decl*>(c.nodes[code[ip + 1].a].get());
-				if (fp.index_chain_ext.size() > 2 || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const bool admission = (code[ip + 1].c & 2) != 0;
 				const type_info* referent = decl->type ? decl->type->element_type().get() : nullptr;
 				const bool classAdmission = admission && referent && referent->base_type == script_value_type::jai_object_type && !referent->type_name.empty();
@@ -4906,7 +4906,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			           && code[ip + 1].a >= static_cast<uint32_t>(c.first_temp_slot) && code[ip + 1].a < k_typed_slot_mask) {
 				// `a[i].m`: the element into an alias temp is an element alias's rebind, the member temp over the temp its dependent
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
-				if (fp.index_chain_ext.size() > 2 || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_target(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint32_t aslot = code[ip + 1].a;
 				bool taken = find_cell(aslot) >= 0 || is_alias(aslot);
 				for (const ir_op& prior : ops) { if (prior.container == aslot) { taken = true; } }
@@ -4925,7 +4925,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				// (a string is borrowed), and the compound is the append with run-time kinds; the pair's origin is the read (a miss at
 				// the append re-runs the push and the compound on the general form, so the temp is never flushed)
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
-				if (fp.index_chain_ext.size() > 2 || !array_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint32_t t = arg_temp_next++;
 				use_slot(t, 0, true, k_typed_dst_temp, nullptr, ip);
 				{ const int tk = find_cell(t); if (tk >= 0) { cells[tk].string_borrow = true; } }   // the append replays from this read on a miss, so a borrowed string may land here
@@ -4939,12 +4939,34 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				op.kind = ir::append; op.tok = static_cast<uint8_t>(token_type::plus); op.a = dslot; op.b = dslot; op.c = t; op.writes = dslot; slot_read(op, dslot);
 				op.origin = static_cast<uint32_t>(ip);
 				++ip;   // the compound is this iteration's second instruction
+			} else if (st.op == opcode::op_index_fused && st.a < c.fused_index_protos.size() && ip + 1 < back && (code[ip + 1].op == opcode::op_jump_if_true || code[ip + 1].op == opcode::op_jump_if_false)) {
+				// `if (!flags[k])`: the element read lands in a statement temp of the element's own kind and the jump tests its truth in the
+				// jump's sense; the pair's origin is the read (a miss at the test re-runs the read and the general jump follows)
+				const fused_index_proto& fp = c.fused_index_protos[st.a];
+				const vm_instruction& j = code[ip + 1];
+				if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp) || !index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!(j.a > ip + 1)) { refuse(chunk::cell_refusal_effect, ip + 1); break; }   // an edge past the back edge exits the block
+				bool targeted = false;
+				for (size_t ip2 = first; ip2 < back && !targeted; ++ip2) { targeted = branch_target(ip2) == ip + 1; }
+				if (targeted) { refuse(chunk::cell_refusal_malformed, ip + 1); break; }
+				const uint32_t t = arg_temp_next++;
+				use_slot(t, 0, true, k_typed_dst_temp, nullptr, ip);
+				op.kind = ir::load; op.a = t; op.proto = st.a; op.writes = t;
+				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
+				if (!alias_site(op, ip)) break;
+				ops.push_back(op);
+				op = ir_op{};
+				use_slot(t, 0, false, 0, nullptr, ip + 1);
+				op.kind = ir::cmp; op.tok = static_cast<uint8_t>(token_type::bang); op.a = t; op.b = k_typed_const_bit; op.target = j.a; op.sense = j.op == opcode::op_jump_if_true;
+				slot_read(op, t);
+				op.origin = static_cast<uint32_t>(ip);
+				++ip;   // the jump is this iteration's second instruction
 			} else if (st.op == opcode::op_index_fused_decl && st.a < c.fused_index_protos.size()) {
 				// load the typed lowering left general (an environment value in the index, an unproven container): the same site
 				// row, built at emission (environment values take synthetic slots), landing in a stamped scalar decl or a compiler
 				// value by the declared kind
 				const fused_index_proto& fp = c.fused_index_protos[st.a];
-				if (fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask || fp.index_chain_ext.size() > 2 || !array_site(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (fp.decl_slot == k_invalid_u32 || fp.decl_slot >= k_typed_slot_mask || fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				const uint8_t dk = stamp_kind(fp.decl_type);
 				if (!fp.decl_temp && dk == 0 && fp.decl_type && fp.decl_type->base_type != script_value_type::jai_any_type) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!index_values(op, fp, ip)) { refuse(chunk::cell_refusal_representation, ip); break; }
@@ -5332,7 +5354,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						// an element read as an argument: the load into an argument value (the copy's own site row)
 						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }   // a computed argument after a verbatim load would run ahead of that load's getter
 						const fused_index_proto& fp = c.fused_index_protos[ai.a];
-						if (fp.index_chain_ext.size() > 2 || !array_site(fp) || !index_values(ao, fp, a)) { refuse(chunk::cell_refusal_representation, a); break; }
+						if (fp.index_chain_ext.size() > chunk::typed_site::k_max_chain_ext || !array_site(fp) || !index_values(ao, fp, a)) { refuse(chunk::cell_refusal_representation, a); break; }
 						const uint32_t t = arg_temp_next++;
 						use_slot(t, 0, true, k_typed_dst_temp, nullptr, a);
 						ao.kind = ir::load; ao.a = t; ao.proto = ai.a; ao.writes = t;
@@ -5859,7 +5881,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 					site.guard_temp = fp.container_guard; site.guard_always = fp.guard_always;
 				} else {
 					site = c.typed_sites[ip];   // a T_LOAD's row with its slot operands rebound to cells
-					for (uint8_t k = 0; k <= site.fold_count && k < 4; ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
+					for (uint8_t k = 0; k <= site.fold_count && k < std::size(site.operands); ++k) { if (!(site.operands[k] & k_typed_const_bit)) { site.operands[k] = current[site.operands[k] & k_typed_slot_mask]; } }
 				}
 				site.orig_ip = static_cast<uint32_t>(ip);
 				const uint32_t dst = dst_of(op.a);   // an adopted-kind local lands through the declared-type rule; a pinned local or a compiler value lands in place

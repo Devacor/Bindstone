@@ -1815,10 +1815,10 @@ JAI_FORCEINLINE bool vm_backend::member_layout_same(const chunk& body, const cla
 
 JAI_NOINLINE bool vm_backend::member_layout_verdict(const chunk& body, const class_definition* cd) {
 	const auto cpp_base = cd->find_cpp_base_class();
-	bool same = cd->is_script_class() && !cd->chain_has_nonpublic() && (cd == body.member_class || cd->derives_from(body.member_class));
+	bool same = cd->is_script_class() && (cd == body.member_class || cd->derives_from(body.member_class));
 	for (size_t i = 0; same && i < body.this_field_uses.size(); ++i) {
 		const auto [id, slot] = body.this_field_uses[i];
-		same = cd->field_slot(id) == slot && !cd->slot_is_cpp_property(slot) && cd->method_ptr(id) == nullptr &&
+		same = cd->field_slot(id) == slot && !cd->slot_is_cpp_property(slot) && cd->method_ptr(id) == nullptr && detail::member_access_allowed(cd, id, body.member_class) &&
 		       cd->find_field_declaring_class(id) == body.member_class->find_field_declaring_class(id) &&
 		       !cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) && !cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first) &&
 		       !const_cast<class_definition*>(cd)->find_static_field_in_chain(id) && !const_cast<class_definition*>(cd)->find_static_method_in_chain(id) &&
@@ -9666,6 +9666,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 		case script_array::kind_t::u8:
 		case script_array::kind_t::i8: expect = static_cast<uint8_t>(script_value::TYPEID_INT); break;
 		case script_array::kind_t::f64: expect = static_cast<uint8_t>(script_value::TYPEID_FLOAT); break;
+		case script_array::kind_t::b8: expect = static_cast<uint8_t>(script_value::TYPEID_BOOL); break;
 		case script_array::kind_t::str: if (!loop.cells[ins.a].string_borrow) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; } expect = static_cast<uint8_t>(script_value::TYPEID_STRING); break;
 		case script_array::kind_t::hetero: {
 			const size_t ei = node->values()[at].raw_storage_index();
@@ -9693,6 +9694,10 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_load(frame& f, size_t& ip, const vm
 	case script_array::kind_t::f64:
 		if (expect != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }   // float -> int is the checked kernel's, not a raw landing
 		bits = cell_bits_of_float(node->floats()[at]);
+		break;
+	case script_array::kind_t::b8:
+		if (expect != static_cast<uint8_t>(script_value::TYPEID_BOOL)) { cells_miss_ip(f, ip, loop, original_ip, 2); return {}; }   // a bool into a number lands by the general conversion
+		bits = node->bytes()[at] != 0 ? 1 : 0;
 		break;
 	case script_array::kind_t::hetero: {
 		const script_value& el = node->values()[at];
@@ -9784,14 +9789,14 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	if (p.store_value.const_index != k_invalid_u32) {
 		const script_value& v = cr.consts[p.store_value.const_index];
 		vkind = static_cast<uint8_t>(v.raw_storage_index());
-		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) && vkind != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
+		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) && vkind != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && vkind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) return miss();
 		vbits = v.unchecked_payload_bits();
 		vstamp = v.get_type_info();
 	} else {
 		const uint32_t k = p.store_value.slot;   // a cell position
 		if (k == k_invalid_u32 || cr.cells[k].kind == 0) return miss();
 		vkind = cr.cells[k].kind; vbits = cr.cells[k].bits;
-		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) && vkind != static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();   // a bool value takes the general store's conversion
+		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) && vkind != static_cast<uint8_t>(script_value::TYPEID_FLOAT) && vkind != static_cast<uint8_t>(script_value::TYPEID_BOOL)) return miss();
 		const chunk::cell_loop::cell& vc = loop.cells[k];
 		vstamp = type_info_ptr{vc.landing == k_typed_dst_decl && vc.stamp ? vc.stamp
 			: (vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? ti_int_ : ti_float_)};
@@ -9810,6 +9815,7 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	script_array* node = const_cast<script_array*>(cs.site_node[f.ip - loop.copy_head]);   // resolved at entry
 	if (!node || index < 0 || static_cast<size_t>(index) >= node->size()) return miss();
 	const size_t at = static_cast<size_t>(index);
+	if ((vkind == static_cast<uint8_t>(script_value::TYPEID_BOOL)) != (node->kind() == script_array::kind_t::b8) || (p.compound && node->kind() == script_array::kind_t::b8)) return miss();   // a bool lands only in a bool buffer: every other pair converts on the general store
 	if (p.compound) {
 		// `a[i] op= v`: the element read in place, the operation by the kinds (an int pair exact, a float on either side a float), and the
 		// result stored by the store's rows below; an overflow, a zero divisor or another buffer kind is the general compound's
@@ -9868,6 +9874,9 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 		// a float or an out-of-range int takes the general store's conversion and range verdict
 		if (vkind != static_cast<uint8_t>(script_value::TYPEID_INT) || !detail::byte_element_fits(node->kind() == script_array::kind_t::i8, static_cast<script_int>(vbits))) return miss();
 		node->bytes()[at] = static_cast<uint8_t>(vbits);
+		break;
+	case script_array::kind_t::b8:
+		node->bytes()[at] = vbits != 0 ? 1 : 0;
 		break;
 	case script_array::kind_t::hetero: {   // a typed var array was refused at entry
 		script_value& target = node->values()[at];
@@ -11904,7 +11913,7 @@ JAI_FORCEINLINE bool vm_backend::inline_method_holds(frame& f, const chunk::inli
 	for (const chunk::inline_site::holds_row& row : site.holds_rows) {
 		if (row.cd == cd && row.epoch == epoch) { return row.holds; }
 	}
-	const bool holds = inline_method_verdict(site, cd);
+	const bool holds = inline_method_verdict(site, cd, frame_access_context(f));
 	chunk::inline_site::holds_row& row = site.holds_rows[site.holds_next];
 	site.holds_next = static_cast<uint8_t>((site.holds_next + 1) % chunk::inline_site::k_holds_rows);
 	row = chunk::inline_site::holds_row{cd, epoch, holds};
@@ -11912,14 +11921,14 @@ JAI_FORCEINLINE bool vm_backend::inline_method_holds(frame& f, const chunk::inli
 }
 // the method graft's facts for a receiver class: the class resolves the name to the graft's one-overload body, no field or getter of the
 // name, no user accessor over a bare field the body names, and each such field is the declaration the method's class sees
-bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const class_definition* cd) {
+bool vm_backend::inline_method_verdict(const chunk::inline_site& site, const class_definition* cd, const class_definition* ctx) {
 	if (site.field_class && cd != site.field_class) return false;
-	if (cd->chain_has_nonpublic() || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
+	if (!detail::member_access_allowed(cd, site.member_id, ctx) || cd->chain_declares_field(site.member_id) || cd->field_slot(site.member_id) != class_definition::k_no_field_slot) return false;
 	const uint64_t getter_id = symbolizer_->get_getter_id_with_view(site.member_id).first;
 	const script_value getter = cd->get_method(getter_id, false);
 	if (!getter.is_null() && !getter.is_invalid() && getter.is_function()) return false;
-	for (const uint64_t id : site.field_ids) {
-		if (cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first)) return false;
+	for (const uint64_t id : site.field_ids) {   // the clone reads the body's fields from the call site's class
+		if (cd->user_accessor(symbolizer_->get_getter_id_with_view(id).first) || cd->user_accessor(symbolizer_->get_setter_id_with_view(id).first) || !detail::member_access_allowed(cd, id, ctx)) return false;
 	}
 	const script_value mv = cd->get_method(site.member_id, false);
 	if (mv.is_null() || mv.is_invalid() || !mv.is_function()) return false;
@@ -12136,7 +12145,7 @@ void vm_backend::arm_sibling_method(frame& f, const call_site& site, const scrip
 	class_instance& inst = *holder->unchecked_instance();
 	class_definition* cd = inst.get_class_definition();
 	const uint64_t sym = f.code->symbols[site.callee.symbol];
-	if (!cd || cd->chain_has_nonpublic()) return;
+	if (!cd || !detail::member_access_allowed(cd, sym, frame_access_context(f))) return;
 	const script_value method = inst.get_method(sym, false);
 	if (method.raw_storage_index() != script_value::TYPEID_FUNCTION || thunk->payload.bound_dispatch()->raw_storage_index() != script_value::TYPEID_FUNCTION ||
 	    &method.unchecked_as_function() != &thunk->payload.bound_dispatch()->unchecked_as_function()) return;
@@ -14969,7 +14978,7 @@ JAI_NOINLINE void vm_backend::fill_host_member_hit(class_definition* cd, const c
 }
 
 uint32_t vm_backend::member_read_slot_probe(class_definition* cd, member_expr* expr) {
-	if (expr->member_id == same_as_id_ || cd->chain_has_nonpublic() ||
+	if (expr->member_id == same_as_id_ || !detail::member_access_allowed(cd, expr->member_id, nullptr) ||   // a site's verdict serves every caller: only a member public through the chain
 	    builtins_.shared_ptr_methods.find(expr->member_id) != builtins_.shared_ptr_methods.end()) {
 		return UINT32_MAX;
 	}

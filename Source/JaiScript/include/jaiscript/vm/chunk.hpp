@@ -792,8 +792,9 @@ namespace jai::vm {
             // operands[0] op[0] operands[1], then op[k] operands[k + 1] for each chain step;
             // an operand is a slot or a constant index behind k_typed_const_bit
             uint32_t cont_slot = k_invalid_u32;
-            uint32_t operands[4] = {};
-            uint8_t fold_ops[3] = {};
+            static constexpr size_t k_max_chain_ext = 4;   // fused_index_proto::index_chain_ext steps a row holds
+            uint32_t operands[k_max_chain_ext + 2] = {};
+            uint8_t fold_ops[k_max_chain_ext + 1] = {};
             uint8_t fold_count = 0;
             uint8_t decl_expect = 0xFF;
             // an op_operand_temp origin (materialize_typed_reads): the read resolves through this synthetic

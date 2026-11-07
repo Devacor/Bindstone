@@ -2346,7 +2346,7 @@ namespace jai::vm {
         }
         bool inline_globals_hold(const frame& f, const chunk::inline_site& site);
         bool inline_forward_callees_hold(const chunk::inline_site& site);
-        bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd);
+        bool inline_method_verdict(const chunk::inline_site& site, const class_definition* cd, const class_definition* ctx);
         bool comparison_free(const script_value& v);
         const uint64_t* layout_gen_ = nullptr;   // engine::layout_generation
         void bind_member_layout(frame& f, const chunk& body, class_instance* receiver = nullptr);

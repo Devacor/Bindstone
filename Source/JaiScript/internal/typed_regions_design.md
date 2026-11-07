@@ -631,7 +631,7 @@ including getters and callbacks. Component lvalues retain their original referen
 member temporary for cell lowering, the compiler rewrites the direct-local form to the existing `MEMBER_TEMP` form.
 
 Member sites also accept one nested object field (`p.pos.x`, with `p` in a frame slot or an element alias). The prefix must be a
-present plain field containing a class instance. Accessors, non-public lookup chains, reference-valued prefixes and other
+present plain field containing a class instance. Accessors, a member some class of the chain declares private, reference-valued prefixes and other
 payload kinds keep the general form. The final field uses the existing scalar read/store guards. Every alias rebind and
 post-call re-probe follows the current prefix object, so replacing `p.pos` in a callback refreshes the dependent sites. The
 prefix field's slot is cached per site in the call record's cell state, keyed by the class and its method epoch (the member

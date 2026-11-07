@@ -5652,6 +5652,18 @@
     },
     {
       "owner": "global",
+      "name": "env_var",
+      "signature": "env_var(name: string) -> string",
+      "provider": "runner",
+      "effect": "observe",
+      "notes": "\"\" when unset",
+      "source": "tools/jaiscript/main.cpp",
+      "form": "function",
+      "availability": "Standalone jaiscript.exe",
+      "display": "env_var(name: string) -> string"
+    },
+    {
+      "owner": "global",
       "name": "term_cols",
       "signature": "term_cols() -> int",
       "provider": "runner",

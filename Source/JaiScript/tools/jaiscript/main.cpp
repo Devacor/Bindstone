@@ -29,6 +29,7 @@
 #include <climits>
 #include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <ctime>
 #include <filesystem>
@@ -263,7 +264,8 @@ void print_usage() {
 		"  (the file import would load for that name), app_data_dir(name) / app_cache_dir(name),\n"
 		"  working_dir(), parent_dir(p), file_name(p) - a script dropped onto the executable runs\n"
 		"  from any working directory when its paths start from one of these; and console-game IO:\n"
-		"  key_down(name), read_key(), term_cols(), term_rows() (clocks are time::, waits sleep()),\n"
+		"  key_down(name), read_key(), term_cols(), term_rows(), env_var(name) (clocks are time::,\n"
+		"  waits sleep()),\n"
 		"  sound: load_sound(path) -> Sound (play()/play(true) loops/stop()/playing()/volume(0..1)/\n"
 		"  format(); wav, midi or mp3 by the file's header), play_sound(path[, loop]), stop_sounds()\n"
 		"  (each Sound mixes with the others; Windows only, null elsewhere). POSIX terminals synthesize\n"
@@ -530,7 +532,14 @@ void posix_restore_terminal() {
 	}
 }
 
+// a script polling raw keys is a terminal game: Ctrl+C also gives back the colours, the cursor
+// and the normal screen it may have taken
 void posix_signal_restore(int sig) {
+	if (g_posix_input.raw && isatty(STDOUT_FILENO)) {
+		const char leave[] = "[0m[?25h[?1049l";
+		ssize_t written = write(STDOUT_FILENO, leave, sizeof(leave) - 1);
+		(void)written;
+	}
 	posix_restore_terminal();
 	std::signal(sig, SIG_DFL);
 	std::raise(sig);
@@ -647,6 +656,20 @@ void register_console_game_io(jai::engine& eng) {
 		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) { return ws.ws_col; }
 #endif
 		return 80;
+	});
+	// an environment variable's value, "" when unset (COLORTERM says whether the terminal takes 24-bit colour)
+	eng.add_function("env_var", [](const std::string& name) -> std::string {
+#ifdef _WIN32
+		char* value = nullptr;
+		size_t size = 0;
+		if (_dupenv_s(&value, &size, name.c_str()) != 0 || !value) { return std::string(); }
+		std::string result(value);
+		std::free(value);
+		return result;
+#else
+		const char* value = std::getenv(name.c_str());
+		return value ? std::string(value) : std::string();
+#endif
 	});
 	eng.add_function("term_rows", []() -> jai::script_int {
 #ifdef _WIN32

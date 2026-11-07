@@ -211,6 +211,11 @@ partial file. JaiDoom's first run uses this to fetch and verify its own game dat
 For hosting, `net_host_name()` returns this machine's name and `net_local_addresses()` its IPv4
 addresses (loopback left out), which is what a player hosting a game tells the others to type.
 
+`env_var(name)` returns an environment variable's value, `""` when it is unset; a terminal game
+reads `COLORTERM` (`truecolor` or `24bit`) to choose between 24-bit colour and the 256-colour
+palette. On Linux and macOS, Ctrl+C in a script that reads keys also resets the colours, shows the
+cursor and leaves the alternate screen before the runner exits.
+
 The strings after `--` are the global `ARGS`.
 
 ## Debugging

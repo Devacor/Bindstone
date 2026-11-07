@@ -205,7 +205,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto eng = jai::foundry::make_engine();
-                check_eq(c.second, eng->execute(c.first).as<int64_t>());
+                check_eq(c.second, eng->execute(c.first).template as<int64_t>());
             });
         });
 
@@ -248,7 +248,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto eng = jai::foundry::make_engine();
-                check_eq(c.second, eng->execute(c.first).as<int64_t>());
+                check_eq(c.second, eng->execute(c.first).template as<int64_t>());
             });
         });
 

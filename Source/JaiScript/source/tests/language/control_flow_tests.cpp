@@ -22,7 +22,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
-                check_eq(engine->execute(c.first).as<int>(), c.second);
+                check_eq(engine->execute(c.first).template as<int>(), c.second);
             });
         });
 
@@ -35,7 +35,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
-                check_eq(engine->execute(c.first).as<int>(), c.second);
+                check_eq(engine->execute(c.first).template as<int>(), c.second);
             });
         });
 
@@ -50,7 +50,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
-                check_eq(engine->execute(c.first).as<int>(), c.second);
+                check_eq(engine->execute(c.first).template as<int>(), c.second);
             });
         });
     }

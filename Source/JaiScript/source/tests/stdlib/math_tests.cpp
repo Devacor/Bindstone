@@ -14,7 +14,7 @@ void check_near_results(double a_tolerance, const std::vector<std::pair<std::str
     check_each(a_cases, [&](const auto& c) {
         auto engine = make_engine();
         stdlib::register_all(*engine);
-        check(std::abs(engine->execute(c.first).as<double>() - c.second) < a_tolerance);
+        check(std::abs(engine->execute(c.first).template as<double>() - c.second) < a_tolerance);
     });
 }
 

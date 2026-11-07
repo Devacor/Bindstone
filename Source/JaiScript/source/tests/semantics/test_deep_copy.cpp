@@ -157,7 +157,7 @@ public:
             check_each(int_rows, [&](const auto& row) {
                 auto engine = make_engine();
                 stdlib::register_all(*engine);
-                check_eq(row.second, engine->execute(row.first).as<script_int>());
+                check_eq(row.second, engine->execute(row.first).template as<script_int>());
             });
             const std::tuple<const char*> true_rows[] = {
                 R"(
@@ -194,7 +194,7 @@ public:
             check_each(true_rows, [&](const auto& row) {
                 auto engine = make_engine();
                 stdlib::register_all(*engine);
-                check(engine->execute(std::get<0>(row)).as<script_bool>(), std::get<0>(row));
+                check(engine->execute(std::get<0>(row)).template as<script_bool>(), std::get<0>(row));
             });
         });
 

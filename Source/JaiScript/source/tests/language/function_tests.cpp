@@ -84,7 +84,7 @@ public:
             check_each(cases, [&](const auto& c) {
                 auto eng = make_engine();
                 jai::stdlib::register_all(eng);
-                check_eq(eng->execute(c.first).as<int64_t>(), c.second);
+                check_eq(eng->execute(c.first).template as<int64_t>(), c.second);
             });
         });
 

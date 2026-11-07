@@ -40,7 +40,7 @@ void check_both_backends(const Cases& a_cases) {
 				check_true(r.is_int(), backend_tag(use_vm) + "an int");
 				check_eq(*expected, r.as_int(), backend_tag(use_vm));
 			} else {
-				check_eq(std::get<std::string>(std::get<2>(c)), r.as<std::string>(), backend_tag(use_vm));
+				check_eq(std::get<std::string>(std::get<2>(c)), r.template as<std::string>(), backend_tag(use_vm));
 			}
 		}
 	});

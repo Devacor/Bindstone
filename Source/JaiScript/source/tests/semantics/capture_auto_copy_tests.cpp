@@ -863,7 +863,7 @@ public:
 			check_each(rows, [&](const auto& row) {
 				auto eng = make_engine();
 				jai::stdlib::register_all(*eng);
-				check_eq(row.second, eng->execute(row.first).as<int>());
+				check_eq(row.second, eng->execute(row.first).template as<int>());
 			});
 			// a global the method already called resolves again from inside the lambda, beside the field it reads
 			const std::pair<const char*, const char*> printed[] = {

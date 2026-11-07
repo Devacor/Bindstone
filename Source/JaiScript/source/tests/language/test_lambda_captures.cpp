@@ -31,7 +31,7 @@ public:
             };
             check_each(cases, [&](const auto& c) {
                 auto eng = make_engine();
-                check_eq(eng->execute(c.first).as<int>(), c.second);
+                check_eq(eng->execute(c.first).template as<int>(), c.second);
             });
         });
 

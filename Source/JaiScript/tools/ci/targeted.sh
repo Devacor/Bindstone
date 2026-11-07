@@ -22,6 +22,9 @@
 #     type_checker.cpp, builtin_methods.cpp
 #   - Gator Quest's or JaiDOOM's script (the runner runs them on both backends) or the fuzzer
 # The VM's optimized lanes elsewhere (vm_inline.cpp, region_ir.*, the coverage and listing tools) take the VM tier only.
+# A test change also takes the android gate: the Debug suites build with MSVC alone, whose template parsing accepts what
+# Clang and GCC reject (a dependent `.as<T>()` without `template` in a generic lambda), and the NDK's Clang is the cheapest
+# build of the suites with another compiler.
 #
 # --lanes declares a change confined to the VM's optimized lanes (fused, typed, cell, graft and cache code) inside the
 # general files: the general-path reason is dropped and the VM against VM-reference fuzz is the change's oracle. --interp
@@ -98,8 +101,8 @@ classify() {
 		examples/embed_quickstart/*) pick embed-quickstart "the embedding quickstart ($p)" ;;
 		examples/jaidoom/*) pick timedemo "JaiDOOM ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
 		examples/*) NOTES="$NOTES $p" ;;
-		source/tests/fuzz/*) pick fuzz-vm-reference "the fuzzer ($p)"; pick debug-suites "the fuzzer's suite ($p)"; interp_tier "the fuzzer's interpreter pair ($p)" ;;
-		source/tests/*) pick debug-suites "a test ($p)" ;;
+		source/tests/fuzz/*) pick fuzz-vm-reference "the fuzzer ($p)"; pick debug-suites "the fuzzer's suite ($p)"; interp_tier "the fuzzer's interpreter pair ($p)"; pick android "Clang compiles the suites ($p)" ;;
+		source/tests/*) pick debug-suites "a test ($p)"; pick android "Clang compiles the suites ($p)" ;;
 		source/implementation/vm/vm_backend.cpp | source/implementation/vm/vm_compiler.cpp | \
 		include/jaiscript/vm/vm_backend.hpp | include/jaiscript/vm/vm_compiler.hpp | include/jaiscript/vm/chunk.hpp | include/jaiscript/vm/opcode.hpp)
 			vm_tier "the VM or its compiler ($p)"; pick fuzz-order "the VM or its compiler ($p)"; pick android "libc++ and 32-bit compile the library ($p)"

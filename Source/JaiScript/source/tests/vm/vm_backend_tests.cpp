@@ -1169,7 +1169,7 @@ public:
 					auto e = jai::foundry::make_default_engine();
 					e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
 					jai::stdlib::register_all(e);
-					check_eq(std::string(std::get<2>(c)), e->execute(std::get<1>(c)).as<std::string>());
+					check_eq(std::string(std::get<2>(c)), e->execute(std::get<1>(c)).template as<std::string>());
 				}
 			});
 		});

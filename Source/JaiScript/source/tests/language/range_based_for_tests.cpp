@@ -27,7 +27,7 @@ public:
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
                 stdlib::register_all(engine);
-                check_eq(engine->execute(c.first).as<int>(), c.second);
+                check_eq(engine->execute(c.first).template as<int>(), c.second);
             });
         });
 
@@ -97,7 +97,7 @@ public:
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
                 stdlib::register_all(engine);
-                check_eq(std::string(c.second), engine->execute(c.first).as<std::string>());
+                check_eq(std::string(c.second), engine->execute(c.first).template as<std::string>());
             });
         });
 

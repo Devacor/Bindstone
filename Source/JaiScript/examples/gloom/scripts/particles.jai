@@ -138,8 +138,8 @@ function fx_secret_glitter(float x, float y) -> void {
 }
 
 // ------------------------------------------------------------- colors -------
-// per-kind life-phase ramps, quantized to 256-color at boot (render reads
-// PART_COLS[kind * 4 + phase]; phase 0 = fresh)
+// per-kind life-phase ramps, interned at boot (render reads
+// PART_COLS[kind * 4 + phase]; phase 0 = fresh); the showcase look's are in look.jai
 array<int> PART_COLS = [];
 
 function build_particle_colors() -> void {
@@ -153,6 +153,12 @@ function build_particle_colors() -> void {
 		[[150, 255, 170], [110, 235, 200], [90, 190, 250], [80, 120, 220]]     // 6 hexmote
 	];
 	PART_COLS = [];
+	if (SHOWCASE) {
+		for (auto& ramp : SHOWCASE_PARTICLE_RAMPS) {
+			for (auto& color : ramp) { PART_COLS.push(color_idx(color)); }
+		}
+		return;
+	}
 	for (auto& ramp : ramps) {
 		for (auto& rgb : ramp) {
 			PART_COLS.push(rgb_idx(rgb[0], rgb[1], rgb[2]));

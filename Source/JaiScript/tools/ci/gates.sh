@@ -42,6 +42,7 @@ esac
 # The reference hashes each example prints for its deterministic headless run.
 GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
+GLOOM_SHOWCASE_FRAME=6559224cca20d1f0
 DEMOREEL_STREAM=006d304a70772e5f
 CRAWLER_STATE=3849293868
 GATORQUEST_STATE=3218840367
@@ -131,15 +132,24 @@ gate_fuzz_order() {
 
 vm_only() { hash_on vm || { echo "$1: its one backend is the VM, which HASH_BACKENDS leaves out; skipped"; return 1; }; }
 
+# gloom_hashes <ticks> <workers> <frame hash> <STATE_HASH> [look]: the reference look draws the frames the ports
+# reproduce, the showcase look the game as played; both run the same simulation, so STATE_HASH is one number
 gloom_hashes() {
 	vm_only gloom || return 0
 	cd "$ROOT/examples/gloom"
-	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2"
-	want "GLOOM vm ($1 ticks, $2 workers): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
+	local look="${5:-reference}"
+	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" --look "$look"
+	want "GLOOM vm ($1 ticks, $2 workers, $look look): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
 }
 
-gate_gloom() { gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"; }
-gate_gloom_workers() { gloom_hashes 300 8 "$GLOOM_FRAME" "$GLOOM_STATE"; }
+gate_gloom() {
+	gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"
+	gloom_hashes 300 0 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase
+}
+gate_gloom_workers() {
+	gloom_hashes 300 8 "$GLOOM_FRAME" "$GLOOM_STATE"
+	gloom_hashes 300 8 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase
+}
 gate_gloom_long() { gloom_hashes 600 0 "$GLOOM_LONG_FRAME" "$GLOOM_LONG_STATE"; }
 
 # JaiDOOM's timedemo and the game's own headless selftest (which loads jaidoom.jai, the entry point), where the checkout carries the example (it is optional)

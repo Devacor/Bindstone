@@ -1,23 +1,14 @@
-// GLOOM drag-drop shim for the standalone runner — no C++ host needed:
+// GLOOM drag-drop shim for the standalone runner, no C++ host needed:
 //
 //     jaiscript.exe gloom.jai                        play (esc quits)
 //     jaiscript.exe gloom.jai -- --smoke --ticks 300 headless parity self-test
 //     jaiscript.exe gloom.jai -- --bench 300         autopilot + live render split
 //
-// The shared C++ host (gloom_host.cpp) owned the console, input, clock, Rng,
-// and flags; the runner already provides the console half (key_down/read_key/
-// term_cols/term_rows/print) and the stdlib's time:: the clock. This file
-// supplies the rest of the reference/README.md section 2 contract in pure script —
-// Rng (bit-exact xorshift64* under checked overflow), host_log/itrunc/ifloor/
-// utf8/ESC, the HOST_* globals from ARGS — then loads scripts/ and runs the
-// host pump.
-// key_down/read_key are NOT redefined: the runner's console-event versions
-// pass through (a script definition would shadow them; verified).
-//
-// scripts/main.jai's sibling imports ("state.jai") resolve against CWD +
-// include paths only — from this directory they cannot be reached through
-// "scripts/main.jai", so its import list + entry glue are replicated below
-// verbatim. The game files themselves are untouched.
+// The runner provides the console (key_down, read_key, term_cols, term_rows,
+// print) and the stdlib's time:: the clock. This file supplies the rest of the
+// host contract of reference/README.md section 2 in script (the Rng, host_log,
+// itrunc, ifloor, utf8, ESC and the HOST_* globals from ARGS), imports
+// scripts/main.jai and runs the frame loop gloom_host.cpp runs.
 
 // ------------------------------------------------------- host API: globals --
 string ESC = "\x1b";
@@ -28,6 +19,9 @@ int HOST_WORKERS = -1;      // <= 0: the scripts run their serial loops
 bool HOST_GOD = false;
 string HOST_BACKEND = "vm";  // label only; the real backend is the runner's --backend (before --)
 int HOST_PIX = 1;           // 0 half (1x2) | 1 quad (2x2) | 2 sext (2x3)
+string HOST_LOOK = "";      // showcase | reference; "" = reference under --smoke, else showcase
+bool HOST_TRUECOLOR = true; // --256color for terminals without 24-bit color
+bool HOST_ASCII = false;    // --ascii for terminals without block glyphs
 
 // ---------------------------------------------------------- host API: Rng ---
 // xorshift64* per gloom_host.hpp, the ONLY randomness (STATE_HASH folds
@@ -106,68 +100,7 @@ function utf8(int cp) -> string {
 }
 
 // ------------------------------------------------------------------ the game --
-// scripts/main.jai's import list, in its exact order
-import "scripts/state.jai";
-import "scripts/util.jai";
-import "scripts/defs.jai";
-import "scripts/maps.jai";
-import "scripts/pure.jai";
-import "scripts/particles.jai";
-import "scripts/enemies.jai";
-import "scripts/combat.jai";
-import "scripts/sim.jai";
-import "scripts/render.jai";
-import "scripts/hud.jai";
-import "scripts/game.jai";
-
-// scripts/main.jai's entry glue, replicated verbatim
-bool FORCE_PILOT = false;
-
-function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
-
-function gloom_boot(int w, int h) -> void {
-	RNG = Rng(HOST_SEED);
-	if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
-	else if (HOST_PIX == 2) { PIXW = 2; PIXH = 3; }
-	else { PIXW = 2; PIXH = 2; }
-	parse_arts();
-	validate_all_maps();
-	G = new Game(w, h);
-	init_render();
-	G.autopilot = HOST_SMOKE || FORCE_PILOT;
-}
-
-// dt accumulates into fixed TICKs (smoke feeds exactly TICK: one tick/frame).
-// The edge key is consumed by the first tick of the frame.
-function gloom_frame(float dt, string key, float fps, float ms_sim, float ms_draw) -> string {
-	G.frame_key = key;
-	G.accum += dt;
-	int steps = 0;
-	while (G.accum >= TICK - 0.0000001 && steps < 3) {
-		G.accum -= TICK;
-		G.run_tick();
-		G.frame_key = "";
-		steps = steps + 1;
-	}
-	if (steps == 3) { G.accum = 0.0; }   // stall recovery: never spiral
-	return render_frame(fps, ms_sim, ms_draw);
-}
-
-function gloom_state_hash() -> int { return G.hash; }
-
-function gloom_wants_quit() -> bool { return G.quit; }
-
-function gloom_summary() -> void {
-	host_log("");
-	host_log("=== GLOOM RESULT ===");
-	host_log(`backend: ${HOST_BACKEND}  seed: ${HOST_SEED}  workers: ${HOST_WORKERS}  ticks: ${G.tick}`);
-	host_log(`mode: ${G.mode}  map: ${G.map_name}  deaths: ${G.deaths}`);
-	host_log(`hp: ${G.hp}  armor: ${G.armor}  ammo: ${G.ammo[0]}/${G.ammo[1]}/${G.ammo[2]}`);
-	host_log(`map kills: ${G.kills}/${G.kill_total}  secrets: ${G.secrets}/${G.secret_total}`);
-	host_log(`episode kills: ${G.ep_kills}/${G.ep_kill_total}  secrets: ${G.ep_secrets}/${G.ep_secret_total}`);
-	host_log(`warden down: ${G.warden_down}`);
-	host_log(`STATE_HASH: ${G.hash}`);
-}
+import "scripts/main.jai";
 
 // ------------------------------------------------------------- the host pump --
 bool SHIM_SMOKE = false;
@@ -199,6 +132,9 @@ function shim_usage() -> void {
 	print("  --w N / --h N   force console dimensions");
 	print("  --god           god mode");
 	print("  --pix MODE      half (1x2) | quad (2x2, default) | sext (2x3)");
+	print("  --look L        showcase (default) | reference (the frames the ports draw; --smoke's default)");
+	print("  --256color      xterm-256 color, for terminals without 24-bit color");
+	print("  --ascii         plain ASCII cells, for terminals without block glyphs");
 	print("  --workers N     >0 enables the parallel_transform paths (default serial)");
 	print("  --dump-frame N  smoke: dump frame N to gloom_frame_shim.txt");
 	print("keys: w/s move  a/d strafe  left/right turn  space/ctrl fire  e use");
@@ -211,9 +147,9 @@ function shim_parse_args() -> int {
 		var a = ARGS[i];
 		bool needs_value = a == "--seed" || a == "--ticks" || a == "ticks" || a == "--frames" || a == "frames"
 			|| a == "--turns" || a == "turns" || a == "--bench" || a == "--fps" || a == "--w" || a == "--h"
-			|| a == "--pix" || a == "--workers" || a == "--dump-frame" || a == "--backend";
+			|| a == "--pix" || a == "--workers" || a == "--dump-frame" || a == "--backend" || a == "--look";
 		if (needs_value && i + 1 >= ARGS.size()) {
-			print("missing value for " + a);
+			print(`missing value for ${a}`);
 			return 2;
 		}
 		if (a == "--smoke" || a == "smoke") { SHIM_SMOKE = true; }
@@ -233,22 +169,34 @@ function shim_parse_args() -> int {
 		else if (a == "--workers") { i = i + 1; HOST_WORKERS = ARGS[i].to_int(-1); }
 		else if (a == "--dump-frame") { i = i + 1; SHIM_DUMP = ARGS[i].to_int(-1); }
 		else if (a == "--backend") { i = i + 1; HOST_BACKEND = ARGS[i]; }
+		else if (a == "--truecolor") { HOST_TRUECOLOR = true; }
+		else if (a == "--256color") { HOST_TRUECOLOR = false; }
+		else if (a == "--ascii") { HOST_ASCII = true; }
+		else if (a == "--look") {
+			i = i + 1;
+			HOST_LOOK = ARGS[i];
+			if (HOST_LOOK != "showcase" && HOST_LOOK != "reference") {
+				print(`unknown --look: ${HOST_LOOK} (showcase|reference)`);
+				return 2;
+			}
+		}
 		else if (a == "--pix") {
 			i = i + 1;
 			var p = ARGS[i];
 			if (p == "half") { HOST_PIX = 0; }
 			else if (p == "quad") { HOST_PIX = 1; }
 			else if (p == "sext") { HOST_PIX = 2; }
-			else { print("unknown --pix mode: " + p + " (half|quad|sext)"); return 2; }
+			else { print(`unknown --pix mode: ${p} (half|quad|sext)`); return 2; }
 		}
 		else {
-			print("unknown flag: " + a);
+			print(`unknown flag: ${a}`);
 			shim_usage();
 			return 2;
 		}
 		i = i + 1;
 	}
 	HOST_SMOKE = SHIM_SMOKE;
+	if (HOST_LOOK == "") { HOST_LOOK = HOST_SMOKE ? "reference" : "showcase"; }
 	return -1;   // keep going
 }
 
@@ -274,13 +222,13 @@ function shim_run_smoke() -> int {
 	if (SMOKE_REF.has(ref_key)) {
 		int expected = SMOKE_REF[ref_key];
 		if (hash == expected) {
-			print("checkpoint parity: OK (matches the shared-host reference " + to_string(expected) + ")");
+			print(`checkpoint parity: OK (matches the shared-host reference ${expected})`);
 			return 0;
 		}
 		print(`checkpoint parity: MISMATCH (expected ${expected}, got ${hash})`);
 		return 1;
 	}
-	print("no reference checkpoint for seed " + to_string(HOST_SEED) + " @ " + to_string(HOST_TICKS) + " ticks (hash informational)");
+	print(`no reference checkpoint for seed ${HOST_SEED} @ ${HOST_TICKS} ticks (hash informational)`);
 	return 0;
 }
 
@@ -299,7 +247,13 @@ function shim_run_live(int bench_frames) -> int {
 	if (bench) { gloom_force_autopilot(); }
 	gloom_boot(w, h);
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J" + ESC + "[H", true);   // alt screen, hide cursor
-	time::stopwatch frame;
+	// steady pacing as gloom_host.cpp's frame_pacer: frames start on a grid of
+	// deadlines, and a dt within a sixth of the period counts as exactly one period
+	float period = 1.0 / SHIM_FPS;
+	time::stopwatch clock;
+	clock.start();
+	float deadline = 0.0;
+	float frame_start = 0.0;
 	time::stopwatch split;
 	float fps_ema = SHIM_FPS;
 	float last_sim = 0.0;
@@ -308,8 +262,10 @@ function shim_run_live(int bench_frames) -> int {
 	float draw_sum = 0.0;
 	int done = 0;
 	while (true) {
-		float dt = frame.elapsed();
-		frame.start();
+		float now = clock.elapsed();
+		float dt = now - frame_start;
+		frame_start = now;
+		if (math::abs(dt - period) < period / 6.0) { dt = period; }
 		if (dt > 0.1) { dt = 0.1; }
 		if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
 
@@ -331,9 +287,10 @@ function shim_run_live(int bench_frames) -> int {
 		}
 		if (gloom_wants_quit()) { break; }
 
-		int budget = itrunc(1000.0 / SHIM_FPS);
-		float used = frame.elapsed() * 1000;
-		if (used < budget) { sleep((budget - used) / 1000.0); }
+		deadline += period;
+		float after = clock.elapsed();
+		if (after > deadline + period) { deadline = after; }
+		else if (deadline > after) { sleep(deadline - after); }
 	}
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", true);   // restore screen + cursor
 	if (bench && done > 0) {

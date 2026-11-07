@@ -70,6 +70,9 @@ public:
 		eng_->add_global("HOST_GOD", eng_->make_value(opt.god));
 		eng_->add_global("HOST_BACKEND", eng_->make_value(backend));
 		eng_->add_global("HOST_PIX", eng_->make_value(gloom::pix_mode_index(opt.pix)));
+		eng_->add_global("HOST_LOOK", eng_->make_value(opt.look));
+		eng_->add_global("HOST_TRUECOLOR", eng_->make_value(opt.truecolor != 0));
+		eng_->add_global("HOST_ASCII", eng_->make_value(opt.ascii));
 	}
 
 	void load_scripts() override {

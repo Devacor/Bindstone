@@ -11,8 +11,12 @@ import "particles.jai";
 import "enemies.jai";
 import "combat.jai";
 import "sim.jai";
+import "look.jai";
 import "render.jai";
+import "viewmodel.jai";
+import "canvas.jai";
 import "hud.jai";
+import "screens.jai";
 import "game.jai";
 
 bool FORCE_PILOT = false;
@@ -21,13 +25,17 @@ function gloom_force_autopilot() -> void { FORCE_PILOT = true; }
 
 function gloom_boot(int w, int h) -> void {
 	RNG = Rng(HOST_SEED);
-	if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
+	SHOWCASE = HOST_LOOK == "showcase";
+	if (HOST_ASCII) { PIXW = 1; PIXH = 1; }
+	else if (HOST_PIX == 0) { PIXW = 1; PIXH = 2; }
 	else if (HOST_PIX == 2) { PIXW = 2; PIXH = 3; }
 	else { PIXW = 2; PIXH = 2; }
 	parse_arts();
+	parse_viewmodels();
 	validate_all_maps();
 	G = new Game(w, h);
 	init_render();
+	if (SHOWCASE) { init_screens(); }
 	G.autopilot = HOST_SMOKE || FORCE_PILOT;
 }
 

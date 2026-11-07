@@ -292,6 +292,11 @@ Bindings the script consumes:
 - `ESC` — the escape char as a 1-char string (lexers without `\x1b`).
 - Globals: `HOST_SEED HOST_SMOKE HOST_TICKS HOST_WORKERS HOST_GOD
   HOST_BACKEND HOST_PIX` (`--pix`: 0 half, 1 quad, 2 sext).
+- Presentation globals the JaiScript adapter also binds, which a port may
+  leave out: `HOST_LOOK` (`"reference"` under `--smoke`, else `"showcase"`;
+  `--look` chooses), `HOST_TRUECOLOR` (24-bit escapes, else xterm-256) and
+  `HOST_ASCII` (`--ascii`). The reference look is the one this document
+  specifies; every hash in it is the reference look's.
 - Frame keys (edge events, one per frame): lowercased chars, `esc tab enter
   up down left right`; consumed by the FIRST tick of the frame.
 
@@ -323,6 +328,7 @@ return s * 0x2545F4914F6CDD1D` (all uint64).
 --bench N          interactive loop + autopilot for N frames; prints
                    sim/draw ms per frame split
 --seed N  --god  --pix half|quad|sext  --w/--h  --fps
+--look reference|showcase   --truecolor  --256color  --ascii   (presentation)
 ```
 
 ### 3.2 STATE_HASH (sim conformance)

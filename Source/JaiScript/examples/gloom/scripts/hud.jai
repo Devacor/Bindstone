@@ -1,5 +1,7 @@
-// HUD: status strip, vitals with bars, ammo rack, the face, the bobbing
-// weapon art — plus the full-screen states (title, tally, death, victory).
+// The reference look's HUD (status strip, vitals with bars, ammo rack, the
+// face, the bobbing weapon art) and full-screen states (title, tally, death,
+// victory): the frames --smoke hashes and the ports reproduce. The showcase
+// look draws its own (screens.jai).
 
 var FACES = {
 	"ok": [
@@ -225,6 +227,7 @@ function render_play(float fps, float ms_sim, float ms_draw) -> string {
 }
 
 function render_frame(float fps, float ms_sim, float ms_draw) -> string {
+	if (SHOWCASE) { return showcase_frame(fps, ms_sim, ms_draw); }
 	if (G.mode == 0) { return render_title(); }
 	if (G.mode == 2) { return render_tally(); }
 	if (G.mode == 3) { return render_dead(); }

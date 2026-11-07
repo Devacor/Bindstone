@@ -35,11 +35,16 @@ struct host_options {
 	int64_t coverage_reset_tick = -1; // smoke: restart the VM's coverage counters at tick N (a coverage build; hashes unchanged)
 	bool god = false;
 	std::string pix = "quad";        // sub-cell pixel mode: half (1x2) | quad (2x2) | sext (2x3)
+	// Presentation only: the ports draw the reference look and may ignore all three.
+	std::string look;                // reference | showcase; resolved by run_gloom (reference under --smoke)
+	int truecolor = -1;              // 1 24-bit, 0 xterm-256; resolved by run_gloom from the terminal
+	bool ascii = false;              // plain ASCII cells for terminals without block glyphs
 	const char* argv0 = "";
 };
 
 // Host capabilities handed to the adapter for binding into the script runtime.
 // key_down is already gated: it returns false permanently in smoke/bench runs.
+// A POSIX terminal sends no key releases: a key reads as held while its auto-repeat keeps arriving.
 struct host_services {
 	std::function<bool(const std::string&)> key_down;
 	std::function<void(const std::string&)> log;       // host_log: one line to stdout, never hashed

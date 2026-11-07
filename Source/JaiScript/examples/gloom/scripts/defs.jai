@@ -1,7 +1,7 @@
 // Data: weapons, bestiary, pickup tables, and every sprite as pixel art.
 // Art format: rows of chars, '.' = transparent, everything else indexes the
 // art's own tiny rgb palette. parse_arts() flattens each into code arrays at
-// boot; the renderer maps codes -> 256-color via per-(art, shade, flash) LUTs.
+// boot; the renderer maps codes -> palette indices via per-(art, shade, flash) LUTs.
 
 // ---------------------------------------------------------------- weapons ---
 // kind: 0 hitscan, 1 projectile
@@ -562,31 +562,35 @@ var ARTS = {};
 
 function parse_arts() -> void {
 	ARTS = {};
-	for (auto kv : ART_SRC) {
-		string name = kv.first;
-		var rows = ART_SRC[name]["rows"];
-		var pal = ART_SRC[name]["pal"];
-		map<string, int> codes = {}; // char string -> code
-		var rgb = [[0, 0, 0]];
-		int next_code = 1;
-		int h = rows.size();
-		int w = rows[0].size();
-		array<int> pix = [];
-		for (int y = 0; y < h; ++y) {
-			string row = rows[y];
-			for (int x = 0; x < w; ++x) {
-				string ch = row.substr(x, 1);
-				if (ch == ".") { pix.push(0); continue; }
-				if (!codes.has(ch)) {
-					codes[ch] = next_code;
-					next_code = next_code + 1;
-					rgb.push(pal[ch]);
-				}
-				pix.push(codes[ch]);
+	for (auto kv : ART_SRC) { ARTS[kv.first] = parse_art(kv.second); }
+}
+
+// one art: {"w", "h", "pix": codes row-major, "rgb": color per code, "keys": palette char per code}
+function parse_art(var src) -> var {
+	var rows = src["rows"];
+	var pal = src["pal"];
+	map<string, int> codes = {}; // char string -> code
+	var rgb = [[0, 0, 0]];
+	array<string> keys = ["."];
+	int next_code = 1;
+	int h = rows.size();
+	int w = rows[0].size();
+	array<int> pix = [];
+	for (int y = 0; y < h; ++y) {
+		string row = rows[y];
+		for (int x = 0; x < w; ++x) {
+			string ch = row.substr(x, 1);
+			if (ch == ".") { pix.push(0); continue; }
+			if (!codes.has(ch)) {
+				codes[ch] = next_code;
+				next_code = next_code + 1;
+				rgb.push(pal[ch]);
+				keys.push(ch);
 			}
+			pix.push(codes[ch]);
 		}
-		ARTS[name] = {"w": w, "h": h, "pix": pix, "rgb": rgb};
 	}
+	return {"w": w, "h": h, "pix": pix, "rgb": rgb, "keys": keys};
 }
 
 // ------------------------------------------------------- weapon HUD art -----

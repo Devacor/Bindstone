@@ -1,9 +1,14 @@
-// The renderer. The view is a flat TRUECOLOR palette-index pixel grid, blitted
-// to the terminal through sub-cell block glyphs (the doom-cli approach):
+// The renderer. The view is a flat palette-index pixel grid, blitted to the
+// terminal through sub-cell block glyphs (the doom-cli approach):
 //
 //   half  (--pix half): 1x2 px/cell, upper-half-block, fg=top bg=bottom
 //   quad  (--pix quad): 2x2 px/cell, quadrant glyphs, 2 colors by luminosity
 //   sext  (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
+//   ascii (--ascii):    1x1 px/cell, a density character over a dimmed background
+//
+// The tables it draws from (wall tones, texture strips, sprite LUTs, the
+// background) come from the reference look here or the showcase look
+// (look.jai); the per-pixel work is the same for both.
 //
 // Wall columns are computed by parallel_for over persistent ray-chunk pair
 // workspaces (pure.jai, in-place outputs); everything after the join is
@@ -120,8 +125,9 @@ function init_render() -> void {
 	build_particle_colors();
 }
 
-// wall tone table: [kind 0..9][side 0..1][shade 0..15][tone 0..2] flattened;
-// tones: 0 base, 1 accent, 2 mortar/frame. Truecolor, 16 shades.
+// wall tone table: [kind 0..8][side 0..1][shade 0..15][tone] flattened. The
+// reference look has three tones (0 base, 1 accent, 2 mortar/frame), the
+// showcase look eight (look.jai).
 array<int> WALLT = [];
 array<int> CEILP = [];     // per pixel-row ceiling color
 array<int> FLOORP = [];    // per pixel-row floor color
@@ -142,6 +148,33 @@ function push_wall_tones(var& base, var& accent) -> void {
 }
 
 function build_render_tables(int mi) -> void {
+	if (SHOWCASE) { build_showcase_tables(mi); }
+	else { build_reference_tables(mi); }
+	// prebaked background: one deep-copy assignment per frame replaces the
+	// per-pixel ceiling/floor loops outright
+	int half = G.vh / 2;
+	array<int> bg = [];
+	for (int y = 0; y < G.vh; ++y) {
+		// (a ternary of two element reads mis-types into an int local; if/else works)
+		int c = 0;
+		if (y < half) { c = CEILP[y]; }
+		else { c = FLOORP[y]; }
+		for (int x = 0; x < G.vw; ++x) { bg.push(c); }
+	}
+	G.bg = bg;
+	// wall tone strips (32-tall texture columns) build lazily per combination
+	STRIPS = [];
+	STRIP_SET = [];
+	int nstrips = 10 * 2 * 16 * 32;
+	for (int i = 0; i < nstrips; ++i) {
+		STRIPS.push([]);
+		STRIP_SET.push(0);
+	}
+	G.lutc = {};
+}
+
+// the reference tables (reference/README.md section 4.2)
+function build_reference_tables(int mi) -> void {
 	var theme = MAPS[mi]["theme"];
 	WALLT = [];
 	// kind 0 (never rendered): flat dark
@@ -188,26 +221,6 @@ function build_render_tables(int mi) -> void {
 			FLOORP.push(rgb_idx(math::itrunc(frgb[0] * lum2), math::itrunc(frgb[1] * lum2), math::itrunc(frgb[2] * lum2)));
 		}
 	}
-	// prebaked background: one deep-copy assignment per frame replaces the
-	// per-pixel ceiling/floor loops outright
-	array<int> bg = [];
-	for (int y2 = 0; y2 < G.vh; ++y2) {
-		// (a ternary of two element reads mis-types into an int local; if/else works)
-		int c = 0;
-		if (y2 < half) { c = CEILP[y2]; }
-		else { c = FLOORP[y2]; }
-		for (int x2 = 0; x2 < G.vw; ++x2) { bg.push(c); }
-	}
-	G.bg = bg;
-	// wall tone strips (32-tall texture columns) build lazily per combination
-	STRIPS = [];
-	STRIP_SET = [];
-	int nstrips = 10 * 2 * 16 * 32;
-	for (int i2 = 0; i2 < nstrips; ++i2) {
-		STRIPS.push([]);
-		STRIP_SET.push(0);
-	}
-	G.lutc = {};
 }
 
 // texture tone at (tx, ty) in 0..31 for a wall kind: 0 base, 1 accent, 2 mortar
@@ -245,10 +258,13 @@ function tex_tone(int kind, int tx, int ty) -> int {
 }
 
 function build_strip(int kind, int side, int shade, int tx) -> array<int> {
-	int tbase = ((kind * 2 + side) * 16 + shade) * 3;
 	array<int> s = [];
-	for (int ty = 0; ty < 32; ++ty) {
-		s.push(WALLT[tbase + tex_tone(kind, tx, ty)]);
+	if (SHOWCASE) {
+		int sbase = ((kind * 2 + side) * 16 + shade) * TONES;
+		for (int ty = 0; ty < 32; ++ty) { s.push(WALLT[sbase + showcase_tone(kind, tx, ty)]); }
+	} else {
+		int tbase = ((kind * 2 + side) * 16 + shade) * 3;
+		for (int ty = 0; ty < 32; ++ty) { s.push(WALLT[tbase + tex_tone(kind, tx, ty)]); }
 	}
 	s.push(s[31]);        // fixed-point overshoot guard
 	return s;
@@ -261,6 +277,11 @@ array<float> BAND_LUM = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
 function sprite_lut(string name, int band, int flash) -> array<int> {
 	string key = `${name}:${band}:${flash}`;
 	if (G.lutc.has(key)) { return G.lutc[key]; }
+	if (SHOWCASE) {
+		array<int> shaded = showcase_sprite_lut(name, band, flash);
+		G.lutc[key] = shaded;
+		return shaded;
+	}
 	var art = ARTS[name];
 	var rgb = art["rgb"];
 	float lum = BAND_LUM[band];
@@ -452,6 +473,8 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 		}
 	}
 
+	if (SHOWCASE) { draw_viewmodel(pix); }
+
 	// --- 5. overlays: automap, hurt flash ---
 	if (G.automap) { draw_automap(pix, G.tiles); }
 	if (G.hurt_flash > 0) {
@@ -473,6 +496,7 @@ function render_view_impl(var& pix, var& zbuf, var& rowparts) -> var {
 	}
 
 	// --- 6. pixel grid -> sub-cell glyph rows -------------------------------
+	if (HOST_ASCII) { return rows_ascii(pix, rowparts); }
 	if (PIXH == 3) { return rows_sext(pix, rowparts); }
 	if (PIXW == 2) { return rows_quad(); }
 	return rows_half(pix, rowparts);
@@ -498,6 +522,27 @@ function rows_half(var& pix, var& parts) -> var {
 			if (tc != ptop) { parts.push(fgs[tc]); ptop = tc; }
 			if (bc != pbot) { parts.push(bgs[bc]); pbot = bc; }
 			parts.push(hb);
+		}
+		parts.push(RESET);
+		rows.push(parts.join(""));
+	}
+	return rows;
+}
+
+// --ascii: one pixel per cell, a density character over a dimmed background
+function rows_ascii(var& pix, var& parts) -> var {
+	int vw = G.vw;
+	var& cells = PAL_ASCII;
+	var& chars = PAL_ASCII_CHAR;
+	array<string> rows = [];
+	for (int ry = 0; ry < G.vh; ++ry) {
+		parts.clear();
+		int prev = -1;
+		int base = ry * vw;
+		for (int x = 0; x < vw; ++x) {
+			int p = pix[base + x];
+			if (p != prev) { parts.push(cells[p]); prev = p; }
+			else { parts.push(chars[p]); }
 		}
 		parts.push(RESET);
 		rows.push(parts.join(""));

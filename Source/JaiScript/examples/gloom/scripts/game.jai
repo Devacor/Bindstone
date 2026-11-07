@@ -131,7 +131,7 @@ public:
 		PIX = [];
 		for (int i = 0; i < vw * vh; ++i) { PIX.push(0); }
 		ROWIDX = [];
-		int vrows = PIXH == 3 ? vh / 3 : vh / 2;
+		int vrows = vh / PIXH;
 		for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
 		zbuf = [];
 		for (int i = 0; i < vw; ++i) { zbuf.push(99.0); }

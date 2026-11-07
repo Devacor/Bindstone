@@ -12,17 +12,27 @@
 #include "gloom_host.hpp"
 #include "../../tools/jaiscript/profile_capture.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <csignal>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <stdexcept>
+#include <thread>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
 #pragma comment(lib, "winmm.lib")
+#else
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 namespace gloom {
@@ -80,12 +90,59 @@ std::string locate_scripts_dir(const std::string& override_dir, const char* argv
 
 namespace {
 
+// Set by Ctrl+C (and SIGTERM): the frame loop finishes its frame, restores the
+// terminal and exits. A second Ctrl+C takes the platform's default exit.
+std::atomic<bool> g_interrupted{false};
+
+// alternate screen off, cursor on, colors reset: written by every exit path
+constexpr const char* k_restore_terminal = "\x1b[0m\x1b[?1049l\x1b[?25h";
+
+#ifdef _WIN32
+BOOL WINAPI on_console_ctrl(DWORD type) {
+	if (type != CTRL_C_EVENT && type != CTRL_BREAK_EVENT) { return FALSE; }
+	if (!g_interrupted.exchange(true)) { return TRUE; }
+	std::fputs(k_restore_terminal, stdout);
+	std::fflush(stdout);
+	return FALSE;
+}
+#else
+termios g_saved_termios{};
+bool g_raw_termios = false;
+
+void restore_termios() {
+	if (g_raw_termios) {
+		tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_termios);
+		g_raw_termios = false;
+	}
+}
+
+void on_posix_signal(int sig) {
+	if (!g_interrupted.exchange(true)) { return; }
+	restore_termios();
+	ssize_t ignored = write(STDOUT_FILENO, k_restore_terminal, std::strlen(k_restore_terminal));
+	(void)ignored;
+	std::signal(sig, SIG_DFL);
+	std::raise(sig);
+}
+#endif
+
 struct console_host {
 	bool active = false;
 	double last_draw_ms = 0.0;
 #ifdef _WIN32
 	HANDLE hout = INVALID_HANDLE_VALUE;
 	HWND console_window = nullptr;
+#else
+	// POSIX terminals deliver bytes, not key events: edges queue for poll_key,
+	// and key_down reads a key as held while its presses keep arriving. The
+	// first repeat waits out the terminal's auto-repeat delay, later ones come
+	// every few tens of milliseconds, so the window shrinks once a key repeats.
+	struct key_press {
+		double last = -1.0;
+		bool repeating = false;
+	};
+	std::map<std::string, key_press> presses;
+	std::deque<std::string> edges;
 #endif
 
 	void init() {
@@ -97,7 +154,20 @@ struct console_host {
 		}
 		SetConsoleOutputCP(CP_UTF8);
 		console_window = GetConsoleWindow();
+		SetConsoleCtrlHandler(on_console_ctrl, TRUE);
 		timeBeginPeriod(1);
+#else
+		if (isatty(STDIN_FILENO) && tcgetattr(STDIN_FILENO, &g_saved_termios) == 0) {
+			termios raw = g_saved_termios;
+			raw.c_lflag &= ~(ICANON | ECHO);
+			raw.c_cc[VMIN] = 0;
+			raw.c_cc[VTIME] = 0;
+			tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+			g_raw_termios = true;
+			std::atexit(restore_termios);
+		}
+		std::signal(SIGINT, on_posix_signal);
+		std::signal(SIGTERM, on_posix_signal);
 #endif
 		std::fputs("\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H", stdout);
 		std::fflush(stdout);
@@ -106,10 +176,15 @@ struct console_host {
 
 	void shutdown() {
 		if (!active) { return; }
-		std::fputs("\x1b[0m\x1b[?1049l\x1b[?25h", stdout);
+		std::fputs(k_restore_terminal, stdout);
 		std::fflush(stdout);
 #ifdef _WIN32
 		timeEndPeriod(1);
+		SetConsoleCtrlHandler(on_console_ctrl, FALSE);
+#else
+		restore_termios();
+		std::signal(SIGINT, SIG_DFL);
+		std::signal(SIGTERM, SIG_DFL);
 #endif
 		active = false;
 	}
@@ -139,6 +214,12 @@ struct console_host {
 			w = info.srWindow.Right - info.srWindow.Left;      // one column spare: no wrap
 			h = info.srWindow.Bottom - info.srWindow.Top;      // one row spare: no scroll
 		}
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0 && ws.ws_row > 0) {
+			w = ws.ws_col - 1;
+			h = ws.ws_row - 1;
+		}
 #endif
 		if (w > 120) { w = 120; }
 		if (h > 46) { h = 46; }
@@ -166,8 +247,11 @@ struct console_host {
 		if (vk == 0) { return false; }
 		return (GetAsyncKeyState(vk) & 0x8000) != 0;
 #else
-		(void)name;
-		return false;
+		pump_posix_input();
+		auto it = presses.find(name);
+		if (it == presses.end() || it->second.last < 0.0) { return false; }
+		double window = it->second.repeating ? 0.12 : 0.55;
+		return now_seconds() - it->second.last < window;
 #endif
 	}
 
@@ -187,6 +271,7 @@ struct console_host {
 			}
 		}
 		switch (c) {
+			case 3: return "esc";
 			case 9: return "tab";
 			case 13: return "enter";
 			case 27: return "esc";
@@ -194,8 +279,88 @@ struct console_host {
 		}
 		if (c >= 'A' && c <= 'Z') { c += 32; }
 		if (c >= 32 && c < 127) { return std::string(1, static_cast<char>(c)); }
-#endif
 		return "";
+#else
+		pump_posix_input();
+		if (edges.empty()) { return ""; }
+		std::string key = edges.front();
+		edges.pop_front();
+		return key;
+#endif
+	}
+
+#ifndef _WIN32
+	void note_press(const std::string& name, bool edge) {
+		double now = now_seconds();
+		key_press& press = presses[name];
+		press.repeating = press.last >= 0.0 && now - press.last < 0.6;
+		press.last = now;
+		if (edge && edges.size() < 64) { edges.push_back(name); }
+	}
+
+	// an escape sequence split across reads (ssh) gets one short retry
+	bool read_byte(unsigned char& b) {
+		if (read(STDIN_FILENO, &b, 1) == 1) { return true; }
+		std::this_thread::sleep_for(std::chrono::milliseconds(3));
+		return read(STDIN_FILENO, &b, 1) == 1;
+	}
+
+	void pump_posix_input() {
+		if (!g_raw_termios) { return; }
+		unsigned char b = 0;
+		while (read(STDIN_FILENO, &b, 1) == 1) {
+			if (b == 0x1B) {
+				unsigned char b2 = 0;
+				if (!read_byte(b2)) { note_press("esc", true); continue; }
+				if (b2 != '[' && b2 != 'O') { note_press("esc", true); continue; }
+				unsigned char fin = 0;
+				bool have = read_byte(fin);
+				while (have && b2 == '[' && fin >= 0x20 && fin <= 0x3F) { have = read_byte(fin); }
+				if (!have) { continue; }
+				switch (fin) {
+					case 'A': note_press("up", true); break;
+					case 'B': note_press("down", true); break;
+					case 'C': note_press("right", true); break;
+					case 'D': note_press("left", true); break;
+					default: break;
+				}
+				continue;
+			}
+			if (b == '\r' || b == '\n') { note_press("enter", true); continue; }
+			if (b == '\t') { note_press("tab", true); continue; }
+			if (b == ' ') { note_press("space", false); note_press(" ", true); continue; }
+			if (b >= 'A' && b <= 'Z') {
+				note_press("shift", false);           // a shifted letter is the only shift a terminal reports
+				b = static_cast<unsigned char>(b + 32);
+			}
+			if (b > 32 && b < 127) { note_press(std::string(1, static_cast<char>(b)), true); }
+		}
+	}
+#endif
+};
+
+// Steady frame pacing: frames start on a fixed grid of deadlines, and a frame
+// whose measured dt is within a sixth of the period reports exactly the period,
+// so a 30 fps loop advances the 30 Hz simulation one tick per frame instead of
+// beating against timer jitter (0, 2, 1, 1, 0, 2 ticks).
+struct frame_pacer {
+	double period;
+	double deadline;
+
+	explicit frame_pacer(double fps) : period(1.0 / fps), deadline(now_seconds()) {}
+
+	double steady_dt(double measured) const {
+		double off = measured - period;
+		return (off < period / 6.0 && off > -period / 6.0) ? period : measured;
+	}
+
+	void wait() {
+		deadline += period;
+		double now = now_seconds();
+		if (now > deadline + period) { deadline = now; return; }   // fell behind: restart the grid
+		if (deadline > now) {
+			std::this_thread::sleep_for(std::chrono::duration<double>(deadline - now));
+		}
 	}
 };
 
@@ -211,6 +376,19 @@ host_services make_services(console_host& console, bool live_input) {
 		std::fflush(stdout);
 	};
 	return services;
+}
+
+// COLORTERM is the convention 24-bit terminals advertise; Windows Terminal and
+// the VT-mode console both render 24-bit without it. The rest get xterm-256.
+bool terminal_has_truecolor() {
+#ifdef _WIN32
+	return true;
+#else
+	const char* colorterm = std::getenv("COLORTERM");
+	if (colorterm == nullptr) { return false; }
+	std::string value = colorterm;
+	return value == "truecolor" || value == "24bit";
+#endif
 }
 
 int run_smoke(script_adapter& adapter, const host_options& opt, console_host& console) {
@@ -365,9 +543,13 @@ void print_usage(script_adapter& adapter) {
 		"  --god           god mode\n"
 		"  --pix MODE      sub-cell pixels: half (1x2) | quad (2x2, default) | sext (2x3,\n"
 		"                  needs a Unicode-13 font e.g. Cascadia Mono in Windows Terminal)\n"
+		"  --look L        showcase (default) | reference (the frames the ports draw; --smoke's default)\n"
+		"  --truecolor     24-bit color (default on Windows and where COLORTERM says truecolor)\n"
+		"  --256color      xterm-256 color (default elsewhere)\n"
+		"  --ascii         plain ASCII cells, for terminals without block glyphs\n"
 		"  --scripts DIR   override the scripts directory\n"
 		"\nkeys: w/s move  a/d strafe  left/right turn  space/ctrl fire  e use\n"
-		"      shift run  1/2/3 weapons  m automap  esc quit\n",
+		"      shift run  1/2/3 weapons  m automap  esc or Ctrl+C quit\n",
 		adapter.title().c_str(), backends_line.c_str());
 }
 
@@ -404,6 +586,10 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		else if (a == "--no-local-alias") { opt.local_alias = false; }
 		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
 		else if (a == "--pix") { opt.pix = next_arg("--pix"); }
+		else if (a == "--look") { opt.look = next_arg("--look"); }
+		else if (a == "--truecolor") { opt.truecolor = 1; }
+		else if (a == "--256color") { opt.truecolor = 0; }
+		else if (a == "--ascii") { opt.ascii = true; }
 		else if (a == "--help" || a == "-h") { print_usage(adapter); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(adapter); return 2; }
 	}
@@ -426,6 +612,12 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		std::fprintf(stderr, "unknown --pix mode: %s (half|quad|sext)\n", opt.pix.c_str());
 		return 2;
 	}
+	if (opt.look.empty()) { opt.look = opt.smoke ? "reference" : "showcase"; }
+	if (opt.look != "reference" && opt.look != "showcase") {
+		std::fprintf(stderr, "unknown --look: %s (reference|showcase)\n", opt.look.c_str());
+		return 2;
+	}
+	if (opt.truecolor < 0) { opt.truecolor = opt.smoke || terminal_has_truecolor() ? 1 : 0; }
 
 	console_host console;
 	const std::string prog = adapter.program_name();
@@ -454,12 +646,13 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 		if (bench_pilot) { session->force_autopilot(); }
 		session->boot(w, h);
 
+		frame_pacer pacer(opt.target_fps);
 		double t_prev = now_seconds();
 		double fps_ema = opt.target_fps;
 		double last_sim_ms = 0.0;
-		for (;;) {
+		while (!g_interrupted.load()) {
 			double frame_start = now_seconds();
-			double dt = frame_start - t_prev;
+			double dt = pacer.steady_dt(frame_start - t_prev);
 			t_prev = frame_start;
 			if (dt > 0.1) { dt = 0.1; }
 			if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
@@ -478,14 +671,7 @@ int run_gloom(int argc, char** argv, script_adapter& adapter) {
 				if (++bench_done >= opt.bench) { break; }
 			}
 			if (session->wants_quit()) { break; }
-
-			double budget = 1.0 / opt.target_fps;
-			double used = now_seconds() - frame_start;
-			if (used < budget) {
-#ifdef _WIN32
-				Sleep(static_cast<DWORD>((budget - used) * 1000.0));
-#endif
-			}
+			pacer.wait();
 		}
 	} catch (const std::exception& ex) {
 		console.shutdown();

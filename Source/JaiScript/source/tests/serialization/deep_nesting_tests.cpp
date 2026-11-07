@@ -27,6 +27,9 @@ namespace jai::foundry::tests {
 
 namespace deep_detail {
 	constexpr int k_depth = 100000;
+	// a class chain this long overflows k_small_stack under any walk spending 64 bytes of native stack a link (a host record's load spends more)
+	constexpr int k_class_chain_depth = 20000;
+	static_assert(static_cast<size_t>(k_class_chain_depth) * 64 > k_small_stack);
 
 	// a host record's native frames differ by build (Release, Debug, ASan): no build fills the roomy stack before the 1024-record
 	// backstop, and the tight one is the stack margin (256 KB on Windows) and one allocation unit, which no chain of records fits
@@ -162,7 +165,7 @@ public:
 				auto eng = make_engine();
 				stdlib::register_all(*eng);
 				eng->execution_budget(0);
-				eng->add_global("depth", eng->make_value(static_cast<script_int>(k_depth)));
+				eng->add_global("depth", eng->make_value(static_cast<script_int>(k_class_chain_depth)));
 				const std::string result = eng->execute(R"(
 					class Link { int n = 0; var next = null; }
 					function length_of(var p) -> int { int count = 0; while (p != null) { count += 1; p = p.next; } return count; }
@@ -184,7 +187,7 @@ public:
 					copied = null;
 					out;
 				)").as<std::string>();
-				const std::string d = std::to_string(k_depth);
+				const std::string d = std::to_string(k_class_chain_depth);
 				check_eq(d + " " + d + " true", result);
 			});
 		});

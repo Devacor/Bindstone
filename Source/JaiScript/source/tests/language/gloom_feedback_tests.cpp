@@ -5,6 +5,11 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
+
+#include <string>
+#include <tuple>
+#include <variant>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -22,6 +27,24 @@ std::shared_ptr<jai::engine> gloom_engine(bool use_vm) {
 
 std::string backend_tag(bool use_vm) { return use_vm ? "[vm] " : "[interp] "; }
 
+using expected_value = std::variant<int64_t, std::string>;
+
+// {name, source, expected}: the source's value on each backend, read as the expected alternative's type
+template<typename Cases>
+void check_both_backends(const Cases& a_cases) {
+	check_each(a_cases, [](const auto& c) {
+		for (bool use_vm : {false, true}) {
+			auto e = gloom_engine(use_vm);
+			auto r = e->execute(std::get<1>(c));
+			if (const auto* expected = std::get_if<int64_t>(&std::get<2>(c))) {
+				check_eq(*expected, r.as_int(), backend_tag(use_vm));
+			} else {
+				check_eq(std::get<std::string>(std::get<2>(c)), r.as<std::string>(), backend_tag(use_vm));
+			}
+		}
+	});
+}
+
 } // namespace
 
 class gloom_feedback_tests : public suite {
@@ -37,25 +60,17 @@ public:
 		// the decl path's lvalue detection) while if/else worked.
 		// ============================================================
 
-		test("ternary_element_reads_into_typed_local", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+		test("decls_from_element_reads_and_ref_returns_copy_values_and_share_handles", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"ternary_element_reads_into_typed_local", R"(
 					var a = [1, 2, 3];
 					var b = [10, 20, 30];
 					bool c = true;
 					int x = c ? a[1] : b[2];
 					int y = !c ? a[1] : b[2];
 					x * 100 + y;
-				)");
-				check_eq((int64_t)230, r.as_int(), backend_tag(use_vm) + "typed local from ternary element reads");
-			}
-		});
-
-		test("ternary_element_reads_typed_variants", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{230}},
+				{"ternary_element_reads_typed_variants", R"(
 					var a = [1, 2, 3];
 					var b = [10, 20, 30];
 					var m = {"k": 7};
@@ -65,15 +80,8 @@ public:
 					int mk = c ? m["k"] : a[0];        // map-entry read
 					int nested = c ? (c ? a[0] : a[1]) : b[0];
 					to_string(f) + " " + to_string(mixed) + " " + to_string(mk) + " " + to_string(nested);
-				)");
-				check_eq(std::string("2.0 2 7 1"), r.as<std::string>(), backend_tag(use_vm) + "float/mixed/map/nested ternary element reads");
-			}
-		});
-
-		test("ternary_element_reads_in_function_slots", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", std::string("2.0 2 7 1")},
+				{"ternary_element_reads_in_function_slots", R"(
 					var a = [1, 2, 3];
 					var b = [10, 20, 30];
 					function pick(bool c) -> int {
@@ -81,18 +89,8 @@ public:
 						return x;
 					}
 					pick(true) * 100 + pick(false);
-				)");
-				check_eq((int64_t)230, r.as_int(), backend_tag(use_vm) + "slot-local typed decl from ternary element reads");
-			}
-		});
-
-		// The pre-fix behavior for var/auto decls was WORSE than an error: the
-		// stored local silently ALIASED the element (writes through the array
-		// changed the local; assigning the local wrote into the array).
-		test("ternary_element_decl_never_aliases", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{230}},
+				{"ternary_element_decl_never_aliases", R"(
 					var a = [1, 2, 3];
 					var b = [10, 20, 30];
 					bool c = true;
@@ -102,53 +100,39 @@ public:
 					var w = c ? a[0] : b[0];
 					w = 42;                            // must not write into a[0]
 					to_string(t) + " " + to_string(u) + " " + to_string(a[0]);
-				)");
-				check_eq(std::string("2 2 1"), r.as<std::string>(), backend_tag(use_vm) + "ternary element decl copies, never aliases");
-			}
-		});
-
-		test("ternary_element_decl_deep_copies_containers", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", std::string("2 2 1")},
+				{"ternary_element_decl_deep_copies_containers", R"(
 					var rows = [[1, 2], [3, 4]];
 					bool c = true;
 					var row = c ? rows[0] : rows[1];
 					row.push(99);                      // must not grow rows[0]
 					rows[0].size() * 10 + row.size();
-				)");
-				check_eq((int64_t)23, r.as_int(), backend_tag(use_vm) + "container element through ternary deep-copies (value semantics)");
-			}
-		});
-
-		test("typed_shared_ptr_decl_from_element_read", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{23}},
+				{"typed_shared_ptr_decl_from_element_read", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					var arr = [];
 					arr.push(new Mob());
 					shared_ptr<Mob> t = arr[0];        // used to error: "Cannot initialize shared_ptr with this type"
 					t.hurt(3);
 					arr[0].hp;
-				)");
-				check_eq((int64_t)7, r.as_int(), backend_tag(use_vm) + "shared_ptr<T> decl from element read shares");
-			}
-		});
-
-		test("weak_ptr_decl_from_element_read", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{7}},
+				{"weak_ptr_decl_from_element_read", R"(
 					class Mob { int hp = 10; }
 					var arr = [];
 					arr.push(new Mob());
 					weak_ptr<Mob> w = arr[0];
 					auto locked = w.lock();
 					locked.hp;
-				)");
-				check_eq((int64_t)10, r.as_int(), backend_tag(use_vm) + "weak_ptr<T> decl from element read observes");
-			}
+				)", int64_t{10}},
+				{"value_decl_from_ref_return_copies", R"(
+					int g = 5;
+					int& get() { return g; }
+					var x = get();
+					x = 9;                             // must not write through into g
+					g * 10 + x;
+				)", int64_t{59}},
+			};
+			check_both_backends(cases);
 		});
 
 		// ============================================================
@@ -159,10 +143,9 @@ public:
 		// value-semantic elements must keep deep-copying.
 		// ============================================================
 
-		test("shared_ptr_element_reads_share", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+		test("shared_ptr_stores_share_the_handle_and_values_deep_copy", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"shared_ptr_element_reads_share", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					var arr = [];
 					arr.push(new Mob());
@@ -174,15 +157,8 @@ public:
 					var mv = m["k"];   mv.hurt(1);      // map-value decl
 					var mv2 = null;    mv2 = m["k"]; mv2.hurt(1);  // map-value assign
 					arr[0].hp * 100 + m["k"].hp;
-				)");
-				check_eq((int64_t)708, r.as_int(), backend_tag(use_vm) + "element/map reads share shared_ptr handles (decl + assign)");
-			}
-		});
-
-		test("shared_ptr_ident_assign_shares", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{708}},
+				{"shared_ptr_ident_assign_shares", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					auto p = new Mob();
 					var q = null;
@@ -196,15 +172,8 @@ public:
 						return p2.hp;
 					}
 					p.hp * 100 + f();
-				)");
-				check_eq((int64_t)909, r.as_int(), backend_tag(use_vm) + "ident assign shares shared_ptr handles (env + slot)");
-			}
-		});
-
-		test("shared_ptr_field_and_element_stores_share", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{909}},
+				{"shared_ptr_field_and_element_stores_share", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					class Holder { var fx = null; }
 					auto h = new Holder();
@@ -217,15 +186,8 @@ public:
 					arr2[0] = p;              // element store of a handle
 					arr2[0].hurt(1);
 					arr[0].hp * 100 + p.hp;
-				)");
-				check_eq((int64_t)909, r.as_int(), backend_tag(use_vm) + "field assign and element store share shared_ptr handles");
-			}
-		});
-
-		test("shared_ptr_loop_destructure_args_share", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{909}},
+				{"shared_ptr_loop_destructure_args_share", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					var arr = [];
 					arr.push(new Mob());
@@ -239,15 +201,8 @@ public:
 					m["a"] = new Mob();
 					for (auto kv : m) { kv.second.hurt(1); }      // map iteration value shares
 					arr[0].hp * 1000 + arr[1].hp * 100 + m["a"].hp;
-				)");
-				check_eq((int64_t)8809, r.as_int(), backend_tag(use_vm) + "range-for/destructure/args/map-iter share shared_ptr handles");
-			}
-		});
-
-		test("value_semantics_still_deep_copy_at_stores", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{8809}},
+				{"value_semantics_still_deep_copy_at_stores", R"(
 					class Pt { int v = 1; }
 					var arr = [];
 					arr.push(Pt());                               // VALUE instance element
@@ -258,15 +213,8 @@ public:
 					var [r0, r1] = rows;                          // destructuring copies containers
 					r0.push(99);
 					arr[0].v * 10 + rows[0].size();
-				)");
-				check_eq((int64_t)11, r.as_int(), backend_tag(use_vm) + "value instances and containers keep deep-copy store semantics");
-			}
-		});
-
-		test("assigned_shared_ptr_keeps_reference_semantics_downstream", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{11}},
+				{"assigned_shared_ptr_keeps_reference_semantics_downstream", R"(
 					class Mob { int hp = 10; void hurt(int d) { hp = hp - d; } }
 					auto p = new Mob();
 					var q = null;
@@ -277,9 +225,9 @@ public:
 					auto locked = w.lock();
 					locked.hurt(1);
 					p.hp;
-				)");
-				check_eq((int64_t)8, r.as_int(), backend_tag(use_vm) + "assigned handle keeps shared_ptr marker downstream");
-			}
+				)", int64_t{8}},
+			};
+			check_both_backends(cases);
 		});
 
 		// ============================================================
@@ -293,10 +241,9 @@ public:
 		// c0 >= '1' && c0 <= '9').
 		// ============================================================
 
-		test("string_subscript_reads_char", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+		test("string_subscript_reads_a_char", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"string_subscript_reads_char", R"(
 					var s = "hello";
 					char c = s[1];
 					var parts = [];
@@ -309,9 +256,29 @@ public:
 					parts.push(to_string(count));
 					parts.push(s);                       // source string untouched
 					parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3] + " " + parts[4] + " " + parts[5];
-				)");
-				check_eq(std::string("char true char true 2 hello"), r.as<std::string>(), backend_tag(use_vm) + "string subscript reads chars");
-			}
+				)", std::string("char true char true 2 hello")},
+				{"demoreel_handle_key_shape_is_live", R"(
+					int nscenes = 9;
+					int started = -1;
+					function start_scene(int i) { started = i; }
+					function handle_key(string key) {
+						if (key == "") { return; }
+						if (key.size() == 1) {
+							char c0 = key[0];
+							if (c0 >= '1' && c0 <= '9') {
+								int d = key.to_int();
+								if (d <= nscenes) { start_scene(d - 1); }
+							}
+							else if (c0 == '0') { start_scene(nscenes - 1); }
+						}
+					}
+					handle_key("7");
+					int seven = started;
+					handle_key("0");
+					seven * 100 + started;
+				)", int64_t{608}},
+			};
+			check_both_backends(cases);
 		});
 
 		test("string_subscript_errors_byte_identical", [this]() {
@@ -352,35 +319,6 @@ public:
 				auto e2 = gloom_engine(use_vm);
 				check_true(!e2->execute("var x = 'a' < 1; x").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 1 is false)");
 				check_true(e2->execute("var y = 'a' < 98; y").as<bool>(), backend_tag(use_vm) + "char/int ordering promotes (97 < 98 is true)");
-			}
-		});
-
-		test("demoreel_handle_key_shape_is_live", [this]() {
-			// The exact examples/demoreel reel.jai handle_key shape GLOOM flagged as
-			// dead (`char c0 = key[0];` would throw): now live end to end.
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
-					int nscenes = 9;
-					int started = -1;
-					function start_scene(int i) { started = i; }
-					function handle_key(string key) {
-						if (key == "") { return; }
-						if (key.size() == 1) {
-							char c0 = key[0];
-							if (c0 >= '1' && c0 <= '9') {
-								int d = key.to_int();
-								if (d <= nscenes) { start_scene(d - 1); }
-							}
-							else if (c0 == '0') { start_scene(nscenes - 1); }
-						}
-					}
-					handle_key("7");
-					int seven = started;
-					handle_key("0");
-					seven * 100 + started;
-				)");
-				check_eq((int64_t)608, r.as_int(), backend_tag(use_vm) + "reel.jai handle_key digit routing works");
 			}
 		});
 
@@ -489,10 +427,9 @@ public:
 		// pins keep the whole var/auto method family from EVER vanishing silently.
 		// ============================================================
 
-		test("var_auto_method_forms", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+		test("var_and_auto_function_and_method_forms_are_callable", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"var_auto_method_forms", R"(
 					class G {
 						int hp = 3;
 						var pilot = null;
@@ -522,15 +459,8 @@ public:
 					parts.push(to_string(second));
 					parts.push(to_string(h.gather()["fwd"]));
 					parts[0] + " " + parts[1] + " " + parts[2] + " " + parts[3] + " " + parts[4] + " " + parts[5];
-				)");
-				check_eq(std::string("3 6 42 7 1 false"), r.as<std::string>(), backend_tag(use_vm) + "var/auto/static/coroutine/override method forms all callable");
-			}
-		});
-
-		test("var_function_forms_top_level_and_namespace", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
+				)", std::string("3 6 42 7 1 false")},
+				{"var_function_forms_top_level_and_namespace", R"(
 					var f() { return 41; }
 					namespace ns {
 						var helper() { return 8; }
@@ -538,9 +468,9 @@ public:
 					}
 					auto i = ns::Inner();
 					f() * 100 + ns::helper() * 10 + i.val();
-				)");
-				check_eq((int64_t)4189, r.as_int(), backend_tag(use_vm) + "top-level and namespaced var functions/methods");
-			}
+				)", int64_t{4189}},
+			};
+			check_both_backends(cases);
 		});
 
 		test("var_method_survives_class_redefinition", [this]() {
@@ -557,22 +487,6 @@ public:
 			}
 		});
 
-		// Plain value decls from reference-producing initializers COPY (C++'s
-		// `int x = f();` for `int& f()`); alias binding stays the auto&/ref-decl
-		// spelling (pinned in vm_backend_tests ref_return_*).
-		test("value_decl_from_ref_return_copies", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = gloom_engine(use_vm);
-				auto r = e->execute(R"(
-					int g = 5;
-					int& get() { return g; }
-					var x = get();
-					x = 9;                             // must not write through into g
-					g * 10 + x;
-				)");
-				check_eq((int64_t)59, r.as_int(), backend_tag(use_vm) + "plain decl from ref return copies the value");
-			}
-		});
 	}
 };
 

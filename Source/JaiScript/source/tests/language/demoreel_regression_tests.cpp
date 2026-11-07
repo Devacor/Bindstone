@@ -5,6 +5,11 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
+
+#include <string>
+#include <tuple>
+#include <variant>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -22,6 +27,25 @@ std::shared_ptr<jai::engine> demoreel_engine(bool use_vm) {
 
 std::string backend_tag(bool use_vm) { return use_vm ? "[vm] " : "[interp] "; }
 
+using expected_value = std::variant<int64_t, std::string>;
+
+// {name, source, expected}: the source's value on each backend, read as the expected alternative's type
+template<typename Cases>
+void check_both_backends(const Cases& a_cases) {
+	check_each(a_cases, [](const auto& c) {
+		for (bool use_vm : {false, true}) {
+			auto e = demoreel_engine(use_vm);
+			auto r = e->execute(std::get<1>(c));
+			if (const auto* expected = std::get_if<int64_t>(&std::get<2>(c))) {
+				check_true(r.is_int(), backend_tag(use_vm) + "an int");
+				check_eq(*expected, r.as_int(), backend_tag(use_vm));
+			} else {
+				check_eq(std::get<std::string>(std::get<2>(c)), r.as<std::string>(), backend_tag(use_vm));
+			}
+		}
+	});
+}
+
 } // namespace
 
 class demoreel_regression_tests : public suite {
@@ -32,49 +56,27 @@ public:
 
 		// Finding 1: calling a FREE function (or lambda) inside a class method must not
 		// poison the method's implicit-self scope for the rest of the method.
-		test("free_call_in_method_keeps_implicit_self", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+		test("a_free_or_lambda_call_in_a_method_keeps_its_implicit_self", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"free_call_in_method_keeps_implicit_self", R"(
 					function mk() -> var { return [1]; }
 					class R { var g = null; int ok = 0; R() { g = mk(); ok = g.size(); } }
 					var r = R();
 					r.ok
-				)");
-				check_eq((int64_t)1, r.as_int(), backend_tag(use_vm) + "field access after free call in ctor");
-			}
-		});
-
-		test("free_call_in_method_keeps_field_reads", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{1}},
+				{"free_call_in_method_keeps_field_reads", R"(
 					int helper() { return 1; }
 					class P { int x = 5; int m() { helper(); return x; } }
 					var p = P();
 					p.m();
-				)");
-				check_eq((int64_t)5, r.as_int(), backend_tag(use_vm) + "unqualified field read after free call");
-			}
-		});
-
-		test("free_call_in_method_keeps_this", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{5}},
+				{"free_call_in_method_keeps_this", R"(
 					int helper() { return 1; }
 					class Q { int x = 5; auto m() { helper(); return this.x; } }
 					var q = Q();
 					q.m();
-				)");
-				check_eq((int64_t)5, r.as_int(), backend_tag(use_vm) + "this.x after free call");
-			}
-		});
-
-		test("lambda_call_in_method_keeps_implicit_self", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{5}},
+				{"lambda_call_in_method_keeps_implicit_self", R"(
 					class L {
 						int a = 7;
 						int m() {
@@ -85,17 +87,16 @@ public:
 					}
 					var l = L();
 					l.m();
-				)");
-				check_eq((int64_t)10, r.as_int(), backend_tag(use_vm) + "field read after lambda call in method");
-			}
+				)", int64_t{10}},
+			};
+			check_both_backends(cases);
 		});
 
 		// Finding 2 (VM): a loop-body local assigned from a nested scope must not corrupt
 		// the enclosing loop variable.
-		test("vm_nested_for_assign_does_not_corrupt_outer_loop", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+		test("nested_and_sibling_scope_locals_never_alias_or_leak", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"vm_nested_for_assign_does_not_corrupt_outer_loop", R"(
 					class G { int t(int w, int h) {
 						int rows = 0;
 						for (int y = 0; y < h; ++y) {
@@ -107,15 +108,8 @@ public:
 					} }
 					var g = G();
 					g.t(3, 5)
-				)");
-				check_eq((int64_t)5, r.as_int(), backend_tag(use_vm) + "outer loop count with inner-for assigning body local");
-			}
-		});
-
-		test("vm_if_assign_does_not_corrupt_outer_loop", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{5}},
+				{"vm_if_assign_does_not_corrupt_outer_loop", R"(
 					class G2 { int t(int h) {
 						int rows = 0;
 						for (int y = 0; y < h; ++y) {
@@ -127,15 +121,8 @@ public:
 					} }
 					var g = G2();
 					g.t(6)
-				)");
-				check_eq((int64_t)6, r.as_int(), backend_tag(use_vm) + "outer loop count with plain-if assigning body local");
-			}
-		});
-
-		test("vm_sibling_scope_locals_do_not_alias", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{6}},
+				{"vm_sibling_scope_locals_do_not_alias", R"(
 					class G3 { int t(int flag) {
 						int acc = 0;
 						if (flag == 1) { int v = 10; acc = acc + v; }
@@ -146,18 +133,8 @@ public:
 					} }
 					var g = G3();
 					g.t(1) * 1000 + g.t(0)
-				)");
-				check_eq((int64_t)210220, r.as_int(), backend_tag(use_vm) + "sibling-scope same-named locals");
-			}
-		});
-
-		// Finding 2 tail (parser): the flat name->slot map leaked inner-scope names to
-		// the enclosing scope — shadowed locals hijacked the outer name after the block
-		// closed ("sibling scopes' same-named locals alias" family; also hit by jai_rogue).
-		test("inner_scope_locals_do_not_leak_to_outer_reads", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{210220}},
+				{"inner_scope_locals_do_not_leak_to_outer_reads", R"(
 					function shadow1() -> int {
 						int v = 1;
 						{ int v = 2; }
@@ -174,31 +151,23 @@ public:
 						return v;
 					}
 					shadow1() * 10000 + shadow2() * 100 + shadow3()
-				)");
-				check_eq((int64_t)10101, r.as_int(), backend_tag(use_vm) + "block/for-body/range-for shadowing restores the outer local");
-			}
+				)", int64_t{10101}},
+			};
+			check_both_backends(cases);
 		});
 
 		// Finding 3 (interpreter): ++x on an enclosing-scope local inside a for body.
-		test("preincrement_outer_local_in_for_body", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+		test("preincrement_of_an_outer_local_in_a_for_body", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"preincrement_outer_local_in_for_body", R"(
 					function f() -> int {
 						int x = 0;
 						for (int i = 0; i < 3; ++i) { ++x; }
 						return x;
 					}
 					f();
-				)");
-				check_eq((int64_t)3, r.as_int(), backend_tag(use_vm) + "++outer local in for body (function)");
-			}
-		});
-
-		test("preincrement_outer_local_in_for_body_method", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{3}},
+				{"preincrement_outer_local_in_for_body_method", R"(
 					class C3 { int m() {
 						int x = 0;
 						for (int i = 0; i < 4; ++i) { ++x; }
@@ -206,9 +175,9 @@ public:
 					} }
 					var c = C3();
 					c.m();
-				)");
-				check_eq((int64_t)4, r.as_int(), backend_tag(use_vm) + "++outer local in for body (method)");
-			}
+				)", int64_t{4}},
+			};
+			check_both_backends(cases);
 		});
 
 		// Finding 4: typed locals and fields convert their initializer/assignment like
@@ -225,30 +194,17 @@ public:
 			}
 		});
 
-		test("typed_local_assignment_converts", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute("int d = 1; d = 6.9; d");
-				check_true(r.is_int(), backend_tag(use_vm) + "int local stays int after float assign");
-				check_eq((int64_t)6, r.as_int(), backend_tag(use_vm) + "int local assign from 6.9 truncates");
-			}
-		});
-
-		// Typed class fields enforce like locals — the declared type is
-		// stored on the class definition and every field write converts through the same
-		// table '=' uses (an int field truncates 4.7 to 4); 'var' fields stay dynamic.
-		test("typed_field_assignment_converts_parity", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+		test("typed_local_and_field_assignments_convert", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"typed_local_assignment_converts", "int d = 1; d = 6.9; d", int64_t{6}},
+				{"typed_field_assignment_converts_parity", R"(
 					class F { int a = 0; }
 					var f = F();
 					f.a = 4.7;
 					f.a
-				)");
-				check_true(r.is_int(), backend_tag(use_vm) + "int field truncates a float assign");
-				check_eq((int64_t)4, r.as_int(), backend_tag(use_vm) + "4.7 -> 4");
-			}
+				)", int64_t{4}},
+			};
+			check_both_backends(cases);
 		});
 
 		// Finding 5: raw array-element / nested-field arguments must resolve against
@@ -416,27 +372,16 @@ public:
 		// consumers as reference wrappers (rhs-lvalue read shape). The interpreter's
 		// typed identifier-assign rejected `int x; x = a[0]`, and BOTH backends'
 		// is_truthy answered always-true for `if (a[0])` on a false element.
-		test("element_read_assigns_into_typed_local", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+		test("element_reads_store_into_typed_locals_and_test_as_values", [this]() {
+			const std::tuple<const char*, const char*, expected_value> cases[] = {
+				{"element_read_assigns_into_typed_local", R"(
 					var a = [7];
 					int x = 0;
 					x = a[0];
 					int y = a[0];
 					x * 10 + y;
-				)");
-				check_eq((int64_t)77, r.as_int(), backend_tag(use_vm) + "assignment and decl from element read agree");
-			}
-		});
-
-		test("typed_local_stores_from_ref_shaped_reads", [this]() {
-			// Same disease, other spellings: compound assign from an element read,
-			// simple/compound assign from a member read, and assign from a ref-decl'd
-			// value - the typed-slot enforcement must see the VALUE, not the wrapper.
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", int64_t{77}},
+				{"typed_local_stores_from_ref_shaped_reads", R"(
 					class Holder { int f = 5; }
 					var a = [7, 2];
 					var h = Holder();
@@ -450,15 +395,8 @@ public:
 					z = rs;           // simple from ref-decl'd value
 					z += a[1];        // compound from element read again
 					to_string(x) + "|" + to_string(z);
-				)");
-				check_eq(std::string("10|11"), r.as<std::string>(), backend_tag(use_vm) + "typed-local stores from ref-shaped reads");
-			}
-		});
-
-		test("element_read_as_condition_derefs", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", std::string("10|11")},
+				{"element_read_as_condition_derefs", R"(
 					var flags = [false, true];
 					var ints = [0, 3];
 					var nulls = [null];
@@ -469,15 +407,8 @@ public:
 					if (ints[1]) { out += "D"; } else { out += "d"; }
 					if (nulls[0]) { out += "E"; } else { out += "e"; }
 					out;
-				)");
-				check_eq(std::string("aBcDe"), r.as<std::string>(), backend_tag(use_vm) + "if on element reads");
-			}
-		});
-
-		test("element_read_condition_not_ternary_logical_while", [this]() {
-			for (bool use_vm : {false, true}) {
-				auto e = demoreel_engine(use_vm);
-				auto r = e->execute(R"(
+				)", std::string("aBcDe")},
+				{"element_read_condition_not_ternary_logical_while", R"(
 					var flags = [false, true];
 					var out = "";
 					if (!flags[0]) { out += "n"; }
@@ -488,10 +419,11 @@ public:
 					int spins = 0;
 					while (live[0]) { spins += 1; if (spins == 3) { live[0] = false; } }
 					out + to_string(spins);
-				)");
-				check_eq(std::string("nfxO3"), r.as<std::string>(), backend_tag(use_vm) + "!/ternary/&&/||/while on element reads");
-			}
+				)", std::string("nfxO3")},
+			};
+			check_both_backends(cases);
 		});
+
 	}
 };
 

@@ -6,10 +6,12 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/detail/foreign_keyword.hpp>
+#include "../case_table.hpp"
 
 #include <memory>
 #include <sstream>
 #include <string>
+#include <tuple>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -42,6 +44,20 @@ std::string error_text(const std::string& source) {
 
 bool contains(const std::string& haystack, std::string_view needle) { return haystack.find(needle) != std::string::npos; }
 
+// {name, source, expected}: expected is the exact printed output, or "ERROR <text>" for an error whose text holds <text>
+template<typename Cases>
+void check_runs(const Cases& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        const std::string expected = std::get<2>(c);
+        if (expected.rfind("ERROR ", 0) == 0) {
+            const std::string err = error_text(std::get<1>(c));
+            check_true(contains(err, expected.substr(6)), err);
+        } else {
+            check_eq(expected, run_output(std::get<1>(c)));
+        }
+    });
+}
+
 }   // namespace
 
 class bridge_additions_tests : public suite {
@@ -50,8 +66,9 @@ public:
 
     void forge_tests() override {
         // ------------------------------------------------------------------ array helpers
-        test("array_map_untyped_and_typed", [this]() {
-            check_eq(std::string("[2,4,6] array\n[6,7]\ncaught: Cannot push 'string' to array<int>\n[2,3,\"s\"]\n"), run_output(R"JS(
+        test("array_helpers_map_reduce_for_each_find_concat_and_insert", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"array_map_untyped_and_typed", R"JS(
                 var a = [1, 2, 3];
                 var d = array::map(a, (x) => x * 2);
                 print(to_json(d), " ", type_of(d));
@@ -62,31 +79,22 @@ public:
                 var u = array::map([1, 2], x => x + 1);
                 u.push("s");
                 print(to_json(u));
-            )JS"));
-        });
-
-        test("array_map_index_and_reference", [this]() {
-            check_eq(std::string("[\"0:a\",\"1:b\"]\n[10,20] [1,2]\n"), run_output(R"JS(
+            )JS", "[2,4,6] array\n[6,7]\ncaught: Cannot push 'string' to array<int>\n[2,3,\"s\"]\n"},
+                {"array_map_index_and_reference", R"JS(
                 var names = ["a", "b"];
                 print(to_json(array::map(names, (n, i) => `${i}:${n}`)));
                 array<int> v = [1, 2];
                 var tens = array::map(v, [](int& x) -> int { x = x; return x * 10; });
                 print(to_json(tens), " ", to_json(v));
-            )JS"));
-        });
-
-        test("array_reduce", [this]() {
-            check_eq(std::string("10 10 abc 7\ncaught: Cannot reduce an empty array without an initial value\n"), run_output(R"JS(
+            )JS", "[\"0:a\",\"1:b\"]\n[10,20] [1,2]\n"},
+                {"array_reduce", R"JS(
                 var a = [1, 2, 3, 4];
                 var empty = [];
                 print(a.reduce((acc, x) => acc + x, 0), " ", a.reduce((acc, x) => acc + x), " ",
                       ["a", "b", "c"].reduce((s, x) => s + x, ""), " ", empty.reduce((acc, x) => acc + x, 7));
                 try { empty.reduce((acc, x) => acc + x); } catch (e) { print("caught: ", e); }
-            )JS"));
-        });
-
-        test("array_for_each_and_reference_elements", [this]() {
-            check_eq(std::string("0:5 1:6 \n[50,60]\n[11,21]\n"), run_output(R"JS(
+            )JS", "10 10 abc 7\ncaught: Cannot reduce an empty array without an initial value\n"},
+                {"array_for_each_and_reference_elements", R"JS(
                 array<int> b = [5, 6];
                 string line = "";
                 b.for_each((x, i) => { line += `${i}:${x} `; });
@@ -98,11 +106,8 @@ public:
                 units[1].hp = 20;
                 units.for_each([](Unit& u) { u.hp += 1; });
                 print(to_json(array::map(units, u => u.hp)));
-            )JS"));
-        });
-
-        test("array_find_find_index_some_every", [this]() {
-            check_eq(std::string("3 true 2 -1\ntrue false true false\ntrue 1\n"), run_output(R"JS(
+            )JS", "0:5 1:6 \n[50,60]\n[11,21]\n"},
+                {"array_find_find_index_some_every", R"JS(
                 var a = [1, 2, 3, 4];
                 var empty = [];
                 print(a.find(x => x > 2), " ", a.find(x => x > 9) == null, " ", a.find_index(x => x > 2), " ", a.find_index(x => x > 9));
@@ -112,11 +117,8 @@ public:
                 var found = ps.find(p => p.v == 1);
                 found.v = 99;
                 print(found != null, " ", ps[0].v);
-            )JS"));
-        });
-
-        test("array_helpers_stop_at_the_answer", [this]() {
-            check_eq(std::string("2 2 3\n"), run_output(R"JS(
+            )JS", "3 true 2 -1\ntrue false true false\ntrue 1\n"},
+                {"array_helpers_stop_at_the_answer", R"JS(
                 int seen_some = 0;
                 int seen_find = 0;
                 int seen_every = 0;
@@ -125,12 +127,8 @@ public:
                 a.find(x => { seen_find += 1; return x > 3; });
                 a.every(x => { seen_every += 1; return x != 2; });
                 print(seen_some, " ", seen_find, " ", seen_every);
-            )JS"));
-        });
-
-        test("array_concat_and_insert", [this]() {
-            check_eq(std::string("[1,2,3,4] [1,2]\ncaught: Cannot push 'string' to array<int>\n[0,1,9,2,3]\n[\"a\",\"x\",\"b\"]\n"
-                                 "caught: Cannot insert at index 9 of an array of size 5\ncaught: Cannot insert 'string' into array<int>\n"), run_output(R"JS(
+            )JS", "2 2 3\n"},
+                {"array_concat_and_insert", R"JS(
                 array<int> a = [1, 2];
                 auto both = array::concat(a, [3, 4]);
                 print(to_json(both), " ", to_json(a));
@@ -144,23 +142,20 @@ public:
                 print(to_json(s));
                 try { b.insert(9, 1); } catch (e) { print("caught: ", e); }
                 try { b.insert(1, "s"); } catch (e) { print("caught: ", e); }
-            )JS"));
-        });
-
-        test("array_helper_callback_throw_propagates", [this]() {
-            check_eq(std::string("caught: boom at 2\n[1,2,3]\n"), run_output(R"JS(
+            )JS", "[1,2,3,4] [1,2]\ncaught: Cannot push 'string' to array<int>\n[0,1,9,2,3]\n[\"a\",\"x\",\"b\"]\n"
+                                 "caught: Cannot insert at index 9 of an array of size 5\ncaught: Cannot insert 'string' into array<int>\n"},
+                {"array_helper_callback_throw_propagates", R"JS(
                 var a = [1, 2, 3];
                 try { auto mapped = array::map(a, x => { if (x == 2) { throw `boom at ${x}`; } return x; }); } catch (e) { print("caught: ", e); }
                 print(to_json(a));
-            )JS"));
-        });
-
-        test("a_class_map_method_wins", [this]() {
-            check_eq(std::string("mapped 3\n"), run_output(R"JS(
+            )JS", "caught: boom at 2\n[1,2,3]\n"},
+                {"a_class_map_method_wins", R"JS(
                 class Grid { string map(int n) { return `mapped ${n}`; } }
                 Grid g;
                 print(g.map(3));
-            )JS"));
+            )JS", "mapped 3\n"},
+            };
+            check_runs(cases);
         });
 
         test("array_helpers_checker", [this]() {
@@ -174,8 +169,9 @@ public:
         });
 
         // ------------------------------------------------------------------ arrow functions
-        test("arrow_function_forms", [this]() {
-            check_eq(std::string("4 6 42 7 9 15\n"), run_output(R"JS(
+        test("arrow_functions_close_over_their_scope_and_type_their_parameters", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"arrow_function_forms", R"JS(
                 var dbl = (x) => x * 2;
                 var inc = x => x + 1;
                 var answer = () => 42;
@@ -183,11 +179,8 @@ public:
                 var block = (x) => { var y = x * 3; return y; };
                 var adder = x => y => x + y;
                 print(dbl(2), " ", dbl(3), " ", answer(), " ", add(3, 4), " ", block(3), " ", adder(10)(5));
-            )JS"));
-        });
-
-        test("arrow_function_closes_over_its_scope_by_reference", [this]() {
-            check_eq(std::string("2 7 3\n"), run_output(R"JS(
+            )JS", "4 6 42 7 9 15\n"},
+                {"arrow_function_closes_over_its_scope_by_reference", R"JS(
                 function make_counter() {
                     int count = 0;
                     return () => { count += 1; return count; };
@@ -201,11 +194,8 @@ public:
                 int seen = 0;
                 [1, 2, 3].for_each(x => { seen = x; });
                 print(next(), " ", total, " ", seen);
-            )JS"));
-        });
-
-        test("arrow_function_in_a_method_sees_this", [this]() {
-            check_eq(std::string("[11,12] [21,22]\n"), run_output(R"JS(
+            )JS", "2 7 3\n"},
+                {"arrow_function_in_a_method_sees_this", R"JS(
                 class Shift {
                     int by = 10;
                     var arrow(var xs) { return array::map(xs, x => x + this.by); }
@@ -213,37 +203,30 @@ public:
                 }
                 Shift s;
                 print(to_json(s.arrow([1, 2])), " ", to_json(s.bare([1, 2])));
-            )JS"));
-        });
-
-        test("arrow_function_typed_parameter_rejects", [this]() {
-            const std::string err = error_text("var f = (int x) => x * 2; var s = \"text\"; f(s);");
-            check_true(contains(err, "Cannot pass string to parameter 'x'"), err);
-        });
-
-        test("parentheses_still_group", [this]() {
-            check_eq(std::string("14 5 3\n"), run_output(R"JS(
+            )JS", "[11,12] [21,22]\n"},
+                {"arrow_function_typed_parameter_rejects", "var f = (int x) => x * 2; var s = \"text\"; f(s);", "ERROR Cannot pass string to parameter 'x'"},
+                {"parentheses_still_group", R"JS(
                 int a = 3;
                 int b = 4;
                 var x = 5;
                 print((a + b) * 2, " ", (x), " ", ((a)));
-            )JS"));
+            )JS", "14 5 3\n"},
+            };
+            check_runs(cases);
         });
 
         // ------------------------------------------------------------------ ?? and ??=
-        test("coalesce_values", [this]() {
-            check_eq(std::string("5 0 false  x 3\n"), run_output(R"JS(
+        test("coalesce_and_coalesce_assign_run_their_right_side_only_for_null", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"coalesce_values", R"JS(
                 var n = null;
                 var z = 0;
                 var f = false;
                 var e = "";
                 var c = null;
                 print(n ?? 5, " ", z ?? 5, " ", f ?? true, " ", e ?? "x", " ", n ?? c ?? "x", " ", n ?? 1 + 2);
-            )JS"));
-        });
-
-        test("coalesce_runs_its_right_side_only_for_null", [this]() {
-            check_eq(std::string("1 7 1\n"), run_output(R"JS(
+            )JS", "5 0 false  x 3\n"},
+                {"coalesce_runs_its_right_side_only_for_null", R"JS(
                 int calls = 0;
                 function fallback() { calls += 1; return 7; }
                 var have = 1;
@@ -251,30 +234,21 @@ public:
                 var a = have ?? fallback();
                 var b = none ?? fallback();
                 print(a, " ", b, " ", calls);
-            )JS"));
-        });
-
-        test("coalesce_map_missing_key_and_get", [this]() {
-            check_eq(std::string("0 3 0 1 Key \"mana\" not found in map\n"), run_output(R"JS(
+            )JS", "1 7 1\n"},
+                {"coalesce_map_missing_key_and_get", R"JS(
                 var m = {"hp": 3};
                 string raised = "";
                 try { var x = m["mana"] ?? 0; } catch (e) { raised = e; }
                 print(m.get("mana") ?? 0, " ", m["hp"] ?? 0, " ", m.get("mana", 0), " ", m.size(), " ", raised);
-            )JS"));
-        });
-
-        test("coalesce_precedence_with_the_conditional", [this]() {
-            check_eq(std::string("no yes\n"), run_output(R"JS(
+            )JS", "0 3 0 1 Key \"mana\" not found in map\n"},
+                {"coalesce_precedence_with_the_conditional", R"JS(
                 var none = null;
                 var some = true;
                 string a = none ?? false ? "yes" : "no";
                 string b = some ?? false ? "yes" : "no";
                 print(a, " ", b);
-            )JS"));
-        });
-
-        test("coalesce_assign_targets", [this]() {
-            check_eq(std::string("42 [9,2,3] axe 1 5\n"), run_output(R"JS(
+            )JS", "no yes\n"},
+                {"coalesce_assign_targets", R"JS(
                 var z = null;
                 z ??= 42;
                 z ??= 7;
@@ -294,16 +268,9 @@ public:
                 once ??= five();
                 once ??= five();
                 print(z, " ", to_json(arr), " ", h.weapon, " ", m["k"], " ", once * calls);
-            )JS"));
-        });
-
-        test("coalesce_assign_needs_a_plain_target", [this]() {
-            const std::string err = error_text("var a = [null]; int i = 0; a[i++] ??= 1;");
-            check_true(contains(err, "'??=' needs a variable, a member or an element whose index runs no code"), err);
-        });
-
-        test("coalesce_in_a_coroutine_resumes", [this]() {
-            check_eq(std::string("1 2 done\n"), run_output(R"JS(
+            )JS", "42 [9,2,3] axe 1 5\n"},
+                {"coalesce_assign_needs_a_plain_target", "var a = [null]; int i = 0; a[i++] ??= 1;", "ERROR '??=' needs a variable, a member or an element whose index runs no code"},
+                {"coalesce_in_a_coroutine_resumes", R"JS(
                 coroutine c() {
                     var none = null;
                     var b = none ?? (yield 1);
@@ -312,7 +279,9 @@ public:
                 string line = "";
                 for (auto v : c()) { line += to_string(v) + " "; }
                 print(line, "done");
-            )JS"));
+            )JS", "1 2 done\n"},
+            };
+            check_runs(cases);
         });
 
         test("coalesce_checker_types", [this]() {
@@ -323,18 +292,16 @@ public:
         });
 
         // ------------------------------------------------------------------ optional chains
-        test("optional_chain_skips_its_rest", [this]() {
-            check_eq(std::string("null null null null null\n3 5 axe\n"), run_output(R"JS(
+        test("optional_chains_skip_their_rest_on_null", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"optional_chain_skips_its_rest", R"JS(
                 class W { string name = "axe"; array<int> arr = [4, 5]; W next() { return W(); } }
                 var b = null;
                 print(b?.name.size(), " ", b?.arr[0], " ", b?.next()?.name, " ", b?.next().name, " ", b?.name);
                 var w = W();
                 print(w?.name.size(), " ", w?.arr[1], " ", w?.next()?.name);
-            )JS"));
-        });
-
-        test("optional_chain_with_coalesce", [this]() {
-            check_eq(std::string("fists fists axe -1\n"), run_output(R"JS(
+            )JS", "null null null null null\n3 5 axe\n"},
+                {"optional_chain_with_coalesce", R"JS(
                 class Weapon { string name = "axe"; }
                 class Player { var weapon = null; }
                 var nobody = null;
@@ -344,19 +311,13 @@ public:
                 p.weapon = Weapon();
                 string c = p?.weapon.name ?? "fists";
                 print(a, " ", b, " ", c, " ", nobody?.weapon.name.size() ?? -1);
-            )JS"));
-        });
-
-        test("optional_chain_raises_on_a_later_null", [this]() {
-            check_eq(std::string("raised: Cannot access 'name' on null ('inner' is null)\n"), run_output(R"JS(
+            )JS", "fists fists axe -1\n"},
+                {"optional_chain_raises_on_a_later_null", R"JS(
                 class Outer { var inner = null; }
                 var o = Outer();
                 try { print(o?.inner.name); } catch (e) { print("raised: ", e); }
-            )JS"));
-        });
-
-        test("optional_chain_evaluates_a_call_base_once", [this]() {
-            check_eq(std::string("null 1\nno inner 2\n30 30\n"), run_output(R"JS(
+            )JS", "raised: Cannot access 'name' on null ('inner' is null)\n"},
+                {"optional_chain_evaluates_a_call_base_once", R"JS(
                 class Outer { var inner = null; Outer make() { return Outer(); } }
                 int calls = 0;
                 function find_outer(bool real) { calls += 1; return real ? Outer() : null; }
@@ -368,12 +329,15 @@ public:
                     return find_outer(p != null)?.make().inner ?? arr[k];
                 }
                 print(local_chain(null), " ", local_chain(1));
-            )JS"));
+            )JS", "null 1\nno inner 2\n30 30\n"},
+            };
+            check_runs(cases);
         });
 
         // ------------------------------------------------------------------ print
-        test("print_uses_to_string", [this]() {
-            check_eq(std::string("P(1)\nP(1) and 3\nat P(1)!\nPlain{y: 2}\n{x} 2\n"), run_output(R"JS(
+        test("print_goes_through_to_string", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"print_uses_to_string", R"JS(
                 class P { int x = 1; string to_string() { return `P(${x})`; } }
                 class Plain { int y = 2; }
                 class Braces { string to_string() { return "{x}"; } }
@@ -385,20 +349,20 @@ public:
                 print("at ", p, "!");
                 print(q);
                 print(b, " ", 2);
-            )JS"));
-        });
-
-        test("print_to_string_throw_is_catchable", [this]() {
-            check_eq(std::string("caught: bad text\n"), run_output(R"JS(
+            )JS", "P(1)\nP(1) and 3\nat P(1)!\nPlain{y: 2}\n{x} 2\n"},
+                {"print_to_string_throw_is_catchable", R"JS(
                 class Bad { string to_string() { throw "bad text"; } }
                 Bad b;
                 try { print(b); } catch (e) { print("caught: ", e); }
-            )JS"));
+            )JS", "caught: bad text\n"},
+            };
+            check_runs(cases);
         });
 
         // ------------------------------------------------------------------ do-while
-        test("do_while_runs_its_body_first", [this]() {
-            check_eq(std::string("1 5 3\n"), run_output(R"JS(
+        test("do_while_runs_its_body_before_the_condition", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"do_while_runs_its_body_first", R"JS(
                 int runs = 0;
                 do { runs++; } while (false);
                 int c = 0;
@@ -409,11 +373,8 @@ public:
                     return i;
                 }
                 print(runs, " ", c, " ", first_multiple(3));
-            )JS"));
-        });
-
-        test("do_while_continue_reaches_the_condition", [this]() {
-            check_eq(std::string("5 4 3\n"), run_output(R"JS(
+            )JS", "1 5 3\n"},
+                {"do_while_continue_reaches_the_condition", R"JS(
                 int c = 0;
                 int bodies = 0;
                 do {
@@ -427,11 +388,8 @@ public:
                     if (i == 3) { break; }
                 } while (true);
                 print(c, " ", bodies, " ", i);
-            )JS"));
-        });
-
-        test("do_while_nested_and_in_a_coroutine", [this]() {
-            check_eq(std::string("6\ng0 g1 g2 \n"), run_output(R"JS(
+            )JS", "5 4 3\n"},
+                {"do_while_nested_and_in_a_coroutine", R"JS(
                 int total = 0;
                 int a = 0;
                 do {
@@ -447,16 +405,11 @@ public:
                 string line = "";
                 for (auto v : gen()) { line += "g" + to_string(v) + " "; }
                 print(line);
-            )JS"));
-        });
-
-        test("do_while_condition_cannot_see_the_body", [this]() {
-            const std::string err = error_text("do { int k = 1; } while (k < 3);");
-            check_true(contains(err, "'k'"), err);
-        });
-
-        test("do_stays_a_name", [this]() {
-            check_eq(std::string("5\n"), run_output("var do = 5; print(do);"));
+            )JS", "6\ng0 g1 g2 \n"},
+                {"do_while_condition_cannot_see_the_body", "do { int k = 1; } while (k < 3);", "ERROR 'k'"},
+                {"do_stays_a_name", "var do = 5; print(do);", "5\n"},
+            };
+            check_runs(cases);
         });
 
         // ------------------------------------------------------------------ let
@@ -477,8 +430,9 @@ public:
         });
 
         // ------------------------------------------------------------------ structured bindings
-        test("structured_binding_over_a_map", [this]() {
-            check_eq(std::string("arrow=20 potion=3 \n{\"arrow\":20,\"potion\":3}\n{\"arrow\":21,\"potion\":4}\n{\"a\":10,\"b\":20}\n"), run_output(R"JS(
+        test("structured_bindings_take_a_maps_key_and_value", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"structured_binding_over_a_map", R"JS(
                 var inv = {"potion": 3, "arrow": 20};
                 string line = "";
                 for (auto [k, v] : inv) { line += `${k}=${v} `; v = 0; }
@@ -490,11 +444,8 @@ public:
                 function bump(map<string, int>& m) { for (var& [name, score] : m) { score *= 10; } }
                 bump(scores);
                 print(to_json(scores));
-            )JS"));
-        });
-
-        test("structured_binding_break_and_continue", [this]() {
-            check_eq(std::string("b\n"), run_output(R"JS(
+            )JS", "arrow=20 potion=3 \n{\"arrow\":20,\"potion\":3}\n{\"arrow\":21,\"potion\":4}\n{\"a\":10,\"b\":20}\n"},
+                {"structured_binding_break_and_continue", R"JS(
                 map<string, int> m = {"a": 1, "b": 2, "c": 3};
                 string picked = "";
                 for (auto [k, v] : m) {
@@ -503,7 +454,10 @@ public:
                     break;
                 }
                 print(picked);
-            )JS"));
+            )JS", "b\n"},
+                {"structured_binding_takes_two_names", "var m = {\"a\": 1}; for (auto [a, b, c] : m) { }", "ERROR a map entry binds two names, the key and the value"},
+            };
+            check_runs(cases);
         });
 
         test("structured_binding_checker", [this]() {
@@ -513,11 +467,6 @@ public:
             check_eq((size_t)1, report.error_count());
             check_true(!report.diagnostics.empty() && contains(report.diagnostics[0].message, "a structured binding takes a map's entries, its key and value: cannot bind 'array<int>' to [x, y]"));
             check_eq((size_t)0, e->check("map<string, int> m = {\"a\": 1}; for (auto [k, v] : m) { for (auto [k2, v2] : m) { int s = v + v2; } }").diagnostics.size());
-        });
-
-        test("structured_binding_takes_two_names", [this]() {
-            const std::string err = error_text("var m = {\"a\": 1}; for (auto [a, b, c] : m) { }");
-            check_true(contains(err, "a map entry binds two names, the key and the value"), err);
         });
 
         // ------------------------------------------------------------------ foreign keywords

@@ -60,8 +60,9 @@ class Reel {
 	bool hud = true;
 	bool paused = false;
 
-	int nscenes = 18;
+	int nscenes = 11;
 	var durs = [];
+	var seed_slots = [];   // each scene seeds from its own slot, so the running order never changes a scene's frames
 	var cur = null;
 	var nxt = null;
 	int cur_idx = 0;
@@ -116,29 +117,23 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 16.0, 24.0];
+		durs = [11.0, 11.0, 12.0, 14.0, 12.0, 15.0, 15.0, 12.0, 20.0, 16.0, 24.0];
+		seed_slots = [3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 16];
 		start_scene(0, 0.0);
 	}
 
 	var make_scene(int idx) {
 		switch (idx) {
-			case 0: return Plasma();
-			case 1: return Starfield();
-			case 2: return Tunnel();
-			case 3: return Donut();
-			case 4: return Julia();
-			case 5: return Lava();
-			case 6: return Pipes();
-			case 7: return SandBox();
-			case 8: return Boids();
-			case 9: return Kinstein();
-			case 10: return CanyonRun();
-			case 11: return SpongeWorks();
-			case 12: return BannerFall();
-			case 13: return Chrome();
-			case 14: return Fire();
-			case 15: return Ossuary();
-			case 16: return Maelstrom();
+			case 0: return Donut();
+			case 1: return Julia();
+			case 2: return Lava();
+			case 3: return Pipes();
+			case 4: return Boids();
+			case 5: return Kinstein();
+			case 6: return CanyonRun();
+			case 7: return Chrome();
+			case 8: return Ossuary();
+			case 9: return Maelstrom();
 			default: return Finale();
 		}
 	}
@@ -173,7 +168,7 @@ class Reel {
 	void start_scene(int idx, float at_t) {
 		cur_idx = ((idx % nscenes) + nscenes) % nscenes;
 		cur = make_scene(cur_idx);
-		cur.setup(w, ph, seed + cur_idx * 7919);
+		cur.setup(w, ph, seed + seed_slots[cur_idx] * 7919);
 		dur_cur = dur_for(cur_idx);
 		scene_t = at_t;
 		in_trans = false;
@@ -199,7 +194,7 @@ class Reel {
 	void begin_transition() {
 		pending_idx = (cur_idx + 1) % nscenes;
 		nxt = make_scene(pending_idx);
-		nxt.setup(w, ph, seed + pending_idx * 7919);
+		nxt.setup(w, ph, seed + seed_slots[pending_idx] * 7919);
 		in_trans = true;
 		trans_t = 0.0;
 		trans_kind = (trans_count + seed) % 5;

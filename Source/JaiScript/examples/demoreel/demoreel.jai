@@ -89,20 +89,14 @@ class Rng {
 
 import "scenes/util.jai";
 import "scenes/reel.jai";
-import "scenes/plasma.jai";
-import "scenes/starfield.jai";
-import "scenes/tunnel.jai";
 import "scenes/donut.jai";
 import "scenes/julia.jai";
 import "scenes/lava.jai";
 import "scenes/pipes.jai";
 import "scenes/fire.jai";
-import "scenes/sand.jai";
 import "scenes/boids.jai";
 import "scenes/kinstein.jai";
 import "scenes/voxelspace.jai";
-import "scenes/marcher.jai";
-import "scenes/cloth.jai";
 import "scenes/chrome.jai";
 import "scenes/skull.jai";
 import "scenes/fluid.jai";

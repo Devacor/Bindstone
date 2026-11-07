@@ -168,6 +168,7 @@ int conversion_registry::get_builtin_conversion_cost(script_value_type from, scr
         case t::jai_int_type: return to == t::jai_float_type ? 1 : (to == t::jai_char_type || to == t::jai_bool_type) ? 2 : 1000;
         case t::jai_float_type: return to == t::jai_int_type ? 2 : (to == t::jai_bool_type || to == t::jai_char_type) ? 3 : 1000;
         case t::jai_utf8_string_type: return to == t::jai_string_type ? 1 : 1000;   // a string parameter reads a utf8_string's bytes
+        case t::jai_string_type: return to == t::jai_char_type ? 2 : 1000;   // a char parameter takes a string of one character
         default: return 1000;
     }
 }

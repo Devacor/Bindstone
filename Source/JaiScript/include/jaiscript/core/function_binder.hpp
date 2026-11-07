@@ -12,6 +12,7 @@
 #include "bound_map.hpp"
 #include "parameter_storage.hpp"
 #include "runtime_errors.hpp"
+#include <jaiscript/detail/numeric_conversion.hpp>
 #include <functional>
 #include <optional>
 #include <set>
@@ -253,7 +254,37 @@ class engine;
                 return script_value(t, eng);  // script_float is double
             }
         };
-        
+
+        // A char parameter takes a char or a string of exactly one character, as a script char slot does
+        template<>
+        struct value_converter<char> {
+            static checked_result<char> checked_from(const script_value& v, engine*) {
+                const script_value& actual = v.deref();
+                if (actual.type() == script_value_type::jai_string_type) {
+                    return actual.raw_storage_index() == script_value::TYPEID_STRING ? char_of_text(actual.unchecked_as_string())
+                                                                                     : char_of_text(actual.to_string());
+                }
+                return v.checked_as<char>();
+            }
+
+            static char from(const script_value& v, engine* eng) {
+                auto result = checked_from(v, eng);
+                if (!result) [[unlikely]] {
+                    throw_numeric_error(result.message(), result.symbol_id(), result.symbol_id2());
+                }
+                return result.value();
+            }
+
+            static script_value to(const char& t, engine* eng) {
+                if (!eng) {
+                    throw runtime_error("Engine reference required for script_value creation");
+                }
+                return script_value(static_cast<script_char>(t), eng);
+            }
+        };
+        template<>
+        struct value_converter<const char&> : value_converter<char> {};   // a one-character string holds no char to bind: the value
+
         // Specialization for script_value itself (no conversion needed!)
         template<>
         struct value_converter<script_value> {
@@ -827,6 +858,8 @@ class engine;
                     return D(const_cast<script_value&>(arg).as_map(), eng);
                 } else if constexpr (std::is_same_v<D, std::string> || std::is_same_v<D, std::vector<script_value>> || std::is_same_v<D, script_map>) {
                     return static_cast<const D&>(actual.as<const D&>());
+                } else if constexpr (std::is_same_v<D, char>) {
+                    return value_converter<char>::from(actual, eng);
                 } else {
                     return D(actual.as<P>());
                 }
@@ -1091,6 +1124,8 @@ class engine;
                     return actual_arg;
                 } else if constexpr (std::is_same_v<base_type, std::string>) {
                     return std::cref(const_cast<script_value&>(actual_arg).as<const std::string&>());   // the script's own string
+                } else if constexpr (std::is_same_v<base_type, char>) {
+                    return detail::value_converter<char>::from(actual_arg, eng);
                 } else {
                     // For built-in types and special types, use the non-const as<T&>() method
                     return const_cast<script_value&>(actual_arg).as<T>();

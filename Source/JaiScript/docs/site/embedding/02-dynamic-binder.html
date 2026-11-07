@@ -514,6 +514,7 @@ clobbering it.</li>
 <li>The ordinary call and the VM&#x27;s direct lane invoke one copy of the lambda, so a
 stateful functor keeps one state.</li>
 </ul></li>
+<li>A <code>char</code> parameter (by value or <code>const char&amp;</code>) of a method, a static method, a constructor or an <code>add_function</code> binding, and an assignment to a <code>char</code> property, take a char or a string of exactly one character, as a script char slot does. A string of any other length raises <code>Cannot convert 'string' to 'char': a char takes a string of exactly one character</code>.</li>
 <li>A non-const <code>T&amp;</code> parameter of a method, a static method or a constructor writes the callee&#x27;s
 final value back into the script argument, exactly as for <code>add_function</code> (see
 <a href="17-host-api.html#the-exact-width-as-aliasing-rules">the quickstart</a>). <code>gate.add(total, 5)</code>

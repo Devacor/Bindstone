@@ -1149,6 +1149,8 @@ private:
         } else if constexpr (dynamic_binder_validation::is_std_function<P>::value) {
             // Script lambdas assign into C++ callback hooks (spawn/update pattern)
             cpp_obj->*member = detail::value_converter<P>::from(args[1], engine_ptr);
+        } else if constexpr (std::is_same_v<P, char>) {
+            cpp_obj->*member = detail::value_converter<char>::from(args[1], engine_ptr);   // a one-character string, as a char field takes
         } else {
             cpp_obj->*member = args[1].as<P>();
         }
@@ -1905,7 +1907,7 @@ private:
     // parameter what value_converter hands the call
     template<typename P>
     using carrier_t = std::conditional_t<detail::host_writes_back<P>(), detail::writeback_argument<std::remove_cvref_t<P>>,
-                                         std::conditional_t<std::is_lvalue_reference_v<P>, P, std::remove_cvref_t<P>>>;
+                                         std::conditional_t<std::is_lvalue_reference_v<P> && !std::is_same_v<P, const char&>, P, std::remove_cvref_t<P>>>;
     template<typename P, size_t I, size_t Offset>
     static carrier_t<P> make_carrier(const std::vector<script_value>& args, engine* eng) {
         if constexpr (detail::host_writes_back<P>()) { return detail::make_writeback_argument<std::remove_cvref_t<P>>(args, I, Offset, eng); }

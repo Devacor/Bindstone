@@ -3981,7 +3981,7 @@ private:
             case script_value_type::jai_bool_type:
                 return k == ctype::bool_k || k == ctype::int_k || k == ctype::float_k;
             case script_value_type::jai_char_type:
-                return k == ctype::char_k || k == ctype::int_k || k == ctype::float_k;
+                return k == ctype::char_k || k == ctype::int_k || k == ctype::float_k || k == ctype::string_k;   // a string of one character
             case script_value_type::jai_string_type:
                 return k == ctype::string_k || k == ctype::utf8_k;   // no builtin numeric->string conversion at the C++ boundary
             case script_value_type::jai_array_type:

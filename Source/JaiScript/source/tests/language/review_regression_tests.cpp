@@ -4475,6 +4475,35 @@ public:
                 check_eq((size_t)1, rep.error_count(), rep.format(src));
                 check_true(rep.format(src).find(load) != std::string::npos, rep.format(src));
             }
+            // a bound C++ char parameter converts as a script char slot does, among host overloads too
+            struct char_taker {
+                std::string got;
+                char mark = '-';
+                char_taker() = default;
+                explicit char_taker(char a_c) : got(1, a_c) {}
+            };
+            e->add_function("host_char", [](char a_c) { return std::string(1, a_c) + "!"; });
+            e->add_function("host_char_ref", [](const char& a_c) { return std::string(1, a_c) + "?"; });
+            e->add_function("host_pick", [](bool) { return std::string("bool"); });
+            e->add_function("host_pick", [](char a_c) { return std::string("char ") + a_c; });
+            dynamic_binder<char_taker>(*e, "CharTaker")
+                .constructor<>()
+                .constructor<char>()
+                .property("mark", &char_taker::mark)
+                .method("take", [](char_taker& a_self, char a_c) { a_self.got += a_c; return a_self.got; })
+                .static_method("echo", [](char a_c) { return a_c; })
+                .static_method("echo_ref", [](const char& a_c) { return a_c; })
+                .build();
+            check_eq(std::string("r! s! t! char u ab b char q? q zy m"), e->execute(R"(
+                var v = "s";
+                CharTaker taker;
+                taker.take("a");
+                string mark_of(string m) { CharTaker t; t.mark = m; return `${t.mark}`; }
+                `${host_char("r")} ${host_char(v)} ${host_char('t')} ${host_pick("u")} ${taker.take(v == "s" ? "b" : "c")} ${CharTaker::echo("b")} ${type_of(CharTaker::echo("b"))} ${host_char_ref("q")} ${CharTaker::echo_ref('q')} ${CharTaker("z").take("y")} ${mark_of("m")}`
+            )").as_string());
+            for (const std::string call : {"host_char(v)", "host_char(\"\")", "host_pick(v)", "CharTaker().take(v)", "CharTaker::echo(v)", "host_char_ref(v)", "CharTaker::echo_ref(v)", "CharTaker(v)", "CharTaker t; t.mark = v"}) {
+                check_eq(refused, e->execute("string got = \"\"; var v = \"zz\"; try { " + call + "; } catch (err) { got = err.message; } got").as_string(), call);
+            }
         });
         // a switch runs the language's ==: a char subject matches a one-character string case and a string subject a char case
         test("switch_matches_a_char_and_its_string", [this]() {

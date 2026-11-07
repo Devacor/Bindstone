@@ -1,8 +1,9 @@
 // The showcase look: how GLOOM is lit and colored when it is played. Lighting,
-// fog, wall textures, sprite shading and particle colors are all tables built
-// at boot and on map load; the per-pixel renderer reads them exactly as it
-// reads the reference tables (reference/README.md section 4.2), so both looks
-// cost the same per pixel, and --smoke keeps the frames the ports reproduce.
+// fog, wall textures, sprite shading and particle colors are all tables the
+// Renderer builds at boot and on map load; its per-pixel work reads them
+// exactly as it reads the reference tables (../gloom/reference/README.md
+// section 4.2), so both looks cost the same per pixel, and --smoke keeps the
+// frames the ports reproduce.
 // Colors are math::color values mixed per channel (mix_rgb): plain arithmetic,
 // so the tables come out bit-identical on every platform.
 
@@ -92,8 +93,8 @@ function shade_light(int shade) -> float {
 	return 0.05 + 0.8 * t * math::sqrt(t);
 }
 
-// WALLT: [kind 0..8][side][shade 0..15][tone 0..7] palette indices
-function push_showcase_tones(Mood& mood, math::color base, math::color accent, math::color glow) -> void {
+// [side][shade 0..15][tone 0..7] palette indices for one wall kind, appended to out
+function push_showcase_tones(array<int>& out, Mood& mood, math::color base, math::color accent, math::color glow) -> void {
 	math::color white = rgb(255, 255, 255);
 	array<math::color> albedo = [base, accent, base * 0.36, math::clamp(base * 1.25, 0.0, 1.0), base * 0.62, glow,
 		base * 0.86, math::clamp(base * 1.1, 0.0, 1.0)];
@@ -104,42 +105,47 @@ function push_showcase_tones(Mood& mood, math::color base, math::color accent, m
 			math::color haze = mood.fog * (1.0 - lum);
 			for (int tone = 0; tone < TONES; ++tone) {
 				if (tone == TONE_GLOW) {
-					WALLT.push(color_idx(math::mix_rgb(glow, white, 0.15) * (0.6 + 0.4 * lum) + haze * 0.3));
+					out.push(color_idx(math::mix_rgb(glow, white, 0.15) * (0.6 + 0.4 * lum) + haze * 0.3));
 				} else {
-					WALLT.push(color_idx(albedo[tone] * light * lum + haze));
+					out.push(color_idx(albedo[tone] * light * lum + haze));
 				}
 			}
 		}
 	}
 }
 
-function build_showcase_tables(int mi) -> void {
+// the wall tone table of floor mi: [kind 0..8][side][shade 0..15][tone 0..7]
+function showcase_wall_tones(int mi) -> array<int> {
 	auto& mood = MOODS[mi];
-	WALLT = [];
+	array<int> tones = [];
 	math::color unseen = rgb(10, 10, 12);
-	push_showcase_tones(mood, unseen, unseen, unseen);
+	push_showcase_tones(tones, mood, unseen, unseen, unseen);
 	for (auto& wall : mood.walls) {
-		push_showcase_tones(mood, wall, math::mix_rgb(wall, mood.light, 0.18), wall);
+		push_showcase_tones(tones, mood, wall, math::mix_rgb(wall, mood.light, 0.18), wall);
 	}
 	for (auto& fixture : FIXTURES) {
-		push_showcase_tones(mood, fixture.base, fixture.accent, fixture.glow);
+		push_showcase_tones(tones, mood, fixture.base, fixture.accent, fixture.glow);
 	}
+	return tones;
+}
 
-	// ceiling and floor fade into the fog at the horizon, one color per pixel row
-	CEILP = [];
-	FLOORP = [];
-	int half = G.vh / 2;
+// ceiling and floor fade into the fog at the horizon, one color per pixel row
+function showcase_backdrop(int mi, int view_h, array<int>& ceiling, array<int>& floor) -> void {
+	auto& mood = MOODS[mi];
+	ceiling = [];
+	floor = [];
+	int half = view_h / 2;
 	math::color near_floor = mood.floor * math::mix_rgb(mood.light, rgb(255, 255, 255), 0.5);
-	for (int y = 0; y < G.vh; ++y) {
+	for (int y = 0; y < view_h; ++y) {
 		if (y < half) {
 			float t = 1.0 * y / imax(1, half - 1);
 			float fade = t * t * (3.0 - 2.0 * t);
-			CEILP.push(color_idx(math::mix_rgb(mood.ceiling, mood.fog, fade)));
-			FLOORP.push(0);
+			ceiling.push(color_idx(math::mix_rgb(mood.ceiling, mood.fog, fade)));
+			floor.push(0);
 		} else {
-			float t = 1.0 * (y - half) / imax(1, G.vh - 1 - half);
-			CEILP.push(0);
-			FLOORP.push(color_idx(math::mix_rgb(mood.fog, near_floor, t * math::sqrt(t))));
+			float t = 1.0 * (y - half) / imax(1, view_h - 1 - half);
+			ceiling.push(0);
+			floor.push(color_idx(math::mix_rgb(mood.fog, near_floor, t * math::sqrt(t))));
 		}
 	}
 }
@@ -254,25 +260,23 @@ function switch_tone(int tx, int ty) -> int {
 // and every projectile glow at full brightness.
 function showcase_sprite_lut(string name, int band, int flash) -> array<int> {
 	auto& mood = MOODS[G.map_i];
-	var& art = ARTS[name];
-	var& rgbs = art["rgb"];
-	array<string> keys = art["keys"];
+	shared_ptr<Art> art = ARTS[name];
 	bool glowing = name.substr(0, 3) == "pr_";
 	float lum = 1.0 - band * 0.085;
 	math::color light = math::mix_rgb(mood.light, rgb(255, 255, 255), 0.55);
 	math::color haze = mood.fog * ((1.0 - lum) * 0.8);
 	array<int> lut = [0];
-	for (int c = 1; c < rgbs.size(); ++c) {
-		int r = rgbs[c][0];
-		int g = rgbs[c][1];
-		int b = rgbs[c][2];
+	for (int c = 1; c < art.rgb.size(); ++c) {
+		int r = art.rgb[c][0];
+		int g = art.rgb[c][1];
+		int b = art.rgb[c][2];
 		if (flash == 1) {
 			r = imin(255, r + 170);
 			g = imin(255, g + 150);
 			b = imin(255, b + 140);
 		}
 		math::color color = rgb(r, g, b);
-		string key = keys[c];
+		string key = art.keys[c];
 		if (glowing || (key >= "A" && key <= "Z")) {
 			lut.push(color_idx(color));
 		} else {

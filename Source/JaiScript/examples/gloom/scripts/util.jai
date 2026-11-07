@@ -1,4 +1,7 @@
-// Small helpers: math, hashing, the truecolor palette intern, text padding.
+// Small helpers: math, hashing, the palette intern, text padding. Free
+// functions, the script's namespace of inline helpers. The palette tables stay
+// globals because gloom_row_quad (render.jai) reads them as captured state
+// inside a parallel_transform body, and captured reads admit only globals.
 
 float TICK = 1.0 / 30.0; // fixed sim timestep; --smoke feeds exactly this dt
 

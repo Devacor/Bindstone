@@ -96,7 +96,6 @@ classify() {
 		tools/jaiscript/*) pick gatorquest "the runner ($p)"; pick selftest "the runner's smoke tests ($p)"; pick site "the runner runs the site's samples ($p)"; pick spider "jai_spider shares the runner's file IO, sockets and HTTP transport ($p)" ;;
 		tools/jai_spider/*) pick spider "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
-		examples/gloom_idiomatic/*) pick gloom "GLOOM written idiomatically ($p)" ;;
 		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
 		examples/crawler/*) pick crawler "the crawler ($p)" ;;
 		examples/gatorquest/*) pick gatorquest "Gator Quest ($p)"; pick lsp "the language server checks Gator Quest ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;

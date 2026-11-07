@@ -23,7 +23,6 @@
 + examples/embed_quickstart/**
 + examples/gatorquest/**
 + examples/gloom/**
-+ examples/gloom_idiomatic/**
 + examples/jaidoom/**
 
 # Internal notes and Bindstone-only material

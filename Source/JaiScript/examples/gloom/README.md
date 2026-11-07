@@ -12,7 +12,10 @@ GLOOM is the crawler's bigger sibling and a deliberate dogfood of the language's
 larger features: **`parallel_transform`** drives the wall rays and the particle pool,
 **coroutine handles living in fields** drive every enemy brain and the demo pilot,
 `new`/`shared_ptr` holds the world and its registries, and template strings (with
-`:spec` formats) build the HUD.
+`:spec` formats) build the HUD. The scripts are written as you would write them today:
+subsystem classes (World, Player, Renderer, Hud, Pilot), an enemy hierarchy whose
+subclasses override one coroutine brain, typed records (`Input`, `Particle`,
+`WallChunk`, `Billboard`), enums and `math::ivec2` paths.
 
 ## Run it
 
@@ -130,20 +133,6 @@ jaiscript.exe gloom.jai -- --256color            # force xterm-256 (the shim gue
 
 `--smoke` exits 0 only when `STATE_HASH` matches the reference checkpoint
 table.
-
-### The same game, written idiomatically
-
-`../gloom_idiomatic` is GLOOM as you would write it today: subsystem classes
-(World, Player, Renderer, Hud, Pilot), an enemy hierarchy whose subclasses
-override one coroutine brain, typed records (`Input`, `Particle`, `WallChunk`,
-`Billboard`), enums and `math::ivec2` paths. It draws the same frames and
-reaches the same `STATE_HASH` in both looks, so the native host plays it too:
-
-```bash
-jai_gloom.exe --scripts ../gloom_idiomatic/scripts
-jai_gloom.exe --smoke --ticks 300 --scripts ../gloom_idiomatic/scripts   # the hashes above
-jaiscript.exe ../gloom_idiomatic/gloom_idiomatic.jai                     # or its own shim
-```
 
 ## The game
 

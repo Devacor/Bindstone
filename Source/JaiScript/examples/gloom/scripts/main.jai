@@ -1,6 +1,7 @@
-// GLOOM entry point. The host executes: import "main.jai"; then calls
+// GLOOM entry point. The host executes import "main.jai"; then calls
 // gloom_boot(w, h) once and gloom_frame(dt, key, fps, ms_sim, ms_draw) per
-// frame; --smoke additionally calls gloom_state_hash() / gloom_summary().
+// frame; --smoke also calls gloom_state_hash() and gloom_summary(). The
+// contract and the tick are ../gloom's; only the style differs.
 
 import "state.jai";
 import "util.jai";
@@ -12,11 +13,11 @@ import "enemies.jai";
 import "combat.jai";
 import "sim.jai";
 import "look.jai";
-import "render.jai";
 import "viewmodel.jai";
+import "render.jai";
 import "canvas.jai";
-import "hud.jai";
 import "screens.jai";
+import "hud.jai";
 import "game.jai";
 
 bool FORCE_PILOT = false;
@@ -34,8 +35,8 @@ function gloom_boot(int w, int h) -> void {
 	parse_viewmodels();
 	validate_all_maps();
 	G = new Game(w, h);
-	init_render();
-	if (SHOWCASE) { init_screens(); }
+	G.renderer.init();
+	G.hud.init();
 	G.autopilot = HOST_SMOKE || FORCE_PILOT;
 }
 
@@ -52,7 +53,7 @@ function gloom_frame(float dt, string key, float fps, float ms_sim, float ms_dra
 		steps = steps + 1;
 	}
 	if (steps == 3) { G.accum = 0.0; }   // stall recovery: never spiral
-	return render_frame(fps, ms_sim, ms_draw);
+	return G.hud.frame(fps, ms_sim, ms_draw);
 }
 
 function gloom_state_hash() -> int { return G.hash; }
@@ -63,8 +64,8 @@ function gloom_summary() -> void {
 	host_log("");
 	host_log("=== GLOOM RESULT ===");
 	host_log(`backend: ${HOST_BACKEND}  seed: ${HOST_SEED}  workers: ${HOST_WORKERS}  ticks: ${G.tick}`);
-	host_log(`mode: ${G.mode}  map: ${G.map_name}  deaths: ${G.deaths}`);
-	host_log(`hp: ${G.hp}  armor: ${G.armor}  ammo: ${G.ammo[0]}/${G.ammo[1]}/${G.ammo[2]}`);
+	host_log(`mode: ${G.mode}  map: ${G.world.map_name}  deaths: ${G.deaths}`);
+	host_log(`hp: ${G.player.hp}  armor: ${G.player.armor}  ammo: ${G.player.ammo[0]}/${G.player.ammo[1]}/${G.player.ammo[2]}`);
 	host_log(`map kills: ${G.kills}/${G.kill_total}  secrets: ${G.secrets}/${G.secret_total}`);
 	host_log(`episode kills: ${G.ep_kills}/${G.ep_kill_total}  secrets: ${G.ep_secrets}/${G.ep_secret_total}`);
 	host_log(`warden down: ${G.warden_down}`);

@@ -111,9 +111,11 @@ int SHIM_H = 0;
 float SHIM_FPS = 30.0;
 int SHIM_DUMP = -1;
 
-// reference/README.md section 3.5 checkpoints, keyed seed/god/ticks (pix-independent)
+// reference/README.md section 3.5 checkpoints and the 100- and 600-tick rows, keyed seed/god/ticks
 var SMOKE_REF = {
+	"666/0/100": 2414528911,
 	"666/0/300": 3580805725,
+	"666/0/600": 1503537018,
 	"666/0/2000": 319812559,
 	"666/0/3000": 4080154357,
 	"666/0/16000": 3497451110,

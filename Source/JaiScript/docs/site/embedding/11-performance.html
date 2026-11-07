@@ -340,13 +340,12 @@ the measured session.</td></tr></tbody></table></div>
 coroutine or generator method in JaiScript, Lua, Squirrel, and Python. In ChaiScript, which has no coroutines, it is a 50-line
 hand-lowered state machine. Expressiveness parity is table stakes; the
 differentiators are speed and what the language lets you say directly.</p>
-<p><strong>Style is near-free, and provably so.</strong> GLOOM exists in a second complete flavor,
-<code>examples/gloom_idiomatic</code>, a full rewrite in modern class-based style: subsystem classes, an
-enemy hierarchy with virtual coroutine brains, typed classes for the record types instead of string-keyed maps. It produces <em>bit-identical</em> state and
-frame hashes to the flat original on both backends at every worker count, and measures within noise on
-the interpreter and ~4–7% behind on the VM. The moral for code review: choose the architecture you want
-to maintain; the per-pixel hot stages are held to the flat shape by the parallel-admission rules either
-way, and that is where the time goes.</p>
+<p><strong>Style is near-free.</strong> GLOOM is written in modern class-based style: subsystem classes with
+private members, an enemy hierarchy with virtual coroutine brains, typed classes for the record types instead
+of string-keyed maps. A flat rewrite of the same game in free functions and globals produces <em>bit-identical</em>
+state and frame hashes and runs within 2% of it on the VM. The moral for code review: choose the architecture you
+want to maintain; the per-pixel hot stages are held to the flat shape by the parallel-admission rules either way,
+and that is where the time goes.</p>
 <h2 id="measuring-yourself">Measuring yourself<a class="hlink" href="#measuring-yourself" aria-label="link">&#8203;</a></h2>
 <p>Build the test executable with the performance suites enabled (<code>-DJAISCRIPT_ENABLE_BENCHMARKS=ON</code> at configure time, Release; see <a href="https://github.com/Devacor/jaiscript/blob/master/docs/BUILD.md"><code>docs/BUILD.md</code></a>, &quot;Comparison benchmarks&quot;) and then:</p>
 <div class="codeblock cb-plain"><pre><code class="lang-plain">jaiscript_tests &quot;Performance Benchmarks&quot; --verbose [--backend=vm]</code></pre></div>

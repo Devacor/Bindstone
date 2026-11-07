@@ -1173,6 +1173,35 @@ function flowtest() -> int {
 	cheat_feed("idclev99");
 	if (GAME_MAP != "E1M2") { fails = fails + 1; print("FAIL idclev99 must not warp (no E9M9)"); }
 
+	// ---- raise-and-change (types 20/22) takes the new floor's texture and drops the old floor's damage ----
+	player_reset();
+	game_start_map("E1M3");
+	int rline = -1;
+	int rsec = -1;
+	for (int rl = 0; rl < LD_SPECIAL.size() && rline < 0; ++rl) {
+		if (LD_SPECIAL[rl] != 20) { continue; }
+		for (int rs = 0; rs < SE_TAG.size(); ++rs) {
+			if (SE_TAG[rs] == LD_TAG[rl] && SE_SPECIAL[rs] == 7) { rline = rl; rsec = rs; }
+		}
+	}
+	if (rline < 0) { fails = fails + 1; print("FAIL no type 20 line raising nukage on E1M3"); }
+	else {
+		spec_line(rline, 0);
+		for (int rt = 0; rt < 200; ++rt) { spec_tic(); }
+		P_X = 0.0; P_Y = 0.0;
+		for (int rv = 0; rv < LD_V1.size() && sector_at(P_X, P_Y) != rsec; ++rv) {
+			if (LD_SIDE0[rv] >= 0 && SD_SEC[LD_SIDE0[rv]] == rsec) {
+				P_X = (VX_X[LD_V1[rv]] + VX_X[LD_V2[rv]]) / 2.0 + (VX_Y[LD_V2[rv]] - VX_Y[LD_V1[rv]]) * 0.1;
+				P_Y = (VX_Y[LD_V1[rv]] + VX_Y[LD_V2[rv]]) / 2.0 - (VX_X[LD_V2[rv]] - VX_X[LD_V1[rv]]) * 0.1;
+			}
+		}
+		P_HP = 100;
+		for (int rh = 0; rh < 64; ++rh) { GAME_TIC = GAME_TIC + 1; spec_tic(); }
+		if (SE_SPECIAL[rsec] != 0 || SE_FLOORPIC[rsec] == "NUKAGE3" || P_HP != 100) {
+			fails = fails + 1; print(`FAIL raised nukage still hurts (sector ${rsec} special ${SE_SPECIAL[rsec]}, ${SE_FLOORPIC[rsec]}, hp ${P_HP}, standing in ${sector_at(P_X, P_Y)})`);
+		}
+	}
+
 	// ---- save/load: the whole sim round-trips through JSON ----
 	player_reset();
 	SKILL_BIT = 2;

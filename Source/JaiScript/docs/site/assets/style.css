@@ -360,6 +360,14 @@ article.chapter details p { margin: .45rem 0; }
 .cb-capture pre code { color: var(--capture-fg); font-size: .95em; }
 .cb-capture > .cb-label { padding-right: 1rem; color: var(--capture-fg); background: #11151d; border-bottom-color: #2a3242; }
 .cb-capture .cb-gutter { background: var(--capture-bg); }
+/* example screenshots: real frames, two to a row, the first of a set often spanning both */
+.shots { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem .9rem; margin: 1.1rem 0 1.5rem; }
+.shot { margin: 0; min-width: 0; }
+.shot-wide { grid-column: 1 / -1; }
+.shot a { display: block; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: #000; }
+.shot a:hover { border-color: var(--border-strong); }
+.shot img { display: block; width: 100%; height: auto; }
+.shot figcaption { margin-top: .45rem; font-size: .86rem; line-height: 1.45; color: var(--fg-dim); }
 /* a verified-output block that directly follows a code sample docks under it */
 .codeblock:has(+ .codeblock.cb-output) { border-bottom-left-radius: 0; border-bottom-right-radius: 0; margin-bottom: 0; }
 .codeblock + .codeblock.cb-output { margin-top: 0; border-top: 0; border-top-left-radius: 0; border-top-right-radius: 0; }
@@ -624,6 +632,7 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
 }
 @media (max-width: 600px) {
   body { font-size: 1rem; }
+  .shots { grid-template-columns: minmax(0, 1fr); }
   .site-nav { gap: .1rem .85rem; }
   .site-nav a { font-size: .9rem; }
   .prevnext { grid-template-columns: minmax(0, 1fr); }

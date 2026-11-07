@@ -59,6 +59,7 @@ jaiscript jaidoom.jai -- host [port] [coop]      # netplay: host (deathmatch or 
 jaiscript jaidoom.jai -- join <host> [port]      #          join
 jaiscript jaidoom.jai -- bootstrap               # fetch the data without the screen
 jaiscript p10_timedemo.jai                       # the deterministic benchmark (prints a state hash)
+jaiscript shots.jai -- fight 105 tics 6          # the docs page's frames as .ans files (title.ans, fight.ans)
 ```
 
 ## Licenses

@@ -44,6 +44,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>Each one teaches something specific, and each one is genuinely fun to run. In the first three C++ is a deliberately thin shell (a VT console, key input, a seeded <code>Rng</code>, a clock, file IO), and <strong>everything you see is script</strong>.</p>
 <p>The first three double as determinism tests: each has a headless <code>--smoke</code> mode that checks a seeded run against the hashes it must produce.</p>
 <p>Every one also ships a <strong>drag-drop shim</strong>: a single <code>.jai</code> file that re-creates, in script, the few things the C++ shell provides (a seeded RNG, flags, logging, the console). Dropping it onto the <a href="../reference/index.html#command-line-runner">standalone runner</a> plays the game with no engine target built at all. The runner&#x27;s <code>--backend=interp</code> runs the same scripts on the tree-walking interpreter, so the shims are also where a game&#x27;s two backends are compared. The C++ hosts link the library without the interpreter and run the VM.</p>
+<p>The screenshots are real frames, in their real colors: <code>docs/site_tools/capture_examples.py</code> runs each game headless at a fixed seed and frame and draws its terminal output cell for cell, two pixels to a half block. Select one to see it full size.</p>
 
 <h2 id="building-them">Building them<a class="hlink" href="#building-them" aria-label="link">&#8203;</a></h2>
 <p>The games are part of the normal CMake build (<code>JAISCRIPT_BUILD_EXAMPLES=ON</code> by default when JaiScript is the top-level project). Configure once, then build the targets you want:</p>
@@ -54,6 +55,12 @@ cmake --build build --config Release --target jai_gloom jai_crawler jai_demoreel
 <h2 id="gloom">GLOOM (examples/gloom): the five-language yardstick<a class="hlink" href="#gloom" aria-label="link">&#8203;</a></h2>
 <p>A real-time 2.5D raycast shooter in the terminal (one tight four-map episode of corridors, keycards, secrets, and things that roar before they charge), written entirely in JaiScript.</p>
 <p>Each floor has its own light: torchlight on sandstone, coolant glow in the warrens, furnace heat in the foundry, the throne&#x27;s red dark. Distance fades into the floor&#x27;s haze, walls carry bricks, plates, conduits and doors whose lock lights glow, monsters stay readable down a dark corridor with their eyes lit, and the gun in your hand sways as you walk and kicks as you fire. Under the view a panel shows big numerals, bars, a face that bleeds as you do and your keycards; the title, the floor tally (its numbers count up), the death and the victory pages are pixel art too.</p>
+<p>Frames of the seeded autopilot in the showcase look (<code>--smoke --look showcase</code>, seed 666):</p>
+<div class="shots">
+<figure class="shot shot-wide"><a href="img/gloom-fight.png"><img src="img/gloom-fight.png" width="800" height="640" loading="lazy" alt="GLOOM in play on E1M1: a green grunt, spattered with blood, stands in a sandstone corridor in front of the raised pistol; the status bar below reads health 28, armor 0, pistol 32, and the message line says -8 hp (a grunt&#x27;s claws)."></a><figcaption>E1M1, the Dimlit Antechamber: a grunt closes in, and the status bar keeps score.</figcaption></figure>
+<figure class="shot"><a href="img/gloom-title.png"><img src="img/gloom-title.png" width="800" height="640" loading="lazy" alt="The GLOOM title screen: the word GLOOM in pale, blood-dripping letters over a dark red gradient with drifting embers, the line &#x27;a terminal raycaster, written in JaiScript&#x27;, &#x27;press FIRE to descend&#x27; and the keys."></a><figcaption>The title, embers drifting up.</figcaption></figure>
+<figure class="shot"><a href="img/gloom-tally.png"><img src="img/gloom-tally.png" width="800" height="640" loading="lazy" alt="The floor tally after E1M1: FLOOR CLEARED in gold block letters, kills 7 / 7 and secrets 1 / 1 at 100% with green bars, and a time of 1:06 against a par of 0:55."></a><figcaption>The tally: every kill and the secret, a little over par.</figcaption></figure>
+</div>
 <p>It is also the anchor of a five-language experiment. The same game, to the same spec, against the same shared C++ host and the same seeded RNG, was reimplemented in <strong>Squirrel, Lua, ChaiScript, and Python</strong>. Each was written the way a competent user of that language would write it, and each was required to reproduce the JaiScript reference <strong>bit-exactly</strong> at fixed state-hash checkpoints. All four did.</p>
 <p>That is the point of GLOOM: it is where the language&#x27;s claims go to be audited, and the comparison is blunt in both directions. On wall clock, in <a href="../embedding/11-performance.html#whole-games-measured">the measured row</a>:</p>
 <ul><li>LuaJIT&#x27;s JIT runs a tick in 0.097&nbsp;ms and Lua 5.4.8 in 0.397.</li>
@@ -83,50 +90,11 @@ build/bin/jaiscript examples/gloom/gloom.jai -- --smoke --ticks 300</code></pre>
 <h2 id="grubwell">GRUBWELL: dungeons of the unwashed (examples/crawler)<a class="hlink" href="#grubwell" aria-label="link">&#8203;</a></h2>
 <p>A first-person, step-based dungeon crawler in the spirit of the 1991 shareware first-person crawlers (garish corridors, a compass, monsters that get <em>bigger</em> as they walk at you), written <strong>entirely in JaiScript</strong>, about 5,600 lines of it. The view is a one-ray-per-column DDA raycaster drawn in half blocks: walls, floors and ceilings in procedural textures, lit by the torch in your hand and by the sconces on the walls, billboard sprites behind a per-column z-buffer, and a step or a turn that glides through in-between frames. Around it sits a cockpit of four panes (ahead, left, right and behind) and six framed boxes: the log, a half-block map, the compass, your character, and what is in sight. A title screen looks down the Well, death washes your last view in blood, victory comes in rainbow fire. Under the pixels it is a complete roguelike (ten floors, kin and professions, skills, affix loot, identify-by-use potions, a boss).</p>
 <p>The codebase is the most approachable of the games: small enough to read in a sitting, big enough to show every language feature in context. It is also the <a href="../embedding/07-hot-reload.html">hot-reload</a> showpiece: with <code>--dev</code>, one keypress re-imports the live game&#x27;s scripts mid-run.</p>
-<p>A corridor with a Grublin blob at the end of it (plaintext capture, ANSI colors stripped):</p>
-<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture"> GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 10  ~ Mossrot Warrens ~
-%%%%%%%%%######%%%#                                             | Wanderer
-#########%%%%%%###%%#                                           | Jackodile-kin
-%%%%%%%%%######%%%##%%                                        %%| HP 28/28
-=======================                                   ======| ############
-%%%%%%%%%######%%%##%%#%#                             #%%%####%%|
-#########%%%%%%###%%##%#%                            %%###%%%%##| Fo 14/14
-%%%%%%%%%######%%%##%%#%#                            ##%%%####%%| ############
-=========================                            ===========| Lv 1  XP 0/15
-%%%%%%%%%######%%%##%%#%#%                    ####%####%%%####%%| Atk 6  Def 1
-#########%%%%%%###%%##%#%###%#ggggg#%#%##%#%%#%%%%#%%%%###%%%%##| Eva 10  Crt 5
-%%%%%%%%%######%%%##%%#%#%%%#%ggggg%#%#%%#%##%####%####%%%####%%| Gold 0
-=========================     ggggg                =============|
-%%%%%%%%%######%%%##%%#%#.....ggggg..................##%%%####%%|       N
-#########%%%%%%###%%##%#%                            %%###%%%%##|     W + E
-%%%%%%%%%######%%%##%%#%#............................##%%%####%%|       S
-========================                                ========| Face WEST
-%%%%%%%%%######%%%##%%#.....................................##%%| Wpn -
-#########%%%%%%###%%#                                           | Arm -
-%%%%%%%%%######%%%##............................................| Trk -</code></pre></div>
-<p>Two steps later it is very much no longer small (bump it to attack):</p>
-<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture"> GRUBWELL -- dungeons of the unwashed --  Floor 1/10  Turn 12  ~ Mossrot Warrens ~
-                                                                | Wanderer
-                                                                | Jackodile-kin
-%%                                                              | HP 25/28
-======                ggggggggggggggggggggg                     | ##########--
-%%####%%%#            ggggggggggggggggggggg                     | -3 HP (Grublin)
-##%%%%###%%##%        ggggggggggggggggggggg                     | Fo 14/14
-%%####%%%##%%##%#%    ggggggggggggggggggggg                     | ############
-======================ggggggggggggggggggggg             ========| Lv 1  XP 0/15
-%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Atk 6  Def 1
-##%%%%###%%##%%#%#%##%ggggggggggggggggggggg%#%%%%%#%%#%#%%#%%##%| Eva 10  Crt 5
-%%####%%%##%%##%#%#%%#ggggggggggggggggggggg#%#####%##%#%##%##%%#| Gold 0
-======================ggggggggggggggggggggg        =============|
-%%####%%%##%%##%#%#%..ggggggggggggggggggggg.................#%%#|       N
-##%%%%###%%##%%#      ggggggggggggggggggggg                     |     W + E
-%%####%%%##%..........ggggggggggggggggggggg.....................|       S
-========              ggggggggggggggggggggg                     | Face WEST
-%%##..................ggggggggggggggggggggg.....................| Wpn -
-                      ggggggggggggggggggggg                     | Arm -
-......................ggggggggggggggggggggg.....................| Trk -
-                      ggggggggggggggggggggg                     |
- The Grublin claws you for 3 (HP 25/28).</code></pre></div>
+<div class="shots">
+<figure class="shot shot-wide"><a href="img/grubwell-fight.png"><img src="img/grubwell-fight.png" width="1080" height="592" loading="lazy" alt="The GRUBWELL cockpit on floor 2, turn 200: the forward view, framed in red, is filled by a toothy green Grublin between the hero&#x27;s torch and blade; around it sit the log, the map, the views behind, left and right, the compass facing west, the character panel at 14 of 22 HP, the monsters in sight and the loot."></a><figcaption>Turn 200 of the seed 6 smoke run: a Grublin fills the forward view, and the red frame is the hit just taken.</figcaption></figure>
+<figure class="shot"><a href="img/grubwell-title.png"><img src="img/grubwell-title.png" width="1080" height="592" loading="lazy" alt="The GRUBWELL title screen: the name in green and gold block letters above a stone well that spirals down to a glowing green light, and a menu offering a new descent, how to play, and leave."></a><figcaption>The title looks down the Well.</figcaption></figure>
+<figure class="shot"><a href="img/grubwell-victory.png"><img src="img/grubwell-victory.png" width="1080" height="592" loading="lazy" alt="The victory page: VICTORY in cream and gold letters over rainbow flames rising from the bottom of the screen, and a box titled THE COLOR RETURNS with the run&#x27;s hero, level, kills, gold, turns and floor."></a><figcaption>Victory over Vexadrach (seed 5, god mode): the swallowed fire climbs the Well in seven colors.</figcaption></figure>
+</div>
 <div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">build/bin/jai_crawler                     # the title screen, seed 1337
 build/bin/jai_crawler --dev               # R re-imports the scripts mid-run (hot reload)
 build/bin/jai_crawler --colors 256        # the xterm 256-colour palette (default: 24-bit when COLORTERM says so)
@@ -142,61 +110,13 @@ build/bin/jaiscript examples/crawler/scripts/crawler.jai -- smoke turns 1500 see
 <h2 id="demoreel">jai_demoreel (examples/demoreel)<a class="hlink" href="#demoreel" aria-label="link">&#8203;</a></h2>
 <p>Seventeen auto-advancing truecolor scenes, transitions, title cards, and a finale where the word JAISCRIPT ignites out of a wall of rainbow fire, cools to neon and rolls the credits. Every effect is coded in <code>scenes/*.jai</code>. The HUD shows the frame cost as the reel plays. Press <code>r</code> and every scene hot-reloads without restarting.</p>
 <p>The scenes: PLASMA, STARFIELD, TUNNEL, DONUT, JULIA, LAVALAMP, PIPEDREAM, POWDER, BOIDS, KINSTEIN 3D, CANYONRUN (a voxel-terrain flight in pure 16.16 fixed point), SPONGEWORKS (a raymarched Menger sponge, the VM&#x27;s floating-point showcase), BANNERFALL (Verlet cloth that tears thread by thread), CHROME, FIRE, OSSUARY (a skull-headed spider crawling a raymarched, morphing surface), FINALE.</p>
-<p>DONUT (<code>jaiscript demoreel.jai -- shot 4 at 4</code>; <code>shot</code> numbers scenes from one and writes the frame's full-color pixels to <code>shot.bmp</code>). Stripped of its colors a half-block frame is only <code>&#9600;</code>, <code>&#9608;</code> and spaces, so this is a brightness map of that bitmap, one character per terminal cell with its two pixels averaged:</p>
-<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">.................................=------*******+*****-=---................
-........................-=--+****##%%%%%%##*#******+****%#**=--...........
-...................--******++++##%%@@@%%#%*#**+**#***********+++=:........
-..............++#**+++==+=+=====**+*****++++++***************+++++=:......
-...........==***+++=+===---==-----============++:+*****+*******+++==-.....
-.........=+****=+===---::::::::::::==-------=+=*********+*++**++++==--....
-.......***%*****+===--::...............--=-*##***********+**+++++==+--:...
-.....=*********+**+++=------------##***********++*********++**++====+-:...
-....**************%%*%%***********%%**********+*********++++++++===---:...
-...*************%%********++**+++**@*********#**+++=**+++++++===+=---::...
-..-******######%#############################%###**+++++++==-=-=----::. ..
-..*+***#####%%%%%%%%%%%%%%##%@@@@%%%%%%%%%#######**+++++======-----::.. ..
-..+****####%%%%@@@@@@@@@@@@@@@@@@@@@@%%%%%%##*##*++++=======---:::::.. ...
-..=+****@%##%%%@@@@@@@@@@@@@@@@@@@@%%%%%#%#***+**=========--:-:::::.  ....
-..-+++++**####%%%%%%@@@@@@@@@@@@@%%%###***#*+==========---:--::::..  .....
-...==*+*++++**#######%%%%%%%#%###*****++===+=======-------:::::..  .......
-....-==**+++++++***++*******++++++=========++==-------::::::...   ........
-.....--============--====-================-==------::::::...    ..........
-......:----=========-====::========------------:::::::...      ...........
-.........::----::------------------------:--:::::.....      ..............
-.............:::::::::------::::::::::::::::.....        .................
-..................::::::::::::::..:........          .....................
-.................................          ...............................</code></pre></div>
-<p>BOIDS (<code>-- shot 9 at 12</code>, the same map: the murmuration crosses the setting sun as darker specks above the skyline):</p>
-<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">.............................................:: ::::::::::::::::::::::::::::::::::::::::::::....
-........................................:::::::::::::::::-----:---::---::----:--::::::::::::::::
-.....................................:::::::.. :::.  ---.:-----------------------------:::::::::
-=-....:....:...::....:............:::::::::::--. .---:--------------------------------------::::
-:::::::::::::::::::::::::::::::::::::::::--------------===========================--------------
-::::::::::::::::::::::::::::::::::::::-----------=======================================--------
-::::::::::::::::::::::::::::::::::::-------:--==-============+++++++++++++++========:====:=---:-
-:::::::::::::::::::::::::::::::::-::---::-.-===:======++++--+++==+++==+++==+++=-+++=-=========--
-:::::::::::::: ::..::::.:...:..:..-::.::= :==-.--=+++-+++++++++++++++++++++++++++++++++=========
-::--::::::::..::::....:... ..:..:..:.-:-::-=:=:++++++++++++*******************++++++++++++======
------------ ..:........:: . . ...: :::-=.:=::+++++++++*****************************+++++++++====
---------------...: ..... ..:.... .:.:--:.==++++++++**************#######**************++++++++==
-------------. :-. .. ...... ..  : ::.:-.-++++++++**********################==#**==***==*+++:++++
----------------: .:.:.: ... ....:::..-:=-++++-++**:****:####+####==###=##########********+++++++
-----:------------:.:::..:..::.::.:- -==+++++++********#########%%%%%%%%%%%#########********+++++
--------------------::.:-:::::.:-:=:===+++++++********#######%%@@@@@@@@@@@@@%%#######********++++
---------------------------:----=======+++++++*******#######@@@@@@@@@@@@@@@@@@@#######*******++++
-======================================++++++*******#######@@@@@@@@@@@@@@@@@@@@@#######*******+++
-======================================++::---------######+@@@@*@@@@**@@@++@@@*@###+.---..---::++
-==========================::===::====-++  -       =#=####*%@@@#@@@@@@@@@@@@@@@%####          =++
-=-====-:::::::::::== :  =     ========++           *#######%@@@=====@@@@@@@@@%#####          =::
-:::::== =     =   ==          ::::::::=+            =    #####% =   @@========----#            =
-     == =         ==           =  =   =+          =      ######    =##            *</code></pre></div>
-<p>FINALE afterglow (brightness map of the raw frame as the fire dies, the word still lit in rainbow flame):</p>
-<div class="codeblock cb-capture"><span class="cb-label">screen capture</span><pre><code class="lang-capture">               ....#..#####..###..########....#####..###..#####. .#.
-               ....#..#####..###..#####.##....###.#..##...###.#  .#.
-               ...##..#####..###...####.##....####...###..####   .#.
-               ..###..#. .#..###...####.##....#.#....###..#.     .#.
-                #..# .#. .#..###...#..# #.##..#. #...###..#.     .#.
-                  ##   #   # ##### ####   #### #   # ##### #       #</code></pre></div>
+<p>Frames from <code>jaiscript demoreel.jai -- shot N at T</code>, which numbers the scenes from one and writes scene N at T seconds to <code>shot.txt</code> (the terminal frame) and <code>shot.bmp</code> (its pixels):</p>
+<div class="shots">
+<figure class="shot"><a href="img/demoreel-finale.png"><img src="img/demoreel-finale.png" width="800" height="640" loading="lazy" alt="FINALE: the word JAISCRIPT in pale yellow block letters burning in a wall of orange and red fire, embers flying up."></a><figcaption>FINALE (17 at 3): the word ignites...</figcaption></figure>
+<figure class="shot"><a href="img/demoreel-credits.png"><img src="img/demoreel-credits.png" width="800" height="640" loading="lazy" alt="The finale&#x27;s credits: JAISCRIPT in neon rainbow letters on black, and under it a rolling list of the reel&#x27;s scenes, each name with a one-line description."></a><figcaption>...then cools to neon and rolls the credits (17 at 17).</figcaption></figure>
+<figure class="shot"><a href="img/demoreel-spongeworks.png"><img src="img/demoreel-spongeworks.png" width="800" height="640" loading="lazy" alt="The SPONGEWORKS title card: a raymarched Menger sponge tumbling through a starfield behind a banner reading SPONGEWORKS, &#x27;menger dive . signed distance, folded by hand&#x27;."></a><figcaption>SPONGEWORKS opens on its title card (12 at 2).</figcaption></figure>
+<figure class="shot"><a href="img/demoreel-chrome.png"><img src="img/demoreel-chrome.png" width="800" height="640" loading="lazy" alt="CHROME: two mirrored spheres, one blue and one gold, floating over a red and cream checkerboard under a sunset sky, each reflecting the floor and the sky."></a><figcaption>CHROME, a ray tracer: one ray per pixel, every core (14 at 11).</figcaption></figure>
+</div>
 <div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">build/bin/jai_demoreel                     # the reel, 30 fps pacing
 build/bin/jai_demoreel --smoke             # headless: the frame-stream hash + perf
 build/bin/jai_demoreel --ascii             # one density character per cell, for terminals without block glyphs
@@ -216,6 +136,12 @@ build/bin/jaiscript examples/demoreel/demoreel.jai -- frames 60 # headless self-
 <ul><li>Swordplay and spellcraft, fishing, mining, smithing and cooking, quests and bosses</li>
 <li>Raccoon Bandits who steal your gold and flee to the Raccoon Warrens (a burrow maze below the sewers, where cornering one gets the purse back)</li>
 <li>up to 16 players in one swamp over a network</li></ul>
+<p>Frames from the headless capture modes, <code>-- shot title</code> and <code>-- tour screen 150x44</code>:</p>
+<div class="shots">
+<figure class="shot shot-wide"><a href="img/gatorquest-town.png"><img src="img/gatorquest-town.png" width="1200" height="704" loading="lazy" alt="Gator Quest in Swampton at seven in the morning: stone streets and timber houses seen from above, the hero gator among townsfolk and guards, and the side panel with HP and MP bars, gold, the place and time, the equipped armor, a minimap and the journal log."></a><figcaption>Swampton in the morning.</figcaption></figure>
+<figure class="shot"><a href="img/gatorquest-title.png"><img src="img/gatorquest-title.png" width="1200" height="704" loading="lazy" alt="The Gator Quest title: GATOR QUEST and &#x27;A SWAMP IN NEED OF A HERO&#x27; in green and yellow pixel letters over the town, a name prompt reading CHOMPS in mud brown, and a side menu to play alone, host or join, with the story and the controls."></a><figcaption>The title: name your gator, pick a color, play alone, host or join.</figcaption></figure>
+<figure class="shot"><a href="img/gatorquest-night.png"><img src="img/gatorquest-night.png" width="1200" height="704" loading="lazy" alt="The same streets at ten at night: the town in deep blue shadow, lit only around the torches and the forge."></a><figcaption>The same streets after dark, lit by torches and the forge.</figcaption></figure>
+</div>
 <p>It runs on the stock <code>jaiscript</code> runner with nothing else. The world, the art, the sound effects and the music are all generated by about 14,000 lines of script, and there is no game-specific C++ at all. It is the largest program in the repository and the one that shows the language at application scale: client-side movement prediction against a host, plain-file saves, and a dedicated server mode.</p>
 <div class="codeblock cb-shell"><span class="cb-label">shell</span><pre><code class="lang-shell">build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai                     # play (single player, host or join from the title)
 build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai -- smoke            # headless: a scripted session, then STATE_HASH
@@ -249,6 +175,12 @@ build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai -- predtest      
 <li>the status bar, the automap, menus, intermission tallies</li>
 <li><strong>16-player networked deathmatch and co-op</strong></li></ul>
 <p>It renders to a terminal through sub-cell block glyphs and 24-bit color. There is no C++ in the game at all. It runs on the stock standalone runner. Its entire host surface is the runner&#x27;s generic builtins: terminal IO (<code>read_key</code>, <code>key_down</code>) plus the <code>NetServer</code>/<code>NetChannel</code> socket classes, with its clocks and frame pacing from the standard library&#x27;s <code>time::</code>. Capabilities any terminal game needs; no engine-specific C++ anywhere.</p>
+<p>Frames from <code>scripts/shots.jai</code>, which stands the player in sight of a monster, fires for a few scripted tics and writes what the terminal would show. They use Freedoom Phase 1, the free IWAD the game fetches first, rather than id&#x27;s shareware data:</p>
+<div class="shots">
+<figure class="shot shot-wide"><a href="img/jaidoom-fight.png"><img src="img/jaidoom-fight.png" width="1280" height="784" loading="lazy" alt="JaiDoom on Freedoom&#x27;s E1M1: a pink creature takes pistol fire in front of a row of monsters on a ledge above blue water, a large tentacled creature looms at the right, and the status bar along the bottom shows ammo 49, health 100% and the marine&#x27;s face."></a><figcaption>E1M1 by the water: the textured BSP renderer, sprites, the weapon and the status bar, in half blocks.</figcaption></figure>
+<figure class="shot"><a href="img/jaidoom-title.png"><img src="img/jaidoom-title.png" width="1280" height="784" loading="lazy" alt="The Freedoom Phase 1 title picture: an armored marine with a gun and a tentacled monster on a red background, the Freedoom logo above and PRESS ANY KEY below."></a><figcaption>The title screen, from the WAD's own TITLEPIC.</figcaption></figure>
+<figure class="shot"><a href="img/jaidoom-courtyard.png"><img src="img/jaidoom-courtyard.png" width="1280" height="784" loading="lazy" alt="A courtyard of the same map: a horned creature stands before a pillar marked with a blue cross, over a dirt floor with a patch of grass and a green potion, the pistol raised."></a><figcaption>A courtyard of the same map, mid-fight.</figcaption></figure>
+</div>
 <p>The multiplayer is the same story one level up: the entire wire protocol is script. A host session runs a <code>NetServer</code> star hub (assigning player slots, relaying packets, and acting as the co-op authority for monsters and doors). Each client holds one <code>NetChannel</code> to the host, and every packet is a small JSON map dispatched by type.</p>
 <p>Ghost players are net-driven sprites in the same mobj pool the monsters use. Deathmatch tracks frags with an in-game scoreboard, and the host&#x27;s lobby counts joiners until ENTER launches everyone into the map together.</p>
 <p>Why it matters here: it exercises everything the language claims, at once.</p>

@@ -198,4 +198,5 @@ The code and the site are the reference for everything else.
 
 ## Commits
 
-One-line commit messages: a title, no body, no trailers.
+A commit message is a title of at most 256 characters; a change that needs more adds a description after a blank line
+(what changed, not why). No trailers.

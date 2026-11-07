@@ -204,7 +204,8 @@ test registers. `verify_site.py` runs the suite; with `JAI_DOC_SAMPLES_DUMP=<dir
 
 ## Commits and pull requests
 
-One-line commit messages — a title, no body.
+A commit message is a title of at most 256 characters. If the change needs more, add a description after a blank line
+that says what changed.
 
 Before you open a PR:
 

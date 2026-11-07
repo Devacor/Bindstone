@@ -354,4 +354,5 @@ receiver loads armed. Run it after any change to a property, registrar or loader
 
 - Dev handles all git operations. Look before any destructive action (a checkout over local changes, a reset, a
   delete); never force push or amend pushed commits.
-- Commit messages are one line: a title, no body, matching `git log --oneline`. No co-author or other trailers.
+- Commit messages are a title of at most 256 characters. A change that needs more adds a description after a blank
+  line, saying what changed, not why. No co-author or other trailers.

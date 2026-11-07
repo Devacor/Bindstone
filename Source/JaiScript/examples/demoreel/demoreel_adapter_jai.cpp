@@ -14,6 +14,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 
 #include <jaiscript/testing/unattended.hpp>
@@ -37,6 +38,35 @@ struct jai_flags {
 	int64_t debug_port = 52472;
 	std::string coverage;                // the vm's execution-coverage census, written at exit (a build with JAISCRIPT_VM_COVERAGE)
 };
+
+// The first diagnostic of a failed load as the reel shows it: "file.jai:line:col: error: ...", then the source line and
+// its caret when the listing has them, tabs as spaces so the caret keeps its column.
+std::string first_diagnostic(const std::string& what, const std::string& file) {
+	std::vector<std::string> lines;
+	size_t start = 0;
+	while (start <= what.size()) {
+		size_t nl = what.find('\n', start);
+		std::string line = what.substr(start, nl == std::string::npos ? std::string::npos : nl - start);
+		if (!line.empty() && line.back() == '\r') { line.pop_back(); }
+		for (char& c : line) { if (c == '\t') { c = ' '; } }
+		lines.push_back(line);
+		if (nl == std::string::npos) { break; }
+		start = nl + 1;
+	}
+	size_t at = 0;
+	while (at < lines.size() && lines[at].find(": error") == std::string::npos) { ++at; }
+	if (at == lines.size()) {
+		at = 0;
+		while (at < lines.size() && lines[at].find_first_not_of(' ') == std::string::npos) { ++at; }
+		return at < lines.size() ? file + ": " + lines[at] : file + ": reload failed";
+	}
+	std::string result = lines[at];
+	if (size_t named = result.find(file + ":"); named != std::string::npos) { result = result.substr(named); }
+	for (size_t k = at + 1; k <= at + 2 && k < lines.size() && lines[k].rfind("    ", 0) == 0; ++k) {
+		result += "\n" + lines[k].substr(4);
+	}
+	return result;
+}
 
 jai::script_value call_script(jai::engine& eng, const char* fn_name,
                               const std::vector<jai::script_value>& args) {
@@ -94,7 +124,10 @@ public:
 				std::string line;
 				std::getline(std::cin, line);
 			}
-			for (const char* f : kSceneFiles) { eng_->execute_file(fs::canonical(fs::path(dir_) / f).string()); }
+			for (const char* f : kSceneFiles) {
+				eng_->execute_file(fs::canonical(fs::path(dir_) / f).string());
+				loaded_[f] = demoreel::slurp_file(dir_ + "/" + f);
+			}
 			kind_ = "file";
 			return;
 		}
@@ -105,6 +138,7 @@ public:
 			if (body.empty()) { throw std::runtime_error("missing scene script: " + dir_ + "/" + f); }
 			source += body;
 			source += "\n";
+			loaded_[f] = std::move(body);
 		}
 		// parse once: the concatenated source goes through engine->jaibite() (or a
 		// saved .jaibite in --precompiled mode), then executes to define everything
@@ -152,23 +186,34 @@ public:
 		call_script(*eng_, "demo_jump", { jai::script_value(idx, e), jai::script_value(at_t, e) });
 	}
 
-	// live coding: re-execute every scene file (not main.jai), then rebuild the
-	// current scene so build()-time changes show immediately
+	// live coding: re-execute every scene file (not main.jai), then rebuild the current scene so build()-time changes
+	// show immediately. A file that fails to parse or check changes nothing, so its previous code keeps running; the reel
+	// shows which files changed, or the first failure.
 	bool reload() override {
 		namespace fs = std::filesystem;
+		std::string changed;
+		std::string failed;
 		for (const char* f : kSceneFiles) {
 			if (std::string(f) == "main.jai") { continue; }
-			if (kind_ == "file") {
-				eng_->execute_file(fs::canonical(fs::path(dir_) / f).string());
-				continue;
-			}
 			std::string body = demoreel::slurp_file(dir_ + "/" + f);
 			if (body.empty()) { continue; }
-			eng_->execute(body);
+			try {
+				eng_->execute_file_source(fs::canonical(fs::path(dir_) / f).string(), body);
+			} catch (const std::exception& ex) {
+				if (failed.empty()) { failed = first_diagnostic(ex.what(), f); }
+				loaded_[f].clear();   // its fix reports as a reload
+				continue;
+			}
+			if (body != loaded_[f]) {
+				changed += (changed.empty() ? "" : " ") + std::string(f);
+				loaded_[f] = std::move(body);
+			}
 		}
-		call_script(*eng_, "demo_reload", {});
+		call_script(*eng_, "demo_reload", { eng_->make_value(changed), eng_->make_value(failed) });
 		return true;
 	}
+
+	std::string reload_notice() override { return ""; }
 
 	std::string stack_trace() override { return eng_->format_stack_trace(); }
 
@@ -182,6 +227,7 @@ private:
 	std::shared_ptr<jai::engine> eng_;
 	std::string dir_;
 	std::string kind_ = "prse";
+	std::map<std::string, std::string> loaded_;   // each scene file's source as last loaded
 };
 
 class jai_adapter : public demoreel::script_adapter {

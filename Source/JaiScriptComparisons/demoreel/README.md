@@ -57,6 +57,7 @@ title cards, HUD, and all 17 scenes. The host only blits the string
 | `scene_count()` / `scene_name()` | `demo_scene_count()` / `demo_scene_name()` | perf rows |
 | `jump(idx, at_t)` | `demo_jump(idx, at_t)` | start scene idx at scene time at_t (stateful scenes replay up to 3 s) |
 | `reload()` | re-execute scene files + `demo_reload()` | optional hot reload; return false when unsupported |
+| `reload_notice()` | - | the line the host flashes after a reload (default `reloaded scene scripts from disk`); `""` when the scripts show the reload themselves (JaiScript's reel names the changed files or the error) |
 | `stack_trace()` | - | script backtrace of the last error, `""` if none |
 
 Errors: script failures surface as `std::exception` throws; the host prints

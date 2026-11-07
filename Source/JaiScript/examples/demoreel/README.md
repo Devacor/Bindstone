@@ -121,7 +121,7 @@ Keys while running:
 
 | key | action |
 | --- | ------ |
-| `r` | hot-reload every `scenes/*.jai` from disk |
+| `r` | hot-reload every `scenes/*.jai` from disk; a band under the HUD names the files that changed, or the file that failed to load with its error |
 | `h` | toggle the HUD: a status bar (scene, backend, frame ms split into sim and draw, fps, pixel size) and a key bar that fills as the scene plays |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
@@ -268,6 +268,13 @@ plus the console write), split out so you can see which side you're bound on.
 The engine re-executes every scene file (hot reload with instance migration) and
 the current scene rebuilds — the change appears without restarting. `main.jai` is
 deliberately never reloaded: it owns the persistent globals.
+
+For three seconds a green band under the HUD names the files whose text changed
+and the scene that was rebuilt (`RELOADED  plasma.jai  PLASMA rebuilt at 4.2 s`).
+An edit that does not parse or check loads nothing: the file keeps running its
+previous code, every other file still reloads, and a red band shows the first
+error with its source line and caret for eight seconds. Fix it and press `r`
+again.
 
 ## Determinism / parity
 

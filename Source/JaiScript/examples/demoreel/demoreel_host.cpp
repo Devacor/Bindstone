@@ -811,7 +811,7 @@ int run_interactive(script_adapter& adapter, const host_options& opt) {
 			if (key == "q" || key == "esc" || g_quit_requested.load()) { break; }
 			if (key == "r") {
 				try {
-					host_notice = sl.session->reload() ? " reloaded scene scripts from disk " : " hot reload unsupported here ";
+					host_notice = sl.session->reload() ? sl.session->reload_notice() : " hot reload unsupported here ";
 				} catch (const std::exception& ex) {
 					host_notice = std::string(" reload error: ") + ex.what() + " ";
 				}

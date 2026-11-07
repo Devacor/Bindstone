@@ -88,6 +88,10 @@ class Reel {
 	int ui_shadow = 0;
 	int ui_edge = 0;
 
+	string reload_files = "";   // the scene files the last 'r' changed
+	string reload_error = "";   // or its first failure: the diagnostic, its source line and caret
+	float reload_left = 0.0;    // seconds its rows stay up
+
 	Reel(int w_, int h_, int seed_, string backend_, bool smoke_, bool hud_) {
 		w = w_;
 		h = h_;
@@ -227,6 +231,41 @@ class Reel {
 		start_scene(cur_idx, keep_t);
 	}
 
+	void reloaded(string changed, string failed) {
+		reload_files = changed.split(" ").join(", ");
+		reload_error = failed;
+		reload_left = failed == "" ? 3.0 : 8.0;
+	}
+
+	// what the last reload did, under the HUD: the files it changed and the scene it
+	// rebuilt, or the file that failed (its previous code still running) with the error
+	void reload_overlay(var& rows) {
+		int row = hud ? 1 : 0;
+		var none = HudLine(0);
+		var head = HudLine(w);
+		if (reload_error == "") {
+			string band = sgr_bg(14, 44, 40);
+			head.put(sgr_bg(96, 224, 168) + sgr_fg(10, 34, 28), " RELOADED ");
+			head.put(band + sgr_fg(226, 255, 240), reload_files == "" ? "  no scene file changed" : `  ${reload_files}`);
+			head.put(band + sgr_fg(130, 190, 170), `  ${cur.name} rebuilt at ${gfx.fmt1(scene_t)} s `);
+			rows[row] = head.finish(band, none);
+			return;
+		}
+		string band = sgr_bg(48, 10, 24);
+		string file = reload_error.substr(0, reload_error.find(":"));
+		head.put(sgr_bg(214, 52, 92) + sgr_fg(255, 250, 230), " RELOAD FAILED ");
+		head.put(band + sgr_fg(255, 214, 220), `  ${file} keeps running its previous code`);
+		if (reload_files != "") { head.put(band + sgr_fg(170, 130, 150), `  (reloaded ${reload_files})`); }
+		rows[row] = head.finish(band, none);
+		var lines = reload_error.split("\n");
+		var inks = [sgr_fg(255, 170, 180), sgr_fg(238, 236, 255), sgr_fg(255, 206, 110)];
+		for (int k = 0; k < lines.size() && k < 3 && row + 1 + k < h; ++k) {
+			var body = HudLine(w);
+			body.put(band + inks[k], "  " + lines[k]);
+			rows[row + 1 + k] = body.finish(band, none);
+		}
+	}
+
 	void handle_key(string key) {
 		if (key == "") { return; }
 		if (key == "h") { hud = !hud; }
@@ -357,6 +396,10 @@ class Reel {
 		title_text(rows, trow);
 		if (!in_trans) { cur.text_rows(rows); }
 		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
+		if (reload_left > 0.0) {
+			reload_left -= dt;
+			reload_overlay(rows);
+		}
 		return rows.join("\n");
 	}
 }

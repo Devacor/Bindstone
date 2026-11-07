@@ -120,6 +120,8 @@ public:
 	virtual std::string scene_name() = 0;                 // demo_scene_name()
 	virtual void jump(int64_t idx, double at_t) = 0;      // demo_jump(idx, at_t)
 	virtual bool reload() { return false; }               // hot reload scene files + demo_reload(); false = unsupported
+	// the line the host flashes after a reload; "" when the scripts show the reload themselves
+	virtual std::string reload_notice() { return " reloaded scene scripts from disk "; }
 	virtual std::string stack_trace() { return ""; }
 };
 

@@ -299,7 +299,7 @@ promoted: 2
 caught: Cannot push &#x27;Rock&#x27; to array&lt;Unit&gt;</code></pre></div>
 <p>(<code>type_of</code> and <code>reflect::type_name</code> both name the class an element actually holds: <a href="12-reflection.html">Chapter 12</a>.)</p>
 <h3 id="key-types">Key types<a class="hlink" href="#key-types" aria-label="link">&#8203;</a></h3>
-<p>A map checks its declared key type on every direct store, and keys never coerce: <code>map&lt;string, int&gt;</code> rejects <code>m[5]</code> rather than turning <code>5</code> into <code>"5"</code>. A typed map declared without an initializer is an empty map of its declared type, ready for <code>m[k] = v</code>. A side can also be open or inferred:</p>
+<p>A map checks its declared key type on every direct store, and keys never coerce: <code>map&lt;string, int&gt;</code> rejects <code>m[5]</code> rather than turning <code>5</code> into <code>"5"</code>. A key whose type the checker knows fails the load with the same text (<code>Cannot use 'int' as a key of type 'string'</code>); a <code>var</code> key raises it when the store runs. A typed map declared without an initializer is an empty map of its declared type, ready for <code>m[k] = v</code>. A side can also be open or inferred:</p>
 <ul>
 <li><code>map&lt;var, V&gt;</code> takes any key.</li>
 <li><code>map&lt;auto, V&gt;</code> infers the key type from a uniform literal, <code>map&lt;K, auto&gt;</code> the value type, and plain <code>auto</code> infers both sides (<code>auto m = {"a": 1}</code> is a <code>map&lt;string, int&gt;</code>). The inferred type is then enforced like a spelled one.</li>
@@ -307,7 +307,8 @@ caught: Cannot push &#x27;Rock&#x27; to array&lt;Unit&gt;</code></pre></div>
 <li>An empty literal leaves the <code>auto</code> side dynamic: <code>map&lt;auto, int&gt; m = {};</code> takes keys of any type.</li>
 </ul>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; ages = {"ana": 31};
-try { ages[5] = 1; } catch (e) { print("caught: {}", e); }     // keys never coerce
+var key = 5;
+try { ages[key] = 1; } catch (e) { print("caught: {}", e); }   // keys never coerce
 map&lt;var, int&gt; anything = {};                                   // any key
 anything[5] = 1;
 anything["five"] = 5;

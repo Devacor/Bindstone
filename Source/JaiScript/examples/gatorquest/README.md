@@ -30,8 +30,10 @@ build/bin/jaiscript examples/gatorquest/scripts/gatorquest.jai
 
 `play.bat` (Windows) and `play.sh` start the same command: each finds the runner in `build/bin` or beside itself.
 
-Use a terminal with 24-bit color and UTF-8 (Windows Terminal is ideal), at least 100x30; bigger is better
-(the view switches to 8-pixel tiles from about 190 columns). `Z` cycles the zoom.
+Use a UTF-8 terminal at least 100x30 (Windows Terminal is ideal); bigger is better (the view switches to 8-pixel tiles
+from about 190 columns). `Z` cycles the zoom. The game draws in 24-bit color where the terminal says it takes it
+(`COLORTERM`, Windows Terminal, any Windows console) and in the xterm 256-color palette elsewhere (macOS Terminal.app);
+`-- --truecolor` and `-- --256color` choose.
 
 ## Controls
 

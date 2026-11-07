@@ -250,6 +250,8 @@ int run_prepare() {
 }
 
 int main() {
+	// captures stay 24-bit wherever they are taken (the page renders them); --truecolor / --256color override the terminal
+	HOST_TRUECOLOR = arg_flag("shot") || arg_flag("tour") || arg_flag("--truecolor") || (!arg_flag("--256color") && terminal_says_truecolor());
 	client_state_init();
 	if (arg_flag("nodelta")) { SNAP_DELTAS = false; }
 	if (arg_flag("noprediction")) { PRED_ON = false; }

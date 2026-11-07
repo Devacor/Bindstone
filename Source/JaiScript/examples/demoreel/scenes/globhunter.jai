@@ -4,13 +4,18 @@
 // texel column and each pixel of the slice steps down it (16x16 textures grown
 // in script: coursed stone, mossy stone, fluted gold, and a banner of animated
 // rainbow fire). Floor and ceiling are cast per pixel (flagstones below, oak
-// planks above), everything fogs with distance. Billboard Grublins and Orglis
-// brutes garrison the route, occluded per column by the wall z-buffer, lit as
-// spheres per pixel, with eyes and grins. The scripted camera FIGHTS them: when
-// an alive enemy sits in the crosshair cone with clear line of sight, the gun
-// auto-fires — recoil, muzzle flash, rainbow hitscan tracer, hit-flash, a gib
-// scatter, a kill counter in pixel letters. Enemies respawn each lap. The ray
-// fan comes from the camera-plane vector: no per-column trig.
+// planks above). LIT: torches flicker along the route and a light map rebuilt
+// every frame from them (and from the muzzle on each shot) lights walls, floor,
+// ceiling and monsters, warm where the fire reaches and cold blue in the gloom
+// between, under a vignette. Billboard Grublins and Orglis brutes garrison the
+// route, occluded per column by the wall z-buffer, lit as spheres per pixel,
+// with eyes and grins. The scripted camera HUNTS them: it swings onto a mark in
+// clear sight, bobs as it walks, and when the mark sits in the crosshair the gun
+// fires — recoil kicking the view, muzzle flash lighting the hall, a rainbow
+// hitscan tracer, a hit-flash, a hit-stop, goo that bursts in 3D and bounces off
+// the flagstones, a callout (DOUBLE KILL on a quick second), a kill counter in
+// pixel letters. Enemies respawn each lap. The ray fan comes from the
+// camera-plane vector: no per-column trig.
 
 class GlobHunter : Scene {
 	array<int> wmap = [];
@@ -21,19 +26,23 @@ class GlobHunter : Scene {
 	array<float> seglen = [];
 	int nwp = 6;
 	float path_len = 0.0;
+	float travel = 0.0;      // distance along the route: it crawls through each hit-stop
 	float posx = 2.5;
 	float posy = 2.5;
 	float dirx = 0.0;
 	float diry = 1.0;
 	float planex = 0.0;
 	float planey = 0.0;
+	float aim = 0.0;         // the eased swing of the view toward the current mark
+	float pitch = 0.0;       // the horizon's offset in pixels: walk bob and recoil
 	array<int> tex = [];     // 3 wall textures + floor + ceiling, 16x16 texel indices 0..7
-	int wall_base = 0;       // ((type*2 + side)*8 + fog)*8 + texel
-	int banner_base = 0;     // (side*8 + fog)*16 + hue
-	int floor_base = 0;      // fog*8 + texel
+	int wall_base = 0;       // ((type*2 + side)*8 + light)*8 + texel
+	int banner_base = 0;     // (side*8 + light)*16 + hue
+	int floor_base = 0;      // light*8 + texel
 	int ceil_base = 0;
 	int sprite_base = 0;
 	float tt = 0.0;
+	int fr = 0;
 	// the bestiary (parallel arrays): type 0 grublin, 1 orglis
 	array<float> ex = [];
 	array<float> ey = [];
@@ -51,12 +60,39 @@ class GlobHunter : Scene {
 	float muzzle_t = 0.0;
 	float tracer_t = 0.0;
 	float hot_t = 0.0;
+	float kick_t = 0.0;
+	float stop_t = 0.0;      // the hit-stop
+	float last_kill = -9.0;
+	int combo = 0;
+	float call_t = 0.0;      // the callout's life
+	string callout = "";
 	int tr_x = 0;
 	int tr_y = 0;
+	// torches: positions; the light map's steady sum of them, and which one rules each cell
+	array<float> tox = [];
+	array<float> toy = [];
+	array<float> still = [];
+	array<int> owner = [];
+	array<int> lmap = [];    // 48x48: two cells per map cell, light levels 0..5
+	int lres = 48;
+	// goo: a pool of particles in world space (z up, 0 = floor, 1 = ceiling)
+	array<float> gx = [];
+	array<float> gy = [];
+	array<float> gz = [];
+	array<float> gvx = [];
+	array<float> gvy = [];
+	array<float> gvz = [];
+	array<float> glife = [];
+	array<int> gtype = [];
+	int ngoo = 160;
+	int goo_next = 0;
+	array<int> vigx = [];    // the vignette: light levels lost toward the edges
+	array<int> vigy = [];
 
 	void build() override {
 		name = "GLOBHUNTER";
-		handle = "grublin keep . one ray per column, zero mercy";
+		handle = "grublin keep . torchlight, one ray per column, zero mercy";
+		replay = 15.0;
 		// # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
 		var rows = [
 			"##################BBBB##",
@@ -96,7 +132,7 @@ class GlobHunter : Scene {
 				wmap.push(v);
 			}
 		}
-		var fogc = [9.0, 9.0, 16.0];
+		var fogc = [5.0, 7.0, 18.0];
 		var wall_cols = [
 			[[40.0, 36.0, 44.0], [88.0, 88.0, 100.0], [104.0, 104.0, 118.0], [120.0, 120.0, 136.0], [138.0, 138.0, 152.0], [156.0, 156.0, 170.0], [186.0, 186.0, 200.0], [70.0, 70.0, 82.0]],
 			[[34.0, 36.0, 34.0], [84.0, 90.0, 92.0], [100.0, 106.0, 108.0], [118.0, 124.0, 126.0], [60.0, 118.0, 50.0], [84.0, 150.0, 62.0], [120.0, 190.0, 80.0], [40.0, 86.0, 36.0]],
@@ -108,7 +144,7 @@ class GlobHunter : Scene {
 				for (int f = 0; f < 8; ++f) {
 					for (int c = 0; c < 8; ++c) {
 						var cc = cols[c];
-						fogged(cc[0], cc[1], cc[2], f, side, fogc);
+						lit(cc[0], cc[1], cc[2], f, side, fogc);
 					}
 				}
 			}
@@ -119,22 +155,23 @@ class GlobHunter : Scene {
 				for (int hu = 0; hu < 4; ++hu) {
 					var rc = gfx.rainbow_rgb(hu * 1.5708);
 					float rr = rc[0]; float rg = rc[1]; float rb = rc[2];
-					fogged(40.0, 16.0, 60.0, f2, side2, fogc);
-					fogged(rr * 0.45, rg * 0.45, rb * 0.45, f2, side2, fogc);
-					fogged(rr, rg, rb, f2, side2, fogc);
-					fogged(255.0, 196.0, 80.0, f2, side2, fogc);
+					int f3 = f2 < 3 ? 3 : f2;   // the banner's fire glows in the dark
+					lit(40.0, 16.0, 60.0, f3, side2, fogc);
+					lit(rr * 0.45, rg * 0.45, rb * 0.45, f3, side2, fogc);
+					lit(rr, rg, rb, f3, side2, fogc);
+					lit(255.0, 196.0, 80.0, f3, side2, fogc);
 				}
 			}
 		}
 		var floor_cols = [[46.0, 38.0, 34.0], [92.0, 80.0, 70.0], [104.0, 92.0, 80.0], [116.0, 102.0, 88.0], [128.0, 112.0, 96.0], [140.0, 124.0, 106.0], [76.0, 66.0, 58.0], [160.0, 142.0, 120.0]];
 		floor_base = pal.size();
-		for (int f3 = 0; f3 < 8; ++f3) {
-			for (int c3 = 0; c3 < 8; ++c3) { var fc = floor_cols[c3]; fogged(fc[0], fc[1], fc[2], f3, 0, fogc); }
+		for (int f4 = 0; f4 < 8; ++f4) {
+			for (int c3 = 0; c3 < 8; ++c3) { var fc = floor_cols[c3]; lit(fc[0], fc[1], fc[2], f4, 0, fogc); }
 		}
 		var ceil_cols = [[20.0, 12.0, 8.0], [60.0, 38.0, 22.0], [72.0, 46.0, 26.0], [84.0, 54.0, 30.0], [96.0, 62.0, 34.0], [50.0, 32.0, 18.0], [110.0, 72.0, 40.0], [36.0, 24.0, 14.0]];
 		ceil_base = pal.size();
-		for (int f4 = 0; f4 < 8; ++f4) {
-			for (int c4 = 0; c4 < 8; ++c4) { var kc = ceil_cols[c4]; fogged(kc[0] * 0.8, kc[1] * 0.8, kc[2] * 0.8, f4, 0, fogc); }
+		for (int f5 = 0; f5 < 8; ++f5) {
+			for (int c4 = 0; c4 < 8; ++c4) { var kc = ceil_cols[c4]; lit(kc[0] * 0.8, kc[1] * 0.8, kc[2] * 0.8, f5, 0, fogc); }
 		}
 		// sprites + combat kit
 		sprite_base = pal.size();
@@ -159,6 +196,9 @@ class GlobHunter : Scene {
 		pal.add(170, 30, 30);                                     // +45 grin
 		pal.add(226, 170, 128);                                   // +46 skin
 		pal.add(150, 100, 72);                                    // +47 skin shade
+		pal.add(255, 60, 40);                                     // +48 glowing eye
+		pal.ramp(4, 120.0, 255.0, 120.0, 230.0, 255.0, 200.0);    // +49..52 callout ink, grublin goo glint
+		pal.ramp(4, 255.0, 120.0, 220.0, 255.0, 240.0, 255.0);    // +53..56 combo ink
 		grow_textures();
 		gun = ["......dlhd......", "......dlmd......", "......dlmd......", ".....ddlmdd.....", ".....dlhmmd.....",
 			"....ddlmmmdd....", "....dlhmmmmd....", "...kdlmmmmmdk...", "..kkdmmmmmmdkk..", ".kkkkdmmmmdkkkk.",
@@ -185,13 +225,68 @@ class GlobHunter : Scene {
 		}
 		zcol = gfx.make_fgrid(w);
 		for (int i3 = 0; i3 < w; ++i3) { zcol[i3] = 99.0; }
+		// torches hang beside the walls along the route; each keeps its falloff over the light map
+		var spots = [[1.2, 2.5], [6.8, 1.6], [2.2, 8.0], [2.8, 14.5], [1.2, 19.5], [9.5, 20.2], [12.2, 17.5],
+			[10.2, 12.5], [15.8, 13.5], [21.8, 7.5], [22.8, 2.5], [17.2, 1.4]];
+		for (int k = 0; k < spots.size(); ++k) {
+			var sp = spots[k];
+			float px = sp[0];
+			float py = sp[1];
+			if (wmap[itrunc(py) * mw + itrunc(px)] != 0) { continue; }
+			tox.push(px);
+			toy.push(py);
+		}
+		array<float> best = [];
+		for (int c5 = 0; c5 < lres * lres; ++c5) {
+			still.push(0.0);
+			owner.push(0);
+			best.push(0.0);
+		}
+		for (int k3 = 0; k3 < tox.size(); ++k3) {
+			for (int c6 = 0; c6 < lres * lres; ++c6) {
+				float lx = (c6 % lres + 0.5) * 0.5 - tox[k3];
+				float ly = (c6 / lres + 0.5) * 0.5 - toy[k3];
+				float f = 1.0 / (1.0 + (lx * lx + ly * ly) * 1.7);
+				still[c6] = still[c6] + f * 5.6 * 0.82;
+				if (f > best[c6]) {
+					best[c6] = f;
+					owner[c6] = k3;
+				}
+			}
+		}
+		lmap = gfx.make_grid(lres * lres);
+		for (int g = 0; g < ngoo; ++g) {
+			gx.push(0.0);
+			gy.push(0.0);
+			gz.push(0.0);
+			gvx.push(0.0);
+			gvy.push(0.0);
+			gvz.push(0.0);
+			glife.push(0.0);
+			gtype.push(0);
+		}
+		vigx = gfx.make_grid(w);
+		vigy = gfx.make_grid(h);
+		for (int vx = 0; vx < w; ++vx) {
+			float e = 2.0 * vx / (w - 1.0) - 1.0;
+			vigx[vx] = itrunc(e * e * e * e * 2.4);
+		}
+		for (int vy = 0; vy < h; ++vy) {
+			float e2 = 2.0 * vy / (h - 1.0) - 1.0;
+			vigy[vy] = itrunc(e2 * e2 * e2 * e2 * 1.6);
+		}
 	}
 
-	// one entry: a color fogged toward the keep's gloom at fog level f (7 = near)
-	void fogged(float r, float g, float b, int f, int side, var fogc) {
-		float k = (0.10 + 0.90 * f / 7.0) * (side == 1 ? 0.72 : 1.0);
-		float fr = fogc[0]; float fg = fogc[1]; float fb = fogc[2];
-		pal.add(r * k + fr * (1.0 - k), g * k + fg * (1.0 - k), b * k + fb * (1.0 - k));
+	// one entry: a colour at light level f (0 black gloom .. 7 full torchlight):
+	// the dark sinks into a cold blue, the lit end warms toward the fire
+	void lit(float r, float g, float b, int f, int side, var fogc) {
+		float k = (0.07 + 0.93 * f / 7.0) * (side == 1 ? 0.72 : 1.0);
+		float warm = f >= 5 ? (f - 4) / 3.0 : 0.0;
+		float fr2 = fogc[0]; float fg = fogc[1]; float fb = fogc[2];
+		float cr = r * (1.0 + 0.32 * warm);
+		float cg = g * (1.0 + 0.06 * warm);
+		float cb = b * (1.0 - 0.28 * warm);
+		pal.add(cr * k + fr2 * (1.0 - k), cg * k + fg * (1.0 - k), cb * k + fb * (1.0 - k));
 	}
 
 	int hash2(int a, int b) {
@@ -286,22 +381,49 @@ class GlobHunter : Scene {
 
 	void update(float t, float dt) override {
 		tt = t;
-		float s = t * 2.4;
-		var p = path_at(s);
-		var q = path_at(s + 1.7);   // look-ahead steers the turns
+		++fr;
+		float pace = stop_t > 0.0 ? 0.18 : 1.0;
+		travel += dt * 2.4 * pace;
+		var p = path_at(travel);
+		var q = path_at(travel + 1.7);   // look-ahead steers the turns
 		posx = p[0];
 		posy = p[1];
-		float dx = q[0] - posx;
-		float dy = q[1] - posy;
-		float dl = math::sqrt(dx * dx + dy * dy);
-		if (dl > 0.0001) { dirx = dx / dl; diry = dy / dl; }
+		float bx = q[0] - posx;
+		float by = q[1] - posy;
+		float bl = math::sqrt(bx * bx + by * by);
+		if (bl > 0.0001) { bx /= bl; by /= bl; } else { bx = dirx; by = diry; }
+		// the hunt: swing toward the nearest live mark in clear sight ahead
+		float want = 0.0;
+		float near = 5.5;
+		for (int m = 0; m < ne; ++m) {
+			if (es[m] != 0) { continue; }
+			float mx = ex[m] - posx;
+			float my = ey[m] - posy;
+			float md = math::sqrt(mx * mx + my * my);
+			if (md > near || md < 0.6) { continue; }
+			float ang = math::atan2(bx * my - by * mx, bx * mx + by * my);
+			if (ang > 0.75 || ang < -0.75) { continue; }
+			if (!los_clear(mx, my, 0.95)) { continue; }
+			near = md;
+			want = ang;
+		}
+		float ease = dt * 7.0;
+		ease = ease > 1.0 ? 1.0 : ease;
+		aim += (want - aim) * ease;
+		float ca = math::cos(aim);
+		float sa = math::sin(aim);
+		dirx = bx * ca - by * sa;
+		diry = bx * sa + by * ca;
 		planex = 0.0 - diry * 0.66;
 		planey = dirx * 0.66;
-		// enemy state machine
+		// timers and the enemy state machine
 		cool -= dt;
 		muzzle_t -= dt;
 		tracer_t -= dt;
 		hot_t -= dt;
+		kick_t -= dt;
+		stop_t -= dt;
+		call_t -= dt;
 		for (int i = 0; i < ne; ++i) {
 			int st = es[i];
 			if (st == 1) { est[i] = est[i] + dt; if (est[i] > 0.14) { es[i] = 2; est[i] = 0.0; } }
@@ -321,66 +443,195 @@ class GlobHunter : Scene {
 				float ry = ey[i2] - posy;
 				float txx = invdet * (diry * rx - dirx * ry);
 				float tyy = invdet * (planex * ry - planey * rx);
-				if (tyy < 1.0 || tyy > 4.2) { continue; }
-				float aim = txx < 0.0 ? -txx : txx;
-				if (aim > tyy * 0.14) { continue; }
+				if (tyy < 1.0 || tyy > 4.6) { continue; }
+				float off = txx < 0.0 ? -txx : txx;
+				if (off > tyy * 0.12) { continue; }
 				if (!los_clear(rx, ry, 0.95)) { continue; }
 				if (tyy < besty) { best = i2; besty = tyy; bestx = txx; }
 			}
-			if (best >= 0) {
-				es[best] = 1;
-				est[best] = 0.0;
-				++kills;
-				cool = 0.7;
-				muzzle_t = 0.12;
-				tracer_t = 0.14;
-				hot_t = 0.35;
-				tr_x = itrunc(w * 0.5 * (1.0 + bestx / besty));
-				tr_y = h / 2 + itrunc(h * 0.10 / besty);
+			if (best >= 0) { fire(best, bestx, besty, t); }
+		}
+		move_goo(dt);
+		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns
+		if ((fr & 1) == 0 || muzzle_t > -0.05) { light_up(); }
+		// the view: a walking bob, the recoil's kick, a shudder while the muzzle burns
+		float bob = math::sin(travel * 5.2) * h * 0.012;
+		float kick = kick_t > 0.0 ? h * 0.05 * kick_t / 0.2 : 0.0;
+		float shud = muzzle_t > 0.0 ? ((fr * 7) % 3 - 1) * h * 0.012 : 0.0;
+		pitch = bob + kick + shud;
+	}
+
+	void fire(int i, float bx, float by, float t) {
+		es[i] = 1;
+		est[i] = 0.0;
+		++kills;
+		cool = 0.62;
+		muzzle_t = 0.12;
+		tracer_t = 0.14;
+		hot_t = 0.35;
+		kick_t = 0.2;
+		stop_t = 0.16;
+		tr_x = itrunc(w * 0.5 * (1.0 + bx / by));
+		tr_y = h / 2 + itrunc(h * 0.10 / by);
+		combo = t - last_kill < 1.8 ? combo + 1 : 1;
+		last_kill = t;
+		var words = ["SPLAT", "GLOBBED", "SQUISH", "POP"];
+		callout = combo >= 3 ? "MULTI KILL" : (combo == 2 ? "DOUBLE KILL" : words[kills % 4]);
+		call_t = 0.9;
+		// the burst: goo flung out of the body, mostly up and back from the shot
+		for (int k = 0; k < 34; ++k) {
+			int g = goo_next;
+			goo_next = (goo_next + 1) % ngoo;
+			float a = rng.nextf() * 6.2831853;
+			float sp = 0.8 + rng.nextf() * 2.2;
+			gx[g] = ex[i];
+			gy[g] = ey[i];
+			gz[g] = 0.35 + rng.nextf() * 0.3;
+			gvx[g] = math::cos(a) * sp + dirx * 1.2;
+			gvy[g] = math::sin(a) * sp + diry * 1.2;
+			gvz[g] = 1.2 + rng.nextf() * 2.6;
+			glife[g] = 2.2 + rng.nextf() * 1.5;
+			gtype[g] = et[i];
+		}
+	}
+
+	// goo falls, bounces off the flagstones and the walls, then lies there fading
+	void move_goo(float dt) {
+		for (int g = 0; g < ngoo; ++g) {
+			float life = glife[g];
+			if (life <= 0.0) { continue; }
+			glife[g] = life - dt;
+			float vz = gvz[g] - 7.5 * dt;
+			float nz = gz[g] + vz * dt;
+			if (nz < 0.0) {
+				nz = 0.0;
+				vz = vz < -0.6 ? 0.0 - vz * 0.3 : 0.0;
+				gvx[g] = gvx[g] * 0.55;
+				gvy[g] = gvy[g] * 0.55;
+			}
+			gz[g] = nz;
+			gvz[g] = vz;
+			float nx = gx[g] + gvx[g] * dt;
+			float ny = gy[g] + gvy[g] * dt;
+			if (wmap[itrunc(gy[g]) * mw + itrunc(nx)] != 0) { gvx[g] = 0.0 - gvx[g] * 0.4; nx = gx[g]; }
+			if (wmap[itrunc(ny) * mw + itrunc(gx[g])] != 0) { gvy[g] = 0.0 - gvy[g] * 0.4; ny = gy[g]; }
+			gx[g] = nx;
+			gy[g] = ny;
+		}
+	}
+
+	// the light map: the torches' steady sum, each cell flickering with the torch
+	// that rules it, plus the muzzle near the camera while it burns
+	void light_up() {
+		int n = lres * lres;
+		int nt = tox.size();
+		array<float> flick = [];
+		for (int k = 0; k < nt; ++k) {
+			flick.push(1.0 + 0.12 * math::sin(tt * 13.0 + k * 2.3) + 0.10 * math::sin(tt * 29.0 + k * 5.1));
+		}
+		var& st = still;
+		var& ow = owner;
+		var& lm = lmap;
+		for (int c = 0; c < n; ++c) {
+			int lv = itrunc(st[c] * flick[ow[c]]);
+			lm[c] = lv > 5 ? 5 : lv;
+		}
+		if (muzzle_t > 0.0) {
+			int cx0 = itrunc(posx * 2.0);
+			int cy0 = itrunc(posy * 2.0);
+			for (int dy = -10; dy <= 10; ++dy) {
+				int cy = cy0 + dy;
+				if (cy < 0 || cy >= lres) { continue; }
+				for (int dx = -10; dx <= 10; ++dx) {
+					int cx = cx0 + dx;
+					if (cx < 0 || cx >= lres) { continue; }
+					float d2 = (dx * dx + dy * dy) * 0.25;
+					int c2 = cy * lres + cx;
+					int lv2 = itrunc(st[c2] * flick[ow[c2]] + 4.5 / (1.0 + d2 * 0.35));
+					lm[c2] = lv2 > 5 ? 5 : lv2;
+				}
 			}
 		}
 	}
 
-	// floor and ceiling, cast per pixel: each row below the horizon is a fixed
-	// distance, stepped across the screen along the camera plane
+	int light_at(float x, float y) {
+		int cx = itrunc(x * 2.0);
+		int cy = itrunc(y * 2.0);
+		cx = cx < 0 ? 0 : (cx >= lres ? lres - 1 : cx);
+		cy = cy < 0 ? 0 : (cy >= lres ? lres - 1 : cy);
+		return lmap[cy * lres + cx];
+	}
+
+	// floor and ceiling, cast per pixel: each row off the horizon is a fixed
+	// distance, stepped across the screen along the camera plane and lit from the
+	// map; a floor row and the ceiling row as far above the horizon share one walk
 	void cast_planes(var& grid) {
 		int ww = w;
 		int hh = h;
-		int half = hh / 2;
+		int h0 = hh / 2 + itrunc(pitch);
 		var& tx = tex;
+		var& lm = lmap;
+		var& vx = vigx;
+		var& vy = vigy;
+		int lr = lres;
 		int fb = floor_base;
 		int cb = ceil_base;
 		float rdx0 = dirx - planex;
 		float rdy0 = diry - planey;
 		float rdx1 = dirx + planex;
 		float rdy1 = diry + planey;
-		for (int y = half; y < hh; ++y) {
-			float p = y + 0.5 - hh * 0.5;
-			float rowd = hh * 0.5 / p;
+		int reach = h0 > hh - h0 ? h0 : hh - h0;
+		for (int k = 0; k < reach; ++k) {
+			int yf = h0 + k;
+			int yc = h0 - 1 - k;
+			bool dof = yf < hh;
+			bool doc = yc >= 0;
+			float rowd = hh * 0.5 / (k + 0.5);
 			float stx_ = rowd * (rdx1 - rdx0) / ww;
 			float sty_ = rowd * (rdy1 - rdy0) / ww;
-			float fx = posx + rowd * rdx0 + 64.0;
-			float fy = posy + rowd * rdy0 + 64.0;
-			int fog = itrunc(19.2 / (rowd + 1.4));
-			fog = fog > 7 ? 7 : fog;
-			int frow = fb + fog * 8;
-			int crow = cb + fog * 8;
-			int gf = y * ww;
-			int gc = (hh - 1 - y) * ww;
+			float fx = posx + rowd * rdx0;
+			float fy = posy + rowd * rdy0;
+			int amb = itrunc(8.0 / (rowd + 1.8));
+			amb = amb > 3 ? 3 : amb;
+			int ambf = amb - (dof ? vy[yf] : 0);
+			int ambc = amb - (doc ? vy[yc] : 0);
+			int gf = yf * ww;
+			int gc = yc * ww;
+			int cell = -1;
+			int lit = 0;
 			for (int x = 0; x < ww; ++x) {
 				int iu = fx * 16.0;
 				int iv = fy * 16.0;
 				int ti = (iv & 15) * 16 + (iu & 15);
-				grid[gf + x] = frow + tx[768 + ti];
-				grid[gc + x] = crow + tx[1024 + ti];
+				// the light changes only from one light-map cell to the next
+				int lc = (iv >> 3) * 4096 + (iu >> 3);
+				if (lc != cell) {
+					cell = lc;
+					int lcx = iu >> 3;
+					int lcy = iv >> 3;
+					lcx = lcx < 0 ? 0 : (lcx >= lr ? lr - 1 : lcx);
+					lcy = lcy < 0 ? 0 : (lcy >= lr ? lr - 1 : lcy);
+					lit = lm[lcy * lr + lcx];
+				}
+				int vxx = vx[x];
+				if (dof) {
+					int lv = ambf + lit - vxx;
+					lv = lv < 0 ? 0 : (lv > 7 ? 7 : lv);
+					grid[gf + x] = fb + lv * 8 + tx[768 + ti];
+				}
+				if (doc) {
+					int lv2 = ambc + lit - vxx;
+					lv2 = lv2 < 0 ? 0 : (lv2 > 7 ? 7 : lv2);
+					grid[gc + x] = cb + lv2 * 8 + tx[1024 + ti];
+				}
 				fx += stx_;
 				fy += sty_;
 			}
 		}
 	}
 
-	// one billboard: an ellipsoid body lit as a sphere per pixel, eyes with
-	// pupils, a grin; walls occlude per column; hit-flash paints it white
+	// one billboard: an ellipsoid body lit as a sphere per pixel, eyes that glow
+	// in the gloom, a grin; walls occlude per column; hit-flash paints it white
 	void draw_blob(var& grid, int i) {
 		float tyy = sty[i];
 		float txx = stx[i];
@@ -389,15 +640,16 @@ class GlobHunter : Scene {
 		float size = typ == 1 ? 1.1 : 0.78;
 		int sh = itrunc(h * size / tyy);
 		sh = sh < 3 ? 3 : sh;
-		sh = sh > 64 ? 64 : sh;
-		float hwm = (sh + (typ == 1 ? 6.0 : 2.0)) * 0.5;
-		int feet = h / 2 + itrunc(h * 0.5 / tyy);
+		sh = sh > h ? h : sh;
+		float hwm = (sh + (typ == 1 ? 6.0 : 2.0) * h / 80.0) * 0.5;
+		int feet = h / 2 + itrunc(pitch) + itrunc(h * 0.5 / tyy);
 		int top = feet - sh;
 		float wob = math::sin(tt * 5.0 + i * 2.1) * 0.10;
 		bool flash = es[i] == 1;
 		int body = sprite_base + typ * 12;
-		float fogk = 1.1 - tyy * 0.06;
-		fogk = fogk < 0.45 ? 0.45 : (fogk > 1.0 ? 1.0 : fogk);
+		float fogk = 0.18 + light_at(ex[i], ey[i]) * 0.15 + 0.35 / (tyy + 0.6);
+		fogk = fogk < 0.2 ? 0.2 : (fogk > 1.0 ? 1.0 : fogk);
+		bool glow = fogk < 0.55;
 		for (int dy = 0; dy < sh; ++dy) {
 			int rr = top + dy;
 			if (rr < 0 || rr >= h) { continue; }
@@ -419,14 +671,17 @@ class GlobHunter : Scene {
 					float nz = q > 0.0 ? math::sqrt(q) : 0.0;
 					float li = -0.45 * nx - 0.55 * v + 0.70 * nz;
 					li = li < 0.0 ? 0.0 : li;
-					int lv = itrunc((0.12 + 0.88 * li) * fogk * 11.99);
-					pi = body + lv;
+					// a rim of torchlight on the silhouette's edge
+					float rim = q < 0.12 && li < 0.3 ? 0.35 : 0.0;
+					int lv = itrunc((0.10 + 0.9 * li + rim) * fogk * 11.99);
+					pi = body + (lv > 11 ? 11 : lv);
 					float ax = nx < 0.0 ? -nx : nx;
 					if (v > -0.5 && v < -0.12 && ax > 0.14 && ax < 0.52) {
 						float ey2 = (v + 0.31) * 5.0;
 						float ex2 = (ax - 0.33) * 5.0;
 						if (ex2 * ex2 + ey2 * ey2 < 1.0) {
-							pi = ex2 * ex2 + ey2 * ey2 < 0.3 ? sprite_base + 26 : sprite_base + 25;
+							bool core = ex2 * ex2 + ey2 * ey2 < 0.3;
+							pi = core ? (glow ? sprite_base + 48 : sprite_base + 26) : (glow ? sprite_base + 26 : sprite_base + 25);
 						}
 					}
 					if (v > 0.18 && v < 0.34 && ax < 0.42) {
@@ -438,6 +693,38 @@ class GlobHunter : Scene {
 		}
 	}
 
+	// a torch's flame: a flickering teardrop, occluded by nearer walls
+	void draw_flame(var& grid, int k) {
+		float invdet = 1.0 / (planex * diry - dirx * planey);
+		float rx = tox[k] - posx;
+		float ry = toy[k] - posy;
+		float tyy = invdet * (planex * ry - planey * rx);
+		if (tyy < 0.3) { return; }
+		float txx = invdet * (diry * rx - dirx * ry);
+		int scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+		float hc = h / 2 + itrunc(pitch);
+		int fh = itrunc(h * 0.24 / tyy);
+		fh = fh < 3 ? 3 : fh;
+		int fy0 = itrunc(hc - h * 0.14 / tyy) - fh;
+		float flick = math::sin(tt * 17.0 + k * 3.0);
+		for (int dy = 0; dy < fh; ++dy) {
+			float v = (dy + 0.5) / fh;
+			float half = (v < 0.65 ? v / 0.65 : 1.0 - (v - 0.65) / 0.35 * 0.4) * fh * 0.28;
+			int sway = itrunc(flick * (1.0 - v) * fh * 0.12);
+			int hw = itrunc(half);
+			int row = fy0 + dy;
+			if (row < 0 || row >= h) { continue; }
+			for (int dx = 0 - hw; dx <= hw; ++dx) {
+				int col = scx + dx + sway;
+				if (col < 0 || col >= w || tyy >= zcol[col]) { continue; }
+				float ax = dx < 0 ? 0 - dx : dx;
+				float e = hw > 0 ? ax / hw : 0.0;
+				int c = e < 0.4 && v > 0.45 ? 31 : (e < 0.75 ? 32 : 33);
+				grid[row * w + col] = sprite_base + c;
+			}
+		}
+	}
+
 	void render(var& grid) override {
 		cast_planes(grid);
 		int ww = w;
@@ -445,9 +732,11 @@ class GlobHunter : Scene {
 		var& wm = wmap;
 		var& tx = tex;
 		var& zc = zcol;
+		var& vx = vigx;
 		int wb = wall_base;
 		int bb = banner_base;
 		int tshift = itrunc(tt * 14.0);
+		float hc = hh / 2 + itrunc(pitch);
 		for (int x = 0; x < ww; ++x) {
 			float camx = 2.0 * x / (ww - 1.0) - 1.0;
 			float rdx = dirx + planex * camx;
@@ -480,18 +769,21 @@ class GlobHunter : Scene {
 			wallx -= math::floor(wallx);
 			int tu = itrunc(wallx * 16.0) & 15;
 			float lineh = hh / pdist;
-			float topf = (hh - lineh) * 0.5;
+			float topf = hc - lineh * 0.5;
 			int y0 = itrunc(topf);
 			int y1 = itrunc(topf + lineh);
 			y0 = y0 < 0 ? 0 : y0;
 			y1 = y1 > hh ? hh : y1;
-			int fog = itrunc(19.2 / (pdist + 1.4));
-			fog = fog > 7 ? 7 : fog;
+			// light: the gloom by distance, the torches at the face, the vignette
+			int amb = itrunc(8.0 / (pdist + 1.8));
+			amb = amb > 3 ? 3 : amb;
+			int lv = amb + light_at(posx + rdx * (pdist - 0.05), posy + rdy * (pdist - 0.05)) - vx[x];
+			lv = lv < 0 ? 0 : (lv > 7 ? 7 : lv);
 			float tstep = 16.0 / lineh;
 			float tpos = (y0 + 0.5 - topf) * tstep;
 			int gi = y0 * ww + x;
 			if (hitv == 4) {
-				int brow = bb + (side * 8 + fog) * 16;
+				int brow = bb + (side * 8 + lv) * 16;
 				// rainbow fire: ragged flame tongues per texel column, hue bands scroll up
 				int wave = (tu * 3 + tshift) % 12;
 				int flen = 6 + (wave < 6 ? wave : 12 - wave);
@@ -505,7 +797,7 @@ class GlobHunter : Scene {
 					gi += ww;
 				}
 			} else {
-				int wrow = wb + (((hitv - 1) * 2 + side) * 8 + fog) * 8;
+				int wrow = wb + (((hitv - 1) * 2 + side) * 8 + lv) * 8;
 				int tbase = (hitv - 1) * 256 + tu;
 				for (int y2 = y0; y2 < y1; ++y2) {
 					int tv2 = tpos;
@@ -515,6 +807,7 @@ class GlobHunter : Scene {
 				}
 			}
 		}
+		for (int k = 0; k < tox.size(); ++k) { draw_flame(grid, k); }
 		// sprite pass: camera-space transforms, then paint far to near
 		float invdet = 1.0 / (planex * diry - dirx * planey);
 		for (int i = 0; i < ne; ++i) {
@@ -539,57 +832,72 @@ class GlobHunter : Scene {
 			drawn[pick] = 1;
 			draw_blob(grid, pick);
 		}
-		// gib scatter for the dying
-		int flick = itrunc(tt * 10.0);
-		for (int i3 = 0; i3 < ne; ++i3) {
-			int st3 = es[i3];
-			if (st3 != 2) { continue; }
-			float tyy = sty[i3];
-			if (tyy < 0.25) { continue; }
-			float prog = est[i3] * 1.9;
-			int scx = itrunc(w * 0.5 * (1.0 + stx[i3] / tyy));
-			int scy = h / 2 + itrunc(h * 0.22 / tyy);
-			float r = prog * (h * 0.45 / tyy);
-			int body = sprite_base + et[i3] * 12 + 8;
-			for (int k = 0; k < 18; ++k) {
-				float a = k * 0.349 + i3;
-				int gx = scx + itrunc(math::cos(a) * r * (1.0 + (k % 3) * 0.3));
-				int gy = scy + itrunc(math::sin(a) * r + prog * prog * 10.0);
-				if (gx < 0 || gx >= w - 1 || gy < 1 || gy >= h - 1) { continue; }
-				if (tyy >= zcol[gx]) { continue; }
-				int gc = k % 4 == 0 ? sprite_base + 45 : body - (k % 3) * 2;
-				grid[gy * w + gx] = gc;
-				grid[gy * w + gx + 1] = gc;
-			}
-		}
-		draw_hud(grid, flick);
+		draw_goo(grid, invdet);
+		draw_hud(grid);
 	}
 
-	void draw_hud(var& grid, int flick) {
-		int gx0 = w / 2;
-		// rainbow hitscan tracer from the muzzle to the target
-		if (tracer_t > 0.0) {
-			int y0t = h - 22;
-			for (int k2 = 1; k2 < 28; ++k2) {
-				int xx = gx0 + (tr_x - gx0) * k2 / 28;
-				int yy = y0t + (tr_y - y0t) * k2 / 28;
-				if (xx < 0 || xx >= w || yy < 1 || yy >= h) { continue; }
-				grid[yy * w + xx] = sprite_base + 34 + (k2 / 2 + flick) % 6;
+	// the goo in flight and on the floor: blobs sized by distance, lit by the map
+	void draw_goo(var& grid, float invdet) {
+		float hc = h / 2 + itrunc(pitch);
+		for (int g = 0; g < ngoo; ++g) {
+			float life = glife[g];
+			if (life <= 0.0) { continue; }
+			float rx = gx[g] - posx;
+			float ry = gy[g] - posy;
+			float tyy = invdet * (planex * ry - planey * rx);
+			if (tyy < 0.3) { continue; }
+			float txx = invdet * (diry * rx - dirx * ry);
+			int scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
+			if (scx < 0 || scx >= w || tyy >= zcol[scx]) { continue; }
+			int scy = itrunc(hc + (0.5 - gz[g]) * h / tyy);
+			int rad = itrunc(h * 0.04 / tyy * (life < 0.6 ? life / 0.6 : 1.0));
+			int flat = gz[g] <= 0.0 ? 1 : 0;
+			float lk = 0.3 + light_at(gx[g], gy[g]) * 0.14;
+			int body = sprite_base + gtype[g] * 12 + itrunc(lk * 10.0);
+			for (int dy = 0 - rad; dy <= rad; ++dy) {
+				int row = scy + (flat == 1 ? dy / 2 : dy);
+				if (row < 0 || row >= h) { continue; }
+				for (int dx = 0 - rad - flat * rad; dx <= rad + flat * rad; ++dx) {
+					int col = scx + dx;
+					if (col < 0 || col >= w || tyy >= zcol[col]) { continue; }
+					if (dx * dx + dy * dy * (flat == 1 ? 4 : 1) > (rad + 1) * (rad + 1) * (flat == 1 ? 4 : 1)) { continue; }
+					grid[row * w + col] = dy < 0 && dx < 0 && flat == 0 ? sprite_base + 52 : (body > sprite_base + gtype[g] * 12 + 11 ? sprite_base + gtype[g] * 12 + 11 : body);
+				}
 			}
 		}
-		// the gun, drawn at 2x: bobs with the walk, kicks on the shot
-		int bob = itrunc(math::sin(tt * 7.0) * 2.5);
-		int kick = muzzle_t > 0.0 ? 4 : 0;
+	}
+
+	void draw_hud(var& grid) {
+		int gx0 = w / 2;
+		int gs = h / 40;
+		gs = gs < 2 ? 2 : gs;
+		int flick = itrunc(tt * 10.0);
+		// rainbow hitscan tracer from the muzzle to the target
+		if (tracer_t > 0.0) {
+			int y0t = h - 11 * gs;
+			int steps = 14 * gs;
+			for (int k2 = 1; k2 < steps; ++k2) {
+				int xx = gx0 + (tr_x - gx0) * k2 / steps;
+				int yy = y0t + (tr_y - y0t) * k2 / steps;
+				for (int th = 0; th < gs / 2; ++th) {
+					if (xx + th < 0 || xx + th >= w || yy < 1 || yy >= h) { continue; }
+					grid[yy * w + xx + th] = sprite_base + 34 + (k2 / gs + flick) % 6;
+				}
+			}
+		}
+		// the gun, drawn at gs x: bobs with the walk, kicks on the shot
+		int bob = itrunc(math::sin(travel * 5.2) * 1.25 * gs);
+		int kick = muzzle_t > 0.0 ? 2 * gs : 0;
 		int gw = 16;
 		int gh = gun.size();
-		int gxs = gx0 - gw + bob;
-		int gys = h - gh * 2 + 4 + kick + (bob < 0 ? 0 - bob : bob) / 2;
-		for (int ry = 0; ry < gh * 2; ++ry) {
-			string row = gun[ry / 2];
+		int gxs = gx0 - gw * gs / 2 + bob;
+		int gys = h - gh * gs + 2 * gs + kick + (bob < 0 ? 0 - bob : bob) / 2;
+		for (int ry = 0; ry < gh * gs; ++ry) {
+			string row = gun[ry / gs];
 			int yy2 = gys + ry;
 			if (yy2 < 0 || yy2 >= h) { continue; }
-			for (int rx = 0; rx < gw * 2; ++rx) {
-				string ch = row.substr(rx / 2, 1);
+			for (int rx = 0; rx < gw * gs; ++rx) {
+				string ch = row.substr(rx / gs, 1);
 				if (ch == ".") { continue; }
 				int c = ch == "d" ? 27 : (ch == "m" ? 28 : (ch == "l" ? 29 : (ch == "h" ? 30 : (ch == "k" ? 46 : 47))));
 				int xx2 = gxs + rx;
@@ -597,28 +905,44 @@ class GlobHunter : Scene {
 			}
 		}
 		if (muzzle_t > 0.0) {
-			int mx = gxs + 15;
-			int my = gys - 4;
-			for (int q = -5; q <= 5; ++q) {
+			int mx = gxs + gw * gs / 2 - 1;
+			int my = gys - 2 * gs;
+			int ray = 3 * gs;
+			for (int q = 0 - ray; q <= ray; ++q) {
 				int aq = q < 0 ? 0 - q : q;
-				int c2 = aq <= 1 ? 31 : (aq <= 3 ? 32 : 33);
-				for (int th = 0; th < 2; ++th) {
-					if (my + q >= 0 && my + q < h) { grid[(my + q) * w + mx + th] = sprite_base + c2; }
-					if (mx + q >= 0 && mx + q < w && my + th >= 0) { grid[(my + th) * w + mx + q] = sprite_base + c2; }
+				int c2 = aq * 5 <= ray ? 31 : (aq * 5 <= ray * 3 ? 32 : 33);
+				for (int th2 = 0; th2 < gs; ++th2) {
+					if (my + q >= 0 && my + q < h && mx + th2 < w) { grid[(my + q) * w + mx + th2] = sprite_base + c2; }
+					if (mx + q >= 0 && mx + q < w && my + th2 >= 0 && my + th2 < h) { grid[(my + th2) * w + mx + q] = sprite_base + c2; }
 				}
-				if (aq <= 3 && mx + q >= 0 && mx + q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx + q] = sprite_base + 32; }
-				if (aq <= 3 && mx - q >= 0 && mx - q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx - q] = sprite_base + 32; }
+				if (aq * 5 <= ray * 3 && mx + q >= 0 && mx + q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx + q] = sprite_base + 32; }
+				if (aq * 5 <= ray * 3 && mx - q >= 0 && mx - q < w && my + q >= 0 && my + q < h) { grid[(my + q) * w + mx - q] = sprite_base + 32; }
 			}
 		}
 		int chc = hot_t > 0.0 ? sprite_base + 41 : sprite_base + 40;
-		int cy = h / 2;
-		for (int d = 2; d <= 3; ++d) {
+		int cy = itrunc(h * 0.5);
+		int cr = gs / 2;
+		for (int d = cr + 1; d <= cr * 2 + 2; ++d) {
 			grid[cy * w + gx0 - d] = chc;
 			grid[cy * w + gx0 + d] = chc;
 			grid[(cy - d) * w + gx0] = chc;
 			grid[(cy + d) * w + gx0] = chc;
 		}
+		int ts = h / 80;
+		ts = ts < 1 ? 1 : ts;
 		string tally = `KILLS ${(kills < 10 ? "0" : "")}${kills}`;
-		gfx.draw_text(grid, w, h, tally, 2, 2, 1, 1, sprite_base + 42, 2, sprite_base + 44, 99);
+		gfx.draw_text(grid, w, h, tally, 2, 2, ts, ts, sprite_base + 42, 2, sprite_base + 44, 99);
+		// the callout: it punches in large and settles, rising as it fades
+		if (call_t > 0.0) {
+			float age = 0.9 - call_t;
+			int cs = w * 3 / 5 / (callout.size() * 6);
+			cs = cs < 1 ? 1 : (cs > 3 * ts ? 3 * ts : cs);
+			cs += age < 0.08 ? 1 : 0;
+			int tw = callout.size() * 6 * cs;
+			int cx = (w - tw) / 2;
+			int cyy = itrunc(h * 0.22 - age * h * 0.08);
+			int ink = combo >= 2 ? sprite_base + 53 + (flick & 3) : sprite_base + 49 + (flick & 1) * 2;
+			if (cx > 0) { gfx.draw_text(grid, w, h, callout, cx, cyy, cs, cs, ink, 1, sprite_base + 44, 99); }
+		}
 	}
 }

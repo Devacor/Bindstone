@@ -161,7 +161,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 3 | LAVALAMP | metaballs in a lamp: the shot opens in macro on the wax and pulls back to show a rounded glass vessel on a steel base under a steel cap in a dark room; seven blobs rise off the heater and sink as they cool over a pool that never leaves the base, stretched into taffy by their speed; one loop per pixel sums the inverse-square field, its gradient and a contribution-weighted hue, so merging blobs blend their colours into a bridge, and the wax is lit from a normal built out of the gradient (diffuse + a sharp specular); between blobs the violet liquid glows with the wax's light, the glass carries a fresnel edge and a highlight stripe, the steel a studio reflection, the wall and the table a halo of the lamp's colour; on the beat the light pulses and the wax burns through the rainbow, painting the room, before the camera pushes back into the glass; rows run in parallel |
 | 4 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes grow one segment per tick through a 16x12x16 voxel volume, never intersecting; every tube is a chain of lit sphere impostors a quarter voxel apart (per-pixel normal, specular, fog, depth nudge so crossings intersect), glossy elbow balls at every turn, a static camera per generation, CRT wipe, reseed from a new angle; ~2% of elbows spawn the jackodile's rainbow eye |
 | 5 | BOIDS | a starling murmuration over a lake at sunset: a thousand birds fly in 3D, keeping their distance from and matching the heading of their nearest neighbours (a uniform grid hashed every frame, steering in parallel chunks), drawn to places on a sheet that swings, stretches and folds; a peregrine falcon stoops through them, and panic passes bird to bird as a scare wave that splits the cloud; projected from the shore into a density buffer, so the cloud darkens where it is thick and pales where the sheet faces you, mirrored in the lake under the sun's glitter path |
-| 6 | GLOBHUNTER | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel, distance fog; billboard Grublins and Orglis brutes lit as spheres per pixel, with eyes and grins, wall-occluded per column; the camera auto-fires on line-of-sight cone lock — recoil, muzzle flash, rainbow tracer, hit-flash, gib scatter, a pixel-font kill counter |
+| 6 | GLOBHUNTER | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel (a floor row and its ceiling row share one walk); LIT by flickering torches through a light map (each cell's steady torch sum, flickering with the torch that rules it, plus the muzzle on each shot), warm in the pools and cold blue in the gloom, under a vignette; billboard Grublins and Orglis brutes lit as spheres per pixel with a torchlit rim, eyes that glow in the dark, grins, wall-occluded per column; the camera hunts: it swings onto a mark in clear sight, bobs as it walks, and fires on cone lock — recoil kicking the view, muzzle flash lighting the hall, a rainbow tracer, a hit-flash and hit-stop, goo that bursts in 3D and bounces off the flagstones and walls, callouts (DOUBLE KILL, MULTI KILL), a pixel-font kill counter; the HUD scales with the screen |
 | 7 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm flown as a golden-hour drone shot: a 512x512 wrapping heightmap by diamond-square, a U-shaped gorge carved along a wrapping meander, the land terraced into mesas and stepped cliffs; the colormap is baked with light in parallel rows (a low sun's shadows marched across the height field, diffuse from the normals, ambient occlusion from the height field against its blur) and materials (river, wet sand, a green floor, scrub, mesa tops, pale peaks, ten strata colours); 120 geometric depth steps of 16.16 fixed-point marching with a per-column y-buffer and a sub-texel jitter per column and step, cliff faces painted per pixel with the rock layer at the height each row looks at (integer inverse projection), grain on rock and ground, twelve haze banks; the river mirrors the sky about each column's horizon with ripples and the sun's glitter, the sky is a perspective cloud deck lit by the sunset; the camera skims the river, banks through the bends, climbs out over the rim for the reveal and dives back in |
 | 8 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 9 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp, its walls an oil slick whose hue turns with the viewing angle, crawled by contour lines and rings of light; eight three-segment IK legs step in a tetrapod gait under a glossy iridescent abdomen with crawling chevrons; the sheet melts into a chamber, the spider climbs its dragline to the hub, casts the spokes, lays the capture spiral and waits with its skull reared toward the viewer; a moth with eyespotted wings strikes the web, the strike rings out through the threads, and the spider runs it down and wraps it in a spinning cocoon; the silk is drawn depth-tested over the trace in hues that turn with each thread's angle, the moth and cocoon are distance fields in the spider's march; rows in parallel |
@@ -190,7 +190,7 @@ Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 | JULIA | 1.5 | 59.0 | 73 |
 | LAVALAMP | 0.9 | 22.2 | 33 |
 | PIPEDREAM | 1.1 | 10.9 | 56 |
-| GLOBHUNTER | 1.2 | 12.6 | 33 |
+| GLOBHUNTER | 1.8 | 28.9 | 35 |
 | CANYONRUN | 1.6 | 32.3 | 90 |
 | CHROME | 4.0 | 17.5 | 27 |
 
@@ -230,7 +230,7 @@ jai_demoreel --perf 30 --backend vm --workers 1 --scenes /tmp/natural_scenes  # 
 ## Console performance
 
 Half-block frames carry two colors per cell: 45 KB on average, 123 KB for JULIA, whose
-cycling palette changes nearly every pixel, while GLOBHUNTER and CANYONRUN stay near 20-30 KB.
+cycling palette changes nearly every pixel, while GLOBHUNTER stays near 35 KB.
 Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
 host's post-processing in `demoreel_host.cpp` is for (scenes and the `--smoke` stream
 are untouched by it, so parity hashes don't move):
@@ -336,51 +336,51 @@ are sun glints, the reflections carry the sky and the floor):
 =====*%%%%%%%%%%%%%%%%%%%-----*****%%%%%%%%%*------------------*%%%%%%%***--------**%%%%%%%%%%%%%%%%
 ```
 
-GLOBHUNTER (`shot 6 at 3.1` — the kill counter top left, oak planks overhead,
-coursed stone walls converging on a Grublin down the corridor, flagstones
-below, the pistol at the bottom):
+GLOBHUNTER (`shot 6 at 3.1` — the kill counter top left, a Grublin with glowing
+red eyes in the crosshair down a cold corridor while the goo of the last one
+bursts around it, the pistol at the bottom):
 
 ```
---======:.....                                         :::::::::.        .::::.       .....:======--
---%:=**:*=%== % ....% ....===== .::::.=====.====+::::::.........::::.....................:======----
---%=*..===% :.% ..::% ::::+=++::::::::% ++% :.:++ :::::::::::::::::::::::::::::.   ....:=====-------
---* ==---=* ==* ....* ::::::..*.::::::*-..* :==..:::::::::::::::::::::::::::::::.....:=====---------
---= --=.=----:+---- -----.----         ---  -----                       ....  .......===------------
---------------=..+-..................   ...............................::::......-+..=--------------
----------------..++++-...............    ......................:::......::....-++++..---------------
-..::-----------..=++++=-.............................   ....................-=++++=..-----------::..
-......::-------..====+===-................................................-===+====..-------::......
-..........::---..=========.:.....................................  .....:.=========..---::..........
-*---.........::..=========.--:.. .................................  ..:--.=========..::.........---*
-****...--........::===---=.----:.. ........  .................... ..:----.=---===::........--...****
-****...====---.......::---.--:::=:..         ..                 ..:=:::--.---::.......---====...****
-+++*...========+---......:.--:::--=.......................... ...=--:::--.:......---+========...*+++
-++++...========++++++..-....:.::---.::: .                  . :::.---::.:....-..++++++========...++++
-++++...========++++++..+++---...::-.::- . ................ . -::.-::...---+++..++++++========...++++
-++++...==============..++++++.-:::....: .:.              .:. :....:::-.++++++..==============...++++
-====...--------======..======.---==-::: ......         ..... :::-==---.======..======--------...====
-====...--------======..======.:---=--:-:::... ..--=-:  ...:::-:--=---:.======..======--------...====
-====...--------======..======.::-----:::::.:  ++#+*=#-: :::::::-----::.======..======--------...====
-....................................... :....=+**#=*++:..:.: .......................................
-........................::.--::=---.--: :::..:----%:::...::: :--.---=::--.::........................
-.........------..=========.++===---.--: ...-=.......... ::.. :--.---===++.=========..------.........
--**************..=====----.====-:::.::..::.......:........::..::.:::-====.----=====..**************-
-**************+..=====----.==---....::::....:...:...::.:::..::::....---==.----=====..+**************
-*******++++++++..====-----.=::...:=--::.:..:....:.::::.:::::.::--=:...::=.-----====..++++++++*******
-+++++++++++++++..--------:....:-----::.:.::.:::::.::::-..::--.::-----:....:--------..+++++++++++++++
-++++++++++++++=..----::....-=.-:-:-..--.::............::.......---:-:-.=-....::----..=++++++++++++++
-+++++++++======..::.....-====.:::.::::::::::::-=:.:----::-::---=:..:::.====-.....::..======+++++++++
-++++=========--........======.:-.----==::-------:::::--==:::------::-:.======........--=========++++
-==========--......-==..====--::::::-==..::::::..==**..:-==..:---------:--====..==-......--==========
-======--.......-=====..==----:::::-==..:------..==--..--==-..:-------------==..=====-.......--======
-==--........:========..---:------.....::------..==--..-----...-----------:---..========:........--==
-.........:===========..--::::---------------....==--....-------------===-..:-..===========:.........
-.......======--===---..:---------::::---::::..==**----..--------:::----===-....---===--======.......
-...-...====----=----::--------------------....==------....----===========+++-..:----=----====...-...
--+++...=----------::----:::---------------..==**--------..================+++-...:----------=...+++-
-++++...---------:-++++++++++++++++++++++##..==----------..##+++++++++++++++++++-...:---------...++++
-++++...-------:.......................####..------------..####.......................:-------...++++
-++==...---------------=++++-....----########..--------..########-....==================------...==++
+::-====--:::::::::::::::::::::::.....::::::::::::::::::::::::::::::::::::::::::::::::::::::--====-::
+::@-=##:#*@**:@:::::@:::::*****::....:*****:*****::::::::::::::::::::::::::::::::::::::::----====-::
+::@*#-----@.-:@.::::@.::::****::::....@.**@.:.:**.:::::::::::::::::::::::::::::::::::::-==---====-::
+::%.**=---%.==%.::::%.::::::::%.::::::%+.:%.:++.:::::::::::::::::::::::::::::::::::::-====---====-::
+::*.==*:*++++-*++++:+++++:++++:::::::::+++::+++++::::::::::::::::::::::::::::::::::-======---====-::
+::----=---========-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::-========---=----::
+::--------=========::-::::::::::::::::::::::::::::::::::::::::::::::::::::::::-::=========--------::
+:::---------=======::---:::::::::::::::::::::::::::::::::::::::::::::..:::::---::=======---------:::
+::::::-:-------====::-----::::::::::::::::::::::::::::::::-:::::::::::::::-----::====-------:-::::::
+::::::::::--------=::-------::::::--::::::::::::::::::::::::::::::::::::-------::=--------::::::::::
+----:::::::::------::-------:-:::::::::::...:::::::::::::::--:::::-:::-:-------::------:::::::::---=
+---===---::::::::--::-------:==-:::::::::::::::::::::.*==:::::::::::-==:-------::--::::::::---===--=
+---====---=::::::::::-------:====:::::::::=:::::::::::+++:::::.::::====:-------::::::::::=---====--=
+---====---=:::==---::::::---:-===:--:::::.......#--.....::...:::--:===-:---::::::---==:::=---====--=
+---====---=:::=======---:::::----:--:-#++:::+=::+++:::::::::::-:--:----:::::---=======:::=---====--=
+---====---=:::==========:=---:::-:--:-===::::::::::::::::::--:-:--:-:::---=:==========:::=---====--=
+---====---=:::==========:======:--:::::-==+-----=-::::::-===-:::::--:======:==========:::=---====--=
+----------=:::==========:---===:=----:-:--+:-@....::::.-=+--:-:----=:===---:==========:::=----------
+-----------:::==========:---===:=----:-===-=:#=:--%-:.::=-==--:----=:===---:==========:::-----------
+-----------:::==========:------:=----:--=+-=-:+=+-#-+-:-=-+=--:----=:------:==========:::-----------
+:::::::::::::::::::::::::::::::::::::::-===:::###==-***#===--:::::::::::::::::::::::::::::::::::::::
+::::::::::::::::::::::::----:--==:--:-:==++:=:-*--%---:++++=-:-:--:==--:----::::::::::::::::::::::::
+::::::::::------===::=======:====:--:-:=---=::::-:*:-:::=-+--:-:--:====:=======::===------::::::::::
+::-====---=========::=======:----:--:::-=+-++=-++++**-++=-+=::::--:----:=======::=========---====-::
+::-====---========-::=======:----:::::-----==-=====*==-====---:::::----:=======::-========---====-::
+::-====---=--------::=======:-:::----:---#=#=#++#++--==-===:--:----:::-:=======::--------=---====-::
+::-----------------::====--:::-:=----++:-+++++=====-----------:----=:-:::--====::-----------------::
+::-----------------::--::::-===:=---:==--:::::::::::::--::::::::---=:===-::::--::-----------------::
+::-----------------::::::---=--:------:--:---------------::---------:--=---::::::-----------------::
+::-------------::::::-==:------:--=====-------==::=====---------==-::------:==-::::::-------------::
+::----------::::::-=====:----------------------**##--------------==-::-----:=====-::::::----------::
+::-----::::::::-========:------------::--------**++--------:::-------------:========-::::::::-----::
+:::-::::::::::==========:-------===-::---------**++-----===-::-==========--:==========::::::::::-:::
+::::::::::=:::========---------===-::----------**++------===:::-===========---========:::=::::::::::
+::::::----=:::=====---=-------===-:::--------**##++++----====:::=======----===---=====:::=----::::::
+:::-===---=:::===------------:::::::---------**++++++--------::::------------------===:::=---===-:::
+:--====----:::=----::::--------------------**##++++++++-----------------------:::----=:::----====---
+---====----:::---:---------------------%%--**++++++++++--%%-----------------===-=::---:::----====--=
+---=-------:::-:---------------------%%%%--++++++++++++--%%%%---------------------:::-:::-------=--=
+-----------:::-------------:::::---%%%%%%%%--++++++++--%%%%%%%%--------------------::::::----------=
 ```
 
 DONUT (`shot 1 at 4` — the product shot: the iced torus over the walnut table, its reflection below):

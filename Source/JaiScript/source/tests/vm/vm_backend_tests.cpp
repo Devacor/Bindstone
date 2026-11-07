@@ -5434,7 +5434,7 @@ public:
 				"int a = 1; int n = 63; return to_string(a << n) + \",\" + to_string((a << n) >> n);",
 				"int a = 1; int n = 64; string m = \"ok\"; try { int r = a << n; } catch (e) { m = e; } return m;",
 				"int a = 1; int n = -1; string m = \"ok\"; try { int r = a >> n; } catch (e) { m = e; } return m;",
-				"float a = 1.5; int n = 1; string m = \"ok\"; try { var r = a & n; } catch (e) { m = e; } return m;",
+				"float a = 1.5; int n = 1; string m = \"ok\"; try { [[warn_mode]] var r = a & n; } catch (e) { m = e; } return m;",
 				"char c = 'a'; int n = 1; return to_string(c & n) + to_string(c >> n) + to_string(c | 128);",
 				"var a = 6; var b = 3; return to_string(a & b) + to_string(a | b) + to_string(a ^ b) + to_string(a << b) + to_string(a >> 1);",
 				"int acc = 0; for (int i = 0; i < 40; ++i) { acc += (i & 3) + (i >> 1) + ((i ^ 5) | 8); } return to_string(acc);",
@@ -5458,7 +5458,7 @@ public:
 			auto vmx = vm_engine();
 			jai::stdlib::register_all(*vmx);
 			check_eq(std::string("Shift amount must be between 0 and 63"), vmx->execute("string run() { int a = 1; int n = 64; string m = \"ok\"; try { int r = a << n; } catch (e) { m = e; } return m; } run();").as_string());
-			check_eq(std::string("Bitwise & requires integer operands"), vmx->execute("string run() { float a = 1.5; int n = 1; string m = \"ok\"; try { var r = a & n; } catch (e) { m = e; } return m; } run();").as_string());
+			check_eq(std::string("Bitwise & requires integer operands"), vmx->execute("string run() { float a = 1.5; int n = 1; string m = \"ok\"; try { [[warn_mode]] var r = a & n; } catch (e) { m = e; } return m; } run();").as_string());
 		});
 
 		test("push_fused_statement_matches_the_interpreter_on_every_receiver", [this]() {

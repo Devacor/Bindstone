@@ -4266,6 +4266,7 @@ private:
         }
         stamp(b->static_operand_class, operand_class_of(l, r), operand_class_unknown);   // annotation only
         check_comparison(b, l, r);
+        check_builtin_binary(b, l, r);
         if (l.kind == ctype::object_k) {
             if (auto user = class_binary_operator(l.cls, b->op.type, r)) { return *user; }
         }
@@ -4310,6 +4311,99 @@ private:
         diag(diag_level::error, b->location, "cannot apply '+' to '" + name(l) + "' and '" + name(r) + "': stringify it with to_string(x) or `${x}`");
     }
 
+    // A class whose whole chain this unit models as script, none of it open: no host operator, reflected binding or wrapper answers for it
+    bool script_chain_closed(std::string_view cls, int depth = 0) {
+        const sclass* c = depth > 32 ? nullptr : find_sclass(cls);
+        if (!c || open_classes_.count(cls)) { return false; }
+        for (auto base : c->decl->base_classes) {
+            if (!script_chain_closed(base, depth + 1)) { return false; }
+        }
+        return true;
+    }
+
+    // An operand whose run-time kind the checker knows whole; var, math values, handles and host or open classes stay with the run time
+    bool settled_operand(const ctype& t) {
+        if (t.tentative || t.diagnostic_only) { return false; }
+        switch (t.kind) {
+            case ctype::int_k: case ctype::float_k: case ctype::char_k: case ctype::bool_k: case ctype::string_k: case ctype::utf8_k:
+            case ctype::null_k: case ctype::array_k: case ctype::map_k: case ctype::function_k: return true;
+            case ctype::object_k:
+                return !t.cls.empty() && !(t.ti && t.ti->base_type == script_value_type::jai_shared_ptr_type) && script_chain_closed(t.cls);
+            default: return false;
+        }
+    }
+
+    // The builtin binary rows (detail/binary_handlers.hpp): + - * / % take numbers (a char promotes) and + a string on either side;
+    // & | ^ << >> take ints and chars; past them only the left operand's class operator answers. A pair nothing takes gets the
+    // operator's spelling and the run time's text; op stays null when something may take it
+    struct binary_refusal { const char* op = nullptr; const char* text = nullptr; };
+    binary_refusal builtin_binary_refusal(const ctype& l, token_type op, const ctype& r) {
+        binary_refusal result;
+        bool bitwise = false;
+        switch (op) {
+            case token_type::plus: result = {"+", "Invalid operands for + operator"}; break;
+            case token_type::minus: result = {"-", "Invalid operands for - operator"}; break;
+            case token_type::star: result = {"*", "Invalid operands for * operator"}; break;
+            case token_type::slash: result = {"/", "Invalid operands for / operator"}; break;
+            case token_type::percent: result = {"%", "Invalid operands for % operator"}; break;
+            case token_type::ampersand: result = {"&", "Bitwise & requires integer operands"}; bitwise = true; break;
+            case token_type::pipe: result = {"|", "Bitwise | requires integer operands"}; bitwise = true; break;
+            case token_type::caret: result = {"^", "Bitwise ^ requires integer operands"}; bitwise = true; break;
+            case token_type::left_shift: result = {"<<", "Left shift requires integer operands"}; bitwise = true; break;
+            case token_type::right_shift: result = {">>", "Right shift requires integer operands"}; bitwise = true; break;
+            default: return {};
+        }
+        if (!settled_operand(l) || !settled_operand(r) || eng_.has_function(result.op)) { return {}; }
+        if (l.kind == ctype::object_k) {
+            const member_hit hit = lookup_member(l.cls, result.op, /*want_static=*/false);
+            if (hit.found || !hit.certain || extended_members_.count(result.op)) { return {}; }
+        }
+        const auto text_kind = [](const ctype& t) { return t.kind == ctype::string_k || t.kind == ctype::utf8_k; };
+        const auto number = [bitwise](const ctype& t) { return t.kind == ctype::int_k || t.kind == ctype::char_k || (!bitwise && t.kind == ctype::float_k); };
+        if (!bitwise && op == token_type::plus && (text_kind(l) || text_kind(r))) { return {}; }
+        if (number(l) && number(r)) { return {}; }
+        return result;
+    }
+
+    // spelled is the operator as written (a compound's "*="); a compound's own run-time text names it, so only binary carries the text
+    std::string builtin_binary_message(const std::string& spelled, const binary_refusal& refusal, const ctype& l, const ctype& r, bool compound) {
+        std::string result = "cannot apply '" + spelled + "' to '" + ctype_name(l) + "' and '" + ctype_name(r) + "'";
+        if (l.kind == ctype::object_k) { result += ": class '" + std::string(l.cls) + "' declares no operator '" + refusal.op + "'"; }
+        if (!compound) { result += std::string(" (it raises '") + refusal.text + "')"; }
+        if (l.kind == ctype::object_k) {
+            result += "; declare the operator in the class or convert the operand";
+        } else if (r.kind == ctype::object_k && lookup_member(r.cls, refusal.op, /*want_static=*/false).found) {
+            result += "; a class's operator runs only with an instance of it on the left";
+        } else if (!compound) {
+            result += "; convert one operand";
+        }
+        return result;
+    }
+
+    void check_builtin_binary(const binary_expr* b, const ctype& l, const ctype& r) {
+        if (const binary_refusal refusal = builtin_binary_refusal(l, b->op.type, r); refusal.op) {
+            diag(diag_level::error, b->location, builtin_binary_message(refusal.op, refusal, l, r, /*compound=*/false));
+        }
+    }
+
+    // ++ and -- take numbers and chars; no class operator answers them
+    bool incdec_refused(const ctype& t) {
+        return settled_operand(t) && t.kind != ctype::int_k && t.kind != ctype::float_k && t.kind != ctype::char_k;
+    }
+
+    // x op= rhs runs x op rhs: the binary rows above, then the store; the diagnostic names the compound spelling
+    bool check_compound_operands(const ctype& target, token_type base_op, const ctype& rhs, const source_location& loc, size_t decl_line, size_t decl_col) {
+        if (incdec_op_) {
+            if (!incdec_refused(target)) { return false; }
+            diag(diag_level::error, loc, std::string("cannot apply '") + incdec_op_ + "' to '" + ctype_name(target) + "'", decl_line, decl_col);
+            return true;
+        }
+        const binary_refusal refusal = builtin_binary_refusal(target, base_op, rhs);
+        if (!refusal.op) { return false; }
+        diag(diag_level::error, loc, builtin_binary_message(std::string(refusal.op) + "=", refusal, target, rhs, /*compound=*/true), decl_line, decl_col);
+        return true;
+    }
+
     JAI_NOINLINE ctype infer_unary(unary_expr* u) {
         ctype operand = infer(u->operand.get());
         if (operand.kind == ctype::object_k && (u->op.type == token_type::minus || u->op.type == token_type::plus ||
@@ -4325,6 +4419,14 @@ private:
             case token_type::plus_plus:
             case token_type::minus_minus:
                 check_incdec_target(u);
+                if (incdec_refused(operand)) {
+                    diag(diag_level::error, u->location, std::string("cannot apply '") + (u->op.type == token_type::plus_plus ? "++" : "--") + "' to '" + ctype_name(operand) + "'");
+                } else if (operand.kind == ctype::char_k && !operand.tentative && !operand.diagnostic_only && u->operand->get_type() == node_type::identifier_expr) {
+                    // a char promotes, so the int it steps to reaches a slot declared char (a non-name target checks as its += 1 store)
+                    auto* id = static_cast<identifier_expr*>(u->operand.get());
+                    const bool field = class_ctx_ && !id->global_qualified && !find_named(id) && lookup_member(class_ctx_name_, id->name, /*want_static=*/false).field;
+                    diag(diag_level::error, u->location, "cannot assign 'int' to " + std::string(field ? "field '" : "'") + std::string(id->name) + "' declared 'char'");
+                }
                 return is_numeric(operand.kind) ? operand : ctype{};
             case token_type::tilde:
                 return operand.kind == ctype::int_k ? operand : ctype{};
@@ -5354,6 +5456,7 @@ private:
                     return stored;
                 }
                 const ctype element = container_value_type(recv);
+                if (compound && check_compound_operands(element, base_op, rhs, a->location, 0, 0)) { return element; }
                 const ctype stored = compound ? binary_result(element, base_op, rhs) : rhs;
                 const bool assigns = !compound && element.kind == ctype::object_k && !element.cls.empty() && assign_operator_accepts(element.cls, stored);
                 const auto issue = assigns ? std::string() : container_element_issue(stored, element.ti);
@@ -5450,6 +5553,7 @@ private:
                 return;
             }
         }
+        if (compound && check_compound_operands(target, base_op, rhs, loc, decl_line, decl_col)) { return; }
         ctype stored = compound ? binary_result(target, base_op, rhs) : rhs;
         if (assignable(stored, target)) { return; }
         if (!compound && target.kind == ctype::object_k && assign_operator_accepts(target.cls, stored)) { return; }

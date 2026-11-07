@@ -4458,7 +4458,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const std::string prelude =
 				"class P { int m = 0; float x = 1.5; int nm() { return ++m; } int pm() { return m++; } int dm() { return --m; } int qm() { return m--; }\n"
 				"  float fx() { return ++x; } void bump() { ++m; } }\n"
-				"class S { string t = \"a\"; int up() { ++t; return 1; } }\n"
+				"class S { string t = \"a\"; int up() { [[warn_mode]] ++t; return 1; } }\n"
 				"string run() { P p = P(); int a = p.nm(); int b = p.pm(); int c = p.dm(); int d = p.qm(); float e = p.fx(); p.bump();\n"
 				"  string err = \"\"; S s = S(); try { s.up(); } catch (ex) { err = ex; }\n"
 				"  return `${a},${b},${c},${d},${e},${p.m},${p.x}|${err}`; }\n";

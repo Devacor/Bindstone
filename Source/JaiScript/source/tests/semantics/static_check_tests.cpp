@@ -3343,6 +3343,66 @@ public:
             check_eq((int64_t)7, e->execute(nullable).as_int());
         });
 
+        // ------------------------------------------------------------ arithmetic and bitwise with no row
+        test("arithmetic_and_bitwise_no_row_takes_are_errors", [this]() {
+            auto e = make_engine();
+            const std::string decls = "class C { int v = 1; }\nclass M { int v = 2; M operator*(int x) { M r; r.v = v * x; return r; } }\nclass K : M { }\n"
+                                      "int i = 1; float f = 1.5; char c = 'a'; string s = \"s\"; bool b = true; array<int> a = [1]; "
+                                      "map<string, int> m = {}; C oc = C(); M om = M(); K ok = K();\n";
+            const std::vector<std::pair<std::string, std::string>> binary = {
+                {"oc * 2", "cannot apply '*' to 'C' and 'int': class 'C' declares no operator '*' (it raises 'Invalid operands for * operator'); declare the operator in the class or convert the operand"},
+                {"s * 3", "cannot apply '*' to 'string' and 'int' (it raises 'Invalid operands for * operator'); convert one operand"},
+                {"i + b", "cannot apply '+' to 'int' and 'bool' (it raises 'Invalid operands for + operator')"},
+                {"a - a", "cannot apply '-' to 'array<int>' and 'array<int>'"},
+                {"m / i", "(it raises 'Invalid operands for / operator')"},
+                {"s - s", "cannot apply '-' to 'string' and 'string'"},
+                {"2 * om", "cannot apply '*' to 'int' and 'M' (it raises 'Invalid operands for * operator'); a class's operator runs only with an instance of it on the left"},
+                {"om + 1", "class 'M' declares no operator '+'"},
+                {"2 - oc", "cannot apply '-' to 'int' and 'C' (it raises 'Invalid operands for - operator'); convert one operand"},
+                {"ok - 1", "class 'K' declares no operator '-'"},
+                {"i & f", "cannot apply '&' to 'int' and 'float' (it raises 'Bitwise & requires integer operands'); convert one operand"},
+                {"b << 1", "(it raises 'Left shift requires integer operands')"},
+                {"s >> 1", "(it raises 'Right shift requires integer operands')"},
+                {"oc ^ 1", "class 'C' declares no operator '^' (it raises 'Bitwise ^ requires integer operands')"},
+            };
+            for (const auto& [expr, text] : binary) {
+                const std::string src = decls + "var r = " + expr + ";";
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+            }
+            const std::vector<std::pair<std::string, std::string>> stores = {
+                {"oc *= 2;", "cannot apply '*=' to 'C' and 'int': class 'C' declares no operator '*'; declare the operator in the class or convert the operand"},
+                {"i *= s;", "cannot apply '*=' to 'int' and 'string'"},
+                {"s -= \"a\";", "cannot apply '-=' to 'string' and 'string'"},
+                {"i += b;", "cannot apply '+=' to 'int' and 'bool'"},
+                {"oc &= 1;", "cannot apply '&=' to 'C' and 'int': class 'C' declares no operator '&'"},
+                {"b++;", "cannot apply '++' to 'bool'"},
+                {"void g() { oc--; }", "cannot apply '--' to 'C'"},
+                {"int k = om++;", "cannot apply '++' to 'M'"},
+                {"c++;", "cannot assign 'int' to 'c' declared 'char'"},
+                {"void h(char p) { --p; }", "cannot assign 'int' to 'p' declared 'char'"},
+                {"class W { char ch = 'a'; void bump() { ch++; } }", "cannot assign 'int' to field 'ch' declared 'char'"},
+            };
+            for (const auto& [stmt, text] : stores) {
+                const std::string src = decls + stmt;
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+            }
+            const std::string fine = decls + "var r = [i + f, c * 2, i % f, s + s, s + c, oc + s, om * 2, ok * 2, i & c, c << 2, math::vec2(1, 2) * 2];\n"
+                                             "i *= 2; f += i; f++; i--; om *= 2; var v = s; var w = b;\nr.size()";
+            auto quiet = e->check(fine);
+            check_eq((size_t)0, error_count(quiet), quiet.format(fine));
+            check_eq((int64_t)11, e->execute(fine).as_int());
+            // var operands keep the run-time verdict, and a warn region reports it as a warning with the run-time error unchanged
+            check_eq((size_t)0, error_count(e->check("var v = \"s\"; var r = v * 2;")));
+            auto w = make_engine();
+            check_eq(std::string("Invalid operands for * operator"),
+                     w->execute("[[warn_mode]]; string s = \"s\"; var c = \"\"; try { var r = s * 2; } catch (e) { c = e; } c").to_string());
+            check_true(has_diag(w->last_check_diagnostics(), dlevel::warning, "cannot apply '*' to 'string' and 'int'"));
+        });
+
         // [[nodiscard]] (guide/06-functions.html#nodiscard): an expression statement that drops the result of a call the checker
         // resolves to a [[nodiscard]] callee fails the load; the library's copying twins of the in-place methods are marked
         test("a_discarded_nodiscard_result_fails_the_load", [this]() {

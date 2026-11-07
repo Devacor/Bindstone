@@ -4639,7 +4639,7 @@ public:
             auto e = make_engine();
             check_eq((int64_t)102, e->execute("var x = 5; x += 'a'; x").as_int());
             // a var holding a char takes the promoted int from -= and ++ on every storage: a local, a slot, a field of this, a
-            // member and an element; a char-declared one refuses it
+            // member and an element; a char-declared one refuses it (a load error; [[warn_mode]] reaches the run-time refusal)
             jai::stdlib::register_all(e);
             check_eq(std::string("97 99 97 99 97 99 97 99 97 99 98 a"), e->execute(R"(
                 class P { var c = 'b'; string m() { c -= 1; string s = `${c}`; c = 'b'; c++; return `${s} ${c}`; } }
@@ -4651,7 +4651,7 @@ public:
                 `${lx} ${ly} ${slot()} ${p.m()} ${q.c} ${r.c} ${arr[0]} ${arr[1]} ${w} ${old}`
             )").as_string());
             check_eq(std::string("Cannot assign int to 'tc' (declared char)"),
-                e->execute("char tc = 'b'; string got = \"\"; try { tc++; } catch (err) { got = err.message; } got").as_string());
+                e->execute("char tc = 'b'; string got = \"\"; try { [[warn_mode]] tc++; } catch (err) { got = err.message; } got").as_string());
             // an overflow names the compound or the step, whatever the storage
             if (!e->throw_on_overflow()) { return; }
             check_eq(std::string("Integer overflow in '+=';Integer overflow in '++';Integer overflow in '*=';Integer overflow in '--';"

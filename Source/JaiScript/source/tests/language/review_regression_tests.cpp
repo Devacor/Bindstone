@@ -11,15 +11,49 @@
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <string>
 #include <optional>
+#include <tuple>
+#include <variant>
 #include <atomic>
 #include <thread>
 
 #include "foundry/small_stack.hpp"
+#include "../case_table.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+namespace {
+
+struct raises {};
+using expected_value = std::variant<int64_t, std::string, bool, raises>;
+
+// {name, source, expected} on a fresh make_engine(): an int row also requires an int result, a string row reads as_string()
+template<typename Cases>
+void check_values(const Cases& a_cases, bool a_stdlib = false) {
+    check_each(a_cases, [a_stdlib](const auto& c) {
+        auto e = make_engine();
+        if (a_stdlib) { jai::stdlib::register_all(*e); }
+        const std::string source = std::get<1>(c);
+        const expected_value& expected = std::get<2>(c);
+        if (std::holds_alternative<raises>(expected)) {
+            check_throws([&]() { e->execute(source); }, source);
+            return;
+        }
+        const auto r = e->execute(source);
+        if (const auto* number = std::get_if<int64_t>(&expected)) {
+            check_true(r.is_int(), "an int result: " + source);
+            check_eq(*number, r.as_int(), source);
+        } else if (const auto* flag = std::get_if<bool>(&expected)) {
+            check_eq(*flag, r.as_bool(), source);
+        } else {
+            check_eq(std::get<std::string>(expected), r.as_string(), source);
+        }
+    });
+}
+
+}   // namespace
 
 // A dynamic_binder-bound base for hybrid (script class : C++ class) rows. The
 // by-reference rows cover every property kind: box-decodable member pointers
@@ -195,23 +229,21 @@ public:
         });
 
         // ---- #5 lexer: template (backtick) string at end-of-source ----
-        test("tmpl_string_at_eof", [this]() {
-            auto e = make_engine();
-            check_eq(std::string("hello world"), e->execute("`hello world`").as_string());
-        });
-        test("tmpl_string_interp_at_eof", [this]() {
-            auto e = make_engine();
-            check_eq(std::string("val=7"), e->execute("auto y = 7; `val=${y}`").as_string());
+        test("a_template_string_at_the_end_of_source_lexes", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"tmpl_string_at_eof", "`hello world`", std::string("hello world")},
+                {"tmpl_string_interp_at_eof", "auto y = 7; `val=${y}`", std::string("val=7")},
+            };
+            check_values(cases);
         });
 
         // ---- #6 lexer: malformed octal must error, valid octal still works ----
-        test("octal_valid", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)8, e->execute("010").as_int());   // C-style octal
-        });
-        test("octal_malformed_throws", [this]() {
-            auto e = make_engine();
-            check_throws([&]() { e->execute("auto x = 08; x"); });
+        test("octal_literals_parse_and_a_malformed_one_raises", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"octal_valid", "010", int64_t{8}},
+                {"octal_malformed_throws", "auto x = 08; x", raises{}},
+            };
+            check_values(cases);
         });
 
         // ---- #7 parser: deep prefix-operator chain must not crash ----
@@ -247,28 +279,25 @@ public:
         });
 
         // ---- #19 range-for inside a function ----
-        test("range_for_in_function", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("range_for_in_a_function_by_value_and_by_reference", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"range_for_in_function", R"(
                 auto sum(auto arr) -> auto {
                     auto total = 0;
                     for (auto x : arr) { total = total + x; }
                     return total;
                 }
                 sum([1, 2, 3]);
-            )");
-            check_eq((int64_t)6, r.as_int());
-        });
-        test("range_for_ref_in_function", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{6}},
+                {"range_for_ref_in_function", R"(
                 auto doubleAll(auto arr) -> auto {
                     for (auto& x : arr) { x = x * 2; }
                     return arr[0] + arr[1] + arr[2];
                 }
                 doubleAll([1, 2, 3]);
-            )");
-            check_eq((int64_t)12, r.as_int());
+            )", int64_t{12}},
+            };
+            check_values(cases);
         });
 
         // ---- #8 set_local gap after a skipped block ----
@@ -287,47 +316,55 @@ public:
         });
 
         // ---- #15 throw inside a while loop must not hang ----
-        test("throw_in_while_no_hang", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("a_throw_inside_a_loop_leaves_the_loop", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"throw_in_while_no_hang", R"(
                 auto count = 0;
                 try {
                     var i = 0;
                     while (i < 5) { count = count + 1; throw "x"; }
                 } catch (e) { }
                 count
-            )");
-            check_eq((int64_t)1, r.as_int());
-        });
-        test("throw_in_for_no_hang", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{1}},
+                {"throw_in_for_no_hang", R"(
                 auto count = 0;
                 try {
                     for (var i = 0; i < 5; i = i + 1) { count = count + 1; throw "x"; }
                 } catch (e) { }
                 count
-            )");
-            check_eq((int64_t)1, r.as_int());
+            )", int64_t{1}},
+            };
+            check_values(cases);
         });
 
         // ---- #16 shrinking an array during value range-for must not OOB ----
-        test("range_for_shrink_no_oob", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("range_for_survives_its_container_shrinking_or_reallocating", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"range_for_shrink_no_oob", R"(
                 auto a = [1, 2, 3, 4, 5];
                 auto seen = 0;
                 auto first = true;
                 for (auto x : a) { seen = seen + 1; if (first) { a.clear(); first = false; } }
                 seen
-            )");
-            check_eq((int64_t)1, r.as_int());
+            )", int64_t{1}},
+                {"range_for_ref_realloc_no_corruption", R"(
+                auto arr = [10, 20, 30];
+                for (auto& x : arr) {
+                    var j = 0;
+                    while (j < 64) { arr.push(0); j = j + 1; }  // force a reallocation
+                    x = 999;                                    // write through AFTER realloc
+                    break;
+                }
+                arr[0]
+            )", int64_t{999}},
+            };
+            check_values(cases);
         });
 
         // ---- #17 continue inside a switch case stops the case body & continues loop ----
-        test("switch_continue_in_loop", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("switch_break_and_continue_inside_a_loop", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"switch_continue_in_loop", R"(
                 auto total = 0;
                 for (var i = 0; i < 4; i = i + 1) {
                     switch (i) {
@@ -339,12 +376,8 @@ public:
                     }
                 }
                 total
-            )");
-            check_eq((int64_t)3, r.as_int());
-        });
-        test("switch_break_does_not_break_loop", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{3}},
+                {"switch_break_does_not_break_loop", R"(
                 auto total = 0;
                 for (var i = 0; i < 3; i = i + 1) {
                     switch (i) {
@@ -353,30 +386,28 @@ public:
                     }
                 }
                 total
-            )");
-            check_eq((int64_t)12, r.as_int());
+            )", int64_t{12}},
+            };
+            check_values(cases);
         });
 
         // ---- #32 reading a missing map key must NOT insert it ----
-        test("map_read_missing_no_insert", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("a_map_read_never_inserts_and_an_assignment_does", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"map_read_missing_no_insert", R"(
                 var m = {"a": 1, "b": 2};
                 int raised = 0;
                 try { var x = m["zzz"]; } catch (e) { raised += 1; }
                 try { var y = m["qqq"]; } catch (e) { raised += 1; }
                 m.size() * 10 + raised
-            )");
-            check_eq((int64_t)22, r.as_int());
-        });
-        test("map_assign_still_inserts", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{22}},
+                {"map_assign_still_inserts", R"(
                 var m = {"a": 1};
                 m["new"] = 5;
                 m["a"] + m["new"] + m.size()
-            )");
-            check_eq((int64_t)8, r.as_int());  // 1 + 5 + 2
+            )", int64_t{8}},
+            };
+            check_values(cases);
         });
 
         // ---- #28 cpp-bound 4-byte float must be read as a float, not 8 bytes ----
@@ -436,10 +467,14 @@ public:
                 check_eq((int64_t)INT64_MIN, e->execute(src).as_int());  // wraps to INT64_MIN
             }
         });
-        test("int_no_false_overflow", [this]() {  // policy-independent: 2e9*2 = 4e9 fits int64
-            auto e = make_engine();
-            check_eq((int64_t)4000000000LL, e->execute("auto x = 2000000000; x * 2").as_int());
+        test("int_results_that_fit_never_raise_overflow", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"int_no_false_overflow", "auto x = 2000000000; x * 2", int64_t{4000000000}},
+                {"int_mod_neg1_is_zero", "auto x = -9223372036854775807 - 1; auto d = -1; x % d", int64_t{0}},
+            };
+            check_values(cases);
         });
+
         // ---- range-for over a NESTED container read (jaidoom edge): for (x : m["a"])
         // failed "not a map" on both backends — the source expression arrives as a
         // reference wrapper and iter-init type-checked the wrapper. Deref'd handles
@@ -483,11 +518,6 @@ public:
             check_eq(std::string("{\"p\":10,\"t\":200}|[100,20]|{\"outer\":{\"inner\":300}}"), r.as_string(),
                 "element reads land as numbers and snapshot at literal construction");
         });
-        test("int_mod_neg1_is_zero", [this]() {   // policy-independent: a % -1 == 0, no trap
-            auto e = make_engine();
-            check_eq((int64_t)0, e->execute("auto x = -9223372036854775807 - 1; auto d = -1; x % d").as_int());
-        });
-
         // ---- shift semantics CONTRACT (policy-independent, both overflow builds):
         // bitwise ops including << >> operate on the 64-bit pattern mod 2^64 by DESIGN —
         // bits shifted past bit 63 are discarded, never an overflow error (matching
@@ -785,30 +815,41 @@ public:
             )");
             check_eq((int64_t)8, r.as_int());
         });
-        test("closure_capture_local_eq", [this]() {
-            // [=] captures local by value — snapshot at capture time
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("lambdas_capture_enclosing_function_locals", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"closure_capture_local_eq", R"(
                 auto make() -> auto {
                     auto local = 10;
                     return [=]() -> auto { return local * 2; };
                 }
                 make()()
-            )");
-            check_eq((int64_t)20, r.as_int());
-        });
-        test("closure_capture_local_inline", [this]() {
-            // Inline (non-escaping) closure also works
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{20}},
+                {"closure_capture_local_inline", R"(
                 auto result = 0;
                 auto x = 5;
                 auto f = [=]() -> auto { return x + 3; };
                 result = f();
                 result
-            )");
-            check_eq((int64_t)8, r.as_int());
+            )", int64_t{8}},
+                {"closure_capture_local_explicit", R"(
+                auto make(auto n) -> auto {
+                    auto doubled = n * 2;
+                    return [doubled]() -> auto { return doubled + 1; };
+                }
+                make(6)()
+            )", int64_t{13}},
+                {"closure_capture_multiple_locals", R"(
+                auto make() -> auto {
+                    auto a = 3;
+                    auto b = 4;
+                    return [=]() -> auto { return a * a + b * b; };
+                }
+                make()()
+            )", int64_t{25}},
+            };
+            check_values(cases);
         });
+
         test("closure_capture_local_snapshot", [this]() {
             // A captured local is a snapshot; a top-level (global) x is read when the lambda runs
             auto e = make_engine();
@@ -825,39 +866,12 @@ public:
             auto g = e->execute("auto gx = 10; auto gf = [=]() -> auto { return gx; }; gx = 999; gf()");
             check_eq((int64_t)999, g.as_int());
         });
-        test("closure_capture_local_explicit", [this]() {
-            // Explicit [local] capture of a function local
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto make(auto n) -> auto {
-                    auto doubled = n * 2;
-                    return [doubled]() -> auto { return doubled + 1; };
-                }
-                make(6)()
-            )");
-            check_eq((int64_t)13, r.as_int());
-        });
-        test("closure_capture_multiple_locals", [this]() {
-            // Multiple locals captured (auto + different types)
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto make() -> auto {
-                    auto a = 3;
-                    auto b = 4;
-                    return [=]() -> auto { return a * a + b * b; };
-                }
-                make()()
-            )");
-            check_eq((int64_t)25, r.as_int());
-        });
-
         // ---- for-body shadow scoping: fresh scope per iteration (vm/while/C++ parity) ----
         // The interpreter's counting-loop fast path reused one body env across iterations,
         // so a body `var g` shadow leaked into the next iteration's reads.
-        test("for_body_shadow_fresh_per_iteration", [this]() {
-            auto e = make_engine();
-            stdlib::register_all(*e);
-            auto r = e->execute(R"(
+        test("a_for_body_shadow_is_fresh_every_iteration", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"for_body_shadow_fresh_per_iteration", R"(
                 var g = 1;
                 var out = "";
                 for (var i = 0; i < 3; ++i) {
@@ -865,9 +879,21 @@ public:
                     var g = 100;
                 }
                 out + to_string(g);
-            )");
-            check_eq(std::string("1;1;1;1"), r.as_string());
+            )", std::string("1;1;1;1")},
+                {"for_body_shadow_general_path_variant", R"(
+                var start = 0;
+                var g = 1;
+                var out = "";
+                for (var i = start; i < 3; ++i) {
+                    out += to_string(g) + ";";
+                    var g = 100;
+                }
+                out;
+            )", std::string("1;1;1;")},
+            };
+            check_values(cases, true);
         });
+
         test("for_body_shadow_fn_call_variant", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(
@@ -882,47 +908,27 @@ public:
             )");
             check_eq((int64_t)30, r.as_int());
         });
-        test("for_body_shadow_general_path_variant", [this]() {
-            // non-literal init keeps this off the counting fast path
-            auto e = make_engine();
-            stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                var start = 0;
-                var g = 1;
-                var out = "";
-                for (var i = start; i < 3; ++i) {
-                    out += to_string(g) + ";";
-                    var g = 100;
-                }
-                out;
-            )");
-            check_eq(std::string("1;1;1;"), r.as_string());
-        });
-
         // ---- fuzz FZ-TYPED-FN-NO-RETURN (seeds 66/239/2529/3657/3784): ++/-- on a
         // slot-based function local resolved only through the environment, so the
         // interpreter raised a bogus "Undefined variable '<local>'" (VM ran fine) ----
-        test("fuzz_incdec_slot_local", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)1, e->execute(R"(
+        test("increment_and_decrement_of_slot_locals_and_parameters", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"fuzz_incdec_slot_local", R"(
                 function f() { int g = 0; ++g; return g; }
                 f();
-            )").as_int());
-        });
-        test("fuzz_incdec_slot_param_in_while", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)4, e->execute(R"(
+            )", int64_t{1}},
+                {"fuzz_incdec_slot_param_in_while", R"(
                 function f(int g) { while (++g < 4) {} return g; }
                 f(0);
-            )").as_int());
-        });
-        test("fuzz_incdec_postfix_slot_local", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)5, e->execute(R"(
+            )", int64_t{4}},
+                {"fuzz_incdec_postfix_slot_local", R"(
                 function f() { int g = 0; while (g++ < 4) {} return g; }
                 f();
-            )").as_int());
+            )", int64_t{5}},
+            };
+            check_values(cases);
         });
+
         // ---- fuzz seed 110753: ++/-- on a MISSING member. The member read raises through
         // the unwinding state (placeholder null on the stack) and the interpreter's ++/--
         // numeric gate then clobbered it with a bare invalid_numeric_operand ("" when
@@ -1444,21 +1450,6 @@ public:
             check_eq(out[0], out[1], "backends agree byte-identically");
         });
 
-        test("range_for_ref_realloc_no_corruption", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto arr = [10, 20, 30];
-                for (auto& x : arr) {
-                    var j = 0;
-                    while (j < 64) { arr.push(0); j = j + 1; }  // force a reallocation
-                    x = 999;                                    // write through AFTER realloc
-                    break;
-                }
-                arr[0]
-            )");
-            check_eq((int64_t)999, r.as_int());  // recomputed element address, not a dangling ptr
-        });
-
         // ---- builtin methods through references ----
         // String builtins invoked through a ref DECL segfaulted on both backends: the
         // identifier-receiver fast path passed the RAW stored value (a reference wrapper)
@@ -1466,40 +1457,47 @@ public:
         // builtins and ref PARAMS took other paths and worked - this pins the full
         // matrix: {string, array, map} x {ref decl, ref param, range-for auto& element},
         // observer AND mutating (mutation must land in the referenced target).
-        test("string_builtins_through_ref_decl", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            auto r = e->execute(R"(
+        test("builtin_methods_through_references_observe_and_mutate_the_target", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"string_builtins_through_ref_decl", R"(
                 auto s = "abc";
                 auto& r = s;
                 int n = r.length();
                 r.to_upper();
                 to_string(n) + "|" + s + "|" + r;
-            )");
-            check_eq(std::string("3|ABC|ABC"), r.as_string());
-        });
-
-        test("string_builtins_through_ref_param", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            auto r = e->execute(R"(
+            )", std::string("3|ABC|ABC")},
+                {"string_builtins_through_ref_param", R"(
                 auto s = "abc";
                 function up(var& t) -> int { t.to_upper(); return t.length(); }
                 int n = up(s);
                 to_string(n) + "|" + s;
-            )");
-            check_eq(std::string("3|ABC"), r.as_string());
-        });
-
-        test("string_builtins_through_range_for_ref", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            auto r = e->execute(R"(
+            )", std::string("3|ABC")},
+                {"string_builtins_through_range_for_ref", R"(
                 var strs = ["ab", "cd"];
                 for (auto& s : strs) { s.to_upper(); }
                 strs[0] + strs[1];
-            )");
-            check_eq(std::string("ABCD"), r.as_string());
+            )", std::string("ABCD")},
+                {"array_map_builtins_through_ref_decl", R"(
+                var arr = [1, 2, 3];
+                auto& ra = arr;
+                ra.push(4);
+                var m = {"k": 1};
+                auto& rm = m;
+                rm["j"] = 2;
+                to_string(ra.size()) + "|" + to_string(arr.size()) + "|" +
+                to_string(rm.size()) + "|" + to_string(m.size());
+            )", std::string("4|4|2|2")},
+                {"array_map_builtins_through_ref_param", R"(
+                function grow(var& a) { a.push(9); }
+                function put(var& m) { m["x"] = 5; }
+                var arr = [1];
+                var mp = {"k": 1};
+                grow(arr);
+                put(mp);
+                to_string(arr.size()) + "|" + to_string(arr[1]) + "|" + to_string(mp.size());
+            )", std::string("2|9|2")},
+            };
+            check_values(cases, true);
         });
 
         // The string copy-on-write gate at the host boundary (internal/invariants.md 11): a
@@ -1551,37 +1549,6 @@ public:
             }
         });
 
-        test("array_map_builtins_through_ref_decl", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            auto r = e->execute(R"(
-                var arr = [1, 2, 3];
-                auto& ra = arr;
-                ra.push(4);
-                var m = {"k": 1};
-                auto& rm = m;
-                rm["j"] = 2;
-                to_string(ra.size()) + "|" + to_string(arr.size()) + "|" +
-                to_string(rm.size()) + "|" + to_string(m.size());
-            )");
-            check_eq(std::string("4|4|2|2"), r.as_string());
-        });
-
-        test("array_map_builtins_through_ref_param", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            auto r = e->execute(R"(
-                function grow(var& a) { a.push(9); }
-                function put(var& m) { m["x"] = 5; }
-                var arr = [1];
-                var mp = {"k": 1};
-                grow(arr);
-                put(mp);
-                to_string(arr.size()) + "|" + to_string(arr[1]) + "|" + to_string(mp.size());
-            )");
-            check_eq(std::string("2|9|2"), r.as_string());
-        });
-
         // ---- Decl fast path (variable_decl::decl_fast_flags): slot decls of matching
         // scalar payloads store without enforce/clone/homogeneity. These pin the
         // semantics the fast path must preserve on BOTH backends; the mismatch shapes
@@ -1591,26 +1558,10 @@ public:
             check_eq((int64_t)4, e->execute("auto f() { int d = 4.7; return d; } f();").as_int());
             check_near(5.0, e->execute("auto g() { float x = 5; return x; } g();").as_float(), 1e-9);
         });
-        test("decl_fast_typed_mismatch_still_errors", [this]() {
-            auto e = make_engine();
-            check_throws([&]() { e->execute(R"(auto f() { int x = "s"; return x; } f();)"); });
-        });
-        test("decl_fast_var_stays_dynamic", [this]() {
-            auto e = make_engine();
-            check_eq(std::string("str"), e->execute(R"(auto f() { var v = 5; v = "str"; return v; } f();)").as_string());
-            // var decl of a scalar must be tagged 'any', not the payload type
-            check_near(6.5, e->execute("auto g() { var q = 5; q = 6.5; return q; } g();").as_float(), 1e-9);
-        });
-        test("decl_fast_auto_locks_inferred_type", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)6, e->execute("auto f() { auto a = 5; a = 6; return a; } f();").as_int());
-            check_throws([&]() { e->execute(R"(auto f() { auto a = 5; a = "s"; return a; } f();)"); });
-        });
-        test("decl_fast_element_init_value_copies", [this]() {
-            auto e = make_engine();
-            // element read arrives as a reference wrapper: the decl must store the
-            // VALUE (fast path bails, full path derefs + clones), never alias
-            auto r = e->execute(R"(
+        test("the_decl_fast_path_keeps_conversions_copies_and_boxing", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"decl_fast_typed_mismatch_still_errors", R"(auto f() { int x = "s"; return x; } f();)", raises{}},
+                {"decl_fast_element_init_value_copies", R"(
                 auto f() {
                     var arr = [1, 2, 3];
                     int total = 0;
@@ -1622,16 +1573,9 @@ public:
                     return arr[0] + arr[1] + arr[2] + total;
                 }
                 f();
-            )");
-            check_eq((int64_t)282, r.as_int());   // elements unchanged (6) + 91+92+93
-        });
-        test("decl_fast_typed_from_local_no_alias", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)57, e->execute("auto f() { int a = 5; int b = a; b = 7; return a * 10 + b; } f();").as_int());
-        });
-        test("decl_fast_loop_decls", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{282}},
+                {"decl_fast_typed_from_local_no_alias", "auto f() { int a = 5; int b = a; b = 7; return a * 10 + b; } f();", int64_t{57}},
+                {"decl_fast_loop_decls", R"(
                 auto f() {
                     int total = 0;
                     for (int i = 0; i < 100; ++i) {
@@ -1642,8 +1586,35 @@ public:
                     return total;
                 }
                 f();
-            )");
-            check_eq((int64_t)10100, r.as_int());
+            )", int64_t{10100}},
+                {"decl_fast_shared_weak_decls_unaffected", R"(
+                class P { int v = 1; }
+                auto f() {
+                    shared_ptr<P> a = P();
+                    var b = a;
+                    b.v = 7;
+                    weak_ptr<P> w = a;
+                    int alive = 0;
+                    if (!w.expired()) { alive = 1; }
+                    return a.v * 10 + alive;
+                }
+                f();
+            )", int64_t{71}},
+                {"decl_fast_ref_escaping_decl_still_boxed", "function set42(int& t) { t = 42; } function f() -> int { int x = 1; set42(x); return x; } f();", int64_t{42}},
+            };
+            check_values(cases);
+        });
+
+        test("decl_fast_var_stays_dynamic", [this]() {
+            auto e = make_engine();
+            check_eq(std::string("str"), e->execute(R"(auto f() { var v = 5; v = "str"; return v; } f();)").as_string());
+            // var decl of a scalar must be tagged 'any', not the payload type
+            check_near(6.5, e->execute("auto g() { var q = 5; q = 6.5; return q; } g();").as_float(), 1e-9);
+        });
+        test("decl_fast_auto_locks_inferred_type", [this]() {
+            auto e = make_engine();
+            check_eq((int64_t)6, e->execute("auto f() { auto a = 5; a = 6; return a; } f();").as_int());
+            check_throws([&]() { e->execute(R"(auto f() { auto a = 5; a = "s"; return a; } f();)"); });
         });
         test("decl_fast_float_bool_char_decls", [this]() {
             auto e = make_engine();
@@ -1673,36 +1644,6 @@ public:
             check(e->execute("auto h() { char c = 'x'; return c == 'x'; } h();").as_bool());
             check_eq((int64_t)1, e->execute("auto k() { int a = true; return a; } k();").as_int());
         });
-        test("decl_fast_shared_weak_decls_unaffected", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                class P { int v = 1; }
-                auto f() {
-                    shared_ptr<P> a = P();
-                    var b = a;
-                    b.v = 7;
-                    weak_ptr<P> w = a;
-                    int alive = 0;
-                    if (!w.expired()) { alive = 1; }
-                    return a.v * 10 + alive;
-                }
-                f();
-            )");
-            check_eq((int64_t)71, r.as_int());
-        });
-        test("decl_fast_ref_escaping_decl_still_boxed", [this]() {
-            auto e = make_engine();
-            // x is escape-marked (bare-identifier ref-param argument): the decl must
-            // still box into a cell so the callee's ref writes land in x - the decl
-            // fast path must bail on ref_escaping. (NOTE: `auto& r = <plain local>` and
-            // slot-local [&] captures are PRE-EXISTING gaps on the pre-fan-out engine -
-            // "Cannot take reference of undefined variable" / silent value capture, the
-            // latter a documented parked stage-D item - so the escape pin uses the
-            // ref-param shape, the one escape route that works for slot locals today.)
-            check_eq((int64_t)42, e->execute(
-                "function set42(int& t) { t = 42; } function f() -> int { int x = 1; set42(x); return x; } f();").as_int());
-        });
-
         // ---- Callee-first for member and computed callees (C++17 [expr.call]; the
         // interpreter is the oracle): `recv.m(args)` evaluates the receiver and looks the
         // member up BEFORE any argument runs, so null-receiver / unknown-member /
@@ -3362,29 +3303,11 @@ public:
     ref_capture_semantics_tests() : suite("Ref Capture Semantics") {}
 
     void forge_tests() override {
-        test("default_by_ref_capture_writes_through", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)42, e->execute(
-                "function f() -> int { int x = 1; auto g = [&]() { x = 42; }; g(); return x; } f();").as_int());
-        });
-
-        test("explicit_by_ref_capture_writes_through", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)42, e->execute(
-                "function f() -> int { int x = 1; auto g = [&x]() { x = 42; }; g(); return x; } f();").as_int());
-        });
-
-        test("by_value_capture_still_copies", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)1, e->execute(
-                "function f() -> int { int x = 1; auto g = [=]() { x = 42; }; g(); return x; } f();").as_int());
-            check_eq((int64_t)1, e->execute(
-                "function f2() -> int { int x = 1; auto g = [x]() { x = 42; }; g(); return x; } f2();").as_int());
-        });
-
-        test("mixed_capture_modes", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("captures_and_ref_decls_of_slot_locals_alias_or_copy_as_spelled", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"default_by_ref_capture_writes_through", "function f() -> int { int x = 1; auto g = [&]() { x = 42; }; g(); return x; } f();", int64_t{42}},
+                {"explicit_by_ref_capture_writes_through", "function f() -> int { int x = 1; auto g = [&x]() { x = 42; }; g(); return x; } f();", int64_t{42}},
+                {"mixed_capture_modes", R"(
                 function f() -> int {
                     int a = 1;
                     int b = 10;
@@ -3393,13 +3316,8 @@ public:
                     return a * 100 + b;   // a written through, b untouched
                 }
                 f();
-            )");
-            check_eq((int64_t)710, r.as_int());
-        });
-
-        test("ref_capture_reads_live_value", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{710}},
+                {"ref_capture_reads_live_value", R"(
                 function f() -> int {
                     int x = 5;
                     auto g = [&]() -> int { return x; };
@@ -3407,13 +3325,8 @@ public:
                     return g();   // by-ref sees the CURRENT value, not creation-time
                 }
                 f();
-            )");
-            check_eq((int64_t)9, r.as_int());
-        });
-
-        test("escaping_ref_capture_outlives_frame", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{9}},
+                {"escaping_ref_capture_outlives_frame", R"(
                 function make() -> auto {
                     int n = 0;
                     return [&]() -> int { n = n + 1; return n; };
@@ -3422,13 +3335,8 @@ public:
                 counter();
                 counter();
                 counter();
-            )");
-            check_eq((int64_t)3, r.as_int());
-        });
-
-        test("two_closures_share_one_ref_capture", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{3}},
+                {"two_closures_share_one_ref_capture", R"(
                 function f() -> int {
                     int shared = 0;
                     auto inc = [&]() { shared = shared + 1; };
@@ -3437,13 +3345,8 @@ public:
                     return shared;
                 }
                 f();
-            )");
-            check_eq((int64_t)-8, r.as_int());
-        });
-
-        test("ref_decl_of_plain_local_binds", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{-8}},
+                {"ref_decl_of_plain_local_binds", R"(
                 function f() -> int {
                     int x = 1;
                     auto& r = x;
@@ -3453,13 +3356,8 @@ public:
                     return seen * 100 + r;   // alias wrote 42 into x; x's write shows through r
                 }
                 f();
-            )");
-            check_eq((int64_t)4207, r.as_int());
-        });
-
-        test("typed_ref_decl_of_local_converts_through", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{4207}},
+                {"typed_ref_decl_of_local_converts_through", R"(
                 function f() -> int {
                     int x = 1;
                     auto& r = x;
@@ -3467,9 +3365,13 @@ public:
                     return x;
                 }
                 f();
-            )");
-            check_eq((int64_t)6, r.as_int());
+            )", int64_t{6}},
+                {"by_value_capture_still_copies", "function f() -> int { int x = 1; auto g = [=]() { x = 42; }; g(); return x; } f();", int64_t{1}},
+                {"by_value_capture_still_copies", "function f2() -> int { int x = 1; auto g = [x]() { x = 42; }; g(); return x; } f2();", int64_t{1}},
+            };
+            check_values(cases);
         });
+
     }
 };
 
@@ -3481,60 +3383,16 @@ public:
     element_read_elision_tests() : suite("Element Read Elision") {}
 
     void forge_tests() override {
-        test("subscript_operands_value_ops", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
+        test("elided_and_fused_element_reads_keep_their_results", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"subscript_operands_value_ops", R"(
                 array<int> a = [10, 20, 30, 40];
                 auto s = a[0] + a[1] * a[2] - a[3];
                 auto c = a[1] < a[2];
                 auto b = (a[0] & a[1]) | (a[2] >> 1);
                 to_string(s) + "|" + to_string(c) + "|" + to_string(b);
-            )");
-            check_eq(std::string("570|true|15"), r.as_string());
-        });
-
-        test("subscript_chain_2d_operand", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                var grid = [[1, 2], [3, 4]];
-                grid[1][0] * 10 + grid[0][1];
-            )");
-            check_eq((int64_t)32, r.as_int());
-        });
-
-        test("subscript_in_conditions", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                array<int> a = [0, 5, 7];
-                auto n = 0;
-                if (a[1]) { n = n + 1; }
-                while (a[2] > n) { n = n + 1; }
-                auto t = a[0] ? 100 : (a[1] && a[2] ? 50 : 0);
-                n + t;
-            )");
-            check_eq((int64_t)57, r.as_int());
-        });
-
-        test("subscript_assignment_rhs", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                array<int> src = [7, 8, 9];
-                array<int> dst = [0, 0, 0];
-                dst[0] = src[2];
-                auto x = src[1];
-                x += src[0];
-                dst[0] * 100 + x;
-            )");
-            check_eq((int64_t)915, r.as_int());
-        });
-
-        // A by-value int/float/bool/char return converts its value: the returned element is a copy, a reference return
-        // still names the element, and a heavy element read by a var return still copies
-        test("scalar_return_of_element", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
+            )", std::string("570|true|15")},
+                {"scalar_return_of_element", R"(
                 array<int> a = [10, 20, 30];
                 var f = [1.75, "s"];
                 var nested = [[1, 2]];
@@ -3552,60 +3410,138 @@ public:
                 try { floor_at(1); } catch (e) { err = "raised"; }
                 to_string(before) + "|" + to_string(at(2)) + "|" + to_string(a[0]) + "|" + to_string(floor_at(0)) + "|" +
                     to_string(pick(1)) + "|" + to_string(nested[0][0]) + "|" + err;
-            )");
-            check_eq(std::string("30|7|99|1|20.0|1|raised"), r.as_string());
-        });
-
-        test("map_transient_read_never_inserts", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
+            )", std::string("30|7|99|1|20.0|1|raised")},
+                {"map_transient_read_never_inserts", R"(
                 var m = {"a": 3};
                 auto hit = m["a"] + 1;
                 string missing = "";
                 try { auto b = m["nope"] == null; } catch (e) { missing = e; }
                 to_string(m.size()) + "|" + to_string(hit) + "|" + missing;
-            )");
-            check_eq(std::string("1|4|Key \"nope\" not found in map"), r.as_string());
+            )", std::string("1|4|Key \"nope\" not found in map")},
+                {"reference_holder_pool_churn", R"(
+                var data = [0, 0, 0, 0];
+                auto bump(var& arr, int i) -> auto { var& cell = arr[i]; cell = cell + 1; return cell; }
+                auto total = 0;
+                auto n = 0;
+                while (n < 400) { total = total + bump(data, n % 4); n = n + 1; }
+                to_string(total) + "|" + to_string(data[0]) + "|" + to_string(data[3]);
+            )", std::string("20200|100|100")},
+                {"fused_store_semantics", R"(
+                array<int> ints = [1, 2, 3];
+                ints[0] = 4.7;                 // typed element: converts like assignment
+                ints[1] += 2;
+                ints[2] *= 3;
+                var strs = ["a", "b"];
+                strs[0] += "x";                // string element: slow-replay concat
+                var m = {"k": 10};
+                m["k"] += 5;                   // map target: slow-replay through the entry ref
+                m["new"] = 1;                  // auto-insert
+                var grid = [[1, 2], [3, 4]];
+                grid[1][0] = grid[0][1] + 40;  // nested chain target + elided RHS
+                to_string(ints[0]) + "|" + to_string(ints[1]) + "|" + to_string(ints[2]) + "|" +
+                    strs[0] + "|" + to_string(m["k"]) + "|" + to_string(m.size()) + "|" + to_string(grid[1][0]);
+            )", std::string("4|4|9|ax|15|2|42")},
+                {"fused_subscript_operand_semantics", R"(
+                array<int> a = [10, 20, 30, 40];
+                var f = [0.5, 2.5];
+                int i = 1;
+                int j = 3;
+                auto s1 = a[i] + a[j];         // ident-index both sides
+                auto s2 = a[0] * a[i];         // literal + ident
+                auto s3 = a[i] < a[j];         // fused cmp bail path
+                auto s4 = f[0] + a[i];         // float element mixed
+                auto total = 0;
+                int k = 0;
+                while (a[k] < 35) { total += a[k]; k += 1; }   // condition + compound RHS
+                to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" +
+                    to_string(s4) + "|" + to_string(total);
+            )", std::string("60|200|true|20.5|60")},
+                {"fused_subscript_chain_n_level", R"(
+                var grid = [[1, 2], [3, 4]];
+                var cube = [[[10, 20], [30, 40]], [[50, 60], [70, 80]]];
+                var deep = [[[[5, 6], [7, 8]]]];
+                var m = {"rows": [[100, 200], [300, 400]]};
+                int y = 1;
+                int x = 0;
+                int z = 1;
+                auto g = grid[y][x] + grid[0][1];          // 2-level both sides
+                auto c = cube[z][y][x] * 2;                // 3-level
+                auto d = deep[0][0][y][x] + 1;             // 4-level
+                auto mm = m["rows"][y][x] + grid[y][x];    // map level mid-chain + array levels
+                auto cmp = grid[y][x] < cube[z][y][x];     // chains in a fused comparison
+                to_string(g) + "|" + to_string(c) + "|" + to_string(d) + "|" +
+                    to_string(mm) + "|" + to_string(cmp);
+            )", std::string("5|140|8|303|true")},
+                {"interp_subscript_compound_inplace", R"(
+                array<int> pix = [0, 0, 0];
+                var fl = [1.5, 2.5];
+                int gi = 1;
+                pix[gi] += 41;                  // ident index, int
+                pix[0] += pix[gi] + 1;          // subscript RHS (callout-free)
+                fl[1] *= 2.0;                   // float in place
+                var arr2 = [10];
+                auto bump() -> auto { arr2.push(99); return 5; }
+                arr2[0] += bump();              // impure RHS: general path (ref re-resolve)
+                to_string(pix[0]) + "|" + to_string(pix[1]) + "|" + to_string(fl[1]) + "|" +
+                    to_string(arr2[0]) + "|" + to_string(arr2.size());
+            )", std::string("42|41|5.0|15|2")},
+            };
+            check_values(cases, true);
         });
 
-        // Impure sibling (a call that reallocates the array) keeps the LEFT operand on
-        // the reference path - the classifier's callout_free rule. Values must be
-        // correct and Debug's 0xDD fill must not trip (no dangling element pointer).
-        test("impure_sibling_keeps_mint", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("elided_element_reads_keep_operand_condition_and_store_values", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"subscript_chain_2d_operand", R"(
+                var grid = [[1, 2], [3, 4]];
+                grid[1][0] * 10 + grid[0][1];
+            )", int64_t{32}},
+                {"subscript_in_conditions", R"(
+                array<int> a = [0, 5, 7];
+                auto n = 0;
+                if (a[1]) { n = n + 1; }
+                while (a[2] > n) { n = n + 1; }
+                auto t = a[0] ? 100 : (a[1] && a[2] ? 50 : 0);
+                n + t;
+            )", int64_t{57}},
+                {"subscript_assignment_rhs", R"(
+                array<int> src = [7, 8, 9];
+                array<int> dst = [0, 0, 0];
+                dst[0] = src[2];
+                auto x = src[1];
+                x += src[0];
+                dst[0] * 100 + x;
+            )", int64_t{915}},
+                {"impure_sibling_keeps_mint", R"(
                 var a = [1, 2, 3];
                 auto grow(var& arr) -> auto { auto i = 0; while (i < 64) { arr.push(0); i = i + 1; } return 5; }
                 a[0] + grow(a);
-            )");
-            check_eq((int64_t)6, r.as_int());
-        });
-
-        // Compound element store still writes through (its target op_index/read stays
-        // on the reference path) while its subscript RHS is elided.
-        test("compound_element_store_with_subscript_rhs", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{6}},
+                {"compound_element_store_with_subscript_rhs", R"(
                 array<int> a = [1, 2, 3];
                 a[0] += a[2];
                 a[1] = a[1] + a[0];
                 a[0] * 10 + a[1];
-            )");
-            check_eq((int64_t)46, r.as_int());
-        });
-
-        // Reference decls / ref returns over subscripts are lvalue consumers - the
-        // classifier must leave them minting (red-team regression from the memo).
-        test("ref_decl_and_write_through_still_bind", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+            )", int64_t{46}},
+                {"ref_decl_and_write_through_still_bind", R"(
                 var arr = [1, 2, 3];
                 var& second = arr[1];
                 second = 20;
                 arr[1] + arr[0];
-            )");
-            check_eq((int64_t)21, r.as_int());
+            )", int64_t{21}},
+                {"class_operator_method_operands_elided_correctly", R"(
+                class Vec {
+                    int v = 0;
+                    Vec(int n) { v = n; }
+                    function operator+(Vec o) -> Vec { return Vec(v + o.v); }
+                }
+                var arr = [Vec(3), Vec(4)];
+                var plain = [10, 20];
+                auto combined = arr[0] + arr[1];        // object elements -> class operator+
+                auto untouched = plain[0] + plain[1];   // int elements -> builtin, still elided
+                combined.v * 100 + untouched;
+            )", int64_t{730}},
+            };
+            check_values(cases);
         });
 
         // A registered binary-operator override flips the runtime gate: subscript
@@ -3618,43 +3554,6 @@ public:
                 a[1] < a[0];
             )");
             check(r.as_bool());   // inverted override: 9 "<" 1 is true
-        });
-
-        // Element reference holders are pool-recycled: heavy mint/release churn in a
-        // loop (ref-decl binds in a function called repeatedly) must stay correct.
-        test("reference_holder_pool_churn", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                var data = [0, 0, 0, 0];
-                auto bump(var& arr, int i) -> auto { var& cell = arr[i]; cell = cell + 1; return cell; }
-                auto total = 0;
-                auto n = 0;
-                while (n < 400) { total = total + bump(data, n % 4); n = n + 1; }
-                to_string(total) + "|" + to_string(data[0]) + "|" + to_string(data[3]);
-            )");
-            check_eq(std::string("20200|100|100"), r.as_string());
-        });
-
-        // Class operator methods deliberately do NOT flip the runtime gate (that would
-        // kill the elision for any host binding operator types): subscript operands
-        // feeding a class operator arrive as evaluation-time copies on BOTH backends
-        // (the interpreter's historical order). Pin: correct dispatch and values.
-        test("class_operator_method_operands_elided_correctly", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                class Vec {
-                    int v = 0;
-                    Vec(int n) { v = n; }
-                    function operator+(Vec o) -> Vec { return Vec(v + o.v); }
-                }
-                var arr = [Vec(3), Vec(4)];
-                var plain = [10, 20];
-                auto combined = arr[0] + arr[1];        // object elements -> class operator+
-                auto untouched = plain[0] + plain[1];   // int elements -> builtin, still elided
-                combined.v * 100 + untouched;
-            )");
-            check_eq((int64_t)730, r.as_int());
         });
 
         // The tag word (internal/value16_design.md): a value names its declared type, or carries the engine-made flag, or nothing (a
@@ -3864,30 +3763,6 @@ public:
 
         // ---- Stage 2: fused subscript stores + flat operator table ----
 
-        // Fused a[i]=v / a[i]op=v fast paths and their slow replays must keep exact
-        // semantics: typed conversion, string-element concat, map auto-insert, nested
-        // chains, and rvalue-target errors.
-        test("fused_store_semantics", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                array<int> ints = [1, 2, 3];
-                ints[0] = 4.7;                 // typed element: converts like assignment
-                ints[1] += 2;
-                ints[2] *= 3;
-                var strs = ["a", "b"];
-                strs[0] += "x";                // string element: slow-replay concat
-                var m = {"k": 10};
-                m["k"] += 5;                   // map target: slow-replay through the entry ref
-                m["new"] = 1;                  // auto-insert
-                var grid = [[1, 2], [3, 4]];
-                grid[1][0] = grid[0][1] + 40;  // nested chain target + elided RHS
-                to_string(ints[0]) + "|" + to_string(ints[1]) + "|" + to_string(ints[2]) + "|" +
-                    strs[0] + "|" + to_string(m["k"]) + "|" + to_string(m.size()) + "|" + to_string(grid[1][0]);
-            )");
-            check_eq(std::string("4|4|9|ax|15|2|42"), r.as_string());
-        });
-
         test("fused_store_error_paths", [this]() {
             auto e = make_engine();
             // Typed element mismatch keeps its error
@@ -3913,30 +3788,6 @@ public:
 
         // ---- Stage 3: fused subscript-read operands + interp subscript-compound ----
 
-        // a[ident] / a[literal] as binary operands (both sides, conditions, compound RHS)
-        // and the interpreter's in-place numeric subscript-compound must keep exact
-        // values across int/float/mixed, OOB errors, map bases, and impure RHS bails.
-        test("fused_subscript_operand_semantics", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                array<int> a = [10, 20, 30, 40];
-                var f = [0.5, 2.5];
-                int i = 1;
-                int j = 3;
-                auto s1 = a[i] + a[j];         // ident-index both sides
-                auto s2 = a[0] * a[i];         // literal + ident
-                auto s3 = a[i] < a[j];         // fused cmp bail path
-                auto s4 = f[0] + a[i];         // float element mixed
-                auto total = 0;
-                int k = 0;
-                while (a[k] < 35) { total += a[k]; k += 1; }   // condition + compound RHS
-                to_string(s1) + "|" + to_string(s2) + "|" + to_string(s3) + "|" +
-                    to_string(s4) + "|" + to_string(total);
-            )");
-            check_eq(std::string("60|200|true|20.5|60"), r.as_string());
-        });
-
         test("fused_subscript_operand_errors_and_maps", [this]() {
             auto e = make_engine();
             jai::stdlib::register_all(*e);
@@ -3951,55 +3802,12 @@ public:
             check_eq(std::string("1|8"), r.as_string());
         });
 
-        // N-level chains as fused operands: array levels step in place; a MAP level
-        // mid-chain replays that level (never-insert) and the walk continues.
-        test("fused_subscript_chain_n_level", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                var grid = [[1, 2], [3, 4]];
-                var cube = [[[10, 20], [30, 40]], [[50, 60], [70, 80]]];
-                var deep = [[[[5, 6], [7, 8]]]];
-                var m = {"rows": [[100, 200], [300, 400]]};
-                int y = 1;
-                int x = 0;
-                int z = 1;
-                auto g = grid[y][x] + grid[0][1];          // 2-level both sides
-                auto c = cube[z][y][x] * 2;                // 3-level
-                auto d = deep[0][0][y][x] + 1;             // 4-level
-                auto mm = m["rows"][y][x] + grid[y][x];    // map level mid-chain + array levels
-                auto cmp = grid[y][x] < cube[z][y][x];     // chains in a fused comparison
-                to_string(g) + "|" + to_string(c) + "|" + to_string(d) + "|" +
-                    to_string(mm) + "|" + to_string(cmp);
-            )");
-            check_eq(std::string("5|140|8|303|true"), r.as_string());
-        });
-
         test("fused_subscript_chain_errors", [this]() {
             auto e = make_engine();
             // OOB at an INNER level keeps the exact op_index error
             check_throws([&]() { e->execute("var g = [[1]]; int i = 9; g[i][0] + 1;"); });
             // OOB at the LAST level too
             check_throws([&]() { e->execute("var g = [[1]]; int j = 9; g[0][j] + 1;"); });
-        });
-
-        test("interp_subscript_compound_inplace", [this]() {
-            auto e = make_engine();
-            jai::stdlib::register_all(*e);
-            auto r = e->execute(R"(
-                array<int> pix = [0, 0, 0];
-                var fl = [1.5, 2.5];
-                int gi = 1;
-                pix[gi] += 41;                  // ident index, int
-                pix[0] += pix[gi] + 1;          // subscript RHS (callout-free)
-                fl[1] *= 2.0;                   // float in place
-                var arr2 = [10];
-                auto bump() -> auto { arr2.push(99); return 5; }
-                arr2[0] += bump();              // impure RHS: general path (ref re-resolve)
-                to_string(pix[0]) + "|" + to_string(pix[1]) + "|" + to_string(fl[1]) + "|" +
-                    to_string(arr2[0]) + "|" + to_string(arr2.size());
-            )");
-            check_eq(std::string("42|41|5.0|15|2"), r.as_string());
         });
 
         // A pooled holder escaping the engine must stay destructible after engine death
@@ -4287,9 +4095,9 @@ public:
     void forge_tests() override {
         // Provable store must not strip the slot's type lock: the float store AFTER the
         // provable int store still converts.
-        test("provable_store_keeps_type_lock", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
+        test("typed_stores_under_the_proof_convert_lock_and_stay_dynamic_as_declared", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"provable_store_keeps_type_lock", R"(
                 auto f() -> auto {
                     int x = 0;
                     x = 5;
@@ -4297,9 +4105,57 @@ public:
                     return x;
                 }
                 f();
-            )");
-            check_eq((int64_t)4, r.as_int());
+            )", int64_t{4}},
+                {"provable_int_loop_correct", R"(
+                auto f() -> auto {
+                    int total = 0;
+                    for (int i = 0; i < 100; i = i + 1) { total = total + i; }
+                    return total;
+                }
+                f();
+            )", int64_t{4950}},
+                {"unprovable_mixed_rhs_converts_each_store", R"(
+                auto f() -> auto {
+                    int x = 0;
+                    for (int i = 0; i < 10; i = i + 1) { x = x + 1.5; }
+                    return x;
+                }
+                f();
+            )", int64_t{10}},
+                {"bool_rhs_still_converts", R"(
+                auto f() -> auto { int x = 0; x = (1 < 2); return x; }
+                f();
+            )", int64_t{1}},
+                {"var_stays_dynamic_after_int_store", R"(
+                auto f() -> auto { var v = 0; v = 1; v = "s"; return v; }
+                f();
+            )", std::string("s")},
+                {"auto_stays_locked_after_int_store", R"(
+                auto f() -> auto { auto a = 1; a = 2; a = 3.9; return a; }
+                f();
+            )", int64_t{3}},
+                {"ref_alias_and_cell_stores_unaffected", R"(
+                function poke(int& t) -> int {
+                    t = 5;
+                    t = 6.9;
+                    return t;
+                }
+                auto f() -> auto {
+                    int x = 1;
+                    auto seen = poke(x);
+                    x = 42;
+                    return seen * 100 + x;
+                }
+                f();
+            )", int64_t{642}},
+                {"compound_store_conversion_unaffected", R"(
+                auto f() -> auto { int x = 1; x += 2.5; return x; }
+                f();
+            )", int64_t{3}},
+            };
+            check_values(cases);
         });
+
         test("float_slot_int_rhs_still_converts", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(
@@ -4322,18 +4178,6 @@ public:
                 )");
             });
         });
-        test("provable_int_loop_correct", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto {
-                    int total = 0;
-                    for (int i = 0; i < 100; i = i + 1) { total = total + i; }
-                    return total;
-                }
-                f();
-            )");
-            check_eq((int64_t)4950, r.as_int());
-        });
         test("provable_float_loop_correct", [this]() {
             auto e = make_engine();
             auto r = e->execute(R"(
@@ -4345,70 +4189,6 @@ public:
                 f();
             )");
             check_near(5.0, r.as_float(), 0.0001);
-        });
-        // Mixed int/float RHS is NOT provable: the truncating conversion still runs
-        // per iteration (x = trunc(x + 1.5) advances by exactly 1).
-        test("unprovable_mixed_rhs_converts_each_store", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto {
-                    int x = 0;
-                    for (int i = 0; i < 10; i = i + 1) { x = x + 1.5; }
-                    return x;
-                }
-                f();
-            )");
-            check_eq((int64_t)10, r.as_int());
-        });
-        // Comparison RHS is bool, never provable for an int slot: bool->int conversion holds.
-        test("bool_rhs_still_converts", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto { int x = 0; x = (1 < 2); return x; }
-                f();
-            )");
-            check_eq((int64_t)1, r.as_int());
-        });
-        // var/auto declarations never prove: var stays dynamic after an int store,
-        // auto stays locked to its inferred type.
-        test("var_stays_dynamic_after_int_store", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto { var v = 0; v = 1; v = "s"; return v; }
-                f();
-            )");
-            check_eq(std::string("s"), r.as_string());
-        });
-        test("auto_stays_locked_after_int_store", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto { auto a = 1; a = 2; a = 3.9; return a; }
-                f();
-            )");
-            check_eq((int64_t)3, r.as_int());
-        });
-        // Ref-alias stores (store_flag_ref_alias) keep store-through; provable stores
-        // through the escape-boxed cell stay alias-visible and keep the type lock.
-        test("ref_alias_and_cell_stores_unaffected", [this]() {
-            auto e = make_engine();
-            // Ref-PARAM alias (the working escape shape; `auto& r = <plain local>` is a
-            // pre-existing engine gap): typed stores through the alias and through the
-            // origin must interleave correctly, incl. the float->int conversion.
-            auto r = e->execute(R"(
-                function poke(int& t) -> int {
-                    t = 5;
-                    t = 6.9;
-                    return t;
-                }
-                auto f() -> auto {
-                    int x = 1;
-                    auto seen = poke(x);
-                    x = 42;
-                    return seen * 100 + x;
-                }
-                f();
-            )");
-            check_eq((int64_t)642, r.as_int());   // alias saw the converted 6; x ends 42
         });
         // cpp-bound global targets keep write-through (globals have no slot, so
         // stores to them are never stamped).
@@ -4452,15 +4232,6 @@ public:
             )");
             check_near(5.0, r.as_float(), 0.0001);
         });
-        // Compound stores are untouched by the proof: += still converts the promoted result.
-        test("compound_store_conversion_unaffected", [this]() {
-            auto e = make_engine();
-            auto r = e->execute(R"(
-                auto f() -> auto { int x = 1; x += 2.5; return x; }
-                f();
-            )");
-            check_eq((int64_t)3, r.as_int());
-        });
     }
 };
 
@@ -4480,83 +4251,44 @@ public:
     }
 
     void forge_tests() override {
-        test("all_primitive_fields_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { int a = 0; float b = 1.5; bool c = false; char d = 'x'; }");
-            check_true(flat_of(e, "P"));
+        test("the_flat_stamp_follows_field_kinds_containment_and_bases", [this]() {
+            const std::tuple<const char*, const char*, const char*, bool> cases[] = {
+                {"all_primitive_fields_flat", "class P { int a = 0; float b = 1.5; bool c = false; char d = 'x'; }", "P", true},
+                {"no_fields_flat", "class P { int helper(int v) { return v * 2; } }", "P", true},
+                {"string_field_flat", "class P { int a = 0; string s = \"\"; }", "P", true},
+                {"var_field_not_flat", "class P { var v = 0; }", "P", false},
+                {"typed_value_container_fields_flat", "class P { array<int> xs = []; array<string> names = []; int n = 0; }", "P", true},
+                {"untyped_container_field_not_flat", "class P { var xs = []; }", "P", false},
+                {"nested_container_field_flat", "class P { array<array<int>> grid = []; map<string, array<float>> table = {}; }", "P", true},
+                {"nested_flat_class_field_flat", R"(
+                    class Vec2 { int x = 0; int y = 0; }
+                    class Outer { Vec2 a = Vec2(); array<Vec2> pts = []; int n = 0; }
+            )", "Vec2", true},
+                {"nested_flat_class_field_flat", R"(
+                    class Vec2 { int x = 0; int y = 0; }
+                    class Outer { Vec2 a = Vec2(); array<Vec2> pts = []; int n = 0; }
+            )", "Outer", true},
+                {"nested_var_field_poisons_outer", R"(
+                    class Inner { var anything = 0; }
+                    class Outer { Inner a = Inner(); }
+            )", "Outer", false},
+                {"weak_ptr_field_not_flat", "class P { int a = 0; weak_ptr<P> other = null; }", "P", false},
+                {"flat_inheritance_chain_flat", R"(
+                    class Base { int hp = 10; string name = ""; }
+                    class Kid : Base { float speed = 1.0; }
+            )", "Kid", true},
+                {"var_parent_poisons_child", R"(
+                    class Base { var payload = 0; }
+                    class Kid : Base { int hp = 10; }
+            )", "Kid", false},
+            };
+            check_each(cases, [this](const auto& c) {
+                auto e = make_engine();
+                e->execute(std::get<1>(c));
+                check_eq(std::get<3>(c), flat_of(e, std::get<2>(c)), std::get<2>(c));
+            });
         });
-        test("no_fields_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { int helper(int v) { return v * 2; } }");
-            check_true(flat_of(e, "P"));
-        });
-        // Strings ARE value-closed (a member string is an engine value
-        // type, per-instance; the barrier normalization detaches rare shared nodes)
-        test("string_field_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { int a = 0; string s = \"\"; }");
-            check_true(flat_of(e, "P"));
-        });
-        test("var_field_not_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { var v = 0; }");
-            check_false(flat_of(e, "P"));
-        });
-        test("typed_value_container_fields_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { array<int> xs = []; array<string> names = []; int n = 0; }");
-            check_true(flat_of(e, "P"));
-        });
-        test("untyped_container_field_not_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { var xs = []; }");
-            check_false(flat_of(e, "P"));
-        });
-        // Transitive value-closure: containers of containers, containers
-        // of flat classes - anything that cannot point at something else
-        test("nested_container_field_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { array<array<int>> grid = []; map<string, array<float>> table = {}; }");
-            check_true(flat_of(e, "P"));
-        });
-        test("nested_flat_class_field_flat", [this]() {
-            auto e = make_engine();
-            e->execute(R"(
-                class Vec2 { int x = 0; int y = 0; }
-                class Outer { Vec2 a = Vec2(); array<Vec2> pts = []; int n = 0; }
-            )");
-            check_true(flat_of(e, "Vec2"));
-            check_true(flat_of(e, "Outer"));
-        });
-        test("nested_var_field_poisons_outer", [this]() {
-            auto e = make_engine();
-            e->execute(R"(
-                class Inner { var anything = 0; }
-                class Outer { Inner a = Inner(); }
-            )");
-            check_false(flat_of(e, "Outer"));
-        });
-        test("weak_ptr_field_not_flat", [this]() {
-            auto e = make_engine();
-            e->execute("class P { int a = 0; weak_ptr<P> other = null; }");
-            check_false(flat_of(e, "P"));
-        });
-        test("flat_inheritance_chain_flat", [this]() {
-            auto e = make_engine();
-            e->execute(R"(
-                class Base { int hp = 10; string name = ""; }
-                class Kid : Base { float speed = 1.0; }
-            )");
-            check_true(flat_of(e, "Kid"));
-        });
-        test("var_parent_poisons_child", [this]() {
-            auto e = make_engine();
-            e->execute(R"(
-                class Base { var payload = 0; }
-                class Kid : Base { int hp = 10; }
-            )");
-            check_false(flat_of(e, "Kid"));
-        });
+
         // THE invalidation case: Outer's cached stamp must fall when Inner hot-reloads
         // to a non-flat shape (per-class epochs cannot see containment; the stamp
         // validates against engine::class_definition_epoch).
@@ -4593,47 +4325,44 @@ public:
     char_promotion_tests() : suite("Char Promotion") {}
 
     void forge_tests() override {
-        test("char_minus_char", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)25, e->execute("'z' - 'a'").as_int());
-        });
-        test("char_plus_int", [this]() {
-            auto e = make_engine();
-            auto r = e->execute("'a' + 1");
-            check(r.is_int());
-            check_eq((int64_t)98, r.as_int());
-        });
-        test("digit_parse_shape", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)42, e->execute(R"(
+        test("char_operands_promote_to_unsigned_bytes_in_arithmetic_bitwise_and_comparisons", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"char_minus_char", "'z' - 'a'", int64_t{25}},
+                {"char_plus_int", "'a' + 1", int64_t{98}},
+                {"digit_parse_shape", R"(
                 var s = "42";
                 (s[0] - '0') * 10 + (s[1] - '0')
-            )").as_int());
-        });
-        test("typed_char_local_promotes", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)1, e->execute("char c = 'b'; c - 'a'").as_int());
-        });
-        test("char_bitwise_and_mask", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)0, e->execute("'A' & 0x20").as_int());
-            check_eq((int64_t)32, e->execute("'a' & 0x20").as_int());
-            check_eq((int64_t)96, e->execute("'a' & 'b'").as_int());
-        });
-        test("char_shift_and_modulo", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)194, e->execute("'a' << 1").as_int());
-            check_eq((int64_t)1, e->execute("'a' % 2").as_int());
+            )", int64_t{42}},
+                {"typed_char_local_promotes", "char c = 'b'; c - 'a'", int64_t{1}},
+                {"char_bitwise_and_mask", "'A' & 0x20", int64_t{0}},
+                {"char_bitwise_and_mask", "'a' & 0x20", int64_t{32}},
+                {"char_bitwise_and_mask", "'a' & 'b'", int64_t{96}},
+                {"char_shift_and_modulo", "'a' << 1", int64_t{194}},
+                {"char_shift_and_modulo", "'a' % 2", int64_t{1}},
+                {"unsigned_high_bit_byte", "var s = \"\xC3\"; s[0] + 0", int64_t{195}},
+                {"unsigned_high_bit_byte", "var s = \"\xC3\"; s[0] * 1", int64_t{195}},
+                {"char_equals_int", "'a' == 97", true},
+                {"char_equals_int", "97 == 'a'", true},
+                {"char_equals_int", "'a' != 98", true},
+                {"char_equals_int", "'a' == 98", false},
+                {"char_equals_int", "var s = \"\\x1A\"; s[0] == 0x1A", true},
+                {"char_ordered_vs_int", "'a' < 98", true},
+                {"char_ordered_vs_int", "'a' >= 97", true},
+                {"char_ordered_vs_int", "64 < 'A'", true},
+                {"char_ordered_vs_int", "'a' < 'b'", true},
+                {"char_ordered_vs_int", "'a' == 'a'", true},
+                {"char_spaceship_promotes", "'a' <=> 65", int64_t{1}},
+                {"char_spaceship_promotes", "'b' <=> 'b'", int64_t{0}},
+                {"char_spaceship_promotes", "'A' <=> 'a'", int64_t{-1}},
+                {"high_bit_comparisons_unsigned", "var s = \"\\xC3\"; s[0] > 'a'", true},
+                {"high_bit_comparisons_unsigned", "var s = \"\\xC3\"; s[0] > 127", true},
+                {"high_bit_comparisons_unsigned", "var s = \"\\xC3\"; s[0] <=> 'a'", int64_t{1}},
+            };
+            check_values(cases);
         });
         test("char_float_mix_promotes_to_float", [this]() {
             auto e = make_engine();
             check_near(145.5, e->execute("'a' * 1.5").as_float(), 1e-9);
-        });
-        test("unsigned_high_bit_byte", [this]() {
-            auto e = make_engine();
-            // Script string contains one raw 0xC3 byte; s[0] must promote as 195, never -61.
-            check_eq((int64_t)195, e->execute("var s = \"\xC3\"; s[0] + 0").as_int());
-            check_eq((int64_t)195, e->execute("var s = \"\xC3\"; s[0] * 1").as_int());
         });
         test("compound_assign_through_promotion", [this]() {
             auto e = make_engine();
@@ -4687,17 +4416,6 @@ public:
             // The promoted result is an int; it does not sneak back into the char domain.
             check_eq(std::string("int"), e->execute("type_of('a' + 1)").as_string());
             check_eq(std::string("char"), e->execute("type_of('a')").as_string());
-        });
-        // Comparison inting: comparisons promote exactly like
-        // arithmetic, so the char domain has ONE rule instead of two.
-        test("char_equals_int", [this]() {
-            auto e = make_engine();
-            check(e->execute("'a' == 97").as_bool());
-            check(e->execute("97 == 'a'").as_bool());
-            check(e->execute("'a' != 98").as_bool());
-            check_false(e->execute("'a' == 98").as_bool());
-            // The binary idiom that is silently false without promotion, truthful:
-            check(e->execute("var s = \"\\x1A\"; s[0] == 0x1A").as_bool());
         });
         // a char compared with a string compares as its one-character text, in either order and under every comparison; a string of
         // another length compares as text too (the empty string first)
@@ -4797,27 +4515,6 @@ public:
             )").as_string());
             check_true(e->execute("var m = {}; m['q'] = 1; m.contains(\"q\") && m.contains('q')").as_bool());
             check_true(e->execute("var m = {}; m[\"q\"] = 1; m.erase('q'); m.size() == 0").as_bool());
-        });
-        test("char_ordered_vs_int", [this]() {
-            auto e = make_engine();
-            check(e->execute("'a' < 98").as_bool());
-            check(e->execute("'a' >= 97").as_bool());
-            check(e->execute("64 < 'A'").as_bool());
-            check(e->execute("'a' < 'b'").as_bool());
-            check(e->execute("'a' == 'a'").as_bool());
-        });
-        test("char_spaceship_promotes", [this]() {
-            auto e = make_engine();
-            check_eq((int64_t)1, e->execute("'a' <=> 65").as_int());
-            check_eq((int64_t)0, e->execute("'b' <=> 'b'").as_int());
-            check_eq((int64_t)-1, e->execute("'A' <=> 'a'").as_int());
-        });
-        test("high_bit_comparisons_unsigned", [this]() {
-            auto e = make_engine();
-            // Byte 0xC3 must order as 195, not -61 — signed-native ordering is gone.
-            check(e->execute("var s = \"\\xC3\"; s[0] > 'a'").as_bool());
-            check(e->execute("var s = \"\\xC3\"; s[0] > 127").as_bool());
-            check_eq((int64_t)1, e->execute("var s = \"\\xC3\"; s[0] <=> 'a'").as_int());
         });
         // Byte minting: \xNN escapes (exactly two hex digits) + stdlib to_char.
         test("hex_escapes_in_literals", [this]() {
@@ -4941,12 +4638,9 @@ public:
                 "class G { int x = 1; G(int v) { x = 4; if (v > 0) { return; } x = 9; } } G(1).x").as_int());
             check_eq((int64_t)9, e->execute("G(0).x").as_int());
         });
-        test("typed_declarations_default_initialize", [this]() {
-            // A typed declaration without an initializer takes its type's default - a class default-constructs,
-            // int 0, float 0.0, bool false, string "", containers empty; var stays null; locals, fields, statics and globals alike
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            check_eq(std::string("0|0.0|false||0|0|null|1.5|2|3.5|0|1.5"), e->execute(R"(
+        test("typed_declarations_default_or_directly_initialize", [this]() {
+            const std::tuple<const char*, const char*, expected_value> cases[] = {
+                {"typed_declarations_default_initialize", R"(
                 class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
                 class H { int n; Vec2 p; array<int> xs; static float s; }
                 int gi; Vec2 gv;
@@ -4956,21 +4650,19 @@ public:
                     return `${i}|${f}|${b}|${s}|${xs.size()}|${m.size()}|${type_of(v)}|${p.x}|${(h.xs.size() + 2)}|${(h.p.y + 1.0)}|${gi}|${gv.x}`;
                 }
                 run();
-            )").as_string());
-        });
-        test("paren_and_brace_declarations_construct", [this]() {
-            // T x(args) direct-initializes, T x() default-constructs, and a primitive takes one value or its zero
-            auto e = make_engine();
-            jai::stdlib::register_all(e);
-            check_eq(std::string("3.0,4.0|1.5|5|0|7.0|2.5"), e->execute(R"(
+            )", std::string("0|0.0|false||0|0|null|1.5|2|3.5|0|1.5")},
+                {"paren_and_brace_declarations_construct", R"(
                 class Vec2 { float x = 1.5; float y = 2.5; Vec2() {} Vec2(float a, float b) { x = a; y = b; } }
                 function run() -> string {
                     Vec2 a(3.0, 4.0); Vec2 b(); int i{5}; int z{}; float f(7.0); Vec2 c{};
                     return `${a.x},${a.y}|${b.x}|${i}|${z}|${f}|${c.y}`;
                 }
                 run();
-            )").as_string());
+            )", std::string("3.0,4.0|1.5|5|0|7.0|2.5")},
+            };
+            check_values(cases, true);
         });
+
         test("a_class_holding_itself_by_value_is_an_error", [this]() {
             // `Node next;` would build a Node inside every Node; `Node next = null;` is a link
             auto e = make_engine();
@@ -5217,8 +4909,9 @@ public:
             check_eq(expected, v_out, std::string(what) + " (vm)");
         };
 
-        test("return_global_array_copies", [expect]() {
-            expect(R"(
+        test("a_by_value_return_copies_globals_fields_elements_and_reference_results", [expect]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"return_global_array_copies", R"(
                 array<int> ints = [1, 2, 3];
                 var f() { return ints; }
                 var r = f(); r.push(4);
@@ -5229,18 +4922,14 @@ public:
                 var r3 = f3(); r3.push(5);
                 to_string(ints.size()) + "/" + to_string(r.size()) + "/" + to_string(anys.size()) + "/" +
                     to_string(r2.size()) + "/" + to_string(r3.size())
-            )", "3/4/3/4/4", "typed and untyped global arrays returned by value are copies");
-        });
-        test("return_global_map_copies", [expect]() {
-            expect(R"(
+            )", "3/4/3/4/4"},
+                {"return_global_map_copies", R"(
                 map<string, int> m = {"a": 1};
                 var h() { return m; }
                 var mm = h(); mm["b"] = 2;
                 m.size() * 10 + mm.size()
-            )", "12", "a global map returned by value is a copy");
-        });
-        test("return_global_object_copies", [expect]() {
-            expect(R"(
+            )", "12"},
+                {"return_global_object_copies", R"(
                 class T { int v = 1; }
                 T obj = T();
                 var g() { return obj; }
@@ -5248,10 +4937,8 @@ public:
                 T g2() { return obj; }
                 var o2 = g2(); o2.v = 77;
                 to_string(obj.v) + "/" + to_string(o.v) + "/" + to_string(o2.v)
-            )", "1/99/77", "a global object returned by value is a copy (var and typed returns)");
-        });
-        test("return_field_copies", [expect]() {
-            expect(R"(
+            )", "1/99/77"},
+                {"return_field_copies", R"(
                 class H {
                     array<int> items = [1];
                     static array<int> shared_items = [1];
@@ -5265,10 +4952,8 @@ public:
                 var c = H::gets(); c.push(4);
                 to_string(hd.items.size()) + "/" + to_string(a.size()) + "/" + to_string(b.size()) + "/" +
                     to_string(H::shared_items.size()) + "/" + to_string(c.size())
-            )", "1/2/2/1/2", "bare, this. and static fields returned by value are copies");
-        });
-        test("return_element_copies", [expect]() {
-            expect(R"(
+            )", "1/2/2/1/2"},
+                {"return_element_copies", R"(
                 array<var> nested = [[1], [2]];
                 var fe() { return nested[0]; }
                 var re = fe(); re.push(3);
@@ -5281,8 +4966,47 @@ public:
                 var ro = fo(); ro.v = 5;
                 to_string(nested[0].size()) + "/" + to_string(re.size()) + "/" + to_string(mm["k"].size()) + "/" +
                     to_string(rm.size()) + "/" + to_string(objs[0].v) + "/" + to_string(ro.v)
-            )", "1/2/1/2/1/5", "array elements, map entries and object slots returned by value are copies");
+            )", "1/2/1/2/1/5"},
+                {"return_ref_call_from_value_function_copies", R"(
+                int gx = 5;
+                int& gi() { return gx; }
+                var fi() { return gi(); }
+                var vi = fi(); vi = 9;
+                array<int> ints = [1];
+                array<int>& ga() { return ints; }
+                var fv() { return ga(); }
+                var c = fv(); c.push(1);
+                array<int> fvt() { return ga(); }
+                var ct = fvt(); ct.push(1);
+                to_string(gx) + "/" + to_string(vi) + "/" + to_string(ints.size()) + "/" + to_string(c.size()) + "/" + to_string(ct.size())
+            )", "5/9/1/2/2"},
+                {"direct_call_result_mutation_is_on_temporary", R"(
+                array<int> ints = [1, 2];
+                var f() { return ints; }
+                f().push(100);
+                class T { int v = 1; }
+                T obj = T();
+                var g() { return obj; }
+                string stored = "stored";
+                try { g().v = 9; } catch (e) { stored = e; }
+                for (auto& x : f()) { x = 0; }
+                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(ints[0]) + "/" + stored
+            )", "2/1/1/Cannot assign to a member of a temporary"},
+                {"return_boxed_local_copies", R"(
+                var keep = null;
+                var f() {
+                    array<int> a = [1];
+                    keep = [&]() { a.push(0); return a.size(); };
+                    return a;
+                }
+                var r = f(); r.push(2);
+                int after = keep();
+                to_string(r.size()) + "/" + to_string(after)
+            )", "2/2"},
+            };
+            check_each(cases, [&](const auto& c) { expect(std::get<1>(c), std::get<2>(c), std::get<0>(c)); });
         });
+
         test("return_param_moves", [expect]() {
             expect(R"(
                 var fp(array<int> p) { return p; }
@@ -5353,8 +5077,9 @@ public:
                 to_string(c1) + "/" + to_string(c2) + "/" + to_string(c3 - c1) + "/" + to_string(c4 - c3) + "/" + to_string(p.v)
             )", "1/0/1/1/0", "one copy per lvalue return; temporaries, nested returns and decl-then-return add none", true);
         });
-        test("return_shared_ptr_shares", [expect]() {
-            expect(R"(
+        test("handle_this_and_reference_returns_share_their_target", [expect]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"return_shared_ptr_shares", R"(
                 class T { int v = 1; }
                 shared_ptr<T> sp = new T();
                 var gsp() { return sp; }
@@ -5363,10 +5088,8 @@ public:
                 Box bx = Box();
                 var q2 = bx.getp(); q2.v = 66;
                 to_string(sp.v) + "/" + to_string(bx.p.v)
-            )", "55/66", "shared_ptr handles returned by value share (global and field)");
-        });
-        test("ref_return_still_aliases", [expect]() {
-            expect(R"(
+            )", "55/66"},
+                {"ref_return_still_aliases", R"(
                 array<int> ints = [1];
                 array<int>& gr() { return ints; }
                 var& ra = gr(); ra.push(9);
@@ -5376,119 +5099,14 @@ public:
                 gt().v = 7;
                 var x = gr(); x.push(1);
                 to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(x.size())
-            )", "2/7/3", "-> T& returns alias; a plain decl from one copies");
-        });
-        test("return_ref_call_from_value_function_copies", [expect]() {
-            expect(R"(
-                int gx = 5;
-                int& gi() { return gx; }
-                var fi() { return gi(); }
-                var vi = fi(); vi = 9;
-                array<int> ints = [1];
-                array<int>& ga() { return ints; }
-                var fv() { return ga(); }
-                var c = fv(); c.push(1);
-                array<int> fvt() { return ga(); }
-                var ct = fvt(); ct.push(1);
-                to_string(gx) + "/" + to_string(vi) + "/" + to_string(ints.size()) + "/" + to_string(c.size()) + "/" + to_string(ct.size())
-            )", "5/9/1/2/2", "a reference-yielding call returned by value copies its target");
-        });
-        test("direct_call_result_mutation_is_on_temporary", [expect]() {
-            expect(R"(
-                array<int> ints = [1, 2];
-                var f() { return ints; }
-                f().push(100);
-                class T { int v = 1; }
-                T obj = T();
-                var g() { return obj; }
-                string stored = "stored";
-                try { g().v = 9; } catch (e) { stored = e; }
-                for (auto& x : f()) { x = 0; }
-                to_string(ints.size()) + "/" + to_string(obj.v) + "/" + to_string(ints[0]) + "/" + stored
-            )", "2/1/1/Cannot assign to a member of a temporary", "f().push / for (auto& : f()) touch the temporary; g().x = raises (C++: a member of a class prvalue)");
-        });
-        test("this_return_shares_receiver", [expect]() {
-            expect(R"(
+            )", "2/7/3"},
+                {"this_return_shares_receiver", R"(
                 class Chain { int n = 0; var inc() { n += 1; return this; } }
                 Chain ch = Chain();
                 ch.inc().inc();
                 ch.n
-            )", "2", "return this keeps the deliberate handle semantics");
-        });
-        test("return_inside_try_same_as_outside", [expect]() {
-            expect(R"(
-                int dtors = 0;
-                class T { int v = 0; ~T() { dtors += 1; } }
-                var make() { try { T t = T(); t.v = 5; return t; } catch (e) { return null; } }
-                var a = make();
-                int d1 = dtors;
-                array<int> ints = [1];
-                var f() { try { return ints; } catch (e) { return null; } }
-                var r = f(); r.push(2);
-                class T2 { int v = 1; }
-                T2 obj = T2();
-                T2 other = T2();
-                var g() { try { return obj.v > 0 ? obj : other; } catch (e) { return null; } }
-                var o = g(); o.v = 9;
-                class H { array<int> items = [1]; var get() { try { return items; } catch (e) { return null; } } }
-                H hd = H();
-                var hi = hd.get(); hi.push(2);
-                var five = 5;
-                array<int> h() { try { return five; } catch (e) { return [7]; } }
-                to_string(d1) + "/" + to_string(a.v) + "/" + to_string(ints.size()) + "/" + to_string(r.size()) + "/" +
-                    to_string(obj.v) + "/" + to_string(hd.items.size()) + "/" + to_string(h().size())
-            )", "0/5/1/2/1/1/1", "in-region returns move locals and copy lvalues exactly like clean ones");
-        });
-        test("return_boxed_local_copies", [expect]() {
-            expect(R"(
-                var keep = null;
-                var f() {
-                    array<int> a = [1];
-                    keep = [&]() { a.push(0); return a.size(); };
-                    return a;
-                }
-                var r = f(); r.push(2);
-                int after = keep();
-                to_string(r.size()) + "/" + to_string(after)
-            )", "2/2", "a local shared with a live closure copies; the closure's cell keeps its value");
-        });
-        test("lambda_captures_return", [expect]() {
-            expect(R"(
-                var mk() {
-                    array<int> cap = [1];
-                    var by_val = [=]() { return cap; };
-                    var by_ref = [&]() { return cap; };
-                    var a = by_val(); a.push(2);
-                    var b = by_val();
-                    var c = by_ref(); c.push(3);
-                    return to_string(a.size()) + "/" + to_string(b.size()) + "/" + to_string(cap.size()) + "/" + to_string(c.size());
-                }
-                mk()
-            )", "2/1/1/2", "[=] returns copy the captured copy, [&] returns copy the shared cell");
-        });
-        test("hot_reload_after_returned_copy", [this]() {
-            for (bool use_vm : {false, true}) {
-                auto e = jai::foundry::make_default_engine();
-                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                e->execute("class T { int v = 1; }\nT obj = T();\nvar g() { return obj; }\nvar c = g();\nc.v = 5;\n");
-                e->execute("class T { int v = 1; int w = 2; }");
-                check_eq((int64_t)9, e->execute("c.w + obj.w + c.v").as_int(), use_vm ? "vm: both migrate" : "interp: both migrate");
-                check_eq((int64_t)1, e->execute("obj.v").as_int(), use_vm ? "vm: original untouched" : "interp: original untouched");
-            }
-        });
-        test("top_level_return_unchanged", [this]() {
-            for (bool use_vm : {false, true}) {
-                auto e = jai::foundry::make_default_engine();
-                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
-                auto r = e->execute("array<var> a = [1]; return a;");
-                e->execute("a.push(2);");
-                check_eq((size_t)2, r.as_array().size(), use_vm ? "vm: top-level return hands the host the global's handle" : "interp: top-level return hands the host the global's handle");
-            }
-        });
-        // a reference return names the storage of any lvalue chain: a map entry by any key, a computed index or key, a member of
-        // an element or entry, an operator[] returning T& (the kernel's map steps, then the operand's evaluation)
-        test("lvalue_chains_return_by_reference", [expect]() {
-            expect(R"(
+            )", "2"},
+                {"lvalue_chains_return_by_reference", R"(
                 class Leaf { int hp = 1; }
                 class Hp { int hp = 1; Leaf child; }
                 class Grid { array<int> cells = [0, 0, 0]; int& operator[](int i) { return cells[i]; } }
@@ -5522,7 +5140,67 @@ public:
                 d2.hp += 1;
                 to_json(m) + " " + to_json(rows) + " " + to_string(units["u"].hp) + " " + to_string(hs[1].hp) + " " +
                     to_string(hs[1].child.hp) + " " + to_json(g.cells)
-            )", R"({"a":12} {"q":[0,12]} 1321 5 10 [0,0,7])", "every lvalue chain returns and binds by reference");
+            )", R"({"a":12} {"q":[0,12]} 1321 5 10 [0,0,7])"},
+            };
+            check_each(cases, [&](const auto& c) { expect(std::get<1>(c), std::get<2>(c), std::get<0>(c)); });
+        });
+
+        test("return_inside_try_same_as_outside", [expect]() {
+            expect(R"(
+                int dtors = 0;
+                class T { int v = 0; ~T() { dtors += 1; } }
+                var make() { try { T t = T(); t.v = 5; return t; } catch (e) { return null; } }
+                var a = make();
+                int d1 = dtors;
+                array<int> ints = [1];
+                var f() { try { return ints; } catch (e) { return null; } }
+                var r = f(); r.push(2);
+                class T2 { int v = 1; }
+                T2 obj = T2();
+                T2 other = T2();
+                var g() { try { return obj.v > 0 ? obj : other; } catch (e) { return null; } }
+                var o = g(); o.v = 9;
+                class H { array<int> items = [1]; var get() { try { return items; } catch (e) { return null; } } }
+                H hd = H();
+                var hi = hd.get(); hi.push(2);
+                var five = 5;
+                array<int> h() { try { return five; } catch (e) { return [7]; } }
+                to_string(d1) + "/" + to_string(a.v) + "/" + to_string(ints.size()) + "/" + to_string(r.size()) + "/" +
+                    to_string(obj.v) + "/" + to_string(hd.items.size()) + "/" + to_string(h().size())
+            )", "0/5/1/2/1/1/1", "in-region returns move locals and copy lvalues exactly like clean ones");
+        });
+        test("lambda_captures_return", [expect]() {
+            expect(R"(
+                var mk() {
+                    array<int> cap = [1];
+                    var by_val = [=]() { return cap; };
+                    var by_ref = [&]() { return cap; };
+                    var a = by_val(); a.push(2);
+                    var b = by_val();
+                    var c = by_ref(); c.push(3);
+                    return to_string(a.size()) + "/" + to_string(b.size()) + "/" + to_string(cap.size()) + "/" + to_string(c.size());
+                }
+                mk()
+            )", "2/1/1/2", "[=] returns copy the captured copy, [&] returns copy the shared cell");
+        });
+        test("hot_reload_after_returned_copy", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::foundry::make_default_engine();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                e->execute("class T { int v = 1; }\nT obj = T();\nvar g() { return obj; }\nvar c = g();\nc.v = 5;\n");
+                e->execute("class T { int v = 1; int w = 2; }");
+                check_eq((int64_t)9, e->execute("c.w + obj.w + c.v").as_int(), use_vm ? "vm: both migrate" : "interp: both migrate");
+                check_eq((int64_t)1, e->execute("obj.v").as_int(), use_vm ? "vm: original untouched" : "interp: original untouched");
+            }
+        });
+        test("top_level_return_unchanged", [this]() {
+            for (bool use_vm : {false, true}) {
+                auto e = jai::foundry::make_default_engine();
+                e->set_backend(use_vm ? jai::backend_type::vm : jai::backend_type::interpreter);
+                auto r = e->execute("array<var> a = [1]; return a;");
+                e->execute("a.push(2);");
+                check_eq((size_t)2, r.as_array().size(), use_vm ? "vm: top-level return hands the host the global's handle" : "interp: top-level return hands the host the global's handle");
+            }
         });
         test("a_reference_return_of_no_storage_names_the_return", [expect]() {
             expect(R"(

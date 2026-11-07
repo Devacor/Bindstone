@@ -11,8 +11,11 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <tuple>
+#include <utility>
 
 #include "foundry/small_stack.hpp"
+#include "../case_table.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -39,16 +42,18 @@ public:
 			check(e->execute("int a; int b; a == b;").as_bool());
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
-		test("typed_null_equality_symmetric", [this]() {
-			auto e = make_engine();
-			check_false(e->execute("int a; a == 5;").as_bool());
-			check_false(e->execute("int a; 5 == a;").as_bool());
-			check(e->execute("int a; a != 5;").as_bool());
-		});
-		test("typed_null_string_compare_no_crash", [this]() {
-			auto e = make_engine();
-			check_false(e->execute("string s; \"hi\" == s;").as_bool());
-			check_false(e->execute("string s; s == \"hi\";").as_bool());
+		test("a_typed_null_compares_unequal_to_a_value_either_way", [this]() {
+			const std::pair<const char*, bool> cases[] = {
+				{"int a; a == 5;", false},
+				{"int a; 5 == a;", false},
+				{"int a; a != 5;", true},
+				{"string s; \"hi\" == s;", false},
+				{"string s; s == \"hi\";", false},
+			};
+			check_each(cases, [](const auto& c) {
+				auto e = make_engine();
+				check_eq(c.second, e->execute(c.first).as_bool());
+			});
 		});
 
 		// ---- #10 env pool: static method call + block must not corrupt the pool ----
@@ -67,28 +72,28 @@ public:
 		});
 
 		// ---- #11 closures: outer local colliding with the lambda's own slot range ----
-		test("lambda_captures_colliding_outer_param_inline", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+		test("a_lambda_capturing_an_outer_parameter_keeps_its_own_slots", [this]() {
+			const std::pair<const char*, int64_t> cases[] = {
+				{R"(
 				int make2(int base) {
 					auto g = [=](int x) { return x + base; };
 					return g(1);
 				}
 				make2(10);
-			)");
-			check_eq((int64_t)11, r.as_int());
-		});
-		test("lambda_captures_colliding_outer_param_escaping", [this]() {
-			auto e = make_engine();
-			auto r = e->execute(R"(
+			)", 11},
+				{R"(
 				auto make_adder(int base) -> auto {
 					return [=](int x) { return x + base; };
 				}
 				auto a1 = make_adder(10);
 				auto a2 = make_adder(100);
 				a1(1) * 1000 + a2(1);
-			)");
-			check_eq((int64_t)11101, r.as_int());  // 11 * 1000 + 101
+			)", 11101},
+			};
+			check_each(cases, [](const auto& c) {
+				auto e = make_engine();
+				check_eq(c.second, e->execute(c.first).as_int());
+			});
 		});
 
 		// ---- #12 statements after a top-level throw in a function body must not run ----
@@ -143,31 +148,24 @@ public:
 		});
 
 		// ---- #15 compound assignment honours the checked-overflow policy ----
-		test("compound_add_overflow_raises", [this]() {
-			auto e = make_engine();
-			if (!e->throw_on_overflow()) { return; }  // wrap build: policy off by design
-			check_throws([&]() { e->execute("var x = 9223372036854775807; x += 1;"); });
-		});
-		test("compound_sub_overflow_raises", [this]() {
-			auto e = make_engine();
-			if (!e->throw_on_overflow()) { return; }
-			check_throws([&]() { e->execute("var x = -9223372036854775807 - 1; x -= 1;"); });
-		});
-		test("compound_mul_overflow_raises", [this]() {
-			auto e = make_engine();
-			if (!e->throw_on_overflow()) { return; }
-			check_throws([&]() { e->execute("var x = 9223372036854775807; x *= 2;"); });
+		test("compound_assignment_raises_on_overflow_under_the_checked_policy", [this]() {
+			if (!make_engine()->throw_on_overflow()) { return; }  // wrap build: policy off by design
+			const std::tuple<const char*> cases[] = {
+				{"var x = 9223372036854775807; x += 1;"},
+				{"var x = -9223372036854775807 - 1; x -= 1;"},
+				{"var x = 9223372036854775807; x *= 2;"},
+				{"var x = 9223372036854775807; var one = 1; x += one;"},
+			};
+			check_each(cases, [](const auto& c) {
+				auto e = make_engine();
+				check_throws([&]() { e->execute(std::get<0>(c)); });
+			});
 		});
 		test("compound_div_min_by_minus_one_no_crash", [this]() {
 			auto e = make_engine();
 			if (!e->throw_on_overflow()) { return; }
 			check_throws([&]() { e->execute("var y = -9223372036854775807 - 1; y /= -1;"); });
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-		test("compound_add_overflow_identifier_rhs", [this]() {
-			auto e = make_engine();
-			if (!e->throw_on_overflow()) { return; }
-			check_throws([&]() { e->execute("var x = 9223372036854775807; var one = 1; x += one;"); });
 		});
 		test("compound_ops_still_correct", [this]() {
 			auto e = make_engine();

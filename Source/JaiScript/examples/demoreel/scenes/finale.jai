@@ -1,14 +1,146 @@
 // FINALE — an eight-dimensional climax. An 8-cube (256 vertices, 1024 edges)
 // unfolds out of a point one dimension at a time, a line, a square, a cube, on
-// up to eight, while it turns through eight planes of 8D rotation and projects
-// down to the screen, every edge glowing in the hue of the axis it runs along.
-// On the beat it shatters: its vertices burst into sparks that swirl onto the
-// pixels of the word JAISCRIPT, and the word slams in with a white flash, two
-// shockwaves and a screen shake as the fire wall erupts beneath it. The flames
-// pump on every beat and burn into rainbow with the hypercube still turning
-// behind them; then the wall dies, the letters cool to neon and the credits
-// roll. It is the fire scene's subclass: the letters are heat sources stamped
-// from the pixel font and fed to the same convection pass.
+// up to eight, every edge glowing in the hue of the axis it runs along. It turns
+// the way a world turns in Fez: eased quarter-turns that snap on the beat, each
+// one a symmetry of the cube, so every snap lands back on a perfect figure. Behind
+// it the hyperbolic plane opens ring by ring as each dimension does, Escher's
+// Circle Limit geometry: octagons meeting three at a corner in the Poincare disk,
+// shrinking without end toward the rim, flowing forever under hyperbolic
+// translation. At eight dimensions the snaps double up on every half beat and the
+// plane accelerates into a warp; then it shatters: the vertices burst into sparks
+// that swirl onto the pixels of the word JAISCRIPT, and the word slams in with a
+// white flash, two shockwaves and a screen shake as the fire wall erupts beneath
+// it. The flames pump on every beat and burn into rainbow with the hypercube still
+// turning behind them; then the wall dies, the letters cool to neon and the
+// credits roll. It is the fire scene's subclass: the letters are heat sources
+// stamped from the pixel font and fed to the same convection pass.
+
+// The {8,3} tiling, one row per parallel_transform body. A pixel's disk point is
+// turned, translated by the flow's Mobius map, then folded into the tiling's
+// fundamental triangle by its three mirrors (the x axis, the line at pi/8 and the
+// central octagon's edge circle). The tiling is three-colourable: the line mirror
+// swaps the neighbours' two colours and the edge circle swaps the centre's with
+// its neighbour's, so composing those swaps along the fold names the tile's colour.
+float HY_CX = 0.0;
+float HY_CY = 0.0;
+float HY_INV_R = 1.0;
+float HY_AX = 0.0;          // the flow: the Mobius translation's point a
+float HY_AY = 0.0;
+float HY_RC = 1.0;          // the disk's turn
+float HY_RS = 0.0;
+float HY_REVEAL = 0.0;      // the hyperbolic radius opened so far
+float HY_GAIN = 1.0;
+float HY_EDGE_C = 1.5535;   // the central octagon's edge circle: centre on the x axis, radius
+float HY_EDGE_R = 1.1889;
+float HY_MID = 0.3646;      // the edge's midpoint, the tile's inradius in the disk
+float HY_NX = 0.0;          // the pi/8 mirror's normal
+float HY_NY = 1.0;
+int HY_W = 0;
+int HY_TILE = 0;            // palette: 3 colours x 16 levels
+int HY_EDGE = 0;            // and 8 levels of edge light
+int HY_SPIN = 0;
+array<int> HY_ROWS = [];
+
+function hyper_row(int y) -> array<int> {
+	array<int> out = [];
+	int ww = HY_W;
+	float ir = HY_INV_R;
+	float cx = HY_CX;
+	float v = (y + 0.5 - HY_CY) * ir;
+	float ax = HY_AX;
+	float ay = HY_AY;
+	float rc = HY_RC;
+	float rs = HY_RS;
+	float ec = HY_EDGE_C;
+	float er = HY_EDGE_R;
+	float er2 = er * er;
+	float nx = HY_NX;
+	float ny = HY_NY;
+	float reveal = HY_REVEAL;
+	float gain = HY_GAIN;
+	float mid = HY_MID;
+	for (int x = 0; x < ww; ++x) {
+		float u = (x + 0.5 - cx) * ir;
+		float vv = v;
+		float r2 = u * u + vv * vv;
+		// outside the disk the plane continues as its own mirror image through the
+		// circle at infinity, dimmer, its tiles growing toward the screen's edges
+		float side = 1.0;
+		if (r2 > 1.0) {
+			u /= r2;
+			vv /= r2;
+			r2 = 1.0 / r2;
+			side = 0.5;
+		}
+		if (r2 >= 0.994) {
+			out.push(-1);
+			continue;
+		}
+		float r = math::sqrt(r2);
+		float dh = math::log2((1.0 + r) / (1.0 - r)) * 0.6931472;
+		if (dh > reveal) {
+			out.push(-1);
+			continue;
+		}
+		float zx = u * rc + vv * rs;
+		float zy = vv * rc - u * rs;
+		float qx = zx - ax;
+		float qy = zy - ay;
+		float dx = 1.0 - ax * zx - ay * zy;
+		float dy = ay * zx - ax * zy;
+		float dd = dx * dx + dy * dy;
+		float fx = (qx * dx + qy * dy) / dd;
+		float fy = (qy * dx - qx * dy) / dd;
+		int p0 = 0;
+		int p1 = 1;
+		int p2 = 2;
+		int facet = 0;
+		float e2 = 9.0;
+		for (int it = 0; it < 40; ++it) {
+			bool moved = false;
+			if (fy < 0.0) {
+				fy = -fy;
+				facet = 1 - facet;
+			}
+			float d = fx * nx + fy * ny;
+			if (d > 0.0) {
+				fx -= 2.0 * d * nx;
+				fy -= 2.0 * d * ny;
+				int sw = p1; p1 = p2; p2 = sw;
+				facet = 1 - facet;
+				moved = true;
+			}
+			float ex = fx - ec;
+			e2 = ex * ex + fy * fy;
+			if (e2 < er2) {
+				float k = er2 / e2;
+				fx = ec + ex * k;
+				fy *= k;
+				int sw2 = p0; p0 = p1; p1 = sw2;
+				moved = true;
+			}
+			if (!moved) { break; }
+		}
+		float rim = (1.0 - r2) * 2.5;
+		float fade = (0.3 + 0.7 * (rim > 1.0 ? 1.0 : rim)) * gain * side;
+		float edge = math::sqrt(e2) - er;
+		if (reveal - dh < 0.22 || edge < 0.02) {
+			int le = itrunc((reveal - dh < 0.22 ? 7.9 : 6.0 - edge * 150.0) * fade);
+			out.push(HY_EDGE + (le < 0 ? 0 : (le > 7 ? 7 : le)));
+			continue;
+		}
+		// shaded by the distance to the nearest edge: a bevel lit on one side of each
+		// edge's midpoint mirror and shadowed on the other, a raised middle, an inlaid ring
+		float depth = edge / mid;
+		float ring = depth - 0.5;
+		ring = ring < 0.0 ? -ring : ring;
+		float lit = depth < 0.2 ? (facet == 1 ? 15.0 : 4.0) : 7.0 + depth * 6.0;
+		if (ring < 0.05) { lit = 3.0; }
+		int l = itrunc(lit * fade);
+		out.push(HY_TILE + ((p0 + HY_SPIN) % 3) * 16 + (l < 0 ? 0 : (l > 15 ? 15 : l)));
+	}
+	return out;
+}
 
 class Finale : Fire {
 	array<int> letter_at = [];   // the letters' pixels
@@ -35,14 +167,26 @@ class Finale : Fire {
 	array<float> pfy = [];
 	array<int> pfaxis = [];
 
+	// the snaps: [start, length, sign, plane a, plane b, second plane a, b (or -1)]
+	array<float> snap_at = [];
+	array<float> snap_len = [];
+	array<float> snap_sign = [];
+	array<int> snap_pa = [];
+	array<int> snap_pb = [];
+	array<int> snap_qa = [];
+	array<int> snap_qb = [];
+	float landed = -9.0;         // when the last snap clicked home
+
 	float unfold_t = 0.8;        // the first dimension opens
-	float shatter_t = 6.3;       // the cube bursts
-	float slam_t = 7.75;         // the word lands and the fire erupts
-	float rainbow_t = 9.7;
-	float wall_out_t = 14.5;     // the wall starts dying
-	float embers_t = 15.5;       // the letters stop feeding the flames
-	float neon_t = 17.5;         // ... and have cooled to neon
-	float credits_t = 16.5;
+	float snaps_t = 1.935;       // the first quarter-turn, once there is a cube to turn
+	float dance_t = 5.32;        // eight dimensions: the snaps double up
+	float shatter_t = 8.235;     // the cube bursts
+	float slam_t = 9.685;        // the word lands and the fire erupts
+	float rainbow_t = 11.635;
+	float wall_out_t = 16.435;   // the wall starts dying
+	float embers_t = 17.435;     // the letters stop feeding the flames
+	float neon_t = 19.435;       // ... and have cooled to neon
+	float credits_t = 18.435;
 	float credit_rows_per_s = 5.0;
 
 	// [kind, left column, right column]: a "role" row splits at the gutter
@@ -75,7 +219,7 @@ class Finale : Fire {
 	void build() override {
 		name = "FINALE";
 		handle = "eight dimensions . jaiscript forever";
-		replay = 24.0;
+		replay = 26.0;
 		build_fire();
 		fuel = gfx.make_grid(w);
 		stamp_word("JAISCRIPT");
@@ -102,6 +246,52 @@ class Finale : Fire {
 			pfx.push(0.0);
 			pfy.push(0.0);
 			pfaxis.push(rng.next(8));
+		}
+		HY_TILE = pal.size();
+		var tile_ink = [[70.0, 90.0, 235.0], [225.0, 60.0, 120.0], [245.0, 185.0, 60.0]];
+		for (int c = 0; c < 3; ++c) {
+			var ink = tile_ink[c];
+			float tr = ink[0]; float tg = ink[1]; float tb = ink[2];
+			pal.ramp(16, tr * 0.04, tg * 0.04, tb * 0.05 + 4.0, tr * 0.62, tg * 0.62, tb * 0.62);
+		}
+		HY_EDGE = pal.ramp(8, 30.0, 30.0, 52.0, 225.0, 240.0, 255.0);
+		// the {8,3} geometry: the octagon's inradius from cosh(rho) = cos(pi/3) / sin(pi/8)
+		float ch = 0.5 / math::sin(0.3926991);
+		HY_MID = math::sqrt((ch - 1.0) / (ch + 1.0));
+		HY_EDGE_C = (HY_MID + 1.0 / HY_MID) * 0.5;
+		HY_EDGE_R = (1.0 / HY_MID - HY_MID) * 0.5;
+		HY_NX = 0.0 - math::sin(0.3926991);
+		HY_NY = math::cos(0.3926991);
+		plan_snaps();
+	}
+
+	// a quarter-turn on every beat once there is a cube, through planes of the axes
+	// already open; at eight dimensions two disjoint planes snap every half beat
+	void plan_snaps() {
+		int k = 0;
+		float t = snaps_t;
+		while (t < shatter_t - 0.1) {
+			bool dance = t >= dance_t - 0.01;
+			int dims = itrunc((t - unfold_t) / 0.55) + 1;
+			dims = dims > 8 ? 8 : dims;
+			int a = k % dims;
+			int b = (a + 1 + (k / dims) % (dims - 1)) % dims;
+			int qa = -1;
+			int qb = -1;
+			if (dance) {
+				b = (a + 1 + 2 * ((k / 8) % 3)) % 8;
+				qa = (a + 4) % 8;
+				qb = (b + 4) % 8;
+			}
+			snap_at.push(t);
+			snap_len.push(dance ? beat * 0.42 : beat * 0.62);
+			snap_sign.push((k & 1) == 0 ? 1.0 : -1.0);
+			snap_pa.push(a);
+			snap_pb.push(b);
+			snap_qa.push(qa);
+			snap_qb.push(qb);
+			t += dance ? beat * 0.5 : beat;
+			++k;
 		}
 	}
 
@@ -166,59 +356,90 @@ class Finale : Fire {
 		if (t > shatter_t && t < slam_t) { fly_sparks(t); }
 	}
 
-	// the 8-cube: each axis opens in turn (a line, a square, a cube, ...), then
-	// the whole turns through eight rotation planes, faster as the cube completes
+	// the 8-cube: each axis opens in turn (a line, a square, a cube, ...) and the
+	// whole turns by the snaps: every finished one is an exact quarter-turn (a signed
+	// swap of two coordinates), the one in flight eases past its mark and settles back
 	void turn_cube(float t) {
 		var& c = cube;
-		float spin = t < shatter_t ? t * (0.35 + t * 0.06) : shatter_t * (0.35 + shatter_t * 0.06) + (t - shatter_t) * 0.4;
-		array<float> ca = [];
-		array<float> sa = [];
-		for (int p = 0; p < 8; ++p) {
-			float a = spin * (0.5 + 0.13 * p) + p * 0.7;
-			ca.push(math::cos(a));
-			sa.push(math::sin(a));
-		}
 		array<float> open = [];
 		for (int d = 0; d < 8; ++d) {
 			float f = (t - unfold_t - d * 0.55) / 0.45;
 			open.push(f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f * f * (3.0 - 2.0 * f)));
 		}
-		// planes (0,1) (2,3) (4,5) (6,7) then (0,4) (1,5) (2,6) (3,7)
-		array<int> pa = [0, 2, 4, 6, 0, 1, 2, 3];
-		array<int> pb = [1, 3, 5, 7, 4, 5, 6, 7];
 		for (int v = 0; v < 256; ++v) {
 			int base = v * 8;
 			for (int d2 = 0; d2 < 8; ++d2) { c[base + d2] = ((v >> d2) & 1) == 1 ? open[d2] : -open[d2]; }
-			for (int p2 = 0; p2 < 8; ++p2) {
-				int ia = base + pa[p2];
-				int ib = base + pb[p2];
-				float xa = c[ia];
-				float xb = c[ib];
-				c[ia] = xa * ca[p2] - xb * sa[p2];
-				c[ib] = xa * sa[p2] + xb * ca[p2];
-			}
 		}
-		// down to the screen: the 16-gon Petrie projection for x and y, another
-		// mix for depth, then perspective; the cube breathes on the beat
-		float scale = h * 0.13 * (1.0 + (t > 3.9 && t < shatter_t ? pulse(t) * 0.12 : 0.0));
+		for (int k = 0; k < snap_at.size(); ++k) {
+			float f = (t - snap_at[k]) / snap_len[k];
+			if (f < 0.0) { break; }
+			if (f >= 1.0) {
+				landed = snap_at[k] + snap_len[k];
+				quarter_turn(snap_pa[k], snap_pb[k], snap_sign[k]);
+				if (snap_qa[k] >= 0) { quarter_turn(snap_qa[k], snap_qb[k], snap_sign[k]); }
+				continue;
+			}
+			float g = f - 1.0;
+			float eased = 1.0 + 2.70158 * g * g * g + 1.70158 * g * g;
+			float ang = snap_sign[k] * 1.5707963 * eased;
+			turn_plane(snap_pa[k], snap_pb[k], math::cos(ang), math::sin(ang));
+			if (snap_qa[k] >= 0) { turn_plane(snap_qa[k], snap_qb[k], math::cos(ang), math::sin(ang)); }
+		}
+		// down to the screen: the 16-gon Petrie projection, its axes dealt out in
+		// bit-reversed order so the first two open as a square and the third as a
+		// cube; the figure turns slowly in the screen's plane and breathes on the beat
+		float scale = h * 0.12 * (1.0 + (t > 3.9 && t < shatter_t ? pulse(t) * 0.12 : 0.0));
 		float cx = w * 0.5;
 		float cy = h * 0.5;
+		float roll = t * 0.11;
+		array<float> dir_x = [];
+		array<float> dir_y = [];
+		array<float> dir_z = [];
+		array<int> deal = [0, 4, 2, 6, 1, 5, 3, 7];
+		for (int d3 = 0; d3 < 8; ++d3) {
+			float ang2 = deal[d3] * 0.3926991;
+			dir_x.push(math::cos(ang2 + roll));
+			dir_y.push(math::sin(ang2 + roll));
+			dir_z.push(0.35 * math::cos(ang2 * 3.0 + 0.6));
+		}
 		for (int v2 = 0; v2 < 256; ++v2) {
 			int b2 = v2 * 8;
 			float x = 0.0;
 			float y = 0.0;
 			float z = 0.0;
-			for (int d3 = 0; d3 < 8; ++d3) {
-				float q = c[b2 + d3];
-				float ang = d3 * 0.3926991;
-				x += q * math::cos(ang);
-				y += q * math::sin(ang);
-				z += q * ((d3 & 1) == 0 ? 0.35 : -0.35);
+			for (int d4 = 0; d4 < 8; ++d4) {
+				float q = c[b2 + d4];
+				x += q * dir_x[d4];
+				y += q * dir_y[d4];
+				z += q * dir_z[d4];
 			}
 			float s = scale * 4.0 / (6.0 - z);
 			sx[v2] = cx + x * s;
 			sy[v2] = cy + y * s;
 			sz[v2] = z;
+		}
+	}
+
+	void quarter_turn(int a, int b, float sign) {
+		var& c = cube;
+		for (int v = 0; v < 256; ++v) {
+			int ia = v * 8 + a;
+			int ib = v * 8 + b;
+			float xa = c[ia];
+			c[ia] = 0.0 - sign * c[ib];
+			c[ib] = sign * xa;
+		}
+	}
+
+	void turn_plane(int a, int b, float ca, float sa) {
+		var& c = cube;
+		for (int v = 0; v < 256; ++v) {
+			int ia = v * 8 + a;
+			int ib = v * 8 + b;
+			float xa = c[ia];
+			float xb = c[ib];
+			c[ia] = xa * ca - xb * sa;
+			c[ib] = xa * sa + xb * ca;
 		}
 	}
 
@@ -281,6 +502,9 @@ class Finale : Fire {
 		var& gh = glow_hue;
 		int n = w * h;
 		for (int i = 0; i < n; ++i) { g[i] = 0.0; }
+		float cx = w * 0.5;
+		float cy = h * 0.5;
+		float outer = 1.0 / (h * 0.36);
 		for (int v = 0; v < 256; ++v) {
 			for (int d = 0; d < 8; ++d) {
 				if (((v >> d) & 1) == 1) { continue; }
@@ -292,7 +516,11 @@ class Finale : Fire {
 				float adx = dx < 0.0 ? -dx : dx;
 				float ady = dy < 0.0 ? -dy : dy;
 				int steps = itrunc((adx > ady ? adx : ady) + 1.0);
-				float lum = gain * (0.55 + (sz[v] + sz[u]) * 0.18);
+				// the rose's outer rings carry its shape; the crowded middle stays dim
+				float mx = (x0 + dx * 0.5 - cx) * outer;
+				float my = (y0 + dy * 0.5 - cy) * outer;
+				float reach = mx * mx + my * my;
+				float lum = gain * (0.55 + (sz[v] + sz[u]) * 0.18) * (0.22 + 0.78 * (reach > 1.0 ? 1.0 : reach));
 				float ix = dx / steps;
 				float iy = dy / steps;
 				for (int s = 0; s <= steps; ++s) {
@@ -320,16 +548,28 @@ class Finale : Fire {
 		var& gh = glow_hue;
 		float gain = tt < shatter_t ? 0.8 : (tt < slam_t ? 0.8 * (1.0 - (tt - shatter_t) / (slam_t - shatter_t)) : 0.3);
 		if (tt > wall_out_t) { gain = 0.3 * (1.0 - (tt - wall_out_t) * 0.5); }
+		float click = tt - landed < 0.16 ? (0.16 - (tt - landed)) * 3.0 : 0.0;
+		gain = gain + (tt < shatter_t ? click : 0.0);
 		bool cube_on = gain > 0.01;
 		if (cube_on) { draw_cube(gain); }
-		for (int i = 0; i < n; ++i) {
-			int v = ht[i];
-			if (v > 5 || !cube_on || g[i] <= 0.04) {
-				grid[i] = (v > 72 ? 72 : v) + b;
-				continue;
+		bool tiles_on = tt > unfold_t && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5));
+		var trows = [];
+		if (tiles_on) { trows = open_plane(); }
+		float over = tiles_on && tt < slam_t ? 0.1 : 0.04;
+		int i = 0;
+		for (int y = 0; y < h; ++y) {
+			for (int x = 0; x < w; ++x) {
+				int v = ht[i];
+				if (v <= 5 && cube_on && g[i] > over) {
+					int lv = g[i] * 9.0;
+					grid[i] = hyper + gh[i] * 12 + (lv > 11 ? 11 : lv);
+				} else if (v <= 5 && tiles_on && trows[y][x] >= 0) {
+					grid[i] = trows[y][x];
+				} else {
+					grid[i] = (v > 72 ? 72 : v) + b;
+				}
+				++i;
 			}
-			int lv = g[i] * 9.0;
-			grid[i] = hyper + gh[i] * 12 + (lv > 11 ? 11 : lv);
 		}
 		if (tt > slam_t) {
 			var& rim = rim_at;
@@ -343,6 +583,52 @@ class Finale : Fire {
 		draw_sparks(grid, b);
 		if (tt < shatter_t) { draw_dimension(grid); }
 		slam(grid);
+	}
+
+	// the hyperbolic plane: it opens ring by ring as the dimensions do, flows under
+	// a translation that wraps at four inradii (two tiles across, where the tiling
+	// and its colouring both repeat), accelerates at eight dimensions and warps out
+	// as the cube shatters; at eight dimensions its colours roll on every snap
+	var open_plane() {
+		float t = tt;
+		float period = 4.0 * math::log2((1.0 + HY_MID) / (1.0 - HY_MID)) * 0.6931472;
+		float s = t * 0.3;
+		if (t > dance_t) { s += (t - dance_t) * (t - dance_t) * 0.8; }
+		if (t > shatter_t) { s += (t - shatter_t) * (t - shatter_t) * 6.0; }
+		if (t > slam_t) { s = (t - slam_t) * 0.8; }
+		s -= math::floor(s / period) * period;
+		float e = math::pow(2.718281828, s);
+		float along = (e - 1.0) / (e + 1.0);
+		HY_AX = along;
+		HY_AY = 0.0;
+		HY_RC = math::cos(t * 0.07);
+		HY_RS = 0.0 - math::sin(t * 0.07);
+		HY_REVEAL = t < 5.2 ? (t - unfold_t) * 1.1 : 4.84 + (t - 5.2) * 6.0;
+		float gain = t < dance_t ? 1.0 : 0.85 + pulse(t) * 0.3;
+		if (t > shatter_t) { gain = 1.0 - (t - shatter_t) / (slam_t - shatter_t); }
+		int spun = 0;
+		for (int k = 0; k < snap_at.size(); ++k) {
+			if (snap_at[k] >= dance_t - 0.01 && snap_at[k] + snap_len[k] <= t) { ++spun; }
+		}
+		// behind the fire it returns faint, its colours rolling on every beat
+		if (t > slam_t) {
+			float rise = (t - slam_t - 0.5) * 1.0;
+			float fall = (wall_out_t + 1.5 - t) / 1.5;
+			gain = 0.45 * (rise < fall ? rise : fall) * (0.8 + pulse(t) * 0.4);
+			gain = gain > 0.45 ? 0.45 : gain;
+			spun = itrunc(t / beat);
+		}
+		HY_GAIN = gain;
+		HY_SPIN = spun % 3;
+		HY_CX = w * 0.5;
+		HY_CY = h * 0.5;
+		HY_INV_R = 1.0 / (h * 0.5 - 0.5);
+		HY_W = w;
+		if (HY_ROWS.size() != h) {
+			HY_ROWS = [];
+			for (int r = 0; r < h; ++r) { HY_ROWS.push(r); }
+		}
+		return parallel_transform(HY_ROWS, hyper_row);
 	}
 
 	// the sparks in flight, each in the hue of an axis

@@ -1,10 +1,11 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
 Eleven auto-advancing truecolor scenes, five kinds of transition, pixel-font
-title cards, and a finale where an eight-dimensional hypercube unfolds, shatters
-into the word JAISCRIPT and slams it into a wall of rainbow fire before the
-credits roll — every effect coded in `scenes/*.jai`, every frame drawn at
-**double vertical resolution** with half-block pixels. A ray tracer, a sphere
+title cards, and a finale where an eight-dimensional hypercube unfolds over
+Escher's hyperbolic plane, shatters into the word JAISCRIPT and slams it into a
+wall of rainbow fire before the credits roll — every effect coded in
+`scenes/*.jai`, every frame drawn at **double vertical resolution** with
+half-block pixels. A ray tracer, a sphere
 tracer, a textured Wolfenstein raycaster, a VoxelSpace terrain flight,
 metaballs, a murmuration, a skull-headed spider crawling a morphing gyroid
 labyrinth, a Navier-Stokes ink tank and the classics. The C++ host (`demoreel_host.cpp`) is a
@@ -148,7 +149,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 8 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 9 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp; the body re-projects onto the moving level set every frame, eight two-bone IK legs step in a tetrapod gait, three tendrils writhe behind, and the camera orbits with the surface normal as up; a crown of flame under a spinning ruby, embers and orbiting blood gems are depth-tested against the traced scene; rows in parallel |
 | 10 | MAELSTROM | ink in water, simulated: Jos Stam's stable fluids. The flow runs on a half-size grid (vorticity confinement hands back the curl the grid smears away, 20 sweeps of warm-started SOR project it divergence-free, semi-Lagrangian self-advection), and the ink moves per pixel through its bilinear upsampling, so the filaments are finer than the grid; the dye is a density plus a premultiplied hue vector, so inks blend into the hue between them and opposites wash out to pearl, lit as a height field (diffuse + Blinn specular from the density gradient) with motes riding the current. Two jets cross, a ring of nozzles winds the tank up, the tank drains, and eight inks bloom into a rainbow wheel that a whirlpool twists; ink and light rows in parallel |
-| 11 | FINALE | an 8-cube (256 vertices, 1024 edges) unfolds out of a point one dimension at a time (a line, a square, a cube, ... with a 1D..8D counter), turns through eight planes of 8D rotation and projects through the 16-gon Petrie projection with perspective, each edge in its axis' hue, breathing on the 124 bpm beat; it shatters into sparks that curl onto the pixels of JAISCRIPT, which slams in with a white flash, two shockwaves and a screen shake as the fire wall erupts (the fire scene in `fire.jai`: convection with the Doom fire's sideways jitter, 73 heat levels); the letters are heat sources, the flames pump and change hue on every beat with the hypercube turning behind them, then the wall dies, the letters cool to neon with a glint sweeping across, and the credits roll up beneath them |
+| 11 | FINALE | an 8-cube (256 vertices, 1024 edges) unfolds out of a point one dimension at a time (a line, a square, a cube, ... with a 1D..8D counter) and turns as a world turns in Fez: eased quarter-turns snapping on the 124 bpm beat, each a symmetry of the cube, so every snap lands on a perfect figure (Petrie projection, axes dealt in bit-reversed order, each edge in its axis' hue); behind it the hyperbolic plane opens ring by ring as each dimension does, Escher's Circle Limit geometry: the {8,3} tiling (octagons, three at a corner) in the Poincaré disk, folded per pixel by its three mirrors, three-coloured, its tiles shrinking without end toward the rim and mirrored through the circle at infinity to fill the screen, flowing forever under hyperbolic translation; at eight dimensions the snaps double up every half beat, the colours roll on each one and the plane accelerates into a warp; the cube shatters into sparks that curl onto the pixels of JAISCRIPT, which slams in with a white flash, two shockwaves and a screen shake as the fire wall erupts (the fire scene in `fire.jai`: convection with the Doom fire's sideways jitter, 73 heat levels); the letters are heat sources, the flames pump and change hue on every beat with the hypercube and the plane turning behind them, then the wall dies, the letters cool to neon with a glint sweeping across, and the credits roll up beneath them |
 
 Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
 glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
@@ -394,18 +395,19 @@ DONUT (`shot 1 at 4` — the frosted torus, specular highlight on the icing):
 ................................::::::::::::::..:........          .................................
 ```
 
-FINALE afterglow (`shot 11 at 19.5 ascii 1`: the fire is out, the word glows in neon and the credits roll):
+FINALE afterglow (`shot 11 at 21.4 ascii 1`: the fire is out, the word glows in neon and the credits roll):
 
 ```
 
 
-     *********   #####   %%%%%%%%%   #######   ******* +++++++   ********* #######   %%%%%%%%%
-          **   ##     ##    %%     ##        **        ++     ++    **     ##     ##    %%
-          **   ##     ##    %%     ##        **        ++     ++    **     ##     ##    %%
-          **   #########    %%       #####   **        +++++++      **     #######      %%
-     **   **   ##     ##    %%            ## **        ++ ++        **     ##           %%
-     **   **   ##     ##    %%            ## **        ++   ++      **     ##           %%
-       ***     ##     ## %%%%%%%%% #######     ******* ++     ++ ********* ##           %%
+     #########   *****   +++++++++   *******   ####### %%%%%%%   ######### *******   +++++++++
+          ##   **     **    ++     **        ##        %%     %%    ##     **     **    ++
+          ##   **     **    ++     **        ##        %%     %%    ##     **     **    ++
+          ##   *********    ++       *****   ##        %%%%%%%      ##     *******      ++
+     ##   ##   **     **    ++            ** ##        %% %%        ##     **           ++
+     ##   ##   **     **    ++            ** ##        %%   %%      ##     **           ++
+       ###     **     ** +++++++++ *******     ####### %%     %% ######### **           +#
+
 
 
 
@@ -420,6 +422,11 @@ FINALE afterglow (`shot 11 at 19.5 ascii 1`: the fire is out, the word glows in 
                                             JULIA  a morphing julia set
                                          LAVALAMP  lit metaballs
                                         PIPEDREAM  the 3d pipes screensaver
+                                            BOIDS  a murmuration and a falcon
+                                       GLOBHUNTER  a textured raycaster
+                                        CANYONRUN  voxelspace terrain
+                                           CHROME  a ray tracer
+                                          OSSUARY  a skull spider on a morphing gyroid
 ```
 
 ## Idioms

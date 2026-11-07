@@ -2,7 +2,10 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "value_rows.hpp"
+#include <algorithm>
 #include <memory>
+#include <vector>
 
 using namespace jai;
 using namespace jai::foundry;
@@ -21,13 +24,11 @@ public:
 
     LifetimeTracker(int val = 0) : id(++total_created), value(val) {
         alive_count++;
-        std::cout << "LifetimeTracker(" << value << ") created, id=" << id << ", alive=" << alive_count << std::endl;
     }
 
     // Copy constructor - track when copies are made
     LifetimeTracker(const LifetimeTracker& other) : id(other.id), value(other.value) {
         copy_count++;
-        std::cout << "LifetimeTracker COPY from id=" << other.id << " (copy #" << copy_count << "), alive=" << alive_count << std::endl;
         // Note: We don't increment alive_count for copies to track only "real" objects
     }
 
@@ -36,15 +37,12 @@ public:
         if (this != &other) {
             id = other.id;
             value = other.value;
-            std::cout << "LifetimeTracker ASSIGN from id=" << other.id << ", alive=" << alive_count << std::endl;
         }
         return *this;
     }
 
     ~LifetimeTracker() {
         alive_count--;
-        std::cout << "~LifetimeTracker() id=" << id << ", alive=" << alive_count << std::endl;
-        std::cout.flush(); // Ensure output is flushed
     }
 
     int get_value() const { return value; }
@@ -206,192 +204,6 @@ public:
             }
         });
 
-        /* Temporarily disabled - crashes in full suite
-        test("weak_ptr_basic_syntax", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-            
-            // Test basic weak_ptr declaration and assignment
-            try {
-                auto result = eng->execute(R"(
-                    auto obj = LifetimeTracker(42);
-                    weak_ptr<LifetimeTracker> weak = obj;
-                    !weak.expired()
-                )");
-                
-                check_eq(result.as<bool>(), true);
-            } catch (const std::exception& e) {
-                std::cerr << "weak_ptr_basic_syntax error: " << e.what() << std::endl;
-                throw;
-            }
-        });
-        */
-        
-        test("weak_ptr_null_checking", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-            
-            // Test null weak_ptr using expired()
-            auto result = eng->execute(R"(
-                weak_ptr<LifetimeTracker> weak;
-                weak.expired()
-            )");
-            
-            check_eq(result.as<bool>(), true);
-            
-            // Test that lock() returns null
-            auto lock_result = eng->execute(R"(
-                weak_ptr<LifetimeTracker> weak;
-                weak.lock() == null
-            )");
-            
-            check_eq(lock_result.as<bool>(), true);
-        });
-        
-        test("weak_ptr_lock_valid", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test locking a valid weak_ptr (must use shared_ptr for reference semantics)
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<LifetimeTracker>(42);
-                weak_ptr<LifetimeTracker> weak = obj;
-                auto locked = weak.lock();
-                locked != null && locked.get_value() == 42
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-        
-        test("weak_ptr_becomes_invalid", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test weak_ptr becoming invalid when object is destroyed
-            auto result = eng->execute(R"(
-                // Check initial count
-                auto initial_count = LifetimeTracker::alive_count;
-
-                // Create shared_ptr object and weak_ptr in local scope
-                weak_ptr<LifetimeTracker> weak;
-                {
-                    auto obj = shared_ptr<LifetimeTracker>(42);
-                    weak = weak_ptr<LifetimeTracker>(obj);
-                    // Verify object is alive
-                    auto during_scope = LifetimeTracker::alive_count == initial_count + 1;
-                    // obj goes out of scope here
-                }
-                // Check if weak_ptr is now invalid
-                auto after_scope = LifetimeTracker::alive_count == initial_count;
-                weak.expired() && after_scope
-            )");
-
-            std::cout << "Initial LifetimeTracker::alive_count: 0" << std::endl;
-            std::cout << "After scope, LifetimeTracker::alive_count: " << LifetimeTracker::alive_count << std::endl;
-            std::cout << "Test result: " << result.to_string() << " (type: " << (result.is_bool() ? "bool" : "other") << ")" << std::endl;
-
-            check_eq(result.as<bool>(), true);
-            // The key test is that weak.expired() returns true AND alive_count decreased
-        });
-        
-        test("weak_ptr_tree_structure", [this]() {
-            auto eng = make_engine();
-            register_tree_node(*eng);
-            
-            auto result = eng->execute(R"(
-                auto root = TreeNode("root");
-                auto child1 = TreeNode("child1");
-                auto child2 = TreeNode("child2");
-                
-                root.add_child(child1);
-                root.add_child(child2);
-                
-                // Check parent relationships
-                child1.get_parent_name() == "root" && 
-                child2.get_parent_name() == "root" &&
-                root.get_parent_name() == "null"
-            )");
-            
-            check_eq(result.as<bool>(), true);
-        });
-        
-        test("weak_ptr_reassignment", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            auto result = eng->execute(R"(
-                auto obj1 = shared_ptr<LifetimeTracker>(10);
-                auto obj2 = shared_ptr<LifetimeTracker>(20);
-
-                weak_ptr<LifetimeTracker> weak = obj1;
-                auto locked1 = weak.lock();
-                auto val1 = locked1.get_value();
-
-                weak = obj2;  // Reassign
-                auto locked2 = weak.lock();
-                auto val2 = locked2.get_value();
-
-                val1 == 10 && val2 == 20
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-        
-        test("weak_ptr_in_containers", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            auto result = eng->execute(R"(
-                auto obj1 = shared_ptr<LifetimeTracker>(1);
-                auto obj2 = shared_ptr<LifetimeTracker>(2);
-                auto obj3 = shared_ptr<LifetimeTracker>(3);
-
-                // Array of weak_ptrs
-                auto weak_refs = [
-                    weak_ptr<LifetimeTracker>(obj1),
-                    weak_ptr<LifetimeTracker>(obj2),
-                    weak_ptr<LifetimeTracker>(obj3)
-                ];
-
-                // Sum all values through weak_ptrs
-                auto sum = 0;
-                for (auto i = 0; i < weak_refs.size(); i = i + 1) {
-                    auto locked = weak_refs[i].lock();
-                    if (locked != null) {
-                        sum = sum + locked.get_value();
-                    }
-                }
-
-                sum == 6
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-        
-        test("weak_ptr_expired_method", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            auto result = eng->execute(R"(
-                weak_ptr<LifetimeTracker> weak;
-
-                // Test with valid object (must use shared_ptr)
-                auto obj = shared_ptr<LifetimeTracker>(42);
-                weak = obj;
-                auto not_expired = !weak.expired();
-
-                // Clear object
-                obj = null;
-
-                // Should now be expired
-                auto is_expired = weak.expired();
-
-                not_expired && is_expired
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-        
         test("weak_ptr_script_class_simplified", [this]() {
             auto eng = make_engine();
             stdlib::register_all(*eng);
@@ -481,25 +293,6 @@ public:
             )");
             
             check_eq(result.as<bool>(), true);
-        });
-
-        test("weak_ptr_assignment_debug", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Use C++ bound class instead of script class to isolate the issue
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<LifetimeTracker>(42);
-                auto weak = weak_ptr<LifetimeTracker>(obj);
-
-                auto before = !weak.expired();
-                obj = null;
-                auto after = weak.expired();
-
-                before && after
-            )");
-
-            check_eq(result.as<bool>(), true, "weak_ptr should expire after obj = null");
         });
 
         test("weak_ptr_script_class_lifetime", [this]() {
@@ -612,7 +405,7 @@ public:
             check_eq(arr[6].as_bool(), true, "test4b failed: weak2.expired() should return true");
             check_eq(arr[7].as_bool(), true, "test4c failed: alive count should be 0 after destruction");
         });
-        
+
         test("weak_ptr_circular_reference_script", [this]() {
             auto eng = make_engine();
             stdlib::register_all(*eng);
@@ -679,418 +472,6 @@ public:
             check_eq(result.as<bool>(), true);
         });
 
-        // Error handling tests - verify helpful error messages
-        test("weak_ptr_rejects_value_constructor", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test that weak_ptr constructor rejects value-semantic objects with helpful error
-            try {
-                eng->execute(R"(
-                    auto obj = LifetimeTracker(42);
-                    auto weak = weak_ptr<LifetimeTracker>(obj);
-                )");
-
-                // Should not reach here
-                throw test_failure("Expected error when constructing weak_ptr from value-semantic object");
-            } catch (const test_failure&) {
-                throw;  // Re-throw test failures
-            } catch (const std::exception& e) {
-                std::string error_msg = e.what();
-
-                // Verify error message is helpful and mentions shared_ptr
-                check(error_msg.find("weak_ptr") != std::string::npos,
-                      "Error message should mention 'weak_ptr'");
-                check(error_msg.find("value-semantic") != std::string::npos ||
-                      error_msg.find("shared_ptr") != std::string::npos,
-                      "Error message should mention 'value-semantic' or 'shared_ptr'");
-                check(error_msg.find("shared_ptr<") != std::string::npos,
-                      "Error message should show shared_ptr<T> syntax");
-
-                std::cout << "  Error message: " << error_msg << std::endl;
-            }
-        });
-
-		test("weak_ptr_rejects_value_initialization", [this]() {
-			auto eng = make_engine();
-			register_lifetime_tracker(*eng);
-
-			// Test that weak_ptr variable initialization rejects value-semantic objects
-			try {
-				eng->execute(R"(
-					var obj = LifetimeTracker(42); // Keep this runtime-diagnostic test behind the dynamic hatch.
-					weak_ptr<LifetimeTracker> weak = obj;
-				)");
-
-				throw test_failure("Expected error when initializing weak_ptr with value-semantic object");
-			} catch (const test_failure&) {
-				throw;  // Re-throw test failures
-			} catch (const std::exception& e) {
-				std::string error_msg = e.what();
-
-				// Family D's declaration shape (internal/diagnostics.md): the slot and its declared type
-				check(error_msg.find("Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker") != std::string::npos,
-					  "weak_ptr declaration from a value names the slot (got: " + error_msg + ")");
-
-				std::cout << "  Error message: " << error_msg << std::endl;
-			}
-		});
-
-		test("weak_ptr_rejects_value_assignment", [this]() {
-			auto eng = make_engine();
-			register_lifetime_tracker(*eng);
-
-			// Test that weak_ptr assignment rejects value-semantic objects
-			try {
-				eng->execute(R"(
-					weak_ptr<LifetimeTracker> weak;
-					var obj = LifetimeTracker(42); // Keep this runtime-diagnostic test behind the dynamic hatch.
-					weak = obj;
-				)");
-
-				throw test_failure("Expected error when assigning value-semantic object to weak_ptr");
-			} catch (const test_failure&) {
-				throw;  // Re-throw test failures
-			} catch (const std::exception& e) {
-				std::string error_msg = e.what();
-
-				// Family D's assignment shape (internal/diagnostics.md): the slot and its declared type
-				check(error_msg.find("Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)") != std::string::npos,
-					  "weak_ptr assignment from a value names the slot (got: " + error_msg + ")");
-
-				std::cout << "  Error message: " << error_msg << std::endl;
-			}
-		});
-
-        test("weak_ptr_accepts_shared_ptr", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test that weak_ptr DOES accept shared_ptr<T> (positive case)
-            // Note: shared_ptr<T>(args...) forwards args to T's constructor
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<LifetimeTracker>(42);
-                weak_ptr<LifetimeTracker> weak = obj;
-                auto locked = weak.lock();
-                locked != null && locked.get_value() == 42
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        // =============== SHARED_PTR CREATION TESTS ===============
-        // Test valid and invalid ways to create shared_ptr
-
-        test("shared_ptr_from_constructor_call", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // shared_ptr<T>(args...) - args forwarded to T's constructor (like make_shared)
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<LifetimeTracker>(42);
-                auto copy = obj;  // Should share (reference semantics)
-                copy.set_value(100);  // Modify through copy
-                obj.get_value()  // Should see the change
-            )");
-
-            check_eq(result.as<script_int>(), 100);
-        });
-
-        test("value_semantics_default", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Direct construction has value semantics (deep copy on assignment)
-            auto result = eng->execute(R"(
-                auto obj = LifetimeTracker(42);
-                auto copy = obj;  // Should deep copy (value semantics)
-                copy.set_value(100);  // Modify through copy
-                obj.get_value()  // Should NOT see the change (independent copy)
-            )");
-
-            check_eq(result.as<script_int>(), 42);
-        });
-
-        test("shared_ptr_vs_value_semantics", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Compare: direct construction (value) vs shared_ptr (reference)
-            auto result = eng->execute(R"(
-                // Value semantics - independent copies
-                auto val1 = LifetimeTracker(10);
-                auto val2 = val1;
-                val2.set_value(99);
-                auto val1_unchanged = val1.get_value() == 10;
-
-                // Reference semantics with shared_ptr - args forwarded to constructor
-                auto ref1 = shared_ptr<LifetimeTracker>(20);
-                auto ref2 = ref1;
-                ref2.set_value(88);
-                auto ref1_changed = ref1.get_value() == 88;
-
-                val1_unchanged && ref1_changed
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_wrapping_variable_should_fail", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // shared_ptr<T>(args...) forwards args to T's constructor
-            // So shared_ptr<LifetimeTracker>(b) tries to call LifetimeTracker(LifetimeTracker_object)
-            // This fails because the constructor expects int, not a LifetimeTracker
-            // This naturally prevents the confusing "wrap a variable" pattern
-            try {
-                eng->execute(R"(
-                    auto b = LifetimeTracker(42);
-                    auto a = shared_ptr<LifetimeTracker>(b);
-                )");
-
-                throw test_failure("Expected error when passing wrong type to constructor");
-            } catch (const test_failure&) {
-                throw;  // Re-throw test failures
-            } catch (const std::exception& e) {
-                std::string error_msg = e.what();
-                std::cout << "  Error (expected): " << error_msg << std::endl;
-                // Error is expected - can't pass LifetimeTracker to LifetimeTracker(int) constructor
-                check(true);
-            }
-        });
-
-        test("shared_ptr_default_constructor", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // shared_ptr<T>() with no args calls T's default constructor
-            auto result = eng->execute(R"(
-                auto obj = shared_ptr<LifetimeTracker>();
-                obj.get_value()  // Default constructor sets value to 0
-            )");
-
-            check_eq(result.as<script_int>(), 0);
-        });
-
-        // =============== SHARED_PTR AUTO-UNWRAP ASSIGNMENT TESTS ===============
-        // Tests for the auto-unwrap semantics where shared_ptr<T> delegates
-        // assignment to the underlying object's operator= when RHS is value-like
-
-        test("shared_ptr_operator_equals_auto_unwrap", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Define a class with operator=
-            eng->execute(R"(
-                class Counter {
-                    int value = 0;
-                    Counter(int v) { value = v; }
-
-                    auto operator=(int v) {
-                        value = v;
-                        return this;
-                    }
-                }
-            )");
-
-            // Test: assigning int to shared_ptr<Counter> should call operator=(int)
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<Counter>(5);
-                auto b = a;  // b shares with a
-
-                a = 10;  // Auto-unwrap: calls Counter::operator=(int)
-
-                // Both should see the change (shared mutation)
-                a.value == 10 && b.value == 10
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_same_type_copies_contents", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Test: assigning same type to shared_ptr should copy contents, not reassign pointer
-            eng->execute(R"(
-                class Point {
-                    int x = 0;
-                    int y = 0;
-                    Point(int px, int py) { x = px; y = py; }
-                }
-            )");
-
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<Point>(1, 2);
-                auto b = a;  // b shares with a
-
-                a = Point(10, 20);  // Copy contents into shared object
-
-                // Both should see the change (contents copied, still sharing)
-                a.x == 10 && a.y == 20 && b.x == 10 && b.y == 20
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_null_reassigns_pointer", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test: assigning null to shared_ptr should nullify it
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<LifetimeTracker>(42);
-                auto b = a;  // b shares with a
-
-                a = null;  // Pointer op: nullify a
-
-                // a is null, b still has the object
-                a == null && b.get_value() == 42
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_polymorphic_assignment", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Test: shared_ptr<Derived> can be assigned to shared_ptr<Base>
-            eng->execute(R"(
-                class Animal {
-                    string name = "";
-                    Animal(string n) { name = n; }
-                }
-
-                class Dog : Animal {
-                    Dog(string n) : super(n) {}
-                }
-            )");
-
-            auto result = eng->execute(R"(
-                auto dog = shared_ptr<Dog>("Rex");
-                shared_ptr<Animal> animal = dog;  // Polymorphic assignment
-
-                animal.name == "Rex"
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_reassign_same_shared_ptr_type", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // Test: assigning shared_ptr<T> to shared_ptr<T> should reassign pointer
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<LifetimeTracker>(10);
-                auto b = shared_ptr<LifetimeTracker>(20);
-                auto c = a;  // c shares with a
-
-                a = b;  // Pointer op: a now shares with b
-
-                // a and b share (20), c still has original (10)
-                a.get_value() == 20 && b.get_value() == 20 && c.get_value() == 10
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_no_operator_equals_error", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Test: assigning incompatible type without operator= should error
-            eng->execute(R"(
-                class Simple {
-                    int value = 0;
-                    Simple(int v) { value = v; }
-                    // No operator=(string) defined
-                }
-            )");
-
-            try {
-                eng->execute(R"(
-                    auto a = shared_ptr<Simple>(5);
-                    a = "hello";  // Should error: no operator=(string)
-                )");
-
-                throw test_failure("Expected error when assigning incompatible type without operator=");
-            } catch (const test_failure&) {
-                throw;  // Re-throw test failures
-            } catch (const std::exception& e) {
-                std::string error_msg = e.what();
-                // Verify error mentions operator= or type mismatch
-                check(error_msg.find("operator=") != std::string::npos ||
-                      error_msg.find("Cannot assign") != std::string::npos,
-                      "Error message should mention operator= or assignment issue");
-                std::cout << "  Error (expected): " << error_msg << std::endl;
-            }
-        });
-
-        test("shared_ptr_box_pattern", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Test: Box<T> pattern for shared primitives
-            eng->execute(R"(
-                class BoxInt {
-                    int value = 0;
-                    BoxInt(int v) { value = v; }
-
-                    auto operator=(int v) {
-                        value = v;
-                        return this;
-                    }
-                }
-            )");
-
-            auto result = eng->execute(R"(
-                auto x = shared_ptr<BoxInt>(5);
-                auto y = x;  // y shares with x
-
-                y = 10;  // Auto-unwrap: BoxInt::operator=(int)
-
-                // Shared mutation works
-                x.value == 10 && y.value == 10
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("shared_ptr_chained_mutations", [this]() {
-            auto eng = make_engine();
-            stdlib::register_all(*eng);
-
-            // Test: multiple mutations through shared references
-            eng->execute(R"(
-                class Accumulator {
-                    int total = 0;
-                    Accumulator(int t) { total = t; }
-
-                    auto operator=(int v) {
-                        total = total + v;  // Add instead of replace
-                        return this;
-                    }
-                }
-            )");
-
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<Accumulator>(0);
-                auto b = a;
-                auto c = a;
-
-                a = 10;  // total = 0 + 10 = 10
-                b = 20;  // total = 10 + 20 = 30
-                c = 5;   // total = 30 + 5 = 35
-
-                a.total == 35 && b.total == 35 && c.total == 35
-            )");
-
-            check_eq(result.as<bool>(), true);
-        });
-
         // Test C++ bound types with auto-unwrap operator=
         test("shared_ptr_cpp_bound_type_auto_unwrap", [this]() {
             auto eng = make_engine();
@@ -1118,49 +499,6 @@ public:
             // Both should see the new value
             tracker_value = eng->execute("tracker.get_value()");
             check_eq(tracker_value.as<int>(), 200);
-        });
-
-        // Test that C++ bound types WITHOUT operator= give proper error
-        test("shared_ptr_cpp_bound_type_no_operator_error", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng, false);  // No assignment_from registered
-
-            eng->execute(R"(
-                auto tracker = shared_ptr<LifetimeTracker>(42);
-            )");
-
-            // No operator=: family D's assignment shape names the handle variable (internal/diagnostics.md)
-            bool threw = false;
-            std::string error_msg;
-            try {
-                eng->execute("tracker = 100;");
-            } catch (const std::exception& e) {
-                threw = true;
-                error_msg = e.what();
-                std::cout << "  Error (expected): " << error_msg << std::endl;
-            }
-            check_eq(threw, true);
-            check(error_msg.find("Cannot assign int to 'tracker' (declared shared_ptr<LifetimeTracker>)") != std::string::npos,
-                  "handle assignment without operator= names the slot (got: " + error_msg + ")");
-        });
-
-        // Test same_as() for shared_ptr - pointer identity comparison
-        test("shared_ptr_same_as", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
-
-            // same_as returns true for same underlying object
-            auto result = eng->execute(R"(
-                auto a = shared_ptr<LifetimeTracker>(42);
-                auto b = a;   // b shares with a
-                auto c = shared_ptr<LifetimeTracker>(42);  // Different object, same value
-
-                auto same_ab = a.same_as(b);   // Should be true - same object
-                auto same_ac = a.same_as(c);   // Should be false - different objects
-
-                same_ab && !same_ac
-            )");
-            check_eq(result.as<bool>(), true);
         });
 
         // Test same_as() for weak_ptr
@@ -1200,45 +538,199 @@ public:
             )").to_string());
         });
 
-        // Test same_as() for regular objects (value semantics)
-        test("object_same_as", [this]() {
-            auto eng = make_engine();
-
-            auto result = eng->execute(R"(
-                class Obj {
-                    int x = 0;
-                }
-
-                auto a = Obj();
-                auto b = a;   // b is a COPY of a (value semantics)
-                auto c = a;   // c is another COPY
-
-                // Each is a different object due to value semantics
-                auto same_ab = a.same_as(b);   // Should be false - copies are different
-                auto same_aa = a.same_as(a);   // Should be true - same object
-
-                !same_ab && same_aa
-            )");
-            check_eq(result.as<bool>(), true);
+        test("a_weak_ptr_observes_a_shared_ptr_and_expires_with_it", [this]() {
+            check_true_rows({
+                {"", "weak_ptr<LifetimeTracker> weak; weak.expired()"},
+                {"", "weak_ptr<LifetimeTracker> weak; weak.lock() == null"},
+                {"", R"(
+                    auto obj = shared_ptr<LifetimeTracker>(42);
+                    weak_ptr<LifetimeTracker> weak = obj;
+                    auto locked = weak.lock();
+                    locked != null && locked.get_value() == 42
+                )"},
+                {"", R"(
+                    auto initial_count = LifetimeTracker::alive_count;
+                    weak_ptr<LifetimeTracker> weak;
+                    {
+                        auto obj = shared_ptr<LifetimeTracker>(42);
+                        weak = weak_ptr<LifetimeTracker>(obj);
+                        auto during_scope = LifetimeTracker::alive_count == initial_count + 1;
+                    }
+                    auto after_scope = LifetimeTracker::alive_count == initial_count;
+                    weak.expired() && after_scope
+                )"},
+                {"", R"(
+                    auto obj1 = shared_ptr<LifetimeTracker>(10);
+                    auto obj2 = shared_ptr<LifetimeTracker>(20);
+                    weak_ptr<LifetimeTracker> weak = obj1;
+                    auto locked1 = weak.lock();
+                    auto val1 = locked1.get_value();
+                    weak = obj2;
+                    auto locked2 = weak.lock();
+                    auto val2 = locked2.get_value();
+                    val1 == 10 && val2 == 20
+                )"},
+                {"", R"(
+                    auto obj1 = shared_ptr<LifetimeTracker>(1);
+                    auto obj2 = shared_ptr<LifetimeTracker>(2);
+                    auto obj3 = shared_ptr<LifetimeTracker>(3);
+                    auto weak_refs = [weak_ptr<LifetimeTracker>(obj1), weak_ptr<LifetimeTracker>(obj2), weak_ptr<LifetimeTracker>(obj3)];
+                    auto sum = 0;
+                    for (auto i = 0; i < weak_refs.size(); i = i + 1) {
+                        auto locked = weak_refs[i].lock();
+                        if (locked != null) {
+                            sum = sum + locked.get_value();
+                        }
+                    }
+                    sum == 6
+                )"},
+                {"", R"(
+                    weak_ptr<LifetimeTracker> weak;
+                    auto obj = shared_ptr<LifetimeTracker>(42);
+                    weak = obj;
+                    auto not_expired = !weak.expired();
+                    obj = null;
+                    auto is_expired = weak.expired();
+                    not_expired && is_expired
+                )"},
+                {"", R"(
+                    auto obj = shared_ptr<LifetimeTracker>(42);
+                    auto weak = weak_ptr<LifetimeTracker>(obj);
+                    auto before = !weak.expired();
+                    obj = null;
+                    auto after = weak.expired();
+                    before && after
+                )"},
+                {"", R"(
+                    auto root = TreeNode("root");
+                    auto child1 = TreeNode("child1");
+                    auto child2 = TreeNode("child2");
+                    root.add_child(child1);
+                    root.add_child(child2);
+                    child1.get_parent_name() == "root" && child2.get_parent_name() == "root" && root.get_parent_name() == "null"
+                )"},
+            });
         });
 
-        // Test same_as() comparing shared_ptr with weak_ptr
-        test("shared_weak_same_as", [this]() {
-            auto eng = make_engine();
-            register_lifetime_tracker(*eng);
+        test("same_as_is_object_identity_for_handles_and_values", [this]() {
+            check_true_rows({
+                {"", R"(
+                    auto a = shared_ptr<LifetimeTracker>(42);
+                    auto b = a;
+                    auto c = shared_ptr<LifetimeTracker>(42);
+                    a.same_as(b) && !a.same_as(c)
+                )"},
+                {"", R"(
+                    auto shared = shared_ptr<LifetimeTracker>(5);
+                    weak_ptr<LifetimeTracker> weak = shared;
+                    shared.same_as(weak.lock())
+                )"},
+                {"", R"(
+                    class Obj { int x = 0; }
+                    auto a = Obj();
+                    auto b = a;
+                    auto c = a;
+                    !a.same_as(b) && a.same_as(a)
+                )"},
+            });
+        });
 
-            auto result = eng->execute(R"(
-                auto shared = shared_ptr<LifetimeTracker>(5);
-                weak_ptr<LifetimeTracker> weak = shared;
+        test("a_shared_ptr_shares_its_object_where_a_value_copies", [this]() {
+            const value_row rows[] = {
+                {"auto obj = shared_ptr<LifetimeTracker>(42); auto copy = obj; copy.set_value(100); obj.get_value()", 100},
+                {"auto obj = LifetimeTracker(42); auto copy = obj; copy.set_value(100); obj.get_value()", 42},
+                {"auto obj = shared_ptr<LifetimeTracker>(); obj.get_value()", 0},
+                {R"(
+                    auto val1 = LifetimeTracker(10);
+                    auto val2 = val1;
+                    val2.set_value(99);
+                    auto val1_unchanged = val1.get_value() == 10;
+                    auto ref1 = shared_ptr<LifetimeTracker>(20);
+                    auto ref2 = ref1;
+                    ref2.set_value(88);
+                    auto ref1_changed = ref1.get_value() == 88;
+                    val1_unchanged && ref1_changed
+                )", true},
+                {"auto a = shared_ptr<LifetimeTracker>(42); auto b = a; a = null; a == null && b.get_value() == 42", true},
+                {R"(
+                    auto a = shared_ptr<LifetimeTracker>(10);
+                    auto b = shared_ptr<LifetimeTracker>(20);
+                    auto c = a;
+                    a = b;
+                    a.get_value() == 20 && b.get_value() == 20 && c.get_value() == 10
+                )", true},
+            };
+            check_values(rows, [this](engine& a_engine) { register_lifetime_tracker(a_engine); });
+        });
 
-                // Cross-type same_as
-                shared.same_as(weak.lock())
-            )");
-            check_eq(result.as<bool>(), true);
+        test("assigning_a_value_to_a_shared_ptr_assigns_into_the_shared_object", [this]() {
+            check_true_rows({
+                {"class Counter { int value = 0; Counter(int v) { value = v; } auto operator=(int v) { value = v; return this; } }",
+                 "auto a = shared_ptr<Counter>(5); auto b = a; a = 10; a.value == 10 && b.value == 10"},
+                {"class BoxInt { int value = 0; BoxInt(int v) { value = v; } auto operator=(int v) { value = v; return this; } }",
+                 "auto x = shared_ptr<BoxInt>(5); auto y = x; y = 10; x.value == 10 && y.value == 10"},
+                {"class Accumulator { int total = 0; Accumulator(int t) { total = t; } auto operator=(int v) { total = total + v; return this; } }",
+                 "auto a = shared_ptr<Accumulator>(0); auto b = a; auto c = a; a = 10; b = 20; c = 5; a.total == 35 && b.total == 35 && c.total == 35"},
+                {"class Point { int x = 0; int y = 0; Point(int px, int py) { x = px; y = py; } }",
+                 "auto a = shared_ptr<Point>(1, 2); auto b = a; a = Point(10, 20); a.x == 10 && a.y == 20 && b.x == 10 && b.y == 20"},
+                {"class Animal { string name = \"\"; Animal(string n) { name = n; } } class Dog : Animal { Dog(string n) : super(n) {} }",
+                 "auto dog = shared_ptr<Dog>(\"Rex\"); shared_ptr<Animal> animal = dog; animal.name == \"Rex\""},
+            });
+        });
+
+        test("a_weak_ptr_or_shared_ptr_rejects_what_it_cannot_hold", [this]() {
+            struct error_row { const char* prelude; const char* code; std::vector<const char*> all_of; std::vector<const char*> any_of; };
+            const error_row rows[] = {
+                {"", "auto obj = LifetimeTracker(42); auto weak = weak_ptr<LifetimeTracker>(obj);", {"weak_ptr", "shared_ptr<"}, {}},
+                {"", "var obj = LifetimeTracker(42); weak_ptr<LifetimeTracker> weak = obj;",
+                 {"Cannot initialize 'weak' (declared weak_ptr<LifetimeTracker>) with LifetimeTracker"}, {}},
+                {"", "weak_ptr<LifetimeTracker> weak; var obj = LifetimeTracker(42); weak = obj;",
+                 {"Cannot assign LifetimeTracker to 'weak' (declared weak_ptr<LifetimeTracker>)"}, {}},
+                // shared_ptr<T>(args) forwards to T's constructor, which takes no LifetimeTracker
+                {"", "auto b = LifetimeTracker(42); auto a = shared_ptr<LifetimeTracker>(b);", {}, {}},
+                {"class Simple { int value = 0; Simple(int v) { value = v; } }", "auto a = shared_ptr<Simple>(5); a = \"hello\";", {}, {"operator=", "Cannot assign"}},
+                {"auto tracker = shared_ptr<LifetimeTracker>(42);", "tracker = 100;", {"Cannot assign int to 'tracker' (declared shared_ptr<LifetimeTracker>)"}, {}},
+            };
+            check_each(rows, [&](const error_row& row) {
+                auto eng = make_test_engine();
+                if (*row.prelude) { eng->execute(row.prelude); }
+                std::string error_msg;
+                bool threw = false;
+                try {
+                    eng->execute(row.code);
+                } catch (const std::exception& e) {
+                    threw = true;
+                    error_msg = e.what();
+                }
+                check_true(threw, "no error");
+                for (const char* needle : row.all_of) {
+                    check_true(error_msg.find(needle) != std::string::npos, error_msg);
+                }
+                const bool any = row.any_of.empty() || std::any_of(row.any_of.begin(), row.any_of.end(), [&](const char* n) { return error_msg.find(n) != std::string::npos; });
+                check_true(any, error_msg);
+            });
         });
     }
 
 private:
+    struct true_row { const char* prelude; const char* code; };
+
+    std::shared_ptr<engine> make_test_engine() {
+        auto eng = make_engine();
+        stdlib::register_all(*eng);
+        register_lifetime_tracker(*eng);
+        register_tree_node(*eng);
+        return eng;
+    }
+
+    // each row's prelude runs first on a fresh engine, then its code must yield true
+    void check_true_rows(const std::vector<true_row>& a_rows) {
+        check_each(a_rows, [&](const true_row& row) {
+            auto eng = make_test_engine();
+            if (*row.prelude) { eng->execute(row.prelude); }
+            check_eq(true, eng->execute(row.code).as<bool>());
+        });
+    }
     void register_lifetime_tracker(engine& eng, bool with_assignment = false) {
         // Note: copy_function is automatically registered for copy-constructible types
         // dynamic_binder is non-copyable, so we use reference from construction

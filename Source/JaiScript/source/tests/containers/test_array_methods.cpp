@@ -4,57 +4,40 @@
 
 namespace jai::foundry::tests {
 
+namespace {
+
+// Each {code, expected} runs on a fresh engine and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto eng = make_engine();
+        check_eq(c.second, eng->execute(c.first).template as<Result>());
+    });
+}
+
+}
+
 class array_methods_tests : public suite {
 public:
     array_methods_tests() : suite("Array Methods") {}
 
     void forge_tests() override {
-        test("index_of_found", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.index_of(3);");
-            check_eq(result.as<int>(), 2);
+        test("index_of_first_last_and_length_read_an_array", [this]() {
+            check_results<int>({
+                {"var arr = [1, 2, 3, 4, 5]; arr.index_of(3);", 2},
+                {"var arr = [1, 2, 3]; arr.index_of(10);", -1},
+                {"var arr = [10, 20, 30]; arr.first();", 10},
+                {"var arr = [10, 20, 30]; arr.last();", 30},
+                {"var arr = [1, 2, 3, 4, 5]; arr.length();", 5},
+            });
         });
 
-        test("index_of_not_found", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3]; arr.index_of(10);");
-            check_eq(result.as<int>(), -1);
-        });
-
-        test("has_true", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3]; arr.has(2);");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("has_false", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3]; arr.has(10);");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("contains_alias", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3]; arr.contains(2);");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("first", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [10, 20, 30]; arr.first();");
-            check_eq(result.as<int>(), 10);
-        });
-
-        test("last", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [10, 20, 30]; arr.last();");
-            check_eq(result.as<int>(), 30);
-        });
-
-        test("length", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute("var arr = [1, 2, 3, 4, 5]; arr.length();");
-            check_eq(result.as<int>(), 5);
+        test("has_and_contains_test_membership", [this]() {
+            check_results<bool>({
+                {"var arr = [1, 2, 3]; arr.has(2);", true},
+                {"var arr = [1, 2, 3]; arr.has(10);", false},
+                {"var arr = [1, 2, 3]; arr.contains(2);", true},
+            });
         });
 
         test("slice_positive", [this]() {

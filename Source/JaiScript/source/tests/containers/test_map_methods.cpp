@@ -1,42 +1,41 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include "../case_table.hpp"
 #include <jaiscript/stdlib/stdlib.hpp>
 
 namespace jai::foundry::tests {
+
+namespace {
+
+// Each {code, expected} runs on a fresh engine and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto eng = make_engine();
+        check_eq(c.second, eng->execute(c.first).template as<Result>());
+    });
+}
+
+}
 
 class map_methods_tests : public suite {
 public:
     map_methods_tests() : suite("Map Methods") {}
 
     void forge_tests() override {
-        test("has_true", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(var m = {"a": 1, "b": 2}; m.has("a");)");
-            check_eq(result.as<bool>(), true);
+        test("has_reports_whether_a_key_is_present", [this]() {
+            check_results<bool>({
+                {R"(var m = {"a": 1, "b": 2}; m.has("a");)", true},
+                {R"(var m = {"a": 1, "b": 2}; m.has("z");)", false},
+            });
         });
 
-        test("has_false", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(var m = {"a": 1, "b": 2}; m.has("z");)");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("get_existing", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(var m = {"a": 10, "b": 20}; m.get("a", 0);)");
-            check_eq(result.as<int>(), 10);
-        });
-
-        test("get_default", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(var m = {"a": 10, "b": 20}; m.get("z", 99);)");
-            check_eq(result.as<int>(), 99);
-        });
-
-        test("length", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(var m = {"a": 1, "b": 2, "c": 3}; m.length();)");
-            check_eq(result.as<int>(), 3);
+        test("get_falls_back_to_its_default_and_length_counts_entries", [this]() {
+            check_results<int>({
+                {R"(var m = {"a": 10, "b": 20}; m.get("a", 0);)", 10},
+                {R"(var m = {"a": 10, "b": 20}; m.get("z", 99);)", 99},
+                {R"(var m = {"a": 1, "b": 2, "c": 3}; m.length();)", 3},
+            });
         });
 
         test("remove_existing", [this]() {
@@ -102,84 +101,59 @@ public:
         // (which never derefs) - so m.has(arr[i]) silently missed while the hoisted-temp
         // spelling hit (the jaidoom MINFO.has(MO_TYPE[i]) workaround). These pin
         // hoisted-temp equivalence through deref_builtin_args (builtin_methods.hpp).
-        test("has_subscript_arg_int_keys", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+        test("map_methods_take_subscript_reads_as_keys_by_value", [this]() {
+            check_results<bool>({
+                {R"(
                 var minfo = {};
                 minfo[3004] = "trooper";
                 minfo[9] = "shotgun";
                 var types = [3004, 9, 42];
                 minfo.has(types[0]) && minfo.has(types[1]) && !minfo.has(types[2]);
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("has_subscript_arg_string_keys", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", true},
+                {R"(
                 var m = {"alpha": 1, "beta": 2};
                 var keys = ["alpha", "gamma"];
                 m.has(keys[0]) && m.contains(keys[0]) && !m.has(keys[1]);
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("get_remove_erase_subscript_arg", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", true},
+                {R"(
                 var m = {"a": 10, "b": 20, "c": 30};
                 var keys = ["a", "b", "c", "z"];
                 int got = m.get(keys[0], -1);
                 var removed = m.remove(keys[1]);
                 m.erase(keys[2]);
                 got == 10 && removed && m.length() == 1 && m.get(keys[3], 99) == 99;
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("has_nested_and_map_read_args", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", true},
+                {R"(
                 var mi = {};
                 mi[7] = true;
                 var grid = [[7, 8], [9, 10]];
                 var look = {"x": 7};
                 mi.has(grid[0][0]) && mi.has(look["x"]) && !mi.has(grid[1][0]);
-            )");
-            check_eq(result.as<bool>(), true);
+            )", true},
+            });
         });
 
         // Literal JSON-style map keys (jaibite v4): {1: "a"} was "Expected expression"
         // while {"s": 0, 1: "a"} parsed - detection only gated on the FIRST entry.
         // Keys keep their runtime type: has(1) hits, has("1") misses.
-        test("literal_int_keys_in_map_literal", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+        test("map_literal_keys_keep_their_kinds_and_a_bare_identifier_stringifies", [this]() {
+            check_results<bool>({
+                {R"(
                 var m = {3004: "trooper", 9: "shotgun"};
                 m.size() == 2 && m[3004] == "trooper" && m.has(9) && !m.has("9");
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("literal_key_types_and_mixing", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", true},
+                {R"(
                 var a = {"s": 0, 1: "a", 2.5: "f", true: "b", 'c': "ch"};
                 var b = {1: "a", "s": 0};
                 a.size() == 5 && a[1] == "a" && a[2.5] == "f" && a[true] == "b" && a['c'] == "ch" &&
                 b.size() == 2 && b[1] == "a" && b["s"] == 0;
-            )");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("bare_identifier_key_still_stringifies", [this]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", true},
+                {R"(
                 int x = 42;
                 var m = {x: 1};
                 m.has("x") && !m.has(42);
-            )");
-            check_eq(result.as<bool>(), true);
+            )", true},
+            });
         });
 
         test("statement_block_disambiguation_holds", [this]() {

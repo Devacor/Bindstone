@@ -501,10 +501,10 @@ function death_overlay() -> void {
 	array<Line> lines = [cause];
 	for (auto l : run_summary_lines()) { lines.push(l); }
 	lines.push(Line());
-	lines.push(line_of(INK_DIM, DEATH_QUIPS[lat(G.turn, G.floor, HOST_SEED) % DEATH_QUIPS.size()]));
+	int w = imin(PAGE_W - 4, 64);
+	for (auto row : wrap_text(paint(INK_DIM, DEATH_QUIPS[lat(G.turn, G.floor, HOST_SEED) % DEATH_QUIPS.size()]), w - 4)) { lines.push(painted_line(row)); }
 	lines.push(Line());
 	lines.push(line_of(INK_FAINT, "any key to leave the Well"));
-	int w = imin(PAGE_W - 4, 64);
 	page_box((PAGE_W - w) / 2, imin(PAGE_H - lines.size() - 3, (y + 7 * sy) / 2 + 3), w, "HERE LIES", lines, 0x6A2020, INK_BAD);
 }
 

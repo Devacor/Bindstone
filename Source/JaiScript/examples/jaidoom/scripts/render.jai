@@ -500,7 +500,7 @@ function render_view(float px, float py, float ang) -> void {
 	CENTERX = VW / 2;
 	CENTERY = VIEWH / 2;
 	FOCAL = 1.0 * CENTERX;
-	FOCALY = FOCAL * PXASPECT;
+	FOCALY = FOCAL * PXASPECT * PIXEL_Y;
 
 	pix_clear(0);
 	if (CLIPTOP.size() != VW) {
@@ -830,13 +830,14 @@ function draw_psprite(int lump, float x0f, float y0f, float scale) -> void {
 	int xa = math::itrunc(x0f < 0.0 ? 0.0 : x0f);
 	int xb = math::itrunc(x0f + w * scale);
 	if (xb >= VW) { xb = VW - 1; }
+	float yscale = scale * PIXEL_Y;
 	for (int sx = xa; sx <= xb; ++sx) {
 		int tc = math::itrunc((sx - x0f) / scale);
 		if (tc < 0 || tc >= w) { continue; }
 		int base = tc * h;
 		int ya = math::itrunc(y0f < 0.0 ? 0.0 : y0f);
 		for (int y = ya; y < VIEWH; ++y) {
-			int iv = math::itrunc((y - y0f) / scale);
+			int iv = math::itrunc((y - y0f) / yscale);
 			if (iv < 0 || iv >= h) { continue; }
 			int texel = tp[base + iv];
 			if (texel >= 0) { pix[y * VW + sx] = palcm[texel]; }
@@ -853,7 +854,7 @@ function draw_psprite(int lump, float x0f, float y0f, float scale) -> void {
 function psprite_place(int lump, float scale) -> void {
 	float texmid = 68.5 + SPR_TO[lump];
 	PSP_X0 = VW / 2.0 + (1.0 - 160.0 - SPR_LO[lump]) * scale + WBOB_X * scale;
-	PSP_Y0 = VIEWH / 2.0 - texmid * scale + WBOB_Y * scale;
+	PSP_Y0 = VIEWH / 2.0 - texmid * scale * PIXEL_Y + WBOB_Y * scale * PIXEL_Y;
 }
 
 function draw_weapon(string spr4, string frame) -> void {

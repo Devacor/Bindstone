@@ -1,8 +1,9 @@
 // JaiDOOM vid.jai — the terminal video layer (doom-cli method, GLOOM lineage):
 // PIX is a flat palette-index grid; colors intern once through rgb_idx; the
-// blitter packs 1x2 pixels per cell through the upper-half-block glyph with
-// fg/bg colors, emitting escapes only on change. Byte output (utf8, BMP)
-// mints through to_char — no dependency on any load-time table.
+// blitter packs each cell's pixels (1x2 through the upper half block, or 2x3
+// through the Unicode 13 sextants) into one glyph with fg/bg colors, emitting
+// escapes only on change. Byte output (utf8, BMP) mints through to_char — no
+// dependency on any load-time table.
 
 import "wad.jai";
 
@@ -11,9 +12,15 @@ import "wad.jai";
 bool HOST_TRUECOLOR = env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "" ||
 	env_var("OS") == "Windows_NT";
 
+// 2x3 sextant cells instead of 1x2 half blocks; set before vid_init. A sextant pixel is half a 1:2 cell wide and a
+// third of it tall, so it stands 4/3 as tall as it is wide: PIXEL_Y scales every vertical size drawn in square units.
+bool SEXTANTS = false;
+float PIXEL_Y = 1.0;
+
 string ESC = "";
 string RESET = "";
 string HALFG = "";
+array<string> SEXTG = [];     // sextant glyphs by TL|TR<<1|ML<<2|MR<<3|BL<<4|BR<<5
 string HOME = "";
 string CLEAR = "";
 
@@ -45,19 +52,29 @@ function utf8(int cp) -> string {
 	return "" + to_char(240 + (cp >> 18)) + to_char(128 + ((cp >> 12) & 63)) + to_char(128 + ((cp >> 6) & 63)) + to_char(128 + (cp & 63));
 }
 
+// the pixel grid w x h: w a multiple of 2 and h of 3 in sextant mode
 function vid_init(int w, int h) -> void {
 	ESC = "\x1b";
 	RESET = ESC + "[0m";
 	HALFG = utf8(0x2580);
+	SEXTG = [];
+	for (int b = 0; b < 64; ++b) {
+		if (b == 0) { SEXTG.push(" "); }
+		else if (b == 21) { SEXTG.push(utf8(0x258C)); }        // left half
+		else if (b == 42) { SEXTG.push(utf8(0x2590)); }        // right half
+		else if (b == 63) { SEXTG.push(utf8(0x2588)); }        // full
+		else { SEXTG.push(utf8(0x1FB00 + b - 1 - (b > 21 ? 1 : 0) - (b > 42 ? 1 : 0))); }
+	}
 	HOME = ESC + "[H";
 	CLEAR = ESC + "[2J" + ESC + "[H";
+	PIXEL_Y = SEXTANTS ? 0.75 : 1.0;
 	VW = w;
 	VH = h;
 	VIEWH = h;
 	PIX = [];
 	for (int i = 0; i < w * h; ++i) { PIX.push(0); }
 	ROWIDX = [];
-	int vrows = h / 2;
+	int vrows = h / cell_h();
 	for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
 	PAL_KEYS = {};
 	PAL_FG = [];
@@ -69,6 +86,15 @@ function vid_init(int w, int h) -> void {
 	PAL_BGR3 = [];
 	rgb_idx(0, 0, 0);
 }
+
+// the grid for a screen of cols x rows cells
+function vid_init_cells(int cols, int rows) -> void { vid_init(cols * cell_w(), rows * cell_h()); }
+
+function cell_w() -> int { return SEXTANTS ? 2 : 1; }
+function cell_h() -> int { return SEXTANTS ? 3 : 2; }
+
+// a vertical size given in square (pixel-width) units, in pixel rows
+function pixel_rows(float v) -> int { return math::itrunc(v * PIXEL_Y); }
 
 function rgb_idx(int r, int g, int b) -> int {
 	int key = r * 65536 + g * 256 + b;
@@ -258,13 +284,75 @@ function vid_row_half(int cy) -> string {
 	return row + RESET;
 }
 
-function blit_half() -> string {
+// sext mode: 2x3 px per cell, GLOOM's cell fit: the brightest pixel is fg, the darkest bg, and each pixel takes the one
+// nearer in luminance. The same capture rules as vid_row_half.
+function vid_row_sext(int cy) -> string {
+	string row = "";
+	int vw = VW;
+	int fg = -1;
+	int bg = -1;
+	int r0 = cy * 3 * vw;
+	int r1 = r0 + vw;
+	int r2 = r1 + vw;
+	for (int x = 0; x < vw; x += 2) {
+		int p0 = PIX[r0 + x];
+		int p1 = PIX[r0 + x + 1];
+		int p2 = PIX[r1 + x];
+		int p3 = PIX[r1 + x + 1];
+		int p4 = PIX[r2 + x];
+		int p5 = PIX[r2 + x + 1];
+		if (p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5) {
+			if (p0 != bg) { row += PAL_BG[p0]; bg = p0; }
+			row += " ";
+			continue;
+		}
+		int l0 = PAL_LUM[p0];
+		int l1 = PAL_LUM[p1];
+		int l2 = PAL_LUM[p2];
+		int l3 = PAL_LUM[p3];
+		int l4 = PAL_LUM[p4];
+		int l5 = PAL_LUM[p5];
+		int lmin = l0;
+		int lmax = l0;
+		int fgp = p0;
+		int bgp = p0;
+		if (l1 < lmin) { lmin = l1; bgp = p1; }
+		if (l1 > lmax) { lmax = l1; fgp = p1; }
+		if (l2 < lmin) { lmin = l2; bgp = p2; }
+		if (l2 > lmax) { lmax = l2; fgp = p2; }
+		if (l3 < lmin) { lmin = l3; bgp = p3; }
+		if (l3 > lmax) { lmax = l3; fgp = p3; }
+		if (l4 < lmin) { lmin = l4; bgp = p4; }
+		if (l4 > lmax) { lmax = l4; fgp = p4; }
+		if (l5 < lmin) { lmin = l5; bgp = p5; }
+		if (l5 > lmax) { lmax = l5; fgp = p5; }
+		int thr = (lmin + lmax + 1) / 2;
+		int bits = 0;
+		if (l0 >= thr) { bits = 1; }
+		if (l1 >= thr) { bits += 2; }
+		if (l2 >= thr) { bits += 4; }
+		if (l3 >= thr) { bits += 8; }
+		if (l4 >= thr) { bits += 16; }
+		if (l5 >= thr) { bits += 32; }
+		if (fgp != fg) { row += PAL_FG[fgp]; fg = fgp; }
+		if (bits != 63 && bgp != bg) { row += PAL_BG[bgp]; bg = bgp; }
+		row += SEXTG[bits];
+	}
+	return row + RESET;
+}
+
+// the frame as terminal text, one line per glyph row
+function vid_blit() -> string {
 	if (BLIT_WORKERS != 0) {
-		var rows = parallel_transform(ROWIDX, vid_row_half);
+		var rows = SEXTANTS ? parallel_transform(ROWIDX, vid_row_sext) : parallel_transform(ROWIDX, vid_row_half);
 		return rows.join("\n") + "\n";
 	}
 	string out = "";
-	int vrows = VH / 2;
-	for (int cy = 0; cy < vrows; ++cy) { out += vid_row_half(cy) + "\n"; }
+	int vrows = ROWIDX.size();
+	if (SEXTANTS) {
+		for (int cy = 0; cy < vrows; ++cy) { out += vid_row_sext(cy) + "\n"; }
+	} else {
+		for (int cy = 0; cy < vrows; ++cy) { out += vid_row_half(cy) + "\n"; }
+	}
 	return out;
 }

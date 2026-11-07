@@ -18,6 +18,8 @@
 //            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //           jaiscript jaidoom.jai -- uncapped    (no frame cap: the camera eases between 35 Hz tics; U toggles in game)
+//           jaiscript jaidoom.jai -- --pix sext  (2x3 sextant pixels per cell, the default in Windows Terminal, whose
+//              font has them; --pix half keeps the 1x2 half blocks every terminal font draws)
 //
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
 //           jaiscript jaidoom.jai -- doom2.wad mypack.wad   (further WADs merge over the first; a
@@ -50,6 +52,7 @@ import "boot.jai";
 
 float TICK_MS = 1000.0 / 35.0;
 bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
+string PIX_MODE = "";        // --pix half|sext; "" = sextants where the font has them (Windows Terminal)
 float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
 bool RUN_TOGGLE = false;
 
@@ -554,7 +557,8 @@ function play(string mapname) -> int {
 	int rows = term_rows();
 	if (cols > 200) { cols = 200; }
 	if (rows > 70) { rows = 70; }
-	vid_init(cols, (rows - 1) * 2);                  // BEFORE map start: vid_init resets the palette intern
+	SEXTANTS = PIX_MODE == "sext" || (PIX_MODE == "" && env_var("WT_SESSION") != "");
+	vid_init_cells(cols, rows - 1);                  // BEFORE map start: vid_init resets the palette intern
 	BLIT_WORKERS = cols >= 160 ? 1 : 0;              // parallel rows pay off once the barrier amortizes
 	hud_init();
 
@@ -732,7 +736,7 @@ function play(string mapname) -> int {
 				if (wipe_tic()) { WIPE_TICS = 0; }
 			}
 		}
-		print(home + blit_half(), skip_newline);
+		print(home + vid_blit(), skip_newline);
 
 		float rest = math::itrunc(TICK_MS) - frame.elapsed() * 1000;
 		if (rest > 0 && !UNCAPPED) { sleep(rest / 1000.0); }
@@ -1240,6 +1244,11 @@ function main() -> int {
 		else if (ARGS[i] == "uncapped") { UNCAPPED = true; }
 		else if (ARGS[i] == "--truecolor") { HOST_TRUECOLOR = true; }
 		else if (ARGS[i] == "--256color") { HOST_TRUECOLOR = false; }
+		else if (ARGS[i] == "--pix" && i + 1 < ARGS.size()) {
+			PIX_MODE = ARGS[i + 1];
+			i = i + 1;
+			if (PIX_MODE != "half" && PIX_MODE != "sext") { print(`unknown --pix mode: ${PIX_MODE} (half|sext)`); return 2; }
+		}
 		else if (ARGS[i] == "flowtest") { flow = true; }
 		else if (ARGS[i] == "freedoom2") { path = "freedoom2"; }
 		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }

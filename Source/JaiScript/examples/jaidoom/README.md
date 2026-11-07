@@ -2,9 +2,11 @@
 
 A playable DOOM engine written in JaiScript: the WAD loader, BSP renderer, playsim, HUD,
 sound and music decoding, savegames, demos and 16-player netplay are all script. It draws
-to the terminal with half-block glyphs: 24-bit colour where the terminal says it takes it (`COLORTERM`,
-Windows Terminal, any Windows console), the xterm 256-colour palette elsewhere (macOS Terminal.app);
-`-- --truecolor` and `-- --256color` choose.
+to the terminal in sextants (Unicode 13's 2x3 blocks, six pixels to a cell) where the font has them,
+which a script can only infer from Windows Terminal (its Cascadia font does), and in half blocks (two
+pixels to a cell) everywhere else; `-- --pix sext` and `-- --pix half` choose. Colour is 24-bit where
+the terminal says it takes it (`COLORTERM`, Windows Terminal, any Windows console), the xterm 256-colour
+palette elsewhere (macOS Terminal.app); `-- --truecolor` and `-- --256color` choose.
 
 JaiDoom is a fan project, not affiliated with or endorsed by id Software; DOOM is a trademark of id Software.
 
@@ -62,6 +64,7 @@ jaiscript jaidoom.jai -- join <host> [port]      #          join
 jaiscript jaidoom.jai -- bootstrap               # fetch the data without the screen
 jaiscript p10_timedemo.jai                       # the deterministic benchmark (prints a state hash)
 jaiscript shots.jai -- fight 105 tics 6          # the docs page's frames as .ans files (title.ans, fight.ans)
+jaiscript shots.jai -- fight 105 tics 6 pix sext # the same frames in sextants
 ```
 
 ## Licenses

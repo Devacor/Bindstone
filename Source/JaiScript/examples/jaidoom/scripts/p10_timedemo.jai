@@ -8,6 +8,7 @@
 //   jaiscript p10_timedemo.jai                       (../demo.json or demo.json)
 //   jaiscript p10_timedemo.jai -- mytape.json 200x140
 //   jaiscript p10_timedemo.jai -- simonly            (playsim isolated, no render)
+//   jaiscript p10_timedemo.jai -- 120x78 sext        (the same 120x39 cells as 2x3 sextants: 240x117 pixels)
 
 import "sim_random.jai";
 import "wad.jai";
@@ -47,6 +48,7 @@ function main() -> int {
 	for (int a = 0; a < ARGS.size(); ++a) {
 		var arg = ARGS[a];
 		if (arg == "simonly") { simonly = true; }
+		else if (arg == "sext") { SEXTANTS = true; }
 		else if (arg.ends_with(".json")) { tape = arg; }
 		else {
 			int xat = arg.find("x");
@@ -60,7 +62,7 @@ function main() -> int {
 	if (tape == "") { tape = data_path("demo.json"); }
 	if (!wad_load(wadpath)) { print("wad_load failed"); return 1; }
 	if (!demo_load(tape)) { print(`no demo at ${tape}`); return 1; }
-	vid_init(bw, bh);
+	vid_init_cells(bw, bh / 2);
 	hud_init();
 
 	// demo_play_start's launch sequence, minus the menu/terminal machinery
@@ -75,7 +77,7 @@ function main() -> int {
 	if (!game_start_map(DEMO_MAP)) { print(`no map ${DEMO_MAP}`); return 1; }
 
 	int ntics = DEMO_TICS.size() / 6;
-	print(`timedemo: ${tape}  map ${DEMO_MAP} skill ${DEMO_SKILL}${DEMO_NM ? " NIGHTMARE" : ""}  ${ntics} tics  vid ${bw}x${bh}${simonly ? " SIMONLY" : ""}`);
+	print(`timedemo: ${tape}  map ${DEMO_MAP} skill ${DEMO_SKILL}${DEMO_NM ? " NIGHTMARE" : ""}  ${ntics} tics  vid ${VW}x${VH}${SEXTANTS ? " sext" : ""}${simonly ? " SIMONLY" : ""}`);
 
 	float sim_s = 0.0;
 	float rend_s = 0.0;
@@ -100,7 +102,7 @@ function main() -> int {
 			}
 			hud_draw();
 			rend_s += tic.delta();
-			var frame = blit_half();
+			var frame = vid_blit();
 			frame_bytes = frame.size();
 			blit_s += tic.delta();
 		}

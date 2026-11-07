@@ -1,9 +1,12 @@
 // JaiDOOM frames for the docs page: the title screen and a fight, drawn through
-// the half-block blit the terminal gets and written as one .ans file each. A fixed seed and
+// the blit the terminal gets and written as one .ans file each. A fixed seed and
 // scripted tics, no clock and no keyboard, so the same WAD gives the same frames.
 //
-//   jaiscript shots.jai -- [<wad>] [<map>] [<cols>x<pixel rows>] [out <dir>]
+//   jaiscript shots.jai -- [<wad>] [<map>] [<cols>x<rows * 2>] [pix half|sext] [out <dir>]
 //                          [fight <mobj>] [tics <n>] [every <n>]
+//
+// The screen is <cols> by <rows> cells, drawn in half blocks (1x2 pixels per cell) unless pix sext
+// draws it in sextants (2x3).
 //
 // The fight stands the player in sight of one monster (by mobj index; the first one with a
 // clear line by default), wakes it and fires for <tics> tics; every <n> adds numbered frames
@@ -22,7 +25,7 @@ import "hud.jai";
 string OUT_DIR = ".";
 
 function shoot(string name) -> void {
-	write_file(`${OUT_DIR}/${name}.ans`, blit_half());
+	write_file(`${OUT_DIR}/${name}.ans`, vid_blit());
 	print(`  ${OUT_DIR}/${name}.ans`);
 }
 
@@ -78,6 +81,7 @@ function main() -> int {
 		else if (a == "fight") { target = next.to_int(-1); i += 1; }
 		else if (a == "tics") { tics = next.to_int(tics); i += 1; }
 		else if (a == "every") { every = next.to_int(0); i += 1; }
+		else if (a == "pix") { SEXTANTS = next == "sext"; i += 1; }
 		else if (a.starts_with("E") || a.starts_with("MAP")) { mapname = a; }
 		else if (a.find("x") > 0 && a.substr(0, a.find("x")).to_int(0) > 0) {
 			int x = a.find("x");
@@ -88,7 +92,7 @@ function main() -> int {
 	}
 	if (!wad_load(wad_path(wad))) { print(`no WAD ${wad}: run jaidoom.jai once to fetch it`); return 1; }
 	HOST_TRUECOLOR = true;   // the page's frames are 24-bit wherever they are captured
-	vid_init(cols, prows);
+	vid_init_cells(cols, prows / 2);
 	hud_init();
 
 	title_draw();

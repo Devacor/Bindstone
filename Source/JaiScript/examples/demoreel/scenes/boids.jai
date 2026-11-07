@@ -636,6 +636,8 @@ class Boids : Scene {
 		for (int i = 0; i < n; ++i) { dn[i] = 0.0; }
 		float half_w = w * 0.5;
 		float half_h = h * 0.5;
+		float px_scale = w / 180.0;   // bird sizes are in a 180-pixel-wide frame's pixels
+		float px_inv = 1.0 / px_scale;
 		for (int b = 0; b < nb; ++b) {
 			float ex = BD_X[b] - cam_x;
 			float ey = BD_Y[b] - cam_y;
@@ -646,10 +648,10 @@ class Boids : Scene {
 			int sx = half_w + (ex * rx_ + ez * rz_) * iz;
 			int sy = half_h - (ex * upx + ey * upy + ez * upz) * iz;
 			if (sx < 1 || sx >= w - 1 || sy < 1 || sy >= horizon) { continue; }
-			float size = 1.6 * iz;
+			float size = 1.6 * iz * px_inv;
 			float beat = math::sin(flap[b] + sim_t * (14.0 + BD_PANIC[b] * 10.0));
 			if (size > 3.0) {
-				wings(sx, sy, size, beat, BD_PANIC[b]);
+				wings(sx, sy, size * px_scale, beat, BD_PANIC[b]);
 				continue;
 			}
 			// a bird banking in panic shows its wings: the scare wave reads darker
@@ -660,6 +662,11 @@ class Boids : Scene {
 				int lift = beat > 0.3 ? -w : 0;
 				dn[i2 - 1 + lift] += wgt * 0.8;
 				dn[i2 + 1 + lift] += wgt * 0.8;
+				if (px_scale > 1.25) {
+					dn[i2 + w] += wgt * 0.7;
+					dn[i2 - 2 + lift] += wgt * 0.5;
+					dn[i2 + 2 + lift] += wgt * 0.5;
+				}
 			}
 		}
 		draw_falcon();

@@ -25,6 +25,11 @@ float AM_ZOOM = 1.0;
 
 function hud_init() -> void {
 	gfx_init();                                      // title/menu draw before any map loads PALCM
+	hud_layout();
+}
+
+// the status bar's share of the screen, again after a resize
+function hud_layout() -> void {
 	BAR_H = pixel_rows(32.0 * VW / 320.0);
 	if (BAR_H < 4) { BAR_H = 4; }
 	if (BAR_H > VH / 3) { BAR_H = VH / 3; }

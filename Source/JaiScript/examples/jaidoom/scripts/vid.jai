@@ -35,6 +35,7 @@ int VIEWH = 0;                // rows the 3D view may touch (hud bar reserves th
 // bench set this explicitly.
 int BLIT_WORKERS = 0;
 array<int> ROWIDX = [];       // parallel_transform input, one element per glyph row
+string VID_INDENT = "";       // starts every glyph row: the cursor move that centers a view narrower than the screen
 
 map<int, int> PAL_KEYS = {};
 array<string> PAL_FG = [];
@@ -67,15 +68,7 @@ function vid_init(int w, int h) -> void {
 	}
 	HOME = ESC + "[H";
 	CLEAR = ESC + "[2J" + ESC + "[H";
-	PIXEL_Y = SEXTANTS ? 0.75 : 1.0;
-	VW = w;
-	VH = h;
-	VIEWH = h;
-	PIX = [];
-	for (int i = 0; i < w * h; ++i) { PIX.push(0); }
-	ROWIDX = [];
-	int vrows = h / cell_h();
-	for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
+	vid_resize(w, h);
 	PAL_KEYS = {};
 	PAL_FG = [];
 	PAL_BG = [];
@@ -89,6 +82,20 @@ function vid_init(int w, int h) -> void {
 
 // the grid for a screen of cols x rows cells
 function vid_init_cells(int cols, int rows) -> void { vid_init(cols * cell_w(), rows * cell_h()); }
+
+// a new grid size (and cell shape) keeping the palette intern, whose indices the loaded map's tables hold
+function vid_resize(int w, int h) -> void {
+	PIXEL_Y = SEXTANTS ? 0.75 : 1.0;
+	VW = w;
+	VH = h;
+	VIEWH = h;
+	PIX = [];
+	for (int i = 0; i < w * h; ++i) { PIX.push(0); }
+	ROWIDX = [];
+	int vrows = h / cell_h();
+	for (int r = 0; r < vrows; ++r) { ROWIDX.push(r); }
+	WIPE_TICS = 0;
+}
 
 function cell_w() -> int { return SEXTANTS ? 2 : 1; }
 function cell_h() -> int { return SEXTANTS ? 3 : 2; }
@@ -345,14 +352,14 @@ function vid_row_sext(int cy) -> string {
 function vid_blit() -> string {
 	if (BLIT_WORKERS != 0) {
 		var rows = SEXTANTS ? parallel_transform(ROWIDX, vid_row_sext) : parallel_transform(ROWIDX, vid_row_half);
-		return rows.join("\n") + "\n";
+		return VID_INDENT + rows.join("\n" + VID_INDENT) + "\n";
 	}
 	string out = "";
 	int vrows = ROWIDX.size();
 	if (SEXTANTS) {
-		for (int cy = 0; cy < vrows; ++cy) { out += vid_row_sext(cy) + "\n"; }
+		for (int cy = 0; cy < vrows; ++cy) { out += VID_INDENT + vid_row_sext(cy) + "\n"; }
 	} else {
-		for (int cy = 0; cy < vrows; ++cy) { out += vid_row_half(cy) + "\n"; }
+		for (int cy = 0; cy < vrows; ++cy) { out += VID_INDENT + vid_row_half(cy) + "\n"; }
 	}
 	return out;
 }

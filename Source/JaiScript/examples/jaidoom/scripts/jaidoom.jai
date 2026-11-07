@@ -551,20 +551,43 @@ function np_wi_advance() -> void {
 }
 bool NP_WI_HOLD = false;      // client intermission menu: quit yes, gameplay no
 
+// render and blit grow with the pixel count: 640x240 (320x80 sextant cells) takes ~13 ms of DOOM's 28.5 ms tic
+int PIXEL_BUDGET = 160000;
+int SCREEN_COLS = 0;
+int SCREEN_ROWS = 0;
+string VIEW_HOME = "";
+
+// the view fills the console: sextants where the font has them and they fit the budget, half blocks otherwise, and a
+// screen too large for even those gets the largest view inside the budget, centered
+function screen_fit() -> void {
+	SCREEN_COLS = term_cols();
+	SCREEN_ROWS = term_rows();
+	int cols = SCREEN_COLS > 8 ? SCREEN_COLS : 8;
+	int rows = SCREEN_ROWS > 5 ? SCREEN_ROWS - 1 : 4;   // a newline on the last row would scroll the screen
+	SEXTANTS = PIX_MODE == "sext" || (PIX_MODE == "" && env_var("WT_SESSION") != "" && cols * rows * 6 <= PIXEL_BUDGET);
+	int pixels = cols * cell_w() * rows * cell_h();
+	if (pixels > PIXEL_BUDGET) {
+		float k = math::sqrt(1.0 * PIXEL_BUDGET / pixels);
+		cols = math::itrunc(cols * k);
+		rows = math::itrunc(rows * k);
+	}
+	if (VW == 0) { vid_init_cells(cols, rows); }     // BEFORE map start: vid_init resets the palette intern
+	else { vid_resize(cols * cell_w(), rows * cell_h()); }
+	BLIT_WORKERS = cols >= 160 ? 1 : 0;              // parallel rows pay off once the barrier amortizes
+	hud_layout();
+	int left = (SCREEN_COLS - cols) / 2;
+	int top = (SCREEN_ROWS - 1 - rows) / 2;
+	VID_INDENT = left > 0 ? `${ESC}[${left}C` : "";
+	VIEW_HOME = `${ESC}[${top > 0 ? top + 1 : 1};1H`;
+}
+
 function play(string mapname) -> int {
 	START_MAP = mapname;
-	int cols = term_cols();
-	int rows = term_rows();
-	if (cols > 200) { cols = 200; }
-	if (rows > 70) { rows = 70; }
-	SEXTANTS = PIX_MODE == "sext" || (PIX_MODE == "" && env_var("WT_SESSION") != "");
-	vid_init_cells(cols, rows - 1);                  // BEFORE map start: vid_init resets the palette intern
-	BLIT_WORKERS = cols >= 160 ? 1 : 0;              // parallel rows pay off once the barrier amortizes
-	hud_init();
+	screen_fit();
+	hud_init();                                      // after the palette reset vid_init makes
 
 	SND_ON = true;                                   // only real play makes noise; gates stay silent
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);   // alt screen, no cursor
-	var home = ESC + "[H";
 	float accum = 0.0;
 	time::stopwatch frame;
 	frame.start();
@@ -580,6 +603,10 @@ function play(string mapname) -> int {
 	while (!quit) {
 		float dt = frame.elapsed() * 1000;
 		frame.start();
+		if (term_cols() != SCREEN_COLS || term_rows() != SCREEN_ROWS) {
+			screen_fit();
+			print(ESC + "[2J", skip_newline);
+		}
 		if (GSTATE == 2) {
 			fps_note(dt);
 			accum = accum + dt;
@@ -736,7 +763,7 @@ function play(string mapname) -> int {
 				if (wipe_tic()) { WIPE_TICS = 0; }
 			}
 		}
-		print(home + vid_blit(), skip_newline);
+		print(VIEW_HOME + vid_blit(), skip_newline);
 
 		float rest = math::itrunc(TICK_MS) - frame.elapsed() * 1000;
 		if (rest > 0 && !UNCAPPED) { sleep(rest / 1000.0); }

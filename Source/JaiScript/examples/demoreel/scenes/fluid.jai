@@ -12,6 +12,11 @@
 // nozzles winds the tank up, the tank drains, and eight inks bloom into a
 // rainbow wheel that a whirlpool twists. The ink and the light run their rows
 // in parallel.
+//
+// Graded for the screen: caustic light ripples across the bare water, the jets
+// pump their ink on the beat, a starburst of jets fires out from the middle of
+// the tank, the frame darkens toward its corners, and at the
+// end the camera pushes in on the whirlpool.
 
 // Globals on purpose: the parallel row bodies read them (arrays borrow zero-copy).
 array<float> MS_U = [];      // the flow, cells per second, on the half-size grid
@@ -27,7 +32,11 @@ int MS_H = 0;
 int MS_CW = 0;
 int MS_CH = 0;
 int MS_INK = 0;
-int MS_BG = 0;
+int MS_BG = 0;               // 16 water tones x 4 caustic levels
+array<float> MS_COS = [];    // a 256-entry cosine table for the caustics
+array<float> MS_CCOL = [];   // per column: this frame's caustic phase
+array<int> MS_VIG = [];      // per pixel: how far the vignette darkens it
+float MS_T = 0.0;
 float MS_RUN = 0.0;          // a frame's step, in pixels per (cell per second)
 float MS_FADE = 1.0;
 
@@ -85,7 +94,9 @@ function maelstrom_row(int y) -> array<int> {
 	int ww = MS_W;
 	int hh = MS_H;
 	int base = MS_INK;
-	int water = MS_BG + y * 16 / hh;
+	// caustics: two crossing waves, bright where their sum passes zero
+	float rowp = 2.0 * math::sin(y * 0.17 + MS_T * 1.1);
+	float yq = y * 0.23;
 	int up = y > 0 ? -ww : 0;
 	int down = y < hh - 1 ? ww : 0;
 	float lx = -0.48;
@@ -99,8 +110,13 @@ function maelstrom_row(int y) -> array<int> {
 	int i = y * ww;
 	for (int x = 0; x < ww; ++x) {
 		float den = MS_D[i];
+		int vig = MS_VIG[i];
 		if (den < 0.03) {
-			out.push(water);
+			float cv = MS_COS[itrunc((x * 0.21 + rowp) * 40.743666) & 255] + MS_COS[itrunc((yq + MS_CCOL[x]) * 40.743666) & 255];
+			cv = cv < 0.0 ? -cv : cv;
+			int glow = cv < 0.24 ? itrunc((0.24 - cv) * 12.5) + 1 : 0;
+			int tone = (y * 16 / hh) + vig * 2;
+			out.push(MS_BG + (tone > 15 ? 15 : tone) * 4 + (glow > 3 ? 3 : glow));
 			++i;
 			continue;
 		}
@@ -117,8 +133,8 @@ function maelstrom_row(int y) -> array<int> {
 		float s8 = s4 * s4;
 		float s32 = s8 * s8 * s8 * s8;
 		float cover = den / (den + 0.3);
-		int lv = cover * (0.42 + 0.78 * diff) * 16.0;
-		lv = lv > 15 ? 15 : lv;
+		int lv = cover * (0.42 + 0.78 * diff) * 16.0 - vig * 2;
+		lv = lv > 15 ? 15 : (lv < 0 ? 0 : lv);
 		if (s32 > 0.4 && cover > 0.4) {
 			int sp = 16 + (s32 - 0.4) * 6.6;
 			lv = sp > 19 ? 19 : sp;
@@ -151,6 +167,8 @@ class Maelstrom : Scene {
 	int bg = 0;                // 16 water tones, top to bottom
 	int mote = 0;
 	int sor_iters = 20;
+	float beat = 0.48387097;   // the soundtrack's 124 bpm
+	array<int> col_of = [];    // the push-in: which column each screen column reads
 	float vorticity = 14.0;
 	float tt = 0.0;
 
@@ -191,7 +209,30 @@ class Maelstrom : Scene {
 				pal.add(cr + (255.0 - cr) * k, cg + (255.0 - cg) * k, cb + (255.0 - cb) * k);
 			}
 		}
-		bg = pal.ramp(16, 14.0, 20.0, 44.0, 3.0, 4.0, 13.0);
+		bg = pal.size();
+		for (int t2 = 0; t2 < 16; ++t2) {
+			float f2 = t2 / 15.0;
+			float wr = 14.0 + (3.0 - 14.0) * f2;
+			float wg = 20.0 + (4.0 - 20.0) * f2;
+			float wb = 44.0 + (13.0 - 44.0) * f2;
+			for (int c4 = 0; c4 < 4; ++c4) {
+				float lift = c4 * 0.11 * (1.0 - f2 * 0.6);
+				pal.add(wr + (90.0 - wr) * lift, wg + (170.0 - wg) * lift, wb + (230.0 - wb) * lift);
+			}
+		}
+		MS_COS = [];
+		for (int q = 0; q < 256; ++q) { MS_COS.push(math::cos(q * 0.024543693)); }
+		MS_CCOL = gfx.make_fgrid(w);
+		MS_VIG = gfx.make_grid(w * h);
+		for (int vy = 0; vy < h; ++vy) {
+			for (int vx = 0; vx < w; ++vx) {
+				float ex = (vx + 0.5) / w * 2.0 - 1.0;
+				float ey = (vy + 0.5) / h * 2.0 - 1.0;
+				float r = ex * ex + ey * ey;
+				MS_VIG[vy * w + vx] = r < 0.55 ? 0 : (r < 0.95 ? 1 : (r < 1.4 ? 2 : 3));
+			}
+		}
+		col_of = gfx.make_grid(w);
 		mote = pal.add(92, 116, 160);
 		for (int k2 = 0; k2 < motes; ++k2) {
 			mx.push(2.0 + rng.nextf() * (w - 4));
@@ -235,10 +276,14 @@ class Maelstrom : Scene {
 	void stir(float t, float step) {
 		float cx = w * 0.5;
 		float cy = h * 0.5;
+		// the jets pump on the beat
+		float ph = t / beat;
+		float hit = 1.0 - (ph - math::floor(ph));
+		float pump = 0.45 + 1.3 * hit * hit;
 		if (t < 6.5) {
-			float pulse = 0.8 + 0.2 * math::sin(t * 2.7);
-			jet(3.0, h * 0.30, 1.0, 0.10, 70.0 * pulse, 5.3 + 0.3 * math::sin(t * 0.9), 24.0, 3.0, step);
-			jet(w - 4.0, h * 0.70, -1.0, -0.10, 70.0 * pulse, 2.9 + 0.3 * math::sin(t * 1.1), 24.0, 3.0, step);
+			float pulse = (0.8 + 0.2 * math::sin(t * 2.7)) * (0.85 + 0.3 * hit);
+			jet(3.0, h * 0.30, 1.0, 0.10, 70.0 * pulse, 5.3 + 0.3 * math::sin(t * 0.9), 24.0 * pump, 3.0 * h / 120.0, step);
+			jet(w - 4.0, h * 0.70, -1.0, -0.10, 70.0 * pulse, 2.9 + 0.3 * math::sin(t * 1.1), 24.0 * pump, 3.0 * h / 120.0, step);
 		}
 		if (t > 5.0 && t < 11.0) {
 			float ring = h * 0.38;
@@ -248,7 +293,16 @@ class Maelstrom : Scene {
 				float ca = math::cos(a);
 				float sa = math::sin(a);
 				jet(cx + ca * ring * 1.2, cy + sa * ring, -sa - ca * 0.35, ca - sa * 0.35, 56.0,
-					k * 1.5707963 + t * 0.45, 9.0, 2.4, step);
+					k * 1.5707963 + t * 0.45, 9.0 * pump, 2.4 * h / 120.0, step);
+			}
+		}
+		// the burst: twelve jets fire outward from the middle, a rainbow starburst
+		if (t > 8.2 && t < 8.9) {
+			for (int k3 = 0; k3 < 12; ++k3) {
+				float a3 = k3 * 0.5235988 + 0.2;
+				float c3 = math::cos(a3);
+				float s3 = math::sin(a3);
+				jet(cx + c3 * h * 0.1, cy + s3 * h * 0.1, c3, s3, 170.0, a3, 30.0 * pump, 3.6 * h / 120.0, step);
 			}
 		}
 		if (t > 10.5) { vortex(cx, cy, swirl(t), step); }
@@ -257,7 +311,7 @@ class Maelstrom : Scene {
 				float a2 = k2 * 0.7853982 + 0.3;
 				float c2 = math::cos(a2);
 				float s2 = math::sin(a2);
-				jet(cx + c2 * h * 0.34, cy + s2 * h * 0.3, -c2, -s2, 84.0, a2, 22.0, 2.6, step);
+				jet(cx + c2 * h * 0.34, cy + s2 * h * 0.3, -c2, -s2, 84.0, a2, 22.0, 2.6 * h / 120.0, step);
 			}
 		}
 	}
@@ -527,18 +581,33 @@ class Maelstrom : Scene {
 		MS_H = h;
 		MS_INK = ink;
 		MS_BG = bg;
+		MS_T = tt;
+		var& cc = MS_CCOL;
+		for (int c = 0; c < w; ++c) { cc[c] = 2.0 * math::sin(c * 0.13 - tt * 0.9); }
 		var rows = parallel_transform(MS_ALL, maelstrom_row);
+		// the push-in on the whirlpool over the last seconds
+		float push = tt > 12.8 ? (tt - 12.8) / 3.2 : 0.0;
+		push = push > 1.0 ? 1.0 : push * push * (3.0 - 2.0 * push);
+		float zoom = 1.0 + push * 0.45;
 		int ww = w;
+		var& cols = col_of;
+		for (int x0 = 0; x0 < ww; ++x0) {
+			int sx = itrunc(ww * 0.5 + (x0 + 0.5 - ww * 0.5) / zoom);
+			cols[x0] = sx < 0 ? 0 : (sx >= ww ? ww - 1 : sx);
+		}
 		int idx = 0;
 		for (int y = 0; y < h; ++y) {
-			var& row = rows[y];
+			int sy = itrunc(h * 0.5 + (y + 0.5 - h * 0.5) / zoom);
+			var& row = rows[sy < 0 ? 0 : (sy >= h ? h - 1 : sy)];
 			for (int x = 0; x < ww; ++x) {
-				grid[idx] = row[x];
+				grid[idx] = row[cols[x]];
 				++idx;
 			}
 		}
 		for (int k = 0; k < motes; ++k) {
-			grid[itrunc(my[k]) * ww + itrunc(mx[k])] = mote;
+			int px = itrunc(ww * 0.5 + (mx[k] - ww * 0.5) * zoom);
+			int py = itrunc(h * 0.5 + (my[k] - h * 0.5) * zoom);
+			if (px >= 0 && px < ww && py >= 0 && py < h) { grid[py * ww + px] = mote; }
 		}
 	}
 }

@@ -141,7 +141,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 2 | JULIA | morphing Julia set (c orbits the cardioid) at full resolution, continuous escape-time coloring (log-log fractional count, no bands) into a cycling 256-entry palette, orbit-trap shading inside the set; rows in parallel |
 | 3 | LAVALAMP | eight metaballs: one loop sums the inverse-square field, its gradient and a contribution-weighted hue, so merging blobs blend colors; the wax is lit from a normal built out of the gradient (the height of a blob under the field), with a tinted glow outside; rows in parallel |
 | 4 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes grow one segment per tick through a 16x12x16 voxel volume, never intersecting; every tube is a chain of lit sphere impostors a quarter voxel apart (per-pixel normal, specular, fog, depth nudge so crossings intersect), glossy elbow balls at every turn, a static camera per generation, CRT wipe, reseed from a new angle; ~2% of elbows spawn the jackodile's rainbow eye |
-| 5 | BOIDS | a starling murmuration at sunset: 80 boids (script class instances) and a flapping hawk as silhouettes against a baked sky (gradient, sun glow, a lit skyline); every palette entry is a sky tone darkened by a level, so birds and their fading wakes shade whatever sky they cross |
+| 5 | BOIDS | a starling murmuration over a lake at sunset: a thousand birds fly in 3D, keeping their distance from and matching the heading of their nearest neighbours (a uniform grid hashed every frame, steering in parallel chunks), drawn to places on a sheet that swings, stretches and folds; a peregrine falcon stoops through them, and panic passes bird to bird as a scare wave that splits the cloud; projected from the shore into a density buffer, so the cloud darkens where it is thick and pales where the sheet faces you, mirrored in the lake under the sun's glitter path |
 | 6 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel, distance fog; billboard Grublins and Orglis brutes lit as spheres per pixel, with eyes and grins, wall-occluded per column; the camera auto-fires on line-of-sight cone lock — recoil, muzzle flash, rainbow tracer, hit-flash, gib scatter, a pixel-font kill counter |
 | 7 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm: a 128x128 wrapping heightmap by diamond-square, a river canyon carved along a sine meander, four levels of sun-side slope light plus hashed grain baked into a packed color/height map; 72 geometric depth steps of 16.16 fixed-point marching with a per-column y-buffer, ten haze banks, a sun that tracks the heading, banking into turns |
 | 8 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
@@ -171,20 +171,19 @@ Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 | JULIA | 5.0 | 16.9 | 123 |
 | LAVALAMP | 2.3 | 18.1 | 51 |
 | PIPEDREAM | 1.1 | 10.9 | 56 |
-| BOIDS | 4.0 | 14.2 | 23 |
 | KINSTEIN 3D | 1.2 | 12.6 | 33 |
 | CANYONRUN | 0.8 | 12.2 | 22 |
 | CHROME | 4.0 | 17.5 | 27 |
 | FINALE | 3.1 | 24.5 | 96 |
 
-The table covers the nine scenes it lists; OSSUARY and MAELSTROM are not in it. Every scene
-in it holds 30 fps on the VM with room to spare (mean 2.9 ms, worst 5.0 ms); on
-the interpreter each stays under 25 ms (mean 15.7 ms).
+The table covers the eight scenes it lists; BOIDS, OSSUARY and MAELSTROM are not in it. Every
+scene in it holds 30 fps on the VM with room to spare (mean 2.8 ms, worst 5.0 ms); on
+the interpreter each stays under 25 ms (mean 15.9 ms).
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the eleven scene entries: shim stream hash `3375579088` on
+  every one of the eleven scene entries: shim stream hash `2666809889` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `ebe25798ad3602e3` (the host's HUD
+  `6fe646c4613513c8` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
@@ -416,7 +415,7 @@ FINALE afterglow (`shot 11 at 17 ascii 1`: the fire is out, the word glows in ne
                                             JULIA  a morphing julia set
                                          LAVALAMP  lit metaballs
                                         PIPEDREAM  the 3d pipes screensaver
-                                            BOIDS  a murmuration and a hawk
+                                            BOIDS  a murmuration and a falcon
                                       KINSTEIN 3D  a textured raycaster
                                         CANYONRUN  voxelspace terrain
                                            CHROME  a ray tracer

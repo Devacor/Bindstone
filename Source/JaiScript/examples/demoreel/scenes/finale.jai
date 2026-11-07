@@ -32,7 +32,7 @@ class Finale : Fire {
 		["role", "JULIA", "a morphing julia set"],
 		["role", "LAVALAMP", "lit metaballs"],
 		["role", "PIPEDREAM", "the 3d pipes screensaver"],
-		["role", "BOIDS", "a murmuration and a hawk"],
+		["role", "BOIDS", "a murmuration and a falcon"],
 		["role", "KINSTEIN 3D", "a textured raycaster"],
 		["role", "CANYONRUN", "voxelspace terrain"],
 		["role", "CHROME", "a ray tracer"],

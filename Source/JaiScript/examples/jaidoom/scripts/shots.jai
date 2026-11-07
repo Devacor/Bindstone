@@ -87,6 +87,7 @@ function main() -> int {
 		else { wad = a; }
 	}
 	if (!wad_load(wad_path(wad))) { print(`no WAD ${wad}: run jaidoom.jai once to fetch it`); return 1; }
+	HOST_TRUECOLOR = true;   // the page's frames are 24-bit wherever they are captured
 	vid_init(cols, prows);
 	hud_init();
 

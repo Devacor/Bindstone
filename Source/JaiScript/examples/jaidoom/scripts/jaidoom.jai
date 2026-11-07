@@ -1238,6 +1238,8 @@ function main() -> int {
 		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
 		else if (ARGS[i] == "--no-audio") { want_audio = false; }
 		else if (ARGS[i] == "uncapped") { UNCAPPED = true; }
+		else if (ARGS[i] == "--truecolor") { HOST_TRUECOLOR = true; }
+		else if (ARGS[i] == "--256color") { HOST_TRUECOLOR = false; }
 		else if (ARGS[i] == "flowtest") { flow = true; }
 		else if (ARGS[i] == "freedoom2") { path = "freedoom2"; }
 		else if (ARGS[i] == "record" && i + 1 < ARGS.size()) { DEMO_ARM = ARGS[i + 1]; i = i + 1; }

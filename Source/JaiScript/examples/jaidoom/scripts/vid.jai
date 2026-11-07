@@ -1,10 +1,15 @@
 // JaiDOOM vid.jai — the terminal video layer (doom-cli method, GLOOM lineage):
 // PIX is a flat palette-index grid; colors intern once through rgb_idx; the
 // blitter packs 1x2 pixels per cell through the upper-half-block glyph with
-// truecolor fg/bg, emitting escapes only on change. Byte output (utf8, BMP)
+// fg/bg colors, emitting escapes only on change. Byte output (utf8, BMP)
 // mints through to_char — no dependency on any load-time table.
 
 import "wad.jai";
+
+// 24-bit where the terminal says it takes it (COLORTERM, Windows Terminal, any Windows console), else xterm-256 (macOS
+// Terminal.app reads a 24-bit escape as a run of unrelated attributes); --truecolor / --256color decide
+bool HOST_TRUECOLOR = env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "" ||
+	env_var("OS") == "Windows_NT";
 
 string ESC = "";
 string RESET = "";
@@ -70,14 +75,61 @@ function rgb_idx(int r, int g, int b) -> int {
 	if (PAL_KEYS.has(key)) { return PAL_KEYS[key]; }
 	int idx = PAL_FG.size();
 	PAL_KEYS[key] = idx;
-	PAL_FG.push(`${ESC}[38;2;${r};${g};${b}m`);
-	PAL_BG.push(`${ESC}[48;2;${r};${g};${b}m`);
+	PAL_FG.push(sgr_color(38, r, g, b));
+	PAL_BG.push(sgr_color(48, r, g, b));
 	PAL_LUM.push(r * 2 + g * 3 + b);
 	PAL_R.push(r);
 	PAL_G.push(g);
 	PAL_B.push(b);
 	PAL_BGR3.push(`${to_char(b)}${to_char(g)}${to_char(r)}`);
 	return idx;
+}
+
+function sgr_color(int layer, int r, int g, int b) -> string {
+	if (HOST_TRUECOLOR) { return `${ESC}[${layer};2;${r};${g};${b}m`; }
+	return `${ESC}[${layer};5;${xterm256(r, g, b)}m`;
+}
+
+// xterm's 240 colors (16-255: the 6x6x6 cube, then the 24-step gray ramp) in OKLab, filled on first use
+array<float> XTERM_LAB = [];
+
+// the xterm color nearest in OKLab: plain RGB distance turns DOOM's browns olive and its dark greens gray
+function xterm256(int r, int g, int b) -> int {
+	if (XTERM_LAB.empty()) {
+		array<int> levels = [0, 95, 135, 175, 215, 255];
+		for (int c = 0; c < 216; ++c) { oklab_push(XTERM_LAB, levels[c / 36], levels[(c / 6) % 6], levels[c % 6]); }
+		for (int k = 0; k < 24; ++k) { oklab_push(XTERM_LAB, 8 + 10 * k, 8 + 10 * k, 8 + 10 * k); }
+	}
+	array<float> want = [];
+	oklab_push(want, r, g, b);
+	int result = 0;
+	float best = 1.0e30;
+	for (int i = 0; i < 240; ++i) {
+		float dl = want[0] - XTERM_LAB[i * 3];
+		float da = want[1] - XTERM_LAB[i * 3 + 1];
+		float db = want[2] - XTERM_LAB[i * 3 + 2];
+		float d = dl * dl + da * da + db * db;
+		if (d < best) { best = d; result = i; }
+	}
+	return 16 + result;
+}
+
+function srgb_linear(int v) -> float {
+	float c = v / 255.0;
+	if (c <= 0.04045) { return c / 12.92; }
+	return math::pow((c + 0.055) / 1.055, 2.4);
+}
+
+function oklab_push(array<float>& out, int r8, int g8, int b8) -> void {
+	float r = srgb_linear(r8);
+	float g = srgb_linear(g8);
+	float b = srgb_linear(b8);
+	float l = math::cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+	float m = math::cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+	float s = math::cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+	out.push(0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s);
+	out.push(1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s);
+	out.push(0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s);
 }
 
 // ground-truth artifact: the palette-index grid as a 24-bit BMP

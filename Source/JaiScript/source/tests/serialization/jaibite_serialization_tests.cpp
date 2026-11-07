@@ -9,6 +9,7 @@
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <filesystem>
 #include <fstream>
 #include <algorithm>
@@ -165,17 +166,15 @@ public:
             }
         };
 
-        test("roundtrip_arithmetic_strings", [check_roundtrip]() {
-            check_roundtrip(R"(
+        test("programs_of_every_construct_run_alike_fresh_and_after_save_and_load", [check_roundtrip]() {
+            const std::pair<std::string, std::string> programs[] = {
+                {"arithmetic_strings", R"(
                 int a = 7; int b = 3;
                 float f = 2.5 * 4.0 + a;
                 var s = "r:" + to_string(a * b + a % b) + "|" + to_string(a / b);
                 s + "|" + to_string(f) + "|" + to_string(a > b) + "|" + to_string(-a) + "|" + to_string('Q');
-            )");
-        });
-
-        test("roundtrip_functions_defaults_ref_params", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"functions_defaults_ref_params", R"(
                 int bump(int& x, int by = 5) { x += by; return x; }
                 class Holder { int v = 1; Holder() {} }
                 auto h = Holder();
@@ -185,11 +184,8 @@ public:
                 int loc = 100;
                 int r3 = bump(loc);
                 to_string(r1) + "," + to_string(r2) + "," + to_string(arr[1]) + "," + to_string(h.v) + "," + to_string(r3) + "," + to_string(loc);
-            )");
-        });
-
-        test("roundtrip_classes_inheritance_statics", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"classes_inheritance_statics", R"(
                 class Animal {
                     int legs = 4;
                     static int count = 0;
@@ -204,11 +200,8 @@ public:
                 auto a = Animal();
                 auto b = Bird();
                 to_string(a.describe()) + "|" + to_string(b.describe()) + "|" + to_string(Animal::count);
-            )");
-        });
-
-        test("roundtrip_keyword_member_names_and_inherited_statics", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"keyword_member_names_and_inherited_statics", R"(
                 class Base { static int count = 0; Base() { count += 1; } }
                 class C : Base {
                     int array() { return 3; }
@@ -219,11 +212,8 @@ public:
                 auto c = C();
                 auto d = C();
                 to_string(c.map(5)) + "|" + to_string(c.array()) + "|" + to_string(C::string()) + "|" + to_string(Base::count);
-            )");
-        });
-
-        test("roundtrip_lambdas_captures", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"lambdas_captures", R"(
                 int base = 10;
                 auto add = [=](int x) { return x + base; };
                 int counter = 0;
@@ -231,13 +221,9 @@ public:
                 inc(); inc();
                 auto make_adder = [](int n) { return [=](int m) { return n + m; }; };
                 to_string(add(5)) + "|" + to_string(counter) + "|" + to_string(make_adder(3)(4));
-            )");
-        });
-
-        // Method coroutines, a field-held handle, yields in expression positions and the
-        // completion-value conversion must survive save/load exactly like a fresh parse.
-        test("roundtrip_coroutine_methods_and_expression_yields", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                // method coroutines, a field-held handle, yields in expression positions and the completion-value conversion
+                {"coroutine_methods_and_expression_yields", R"(
                 class Gen {
                     int base = 10;
                     var h = null;
@@ -265,11 +251,8 @@ public:
                 string e = "";
                 try { t.next(); } catch (err) { e = to_string(err); }
                 to_string(total) + "|" + s + "|" + type_of(last) + ":" + to_string(last) + "|" + e;
-            )");
-        });
-
-        test("roundtrip_coroutines_range_for", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"coroutines_range_for", R"(
                 coroutine int gen(int n) {
                     for (int i = 0; i < n; ++i) { yield i * i; }
                     return -1;
@@ -282,11 +265,8 @@ public:
                 int manual = 0;
                 while (!c.done()) { manual += c.next(); }
                 to_string(total) + "|" + to_string(manual);
-            )");
-        });
-
-        test("roundtrip_maps_arrays", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"maps_arrays", R"(
                 var m = {"a": 1, "b": 2};
                 m["c"] = m["a"] + m["b"];
                 var arr = [1, 2, 3];
@@ -295,24 +275,16 @@ public:
                 for (auto kv : m) { s += kv.first + "=" + to_string(kv.second) + ";"; }
                 for (auto& x : arr) { x *= 2; }
                 s + to_string(arr.size()) + "|" + to_string(arr[3]);
-            )");
-        });
-
-        test("roundtrip_try_catch_error_text", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"try_catch_error_text", R"(
                 var msg = "";
                 try { throw "boom " + to_string(42); } catch (e) { msg = e; }
                 var msg2 = "";
                 try { var arr = [1]; var x = arr[10]; } catch (e2) { msg2 = e2; }
                 msg + "|" + msg2;
-            )");
-        });
-
-        // The catch variable is a frame-slot local (function) / scope local (top level):
-        // the slot and symbol ride the bite, and the loaded tree reads it exactly like a
-        // fresh parse - shadowing, callee isolation, yields inside the catch included
-        test("roundtrip_catch_variable_slot", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                // the catch variable's slot and symbol ride the bite: shadowing, callee isolation and yields inside the catch
+                {"catch_variable_slot", R"(
                 var e = "global";
                 int callee() { int e = 5; return e; }
                 string f() { string s = ""; try { throw "x"; } catch (e) { e += "!"; s = e + to_string(callee()); } return s + e; }
@@ -321,37 +293,19 @@ public:
                 coroutine var g() { try { throw "c"; } catch (e) { yield e; yield e + "2"; return e; } }
                 var h = g();
                 log + f() + "|" + to_string(h.next()) + "|" + to_string(h.next()) + "|" + to_string(h.next()) + "|" + e;
-            )");
-        });
-
-        test("roundtrip_parallel_for_zip", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"parallel_for_zip", R"(
                 class V { float x = 0.0; float y = 0.0; V() {} V(float a) { x = a; y = a * 2; } }
                 array<V> vs = []; array<V> os = []; array<float> ss = [];
                 for (int i = 0; i < 50; i++) { vs.push(V(i)); os.push(V()); ss.push(0.0); }
                 parallel_for (auto& v, auto& o, auto& s : vs, os, ss) { o.x = v.x * v.y; o.y = v.y + 1.0; s = o.x + o.y; }
                 to_string(os[7].x) + "|" + to_string(os[7].y) + "|" + to_string(ss[49]) + "|" + to_string(os.size());
-            )");
-        });
-
-        test("roundtrip_uncaught_throw_error_text", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"uncaught_throw_error_text", R"(
                 int helper(int n) { if (n > 2) { throw "kaboom at " + to_string(n); } return n; }
                 helper(1) + helper(5);
-            )");
-        });
-
-        test("roundtrip_registered_type", [check_roundtrip]() {
-            check_roundtrip(R"(
-                auto p = JbPoint(3.0, 4.0);
-                p.x = p.x + 10.0;
-                auto t = JbTag("hi");
-                to_string(p.sum()) + "|" + t.decorated() + "|" + to_string(p.x);
-            )", [](engine& e) { register_point(e); register_tag(e); });
-        });
-
-        test("roundtrip_kitchen_sink", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"kitchen_sink", R"(
                 enum Color { Red, Green, Blue = 40, Teal }
                 namespace util { int twice(int v) { return v * 2; } }
                 auto [dx, dy] = [4, 7];
@@ -369,11 +323,8 @@ public:
                 var maybe = null;
                 var q = maybe?.anything;
                 name + "|" + t + "|" + to_string(dx + dy) + "|" + to_string(util::twice(21)) + "|" + to_string(q == null) + "|" + to_string(Color::Blue) + "|" + to_string(Color::Teal);
-            )");
-        });
-
-        test("roundtrip_cast_expressions", [this, check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"cast_expressions", R"(
                 class S { int x = 1; }
                 class T : S { int t = 2; }
                 class H { S p = null; }
@@ -391,18 +342,26 @@ public:
                 var c = "";
                 try { var bad = cast<H>(h.p); } catch (e) { c = e; }
                 to_string(cast<T&>(h.p).t) + "|" + to_string(tv.t) + "|" + to_string(tmp.t) + "|" + to_string(cast<int>(f)) + "|" + cast<string>(42) + "|" + c;
-            )");
-        });
-
-        test("roundtrip_namespace_classes_keep_their_qualified_names", [check_roundtrip]() {
-            check_roundtrip(R"(
+            )"},
+                {"namespace_classes_keep_their_qualified_names", R"(
                 namespace spider {
                     class Session { int a = 0; }
                     class SessionStore { int db = 0; SessionStore() {} SessionStore(int d) { db = d; } Session load() { Session s; s.a = db; return s; } }
                 }
                 spider::SessionStore sessions = spider::SessionStore(3);
                 type_of(sessions) + " " + type_of(sessions.load()) + " " + to_string(sessions.load().a);
-            )");
+            )"},
+            };
+            check_each(programs, [&](const auto& program) { check_roundtrip(program.second); });
+        });
+
+        test("roundtrip_registered_type", [check_roundtrip]() {
+            check_roundtrip(R"(
+                auto p = JbPoint(3.0, 4.0);
+                p.x = p.x + 10.0;
+                auto t = JbTag("hi");
+                to_string(p.sum()) + "|" + t.decorated() + "|" + to_string(p.x);
+            )", [](engine& e) { register_point(e); register_tag(e); });
         });
 
         test("a_bite_parsed_under_other_namespace_classes_is_refused_at_load", [this]() {

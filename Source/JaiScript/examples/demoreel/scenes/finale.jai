@@ -15,19 +15,26 @@
 // credits roll. It is the fire scene's subclass: the letters are heat sources
 // stamped from the pixel font and fed to the same convection pass.
 
-// The {8,3} tiling, one row per parallel_transform body. A pixel's disk point is
-// turned, translated by the flow's Mobius map, then folded into the tiling's
+// The {8,3} tiling, one row per parallel_transform body. A pixel is first carried
+// through the scene's warp (a turn, a swirl tightest at the centre, a ripple
+// running outward), which also names the pixel of the cube's light it shows. Its
+// disk point is translated by the flow's Mobius map, then folded into the tiling's
 // fundamental triangle by its three mirrors (the x axis, the line at pi/8 and the
 // central octagon's edge circle). The tiling is three-colourable: the line mirror
 // swaps the neighbours' two colours and the edge circle swaps the centre's with
 // its neighbour's, so composing those swaps along the fold names the tile's colour.
+// Each entry packs (source pixel + 1) * 4096 + (palette index + 1), 0 for none.
 float HY_CX = 0.0;
 float HY_CY = 0.0;
 float HY_INV_R = 1.0;
 float HY_AX = 0.0;          // the flow: the Mobius translation's point a
 float HY_AY = 0.0;
-float HY_RC = 1.0;          // the disk's turn
-float HY_RS = 0.0;
+float HY_TURN = 0.0;        // the warp: the whole scene's turn,
+float HY_SWIRL = 0.0;       // the extra twist at its centre,
+float HY_RIPPLE = 0.0;      // the ripple's depth and phase
+float HY_WAVE = 0.0;
+bool HY_SHOW = true;        // whether the plane is drawn, or only the warp is wanted
+int HY_H = 0;
 float HY_REVEAL = 0.0;      // the hyperbolic radius opened so far
 float HY_GAIN = 1.0;
 float HY_EDGE_C = 1.5535;   // the central octagon's edge circle: centre on the x axis, radius
@@ -46,11 +53,16 @@ function hyper_row(int y) -> array<int> {
 	int ww = HY_W;
 	float ir = HY_INV_R;
 	float cx = HY_CX;
-	float v = (y + 0.5 - HY_CY) * ir;
+	float cy = HY_CY;
+	float v0 = (y + 0.5 - cy) * ir;
 	float ax = HY_AX;
 	float ay = HY_AY;
-	float rc = HY_RC;
-	float rs = HY_RS;
+	float turn = HY_TURN;
+	float swirl = HY_SWIRL;
+	float ripple = HY_RIPPLE;
+	float wave = HY_WAVE;
+	bool show = HY_SHOW;
+	int hh = HY_H;
 	float ec = HY_EDGE_C;
 	float er = HY_EDGE_R;
 	float er2 = er * er;
@@ -60,8 +72,16 @@ function hyper_row(int y) -> array<int> {
 	float gain = HY_GAIN;
 	float mid = HY_MID;
 	for (int x = 0; x < ww; ++x) {
-		float u = (x + 0.5 - cx) * ir;
-		float vv = v;
+		float u0 = (x + 0.5 - cx) * ir;
+		float pr = math::sqrt(u0 * u0 + v0 * v0);
+		float pa = math::atan2(v0, u0) - turn - swirl / (1.0 + 3.0 * pr * pr);
+		pr *= 1.0 + ripple * math::sin(pr * 7.0 - wave);
+		float u = pr * math::cos(pa);
+		float vv = pr * math::sin(pa);
+		int gx = math::ifloor(cx + u / ir);
+		int gy = math::ifloor(cy + vv / ir);
+		int src = gx >= 0 && gx < ww && gy >= 0 && gy < hh ? gy * ww + gx : -1;
+		int packed = (src + 1) * 4096;
 		float r2 = u * u + vv * vv;
 		// outside the disk the plane continues as its own mirror image through the
 		// circle at infinity, dimmer, its tiles growing toward the screen's edges
@@ -72,18 +92,18 @@ function hyper_row(int y) -> array<int> {
 			r2 = 1.0 / r2;
 			side = 0.5;
 		}
-		if (r2 >= 0.994) {
-			out.push(-1);
+		if (!show || r2 >= 0.994) {
+			out.push(packed);
 			continue;
 		}
 		float r = math::sqrt(r2);
 		float dh = math::log2((1.0 + r) / (1.0 - r)) * 0.6931472;
 		if (dh > reveal) {
-			out.push(-1);
+			out.push(packed);
 			continue;
 		}
-		float zx = u * rc + vv * rs;
-		float zy = vv * rc - u * rs;
+		float zx = u;
+		float zy = vv;
 		float qx = zx - ax;
 		float qy = zy - ay;
 		float dx = 1.0 - ax * zx - ay * zy;
@@ -126,7 +146,7 @@ function hyper_row(int y) -> array<int> {
 		float edge = math::sqrt(e2) - er;
 		if (reveal - dh < 0.22 || edge < 0.02) {
 			int le = itrunc((reveal - dh < 0.22 ? 7.9 : 6.0 - edge * 150.0) * fade);
-			out.push(HY_EDGE + (le < 0 ? 0 : (le > 7 ? 7 : le)));
+			out.push(packed + HY_EDGE + 1 + (le < 0 ? 0 : (le > 7 ? 7 : le)));
 			continue;
 		}
 		// shaded by the distance to the nearest edge: a bevel lit on one side of each
@@ -137,7 +157,7 @@ function hyper_row(int y) -> array<int> {
 		float lit = depth < 0.2 ? (facet == 1 ? 15.0 : 4.0) : 7.0 + depth * 6.0;
 		if (ring < 0.05) { lit = 3.0; }
 		int l = itrunc(lit * fade);
-		out.push(HY_TILE + ((p0 + HY_SPIN) % 3) * 16 + (l < 0 ? 0 : (l > 15 ? 15 : l)));
+		out.push(packed + HY_TILE + 1 + ((p0 + HY_SPIN) % 3) * 16 + (l < 0 ? 0 : (l > 15 ? 15 : l)));
 	}
 	return out;
 }
@@ -353,7 +373,56 @@ class Finale : Fire {
 		if (t > slam_t) { burn_letters(t); }
 		move_sparks(dt, amp > 12);
 		turn_cube(t);
+		set_warp(t);
 		if (t > shatter_t && t < slam_t) { fly_sparks(t); }
+	}
+
+	// the whole scene turns, faster through the dance and fastest through the
+	// shatter, easing to a drift behind the fire; it swirls hardest at the centre and
+	// ripples outward, both throbbing on the beat
+	void set_warp(float t) {
+		float t1 = t < shatter_t ? t : shatter_t;
+		float spin = 0.22 * t1 + (t1 > dance_t ? 0.35 * (t1 - dance_t) * (t1 - dance_t) : 0.0);
+		if (t > shatter_t) { spin += 2.26 * ((t < slam_t ? t : slam_t) - shatter_t); }
+		if (t > slam_t) { spin += 0.5 * (t - slam_t); }
+		float swirl = 0.0;
+		float ripple = 0.012 * (t - unfold_t) / 3.0;
+		ripple = ripple > 0.012 ? 0.012 : ripple;
+		if (t > snaps_t) { swirl = 0.5 * (t - snaps_t) / (dance_t - snaps_t); }
+		if (t > dance_t) {
+			swirl = 0.5 + 0.6 * pulse(t) + (t - dance_t) * 0.4;
+			ripple = 0.015 + 0.025 * pulse(t);
+		}
+		if (t > shatter_t) {
+			float u = (t - shatter_t) / (slam_t - shatter_t);
+			swirl = 1.7 + 1.5 * u;
+			ripple = 0.05 + 0.07 * u;
+		}
+		if (t > slam_t) {
+			swirl = 0.7 * math::sin((t - slam_t) * 0.8);
+			ripple = 0.02;
+		}
+		HY_TURN = spin;
+		HY_SWIRL = swirl;
+		HY_RIPPLE = ripple;
+		HY_WAVE = t * 5.0;
+		HY_CX = w * 0.5;
+		HY_CY = h * 0.5;
+		HY_INV_R = 1.0 / (h * 0.5 - 0.5);
+		HY_W = w;
+		HY_H = h;
+		set_plane(t);
+	}
+
+	// where the warp takes the screen point (px, py): the same map hyper_row applies
+	array<float> warp_source(float px, float py) {
+		float ir = HY_INV_R;
+		float u0 = (px - HY_CX) * ir;
+		float v0 = (py - HY_CY) * ir;
+		float pr = math::sqrt(u0 * u0 + v0 * v0);
+		float pa = math::atan2(v0, u0) - HY_TURN - HY_SWIRL / (1.0 + 3.0 * pr * pr);
+		pr *= 1.0 + HY_RIPPLE * math::sin(pr * 7.0 - HY_WAVE);
+		return [HY_CX + pr * math::cos(pa) / ir, HY_CY + pr * math::sin(pa) / ir];
 	}
 
 	// the 8-cube: each axis opens in turn (a line, a square, a cube, ...) and the
@@ -387,19 +456,18 @@ class Finale : Fire {
 		}
 		// down to the screen: the 16-gon Petrie projection, its axes dealt out in
 		// bit-reversed order so the first two open as a square and the third as a
-		// cube; the figure turns slowly in the screen's plane and breathes on the beat
+		// cube; it breathes on the beat (the warp turns it with the plane)
 		float scale = h * 0.12 * (1.0 + (t > 3.9 && t < shatter_t ? pulse(t) * 0.12 : 0.0));
 		float cx = w * 0.5;
 		float cy = h * 0.5;
-		float roll = t * 0.11;
 		array<float> dir_x = [];
 		array<float> dir_y = [];
 		array<float> dir_z = [];
 		array<int> deal = [0, 4, 2, 6, 1, 5, 3, 7];
 		for (int d3 = 0; d3 < 8; ++d3) {
 			float ang2 = deal[d3] * 0.3926991;
-			dir_x.push(math::cos(ang2 + roll));
-			dir_y.push(math::sin(ang2 + roll));
+			dir_x.push(math::cos(ang2));
+			dir_y.push(math::sin(ang2));
 			dir_z.push(0.35 * math::cos(ang2 * 3.0 + 0.6));
 		}
 		for (int v2 = 0; v2 < 256; ++v2) {
@@ -444,7 +512,7 @@ class Finale : Fire {
 	}
 
 	// the shatter: each letter pixel's spark leaves a vertex of the cube, curls
-	// around the centre and lands on its pixel on the slam
+	// around the centre and lands where the warp shows it on its pixel on the slam
 	void fly_sparks(float t) {
 		float u = (t - shatter_t) / (slam_t - shatter_t);
 		u = u > 1.0 ? 1.0 : u;
@@ -457,8 +525,9 @@ class Finale : Fire {
 		for (int k = 0; k < letter_at.size(); ++k) {
 			int v = (k * 37) & 255;
 			int i = letter_at[k];
-			float tx = i % w;
-			float ty = i / w;
+			var at = warp_source(i % w + 0.5, i / w + 0.5);
+			float tx = at[0];
+			float ty = at[1];
 			float px = sx[v] + (tx - sx[v]) * e;
 			float py = sy[v] + (ty - sy[v]) * e;
 			float ox = px - cx;
@@ -551,20 +620,36 @@ class Finale : Fire {
 		float click = tt - landed < 0.16 ? (0.16 - (tt - landed)) * 3.0 : 0.0;
 		gain = gain + (tt < shatter_t ? click : 0.0);
 		bool cube_on = gain > 0.01;
-		if (cube_on) { draw_cube(gain); }
+		bool flight = tt > shatter_t && tt < slam_t;
+		if (cube_on) {
+			draw_cube(gain);
+		} else if (flight) {
+			for (int c = 0; c < n; ++c) { g[c] = 0.0; }
+		}
+		if (flight) { draw_flight(); }
 		bool tiles_on = tt > unfold_t && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5));
-		var trows = [];
-		if (tiles_on) { trows = open_plane(); }
+		bool warped = tt > unfold_t && (cube_on || flight || tiles_on);
+		HY_SHOW = tiles_on;
+		var rows = [];
+		if (warped) { rows = open_plane(); }
 		float over = tiles_on && tt < slam_t ? 0.1 : 0.04;
 		int i = 0;
 		for (int y = 0; y < h; ++y) {
 			for (int x = 0; x < w; ++x) {
 				int v = ht[i];
-				if (v <= 5 && cube_on && g[i] > over) {
-					int lv = g[i] * 9.0;
-					grid[i] = hyper + gh[i] * 12 + (lv > 11 ? 11 : lv);
-				} else if (v <= 5 && tiles_on && trows[y][x] >= 0) {
-					grid[i] = trows[y][x];
+				int src = i;
+				int ink = -1;
+				if (warped) {
+					int packed = rows[y][x];
+					src = (packed >> 12) - 1;
+					ink = (packed & 4095) - 1;
+				}
+				float light = src >= 0 && (cube_on || flight) ? g[src] : 0.0;
+				if (v <= 5 && light > over) {
+					int lv = light * 9.0;
+					grid[i] = hyper + gh[src] * 12 + (lv > 11 ? 11 : lv);
+				} else if (v <= 5 && ink >= 0) {
+					grid[i] = ink;
 				} else {
 					grid[i] = (v > 72 ? 72 : v) + b;
 				}
@@ -579,18 +664,25 @@ class Finale : Fire {
 			}
 			draw_letters(grid, b);
 		}
-		if (tt > shatter_t && tt < slam_t) { draw_flight(grid); }
 		draw_sparks(grid, b);
 		if (tt < shatter_t) { draw_dimension(grid); }
 		slam(grid);
+	}
+
+	// the warped scene, a row at a time: the plane's colour and the cube light's source
+	var open_plane() {
+		if (HY_ROWS.size() != h) {
+			HY_ROWS = [];
+			for (int r = 0; r < h; ++r) { HY_ROWS.push(r); }
+		}
+		return parallel_transform(HY_ROWS, hyper_row);
 	}
 
 	// the hyperbolic plane: it opens ring by ring as the dimensions do, flows under
 	// a translation that wraps at four inradii (two tiles across, where the tiling
 	// and its colouring both repeat), accelerates at eight dimensions and warps out
 	// as the cube shatters; at eight dimensions its colours roll on every snap
-	var open_plane() {
-		float t = tt;
+	void set_plane(float t) {
 		float period = 4.0 * math::log2((1.0 + HY_MID) / (1.0 - HY_MID)) * 0.6931472;
 		float s = t * 0.3;
 		if (t > dance_t) { s += (t - dance_t) * (t - dance_t) * 0.8; }
@@ -601,8 +693,6 @@ class Finale : Fire {
 		float along = (e - 1.0) / (e + 1.0);
 		HY_AX = along;
 		HY_AY = 0.0;
-		HY_RC = math::cos(t * 0.07);
-		HY_RS = 0.0 - math::sin(t * 0.07);
 		HY_REVEAL = t < 5.2 ? (t - unfold_t) * 1.1 : 4.84 + (t - 5.2) * 6.0;
 		float gain = t < dance_t ? 1.0 : 0.85 + pulse(t) * 0.3;
 		if (t > shatter_t) { gain = 1.0 - (t - shatter_t) / (slam_t - shatter_t); }
@@ -620,24 +710,20 @@ class Finale : Fire {
 		}
 		HY_GAIN = gain;
 		HY_SPIN = spun % 3;
-		HY_CX = w * 0.5;
-		HY_CY = h * 0.5;
-		HY_INV_R = 1.0 / (h * 0.5 - 0.5);
-		HY_W = w;
-		if (HY_ROWS.size() != h) {
-			HY_ROWS = [];
-			for (int r = 0; r < h; ++r) { HY_ROWS.push(r); }
-		}
-		return parallel_transform(HY_ROWS, hyper_row);
 	}
 
-	// the sparks in flight, each in the hue of an axis
-	void draw_flight(var& grid) {
+	// the sparks in flight, each in the hue of an axis, into the cube's light so the
+	// warp carries them with everything else
+	void draw_flight() {
+		var& g = glow;
+		var& gh = glow_hue;
 		for (int k = 0; k < letter_at.size(); ++k) {
-			int x = itrunc(pfx[k]);
-			int y = itrunc(pfy[k]);
+			int x = math::ifloor(pfx[k]);
+			int y = math::ifloor(pfy[k]);
 			if (x < 0 || x >= w || y < 0 || y >= h) { continue; }
-			grid[y * w + x] = hyper + pfaxis[k] * 12 + 9 + (k & 1) * 2;
+			int i = y * w + x;
+			g[i] = 1.12 + (k & 1) * 0.2;
+			gh[i] = pfaxis[k];
 		}
 	}
 

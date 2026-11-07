@@ -20,18 +20,17 @@ public:
 		});
 
 		test("budget_stops_every_loop_lane_and_the_engine_recovers", [this]() {
-			struct loop_case { const char* code; };
-			const loop_case loops[] = {
+			const char* const loops[] = {
 				"while (true) { }",
 				"for (int i = 0; i < 2; i += 0) { }",
 				// fuzz seed 33294: the counting loop's fall-through, taken once a reference binding boxes the counter, had no back-edge check
 				"function bump(int& x) { x += 1; } for (int i = 0; i < 4; i++) { if (i != 0) { i = i - 1; } else { bump(i); i = 0; } }",
 				"for (int i = 0; i < 4; i++) { if (i == 0) { auto f = [&]() { i = 0; }; f(); } i = i - 1; }",
 			};
-			check_each(loops, [&](const loop_case& loop) {
+			check_each(loops, [&](const char* loop) {
 				auto e = make_engine();
 				e->execution_budget(0.05);
-				check_throws([&]() { e->execute(loop.code); });
+				check_throws([&]() { e->execute(loop); });
 				check_eq((int64_t)4, e->execute("2 + 2").as_int());
 			});
 		});
@@ -90,18 +89,17 @@ public:
 
 		// fuzz seeds 436/3507/8285/1213/1462/1788/8356/8391: a catch-and-retry loop around infinite work must return from execute()
 		test("a_terminal_budget_error_skips_every_catch", [this]() {
-			struct spin_case { const char* code; };
-			const spin_case spins[] = {
+			const char* const spins[] = {
 				"while (true) { try { while (true) { } } catch (e) { } }",
 				"try { try { while (true) { } } catch (a) { } } catch (b) { }",
 				"void spin() { try { while (true) { } } catch (e) { } } spin();",
 				"auto f = []() -> auto { try { while (true) { } } catch (e) { return 1; } return 2; }; f();",
 				"coroutine int spin() { try { while (true) { } } catch (e) { yield 1; } return 0; } auto c = spin(); c.next();",
 			};
-			check_each(spins, [&](const spin_case& spin) {
+			check_each(spins, [&](const char* spin) {
 				auto e = make_engine();
 				e->execution_budget(0.05);
-				check_throws([&]() { e->execute(spin.code); });
+				check_throws([&]() { e->execute(spin); });
 				check_eq((int64_t)4, e->execute("2 + 2").as_int());
 			});
 		});

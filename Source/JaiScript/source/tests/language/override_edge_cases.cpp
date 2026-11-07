@@ -266,8 +266,7 @@ public:
         });
         
         test("override_never_crosses_static_and_instance", [this]() {
-            struct crossing_case { const char* code; };
-            const crossing_case cases[] = {
+            const char* const cases[] = {
                 {R"(
                     class Base { auto method() { return 42; } }
                     class Derived : Base { static auto method() override { return 99; } }
@@ -277,9 +276,9 @@ public:
                     class Derived : Base { auto method() override { return 99; } }
                 )"},
             };
-            check_each(cases, [](const crossing_case& c) {
+            check_each(cases, [](const char* c) {
                 auto engine = make_engine();
-                check_throws([&]() { engine->execute(c.code); });
+                check_throws([&]() { engine->execute(c); });
             });
         });
 

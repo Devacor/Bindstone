@@ -23,7 +23,6 @@ public:
 	}
 
 private:
-	struct source_case { const char* code; };
 
 	// the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
 	static std::vector<uint8_t> unstamped_bite_bytes(engine& a_engine, const std::string& a_source) {
@@ -209,7 +208,7 @@ private:
 
 	void element_rules() {
 		test("element_reads_and_writes_report_known_type_mismatches", [this]() {
-			const source_case sources[] = {
+			const char* const sources[] = {
 				{R"jai(array<string> a = ["bad"]; int x = a[0]; x;)jai"},
 				{R"jai(array<string> a = ["bad"]; float x = a[0]; x;)jai"},
 				{R"jai(array<int> a = [65]; char c = a[0]; c;)jai"},
@@ -229,7 +228,7 @@ private:
 			};
 			check_each(sources, [&](const auto& c) {
 				auto engine = make_engine();
-				check_true(engine->check(c.code).has_errors());
+				check_true(engine->check(c).has_errors());
 			});
 		});
 
@@ -237,7 +236,7 @@ private:
 
 	void element_rule_boundaries() {
 		test("rules_123_known_element_mismatches_reject_before_execution", [this]() {
-			const source_case sources[] = {
+			const char* const sources[] = {
 				{R"jai(array<int> a = [1]; a.push("bad");)jai"},
 				{R"jai(array<int> a = [1]; a[0] = "bad";)jai"},
 				{R"jai(map<int,string> m = {{"bad","ok"}};)jai"},
@@ -255,7 +254,7 @@ private:
 				{R"jai(array<string> a = ["bad"]; array<string>& b = a; int x = b[0];)jai"},
 			};
 			check_each(sources, [&](const auto& c) {
-				const std::string source = c.code;
+				const std::string source = c;
 				auto eng = make_engine();
 				const auto report = eng->check(source);
 				check_true(report.has_errors(), source);
@@ -267,7 +266,7 @@ private:
 		});
 
 		test("rules_123_floats_beyond_int_range_reject_before_execution", [this]() {
-			const source_case sources[] = {
+			const char* const sources[] = {
 				{R"jai(int x = 1e30;)jai"},
 				{R"jai(int x = -1e30;)jai"},
 				{R"jai(int x = 9.223372036854776e18;)jai"},
@@ -282,7 +281,7 @@ private:
 				{R"jai(map<int,string> m = {{1e30,"ok"}};)jai"},
 			};
 			check_each(sources, [&](const auto& c) {
-				const std::string source = c.code;
+				const std::string source = c;
 				auto eng = make_engine();
 				const auto report = eng->check(source);
 				check_true(report.has_errors(), source);
@@ -294,7 +293,7 @@ private:
 		});
 
 		test("rules_123_dynamic_sources_and_valid_conversions_check_clean", [this]() {
-			const source_case sources[] = {
+			const char* const sources[] = {
 				{R"jai(var a = ["bad"]; int x = a[0];)jai"},
 				{R"jai(array<var> a = ["bad"]; int x = a[0];)jai"},
 				{R"jai(void f(var& a) { int x = a[0]; })jai"},
@@ -324,7 +323,7 @@ private:
 				{R"jai(auto huge = 1e30; int x = huge;)jai"},
 			};
 			check_each(sources, [&](const auto& c) {
-				const std::string source = c.code;
+				const std::string source = c;
 				auto eng = make_engine();
 				const auto report = eng->check(source);
 				check_false(report.has_errors(), source + "\n" + report.format(source));

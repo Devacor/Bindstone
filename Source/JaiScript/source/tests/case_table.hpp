@@ -6,13 +6,17 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <tuple>
+#include <type_traits>
 
 namespace jai::foundry::tests {
 
 template<typename Case>
 std::string case_label(const Case& a_case) {
-    if constexpr (requires { a_case.code; }) {
+    if constexpr (std::is_convertible_v<const Case&, std::string_view>) {
+        return std::string(std::string_view(a_case));
+    } else if constexpr (requires { a_case.code; }) {
         return std::string(a_case.code);
     } else {
         return std::string(std::get<0>(a_case));

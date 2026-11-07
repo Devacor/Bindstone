@@ -50,8 +50,7 @@ public:
 		// recursion inside field initializers (before any guarded body, implicit or explicit constructor, through a super chain) and
 		// inside a constructor's default argument; the counter bounds a binary without the cap to 20 constructions
 		test("construction_recursion_obeys_the_depth_cap", [this]() {
-			struct recursion_case { const char* code; };
-			const recursion_case cases[] = {
+			const char* const cases[] = {
 				{R"(
 					int remaining = 20;
 					class C { var child = --remaining > 0 ? C() : null; }
@@ -84,10 +83,10 @@ public:
 					remaining;
 				)"},
 			};
-			check_each(cases, [](const recursion_case& c) {
+			check_each(cases, [](const char* c) {
 				auto eng = make_engine();
 				configure(*eng, 8);
-				expect_depth_error(*eng, c.code);
+				expect_depth_error(*eng, c);
 			});
 		});
 

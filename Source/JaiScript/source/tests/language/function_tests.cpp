@@ -1010,13 +1010,13 @@ public:
         });
 
         test("anonymous_function_takes_no_name_and_no_coroutine_form", [this]() {
-            const std::tuple<const char*> cases[] = {
+            const char* const cases[] = {
                 {"var f = function g(x) { return x; }; f(1);"},
                 {"var f = coroutine function() { yield 1; }; 1;"},
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
-                check_throws([&]() { engine->execute(std::get<0>(c)); });
+                check_throws([&]() { engine->execute(c); });
             });
         });
 

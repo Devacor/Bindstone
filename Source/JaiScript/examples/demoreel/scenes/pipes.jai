@@ -8,11 +8,19 @@
 // pixel of a splat derives its normal from the disc's bulge (diffuse, a sharp
 // specular, distance fog) and nudges its depth by it, so crossings intersect.
 //
+// The pipes are chrome: each pixel's normal reflects the set (a sky above, a
+// burning horizon line, a dark floor below), so every tube carries the bright
+// band of the horizon along its length, tinted by its pipe's hue.
+//
 // The static camera is also the perf trick: the screen image is persistent
 // (pgrid/pz fields), and each frame only the voxels grown since the last frame
-// are projected and splatted (~a dozen), not the whole volume. Canon demands
-// the teapot: ~2% of joints instead spawn the jackodile's eye, a
-// rainbow-flickering ball (re-splatted per frame so it shimmers).
+// are projected and splatted (~a dozen), not the whole volume. The camera's
+// moves happen after: the persistent image is read through a slow push-in and
+// drift, over a synthwave set (a striped sun on the horizon, a floor grid
+// rushing in) that never needs re-splatting. When a generation fills, a glint
+// sweeps every pipe and the frame flashes; the wipe is a CRT beam that leaves
+// the set behind it. Canon demands the teapot: ~2% of joints instead spawn the
+// jackodile's eye, a rainbow-flickering ball (re-splatted per frame so it shimmers).
 
 class Pipes : Scene {
 	array<int> cells = [];   // 0 empty, else 1 + pipe*3 + kind (0 seg, 1 joint, 2 eye)
@@ -30,9 +38,18 @@ class Pipes : Scene {
 	int gw = 16;
 	int gh = 12;
 	int gd = 16;
-	int npipes = 4;
+	int npipes = 6;
 	int pipe_base = 0;
 	int egg_base = 0;
+	int sky_base = 0;      // the set: 32 sky rows, 16 sun shades, floor and grid
+	int sun_base = 0;
+	int floor_base = 0;
+	int grid_base = 0;
+	array<int> backdrop = [];  // the sky and sun, painted once
+	array<int> col_map = [];   // the camera: which persistent column and row each screen pixel reads
+	array<int> row_map = [];
+	float done_t = -9.0;       // when the generation filled: the glint and flash
+	int gen = 0;
 	int filled = 0;
 	int cap = 0;
 	int phase = 0;       // 0 grow, 1 hold, 2 wipe
@@ -51,18 +68,18 @@ class Pipes : Scene {
 	void build() override {
 		name = "PIPEDREAM";
 		handle = "screensaver seance . watch for the jackodile";
+		replay = 14.0;
 		cells = gfx.make_grid(gw * gh * gd);
 		pgrid = gfx.make_grid(w * h);
 		pz = gfx.make_fgrid(w * h);
 		cap = gw * gh * gd * 34 / 100;
-		// the office monitor at 2am: one entry per row
-		for (int y = 0; y < h; ++y) {
-			float f = y / (h - 1.0);
-			pal.add(3.0 + 6.0 * f, 4.0 + 5.0 * f, 12.0 + 14.0 * f);
-		}
-		for (int q = 0; q < w * h; ++q) { pgrid[q] = q / w; }
-		pipe_base = h;
-		var hues = [[70.0, 225.0, 195.0], [255.0, 178.0, 58.0], [232.0, 88.0, 212.0], [128.0, 158.0, 255.0]];
+		sky_base = pal.gradient(32, [[4.0, 2.0, 18.0], [22.0, 8.0, 52.0], [92.0, 18.0, 96.0], [230.0, 60.0, 120.0], [255.0, 150.0, 90.0]]);
+		sun_base = pal.gradient(16, [[255.0, 236.0, 120.0], [255.0, 150.0, 70.0], [255.0, 60.0, 140.0]]);
+		floor_base = pal.gradient(8, [[5.0, 2.0, 12.0], [70.0, 16.0, 78.0]]);
+		grid_base = pal.gradient(8, [[40.0, 20.0, 90.0], [60.0, 220.0, 255.0]]);
+		pipe_base = pal.size();
+		var hues = [[70.0, 225.0, 195.0], [255.0, 178.0, 58.0], [232.0, 88.0, 212.0], [128.0, 158.0, 255.0],
+			[250.0, 90.0, 80.0], [150.0, 240.0, 90.0]];
 		for (int p = 0; p < npipes; ++p) {
 			var hue = hues[p];
 			shade_ramp(hue[0], hue[1], hue[2]);
@@ -72,6 +89,9 @@ class Pipes : Scene {
 			var c = gfx.rainbow_rgb(e * 1.0471975512);
 			shade_ramp(c[0], c[1], c[2]);
 		}
+		paint_backdrop();
+		col_map = gfx.make_grid(w);
+		row_map = gfx.make_grid(h);
 		set_view(rng.next(628) * 0.01, 0.26 + rng.next(20) * 0.01);
 		for (int p2 = 0; p2 < npipes; ++p2) {
 			hx.push(0);
@@ -89,6 +109,34 @@ class Pipes : Scene {
 			float k = f < 0.8 ? 0.06 + f * 1.18 : 1.0;
 			float wh = f < 0.8 ? 0.0 : (f - 0.8) * 4.0;
 			pal.add(r * k + (255.0 - r * k) * wh, g * k + (255.0 - g * k) * wh, b * k + (255.0 - b * k) * wh);
+		}
+	}
+
+	int horizon() { return itrunc(h * 0.64); }
+
+	// the sky's gradient and the striped sun sinking into the horizon
+	void paint_backdrop() {
+		backdrop = gfx.make_grid(w * h);
+		int hz = horizon();
+		float cx = w * 0.5;
+		float sun_r = h * 0.3;
+		float sun_y = hz - sun_r * 0.35;
+		for (int y = 0; y < hz; ++y) {
+			int sky = sky_base + itrunc(y * 31.0 / hz);
+			for (int x = 0; x < w; ++x) {
+				float dx = x + 0.5 - cx;
+				float dy = y + 0.5 - sun_y;
+				int ink = sky;
+				if (dx * dx + dy * dy < sun_r * sun_r) {
+					float down = (y + 0.5 - (sun_y - sun_r)) / (sun_r * 1.35);
+					// the bands thicken toward the horizon as the gaps between them grow
+					float band = (sun_y + sun_r - y) * 0.42;
+					float gap = band - math::floor(band);
+					bool cut = y > sun_y - sun_r * 0.25 && gap < 0.18 + down * 0.35;
+					if (!cut) { ink = sun_base + itrunc((down > 0.999 ? 0.999 : down) * 16.0); }
+				}
+				backdrop[y * w + x] = ink;
+			}
 		}
 	}
 
@@ -189,21 +237,22 @@ class Pipes : Scene {
 			while (phase == 0 && step_acc >= 0.03) {
 				step_acc -= 0.03;
 				for (int p = 0; p < npipes; ++p) { step_one(p); }
-				if (filled >= cap) { phase = 1; phase_t = 0.0; step_acc = 0.0; }
+				if (filled >= cap) { phase = 1; phase_t = 0.0; step_acc = 0.0; done_t = t; }
 			}
 		} else if (phase == 1) {
 			phase_t += dt;
 			if (phase_t > 1.8) { phase = 2; phase_t = 0.0; }
 		} else {
 			phase_t += dt;
-			if (phase_t > 1.5) { reset_volume(); }
+			if (phase_t > 1.3) { reset_volume(); }
 		}
 	}
 
 	void reset_volume() {
 		for (auto& c : cells) { c = 0; }
 		int nn = w * h;
-		for (int q = 0; q < nn; ++q) { pgrid[q] = q / w; pz[q] = 0.0; }
+		for (int q = 0; q < nn; ++q) { pz[q] = 0.0; }
+		++gen;
 		pending.clear();
 		eggs.clear();
 		filled = 0;
@@ -226,11 +275,11 @@ class Pipes : Scene {
 		float ooz = 1.0 / zcam;
 		int kind = (c - 1) % 3;
 		int p = (c - 1) / 3;
-		float scale = (w < h * 1.3 ? w : h * 1.3) * 1.25 * ooz;
+		float scale = (w < h * 1.3 ? w : h * 1.3) * 1.02 * ooz;
 		float rad = scale * (kind == 0 ? 0.40 : 0.58);
 		rad = rad < 0.7 ? 0.7 : rad;
 		float sx = w * 0.5 + rx * scale;
-		float sy = h * 0.52 - ry * scale;
+		float sy = h * 0.5 - ry * scale;
 		float fog = 1.25 - zcam * 0.018;
 		fog = fog > 1.0 ? 1.0 : (fog < 0.35 ? 0.35 : fog);
 		int base = kind == 2 ? egg_base + ((flick + p + itrunc(fx * 3.0 + fz + 40.0)) % 6) * 16 : pipe_base + p * 16;
@@ -264,7 +313,11 @@ class Pipes : Scene {
 				float s2 = s * s;
 				float s4 = s2 * s2;
 				float s8 = s4 * s4;
-				float lit = (0.10 + d * 0.78) * fog + s8 * s8 * (kind == 0 ? 0.5 : 0.8);
+				// chrome: the view ray reflected off the normal reads the set; up is
+				// the sky, a hard bright line the horizon, down the dark floor
+				float up = 0.0 - 2.0 * nz * ny;
+				float env = up > 0.08 ? 0.34 + up * 0.32 : (up > -0.06 ? 1.05 : 0.06 - up * 0.1);
+				float lit = (env * 0.72 + d * 0.22) * fog + s8 * s8 * (kind == 0 ? 0.55 : 0.85);
 				int lv = itrunc(lit * 15.99);
 				zz[rowb + xx] = depth;
 				pg[rowb + xx] = base + (lv > 15 ? 15 : lv);
@@ -314,13 +367,12 @@ class Pipes : Scene {
 	}
 
 	void render(var& grid) override {
-		int nn = w * h;
 		if (phase == 2) {
-			// generation over: the monitor wipes to black, top down
-			int target = itrunc(phase_t * h / 1.3);
+			// generation over: a CRT beam sweeps down and leaves the set behind it
+			int target = itrunc(phase_t * h / 1.1);
 			target = target > h ? h : target;
 			int stop = target * w;
-			for (int q = last_wipe * w; q < stop; ++q) { pgrid[q] = q / w; pz[q] = 0.0; }
+			for (int q = last_wipe * w; q < stop; ++q) { pz[q] = 0.0; }
 			last_wipe = target;
 		} else {
 			flick = itrunc(tt * 8.0);
@@ -328,6 +380,73 @@ class Pipes : Scene {
 			pending.clear();
 			for (auto e : eggs) { splat_voxel(e); }   // the eyes shimmer every frame
 		}
-		for (int i = 0; i < nn; ++i) { grid[i] = pgrid[i]; }
+		// the camera: a slow push-in and drift through each generation, a kick in on the fill
+		float grow = phase == 0 ? filled * 1.0 / cap : 1.0;
+		float since = tt - done_t;
+		float kick = phase == 0 ? 0.0 : (since < 1.8 ? since / 1.8 : 1.0);
+		float zoom = 0.86 + grow * 0.16 + kick * kick * 0.12;
+		float pan = math::sin(tt * 0.35 + gen * 2.1) * w * 0.03;
+		float cx = w * 0.5;
+		float cy = h * 0.5;
+		for (int x = 0; x < w; ++x) {
+			int sx = math::ifloor(cx + (x + 0.5 - cx) / zoom + pan);
+			col_map[x] = sx < 0 || sx >= w ? -1 : sx;
+		}
+		for (int y = 0; y < h; ++y) {
+			int sy = math::ifloor(cy + (y + 0.5 - cy) / zoom);
+			row_map[y] = sy < 0 || sy >= h ? -1 : sy;
+		}
+		// the glint: a bright diagonal band crosses every pipe as the volume fills,
+		// over a flash that lifts the whole frame and decays
+		float glint = since >= 0.0 && since < 0.9 ? since / 0.9 * (w + h) * 1.3 - h * 0.3 : -999.0;
+		int lift = since >= 0.0 && since < 0.35 ? itrunc((0.35 - since) * 20.0) : 0;
+		int hz = horizon();
+		float scroll = tt * 1.6;
+		int beam = phase == 2 ? last_wipe : -9;
+		var& pg = pgrid;
+		var& zz = pz;
+		var& bd = backdrop;
+		int ramps = egg_base + 96;
+		int i = 0;
+		for (int y = 0; y < h; ++y) {
+			int rb = row_map[y] * w;
+			// the floor grid: a line wherever a grid line falls between this pixel and
+			// the next, so lines stay one pixel wide; the far floor is haze
+			float floor_z = y >= hz ? h * 0.9 / (y - hz + 1.0) : 0.0;
+			float next_z = y >= hz ? h * 0.9 / (y - hz + 2.0) : 0.0;
+			bool zline = y >= hz && math::floor(floor_z * 0.1 + scroll) != math::floor(next_z * 0.1 + scroll);
+			float near = y >= hz ? (y - hz) * 1.0 / (h - hz) : 0.0;
+			bool far = (floor_z - next_z) * 0.1 > 0.34;
+			int glow = itrunc(near * 7.99);
+			int dark = floor_base + itrunc((1.0 - near) * 7.99);
+			float gstep = floor_z * 0.045;
+			bool xfar = gstep > 0.17;
+			for (int x = 0; x < w; ++x) {
+				int cm = col_map[x];
+				int src = rb + cm;
+				int ink = 0;
+				if (rb >= 0 && cm >= 0 && zz[src] > 0.0) {
+					ink = pg[src];
+					if (ink >= pipe_base && ink < ramps) {
+						float dg = x + y - glint;
+						int up2 = lift + (dg > -4.0 && dg < 4.0 ? 8 : (dg > -14.0 && dg < -9.0 ? 5 : 0));
+						if (up2 > 0) {
+							int lv = (ink - pipe_base) % 16;
+							int lifted = lv + up2;
+							ink += (lifted > 15 ? 15 : lifted) - lv;
+						}
+					}
+				} else if (y < hz) {
+					ink = bd[i];
+				} else {
+					float gx = (x - cx) * gstep;
+					bool xline = math::floor(gx) != math::floor(gx + gstep);
+					ink = (!far && zline) || (!xfar && xline) ? grid_base + glow : dark;
+				}
+				if (y == beam || y == beam - 1) { ink = grid_base + 7; }
+				grid[i] = ink;
+				++i;
+			}
+		}
 	}
 }

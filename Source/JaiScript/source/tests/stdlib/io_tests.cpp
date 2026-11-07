@@ -11,16 +11,6 @@ namespace jai::foundry::tests {
 
 namespace {
 
-// Each {code, expected} runs on a fresh engine with the stdlib registered and checks the result read as Result.
-template<typename Result>
-void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
-    check_each(a_cases, [](const auto& c) {
-        auto engine = make_engine();
-        stdlib::register_all(*engine);
-        check_eq(c.second, engine->execute(c.first).template as<Result>());
-    });
-}
-
 std::string printed_text(jai::engine& a_engine, const std::string& a_code) {
     auto capture = std::make_shared<std::ostringstream>();
     a_engine.set_output_stream(capture);
@@ -188,7 +178,7 @@ public:
         // ============================================================
 
         test("format_substitutes_placeholders_and_concatenates_the_rest", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"format(\"Hello, {}!\", \"World\");", "Hello, World!"},
                 {"format(\"{} + {} = {}\", 2, 3, 5);", "2 + 3 = 5"},
                 {"format(\"a\", \"b\", \"c\");", "abc"},

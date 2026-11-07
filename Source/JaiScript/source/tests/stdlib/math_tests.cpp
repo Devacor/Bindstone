@@ -10,16 +10,6 @@ namespace jai::foundry::tests {
 
 namespace {
 
-// Each {code, expected} runs on a fresh engine with the stdlib registered and checks the result read as Result.
-template<typename Result>
-void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
-    check_each(a_cases, [](const auto& c) {
-        auto engine = make_engine();
-        stdlib::register_all(*engine);
-        check_eq(c.second, engine->execute(c.first).template as<Result>());
-    });
-}
-
 void check_near_results(double a_tolerance, const std::vector<std::pair<std::string, double>>& a_cases) {
     check_each(a_cases, [&](const auto& c) {
         auto engine = make_engine();
@@ -36,7 +26,7 @@ public:
 
     void forge_tests() override {
         test("abs_min_max_clamp_and_saturate_bound_a_value", [this]() {
-            check_results<double>({
+            check_stdlib_results<double>({
                 {"math::abs(5.5);", 5.5},
                 {"math::abs(-5.5);", 5.5},
                 {"math::min(3.0, 7.0);", 3.0},
@@ -51,7 +41,7 @@ public:
         });
 
         test("sign_is_minus_one_zero_or_one", [this]() {
-            check_results<script_int>({
+            check_stdlib_results<script_int>({
                 {"math::sign(42.0);", 1},
                 {"math::sign(-42.0);", -1},
                 {"math::sign(0.0);", 0},
@@ -59,7 +49,7 @@ public:
         });
 
         test("floor_ceil_round_and_trunc_round_to_whole_values", [this]() {
-            check_results<double>({
+            check_stdlib_results<double>({
                 {"math::floor(3.7);", 3.0},
                 {"math::ceil(3.2);", 4.0},
                 {"math::round(3.5);", 4.0},
@@ -68,7 +58,7 @@ public:
         });
 
         test("sqrt_pow_hypot_sin_and_cos_give_exact_values", [this]() {
-            check_results<double>({
+            check_stdlib_results<double>({
                 {"math::sqrt(16.0);", 4.0},
                 {"math::pow(2.0, 3.0);", 8.0},
                 {"math::hypot(3.0, 4.0);", 5.0},
@@ -89,7 +79,7 @@ public:
         });
 
         test("mix_unmix_eases_lerp_wrap_and_remap_map_between_ranges", [this]() {
-            check_results<double>({
+            check_stdlib_results<double>({
                 {"math::mix(0.0, 100.0, 0.5);", 50.0},
                 {"math::mix(10.0, 20.0, 0.0);", 10.0},
                 {"math::mix(10.0, 20.0, 1.0);", 20.0},

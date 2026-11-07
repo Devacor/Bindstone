@@ -15,20 +15,6 @@ using namespace jai::foundry;
 
 namespace jai::foundry::tests {
 
-namespace {
-
-// Each {code, expected} runs on a fresh engine with the stdlib registered and checks the result read as Result.
-template<typename Result>
-void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
-    check_each(a_cases, [](const auto& c) {
-        auto engine = make_engine();
-        stdlib::register_all(*engine);
-        check_eq(c.second, engine->execute(c.first).template as<Result>());
-    });
-}
-
-}
-
 class string_stdlib_tests : public suite {
 public:
     string_stdlib_tests() : suite("String Stdlib Tests") {}
@@ -80,7 +66,7 @@ public:
         // ============================================================
 
         test("length_and_size_count_bytes", [this]() {
-            check_results<script_int>({
+            check_stdlib_results<script_int>({
                 {"var s = \"\"; s.length();", 0},
                 {"var s = \"hello\"; s.length();", 5},
                 {"var s = \"test\"; s.size();", 4},
@@ -88,14 +74,14 @@ public:
         });
 
         test("empty_is_true_only_for_an_empty_string", [this]() {
-            check_results<bool>({
+            check_stdlib_results<bool>({
                 {"var s = \"\"; s.empty();", true},
                 {"var s = \"a\"; s.empty();", false},
             });
         });
 
         test("at_front_and_back_read_one_character", [this]() {
-            check_results<script_char>({
+            check_stdlib_results<script_char>({
                 {"var s = \"hello\"; s.at(1);", 'e'},
                 {"var s = \"hello\"; s.at(-1);", 'o'},
                 {"var s = \"hello\"; s.at(-2);", 'l'},
@@ -105,7 +91,7 @@ public:
         });
 
         test("substr_takes_a_start_and_an_optional_length", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"hello world\"; s.substr(0, 5);", "hello"},
                 {"var s = \"hello world\"; s.substr(6);", "world"},
                 {"var s = \"hello\"; s.substr(-3);", "llo"},
@@ -117,7 +103,7 @@ public:
         // ============================================================
 
         test("find_rfind_count_and_find_of_locate_text", [this]() {
-            check_results<script_int>({
+            check_stdlib_results<script_int>({
                 {"var s = \"hello world\"; s.find(\"wor\");", 6},
                 {"var s = \"hello world\"; s.find(\"xyz\");", -1},
                 {"var s = \"hello hello\"; s.find(\"ell\", 3);", 7},
@@ -129,7 +115,7 @@ public:
         });
 
         test("contains_starts_with_and_ends_with_test_for_a_substring", [this]() {
-            check_results<bool>({
+            check_stdlib_results<bool>({
                 {"var s = \"hello world\"; s.contains(\"wor\");", true},
                 {"var s = \"hello world\"; s.contains(\"xyz\");", false},
                 {"var s = \"hello world\"; s.starts_with(\"hello\");", true},
@@ -144,7 +130,7 @@ public:
         // ============================================================
 
         test("to_int_parses_with_a_default_and_a_base", [this]() {
-            check_results<script_int>({
+            check_stdlib_results<script_int>({
                 {"var s = \"42\"; s.to_int();", 42},
                 {"var s = \"not_a_number\"; s.to_int(-1);", -1},
                 {"var s = \"FF\"; s.to_int(0, 16);", 255},
@@ -170,7 +156,7 @@ public:
         // ============================================================
 
         test("to_lower_and_to_upper_change_the_string_in_place", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"HELLO\"; s.to_lower(); s;", "hello"},
                 {"var s = \"hello\"; s.to_upper(); s;", "HELLO"},
             });
@@ -181,7 +167,7 @@ public:
         // ============================================================
 
         test("string_namespace_case_transforms_return_a_copy", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"AbC 123!\"; var t = string::to_lower(s); t + \"|\" + s;", "abc 123!|AbC 123!"},
                 {"var s = \"AbC 123!\"; var t = string::to_upper(s); t + \"|\" + s;", "ABC 123!|AbC 123!"},
                 {"string::to_lower(\"HeLLo\" + \" WoRLD\");", "hello world"},
@@ -208,7 +194,7 @@ public:
         });
 
         test("trim_strips_whitespace_or_given_characters_in_place", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"  hello  \"; s.trim(); s;", "hello"},
                 {"var s = \"***hello***\"; s.trim(\"*\"); s;", "hello"},
                 {"var s = \"  hello  \"; s.trim_left(); s;", "hello  "},
@@ -217,7 +203,7 @@ public:
         });
 
         test("pad_left_and_pad_right_fill_to_a_width", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"hi\"; s.pad_left(5, '.'); s;", "...hi"},
                 {"var s = \"hi\"; s.pad_right(5, '.'); s;", "hi..."},
             });
@@ -235,7 +221,7 @@ public:
         });
 
         test("replace_rewrites_the_first_last_or_every_match_in_place", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"hello hello\"; s.replace_first(\"hello\", \"hi\"); s;", "hi hello"},
                 {"var s = \"hello hello\"; s.replace_last(\"hello\", \"hi\"); s;", "hello hi"},
                 {"var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\"); s;", "hi hi hi"},
@@ -245,7 +231,7 @@ public:
         });
 
         test("insert_erase_remove_reverse_and_repeat_edit_in_place", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"helloworld\"; s.insert(5, \" \"); s;", "hello world"},
                 {"var s = \"hello world\"; s.erase(5, 1); s;", "helloworld"},
                 {"var s = \"hello world\"; s.remove_prefix(6); s;", "world"},
@@ -279,7 +265,7 @@ public:
         // ============================================================
 
         test("split_cuts_at_a_delimiter_or_between_characters", [this]() {
-            check_results<script_int>({
+            check_stdlib_results<script_int>({
                 {"var s = \"a,b,c\"; var arr = s.split(\",\"); arr.length();", 3},
                 {"var s = \"abc\"; var arr = s.split(\"\"); arr.length();", 3},
             });
@@ -348,7 +334,7 @@ public:
         });
 
         test("join_and_split_produce_the_pieces_and_the_text", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {"var s = \"a,b,c\"; var arr = s.split(\",\"); arr[0];", "a"},
                 {"var arr = [\"a\", \"b\", \"c\"]; arr.join(\",\");", "a,b,c"},
                 {"var arr = [\"a\", \"b\", \"c\"]; arr.join();", "abc"},
@@ -357,7 +343,7 @@ public:
         });
 
         test("template_strings_splice_expressions_and_honor_escapes", [this]() {
-            check_results<std::string>({
+            check_stdlib_results<std::string>({
                 {R"(auto name = "world"; `hello ${name}`;)", "hello world"},
                 {R"(auto x = 10; auto y = 20; `${x} + ${y} = ${x + y}`;)", "10 + 20 = 30"},
                 {R"(`just a plain string`;)", "just a plain string"},

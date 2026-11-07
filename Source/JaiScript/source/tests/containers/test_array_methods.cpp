@@ -4,19 +4,6 @@
 
 namespace jai::foundry::tests {
 
-namespace {
-
-// Each {code, expected} runs on a fresh engine and checks the result read as Result.
-template<typename Result>
-void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
-    check_each(a_cases, [](const auto& c) {
-        auto eng = make_engine();
-        check_eq(c.second, eng->execute(c.first).template as<Result>());
-    });
-}
-
-}
-
 class array_methods_tests : public suite {
 public:
     array_methods_tests() : suite("Array Methods") {}

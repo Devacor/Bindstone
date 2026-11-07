@@ -2,6 +2,7 @@
 
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/stdlib/stdlib.hpp>
 
 #include <memory>
 #include <sstream>
@@ -9,6 +10,8 @@
 #include <string_view>
 #include <tuple>
 #include <type_traits>
+#include <utility>
+#include <vector>
 
 namespace jai::foundry::tests {
 
@@ -63,6 +66,25 @@ void check_outputs(const Cases& a_cases, const std::string& a_prelude = {}) {
         const bool error_case = want.rfind("ERROR ", 0) == 0;
         const bool ok = error_case ? got.rfind("ERROR ", 0) == 0 && got.find(want.substr(6)) != std::string::npos : got == want;
         check_true(ok, "got: " + got);
+    });
+}
+
+// Each {code, expected} runs on a fresh make_engine() and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto e = make_engine();
+        check_eq(c.second, e->execute(c.first).template as<Result>());
+    });
+}
+
+// check_results on engines with the stdlib registered.
+template<typename Result>
+void check_stdlib_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto e = make_engine();
+        jai::stdlib::register_all(*e);
+        check_eq(c.second, e->execute(c.first).template as<Result>());
     });
 }
 

@@ -1,11 +1,34 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <sstream>
+#include <tuple>
 
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+namespace {
+
+// Each {code, expected} runs on a fresh engine with the stdlib registered and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto engine = make_engine();
+        stdlib::register_all(*engine);
+        check_eq(c.second, engine->execute(c.first).template as<Result>());
+    });
+}
+
+std::string printed_text(jai::engine& a_engine, const std::string& a_code) {
+    auto capture = std::make_shared<std::ostringstream>();
+    a_engine.set_output_stream(capture);
+    a_engine.execute(a_code);
+    return capture->str();
+}
+
+}
 
 class io_stdlib_tests : public suite {
 public:
@@ -19,22 +42,14 @@ public:
         // name, one registration, never a stacked double-print.
         // ============================================================
 
-        test("bare_engine_ships_basic_print", [this]() {
-            auto engine = jai::foundry::make_engine();   // NO register_all
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-            engine->execute("print(\"hello\");");
-            check(capture->str().find("hello") != std::string::npos);
-        });
-
-        test("bare_print_concatenates_without_formatting", [this]() {
-            auto engine = jai::foundry::make_engine();   // NO register_all
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-            engine->execute("print(\"Value: {}\", 42);");
-            std::string output = capture->str();
-            check(output.find("Value: {}42") != std::string::npos,
-                "bare print concatenates; {} stays literal until stdlib upgrades it");
+        test("bare_engine_print_concatenates_without_formatting", [this]() {
+            check_each(std::vector<std::pair<std::string, std::string>>{
+                {"print(\"hello\");", "hello"},
+                {"print(\"Value: {}\", 42);", "Value: {}42"},
+            }, [](const auto& c) {
+                auto engine = jai::foundry::make_engine();
+                check(printed_text(*engine, c.first).find(c.second) != std::string::npos);
+            });
         });
 
         test("stdlib_upgrade_replaces_print_exactly_once", [this]() {
@@ -53,54 +68,26 @@ public:
         // Output stream redirection
         // ============================================================
 
-        test("output_capture_basic", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            // Create capture buffer
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-
-            // Run script that prints
-            engine->execute("print(\"Hello, World!\");");
-
-            // Get captured output
-            std::string output = capture->str();
-            check(output.find("Hello, World!") != std::string::npos);
-        });
-
-        test("output_capture_format_string", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-
-            engine->execute("print(\"Value: {}\", 42);");
-
-            std::string output = capture->str();
-            check(output.find("Value: 42") != std::string::npos);
-        });
-
-        // Single-arg print is VERBATIM passthrough — {{ }} escape
-        // processing only runs when format substitution runs (format path with args).
-        // print is one shared registry entry, so both backends share this behavior.
-        test("print_single_arg_verbatim_braces", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-            engine->execute(R"(print("{{x}}");)");
-            check_eq(std::string("{{x}}\n"), capture->str(), "single-arg print prints braces raw");
-        });
-
-        test("print_format_path_processes_escapes", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-            engine->execute(R"(print("{{}} {0}", 7);)");
-            check_eq(std::string("{} 7\n"), capture->str(), "format path processes {{ }} escapes");
+        // single-arg print is verbatim; {{ }} escapes are read only on the format path, which runs with arguments
+        test("stdlib_print_writes_to_the_output_stream_and_formats_with_arguments", [this]() {
+            const std::tuple<std::string, std::string, bool> cases[] = {
+                {"print(\"Hello, World!\");", "Hello, World!", false},
+                {"print(\"Value: {}\", 42);", "Value: 42", false},
+                {"print(\"a\", \"b\", \"c\");", "abc", false},
+                {R"(print("{{x}}");)", "{{x}}\n", true},
+                {R"(print("{{}} {0}", 7);)", "{} 7\n", true},
+                {R"(print("[{:>5}]", 42);)", "[   42]\n", true},
+            };
+            check_each(cases, [](const auto& c) {
+                auto engine = make_engine();
+                stdlib::register_all(*engine);
+                const std::string output = printed_text(*engine, std::get<0>(c));
+                if (std::get<2>(c)) {
+                    check_eq(std::get<1>(c), output);
+                } else {
+                    check(output.find(std::get<1>(c)) != std::string::npos);
+                }
+            });
         });
 
         // ============================================================
@@ -115,15 +102,6 @@ public:
             check_eq(std::string("    42"), engine->execute(R"(format("{0:>6}", 42);)").as<std::string>());
             check_eq(std::string("ff FF"), engine->execute(R"(format("{:x} {0:X}", 255);)").as<std::string>());
             check_eq(std::string("x=1 y=2.5"), engine->execute(R"(format("x={} y={1:.1f}", 1, 2.5);)").as<std::string>());
-        });
-
-        test("print_spec_placeholder", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-            engine->execute(R"(print("[{:>5}]", 42);)");
-            check_eq(std::string("[   42]\n"), capture->str());
         });
 
         test("format_spec_outside_the_subset_raises", [this]() {
@@ -154,19 +132,6 @@ public:
             stdlib::register_all(*engine);
             auto result = engine->execute(R"(var msg = ""; try { format("{:.1f}", "abc"); } catch (e) { msg = e; } msg;)");
             check_eq(std::string("format spec ':.1f' does not apply to string value"), result.as<std::string>());
-        });
-
-        test("output_capture_multiple_args", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto capture = std::make_shared<std::ostringstream>();
-            engine->set_output_stream(capture);
-
-            engine->execute("print(\"a\", \"b\", \"c\");");
-
-            std::string output = capture->str();
-            check(output.find("abc") != std::string::npos);
         });
 
         test("output_capture_multiple_prints", [this]() {
@@ -222,36 +187,13 @@ public:
         // Format function tests
         // ============================================================
 
-        test("format_basic", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto result = engine->execute("format(\"Hello, {}!\", \"World\");");
-            check_eq(result.as<std::string>(), "Hello, World!");
-        });
-
-        test("format_multiple_placeholders", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto result = engine->execute("format(\"{} + {} = {}\", 2, 3, 5);");
-            check_eq(result.as<std::string>(), "2 + 3 = 5");
-        });
-
-        test("format_concatenation", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto result = engine->execute("format(\"a\", \"b\", \"c\");");
-            check_eq(result.as<std::string>(), "abc");
-        });
-
-        test("format_single_value", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-
-            auto result = engine->execute("format(42);");
-            check_eq(result.as<std::string>(), "42");
+        test("format_substitutes_placeholders_and_concatenates_the_rest", [this]() {
+            check_results<std::string>({
+                {"format(\"Hello, {}!\", \"World\");", "Hello, World!"},
+                {"format(\"{} + {} = {}\", 2, 3, 5);", "2 + 3 = 5"},
+                {"format(\"a\", \"b\", \"c\");", "abc"},
+                {"format(42);", "42"},
+            });
         });
 
         // C++20's constant-format rule: only a string literal written as the first argument of print or format is a format

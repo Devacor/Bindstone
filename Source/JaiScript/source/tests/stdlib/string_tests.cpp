@@ -3,6 +3,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
 #include <jaiscript/detail/float_text.hpp>
+#include "../case_table.hpp"
 #include <charconv>
 #include <cstdio>
 #include <cstring>
@@ -13,6 +14,20 @@
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+namespace {
+
+// Each {code, expected} runs on a fresh engine with the stdlib registered and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto engine = make_engine();
+        stdlib::register_all(*engine);
+        check_eq(c.second, engine->execute(c.first).template as<Result>());
+    });
+}
+
+}
 
 class string_stdlib_tests : public suite {
 public:
@@ -64,215 +79,76 @@ public:
         // Observer methods (non-mutating)
         // ============================================================
 
-        test("length_empty", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"\"; s.length();");
-            check_eq(result.as<script_int>(), 0);
+        test("length_and_size_count_bytes", [this]() {
+            check_results<script_int>({
+                {"var s = \"\"; s.length();", 0},
+                {"var s = \"hello\"; s.length();", 5},
+                {"var s = \"test\"; s.size();", 4},
+            });
         });
 
-        test("length_non_empty", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.length();");
-            check_eq(result.as<script_int>(), 5);
+        test("empty_is_true_only_for_an_empty_string", [this]() {
+            check_results<bool>({
+                {"var s = \"\"; s.empty();", true},
+                {"var s = \"a\"; s.empty();", false},
+            });
         });
 
-        test("size_same_as_length", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"test\"; s.size();");
-            check_eq(result.as<script_int>(), 4);
+        test("at_front_and_back_read_one_character", [this]() {
+            check_results<script_char>({
+                {"var s = \"hello\"; s.at(1);", 'e'},
+                {"var s = \"hello\"; s.at(-1);", 'o'},
+                {"var s = \"hello\"; s.at(-2);", 'l'},
+                {"var s = \"hello\"; s.front();", 'h'},
+                {"var s = \"hello\"; s.back();", 'o'},
+            });
         });
 
-        test("empty_true", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"\"; s.empty();");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("empty_false", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"a\"; s.empty();");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("at_positive_index", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.at(1);");
-            check_eq(result.as<script_char>(), 'e');
-        });
-
-        test("at_negative_index", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.at(-1);");
-            check_eq(result.as<script_char>(), 'o');
-        });
-
-        test("at_negative_index_second_last", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.at(-2);");
-            check_eq(result.as<script_char>(), 'l');
-        });
-
-        test("front", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.front();");
-            check_eq(result.as<script_char>(), 'h');
-        });
-
-        test("back", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.back();");
-            check_eq(result.as<script_char>(), 'o');
-        });
-
-        test("substr_two_args", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.substr(0, 5);");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("substr_one_arg", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.substr(6);");
-            check_eq(result.as<std::string>(), "world");
-        });
-
-        test("substr_negative_start", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.substr(-3);");
-            check_eq(result.as<std::string>(), "llo");
+        test("substr_takes_a_start_and_an_optional_length", [this]() {
+            check_results<std::string>({
+                {"var s = \"hello world\"; s.substr(0, 5);", "hello"},
+                {"var s = \"hello world\"; s.substr(6);", "world"},
+                {"var s = \"hello\"; s.substr(-3);", "llo"},
+            });
         });
 
         // ============================================================
         // Search methods
         // ============================================================
 
-        test("find_exists", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.find(\"wor\");");
-            check_eq(result.as<script_int>(), 6);
+        test("find_rfind_count_and_find_of_locate_text", [this]() {
+            check_results<script_int>({
+                {"var s = \"hello world\"; s.find(\"wor\");", 6},
+                {"var s = \"hello world\"; s.find(\"xyz\");", -1},
+                {"var s = \"hello hello\"; s.find(\"ell\", 3);", 7},
+                {"var s = \"hello hello\"; s.rfind(\"ell\");", 7},
+                {"var s = \"abcabcabc\"; s.count(\"abc\");", 3},
+                {"var s = \"hello world\"; s.find_first_of(\"aeiou\");", 1},
+                {"var s = \"hello world\"; s.find_last_of(\"aeiou\");", 7},
+            });
         });
 
-        test("find_not_exists", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.find(\"xyz\");");
-            check_eq(result.as<script_int>(), -1);
-        });
-
-        test("find_with_start", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.find(\"ell\", 3);");
-            check_eq(result.as<script_int>(), 7);
-        });
-
-        test("rfind_exists", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.rfind(\"ell\");");
-            check_eq(result.as<script_int>(), 7);
-        });
-
-        test("contains_true", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.contains(\"wor\");");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("contains_false", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.contains(\"xyz\");");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("starts_with_true", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.starts_with(\"hello\");");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("starts_with_false", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.starts_with(\"world\");");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("ends_with_true", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.ends_with(\"world\");");
-            check_eq(result.as<bool>(), true);
-        });
-
-        test("ends_with_false", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.ends_with(\"hello\");");
-            check_eq(result.as<bool>(), false);
-        });
-
-        test("count_occurrences", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"abcabcabc\"; s.count(\"abc\");");
-            check_eq(result.as<script_int>(), 3);
-        });
-
-        test("find_first_of", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.find_first_of(\"aeiou\");");
-            check_eq(result.as<script_int>(), 1); // 'e' at position 1
-        });
-
-        test("find_last_of", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.find_last_of(\"aeiou\");");
-            check_eq(result.as<script_int>(), 7); // 'o' at position 7
+        test("contains_starts_with_and_ends_with_test_for_a_substring", [this]() {
+            check_results<bool>({
+                {"var s = \"hello world\"; s.contains(\"wor\");", true},
+                {"var s = \"hello world\"; s.contains(\"xyz\");", false},
+                {"var s = \"hello world\"; s.starts_with(\"hello\");", true},
+                {"var s = \"hello world\"; s.starts_with(\"world\");", false},
+                {"var s = \"hello world\"; s.ends_with(\"world\");", true},
+                {"var s = \"hello world\"; s.ends_with(\"hello\");", false},
+            });
         });
 
         // ============================================================
         // Parsing methods
         // ============================================================
 
-        test("to_int_valid", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"42\"; s.to_int();");
-            check_eq(result.as<script_int>(), 42);
-        });
-
-        test("to_int_with_default", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"not_a_number\"; s.to_int(-1);");
-            check_eq(result.as<script_int>(), -1);
-        });
-
-        test("to_int_hex", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"FF\"; s.to_int(0, 16);");
-            check_eq(result.as<script_int>(), 255);
+        test("to_int_parses_with_a_default_and_a_base", [this]() {
+            check_results<script_int>({
+                {"var s = \"42\"; s.to_int();", 42},
+                {"var s = \"not_a_number\"; s.to_int(-1);", -1},
+                {"var s = \"FF\"; s.to_int(0, 16);", 255},
+            });
         });
 
         test("to_float_valid", [this]() {
@@ -293,43 +169,23 @@ public:
         // Mutating methods (modify in place, return nothing)
         // ============================================================
 
-        test("to_lower", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"HELLO\"; s.to_lower(); s;");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("to_upper", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.to_upper(); s;");
-            check_eq(result.as<std::string>(), "HELLO");
+        test("to_lower_and_to_upper_change_the_string_in_place", [this]() {
+            check_results<std::string>({
+                {"var s = \"HELLO\"; s.to_lower(); s;", "hello"},
+                {"var s = \"hello\"; s.to_upper(); s;", "HELLO"},
+            });
         });
 
         // ============================================================
         // string:: namespace (NON-mutating: returns a new string, argument untouched)
         // ============================================================
 
-        test("ns_to_lower_non_mutating", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"AbC 123!\"; var t = string::to_lower(s); t + \"|\" + s;");
-            check_eq(result.as<std::string>(), "abc 123!|AbC 123!");
-        });
-
-        test("ns_to_upper_non_mutating", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"AbC 123!\"; var t = string::to_upper(s); t + \"|\" + s;");
-            check_eq(result.as<std::string>(), "ABC 123!|AbC 123!");
-        });
-
-        test("ns_to_lower_literal_and_expr", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("string::to_lower(\"HeLLo\" + \" WoRLD\");");
-            check_eq(result.as<std::string>(), "hello world");
+        test("string_namespace_case_transforms_return_a_copy", [this]() {
+            check_results<std::string>({
+                {"var s = \"AbC 123!\"; var t = string::to_lower(s); t + \"|\" + s;", "abc 123!|AbC 123!"},
+                {"var s = \"AbC 123!\"; var t = string::to_upper(s); t + \"|\" + s;", "ABC 123!|AbC 123!"},
+                {"string::to_lower(\"HeLLo\" + \" WoRLD\");", "hello world"},
+            });
         });
 
         test("ns_case_transform_type_errors", [this]() {
@@ -351,46 +207,20 @@ public:
             check_eq(engine->execute("string::to_upper(\"ok\");").as<std::string>(), "OK");
         });
 
-        test("trim_both_sides", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim(); s;");
-            check_eq(result.as<std::string>(), "hello");
+        test("trim_strips_whitespace_or_given_characters_in_place", [this]() {
+            check_results<std::string>({
+                {"var s = \"  hello  \"; s.trim(); s;", "hello"},
+                {"var s = \"***hello***\"; s.trim(\"*\"); s;", "hello"},
+                {"var s = \"  hello  \"; s.trim_left(); s;", "hello  "},
+                {"var s = \"  hello  \"; s.trim_right(); s;", "  hello"},
+            });
         });
 
-        test("trim_with_chars", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"***hello***\"; s.trim(\"*\"); s;");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("trim_left", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim_left(); s;");
-            check_eq(result.as<std::string>(), "hello  ");
-        });
-
-        test("trim_right", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim_right(); s;");
-            check_eq(result.as<std::string>(), "  hello");
-        });
-
-        test("pad_left", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hi\"; s.pad_left(5, '.'); s;");
-            check_eq(result.as<std::string>(), "...hi");
-        });
-
-        test("pad_right", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hi\"; s.pad_right(5, '.'); s;");
-            check_eq(result.as<std::string>(), "hi...");
+        test("pad_left_and_pad_right_fill_to_a_width", [this]() {
+            check_results<std::string>({
+                {"var s = \"hi\"; s.pad_left(5, '.'); s;", "...hi"},
+                {"var s = \"hi\"; s.pad_right(5, '.'); s;", "hi..."},
+            });
         });
 
         test("pad_center", [this]() {
@@ -404,74 +234,25 @@ public:
                                      " utf8_string u = \"b\"; u.pad_left(5, \"\xC3\xA9\xE6\x97\xA5\"); l + \"|\" + r + \"|\" + c + \"|\" + u;").to_string());
         });
 
-        test("replace_first", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.replace_first(\"hello\", \"hi\"); s;");
-            check_eq(result.as<std::string>(), "hi hello");
+        test("replace_rewrites_the_first_last_or_every_match_in_place", [this]() {
+            check_results<std::string>({
+                {"var s = \"hello hello\"; s.replace_first(\"hello\", \"hi\"); s;", "hi hello"},
+                {"var s = \"hello hello\"; s.replace_last(\"hello\", \"hi\"); s;", "hello hi"},
+                {"var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\"); s;", "hi hi hi"},
+                {"var s = \"aaaa\"; s.replace(\"aa\", \"b\"); s;", "bb"},
+                {"var s = \"aaa\"; s.replace(\"a\", \"b\"); s;", "bbb"},
+            });
         });
 
-        test("replace_last", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello\"; s.replace_last(\"hello\", \"hi\"); s;");
-            check_eq(result.as<std::string>(), "hello hi");
-        });
-
-        test("replace", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello hello hello\"; s.replace(\"hello\", \"hi\"); s;");
-            check_eq(result.as<std::string>(), "hi hi hi");
-        });
-
-        test("replace_non_overlapping", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"aaaa\"; s.replace(\"aa\", \"b\"); s;");
-            check_eq(result.as<std::string>(), "bb");
-        });
-
-        test("insert", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"helloworld\"; s.insert(5, \" \"); s;");
-            check_eq(result.as<std::string>(), "hello world");
-        });
-
-        test("erase", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.erase(5, 1); s;");
-            check_eq(result.as<std::string>(), "helloworld");
-        });
-
-        test("remove_prefix", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.remove_prefix(6); s;");
-            check_eq(result.as<std::string>(), "world");
-        });
-
-        test("remove_suffix", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.remove_suffix(6); s;");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("reverse", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello\"; s.reverse(); s;");
-            check_eq(result.as<std::string>(), "olleh");
-        });
-
-        test("repeat", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"ab\"; s.repeat(3); s;");
-            check_eq(result.as<std::string>(), "ababab");
+        test("insert_erase_remove_reverse_and_repeat_edit_in_place", [this]() {
+            check_results<std::string>({
+                {"var s = \"helloworld\"; s.insert(5, \" \"); s;", "hello world"},
+                {"var s = \"hello world\"; s.erase(5, 1); s;", "helloworld"},
+                {"var s = \"hello world\"; s.remove_prefix(6); s;", "world"},
+                {"var s = \"hello world\"; s.remove_suffix(6); s;", "hello"},
+                {"var s = \"hello\"; s.reverse(); s;", "olleh"},
+                {"var s = \"ab\"; s.repeat(3); s;", "ababab"},
+            });
         });
 
         // ============================================================
@@ -497,18 +278,11 @@ public:
         // Split and Join
         // ============================================================
 
-        test("split_by_delimiter", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"a,b,c\"; var arr = s.split(\",\"); arr.length();");
-            check_eq(result.as<script_int>(), 3);
-        });
-
-        test("split_into_chars", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"abc\"; var arr = s.split(\"\"); arr.length();");
-            check_eq(result.as<script_int>(), 3);
+        test("split_cuts_at_a_delimiter_or_between_characters", [this]() {
+            check_results<script_int>({
+                {"var s = \"a,b,c\"; var arr = s.split(\",\"); arr.length();", 3},
+                {"var s = \"abc\"; var arr = s.split(\"\"); arr.length();", 3},
+            });
         });
 
         test("split_without_a_separator_splits_on_whitespace_and_skips_empties", [this]() {
@@ -573,85 +347,25 @@ public:
             }
         });
 
-        test("split_first_element", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"a,b,c\"; var arr = s.split(\",\"); arr[0];");
-            check_eq(result.as<std::string>(), "a");
+        test("join_and_split_produce_the_pieces_and_the_text", [this]() {
+            check_results<std::string>({
+                {"var s = \"a,b,c\"; var arr = s.split(\",\"); arr[0];", "a"},
+                {"var arr = [\"a\", \"b\", \"c\"]; arr.join(\",\");", "a,b,c"},
+                {"var arr = [\"a\", \"b\", \"c\"]; arr.join();", "abc"},
+                {"var s = \"hello world\"; s.split(\" \").join(\"-\");", "hello-world"},
+            });
         });
 
-        test("join_with_delimiter", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var arr = [\"a\", \"b\", \"c\"]; arr.join(\",\");");
-            check_eq(result.as<std::string>(), "a,b,c");
-        });
-
-        test("join_no_delimiter", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var arr = [\"a\", \"b\", \"c\"]; arr.join();");
-            check_eq(result.as<std::string>(), "abc");
-        });
-
-        test("split_and_join_roundtrip", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"hello world\"; s.split(\" \").join(\"-\");");
-            check_eq(result.as<std::string>(), "hello-world");
-        });
-
-        // ============================================================
-        // Mutation verification (ensure original is modified in place)
-        // ============================================================
-
-        test("mutation_to_lower_modifies_original", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"HELLO\"; s.to_lower(); s;");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("mutation_trim_modifies_original", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"  hello  \"; s.trim(); s;");
-            check_eq(result.as<std::string>(), "hello");
-        });
-
-        test("mutation_replace_modifies_original", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("var s = \"aaa\"; s.replace(\"a\", \"b\"); s;");
-            check_eq(result.as<std::string>(), "bbb");
-        });
-
-        test("template_string_basic", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(auto name = "world"; `hello ${name}`;)");
-            check_eq(result.as<std::string>(), "hello world");
-        });
-
-        test("template_string_expression", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(auto x = 10; auto y = 20; `${x} + ${y} = ${x + y}`;)");
-            check_eq(result.as<std::string>(), "10 + 20 = 30");
-        });
-
-        test("template_string_no_interpolation", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(`just a plain string`;)");
-            check_eq(result.as<std::string>(), "just a plain string");
-        });
-
-        test("template_string_only_expression", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(auto val = 42; `${val}`;)");
-            check_eq(result.as<std::string>(), "42");
+        test("template_strings_splice_expressions_and_honor_escapes", [this]() {
+            check_results<std::string>({
+                {R"(auto name = "world"; `hello ${name}`;)", "hello world"},
+                {R"(auto x = 10; auto y = 20; `${x} + ${y} = ${x + y}`;)", "10 + 20 = 30"},
+                {R"(`just a plain string`;)", "just a plain string"},
+                {R"(auto val = 42; `${val}`;)", "42"},
+                {R"(`hello\`world`;)", "hello`world"},
+                {R"(`price: \$${99}`;)", "price: $99"},
+                {"`line1\nline2`;", "line1\nline2"},
+            });
         });
 
         test("template_string_nested_expressions", [this]() {
@@ -662,13 +376,6 @@ public:
             // :: in a splice is scope resolution, a format spec starts at a lone ':' (a parenthesized ::name is a group)
             auto scoped = engine->execute(R"(int hp = 7; namespace ns { int hp = 3; } `${::hp} ${ns::hp} ${ (::hp) } ${::hp:3} ${ns::hp:.1f} ${[::hp][0]}`;)");
             check_eq(std::string("7 3 7   7 3.0 7"), scoped.as<std::string>());
-        });
-
-        test("template_string_escape_backtick", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(`hello\`world`;)");
-            check_eq(result.as<std::string>(), "hello`world");
         });
 
         // Splice depth is tracked on LEXED brace tokens: whitespace before a
@@ -737,20 +444,6 @@ public:
             // Map literals are primaries now: postfix applies directly
             check_eq((int64_t)1, engine->execute(R"({"k": 1}["k"];)").as_int());
             check_eq((int64_t)2, engine->execute(R"({"a": 1, "b": 2}.size();)").as_int());
-        });
-
-        test("template_string_escape_dollar", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute(R"(`price: \$${99}`;)");
-            check_eq(result.as<std::string>(), "price: $99");
-        });
-
-        test("template_string_multiline", [this]() {
-            auto engine = make_engine();
-            stdlib::register_all(*engine);
-            auto result = engine->execute("`line1\nline2`;");
-            check_eq(result.as<std::string>(), "line1\nline2");
         });
 
         // ============================================================

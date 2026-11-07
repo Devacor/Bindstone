@@ -5,9 +5,11 @@
 #include <jaiscript/jaiscript_fwd.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <sstream>
 #include <fstream>
 #include <filesystem>
+#include <vector>
 
 using namespace jai::foundry;
 
@@ -16,48 +18,59 @@ namespace jai::foundry::tests {
 class lexer_tests : public suite {
 public:
     lexer_tests() : suite("Lexer Tests") {}
-    
+
     void forge_tests() override {
-        test("empty_input", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(1), tokens.size());
-            check_eq(token_type::eof, tokens[0].type);
+        test("each_lexeme_lexes_to_its_token_and_input_ends_in_eof", [this]() {
+            struct token_row { const char* code; std::vector<token_type> types; };
+            const token_row rows[] = {
+                {"", {}},
+                {"foo", {token_type::identifier}},
+                {"int float bool class", {token_type::int_keyword, token_type::float_keyword, token_type::bool_keyword, token_type::class_keyword}},
+                {"true false", {token_type::true_keyword, token_type::false_keyword}},
+                {"42 0 999", {token_type::integer_literal, token_type::integer_literal, token_type::integer_literal}},
+                {R"("hello" "world" "hello\nworld")", {token_type::string_literal, token_type::string_literal, token_type::string_literal}},
+                {"'a' '\\n' '0'", {token_type::char_literal, token_type::char_literal, token_type::char_literal}},
+                {"+ - * / % == != < > <= >= && || !", {token_type::plus, token_type::minus, token_type::star, token_type::slash, token_type::percent,
+                    token_type::equal_equal, token_type::bang_equal, token_type::less, token_type::greater, token_type::less_equal,
+                    token_type::greater_equal, token_type::ampersand_ampersand, token_type::pipe_pipe, token_type::bang}},
+                {"+= -= *= /= %=", {token_type::plus_equal, token_type::minus_equal, token_type::star_equal, token_type::slash_equal, token_type::percent_equal}},
+                {"( ) { } [ ] ; ,", {token_type::left_paren, token_type::right_paren, token_type::left_brace, token_type::right_brace,
+                    token_type::left_bracket, token_type::right_bracket, token_type::semicolon, token_type::comma}},
+            };
+            check_each(rows, [&](const token_row& row) {
+                string_symbolizer symbolizer;
+                lexer lex(row.code, &symbolizer, "test.jai");
+                auto tokens = lex.tokenize();
+                check_eq(row.types.size() + 1, tokens.size(), "token count");
+                for (size_t i = 0; i < row.types.size(); ++i) {
+                    check_eq(row.types[i], tokens[i].type, std::string(tokens[i].lexeme));
+                }
+                check_eq(token_type::eof, tokens.back().type);
+            });
         });
 
-        test("single_identifier", [this]() {
+        test("literal_tokens_carry_their_values", [this]() {
             string_symbolizer symbolizer;
-            lexer lex("foo", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(2), tokens.size());
-            check_eq(token_type::identifier, tokens[0].type);
-            check_eq(std::string("foo"), std::string(tokens[0].lexeme));
-            check_eq(token_type::eof, tokens[1].type);
-        });
+            lexer name("foo", &symbolizer, "test.jai");
+            check_eq(std::string("foo"), std::string(name.tokenize()[0].lexeme));
 
-        test("keywords", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("int float bool class", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(5), tokens.size());
-            check_eq(token_type::int_keyword, tokens[0].type);
-            check_eq(token_type::float_keyword, tokens[1].type);
-            check_eq(token_type::bool_keyword, tokens[2].type);
-            check_eq(token_type::class_keyword, tokens[3].type);
-        });
+            lexer ints("42 0 999", &symbolizer, "test.jai");
+            const auto int_tokens = ints.tokenize();
+            check_eq(42, int_tokens[0].int_value);
+            check_eq(0, int_tokens[1].int_value);
+            check_eq(999, int_tokens[2].int_value);
 
-        test("integer_literals", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("42 0 999", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(4), tokens.size());
-            check_eq(token_type::integer_literal, tokens[0].type);
-            check_eq(42, tokens[0].int_value);
-            check_eq(token_type::integer_literal, tokens[1].type);
-            check_eq(0, tokens[1].int_value);
-            check_eq(token_type::integer_literal, tokens[2].type);
-            check_eq(999, tokens[2].int_value);
+            lexer strings(R"("hello" "world" "hello\nworld")", &symbolizer, "test.jai");
+            const auto string_tokens = strings.tokenize();
+            check_eq(std::string("hello"), string_tokens[0].string_value);
+            check_eq(std::string("world"), string_tokens[1].string_value);
+            check_eq(std::string("hello\nworld"), string_tokens[2].string_value);
+
+            lexer chars("'a' '\\n' '0'", &symbolizer, "test.jai");
+            const auto char_tokens = chars.tokenize();
+            check_eq('a', char_tokens[0].char_value);
+            check_eq('\n', char_tokens[1].char_value);
+            check_eq('0', char_tokens[2].char_value);
         });
 
         test("float_literals", [this]() {
@@ -89,93 +102,6 @@ public:
             check_eq(token_type::question, rest[4].type);
             check_eq(token_type::float_literal, rest[5].type);
         });
-
-        test("string_literals", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex(R"("hello" "world" "hello\nworld")", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(4), tokens.size());
-            check_eq(token_type::string_literal, tokens[0].type);
-            check_eq(std::string("hello"), tokens[0].string_value);
-            check_eq(token_type::string_literal, tokens[1].type);
-            check_eq(std::string("world"), tokens[1].string_value);
-            check_eq(token_type::string_literal, tokens[2].type);
-            check_eq(std::string("hello\nworld"), tokens[2].string_value);
-        });
-
-        test("character_literals", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("'a' '\\n' '0'", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(4), tokens.size());
-            check_eq(token_type::char_literal, tokens[0].type);
-            check_eq('a', tokens[0].char_value);
-            check_eq(token_type::char_literal, tokens[1].type);
-            check_eq('\n', tokens[1].char_value);
-            check_eq(token_type::char_literal, tokens[2].type);
-            check_eq('0', tokens[2].char_value);
-        });
-
-        test("boolean_keywords", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("true false", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(3), tokens.size());
-            check_eq(token_type::true_keyword, tokens[0].type);
-            check_eq(token_type::false_keyword, tokens[1].type);
-        });
-
-        test("operators", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("+ - * / % == != < > <= >= && || !", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            
-            // Check that all operator tokens are present (excluding EOF)
-            check(tokens.size() > 13);
-            check_eq(token_type::plus, tokens[0].type);
-            check_eq(token_type::minus, tokens[1].type);
-            check_eq(token_type::star, tokens[2].type);
-            check_eq(token_type::slash, tokens[3].type);
-            check_eq(token_type::percent, tokens[4].type);
-            check_eq(token_type::equal_equal, tokens[5].type);
-            check_eq(token_type::bang_equal, tokens[6].type);
-            check_eq(token_type::less, tokens[7].type);
-            check_eq(token_type::greater, tokens[8].type);
-            check_eq(token_type::less_equal, tokens[9].type);
-            check_eq(token_type::greater_equal, tokens[10].type);
-            check_eq(token_type::ampersand_ampersand, tokens[11].type);
-            check_eq(token_type::pipe_pipe, tokens[12].type);
-            check_eq(token_type::bang, tokens[13].type);
-        });
-
-        test("compound_assignments", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("+= -= *= /= %=", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(6), tokens.size());
-            check_eq(token_type::plus_equal, tokens[0].type);
-            check_eq(token_type::minus_equal, tokens[1].type);
-            check_eq(token_type::star_equal, tokens[2].type);
-            check_eq(token_type::slash_equal, tokens[3].type);
-            check_eq(token_type::percent_equal, tokens[4].type);
-        });
-
-        test("delimiters", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("( ) { } [ ] ; ,", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(std::size_t(9), tokens.size());
-            check_eq(token_type::left_paren, tokens[0].type);
-            check_eq(token_type::right_paren, tokens[1].type);
-            check_eq(token_type::left_brace, tokens[2].type);
-            check_eq(token_type::right_brace, tokens[3].type);
-            check_eq(token_type::left_bracket, tokens[4].type);
-            check_eq(token_type::right_bracket, tokens[5].type);
-            check_eq(token_type::semicolon, tokens[6].type);
-            check_eq(token_type::comma, tokens[7].type);
-        });
-
-        // --- Encoding / line-ending handling ---------------------------------
 
         test("utf8_bom_stripped_at_position_zero", [this]() {
             // A leading UTF-8 BOM is invisible: the same tokens as the un-BOM'd source,
@@ -246,51 +172,34 @@ public:
             check_eq((int64_t)3, engine->execute("#!/usr/bin/env jaiscript\n1 + 2").as_int());
         });
 
-        test("utf16_le_bom_is_a_clear_encoding_error", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("\xFF\xFE" "foo", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(token_type::error, tokens[0].type);
-            check_eq(std::string("UTF-16 encoding is not supported - save the file as UTF-8"),
-                     std::string(tokens[0].lexeme));
-            check_eq(std::size_t(1), tokens[0].location.line);
-            check_eq(std::size_t(1), tokens[0].location.column);
-            // Rest of the file is consumed: the error is followed by eof, not more errors.
-            check_eq(token_type::eof, tokens[1].type);
+        test("a_utf16_bom_is_a_clear_encoding_error", [this]() {
+            const char* rows[][1] = {{"\xFF\xFE" "foo"}, {"\xFE\xFF" "foo"}};   // little- and big-endian
+            for (const auto& row : rows) {
+                string_symbolizer symbolizer;
+                lexer lex(row[0], &symbolizer, "test.jai");
+                auto tokens = lex.tokenize();
+                check_eq(token_type::error, tokens[0].type);
+                check_eq(std::string("UTF-16 encoding is not supported - save the file as UTF-8"), std::string(tokens[0].lexeme));
+                check_eq(std::size_t(1), tokens[0].location.line);
+                check_eq(std::size_t(1), tokens[0].location.column);
+                // Rest of the file is consumed: the error is followed by eof, not more errors.
+                check_eq(token_type::eof, tokens[1].type);
+            }
         });
 
-        test("utf16_be_bom_is_a_clear_encoding_error", [this]() {
-            string_symbolizer symbolizer;
-            lexer lex("\xFE\xFF" "foo", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            check_eq(token_type::error, tokens[0].type);
-            check_eq(std::string("UTF-16 encoding is not supported - save the file as UTF-8"),
-                     std::string(tokens[0].lexeme));
-            check_eq(std::size_t(1), tokens[0].location.line);
-            check_eq(std::size_t(1), tokens[0].location.column);
-        });
-
-        test("cr_only_line_endings_report_correct_line", [this]() {
-            // Classic-Mac CR-only source: the deliberate bad char sits on line 3, and the
-            // lexer must report line 3 (pre-fix it reported everything at line 1).
-            string_symbolizer symbolizer;
-            lexer lex("a\rb\r@", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            const token* err = nullptr;
-            for (auto& t : tokens) if (t.type == token_type::error) { err = &t; break; }
-            check(err != nullptr);
-            check_eq(std::size_t(3), err->location.line);
-        });
-
-        test("crlf_line_endings_are_not_double_counted", [this]() {
-            // CRLF must count as ONE newline: the bad char on line 3 reports line 3, not 5.
-            string_symbolizer symbolizer;
-            lexer lex("a\r\nb\r\n@", &symbolizer, "test.jai");
-            auto tokens = lex.tokenize();
-            const token* err = nullptr;
-            for (auto& t : tokens) if (t.type == token_type::error) { err = &t; break; }
-            check(err != nullptr);
-            check_eq(std::size_t(3), err->location.line);
+        test("cr_only_and_crlf_line_endings_count_one_line_each", [this]() {
+            // the bad char sits on line 3 in both: CR-only counts each CR (it once reported line 1), CRLF counts once (not 5)
+            for (const char* source : {"a\rb\r@", "a\r\nb\r\n@"}) {
+                string_symbolizer symbolizer;
+                lexer lex(source, &symbolizer, "test.jai");
+                auto tokens = lex.tokenize();
+                const token* err = nullptr;
+                for (auto& t : tokens) {
+                    if (t.type == token_type::error) { err = &t; break; }
+                }
+                check(err != nullptr);
+                check_eq(std::size_t(3), err->location.line);
+            }
         });
 
         test("utf8_bom_executes_identically", [this]() {

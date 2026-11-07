@@ -5,6 +5,7 @@
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/detail/ast.hpp>
 #include <jaiscript/detail/ast_serializer.hpp>
+#include "../case_table.hpp"
 
 using namespace jai::foundry;
 
@@ -87,79 +88,78 @@ public:
             check_eq(std::string("A&"), ref->type->type_name);
         });
 
-        test("expression_literals", [this]() {
-            check_parse_succeeds("42;");
-            check_parse_succeeds("3.14;");
-            check_parse_succeeds("\"hello\";");
-            check_parse_succeeds("'x';");
-            check_parse_succeeds("true;");
-            check_parse_succeeds("false;");
-            check_parse_succeeds("null;");
-        });
-
-        test("expression_identifiers", [this]() {
-            check_parse_succeeds("x;");
-            check_parse_succeeds("foo_bar;");
-            check_parse_succeeds("_private;");
-        });
-
-        test("binary_operators", [this]() {
-            check_parse_succeeds("1 + 2;");
-            check_parse_succeeds("x * y;");
-            check_parse_succeeds("a && b || c;");
-            check_parse_succeeds("x == y;");
-            check_parse_succeeds("a < b;");
-        });
-
-        test("unary_operators", [this]() {
-            check_parse_succeeds("-x;");
-            check_parse_succeeds("!flag;");
-            check_parse_succeeds("++i;");
-            check_parse_succeeds("--count;");
-            check_parse_fails("&value;");   // no address-of: the parser names auto& and T& parameters instead
-        });
-
-        test("assignment_operators", [this]() {
-            check_parse_succeeds("x = 42;");
-            check_parse_succeeds("y += 10;");
-            check_parse_succeeds("z *= 2;");
-        });
-
-        test("ternary_operator", [this]() {
-            check_parse_succeeds("x ? y : z;");
-            check_parse_succeeds("a > b ? a : b;");
-            check_parse_succeeds("flag ? 1 : 0;");
-        });
-
-        test("parenthesized_expressions", [this]() {
-            check_parse_succeeds("(42);");
-            check_parse_succeeds("(x + y) * z;");
-            check_parse_succeeds("((a + b) * c) / d;");
-        });
-
-        test("function_calls", [this]() {
-            check_parse_succeeds("foo();");
-            check_parse_succeeds("bar(x);");
-            check_parse_succeeds("baz(a, b, c);");
-            check_parse_succeeds("nested(func(x));");
-        });
-
-        test("member_access", [this]() {
-            check_parse_succeeds("obj.property;");
-            check_parse_succeeds("ptr->member;");
-            check_parse_succeeds("nested.obj.prop;");
-        });
-
-        test("array_access", [this]() {
-            check_parse_succeeds("arr[0];");
-            check_parse_succeeds("matrix[i][j];");
-            // Note: map["key"] requires identifier 'map' to be defined
-        });
-
-        test("array_literals", [this]() {
-            check_parse_succeeds("[1, 2, 3];");
-            check_parse_succeeds("[];");
-            check_parse_succeeds("[x, y + z, func()];");
+        test("every_expression_and_statement_form_parses_and_malformed_ones_fail", [this]() {
+            const std::pair<const char*, bool> rows[] = {   // {code, parses}
+                {"42;", true},
+                {"3.14;", true},
+                {"\"hello\";", true},
+                {"'x';", true},
+                {"true;", true},
+                {"false;", true},
+                {"null;", true},
+                {"x;", true},
+                {"foo_bar;", true},
+                {"_private;", true},
+                {"1 + 2;", true},
+                {"x * y;", true},
+                {"a && b || c;", true},
+                {"x == y;", true},
+                {"a < b;", true},
+                {"-x;", true},
+                {"!flag;", true},
+                {"++i;", true},
+                {"--count;", true},
+                {"&value;", false},   // no address-of: the parser names auto& and T& parameters instead
+                {"x = 42;", true},
+                {"y += 10;", true},
+                {"z *= 2;", true},
+                {"x ? y : z;", true},
+                {"a > b ? a : b;", true},
+                {"flag ? 1 : 0;", true},
+                {"(42);", true},
+                {"(x + y) * z;", true},
+                {"((a + b) * c) / d;", true},
+                {"foo();", true},
+                {"bar(x);", true},
+                {"baz(a, b, c);", true},
+                {"nested(func(x));", true},
+                {"obj.property;", true},
+                {"ptr->member;", true},
+                {"nested.obj.prop;", true},
+                {"arr[0];", true},
+                {"matrix[i][j];", true},
+                {"[1, 2, 3];", true},
+                {"[];", true},
+                {"[x, y + z, func()];", true},
+                {"var x = 42;", true},
+                {"let y = \"hello\";", true},
+                {"auto w = getValue();", true},
+                {"function add(auto a, auto b) -> auto { return a + b; }", true},
+                {"auto multiply(auto x, auto y) -> auto { return x * y; }", true},
+                {"function getValue() -> auto { return 42; }", true},
+                {"if (x > 0) { print(x); }", true},
+                {"if (flag) doSomething(); else doOther();", true},
+                {"while (condition) { update(); }", true},
+                {"for (var i = 0; i < 10; ++i) { work(i); }", true},
+                {"return;", true},
+                {"return 42;", true},
+                {"return x + y;", true},
+                {"auto lambda = [](){ return 42; };", true},
+                {"auto typed = [](auto x) -> auto { return x * 2; };", true},
+                {"result = (a + b) * c.getValue() - arr[i]->member;", true},
+                {"bool check = x > 0 && func(y) != null;", true},
+                {"auto final = condition ? getValue() : getDefault();", true},
+                {"42 +;", false},
+                {"if (x > 0;", false},
+                {"return return;", false},
+            };
+            check_each(rows, [&](const auto& row) {
+                if (row.second) {
+                    check_parse_succeeds(row.first);
+                } else {
+                    check_parse_fails(row.first);
+                }
+            });
         });
 
         test("map_literals", [this]() {
@@ -177,25 +177,6 @@ public:
                        errors.empty() ? std::string("no error") : errors[0]);
         });
 
-        test("variable_declarations", [this]() {
-            check_parse_succeeds("var x = 42;");
-            check_parse_succeeds("let y = \"hello\";");
-            check_parse_succeeds("auto w = getValue();");
-        });
-
-        test("function_declarations", [this]() {
-            check_parse_succeeds("function add(auto a, auto b) -> auto { return a + b; }");
-            check_parse_succeeds("auto multiply(auto x, auto y) -> auto { return x * y; }");
-            check_parse_succeeds("function getValue() -> auto { return 42; }");
-        });
-
-        test("control_flow_statements", [this]() {
-            check_parse_succeeds("if (x > 0) { print(x); }");
-            check_parse_succeeds("if (flag) doSomething(); else doOther();");
-            check_parse_succeeds("while (condition) { update(); }");
-            check_parse_succeeds("for (var i = 0; i < 10; ++i) { work(i); }");
-        });
-
         test("break_continue_statements", [this]() {
             check_parse_succeeds("while (true) { if (done) break; }");
             check_parse_succeeds("for (var i = 0; i < 10; ++i) { if (skip) continue; work(); }");
@@ -209,32 +190,6 @@ public:
                 const auto errors = collect_parse_errors(source);
                 check_true(!errors.empty() && errors[0].find("outside a loop") != std::string::npos, std::string(source) + ": " + (errors.empty() ? std::string("no error") : errors[0]));
             }
-        });
-
-        test("return_statements", [this]() {
-            check_parse_succeeds("return;");
-            check_parse_succeeds("return 42;");
-            check_parse_succeeds("return x + y;");
-        });
-
-        test("lambda_expressions", [this]() {
-            check_parse_succeeds("auto lambda = [](){ return 42; };");
-            check_parse_succeeds("auto typed = [](auto x) -> auto { return x * 2; };");
-            // Note: capture lists [x, y] and [&x] not yet implemented
-        });
-
-        test("complex_expressions", [this]() {
-            check_parse_succeeds("result = (a + b) * c.getValue() - arr[i]->member;");
-            check_parse_succeeds("bool check = x > 0 && func(y) != null;");
-            check_parse_succeeds("auto final = condition ? getValue() : getDefault();");
-        });
-
-        test("error_cases", [this]() {
-            check_parse_fails("42 +;");
-            check_parse_fails("if (x > 0;");
-            // "function () { }" is legal since the anonymous-function-expression desugar
-            // Note: "var = 42;" is valid syntax - undeclared variable errors happen at runtime
-            check_parse_fails("return return;");
         });
 
         // 'map'/'array' are hard keywords by grammar contract outside member names; using one as a name

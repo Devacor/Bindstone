@@ -20,9 +20,9 @@
 //            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
 //           jaiscript jaidoom.jai -- uncapped    (no frame cap: the camera eases between 35 Hz tics; U toggles in game)
-//           jaiscript jaidoom.jai -- --pix sext  (2x3 sextant pixels per cell, the default in Windows Terminal, whose
-//              font has them; --pix half keeps the 1x2 half blocks every terminal font draws; the menu's
-//              OPTIONS -> HIGH DETAIL sets either for later runs, a --pix on the command line wins for its run)
+//           jaiscript jaidoom.jai -- --pix half  (1x2 half blocks every terminal font draws, for a font without the
+//              default 2x3 sextants; the menu's OPTIONS -> HIGH DETAIL sets either for later runs, and a --pix
+//              on the command line wins for its run)
 //
 // Optional: jaiscript jaidoom.jai -- <wad> <map>       (MAPxx names work: -- freedoom2 MAP01)
 //           jaiscript jaidoom.jai -- doom2.wad mypack.wad   (further WADs merge over the first; a
@@ -55,7 +55,7 @@ import "boot.jai";
 
 float TICK_MS = 1000.0 / 35.0;
 bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
-string PIX_MODE = "";        // --pix half|sext, else the OPTIONS choice; "" = sextants where the font has them (Windows Terminal)
+string PIX_MODE = "";        // --pix half|sext, else the OPTIONS choice; "" = sextants within the pixel budget
 string PIX_SETTING = "";     // the OPTIONS render mode, saved with the config; "" until it is changed
 float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
 bool RUN_TOGGLE = false;
@@ -614,14 +614,14 @@ int SCREEN_COLS = 0;
 int SCREEN_ROWS = 0;
 string VIEW_HOME = "";
 
-// the view fills the console: sextants where the font has them and they fit the budget, half blocks otherwise, and a
+// the view fills the console: sextants where they fit the budget, half blocks otherwise (or by choice), and a
 // screen too large for even those gets the largest view inside the budget, centered
 function screen_fit() -> void {
 	SCREEN_COLS = term_cols();
 	SCREEN_ROWS = term_rows();
 	int cols = SCREEN_COLS > 8 ? SCREEN_COLS : 8;
 	int rows = SCREEN_ROWS > 5 ? SCREEN_ROWS - 1 : 4;   // a newline on the last row would scroll the screen
-	SEXTANTS = PIX_MODE == "sext" || (PIX_MODE == "" && env_var("WT_SESSION") != "" && cols * rows * 6 <= PIXEL_BUDGET);
+	SEXTANTS = PIX_MODE == "sext" || (PIX_MODE == "" && cols * rows * 6 <= PIXEL_BUDGET);
 	int pixels = cols * cell_w() * rows * cell_h();
 	if (pixels > PIXEL_BUDGET) {
 		float k = math::sqrt(1.0 * PIXEL_BUDGET / pixels);

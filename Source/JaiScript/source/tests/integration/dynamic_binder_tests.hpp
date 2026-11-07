@@ -55,34 +55,34 @@ struct PlainCopy {
 namespace jai::foundry::tests {
 
 // Test classes for binding
-class Point {
+class DynamicBinderPoint {
 public:
     double x, y;
 
-    Point() : x(0), y(0) {}
-    Point(double x, double y) : x(x), y(y) {}
+    DynamicBinderPoint() : x(0), y(0) {}
+    DynamicBinderPoint(double x, double y) : x(x), y(y) {}
 
     double length() const { return std::sqrt(x * x + y * y); }
     void move_by(double dx, double dy) { x += dx; y += dy; }
 
     // Arithmetic operators
-    Point operator+(const Point& other) const { return Point(x + other.x, y + other.y); }
-    Point operator-(const Point& other) const { return Point(x - other.x, y - other.y); }
-    Point operator*(double scalar) const { return Point(x * scalar, y * scalar); }
-    Point operator/(double scalar) const { return Point(x / scalar, y / scalar); }
+    DynamicBinderPoint operator+(const DynamicBinderPoint& other) const { return DynamicBinderPoint(x + other.x, y + other.y); }
+    DynamicBinderPoint operator-(const DynamicBinderPoint& other) const { return DynamicBinderPoint(x - other.x, y - other.y); }
+    DynamicBinderPoint operator*(double scalar) const { return DynamicBinderPoint(x * scalar, y * scalar); }
+    DynamicBinderPoint operator/(double scalar) const { return DynamicBinderPoint(x / scalar, y / scalar); }
 
     // Comparison operators
-    bool operator==(const Point& other) const { return x == other.x && y == other.y; }
-    bool operator<(const Point& other) const { return length() < other.length(); }
-    bool operator<=(const Point& other) const { return length() <= other.length(); }
-    bool operator>(const Point& other) const { return length() > other.length(); }
-    bool operator>=(const Point& other) const { return length() >= other.length(); }
+    bool operator==(const DynamicBinderPoint& other) const { return x == other.x && y == other.y; }
+    bool operator<(const DynamicBinderPoint& other) const { return length() < other.length(); }
+    bool operator<=(const DynamicBinderPoint& other) const { return length() <= other.length(); }
+    bool operator>(const DynamicBinderPoint& other) const { return length() > other.length(); }
+    bool operator>=(const DynamicBinderPoint& other) const { return length() >= other.length(); }
 
-    static Point origin() { return Point(0, 0); }
+    static DynamicBinderPoint origin() { return DynamicBinderPoint(0, 0); }
     static int point_count;
 };
 
-int Point::point_count = 0;
+int DynamicBinderPoint::point_count = 0;
 
 // Test class using JAI_PROPERTY macros for auto_bind property tests
 class PropertyOwnerTest : public property_owner<PropertyOwnerTest> {
@@ -275,7 +275,7 @@ public:
     
     void pre_test() override {
         // Reset static state before each test
-        Point::point_count = 0;
+        DynamicBinderPoint::point_count = 0;
     }
     
     // LaneSchemaOwner bound with two methods, and objects the host makes and keeps: held() a LaneSchemaOwner,
@@ -1097,12 +1097,12 @@ public:
         test("basic_class_registration", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<>()
                 .constructor<double, double>()
-                .method("length", &Point::length)
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .method("length", &DynamicBinderPoint::length)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             auto result = eng->execute("auto p = Point(3, 4); p.length()");
@@ -1112,11 +1112,11 @@ public:
         test("constructors", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<>()
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             // Default constructor
@@ -1133,11 +1133,11 @@ public:
         test("methods", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .method("move_by", &Point::move_by)
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .method("move_by", &DynamicBinderPoint::move_by)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             eng->execute("auto p = Point(1, 2);");
@@ -1149,10 +1149,10 @@ public:
         test("properties", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             eng->execute("auto p = Point();");
@@ -1165,11 +1165,11 @@ public:
         test("operator_overloading", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .method("+", &Point::operator+)
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .method("+", &DynamicBinderPoint::operator+)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             eng->execute("auto p1 = Point(1, 2);");
@@ -1187,21 +1187,21 @@ public:
             int64_t scale = 3;
             auto scaled = [&scale](int64_t n) { return n * scale; };
             auto scaled_copy = [scale](int64_t n) { return n * scale; };
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .static_method("origin", &Point::origin)
-                .static_method("shared", []() { return std::make_shared<Point>(1, 2); })
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .static_method("origin", &DynamicBinderPoint::origin)
+                .static_method("shared", []() { return std::make_shared<DynamicBinderPoint>(1, 2); })
                 .static_method("range", [](int64_t n) { std::vector<int64_t> result; for (int64_t i = 0; i < n; ++i) { result.push_back(i); } return result; })
                 .static_method("sum", [](std::vector<int64_t> values) { int64_t result = 0; for (int64_t v : values) { result += v; } return result; })
                 .static_method("apply", [](std::function<int64_t(int64_t)> f) { return f(20); })
-                .static_method("distance", [](const Point& a, const Point& b) { return (a - b).length(); })
+                .static_method("distance", [](const DynamicBinderPoint& a, const DynamicBinderPoint& b) { return (a - b).length(); })
                 .static_method("scaled", scaled)
                 .static_method("scaled_copy", scaled_copy)
                 .build();
             scale = 100;
-            eng->add_function("Point_origin", &Point::origin);
+            eng->add_function("Point_origin", &DynamicBinderPoint::origin);
 
             eng->execute("auto p = Point_origin();");
             check_eq(eng->execute("p.x").as<double>(), 0.0);
@@ -1224,19 +1224,19 @@ public:
         test("static_properties", [this]() {
             auto eng = make_engine();
 
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<>()
                 .build();
 
             // Register static property as global reference (not copy!)
             // Using add_global_ref ensures script modifications update the C++ static
-            Point::point_count = 42;
-            eng->add_global_ref("Point_count", Point::point_count);
+            DynamicBinderPoint::point_count = 42;
+            eng->add_global_ref("Point_count", DynamicBinderPoint::point_count);
 
             check_eq(eng->execute("Point_count").as<int>(), 42);
 
             eng->execute("Point_count = 100;");
-            check_eq(Point::point_count, 100);
+            check_eq(DynamicBinderPoint::point_count, 100);
         });
         
         test("method_chaining", [this]() {
@@ -1258,16 +1258,16 @@ public:
         test("lambda_methods", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("distance_to", [](const Point& self, const Point& other) {
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("distance_to", [](const DynamicBinderPoint& self, const DynamicBinderPoint& other) {
                     double dx = self.x - other.x;
                     double dy = self.y - other.y;
                     return std::sqrt(dx * dx + dy * dy);
                 })
-                .method("scale", [](Point& self, double factor) -> Point& {
+                .method("scale", [](DynamicBinderPoint& self, double factor) -> DynamicBinderPoint& {
                     self.x *= factor;
                     self.y *= factor;
                     return self;
@@ -1287,14 +1287,14 @@ public:
         test("custom_getters_setters", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("length_squared", [](const Point& self) {
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("length_squared", [](const DynamicBinderPoint& self) {
                     return self.x * self.x + self.y * self.y;
                 })
-                .method("set_both", [](Point& self, double val) -> Point& {
+                .method("set_both", [](DynamicBinderPoint& self, double val) -> DynamicBinderPoint& {
                     self.x = val;
                     self.y = val;
                     return self;
@@ -1312,19 +1312,19 @@ public:
         test("shared_ptr_support", [this]() {
             auto eng = make_engine();
             
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
                 .build();
             
             // Function that returns shared_ptr
             eng->add_function("make_shared_point", [](double x, double y) {
-                return std::make_shared<Point>(x, y);
+                return std::make_shared<DynamicBinderPoint>(x, y);
             });
             
             // Function that accepts shared_ptr
-            eng->add_function("point_length", [](std::shared_ptr<Point> p) {
+            eng->add_function("point_length", [](std::shared_ptr<DynamicBinderPoint> p) {
                 return p->length();
             });
             
@@ -1445,11 +1445,11 @@ public:
         test("equality_operator", [this]() {
             auto eng = make_engine();
 
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("==", &Point::operator==)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("==", &DynamicBinderPoint::operator==)
                 .build();
 
             // Same values should be equal
@@ -1501,15 +1501,15 @@ public:
             auto eng = make_engine();
 
             // Register Point with all comparison operators
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("length", &Point::length)
-                .method("<", &Point::operator<)
-                .method("<=", &Point::operator<=)
-                .method(">", &Point::operator>)
-                .method(">=", &Point::operator>=)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("length", &DynamicBinderPoint::length)
+                .method("<", &DynamicBinderPoint::operator<)
+                .method("<=", &DynamicBinderPoint::operator<=)
+                .method(">", &DynamicBinderPoint::operator>)
+                .method(">=", &DynamicBinderPoint::operator>=)
                 .build();
 
             // Create points with different lengths: (3,4)=5, (0,0)=0, (6,8)=10
@@ -1564,12 +1564,12 @@ public:
             auto eng = make_engine();
 
             // Register Point with arithmetic operators
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("+", &Point::operator+)
-                .method("-", &Point::operator-)
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("+", &DynamicBinderPoint::operator+)
+                .method("-", &DynamicBinderPoint::operator-)
                 .build();
 
             // Test addition
@@ -1622,15 +1622,15 @@ public:
             auto eng = make_engine();
 
             // Register Point with arithmetic operators via lambda
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("*", [](const Point& self, double scalar) {
-                    return Point(self.x * scalar, self.y * scalar);
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("*", [](const DynamicBinderPoint& self, double scalar) {
+                    return DynamicBinderPoint(self.x * scalar, self.y * scalar);
                 })
-                .method("/", [](const Point& self, double scalar) {
-                    return Point(self.x / scalar, self.y / scalar);
+                .method("/", [](const DynamicBinderPoint& self, double scalar) {
+                    return DynamicBinderPoint(self.x / scalar, self.y / scalar);
                 })
                 .build();
 
@@ -1651,14 +1651,14 @@ public:
             auto eng = make_engine();
 
             // Register Point with arithmetic operators
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .property("x", &Point::x)
-                .property("y", &Point::y)
-                .method("+", &Point::operator+)
-                .method("-", &Point::operator-)
-                .method("*", static_cast<Point(Point::*)(double) const>(&Point::operator*))
-                .method("/", static_cast<Point(Point::*)(double) const>(&Point::operator/))
+                .property("x", &DynamicBinderPoint::x)
+                .property("y", &DynamicBinderPoint::y)
+                .method("+", &DynamicBinderPoint::operator+)
+                .method("-", &DynamicBinderPoint::operator-)
+                .method("*", static_cast<DynamicBinderPoint(DynamicBinderPoint::*)(double) const>(&DynamicBinderPoint::operator*))
+                .method("/", static_cast<DynamicBinderPoint(DynamicBinderPoint::*)(double) const>(&DynamicBinderPoint::operator/))
                 .build();
 
             // Test += operator
@@ -2397,26 +2397,26 @@ public:
         test("bare_local_object_args_to_cpp_boundaries", [this]() {
             auto eng = make_engine();
 
-            dynamic_binder<Point>(*eng, "Point")
+            dynamic_binder<DynamicBinderPoint>(*eng, "Point")
                 .constructor<double, double>()
-                .method("length", &Point::length)
-                .method("plus", [](Point& a_self, const Point& a_other) { return Point(a_self.x + a_other.x, a_self.y + a_other.y); })
-                .method("shared_x", [](Point& a_self, const std::shared_ptr<Point>& a_other) { (void)a_self; return a_other ? a_other->x : -1.0; })
-                .method("shared_pair", [](Point& a_self) {
+                .method("length", &DynamicBinderPoint::length)
+                .method("plus", [](DynamicBinderPoint& a_self, const DynamicBinderPoint& a_other) { return DynamicBinderPoint(a_self.x + a_other.x, a_self.y + a_other.y); })
+                .method("shared_x", [](DynamicBinderPoint& a_self, const std::shared_ptr<DynamicBinderPoint>& a_other) { (void)a_self; return a_other ? a_other->x : -1.0; })
+                .method("shared_pair", [](DynamicBinderPoint& a_self) {
                     (void)a_self;
-                    return std::vector<std::shared_ptr<Point>>{ std::make_shared<Point>(3.0, 4.0), std::make_shared<Point>(6.0, 8.0) };
+                    return std::vector<std::shared_ptr<DynamicBinderPoint>>{ std::make_shared<DynamicBinderPoint>(3.0, 4.0), std::make_shared<DynamicBinderPoint>(6.0, 8.0) };
                 })
                 .build();
-            eng->add_function("free_length", [](const std::shared_ptr<Point>& a_point) { return a_point ? a_point->length() : -1.0; });
-            eng->add_global("shared_point", eng->make_object(std::make_shared<Point>(6.0, 8.0)));
+            eng->add_function("free_length", [](const std::shared_ptr<DynamicBinderPoint>& a_point) { return a_point ? a_point->length() : -1.0; });
+            eng->add_global("shared_point", eng->make_object(std::make_shared<DynamicBinderPoint>(6.0, 8.0)));
             // To-script mirror: a const shared_ptr<T>& RETURN must route to the shared_ptr
             // specialization, not a registry lookup of a class named "std::shared_ptr<T>".
-            auto sharedOut = std::make_shared<Point>(6.0, 8.0);
-            eng->add_function("shared_ref_out", [sharedOut]() -> const std::shared_ptr<Point>& { return sharedOut; });
+            auto sharedOut = std::make_shared<DynamicBinderPoint>(6.0, 8.0);
+            eng->add_function("shared_ref_out", [sharedOut]() -> const std::shared_ptr<DynamicBinderPoint>& { return sharedOut; });
             // NON-const lvalue handle through make_value: the universal-reference overload
             // outranks const shared_ptr<T>& here — the funnel must still share the pointee
             // (the sim's creature-signal shape).
-            auto lvalueHandle = std::make_shared<Point>(3.0, 4.0);
+            auto lvalueHandle = std::make_shared<DynamicBinderPoint>(3.0, 4.0);
             eng->add_global("lvalue_handle", eng->make_value(lvalueHandle));
 
             double diagonal = std::sqrt(4.0 * 4.0 + 6.0 * 6.0);

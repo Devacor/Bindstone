@@ -865,6 +865,13 @@ public:
 				jai::stdlib::register_all(*eng);
 				check_eq(row.second, eng->execute(row.first).as<int>());
 			});
+			// a global the method already called resolves again from inside the lambda, beside the field it reads
+			const std::pair<const char*, const char*> printed[] = {
+				{"class TestClass { auto value; TestClass(auto v) { value = v; } "
+				 "void call_lambda() { print(\"start\"); auto lambda = [this]() { print(`value = ${value}`); return value; }; print(lambda()); } } "
+				 "TestClass(42).call_lambda();", "start\nvalue = 42\n42"},
+			};
+			check_outputs(printed);
 		});
 	}
 };

@@ -1678,8 +1678,15 @@ class Ossuary : Scene {
 
 	void render(var& grid) override {
 		set_world(tt);
-		SK_W = w;
-		SK_H = h;
+		// the rays trace at most about 9,000 pixels (a sextant grid is 2.25 times a half-block
+		// one) and the picture scales up to the grid; the web, the moth's dust and the
+		// particles draw over it at full size
+		float trace_k = math::sqrt(9000.0 / (w * h));
+		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
+		int tw = itrunc(w * trace_k);
+		int th = itrunc(h * trace_k);
+		SK_W = tw;
+		SK_H = th;
 		SK_FLICK = 0.7 * math::sin(tt * 17.0) * math::sin(tt * 5.3);
 		if (tt > t_wrap1) { SK_FLICK = SK_FLICK * 0.4 + 0.9; }
 		float bob = 0.2 + 0.018 * math::sin(tt * 11.0);
@@ -1828,9 +1835,9 @@ class Ossuary : Scene {
 		float kz = upz * 0.75 - lz * 0.45 + SK_RZ * 0.35;
 		float kl = 1.0 / math::sqrt(kx * kx + ky * ky + kz * kz);
 		SK_KX = kx * kl; SK_KY = ky * kl; SK_KZ = kz * kl;
-		if (SK_ROWS.size() != h) {
+		if (SK_ROWS.size() != th) {
 			SK_ROWS = [];
-			for (int r = 0; r < h; ++r) { SK_ROWS.push(r); }
+			for (int r = 0; r < th; ++r) { SK_ROWS.push(r); }
 		}
 		var rows = parallel_transform(SK_ROWS, sk_row);
 		if (depth.size() != w * h) {
@@ -1839,9 +1846,9 @@ class Ossuary : Scene {
 		}
 		int idx = 0;
 		for (int y = 0; y < h; ++y) {
-			var& row = rows[y];
+			var& row = rows[y * th / h];
 			for (int x = 0; x < w; ++x) {
-				int v = row[x];
+				int v = row[x * tw / w];
 				grid[idx] = v % 1024;
 				depth[idx] = v / 1024;
 				idx = idx + 1;

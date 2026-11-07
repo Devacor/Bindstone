@@ -199,9 +199,9 @@ Every scene in it holds 30 fps on the VM with room to spare (mean 2.7 ms, worst 
 the interpreter each stays under 19 ms (mean 14.7 ms).
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the eleven scene entries: shim stream hash `1780415902` on
+  every one of the eleven scene entries: shim stream hash `367563470` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `72ddeeab3825a36b` (the host's HUD
+  `7ebf414b506dd9d9` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
@@ -210,27 +210,29 @@ the interpreter each stays under 19 ms (mean 14.7 ms).
 
 ### Scoreboard
 
-`scenes/skull_natural.jai` is OSSUARY written the way a user would write it:
-the same algorithms and the same frames as `skull.jai` (scene hash
-`1aba3d7537895828`), without the spellings chosen to fit the VM's fast paths
-(one `sk_world`, the warp's amplitude read left of its sine, ternary folds,
+`ossuary_bench/` keeps the original OSSUARY (the skull-spider on the morphing
+gyroid, before it spun its web) as a frozen pair: `skull_shaped.jai`, tuned for
+the VM, and `skull_natural.jai`, the same algorithms and the same frames written
+the way a user would write them (scene hash `afd81a7d28930a94` from both at
+`--pix half --workers 1`), without the spellings chosen to fit the VM's fast
+paths (one `sk_world`, the warp's amplitude read left of its sine, ternary folds,
 one `sk_crown` holding its flames, the row pushing `sk_trace`'s result). The
-ratio of the two files' serial OSSUARY rows, natural over shaped, measures how
-general the VM's fast path is: at 1.0 plain code runs as fast as code written
-for the VM. The host loads `skull.jai` only, so run the natural file from a
-copy of the scenes directory:
+ratio of their serial OSSUARY rows, natural over shaped, measures how general
+the VM's fast path is: at 1.0 plain code runs as fast as code written for the
+VM. Drop either one into a copy of the scenes directory as `skull.jai`:
 
 ```
-cp -r scenes /tmp/natural_scenes
-cp scenes/skull_natural.jai /tmp/natural_scenes/skull.jai
-jai_demoreel --perf 30 --backend vm --workers 1                               # shaped
-jai_demoreel --perf 30 --backend vm --workers 1 --scenes /tmp/natural_scenes  # natural
+cp -r scenes /tmp/shaped_scenes && cp ossuary_bench/skull_shaped.jai /tmp/shaped_scenes/skull.jai
+cp -r scenes /tmp/natural_scenes && cp ossuary_bench/skull_natural.jai /tmp/natural_scenes/skull.jai
+jai_demoreel --perf 30 --scene 8 --backend vm --workers 1 --pix half --scenes /tmp/shaped_scenes   # shaped
+jai_demoreel --perf 30 --scene 8 --backend vm --workers 1 --pix half --scenes /tmp/natural_scenes  # natural
 ```
 
 ## Console performance
 
-Half-block frames carry two colors per cell: 45 KB on average, 123 KB for JULIA, whose
-cycling palette changes nearly every pixel, while GLOBHUNTER stays near 35 KB.
+Frames carry two colors per cell. At 100x40 in sextants they average about 53 KB,
+from 34 KB for CHROME to 97 KB for CANYONRUN, whose shading changes nearly every
+cell; FINALE runs from 7 KB in its slides to 115 KB under the dancing 8-cube.
 Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
 host's post-processing in `demoreel_host.cpp` is for (scenes and the `--smoke` stream
 are untouched by it, so parity hashes don't move):
@@ -247,7 +249,7 @@ are untouched by it, so parity hashes don't move):
   terminal (macOS Terminal.app, the Linux console, legacy conhost) gets the
   xterm-256 cube. Conhost also shows a one-line tip on the title card ("Windows
   Terminal renders this reel much faster"). `--truecolor` and `--256color`
-  override the choice, and `--ascii` replaces the half blocks with one density
+  override the choice, and `--ascii` replaces the block glyphs with one density
   character per cell (its brightness the cell's, its color the cell's hue at
   full value) for terminals without the block glyphs; rows carrying text keep
   their characters.

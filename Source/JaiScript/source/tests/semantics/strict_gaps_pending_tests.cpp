@@ -7,6 +7,7 @@
 #include <jaiscript/detail/lexer.hpp>
 #include <jaiscript/detail/parser.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -22,6 +23,8 @@ public:
 	}
 
 private:
+	struct source_case { const char* code; };
+
 	// the bytes of a bite no checker has seen (parsed and serialized directly), for a loader to check
 	static std::vector<uint8_t> unstamped_bite_bytes(engine& a_engine, const std::string& a_source) {
 		const auto templates = detail::engine_access::get_registered_template_types(a_engine);
@@ -34,152 +37,36 @@ private:
 	}
 
 	void rules_456_and_controls() {
-		test("control_bool_any", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(bool b = [1]; b;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
+		test("typed_slot_controls_reject_known_mismatches_and_leave_dynamic_values_alone", [this]() {
+			const std::pair<const char*, bool> cases[] = {
+				{R"jai(bool b = [1]; b;)jai", false},
+				{R"jai(string s = 42; s;)jai", true},
+				{R"jai(shared_ptr<int> p = "bad"; p;)jai", true},
+				{R"jai(weak_ptr<int> p = "bad"; p;)jai", true},
+				{R"jai(string s = "bad"; int& r = s; r;)jai", true},
+				{R"jai(var v = 1; v = "bad"; v;)jai", false},
+				{R"jai(array<int> a = [1]; var v = a; string x = v[0]; x;)jai", false},
+				{R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; v[0];)jai", false},
+				{R"jai(auto x = null; x = 1; x = "bad"; x;)jai", false},
+				{R"jai(int x = "bad"; x;)jai", true},
+				{R"jai(float x = "bad"; x;)jai", true},
+				{R"jai(char c = 65; c;)jai", true},
+				{R"jai(class C {} class D {} C c = D(); c;)jai", true},
+				{R"jai(auto x = 1; x = "bad"; x;)jai", true},
+				{R"jai(array<int> a = 1; a;)jai", true},
+				{R"jai(array<int> a = [3.9]; a[0];)jai", false},
+				{R"jai(function f = 42; f;)jai", true},
+				{R"jai(string s = "bad"; int& r = s; r = 1; s;)jai", true},
+				{R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; a[0];)jai", false},
+				{R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; array<int> b = v; b;)jai", false},
+				{R"jai(array<array<int>> a = [[1]]; var v = a; v[0][0] = "bad"; v;)jai", false},
+			};
+			check_each(cases, [&](const auto& c) {
+				auto engine = make_engine();
+				check_eq(c.second, engine->check(c.first).has_errors());
+			});
 		});
 
-		test("control_string_any", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(string s = 42; s;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());   // a string takes text only
-		});
-
-		test("control_shared_lenient", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(shared_ptr<int> p = "bad"; p;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_weak_lenient", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(weak_ptr<int> p = "bad"; p;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_reference_lenient", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(string s = "bad"; int& r = s; r;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_var_any", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(var v = 1; v = "bad"; v;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_var_typed_array_read", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; var v = a; string x = v[0]; x;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_var_typed_array_write", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; v[0];)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_auto_null", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(auto x = null; x = 1; x = "bad"; x;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_int_direct_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(int x = "bad"; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_float_direct_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(float x = "bad"; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_char_direct_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(char c = 65; c;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_object_direct_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(class C {} class D {} C c = D(); c;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_auto_direct_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(auto x = 1; x = "bad"; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_array_kind_control", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = 1; a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_container_finite_float", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [3.9]; a[0];)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_function_slot_any", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(function f = 42; f;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_reference_write", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(string s = "bad"; int& r = s; r = 1; s;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("control_var_copy_original", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; a[0];)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_var_demoted_retyped", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; var v = a; v[0] = "bad"; array<int> b = v; b;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
-
-		test("control_var_nested_demotion", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1]]; var v = a; v[0][0] = "bad"; v;)jai";
-			const auto report = engine->check(source);
-			check_false(report.has_errors());
-		});
 		test("rules_456_known_type_rejections", [this]() {
 			const char* sources[] = {
 				"class A {} class B {} shared_ptr<B> h = new B(); weak_ptr<A> w = h;",
@@ -197,8 +84,6 @@ private:
 				"namespace N { function f = 42; }",
 				"class C { static function f = null; } C::f = 42;",
 				"class C { function f = null; void bad() { f = 42; } }",
-				"class C { static function f = null; } C::f = 42;",
-				"namespace N { function f = 42; }",
 				"class A {} function f = A();",
 				"void g(function cb) {} g(42);"
 			};
@@ -323,627 +208,127 @@ private:
 	}
 
 	void element_rules() {
-		test("pending_reject_int_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<string> a = ["bad"]; int x = a[0]; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
+		test("element_reads_and_writes_report_known_type_mismatches", [this]() {
+			const source_case sources[] = {
+				{R"jai(array<string> a = ["bad"]; int x = a[0]; x;)jai"},
+				{R"jai(array<string> a = ["bad"]; float x = a[0]; x;)jai"},
+				{R"jai(array<int> a = [65]; char c = a[0]; c;)jai"},
+				{R"jai(array<int> a = ["bad"]; a;)jai"},
+				{R"jai(map<string, int> m = {{"key", "bad"}}; m;)jai"},
+				{R"jai(class C {} class D {} array<D> a = [D()]; C c = a[0]; c;)jai"},
+				{R"jai(auto x = 1; array<string> a = ["bad"]; x = a[0]; x;)jai"},
+				{R"jai(array<array<int>> a = [[1, "bad"]]; a;)jai"},
+				{R"jai(map<string, array<int>> m = {{"key", [1, "bad"]}}; m;)jai"},
+				{R"jai(map<int, array<int>> m = {{"bad", [1]}}; m;)jai"},
+				{R"jai(array<array<int>> a = [[1]]; a.push(["bad"]); a;)jai"},
+				{R"jai(array<array<int>> a = [[1]]; a[0][0] = "bad"; a;)jai"},
+				{R"jai(array<int> a = [1e30]; a;)jai"},
+				{R"jai(array<string> a = ["bad"]; int f() { return a[0]; } f();)jai"},
+				{R"jai(array<string> a = ["bad"]; int f(int x) { return x; } f(a[0]);)jai"},
+				{R"jai(class C { int x = 0; } array<string> a = ["bad"]; C c = C(); c.x = a[0]; c.x;)jai"},
+			};
+			check_each(sources, [&](const auto& c) {
+				auto engine = make_engine();
+				check_true(engine->check(c.code).has_errors());
+			});
 		});
 
-		test("pending_reject_float_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<string> a = ["bad"]; float x = a[0]; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_char_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [65]; char c = a[0]; c;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_array_element", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = ["bad"]; a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_map_value", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(map<string, int> m = {{"key", "bad"}}; m;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_object_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(class C {} class D {} array<D> a = [D()]; C c = a[0]; c;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_auto_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(auto x = 1; array<string> a = ["bad"]; x = a[0]; x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_nested_array", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1, "bad"]]; a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_nested_map_value", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(map<string, array<int>> m = {{"key", [1, "bad"]}}; m;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_nested_map_key", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(map<int, array<int>> m = {{"bad", [1]}}; m;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_nested_push", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1]]; a.push(["bad"]); a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_nested_subscript_write", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1]]; a[0][0] = "bad"; a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_container_float_overflow", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<int> a = [1e30]; a;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_int_return_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<string> a = ["bad"]; int f() { return a[0]; } f();)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_int_parameter_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(array<string> a = ["bad"]; int f(int x) { return x; } f(a[0]);)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
-
-		test("pending_reject_int_field_subscript", [this]() {
-			auto engine = make_engine();
-			const std::string source = R"jai(class C { int x = 0; } array<string> a = ["bad"]; C c = C(); c.x = a[0]; c.x;)jai";
-			const auto report = engine->check(source);
-			check_true(report.has_errors());
-		});
 	}
 
 	void element_rule_boundaries() {
-		test("rules_123_reject_00", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; a.push("bad");)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
+		test("rules_123_known_element_mismatches_reject_before_execution", [this]() {
+			const source_case sources[] = {
+				{R"jai(array<int> a = [1]; a.push("bad");)jai"},
+				{R"jai(array<int> a = [1]; a[0] = "bad";)jai"},
+				{R"jai(map<int,string> m = {{"bad","ok"}};)jai"},
+				{R"jai(array<string> a = [1];)jai"},
+				{R"jai(array<char> a = [65];)jai"},
+				{R"jai(array<array<int>> a = [[1]]; a[0] = ["bad"];)jai"},
+				{R"jai(map<string,array<int>> m = {{"a",[1]}}; m["a"][0] = "bad";)jai"},
+				{R"jai(array<map<string,int>> a = [{{"k","bad"}}];)jai"},
+				{R"jai(void take(array<int> a) {} take(["bad"]);)jai"},
+				{R"jai(array<int> give() { return ["bad"]; })jai"},
+				{R"jai(class C { array<int> a = ["bad"]; })jai"},
+				{R"jai(class C { array<int> a = [1]; } C c = C(); c.a = ["bad"];)jai"},
+				{R"jai(map<string,string> m = {{"k","bad"}}; int x = m["k"];)jai"},
+				{R"jai(void f(array<string>& a) { int x = a[0]; })jai"},
+				{R"jai(array<string> a = ["bad"]; array<string>& b = a; int x = b[0];)jai"},
+			};
+			check_each(sources, [&](const auto& c) {
+				const std::string source = c.code;
+				auto eng = make_engine();
+				const auto report = eng->check(source);
+				check_true(report.has_errors(), source);
+				bool rejected = false;
+				try { eng->execute(source); }
+				catch (const static_check_error&) { rejected = true; }
+				check_true(rejected, "known mismatch rejects before execution");
+			});
 		});
 
-		test("rules_123_reject_01", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; a[0] = "bad";)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
+		test("rules_123_floats_beyond_int_range_reject_before_execution", [this]() {
+			const source_case sources[] = {
+				{R"jai(int x = 1e30;)jai"},
+				{R"jai(int x = -1e30;)jai"},
+				{R"jai(int x = 9.223372036854776e18;)jai"},
+				{R"jai(int x = -9.223372036854778e18;)jai"},
+				{R"jai(int x = 0; x = 1e30;)jai"},
+				{R"jai(int f() { return 1e30; })jai"},
+				{R"jai(void f(int x) {} f(1e30);)jai"},
+				{R"jai(class C { int x = 1e30; })jai"},
+				{R"jai(array<int> a = [1]; a.push(1e30);)jai"},
+				{R"jai(array<int> a = [1]; a[0] = 1e30;)jai"},
+				{R"jai(array<array<int>> a = [[1e30]];)jai"},
+				{R"jai(map<int,string> m = {{1e30,"ok"}};)jai"},
+			};
+			check_each(sources, [&](const auto& c) {
+				const std::string source = c.code;
+				auto eng = make_engine();
+				const auto report = eng->check(source);
+				check_true(report.has_errors(), source);
+				bool rejected = false;
+				try { eng->execute(source); }
+				catch (const static_check_error&) { rejected = true; }
+				check_true(rejected, "known mismatch rejects before execution");
+			});
 		});
 
-		test("rules_123_reject_02", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<int,string> m = {{"bad","ok"}};)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_03", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<string> a = [1];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_int_to_bool_element", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<bool> a = [0, 1, -2]; !a[0] && a[1] && a[2];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), report.format(source));
-			check_true(eng->execute(source).as<bool>(), source);
-		});
-
-		test("rules_123_reject_05", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<char> a = [65];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_bool_to_int_element", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [true, false]; a[0] == 1 && a[1] == 0;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), report.format(source));
-			check_true(eng->execute(source).as<bool>(), source);
-		});
-
-		test("rules_123_reject_07", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1]]; a[0] = ["bad"];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_08", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<string,array<int>> m = {{"a",[1]}}; m["a"][0] = "bad";)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_09", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<map<string,int>> a = [{{"k","bad"}}];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_10", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(void take(array<int> a) {} take(["bad"]);)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_11", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> give() { return ["bad"]; })jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_12", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(class C { array<int> a = ["bad"]; })jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_13", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(class C { array<int> a = [1]; } C c = C(); c.a = ["bad"];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_14", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<string,string> m = {{"k","bad"}}; int x = m["k"];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_15", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(void f(array<string>& a) { int x = a[0]; })jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_16", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<string> a = ["bad"]; array<string>& b = a; int x = b[0];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_17", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = 1e30;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_18", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = -1e30;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_19", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = 9.223372036854776e18;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_20", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = -9.223372036854778e18;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_21", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = 0; x = 1e30;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_22", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int f() { return 1e30; })jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_23", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(void f(int x) {} f(1e30);)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_24", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(class C { int x = 1e30; })jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_25", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; a.push(1e30);)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_26", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; a[0] = 1e30;)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_27", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1e30]];)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_reject_28", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<int,string> m = {{1e30,"ok"}};)jai";
-			const auto report = eng->check(source);
-			check_true(report.has_errors(), source);
-			bool rejected = false;
-			try { eng->execute(source); }
-			catch (const static_check_error&) { rejected = true; }
-			check_true(rejected, "known mismatch rejects before execution");
-		});
-
-		test("rules_123_check_accept_00", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(var a = ["bad"]; int x = a[0];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_01", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<var> a = ["bad"]; int x = a[0];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_02", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(void f(var& a) { int x = a[0]; })jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_03", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(var x = "bad"; array<int> a = [x];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_04", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(var x = "bad"; array<int> a = [1]; a.push(x);)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_05", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(var x = "bad"; array<int> a = [1]; a[0] = x;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_06", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<string> a = ["ok"]; string x = a[0];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_07", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [1]; float x = a[0]; bool b = a[0];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_08", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [3.9]; array<float> b = [1];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_09", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<array<int>> a = [[1, 3.9]];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_10", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<string,array<int>> m = {{"a",[1,3.9]}};)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_11", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<var> a = [1,"s",true];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_12", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = []; map<string,int> m = {};)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_13", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(float x = 1e30; int y = x;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_14", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(float big() { return 1e30; } int x = big();)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_15", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(float huge = 1e30; array<int> a = [huge];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_16", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(float huge = 1e30; array<int> a = [1]; a.push(huge);)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_17", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = -9.223372036854776e18;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_18", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = 9.223372036854775e18;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_19", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = 3.9;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_20", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(int x = cast<int>("3");)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_21", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(class A {} class B : A {} array<A> a = [B()];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_22", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(class A {} class B : A {} array<A> a = [new B()];)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_23", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(function f = null; f = []() { return 1; };)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_24", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<int> a = [0]; auto x = (a[0] = 3.9); int& r = x;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_25", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(map<string,int> m = {{"a",0}}; auto x = (m["a"] = 3.9); int& r = x;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_26", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(array<string> a = ["x"]; auto x = (a[0] += 1); string& r = x;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
-		});
-
-		test("rules_123_check_accept_27", [this]() {
-			auto eng = make_engine();
-			const std::string source = R"jai(auto huge = 1e30; int x = huge;)jai";
-			const auto report = eng->check(source);
-			check_false(report.has_errors(), source + "\n" + report.format(source));
+		test("rules_123_dynamic_sources_and_valid_conversions_check_clean", [this]() {
+			const source_case sources[] = {
+				{R"jai(var a = ["bad"]; int x = a[0];)jai"},
+				{R"jai(array<var> a = ["bad"]; int x = a[0];)jai"},
+				{R"jai(void f(var& a) { int x = a[0]; })jai"},
+				{R"jai(var x = "bad"; array<int> a = [x];)jai"},
+				{R"jai(var x = "bad"; array<int> a = [1]; a.push(x);)jai"},
+				{R"jai(var x = "bad"; array<int> a = [1]; a[0] = x;)jai"},
+				{R"jai(array<string> a = ["ok"]; string x = a[0];)jai"},
+				{R"jai(array<int> a = [1]; float x = a[0]; bool b = a[0];)jai"},
+				{R"jai(array<int> a = [3.9]; array<float> b = [1];)jai"},
+				{R"jai(array<array<int>> a = [[1, 3.9]];)jai"},
+				{R"jai(map<string,array<int>> m = {{"a",[1,3.9]}};)jai"},
+				{R"jai(array<var> a = [1,"s",true];)jai"},
+				{R"jai(array<int> a = []; map<string,int> m = {};)jai"},
+				{R"jai(float x = 1e30; int y = x;)jai"},
+				{R"jai(float big() { return 1e30; } int x = big();)jai"},
+				{R"jai(float huge = 1e30; array<int> a = [huge];)jai"},
+				{R"jai(float huge = 1e30; array<int> a = [1]; a.push(huge);)jai"},
+				{R"jai(int x = -9.223372036854776e18;)jai"},
+				{R"jai(int x = 9.223372036854775e18;)jai"},
+				{R"jai(int x = 3.9;)jai"},
+				{R"jai(int x = cast<int>("3");)jai"},
+				{R"jai(class A {} class B : A {} array<A> a = [B()];)jai"},
+				{R"jai(class A {} class B : A {} array<A> a = [new B()];)jai"},
+				{R"jai(array<int> a = [0]; auto x = (a[0] = 3.9); int& r = x;)jai"},
+				{R"jai(map<string,int> m = {{"a",0}}; auto x = (m["a"] = 3.9); int& r = x;)jai"},
+				{R"jai(array<string> a = ["x"]; auto x = (a[0] += 1); string& r = x;)jai"},
+				{R"jai(auto huge = 1e30; int x = huge;)jai"},
+			};
+			check_each(sources, [&](const auto& c) {
+				const std::string source = c.code;
+				auto eng = make_engine();
+				const auto report = eng->check(source);
+				check_false(report.has_errors(), source + "\n" + report.format(source));
+			});
 		});
 
 		test("rules_123_warn_regions", [this]() {
@@ -1062,7 +447,9 @@ private:
 				"map<string,bool> m = {{\"a\",0}}; m[\"a\"] = 2; m[\"a\"];",
 				"map<string,int> m = {{\"a\",false}}; m[\"a\"] = true; m[\"a\"] == 1;",
 				"array<string> a = [to_string(15), cast<string>(16)]; a.push(to_string(17)); a[0] == \"15\" && a[1] == \"16\" && a[2] == \"17\";",
-				"array<int> a = []; var b = true; a.push(b); array<bool> c = []; var i = 7; c.push(i); a[0] == 1 && c[0];"
+				"array<int> a = []; var b = true; a.push(b); array<bool> c = []; var i = 7; c.push(i); a[0] == 1 && c[0];",
+				R"jai(array<bool> a = [0, 1, -2]; !a[0] && a[1] && a[2];)jai",
+				R"jai(array<int> a = [true, false]; a[0] == 1 && a[1] == 0;)jai"
 			}) {
 				auto eng = make_engine();
 				jai::stdlib::register_all(*eng);

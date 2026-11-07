@@ -16,6 +16,7 @@
 
 #include "fuzz/fuzz_generator.hpp"
 #include "fuzz/fuzz_harness.hpp"
+#include "../case_table.hpp"
 
 #include <algorithm>
 #include <filesystem>
@@ -233,20 +234,32 @@ public:
 
         // ------------------------------------------------------------ the type ladder
 
-        test("ladder_typed_decls", [this]() {
-            auto e = make_engine();
-            check_eq((size_t)0, error_count(e->check("int x = 5;")));
-            check_eq((size_t)0, error_count(e->check("int x = 4.7;")));      // converts
-            check_eq((size_t)0, error_count(e->check("int x = true;")));     // converts
-            check_eq((size_t)0, error_count(e->check("float f = 2;")));
-            check_eq((size_t)1, error_count(e->check("string s = 42;")));    // text only
-            check_eq((size_t)0, error_count(e->check("bool b = \"x\";")));   // truthy
-            check_eq((size_t)0, error_count(e->check("int x;")));            // null init is fine
-            check_eq((size_t)1, error_count(e->check("int x = \"s\";")));
-            check_eq((size_t)1, error_count(e->check("int x = null;")));
-            check_eq((size_t)1, error_count(e->check("int x = 'c';")));
-            check_eq((size_t)1, error_count(e->check("char c = 65;")));
-            check_eq((size_t)1, error_count(e->check("int x = [1, 2];")));
+        test("the_type_ladder_enforces_typed_slots_infers_auto_and_leaves_var_dynamic", [this]() {
+            const std::pair<const char*, size_t> cases[] = {
+                {"int x = 5;", 0},
+                {"int x = 4.7;", 0},
+                {"int x = true;", 0},
+                {"float f = 2;", 0},
+                {"string s = 42;", 1},
+                {"bool b = \"x\";", 0},
+                {"int x;", 0},
+                {"int x = \"s\";", 1},
+                {"int x = null;", 1},
+                {"int x = 'c';", 1},
+                {"char c = 65;", 1},
+                {"int x = [1, 2];", 1},
+                {"auto x = 5; x = 7;", 0},
+                {"auto x = 5; x = \"s\";", 1},
+                {"auto x; x = 5; x = \"s\";", 0},   // auto without an initializer locks at its first run-time store, which the checker cannot order
+                {"var v = 5; v = \"s\";", 0},
+                {"var v = \"s\"; int x = v;", 0},
+                {"var v = 1; int x = v + 1;", 0},
+                {"var v = 5; v += \"s\";", 0},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto e = make_engine();
+                check_eq(c.second, error_count(e->check(c.first)));
+            });
         });
 
         test("ladder_assignment_to_typed", [this]() {
@@ -257,24 +270,6 @@ public:
             check_eq((size_t)1, error_count(r));
             check_eq((size_t)2, r.diagnostics[0].line);
             check_eq((size_t)1, r.diagnostics[0].related_line);   // points at the declaration
-        });
-
-        test("ladder_auto_infers_then_enforces", [this]() {
-            auto e = make_engine();
-            check_eq((size_t)0, error_count(e->check("auto x = 5; x = 7;")));
-            check_eq((size_t)1, error_count(e->check("auto x = 5; x = \"s\";")));
-            // auto without initializer locks at first runtime assignment: the checker
-            // can't see branch order, so it stays dynamic (documented leniency)
-            check_eq((size_t)0, error_count(e->check("auto x; x = 5; x = \"s\";")));
-        });
-
-        test("ladder_var_is_the_opt_out", [this]() {
-            auto e = make_engine();
-            check_eq((size_t)0, error_count(e->check("var v = 5; v = \"s\";")));
-            // and the opt-out propagates: expressions touching var become unknown
-            check_eq((size_t)0, error_count(e->check("var v = \"s\"; int x = v;")));
-            check_eq((size_t)0, error_count(e->check("var v = 1; int x = v + 1;")));
-            check_eq((size_t)0, error_count(e->check("var v = 5; v += \"s\";")));
         });
 
         test("compound_assign_follows_cpp_rules", [this]() {

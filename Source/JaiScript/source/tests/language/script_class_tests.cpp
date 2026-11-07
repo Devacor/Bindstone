@@ -46,7 +46,9 @@ public:
             const std::pair<const char*, int64_t> cases[] = {
                 {"class Point { int x = 0; int y = 0; } auto p = Point(); p.x = 10; p.y = 20; p.x + p.y", 30},
                 {"class Point { int x = 0; int y = 0; Point(int x, int y) { this.x = x; this.y = y; } } auto p = Point(5, 7); p.x * p.y", 35},
-                {"class Rectangle { int width = 0; int height = 0; Rectangle(int w, int h) { this.width = w; this.height = h; } int area() { return this.width * this.height; } int perimeter() { return 2 * (this.width + this.height); } } auto rect = Rectangle(4, 3); rect.area() + rect.perimeter()", 12 + 14},
+                {"class Rectangle { int width = 0; int height = 0; Rectangle(int w, int h) { this.width = w; this.height = h; } "
+                 "int area() { return this.width * this.height; } int perimeter() { return 2 * (this.width + this.height); } } "
+                 "auto rect = Rectangle(4, 3); rect.area() + rect.perimeter()", 12 + 14},
                 // a constructor assigns a field by its bare name; a field initializer holds without one
                 {"class Cat { int a = 0; Cat(int val) { a = val; } } auto cat = Cat(42); cat.a", 42},
                 {"class Cat { int a = 42; } auto cat = Cat(); cat.a", 42},
@@ -873,10 +875,13 @@ public:
         test("multiple_inheritance_builds_every_base", [this]() {
             const std::pair<const char*, std::vector<int64_t>> cases[] = {
                 {"class A { int x = 1; } class B { int y = 2; } class C : A, B { int z = 3; } auto c = C(); [c.x, c.y, c.z]", {1, 2, 3}},
-                {"class A { int x = 0; A(int val) { this.x = val; } } class B { int y = 0; B(int val) { this.y = val; } } class C : A, B { int z = 0; C(int a, int b, int c) : super(a), B(b) { this.z = c; } } auto c = C(1, 2, 3); [c.x, c.y, c.z]", {1, 2, 3}},
+                {"class A { int x = 0; A(int val) { this.x = val; } } class B { int y = 0; B(int val) { this.y = val; } } "
+                 "class C : A, B { int z = 0; C(int a, int b, int c) : super(a), B(b) { this.z = c; } } auto c = C(1, 2, 3); "
+                 "[c.x, c.y, c.z]", {1, 2, 3}},
                 {"class A { int a = 1; } class B : A { int b = 2; } class C { int c = 3; } class D : B, C { int d = 4; } auto obj = D(); [obj.a, obj.b, obj.c, obj.d]", {1, 2, 3, 4}},
                 {"class A { int a = 100; } class B { int b = 200; } class C : A, B { int c = 300; } auto obj = C(); [obj.a, obj.b, obj.c]", {100, 200, 300}},
-                {"class A { static int static_a = 100; } class B { static int static_b = 200; } class C : A, B { static int static_c = 300; } [A::static_a, B::static_b, C::static_c]", {100, 200, 300}},
+                {"class A { static int static_a = 100; } class B { static int static_b = 200; } "
+                 "class C : A, B { static int static_c = 300; } [A::static_a, B::static_b, C::static_c]", {100, 200, 300}},
             };
             check_each(cases, [&](const auto& c) {
                 auto js_engine = make_engine();

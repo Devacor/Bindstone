@@ -36,12 +36,19 @@ public:
         
         test("switch_runs_the_matching_case_and_falls_through_only_when_told", [this]() {
             const std::pair<const char*, const char*> cases[] = {
-                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = result + \"one\"; fallthrough; case 2: result = result + \"two\"; fallthrough; case 3: result = result + \"three\"; fallthrough; default: result = result + \"default\"; } result", "twothreedefault"},
-                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = \"one\"; break; case 2: result = \"two\"; break; case 3: result = \"three\"; break; default: result = \"other\"; } result", "two"},
-                {"auto name = \"Bob\"; auto greeting = \"\"; switch (name) { case \"Alice\": greeting = \"Hello Alice!\"; case \"Bob\": greeting = \"Hey Bob!\"; case \"Charlie\": greeting = \"Hi Charlie!\"; default: greeting = \"Hello stranger!\"; } greeting", "Hey Bob!"},
+                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = result + \"one\"; fallthrough; "
+                 "case 2: result = result + \"two\"; fallthrough; case 3: result = result + \"three\"; fallthrough; "
+                 "default: result = result + \"default\"; } result", "twothreedefault"},
+                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = \"one\"; break; case 2: result = \"two\"; "
+                 "break; case 3: result = \"three\"; break; default: result = \"other\"; } result", "two"},
+                {"auto name = \"Bob\"; auto greeting = \"\"; switch (name) { case \"Alice\": greeting = \"Hello Alice!\"; "
+                 "case \"Bob\": greeting = \"Hey Bob!\"; case \"Charlie\": greeting = \"Hi Charlie!\"; "
+                 "default: greeting = \"Hello stranger!\"; } greeting", "Hey Bob!"},
                 {"auto x = 99; auto result = \"\"; switch (x) { case 1: result = \"one\"; case 2: result = \"two\"; default: result = \"default case\"; } result", "default case"},
                 {"auto x = 99; auto result = \"unchanged\"; switch (x) { case 1: result = \"one\"; case 2: result = \"two\"; } result", "unchanged"},
-                {"auto x = 1; auto y = 2; auto result = \"\"; switch (x) { case 1: switch (y) { case 1: result = \"x=1,y=1\"; case 2: result = \"x=1,y=2\"; default: result = \"x=1,y=other\"; } case 2: result = \"x=2\"; default: result = \"x=other\"; } result", "x=1,y=2"},
+                {"auto x = 1; auto y = 2; auto result = \"\"; switch (x) { case 1: switch (y) { case 1: result = \"x=1,y=1\"; "
+                 "case 2: result = \"x=1,y=2\"; default: result = \"x=1,y=other\"; } case 2: result = \"x=2\"; "
+                 "default: result = \"x=other\"; } result", "x=1,y=2"},
                 {"auto get_name = [](int x) { switch (x) { case 1: return \"one\"; case 2: return \"two\"; case 3: return \"three\"; default: return \"other\"; } }; get_name(2)", "two"},
             };
             check_each(cases, [&](const auto& c) {

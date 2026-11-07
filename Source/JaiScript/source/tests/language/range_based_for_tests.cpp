@@ -85,7 +85,12 @@ public:
             const std::pair<const char*, const char*> cases[] = {
                 {"string s = \"abc\"; string joined = \"\"; for (auto c : s) { if (joined != \"\") { joined += \",\"; } joined += c; } joined", "a,b,c"},
                 {"string s = \"ab\"; string kinds = \"\"; int code = 0; for (auto c : s) { kinds += type_of(c); code = code * 1000 + (c + 0); } kinds + \":\" + to_string(code)", "charchar:97098"},
-                {"string out = \"\"; for (auto c : \"xy\") { out += c; } out += \"|\"; var held = \"pq\"; for (auto c : held) { out += c; } out += \"|\"; for (char c : \"mn\") { out += c; } out += \"|\"; for (const auto c : \"rs\") { out += c; } out += \"|\"; var m = {\"k\": \"hi\"}; for (auto c : m[\"k\"]) { out += c; } out += \"|\"; string dotted(string s) { string o = \"\"; for (auto c : s) { o += c; o += \".\"; } return o; } out += dotted(\"ab\"); out += \"|\"; for (auto a : \"ab\") { for (auto b : \"xy\") { out += a; out += b; out += \",\"; } } out", "xy|pq|mn|rs|hi|a.b.|ax,ay,bx,by,"},
+                {"string out = \"\"; for (auto c : \"xy\") { out += c; } out += \"|\"; var held = \"pq\"; "
+                 "for (auto c : held) { out += c; } out += \"|\"; for (char c : \"mn\") { out += c; } out += \"|\"; "
+                 "for (const auto c : \"rs\") { out += c; } out += \"|\"; var m = {\"k\": \"hi\"}; "
+                 "for (auto c : m[\"k\"]) { out += c; } out += \"|\"; string dotted(string s) { string o = \"\"; "
+                 "for (auto c : s) { o += c; o += \".\"; } return o; } out += dotted(\"ab\"); out += \"|\"; "
+                 "for (auto a : \"ab\") { for (auto b : \"xy\") { out += a; out += b; out += \",\"; } } out", "xy|pq|mn|rs|hi|a.b.|ax,ay,bx,by,"},
                 {"string s = \"abcdef\"; string out = \"\"; for (auto c : s) { if (c == 'b') { continue; } if (c == 'e') { break; } out += c; } out + \"|\" + s", "acd|abcdef"},
                 {"string s = \"abc\"; for (auto c : s) { [[warn_mode]] c = 'z'; } s", "abc"},
             };

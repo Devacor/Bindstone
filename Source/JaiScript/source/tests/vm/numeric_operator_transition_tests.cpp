@@ -148,7 +148,9 @@ public:
 				{"general_form_string_float_and_environment_rows_match_the_interpreter",
 					"var g = 0; int gi = 1; float gf = 0.5; var gs = \"a\"; string gt = \"t\";\n"
 					"function floats(float x, float y) { float s = 0.0; for (int i = 0; i < 4; ++i) { s += x; s -= y * 0.5; s *= 1.5; } return s; }\n"
-					"function widen(int k) { float w = 1.5; float v = 0.25; for (int i = 0; i < 3; ++i) { w = k; v = i; } var q = (w = k + 1); var big = 9007199254740993; w = big; return `${to_string(w)},${to_string(v)},${to_string(q)},${type_of(q)}${type_of(w)}`; }\n"
+					"function widen(int k) { float w = 1.5; float v = 0.25; for (int i = 0; i < 3; ++i) { w = k; v = i; } "
+					"var q = (w = k + 1); var big = 9007199254740993; w = big; "
+					"return `${to_string(w)},${to_string(v)},${to_string(q)},${type_of(q)}${type_of(w)}`; }\n"
 					"function strs(var a, var b) {\n"
 					"    var out = \"\";\n"
 					"    if (a < b) { out += \"lt\"; } if (a == b) { out += \"eq\"; } if (a != b) { out += \"ne\"; } if (a >= b) { out += \"ge\"; }\n"

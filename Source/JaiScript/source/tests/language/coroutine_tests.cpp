@@ -18,16 +18,31 @@ public:
 
         test("coroutines_yield_resume_report_done_and_return", [this]() {
             const std::pair<const char*, script_int> cases[] = {
-                {"coroutine int counter() { yield 1; yield 2; yield 3; return 4; } auto c = counter(); auto a = c.next(); auto b = c.next(); auto d = c.next(); auto e = c.next(); a + b + d + e", static_cast<script_int>(10)},
-                {"coroutine int gen() { yield 42; return 0; } auto c = gen(); auto before = c.done(); c.next(); auto mid = c.done(); c.next(); auto after = c.done(); auto result = 0; if (!before && !mid && after) { result = 1; } result", static_cast<script_int>(1)},
-                {"coroutine int range_gen() { for (int i = 0; i < 5; ++i) { yield i; } return -1; } auto c = range_gen(); auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(9)},
-                {"coroutine int while_gen() { auto i = 0; while (i < 3) { yield i; i = i + 1; } return 99; } auto c = while_gen(); auto r0 = c.next(); auto r1 = c.next(); auto r2 = c.next(); auto r3 = c.next(); r0 * 1000 + r1 * 100 + r2 * 10 + r3", static_cast<script_int>(219)},
-                {"coroutine int branch_gen(int x) { if (x > 0) { yield 1; } else { yield -1; } return 0; } auto c1 = branch_gen(5); auto c2 = branch_gen(-3); auto r1 = c1.next(); auto r2 = c2.next(); r1 + r2", static_cast<script_int>(0)},
-                {"coroutine int seq() { yield 10; yield 20; yield 30; yield 40; yield 50; return 0; } auto c = seq(); auto sum = 0; sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum", static_cast<script_int>(150)},
-                {"coroutine int gen_a() { yield 1; yield 2; return 3; } coroutine int gen_b() { yield 10; yield 20; return 30; } auto a = gen_a(); auto b = gen_b(); auto r1 = a.next(); auto r2 = b.next(); auto r3 = a.next(); auto r4 = b.next(); auto r5 = a.next(); auto r6 = b.next(); r1 + r2 + r3 + r4 + r5 + r6", static_cast<script_int>(66)},
-                {"coroutine int multiply_gen(int start, int factor) { int val = start; yield val; val = val * factor; yield val; val = val * factor; return val; } auto c = multiply_gen(2, 3); auto r1 = c.next(); auto r2 = c.next(); auto r3 = c.next(); r1 * 100 + r2 * 10 + r3", static_cast<script_int>(278)},
-                {"coroutine int matrix_gen() { for (int i = 0; i < 2; ++i) { for (int j = 0; j < 3; ++j) { yield i * 10 + j; } } return -1; } auto c = matrix_gen(); auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(35)},
-                {"coroutine void stepper() { yield; yield; return; } auto c = stepper(); c.next(); c.next(); c.next(); auto result = 0; if (c.done()) { result = 1; } result", static_cast<script_int>(1)},
+                {"coroutine int counter() { yield 1; yield 2; yield 3; return 4; } auto c = counter(); auto a = c.next(); "
+                 "auto b = c.next(); auto d = c.next(); auto e = c.next(); a + b + d + e", static_cast<script_int>(10)},
+                {"coroutine int gen() { yield 42; return 0; } auto c = gen(); auto before = c.done(); c.next(); "
+                 "auto mid = c.done(); c.next(); auto after = c.done(); auto result = 0; "
+                 "if (!before && !mid && after) { result = 1; } result", static_cast<script_int>(1)},
+                {"coroutine int range_gen() { for (int i = 0; i < 5; ++i) { yield i; } return -1; } auto c = range_gen(); "
+                 "auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(9)},
+                {"coroutine int while_gen() { auto i = 0; while (i < 3) { yield i; i = i + 1; } return 99; } "
+                 "auto c = while_gen(); auto r0 = c.next(); auto r1 = c.next(); auto r2 = c.next(); auto r3 = c.next(); "
+                 "r0 * 1000 + r1 * 100 + r2 * 10 + r3", static_cast<script_int>(219)},
+                {"coroutine int branch_gen(int x) { if (x > 0) { yield 1; } else { yield -1; } return 0; } "
+                 "auto c1 = branch_gen(5); auto c2 = branch_gen(-3); auto r1 = c1.next(); auto r2 = c2.next(); r1 + r2", static_cast<script_int>(0)},
+                {"coroutine int seq() { yield 10; yield 20; yield 30; yield 40; yield 50; return 0; } auto c = seq(); "
+                 "auto sum = 0; sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); sum = sum + c.next(); "
+                 "sum = sum + c.next(); sum = sum + c.next(); sum", static_cast<script_int>(150)},
+                {"coroutine int gen_a() { yield 1; yield 2; return 3; } coroutine int gen_b() { yield 10; yield 20; return 30; "
+                 "} auto a = gen_a(); auto b = gen_b(); auto r1 = a.next(); auto r2 = b.next(); auto r3 = a.next(); "
+                 "auto r4 = b.next(); auto r5 = a.next(); auto r6 = b.next(); r1 + r2 + r3 + r4 + r5 + r6", static_cast<script_int>(66)},
+                {"coroutine int multiply_gen(int start, int factor) { int val = start; yield val; val = val * factor; "
+                 "yield val; val = val * factor; return val; } auto c = multiply_gen(2, 3); auto r1 = c.next(); "
+                 "auto r2 = c.next(); auto r3 = c.next(); r1 * 100 + r2 * 10 + r3", static_cast<script_int>(278)},
+                {"coroutine int matrix_gen() { for (int i = 0; i < 2; ++i) { for (int j = 0; j < 3; ++j) { yield i * 10 + j; } "
+                 "} return -1; } auto c = matrix_gen(); auto sum = 0; while (!c.done()) { sum = sum + c.next(); } sum", static_cast<script_int>(35)},
+                {"coroutine void stepper() { yield; yield; return; } auto c = stepper(); c.next(); c.next(); c.next(); "
+                 "auto result = 0; if (c.done()) { result = 1; } result", static_cast<script_int>(1)},
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();
@@ -179,9 +194,14 @@ public:
             const std::pair<const char*, int64_t> cases[] = {
                 // A coroutine declared inside a function takes what it needs as parameters (a named function captures
                 // nothing); each factory call mints its own independent handle.
-                {"function make_counter(auto start) -> auto { coroutine int counter(int first) { auto v = first; while (v < first + 3) { yield v; v = v + 1; } return 0 - 1; } return counter(start); } auto c1 = make_counter(5); auto c2 = make_counter(50); c1.next() + c2.next() + c1.next() + c2.next();", int64_t(112)},
-                {"function pair_sum(int base) -> int { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } auto g = gen(base); return g.next() + g.next(); } pair_sum(1) + pair_sum(2);", int64_t(62)},
-                {"function make_gen(int base) -> auto { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } return gen(base); } auto g1 = make_gen(1); auto g2 = make_gen(2); g1.next() + g1.next() + g2.next() + g2.next();", int64_t(62)},
+                {"function make_counter(auto start) -> auto { coroutine int counter(int first) { auto v = first; "
+                 "while (v < first + 3) { yield v; v = v + 1; } return 0 - 1; } return counter(start); } "
+                 "auto c1 = make_counter(5); auto c2 = make_counter(50); c1.next() + c2.next() + c1.next() + c2.next();", int64_t(112)},
+                {"function pair_sum(int base) -> int { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } "
+                 "auto g = gen(base); return g.next() + g.next(); } pair_sum(1) + pair_sum(2);", int64_t(62)},
+                {"function make_gen(int base) -> auto { coroutine int gen(int b) { yield b * 10; yield b * 10 + 1; return 0; } "
+                 "return gen(base); } auto g1 = make_gen(1); auto g2 = make_gen(2); "
+                 "g1.next() + g1.next() + g2.next() + g2.next();", int64_t(62)},
             };
             check_each(cases, [&](const auto& c) {
                 auto eng = jai::foundry::make_engine();
@@ -206,15 +226,25 @@ public:
             const std::pair<const char*, int64_t> cases[] = {
                 // Suspending used to steal the CALLER's call frames into the coroutine
                 // state, leaving the rest of the caller's body frameless (hang/corruption)
-                {"coroutine int gen2() { yield 10; yield 11; return 0; } function pair() -> int { auto g = gen2(); var local = 100; return g.next() + g.next() + local; } pair() + pair();", int64_t(242)},
+                {"coroutine int gen2() { yield 10; yield 11; return 0; } function pair() -> int { auto g = gen2(); "
+                 "var local = 100; return g.next() + g.next() + local; } pair() + pair();", int64_t(242)},
                 // Interpreter used to abort the whole process (env-cycle abort) here
-                {"coroutine int inner() { for (int i = 0; i < 3; i++) { yield i; } } coroutine int outer() { for (auto x : inner()) { yield x * 10; } return 0 - 1; } auto o = outer(); o.next() * 100 + o.next() * 10 + o.next();", int64_t(120)},
+                {"coroutine int inner() { for (int i = 0; i < 3; i++) { yield i; } } "
+                 "coroutine int outer() { for (auto x : inner()) { yield x * 10; } return 0 - 1; } auto o = outer(); "
+                 "o.next() * 100 + o.next() * 10 + o.next();", int64_t(120)},
                 // The failed handle must report done() even when an unrelated coroutine
                 // was resumed between its suspension and its failure
-                {"function boom() -> auto { throw \"die\"; } coroutine int bad() { yield 1; boom(); yield 2; return 3; } coroutine int good() { yield 10; yield 20; return 30; } auto vb = bad(); auto vg = good(); auto d = 0; auto r1 = vb.next(); if (vb.done()) { d = d + 1; } auto r2 = vg.next(); if (vb.done()) { d = d + 2; } auto caught = 0; try { vb.next(); } catch (e) { caught = 1; } if (vb.done()) { d = d + 4; } if (!vg.done()) { d = d + 8; } d * 10 + caught;", int64_t(121)},
+                {"function boom() -> auto { throw \"die\"; } coroutine int bad() { yield 1; boom(); yield 2; return 3; } "
+                 "coroutine int good() { yield 10; yield 20; return 30; } auto vb = bad(); auto vg = good(); auto d = 0; "
+                 "auto r1 = vb.next(); if (vb.done()) { d = d + 1; } auto r2 = vg.next(); if (vb.done()) { d = d + 2; } "
+                 "auto caught = 0; try { vb.next(); } catch (e) { caught = 1; } if (vb.done()) { d = d + 4; } "
+                 "if (!vg.done()) { d = d + 8; } d * 10 + caught;", int64_t(121)},
                 // Resume used to re-evaluate the container and restart iteration at 0
-                {"coroutine int walker() { auto acc = 1000; for (auto x : [3, 5, 7]) { yield x; acc = acc + x; } return acc; } auto w = walker(); w.next() * 1000 + w.next() * 100 + w.next() * 10 + (w.next() - 1000);", int64_t(3585)},
-                {"coroutine int gen() { for (int i = 1; i <= 4; i++) { yield i * i; } return 0; } function pump(auto& h) -> auto { auto local = 100; auto v = h.next(); return local + v; } auto c = gen(); auto s = 0; for (int i = 0; i < 4; i++) { s = s + pump(c); } s;", int64_t(430)},
+                {"coroutine int walker() { auto acc = 1000; for (auto x : [3, 5, 7]) { yield x; acc = acc + x; } return acc; } "
+                 "auto w = walker(); w.next() * 1000 + w.next() * 100 + w.next() * 10 + (w.next() - 1000);", int64_t(3585)},
+                {"coroutine int gen() { for (int i = 1; i <= 4; i++) { yield i * i; } return 0; } "
+                 "function pump(auto& h) -> auto { auto local = 100; auto v = h.next(); return local + v; } auto c = gen(); "
+                 "auto s = 0; for (int i = 0; i < 4; i++) { s = s + pump(c); } s;", int64_t(430)},
             };
             check_each(cases, [&](const auto& c) {
                 auto eng = jai::foundry::make_engine();

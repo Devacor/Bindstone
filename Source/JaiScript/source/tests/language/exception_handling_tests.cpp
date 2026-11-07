@@ -126,7 +126,8 @@ public:
                 {"try { throw \"Error message\"; } catch { return \"Caught without variable\"; }", "Caught without variable"},
                 {"try { try { throw \"Inner error\"; } catch (inner) { throw \"Outer error: \" + inner; } } catch (outer) { return outer; }", "Outer error: Inner error"},
                 {"try { throw \"Original error\"; } catch (e) { try { throw; } catch (re) { return re; } }", "Original error"},
-                {"auto result = \"Start\"; try { result = result + \" \" + throw \"Error in expression\"; } catch (e) { result = result + \" caught: \" + e; } return result;", "Start caught: Error in expression"},
+                {"auto result = \"Start\"; try { result = result + \" \" + throw \"Error in expression\"; } "
+                 "catch (e) { result = result + \" caught: \" + e; } return result;", "Start caught: Error in expression"},
                 {"auto outer_var = \"outer\"; try { auto inner_var = \"inner\"; throw \"test\"; } catch (e) { return outer_var + \" \" + e; }", "outer test"},
             };
             check_each(cases, [&](const auto& c) {
@@ -1035,7 +1036,9 @@ public:
         // A throw during argument or callee evaluation propagates the thrown value, never a parameter-binding error in its place
         test("a_throw_while_evaluating_a_call_propagates_its_value", [this]() {
             const std::pair<const char*, const char*> cases[] = {
-                {"auto h() { throw \"argfail\"; } auto g(int a, int b) { return \"g\"; } auto caller() { try { return g(1, h()); } catch (e) { return \"c:\" + e; } } return caller() + \"|\" + caller();", "c:argfail|c:argfail"},
+                {"auto h() { throw \"argfail\"; } auto g(int a, int b) { return \"g\"; } "
+                 "auto caller() { try { return g(1, h()); } catch (e) { return \"c:\" + e; } } "
+                 "return caller() + \"|\" + caller();", "c:argfail|c:argfail"},
                 {"auto h() { throw \"argfail\"; } try { return \"r:\" + gn(1, h()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
                 {"auto h() { throw \"argfail\"; } class M { auto m(int a, int b) { return \"m\"; } } var o = M(); try { return \"r:\" + o.m(1, h()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
                 {"auto h() { throw \"argfail\"; } auto g(int a, int b) { return \"g\"; } var hv = h; try { return \"r:\" + g(1, hv()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
@@ -1149,9 +1152,15 @@ public:
         // Regression: a script throw inside operator< / <= / > / >= was replaced by "Invalid operands for < operator"
         test("a_throw_in_an_ordering_operator_propagates", [this]() {
             const std::pair<const char*, const char*> cases[] = {
-                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"boom\"; } } var a = S(1); var lim = S(5); var out = \"\"; try { if (a < lim) { out = \"T\"; } } catch (e) { out = \"C[\" + e + \"]\"; } out;", "C[boom]"},
-                {"class S { int v = 0; S(int n) { v = n; } function operator>=(S o) { throw \"ge-boom\"; } } var a = S(1); var lim = S(5); var out = \"\"; try { var b = (a >= lim); out = \"got:\" + b; } catch (e) { out = \"C[\" + e + \"]\"; } out;", "C[ge-boom]"},
-                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"deep\"; } } function spin(var t, var lim) -> string { var c = 0; while (t < lim) { c += 1; } return \"exited:\" + c; } var out = \"\"; try { out = spin(S(1), S(9)); } catch (e) { out = \"C[\" + e + \"]\"; } out + \":alive\";", "C[deep]:alive"},
+                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"boom\"; } } var a = S(1); "
+                 "var lim = S(5); var out = \"\"; try { if (a < lim) { out = \"T\"; } } catch (e) { out = \"C[\" + e + \"]\"; } "
+                 "out;", "C[boom]"},
+                {"class S { int v = 0; S(int n) { v = n; } function operator>=(S o) { throw \"ge-boom\"; } } var a = S(1); "
+                 "var lim = S(5); var out = \"\"; try { var b = (a >= lim); out = \"got:\" + b; } "
+                 "catch (e) { out = \"C[\" + e + \"]\"; } out;", "C[ge-boom]"},
+                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"deep\"; } } "
+                 "function spin(var t, var lim) -> string { var c = 0; while (t < lim) { c += 1; } return \"exited:\" + c; } "
+                 "var out = \"\"; try { out = spin(S(1), S(9)); } catch (e) { out = \"C[\" + e + \"]\"; } out + \":alive\";", "C[deep]:alive"},
             };
             check_each(cases, [&](const auto& c) {
                 auto engine = make_engine();

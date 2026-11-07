@@ -16,9 +16,14 @@ public:
                 {"[](auto x) -> auto { return x + 1; }(5)", 6},
                 {"[=](auto x) -> auto { return x + 1; }(5)", 6},
                 // function locals: [=] copies them (a top-level variable is a global, read when the lambda runs)
-                {"function run() -> auto { auto x = 10; auto y = 20; auto z = 30; auto lambda = [=](auto bonus) -> auto { return x + y + z + bonus; }; x = 100; y = 200; z = 300; return lambda(5); } run();", 65},
-                {"auto a = 1; auto b = 2; auto lambda = [&](auto multiplier) -> auto { a = a * multiplier; b = b * multiplier; return a + b; }; auto result1 = lambda(10); auto result2 = lambda(2); result1 * 100 + result2;", 3060},
-                {"function run() -> auto { auto x = 10; auto y = 20; auto counter = 0; auto lambda = [=, &counter](auto bonus) -> auto { counter = counter + 1; return x + y + bonus + counter; }; x = 100; y = 200; auto result1 = lambda(1); auto result2 = lambda(2); return result1 * 100 + result2; } run();", 3234},
+                {"function run() -> auto { auto x = 10; auto y = 20; auto z = 30; "
+                 "auto lambda = [=](auto bonus) -> auto { return x + y + z + bonus; }; x = 100; y = 200; z = 300; "
+                 "return lambda(5); } run();", 65},
+                {"auto a = 1; auto b = 2; auto lambda = [&](auto multiplier) -> auto { a = a * multiplier; b = b * multiplier; "
+                 "return a + b; }; auto result1 = lambda(10); auto result2 = lambda(2); result1 * 100 + result2;", 3060},
+                {"function run() -> auto { auto x = 10; auto y = 20; auto counter = 0; "
+                 "auto lambda = [=, &counter](auto bonus) -> auto { counter = counter + 1; return x + y + bonus + counter; }; "
+                 "x = 100; y = 200; auto result1 = lambda(1); auto result2 = lambda(2); return result1 * 100 + result2; } run();", 3234},
                 {"auto x = 10; auto y = 20; auto lambda = [x, y](auto bonus) -> auto { return x + y + bonus; }; x = 100; y = 200; lambda(5);", 35},
                 {"auto counter = 0; auto increment = [&counter]() -> auto { counter = counter + 1; return counter; }; auto val1 = increment(); auto val2 = increment(); counter;", 2},
                 {"auto f = [=]() -> auto { return 42; }; f()", 42},

@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 
 using namespace jai;
 using namespace jai::foundry;
@@ -33,106 +34,22 @@ public:
             check_eq(result.template as<std::string>(), std::string("two"));
         });
         
-        test("switch_with_fallthrough", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto x = 2;
-                auto result = "";
-                switch (x) {
-                    case 1:
-                        result = result + "one";
-                        fallthrough;
-                    case 2:
-                        result = result + "two";
-                        fallthrough;
-                    case 3:
-                        result = result + "three";
-                        fallthrough;
-                    default:
-                        result = result + "default";
-                }
-                result
-            )");
-            check_eq(result.template as<std::string>(), std::string("twothreedefault"));
+        test("switch_runs_the_matching_case_and_falls_through_only_when_told", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = result + \"one\"; fallthrough; case 2: result = result + \"two\"; fallthrough; case 3: result = result + \"three\"; fallthrough; default: result = result + \"default\"; } result", "twothreedefault"},
+                {"auto x = 2; auto result = \"\"; switch (x) { case 1: result = \"one\"; break; case 2: result = \"two\"; break; case 3: result = \"three\"; break; default: result = \"other\"; } result", "two"},
+                {"auto name = \"Bob\"; auto greeting = \"\"; switch (name) { case \"Alice\": greeting = \"Hello Alice!\"; case \"Bob\": greeting = \"Hey Bob!\"; case \"Charlie\": greeting = \"Hi Charlie!\"; default: greeting = \"Hello stranger!\"; } greeting", "Hey Bob!"},
+                {"auto x = 99; auto result = \"\"; switch (x) { case 1: result = \"one\"; case 2: result = \"two\"; default: result = \"default case\"; } result", "default case"},
+                {"auto x = 99; auto result = \"unchanged\"; switch (x) { case 1: result = \"one\"; case 2: result = \"two\"; } result", "unchanged"},
+                {"auto x = 1; auto y = 2; auto result = \"\"; switch (x) { case 1: switch (y) { case 1: result = \"x=1,y=1\"; case 2: result = \"x=1,y=2\"; default: result = \"x=1,y=other\"; } case 2: result = \"x=2\"; default: result = \"x=other\"; } result", "x=1,y=2"},
+                {"auto get_name = [](int x) { switch (x) { case 1: return \"one\"; case 2: return \"two\"; case 3: return \"three\"; default: return \"other\"; } }; get_name(2)", "two"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(engine->execute(c.first).template as<std::string>(), std::string(c.second));
+            });
         });
-        
-        test("switch_with_explicit_break", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto x = 2;
-                auto result = "";
-                switch (x) {
-                    case 1:
-                        result = "one";
-                        break;
-                    case 2:
-                        result = "two";
-                        break;
-                    case 3:
-                        result = "three";
-                        break;
-                    default:
-                        result = "other";
-                }
-                result
-            )");
-            check_eq(result.template as<std::string>(), std::string("two"));
-        });
-        
-        test("switch_with_strings", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto name = "Bob";
-                auto greeting = "";
-                switch (name) {
-                    case "Alice":
-                        greeting = "Hello Alice!";
-                    case "Bob":
-                        greeting = "Hey Bob!";
-                    case "Charlie":
-                        greeting = "Hi Charlie!";
-                    default:
-                        greeting = "Hello stranger!";
-                }
-                greeting
-            )");
-            check_eq(result.template as<std::string>(), std::string("Hey Bob!"));
-        });
-        
-        test("switch_no_match_default_case", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto x = 99;
-                auto result = "";
-                switch (x) {
-                    case 1:
-                        result = "one";
-                    case 2:
-                        result = "two";
-                    default:
-                        result = "default case";
-                }
-                result
-            )");
-            check_eq(result.template as<std::string>(), std::string("default case"));
-        });
-        
-        test("switch_no_default", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto x = 99;
-                auto result = "unchanged";
-                switch (x) {
-                    case 1:
-                        result = "one";
-                    case 2:
-                        result = "two";
-                }
-                result
-            )");
-            check_eq(result.template as<std::string>(), std::string("unchanged"));
-        });
-        
+
         test("switch_with_expressions", [this]() {
             auto engine = make_engine();
             auto result = engine->execute(R"(
@@ -151,52 +68,6 @@ public:
                 result
             )");
             check_eq(result.template as<int>(), 10);
-        });
-        
-        test("nested_switch", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto x = 1;
-                auto y = 2;
-                auto result = "";
-                switch (x) {
-                    case 1:
-                        switch (y) {
-                            case 1:
-                                result = "x=1,y=1";
-                            case 2:
-                                result = "x=1,y=2";
-                            default:
-                                result = "x=1,y=other";
-                        }
-                    case 2:
-                        result = "x=2";
-                    default:
-                        result = "x=other";
-                }
-                result
-            )");
-            check_eq(result.template as<std::string>(), std::string("x=1,y=2"));
-        });
-        
-        test("switch_with_return", [this]() {
-            auto engine = make_engine();
-            auto result = engine->execute(R"(
-                auto get_name = [](int x) {
-                    switch (x) {
-                        case 1:
-                            return "one";
-                        case 2:
-                            return "two";
-                        case 3:
-                            return "three";
-                        default:
-                            return "other";
-                    }
-                };
-                get_name(2)
-            )");
-            check_eq(result.template as<std::string>(), std::string("two"));
         });
         
         test("case_values_run_in_order_until_a_match_and_once_on_a_fallthrough", [this]() {

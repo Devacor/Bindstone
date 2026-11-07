@@ -4,6 +4,7 @@
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -119,22 +120,23 @@ public:
             }
         });
 
-        test("basic_throw_catch", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                try {
-                    throw "Test error message";
-                } catch (e) {
-                    return e;
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Test error message");
+        test("try_catch_catches_nests_and_rethrows", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"try { throw \"Test error message\"; } catch (e) { return e; }", "Test error message"},
+                {"try { throw \"Error message\"; } catch { return \"Caught without variable\"; }", "Caught without variable"},
+                {"try { try { throw \"Inner error\"; } catch (inner) { throw \"Outer error: \" + inner; } } catch (outer) { return outer; }", "Outer error: Inner error"},
+                {"try { throw \"Original error\"; } catch (e) { try { throw; } catch (re) { return re; } }", "Original error"},
+                {"auto result = \"Start\"; try { result = result + \" \" + throw \"Error in expression\"; } catch (e) { result = result + \" caught: \" + e; } return result;", "Start caught: Error in expression"},
+                {"auto outer_var = \"outer\"; try { auto inner_var = \"inner\"; throw \"test\"; } catch (e) { return outer_var + \" \" + e; }", "outer test"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                script_value result = engine->execute(c.first);
+                check_eq(result.is_string(), true);
+                check_eq(result.as_string(), c.second);
+            });
         });
-        
+
         test("throw_without_catch_bubbles_to_cpp", [this]() {
             auto engine = make_engine();
             
@@ -153,140 +155,21 @@ public:
             check_eq(caught_exception, true);
         });
         
-        test("catch_without_variable", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                try {
-                    throw "Error message";
-                } catch {
-                    return "Caught without variable";
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Caught without variable");
-        });
-        
-        test("nested_try_catch", [this]() {
-            auto engine = make_engine();
-
-            std::string script = R"(
-                try {
-                    try {
-                        throw "Inner error";
-                    } catch (inner) {
-                        throw "Outer error: " + inner;
-                    }
-                } catch (outer) {
-                    return outer;
-                }
-            )";
-
-            script_value result = engine->execute(script);
-            std::cout << "  Result type: " << static_cast<int>(result.type()) << "\n";
-            if (result.is_string()) {
-                std::cout << "  Result value: '" << result.as_string() << "'\n";
-            } else {
-                std::cout << "  Result is not a string\n";
-            }
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Outer error: Inner error");
-        });
-        
-        test("cpp_runtime_error_interop", [this]() {
-            auto engine = make_engine();
-            
-            // Add a C++ function that throws std::runtime_error
-            engine->add_function("risky_function", []() {
-                throw std::runtime_error("C++ function error");
+        test("a_cpp_exception_is_caught_as_its_what_text", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"try { risky_function(); } catch (e) { return e; }", "C++ function error"},
+                {"try { generic_exception(); } catch (e) { return e; }", "Generic C++ error"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                engine->add_function("risky_function", []() { throw std::runtime_error("C++ function error"); });
+                engine->add_function("generic_exception", []() { throw std::logic_error("Generic C++ error"); });
+                script_value result = engine->execute(c.first);
+                check_eq(result.is_string(), true);
+                check_eq(result.as_string(), c.second);
             });
-            
-            std::string script = R"(
-                try {
-                    risky_function();
-                } catch (e) {
-                    return e;
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            if (!result.is_string() || result.as_string() != "C++ function error") {
-                std::cout << "\ncpp_runtime_error_interop FAILURE:" << std::endl;
-                std::cout << "  Expected: 'C++ function error'" << std::endl;
-                std::cout << "  Actual: '" << (result.is_string() ? result.as_string() : "<not a string>") << "'" << std::endl;
-                std::cout << "  Is int: " << result.is_int() << ", Is string: " << result.is_string() << std::endl;
-            }
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "C++ function error");
         });
-        
-        test("cpp_generic_exception_interop", [this]() {
-            auto engine = make_engine();
-            
-            // Add a C++ function that throws generic std::exception
-            engine->add_function("generic_exception", []() {
-                throw std::logic_error("Generic C++ error");
-            });
-            
-            std::string script = R"(
-                try {
-                    generic_exception();
-                } catch (e) {
-                    return e;
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            if (!result.is_string() || result.as_string() != "Generic C++ error") {
-                std::cout << "\ncpp_generic_exception_interop FAILURE:" << std::endl;
-                std::cout << "  Expected: 'Generic C++ error'" << std::endl;
-                std::cout << "  Actual: '" << (result.is_string() ? result.as_string() : "<not a string>") << "'" << std::endl;
-                std::cout << "  Is int: " << result.is_int() << ", Is string: " << result.is_string() << std::endl;
-            }
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Generic C++ error");
-        });
-        
-        test("throw_rethrow", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                try {
-                    throw "Original error";
-                } catch (e) {
-                    try {
-                        throw;  // Re-throw
-                    } catch (re) {
-                        return re;
-                    }
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Original error");
-        });
-        
-        test("throw_in_expressions", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto result = "Start";
-                try {
-                    result = result + " " + throw "Error in expression";
-                } catch (e) {
-                    result = result + " caught: " + e;
-                }
-                return result;
-            )";
-            
-            script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "Start caught: Error in expression");
-        });
-        
+
         test("exception_with_numeric_values", [this]() {
             auto engine = make_engine();
 
@@ -348,25 +231,6 @@ public:
             }
         });
         
-        test("exception_scope_isolation", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto outer_var = "outer";
-                try {
-                    auto inner_var = "inner";
-                    throw "test";
-                } catch (e) {
-                    // inner_var should not be accessible here
-                    return outer_var + " " + e;
-                }
-            )";
-            
-            script_value result = engine->execute(script);
-            check_eq(result.is_string(), true);
-            check_eq(result.as_string(), "outer test");
-        });
-
         test("throw_captures_nested_stack_trace", [this]() {
             auto engine = make_engine();
             const char* src =
@@ -746,50 +610,45 @@ public:
             check_eq(std::string("  at f (<script>:3)\n  at <script> (<script>:7)\n"), engine->format_stack_trace());
         });
 
-        test("return_conversion_error_nested_frames", [this]() {
-            auto engine = make_engine();
-            const char* src =
-                "int f() {\n"                 // 1
-                "  var x = \"s\";\n"          // 2
-                "  return x;\n"               // 3
-                "}\n"                         // 4
-                "int g() {\n"                 // 5
-                "  int r = f();\n"            // 6
-                "  return r;\n"               // 7
-                "}\n"                         // 8
-                "int b = g();\n";             // 9
-            std::string what = failure_text(*engine, src);
-            check_true(what.find("Cannot return string from 'f' (declared -> int)") == 0, "text (got: " + what + ")");
-            check_eq(std::string("f:3|g:6|<script>:9"), trace_shape(*engine));
-        });
-
-        test("lambda_typed_return_conversion_attributed", [this]() {
-            auto engine = make_engine();
-            const char* src =
-                "var x = \"s\";\n"            // 1
-                "auto l = []() -> int {\n"    // 2
-                "  return x;\n"               // 3
-                "};\n"                        // 4
-                "int b = l();\n";             // 5
-            std::string what = failure_text(*engine, src);
-            check_true(what.find("Cannot return string from lambda (declared -> int)") == 0, "text (got: " + what + ")");
-            check_eq(std::string("<lambda>:3|<script>:5"), trace_shape(*engine));
-        });
-
-        test("method_typed_return_conversion_attributed", [this]() {
-            auto engine = make_engine();
-            const char* src =
-                "class C {\n"                 // 1
-                "  int m() {\n"               // 2
-                "    var x = \"s\";\n"        // 3
-                "    return x;\n"             // 4
-                "  }\n"                       // 5
-                "}\n"                         // 6
-                "auto c = C();\n"             // 7
-                "int b = c.m();\n";           // 8
-            std::string what = failure_text(*engine, src);
-            check_true(what.find("Cannot return string from 'm' (declared -> int)") == 0, "text (got: " + what + ")");
-            check_eq(std::string("m:4|<script>:8"), trace_shape(*engine));
+        test("a_return_error_is_raised_at_the_return_statement_of_every_callee_kind", [this]() {
+            const std::tuple<const char*, const char*, const char*> cases[] = {
+                {"int f() {\n"                 // 1
+                 "  var x = \"s\";\n"          // 2
+                 "  return x;\n"               // 3
+                 "}\n"                         // 4
+                 "int g() {\n"                 // 5
+                 "  int r = f();\n"            // 6
+                 "  return r;\n"               // 7
+                 "}\n"                         // 8
+                 "int b = g();\n",
+                 "Cannot return string from 'f' (declared -> int)", "f:3|g:6|<script>:9"},
+                {"var x = \"s\";\n"            // 1
+                 "auto l = []() -> int {\n"    // 2
+                 "  return x;\n"               // 3
+                 "};\n"                        // 4
+                 "int b = l();\n",
+                 "Cannot return string from lambda (declared -> int)", "<lambda>:3|<script>:5"},
+                {"class C {\n"                 // 1
+                 "  int m() {\n"               // 2
+                 "    var x = \"s\";\n"        // 3
+                 "    return x;\n"             // 4
+                 "  }\n"                       // 5
+                 "}\n"                         // 6
+                 "auto c = C();\n"             // 7
+                 "int b = c.m();\n",
+                 "Cannot return string from 'm' (declared -> int)", "m:4|<script>:8"},
+                {"int& f() {\n"                // 1
+                 "  return 5;\n"               // 2
+                 "}\n"                         // 3
+                 "int b = f();\n",
+                 "Function with reference return type must return an lvalue reference", "f:2|<script>:4"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                std::string what = failure_text(*engine, std::get<0>(c));
+                check_true(what.find(std::get<1>(c)) == 0, "text (got: " + what + ")");
+                check_eq(std::string(std::get<2>(c)), trace_shape(*engine));
+            });
         });
 
         test("coroutine_typed_return_conversion_attributed", [this]() {
@@ -882,18 +741,6 @@ public:
             }
         });
 
-        test("ref_return_error_attributed_to_return_site", [this]() {
-            auto engine = make_engine();
-            const char* src =
-                "int& f() {\n"                // 1
-                "  return 5;\n"               // 2
-                "}\n"                         // 3
-                "int b = f();\n";             // 4
-            std::string what = failure_text(*engine, src);
-            check_true(what.find("Function with reference return type must return an lvalue reference") == 0, "text (got: " + what + ")");
-            check_eq(std::string("f:2|<script>:4"), trace_shape(*engine));
-        });
-
         // ---- returncatch (C++ semantics): the typed-return conversion is part of the
         // `return` statement, so a try/catch around the failing return INSIDE the callee
         // catches it; uncaught, the attribution and text above are unchanged. ----
@@ -947,10 +794,9 @@ public:
             check_eq(std::string("caught:Cannot return string from 'f' (declared -> int)"), result.as_string());
         });
 
-        test("return_conversion_catch_nested_try", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(
-                "int f() {\n"
+        test("a_return_conversion_error_is_caught_inside_its_callee", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"int f() {\n"
                 "  try {\n"
                 "    try {\n"
                 "      var x = \"s\";\n"
@@ -963,8 +809,24 @@ public:
                 "    return -3;\n"
                 "  }\n"
                 "}\n"
-                "f()\n");
-            check_eq((int64_t)-3, result.as_int());
+                "f()\n", (int64_t)-3},
+                {"class C {\n"
+                "  int m() {\n"
+                "    try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
+                "  }\n"
+                "}\n"
+                "auto c = C();\n"
+                "c.m()\n", (int64_t)-1},
+                {"var x = \"s\";\n"
+                "auto l = []() -> int {\n"
+                "  try { return x; } catch (e) { return -1; }\n"
+                "};\n"
+                "l()\n", (int64_t)-1},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(c.second, engine->execute(c.first).as_int());
+            });
         });
 
         test("return_conversion_catch_rethrow_attributed_to_throw", [this]() {
@@ -981,30 +843,6 @@ public:
                 "int b = f();\n";             // 9
             check_eq(std::string("Cannot return string from 'f' (declared -> int)"), failure_text(*engine, src));
             check_eq(std::string("f:6|<script>:9"), trace_shape(*engine));
-        });
-
-        test("method_return_conversion_caught_at_return_site", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(
-                "class C {\n"
-                "  int m() {\n"
-                "    try { var x = \"s\"; return x; } catch (e) { return -1; }\n"
-                "  }\n"
-                "}\n"
-                "auto c = C();\n"
-                "c.m()\n");
-            check_eq((int64_t)-1, result.as_int());
-        });
-
-        test("lambda_return_conversion_caught_at_return_site", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(
-                "var x = \"s\";\n"
-                "auto l = []() -> int {\n"
-                "  try { return x; } catch (e) { return -1; }\n"
-                "};\n"
-                "l()\n");
-            check_eq((int64_t)-1, result.as_int());
         });
 
         test("coroutine_return_conversion_caught_at_return_site", [this]() {
@@ -1194,51 +1032,21 @@ public:
                 "r\n").as_string());
         });
 
-        // A throw during argument evaluation must propagate the thrown value; it must not
-        // leak into the outer call's parameter binding and get replaced by a binding error.
-        test("throw_during_argument_evaluation_caught", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                auto h() { throw "argfail"; }
-                auto g(int a, int b) { return "g"; }
-                auto caller() {
-                    try { return g(1, h()); } catch (e) { return "c:" + e; }
-                }
-                return caller() + "|" + caller();
-            )");
-            check_eq(std::string("c:argfail|c:argfail"), result.as_string());
-        });
-
-        test("throw_during_argument_evaluation_native_callee", [this]() {
-            auto engine = make_engine();
-            engine->add_function("gn", [](int a, int b) { return std::string("gn"); });
-            script_value result = engine->execute(R"(
-                auto h() { throw "argfail"; }
-                try { return "r:" + gn(1, h()); } catch (e) { return "c:" + e; }
-            )");
-            check_eq(std::string("c:argfail"), result.as_string());
-        });
-
-        test("throw_during_argument_evaluation_method_callee", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                auto h() { throw "argfail"; }
-                class M { auto m(int a, int b) { return "m"; } }
-                var o = M();
-                try { return "r:" + o.m(1, h()); } catch (e) { return "c:" + e; }
-            )");
-            check_eq(std::string("c:argfail"), result.as_string());
-        });
-
-        test("throw_during_argument_evaluation_indirect_callee", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                auto h() { throw "argfail"; }
-                auto g(int a, int b) { return "g"; }
-                var hv = h;
-                try { return "r:" + g(1, hv()); } catch (e) { return "c:" + e; }
-            )");
-            check_eq(std::string("c:argfail"), result.as_string());
+        // A throw during argument or callee evaluation propagates the thrown value, never a parameter-binding error in its place
+        test("a_throw_while_evaluating_a_call_propagates_its_value", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"auto h() { throw \"argfail\"; } auto g(int a, int b) { return \"g\"; } auto caller() { try { return g(1, h()); } catch (e) { return \"c:\" + e; } } return caller() + \"|\" + caller();", "c:argfail|c:argfail"},
+                {"auto h() { throw \"argfail\"; } try { return \"r:\" + gn(1, h()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
+                {"auto h() { throw \"argfail\"; } class M { auto m(int a, int b) { return \"m\"; } } var o = M(); try { return \"r:\" + o.m(1, h()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
+                {"auto h() { throw \"argfail\"; } auto g(int a, int b) { return \"g\"; } var hv = h; try { return \"r:\" + g(1, hv()); } catch (e) { return \"c:\" + e; }", "c:argfail"},
+                {"auto h() { throw \"calleefail\"; } try { h()(); } catch (e) { return \"c:\" + e; }", "c:calleefail"},
+                {"auto h() { throw \"strfail\"; } var s = \"abc\"; try { var n = s.find(h()); return \"r:found\"; } catch (e) { return \"c:\" + e; }", "c:strfail"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                engine->add_function("gn", [](int a, int b) { return std::string("gn"); });
+                check_eq(std::string(c.second), engine->execute(c.first).as_string());
+            });
         });
 
         test("throw_during_argument_evaluation_uncaught_text", [this]() {
@@ -1253,15 +1061,6 @@ public:
                 got = e.what();
             }
             check_eq(std::string("argfail"), got);
-        });
-
-        test("throw_during_callee_evaluation", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                auto h() { throw "calleefail"; }
-                try { h()(); } catch (e) { return "c:" + e; }
-            )");
-            check_eq(std::string("c:calleefail"), result.as_string());
         });
 
         // Regression: caught typed-return conversion error left the callee frame/env and
@@ -1347,50 +1146,17 @@ public:
             check_eq((int64_t)3, engine->execute("takes(3);").as_int());
         });
 
-        // Regression: a script throw inside operator< / <= / > / >= was replaced by
-        // "Invalid operands for < operator" on both backends; == already propagated.
-        test("throw_in_ordering_operator_propagates", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw "boom"; } }
-                var a = S(1); var lim = S(5); var out = "";
-                try { if (a < lim) { out = "T"; } } catch (e) { out = "C[" + e + "]"; }
-                out;
-            )");
-            check_eq(std::string("C[boom]"), result.as_string());
-        });
-
-        test("throw_in_ordering_operator_plain_expression", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                class S { int v = 0; S(int n) { v = n; } function operator>=(S o) { throw "ge-boom"; } }
-                var a = S(1); var lim = S(5); var out = "";
-                try { var b = (a >= lim); out = "got:" + b; } catch (e) { out = "C[" + e + "]"; }
-                out;
-            )");
-            check_eq(std::string("C[ge-boom]"), result.as_string());
-        });
-
-        test("throw_in_ordering_operator_across_call_frame", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw "deep"; } }
-                function spin(var t, var lim) -> string { var c = 0; while (t < lim) { c += 1; } return "exited:" + c; }
-                var out = "";
-                try { out = spin(S(1), S(9)); } catch (e) { out = "C[" + e + "]"; }
-                out + ":alive";
-            )");
-            check_eq(std::string("C[deep]:alive"), result.as_string());
-        });
-
-        test("throw_during_string_method_argument", [this]() {
-            auto engine = make_engine();
-            script_value result = engine->execute(R"(
-                auto h() { throw "strfail"; }
-                var s = "abc";
-                try { var n = s.find(h()); return "r:found"; } catch (e) { return "c:" + e; }
-            )");
-            check_eq(std::string("c:strfail"), result.as_string());
+        // Regression: a script throw inside operator< / <= / > / >= was replaced by "Invalid operands for < operator"
+        test("a_throw_in_an_ordering_operator_propagates", [this]() {
+            const std::pair<const char*, const char*> cases[] = {
+                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"boom\"; } } var a = S(1); var lim = S(5); var out = \"\"; try { if (a < lim) { out = \"T\"; } } catch (e) { out = \"C[\" + e + \"]\"; } out;", "C[boom]"},
+                {"class S { int v = 0; S(int n) { v = n; } function operator>=(S o) { throw \"ge-boom\"; } } var a = S(1); var lim = S(5); var out = \"\"; try { var b = (a >= lim); out = \"got:\" + b; } catch (e) { out = \"C[\" + e + \"]\"; } out;", "C[ge-boom]"},
+                {"class S { int v = 0; S(int n) { v = n; } function operator<(S o) { throw \"deep\"; } } function spin(var t, var lim) -> string { var c = 0; while (t < lim) { c += 1; } return \"exited:\" + c; } var out = \"\"; try { out = spin(S(1), S(9)); } catch (e) { out = \"C[\" + e + \"]\"; } out + \":alive\";", "C[deep]:alive"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(std::string(c.second), engine->execute(c.first).as_string());
+            });
         });
 
         // Error texts that embed a value (a host exception, a binary reader past its end, a name nothing declares) never

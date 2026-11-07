@@ -44,7 +44,7 @@ GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
 GLOOM_SHOWCASE_FRAME=6559224cca20d1f0
 DEMOREEL_STREAM=006d304a70772e5f
-CRAWLER_STATE=3849293868
+CRAWLER_STATE=1743191104
 GATORQUEST_STATE=3218840367
 GLOOM_LONG_FRAME=dfd969ed5a336dca
 GLOOM_LONG_STATE=1503537018
@@ -197,7 +197,7 @@ gate_demoreel() {
 
 gate_crawler() {
 	vm_only crawler || return 0
-	run_logged "$BIN/jai_crawler" --smoke --seed 99 --turns 1500
+	run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500
 	want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
 }
 

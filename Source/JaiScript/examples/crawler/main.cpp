@@ -1,8 +1,9 @@
-// jai_crawler host: a deliberately thin console shell around a JaiScript engine.
-// GRUBWELL is a first-person, facing-locked dungeon crawler; everything that
-// makes it a game (raycast view, dungeon gen, combat, AI, items, UI text) lives
-// in scripts/*.jai. The host only provides: a terminal, a blocking keyboard,
-// a seeded rng class, file IO for saves, and command-line flags as globals.
+// jai_crawler: GRUBWELL's native host, a thin console shell around a JaiScript engine.
+// Everything that makes the game (the raycast view, dungeon generation, combat, AI, items, the
+// screens) lives in scripts/*.jai. The host gives the script a terminal (raw keys, the console
+// size, its colour depth, an alternate screen it restores on every exit), a seeded Rng, file IO
+// for saves, and the command-line flags as globals. scripts/crawler.jai is the same contract
+// written in script for the standalone runner.
 
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
@@ -12,18 +13,28 @@
 
 #include <cerrno>
 #include <chrono>
-#include <cstdio>
+#include <csignal>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <deque>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <thread>
+#include <vector>
 
 #ifdef _WIN32
 #include <windows.h>
 #include <conio.h>
+#else
+#include <poll.h>
+#include <sys/ioctl.h>
+#include <termios.h>
+#include <unistd.h>
 #endif
 
 #include <jaiscript/testing/unattended.hpp>
@@ -33,24 +44,25 @@ namespace {
 struct host_options {
 	int64_t seed = 1337;
 	std::string backend = "vm";
-	uint32_t miss_every = 0;   // engine::cells_miss_every (--miss-every N; a build with JAISCRIPT_MISS_INJECTION)
+	uint32_t miss_every = 0;     // engine::cells_miss_every (--miss-every N; a build with JAISCRIPT_MISS_INJECTION)
 	bool smoke = false;
 	bool dev = false;
 	bool god = false;
 	bool load = false;
-	bool quiet = false;          // suppress frame drawing (smoke implies quiet)
-	bool time_turns = false;     // measure key->frame latency; summary on exit
+	bool quiet = false;          // no frames (smoke implies it)
+	bool time_turns = false;     // key->frame latency summary on exit
 	int64_t turns = 250;         // smoke turn budget
+	std::string colors;          // "24" or "256"; empty = detect
+	bool ascii = false;          // plain ASCII glyphs, for terminals without Unicode block characters
 	std::string scripted_input;  // keys fed to read_key(); empty = interactive
 	std::string scripts_dir;
 	std::string save_path = "jai_crawler_save.json";
 	bool debug = false;          // stand up the DAP debug_connector
 	bool debug_wait = false;     // also hold boot until a debugger attaches (--debug-wait)
-	int64_t debug_port = 52472;   // port VS Code attaches to
+	int64_t debug_port = 52472;
 };
 
-// --time latency probe: read_key return -> frame_mark (turn logic) ->
-// draw entry (frame string build) -> fwrite+fflush (console blit).
+// --time: read_key return -> frame_mark (turn logic) -> draw entry (frame build) -> fwrite+fflush (blit)
 struct turn_perf {
 	using clock = std::chrono::steady_clock;
 	bool enabled = false;
@@ -67,6 +79,12 @@ struct turn_perf {
 		return std::chrono::duration<double, std::milli>(b - a).count();
 	}
 
+	static void track(double ms, double& sum, double& lo, double& hi) {
+		sum += ms;
+		if (ms > hi) { hi = ms; }
+		if (ms < lo) { lo = ms; }
+	}
+
 	void on_key() {
 		if (!enabled) { return; }
 		key_stamp = clock::now();
@@ -80,25 +98,19 @@ struct turn_perf {
 		frame_pending = true;
 	}
 
-	// returns true if this draw closes a measured turn (caller then times the blit)
+	// true when this draw closes a measured turn (the caller then times the blit)
 	bool on_draw_begin() {
 		if (!enabled || !key_pending) { return false; }
 		auto now = clock::now();
-		double logic = frame_pending ? ms_between(key_stamp, frame_stamp) : ms_between(key_stamp, now);
-		double build = frame_pending ? ms_between(frame_stamp, now) : 0.0;
-		logic_sum += logic; if (logic > logic_max) { logic_max = logic; } if (logic < logic_min) { logic_min = logic; }
-		build_sum += build; if (build > build_max) { build_max = build; } if (build < build_min) { build_min = build; }
+		track(frame_pending ? ms_between(key_stamp, frame_stamp) : ms_between(key_stamp, now), logic_sum, logic_min, logic_max);
+		track(frame_pending ? ms_between(frame_stamp, now) : 0.0, build_sum, build_min, build_max);
 		++turns;
 		key_pending = false;
 		frame_pending = false;
 		return true;
 	}
 
-	void on_blit(double ms) {
-		blit_sum += ms;
-		if (ms > blit_max) { blit_max = ms; }
-		if (ms < blit_min) { blit_min = ms; }
-	}
+	void on_blit(double ms) { track(ms, blit_sum, blit_min, blit_max); }
 
 	void report() const {
 		if (!enabled || turns == 0) { return; }
@@ -116,6 +128,77 @@ struct turn_perf {
 	}
 };
 
+// The terminal the game owns between enter() and restore_terminal(): the alternate screen, a
+// hidden cursor and (on POSIX) raw keys. It is given back on a normal exit, a script error,
+// Ctrl+C, a closed console and SIGTERM alike; host_log lines written meanwhile print after it.
+const char* const k_enter_screen = "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H";
+const char* const k_leave_screen = "\x1b[0m\x1b[2J\x1b[H\x1b[?25h\x1b[?1049l";
+volatile std::sig_atomic_t g_screen_entered = 0;
+std::vector<std::string> g_held_log;
+#ifndef _WIN32
+termios g_saved_termios{};
+volatile std::sig_atomic_t g_raw_keys = 0;
+#endif
+
+void restore_terminal() {
+#ifndef _WIN32
+	if (g_raw_keys) {
+		tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_termios);
+		g_raw_keys = 0;
+	}
+#endif
+	if (g_screen_entered) {
+		g_screen_entered = 0;
+		std::fputs(k_leave_screen, stdout);
+	}
+	for (const std::string& line : g_held_log) {
+		std::fputs(line.c_str(), stdout);
+		std::fputc('\n', stdout);
+	}
+	g_held_log.clear();
+	std::fflush(stdout);
+}
+
+#ifdef _WIN32
+BOOL WINAPI on_console_break(DWORD type) {
+	if (type == CTRL_C_EVENT || type == CTRL_BREAK_EVENT || type == CTRL_CLOSE_EVENT) {
+		restore_terminal();
+		ExitProcess(130);
+	}
+	return FALSE;
+}
+#else
+void on_signal(int sig) {
+	if (g_raw_keys) { tcsetattr(STDIN_FILENO, TCSANOW, &g_saved_termios); }
+	if (g_screen_entered) {
+		ssize_t written = write(STDOUT_FILENO, k_leave_screen, std::strlen(k_leave_screen));
+		(void)written;
+	}
+	std::signal(sig, SIG_DFL);
+	std::raise(sig);
+}
+#endif
+
+// COLORTERM=truecolor|24bit says 24-bit, and so does a Windows console that took VT processing.
+// Anything else gets the xterm 256-colour cube.
+bool detect_truecolor(bool vt_console) {
+#ifdef _WIN32
+	char* colorterm = nullptr;
+	size_t size = 0;
+	std::string value;
+	if (_dupenv_s(&colorterm, &size, "COLORTERM") == 0 && colorterm) {
+		value = colorterm;
+		std::free(colorterm);
+	}
+	return value == "truecolor" || value == "24bit" || vt_console;
+#else
+	(void)vt_console;
+	const char* colorterm = std::getenv("COLORTERM");
+	std::string value = colorterm ? colorterm : "";
+	return value == "truecolor" || value == "24bit";
+#endif
+}
+
 struct console_host {
 	bool vt_enabled = false;
 	bool quiet = false;
@@ -131,18 +214,28 @@ struct console_host {
 			vt_enabled = SetConsoleMode(out, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING) != 0;
 		}
 		SetConsoleOutputCP(CP_UTF8);
+		SetConsoleCtrlHandler(on_console_break, TRUE);
 #endif
-		if (!quiet) {
-			std::fputs("\x1b[?25l\x1b[2J\x1b[H", stdout);
-			std::fflush(stdout);
-		}
 	}
 
-	void shutdown() {
-		if (!quiet) {
-			std::fputs("\x1b[0m\x1b[?25h\n", stdout);
-			std::fflush(stdout);
+	void enter() {
+		std::atexit(restore_terminal);
+		if (quiet) { return; }
+#ifndef _WIN32
+		if (!input_was_scripted && isatty(STDIN_FILENO) && tcgetattr(STDIN_FILENO, &g_saved_termios) == 0) {
+			termios raw = g_saved_termios;
+			raw.c_lflag &= ~(ICANON | ECHO);   // ISIG stays: Ctrl+C raises SIGINT, which restores and exits
+			raw.c_cc[VMIN] = 1;
+			raw.c_cc[VTIME] = 0;
+			tcsetattr(STDIN_FILENO, TCSANOW, &raw);
+			g_raw_keys = 1;
 		}
+		std::signal(SIGINT, on_signal);
+		std::signal(SIGTERM, on_signal);
+#endif
+		g_screen_entered = 1;
+		std::fputs(k_enter_screen, stdout);
+		std::fflush(stdout);
 	}
 
 	void draw(const std::string& frame) {
@@ -159,32 +252,61 @@ struct console_host {
 		if (measured) { perf.on_blit(turn_perf::ms_between(blit_start, turn_perf::clock::now())); }
 	}
 
-	void clear() {
-		if (quiet) { return; }
-		std::fputs("\x1b[2J\x1b[H", stdout);
+	void log(const std::string& line) {
+		if (g_screen_entered) {
+			g_held_log.push_back(line);
+			return;
+		}
+		std::fputs(line.c_str(), stdout);
+		std::fputc('\n', stdout);
 		std::fflush(stdout);
 	}
 
 	std::string read_key() {
-		std::string k = read_key_impl();
+		std::string key = next_key(-1.0);
 		perf.on_key();
-		return k;
+		return key;
 	}
 
-	std::string read_key_impl() {
+	// a key, or "" when none arrives within the timeout; scripted input never waits
+	std::string poll_key(double seconds) {
+		std::string key = next_key(seconds < 0.0 ? 0.0 : seconds);
+		if (!key.empty()) { perf.on_key(); }
+		return key;
+	}
+
+	// timeout < 0 blocks until a key
+	std::string next_key(double timeout) {
 		if (input_was_scripted) {
-			if (scripted.empty()) { return "Q"; }  // scripted run finished: hard quit
-			std::string k = scripted.front();
+			if (scripted.empty()) { return "Q"; }   // the script ran out: hard quit
+			std::string key = scripted.front();
 			scripted.pop_front();
-			if (k == ";") { return "enter"; }  // scripted stand-ins for special keys
-			if (k == "^") { return "esc"; }
-			return k;
+			if (key == ";") { return "enter"; }
+			if (key == "^") { return "esc"; }
+			return key;
 		}
+		auto deadline = turn_perf::clock::now()
+			+ std::chrono::duration_cast<turn_perf::clock::duration>(std::chrono::duration<double>(timeout < 0.0 ? 0.0 : timeout));
+		while (timeout < 0.0 || key_waiting(deadline)) {
+			std::string key = decode_key();
+			if (!key.empty()) { return key; }
+		}
+		return "";
+	}
+
 #ifdef _WIN32
+	bool key_waiting(turn_perf::clock::time_point deadline) {
+		while (!_kbhit()) {
+			if (turn_perf::clock::now() >= deadline) { return false; }
+			std::this_thread::sleep_for(std::chrono::milliseconds(4));
+		}
+		return true;
+	}
+
+	std::string decode_key() {
 		int c = _getch();
 		if (c == 0 || c == 0xE0) {
-			int c2 = _getch();
-			switch (c2) {
+			switch (_getch()) {
 				case 72: return "up";
 				case 80: return "down";
 				case 75: return "left";
@@ -193,6 +315,7 @@ struct console_host {
 			}
 		}
 		switch (c) {
+			case 3: restore_terminal(); std::exit(130);
 			case 13: return "enter";
 			case 27: return "esc";
 			case 8: return "backspace";
@@ -201,17 +324,72 @@ struct console_host {
 		}
 		if (c >= 32 && c < 127) { return std::string(1, static_cast<char>(c)); }
 		return "";
+	}
 #else
-		int c = std::getchar();
-		if (c == EOF) { return "Q"; }
-		if (c == '\n') { return "enter"; }
-		return std::string(1, static_cast<char>(c));
+	static bool byte_within(unsigned char& b, int ms) {
+		pollfd fd{STDIN_FILENO, POLLIN, 0};
+		if (poll(&fd, 1, ms) <= 0) { return false; }
+		return read(STDIN_FILENO, &b, 1) == 1;
+	}
+
+	bool key_waiting(turn_perf::clock::time_point deadline) {
+		auto left = std::chrono::duration_cast<std::chrono::milliseconds>(deadline - turn_perf::clock::now()).count();
+		pollfd fd{STDIN_FILENO, POLLIN, 0};
+		return poll(&fd, 1, left < 0 ? 0 : static_cast<int>(left)) > 0;
+	}
+
+	// an arrow is ESC [ A..D (or ESC O A..D in application cursor mode); a lone ESC is the escape key
+	std::string decode_key() {
+		unsigned char b = 0;
+		if (read(STDIN_FILENO, &b, 1) != 1) { return "Q"; }   // stdin closed
+		if (b == 0x1B) {
+			unsigned char b2 = 0;
+			if (!byte_within(b2, 25) || (b2 != '[' && b2 != 'O')) { return "esc"; }
+			unsigned char fin = 0;
+			bool have = byte_within(fin, 25);
+			while (have && b2 == '[' && fin >= 0x20 && fin <= 0x3F) { have = byte_within(fin, 25); }
+			if (!have) { return ""; }
+			switch (fin) {
+				case 'A': return "up";
+				case 'B': return "down";
+				case 'C': return "right";
+				case 'D': return "left";
+				default: return "";
+			}
+		}
+		if (b == '\n' || b == '\r') { return "enter"; }
+		if (b == '\t') { return "tab"; }
+		if (b == 127 || b == 8) { return "backspace"; }
+		if (b >= 32 && b < 127) { return std::string(1, static_cast<char>(b)); }
+		return "";
+	}
 #endif
+
+	static jai::script_int columns() {
+#ifdef _WIN32
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) { return info.srWindow.Right - info.srWindow.Left + 1; }
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_col > 0) { return ws.ws_col; }
+#endif
+		return 80;
+	}
+
+	static jai::script_int rows() {
+#ifdef _WIN32
+		CONSOLE_SCREEN_BUFFER_INFO info;
+		if (GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) { return info.srWindow.Bottom - info.srWindow.Top + 1; }
+#else
+		winsize ws{};
+		if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) == 0 && ws.ws_row > 0) { return ws.ws_row; }
+#endif
+		return 25;
 	}
 };
 
-// Deterministic xorshift64* — the ONLY randomness the game is allowed to touch.
-// Bound as script class `Rng` so dungeons replay exactly from a seed.
+// Deterministic xorshift64*, the only randomness the game rules touch. Bound as script class Rng
+// so a seed replays a run exactly.
 struct crawler_rng {
 	uint64_t s;
 
@@ -239,7 +417,7 @@ struct crawler_rng {
 
 	bool chance(jai::script_int percent) { return next(100) < percent; }
 
-	// Masked to 62 bits so the value survives a script-side int64 round trip via JSON.
+	// masked to 62 bits so the value survives a script-side int64 round trip through JSON
 	jai::script_int state() const { return static_cast<jai::script_int>(s & 0x3FFFFFFFFFFFFFFFull); }
 	void set_state(jai::script_int v) {
 		s = static_cast<uint64_t>(v);
@@ -247,8 +425,8 @@ struct crawler_rng {
 	}
 };
 
-// read_file: the file's bytes, "" for an empty file; a missing or unreadable one raises the catchable
-// "Cannot read file '<path>': <reason>", the runner's contract (tools/jaiscript/README.md)
+// the file's bytes; a missing or unreadable one raises the runner's catchable
+// "Cannot read file '<path>': <reason>" (tools/jaiscript/README.md)
 std::string read_file_or_raise(const std::string& path) {
 	std::error_code ec;
 	const std::filesystem::file_status st = std::filesystem::status(path, ec);
@@ -293,10 +471,8 @@ std::string locate_scripts_dir(const std::string& override_dir, const char* argv
 }
 
 #ifdef JAISCRIPT_ENABLE_DEBUGGER
-// Attach a DAP connector for the whole engine lifetime — it listens until the engine is torn
-// down, so you can attach from VS Code at ANY time; breakpoints you set bind on the next
-// statement. Pass wait_to_boot (--debug-wait) to also hold boot until you press Enter, which
-// lets breakpoints in boot-time script (dungeon gen, class init) catch the very first run.
+// The connector listens for the engine's whole lifetime, so VS Code can attach at any time;
+// wait_to_boot (--debug-wait) also holds boot until Enter, so boot-time breakpoints catch.
 void start_debugger(jai::engine& eng, int port, bool wait_to_boot) {
 	jai::debug::listen(eng, port);
 	std::fprintf(stderr, "[jai debug] listening on 127.0.0.1:%d - attach from VS Code any time.\n", port);
@@ -314,19 +490,21 @@ void print_usage() {
 	std::puts(
 		"jai_crawler - GRUBWELL, a first-person dungeon crawler written in JaiScript\n"
 		"  --seed N        dungeon seed (default 1337)\n"
-		"  --backend B     vm (default vm)\n"
+		"  --load          continue the saved run\n"
+		"  --god           tourist mode: no damage, monstrous stats\n"
+		"  --colors 24|256 colour depth (default: 24-bit when COLORTERM says so or on a Windows console)\n"
+		"  --ascii         plain ASCII glyphs, for terminals without Unicode block characters\n"
+		"  --dev           'R' hot-reloads the scripts mid-run\n"
 		"  --smoke         headless deterministic autoplay; prints a state hash\n"
 		"  --turns N       smoke turn budget (default 250)\n"
-		"  --input KEYS    scripted keys fed to read_key() (e.g. \"wwdwg>\"; ';'=enter '^'=esc)\n"
-		"  --quiet         suppress frame drawing (useful with --input)\n"
-		"  --time          measure key->frame latency; prints a summary on exit\n"
-		"  --dev           enable in-game script hot reload on 'R'\n"
-		"  --god           god mode (no damage, monstrous stats)\n"
-		"  --load          continue from the save file\n"
-		"  --save PATH     save file path (default jai_crawler_save.json)\n"
-		"  --scripts DIR   override the scripts directory\n"
+		"  --input KEYS    scripted keys (e.g. \"n11;wwdwg>\"; ';'=enter '^'=esc)\n"
+		"  --quiet         no frames (useful with --input)\n"
+		"  --time          key->frame latency summary on exit\n"
+		"  --save PATH     save file (default jai_crawler_save.json)\n"
+		"  --scripts DIR   scripts directory\n"
+		"  --backend B     vm (the only backend this host links)\n"
 		"  --debug         listen for a VS Code debugger for the whole run\n"
-		"  --debug-wait    like --debug, but also hold boot until you attach + press Enter\n"
+		"  --debug-wait    like --debug, and hold boot until you attach + press Enter\n"
 		"  --debug-port N  --debug on port N (default 52472)\n");
 }
 
@@ -355,6 +533,8 @@ int main(int argc, char** argv) {
 		else if (a == "--dev") { opt.dev = true; }
 		else if (a == "--god") { opt.god = true; }
 		else if (a == "--load") { opt.load = true; }
+		else if (a == "--colors") { opt.colors = next_arg("--colors"); }
+		else if (a == "--ascii") { opt.ascii = true; }
 		else if (a == "--save") { opt.save_path = next_arg("--save"); }
 		else if (a == "--scripts") { opt.scripts_dir = next_arg("--scripts"); }
 		else if (a == "--debug") { opt.debug = true; }
@@ -362,6 +542,14 @@ int main(int argc, char** argv) {
 		else if (a == "--debug-port") { opt.debug = true; opt.debug_port = std::stoll(next_arg("--debug-port")); }
 		else if (a == "--help" || a == "-h") { print_usage(); return 0; }
 		else { std::fprintf(stderr, "unknown flag: %s\n", a.c_str()); print_usage(); return 2; }
+	}
+	if (!opt.colors.empty() && opt.colors != "24" && opt.colors != "256") {
+		std::fprintf(stderr, "--colors takes 24 or 256\n");
+		return 2;
+	}
+	if (opt.backend != "vm") {
+		std::fprintf(stderr, "unknown backend: %s\n", opt.backend.c_str());
+		return 2;
 	}
 
 	console_host console;
@@ -371,17 +559,10 @@ int main(int argc, char** argv) {
 		console.input_was_scripted = true;
 		for (char c : opt.scripted_input) { console.scripted.emplace_back(1, c); }
 	}
-	// Only --debug-wait holds the alt-screen back (its attach prompt prints to the normal
-	// terminal). Plain --debug boots immediately with the connector listening in the
-	// background, so init the console now.
-	if (!(opt.debug && opt.debug_wait)) { console.init(); }
+	console.init();
+	bool truecolor = opt.colors.empty() ? detect_truecolor(console.vt_enabled) : opt.colors == "24";
 
 	auto eng = jai::engine::make();
-	if (opt.backend != "vm") {
-		console.shutdown();
-		std::fprintf(stderr, "unknown backend: %s\n", opt.backend.c_str());
-		return 2;
-	}
 	if (opt.miss_every) { eng->cells_miss_every(opt.miss_every); }
 	eng->execution_budget(0.0);  // the game blocks on read_key(); wall-clock budgets don't apply
 	jai::stdlib::register_all(eng);
@@ -390,22 +571,14 @@ int main(int argc, char** argv) {
 	eng->add_include_path(scripts_dir);
 	eng->set_import_behavior(jai::engine::import_behavior::always);
 
-	// --- console bindings ---
 	eng->add_function("draw", [&console](const std::string& frame) { console.draw(frame); });
-	eng->add_function("clear_screen", [&console]() { console.clear(); });
 	eng->add_function("read_key", [&console]() -> std::string { return console.read_key(); });
+	eng->add_function("poll_key", [&console](double seconds) -> std::string { return console.poll_key(seconds); });
 	eng->add_function("frame_mark", [&console]() { console.perf.on_frame_mark(); });
-	eng->add_function("chr", [](jai::script_int code) -> std::string {
-		return std::string(1, static_cast<char>(code & 0x7F));
-	});
-	// stdout that works even while frames own the screen (smoke summaries, death dumps)
-	eng->add_function("host_log", [](const std::string& line) {
-		std::fputs(line.c_str(), stdout);
-		std::fputc('\n', stdout);
-		std::fflush(stdout);
-	});
+	eng->add_function("term_cols", []() -> jai::script_int { return console_host::columns(); });
+	eng->add_function("term_rows", []() -> jai::script_int { return console_host::rows(); });
+	eng->add_function("host_log", [&console](const std::string& line) { console.log(line); });
 
-	// --- file IO for saves ---
 	eng->add_function("read_file", [](const std::string& path) -> std::string { return read_file_or_raise(path); });
 	eng->add_function("write_file", [](const std::string& path, const std::string& content) -> bool {
 		return spill_file(path, content);
@@ -418,7 +591,6 @@ int main(int argc, char** argv) {
 		return std::filesystem::remove(path, ec);
 	});
 
-	// --- deterministic rng ---
 	jai::dynamic_binder<crawler_rng>(*eng, "Rng")
 		.constructor<jai::script_int>()
 		.method("next", &crawler_rng::next)
@@ -428,8 +600,6 @@ int main(int argc, char** argv) {
 		.method("set_state", &crawler_rng::set_state)
 		.build();
 
-	// --- flags as globals ---
-	eng->add_global("ESC", eng->make_value(std::string("\x1b")));
 	eng->add_global("HOST_SEED", eng->make_value(opt.seed));
 	eng->add_global("HOST_SMOKE", eng->make_value(opt.smoke));
 	eng->add_global("HOST_TURNS", eng->make_value(opt.turns));
@@ -437,6 +607,9 @@ int main(int argc, char** argv) {
 	eng->add_global("HOST_GOD", eng->make_value(opt.god));
 	eng->add_global("HOST_LOAD", eng->make_value(opt.load));
 	eng->add_global("HOST_SCRIPTED", eng->make_value(console.input_was_scripted));
+	eng->add_global("HOST_INTERACTIVE", eng->make_value(!console.quiet && !console.input_was_scripted));
+	eng->add_global("HOST_TRUECOLOR", eng->make_value(truecolor));
+	eng->add_global("HOST_ASCII", eng->make_value(opt.ascii));
 	eng->add_global("SAVE_PATH", eng->make_value(opt.save_path));
 	eng->add_global("HOST_BACKEND", eng->make_value(opt.backend));
 
@@ -446,21 +619,20 @@ int main(int argc, char** argv) {
 #else
 		std::fprintf(stderr, "--debug needs a build with -DJAISCRIPT_ENABLE_DEBUGGER=ON\n");
 #endif
-		if (opt.debug_wait) { console.init(); }
 	}
+	console.enter();
 
-	int exit_code = 0;
 	try {
 		eng->execute("import \"main.jai\";");
 		eng->execute("crawler_main();");
 	} catch (const std::exception& ex) {
-		console.shutdown();
+		restore_terminal();
 		std::fprintf(stderr, "\njai_crawler: script error: %s\n", ex.what());
 		std::string trace = eng->format_stack_trace();
 		if (!trace.empty()) { std::fprintf(stderr, "%s\n", trace.c_str()); }
 		return 1;
 	}
-	console.shutdown();
+	restore_terminal();
 	console.perf.report();
-	return exit_code;
+	return 0;
 }

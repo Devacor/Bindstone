@@ -1,117 +1,61 @@
 // GRUBWELL entry point. The host executes: import "main.jai"; crawler_main();
-// state.jai holds the persistent globals (G, RNG). reload_scripts() below deliberately
-// skips it: reloading would re-run its top-level declarations and reset the live run.
-// (Not a language mechanism - just don't re-execute files whose side effects you want kept.)
+// The host supplies: draw, read_key, poll_key, term_cols, term_rows, frame_mark, host_log, the
+// file functions, the seeded Rng class and the HOST_* flags (main.cpp, or crawler.jai on the
+// standalone runner).
 
-import "state.jai";
+import "state.jai";     // the persistent globals; the dev reload leaves this file out
 import "util.jai";
+import "term.jai";
 import "data.jai";
 import "entities.jai";
 import "dungeon.jai";
 import "items.jai";
 import "combat.jai";
 import "ai.jai";
+import "art.jai";
 import "view.jai";
 import "ui.jai";
+import "screens.jai";
 import "game.jai";
 
-// Re-run every rule file mid-run ('R' with --dev). An import is program scope wherever
-// it stands, so functions and classes replace in place (instances migrate) and each
-// file's top-level declarations re-run; the host's import_behavior::always re-runs them
-// on every R, edited or not. The group is parsed and checked before any of it runs, so
-// a broken edit raises and changes nothing. Live coroutines keep their old bodies until
-// rebuilt. G and RNG live in state.jai, which is deliberately skipped. (An include here
-// would paste the files into this function: their functions would be its nested ones.)
+// Re-runs every rule and presentation file mid-run ('R' with --dev). An import is program
+// scope wherever it stands, so functions and classes replace in place (instances migrate) and
+// each file's top-level declarations run again; the group is parsed and checked before any of
+// it runs, so a broken edit raises and changes nothing. Live coroutines keep their old bodies
+// until they are made again.
 function reload_scripts() -> void {
-	import("util.jai", "data.jai", "entities.jai", "dungeon.jai", "items.jai", "combat.jai", "ai.jai", "view.jai", "ui.jai", "game.jai");
-}
-
-function creation_screen() -> var {
-	// species
-	var species_index = -1;
-	while (species_index < 0) {
-		var lines = [];
-		lines.push(col("93", " Who goes down the Well?") + col("90", "  (choose your Kin)"));
-		lines.push("");
-		for (int i = 0; i < SPECIES.size(); ++i) {
-			var s = SPECIES[i];
-			lines.push(`  ${i + 1}) ${col("97", s["name"])}`);
-			lines.push(col("90", `     ${s["blurb"]}`));
-			lines.push(col("36", `     ${s["trait_name"]}: `) + col("90", s["trait_blurb"]));
-		}
-		present(lines);
-		var key = read_key();
-		if (key == "Q") { return null; }
-		for (int i = 0; i < SPECIES.size(); ++i) {
-			if (key == to_string(i + 1)) { species_index = i; }
-		}
-	}
-	// class
-	var class_index = -1;
-	while (class_index < 0) {
-		var lines = [];
-		lines.push(col("93", " And what did you train as?"));
-		lines.push("");
-		for (int i = 0; i < CLASSES.size(); ++i) {
-			var c = CLASSES[i];
-			lines.push(`  ${i + 1}) ${col("97", c["name"])}`);
-			lines.push(col("90", `     ${c["blurb"]}`));
-			lines.push(col("36", `     ${c["skill_name"]} (${c["skill_cost"]} focus): `) + col("90", c["skill_blurb"]));
-		}
-		present(lines);
-		var key = read_key();
-		if (key == "Q") { return null; }
-		for (int i = 0; i < CLASSES.size(); ++i) {
-			if (key == to_string(i + 1)) { class_index = i; }
-		}
-	}
-	// name
-	var hero_name = "";
-	while (true) {
-		var lines = [];
-		lines.push(col("93", " Your name, wanderer?") + col("90", "  (letters, enter to finish, esc for a nameless run)"));
-		lines.push("");
-		lines.push(`   > ${col("97", hero_name)}${col("90", "_")}`);
-		present(lines);
-		var key = read_key();
-		if (key == "enter") { break; }
-		if (key == "esc") { hero_name = ""; break; }
-		if (key == "backspace") {
-			if (hero_name.size() > 0) { hero_name = hero_name.substr(0, hero_name.size() - 1); }
-			continue;
-		}
-		if (key.size() == 1 && hero_name.size() < 12) { hero_name = hero_name + key; }
-	}
-	if (hero_name == "") { hero_name = "Wanderer"; }
-	return [SPECIES[species_index], CLASSES[class_index], hero_name];
+	import("util.jai", "term.jai", "data.jai", "entities.jai", "dungeon.jai", "items.jai", "combat.jai", "ai.jai",
+		"art.jai", "view.jai", "ui.jai", "screens.jai", "game.jai");
+	setup_screen();
 }
 
 function crawler_main() -> void {
+	setup_screen();
 	RNG = Rng(HOST_SEED);
 	G = Game();
-	PILOT_CO = null;   // a second run in the same engine (the REPL) starts a fresh pilot, not the last game's
+	PILOT_CO = null;   // a second run in the same engine (the REPL) starts a fresh pilot
 	G.smoke = HOST_SMOKE;
 	G.autopilot = HOST_SMOKE;
 
-	if (HOST_LOAD && file_exists(SAVE_PATH)) {
-		if (!load_game()) {
-			host_log("Save file unreadable; starting fresh.");
-			G = Game();
-			G.smoke = HOST_SMOKE;
-			G.autopilot = HOST_SMOKE;
-		}
-	}
-
-	if (G.player == null) {
-		if (G.autopilot) {
-			// deterministic pilot: species/class from the seed, same key path as a human after that
-			var species_row = SPECIES[RNG.next(SPECIES.size())];
-			var class_row = CLASSES[RNG.next(CLASSES.size())];
-			start_new_game(species_row, class_row, "Testpilot");
-		} else {
-			var chosen = creation_screen();
-			if (chosen == null) { return; }
-			start_new_game(chosen[0], chosen[1], chosen[2]);
+	if (G.autopilot) {
+		// the pilot's kin and profession come from the seed; from there it presses keys like you
+		Species species = SPECIES[RNG.next(SPECIES.size())];
+		Profession calling = PROFESSIONS[RNG.next(PROFESSIONS.size())];
+		start_new_game(species, calling, "Testpilot");
+	} else if (!(HOST_LOAD && load_game())) {
+		bool saved = file_exists(SAVE_PATH);
+		while (true) {
+			string choice = title_screen(saved);
+			if (choice == "q") { return; }
+			if (choice == "c") {
+				if (load_game()) { break; }
+				saved = false;
+				continue;
+			}
+			Hero hero = choose_hero();
+			if (!hero.chosen) { continue; }
+			start_new_game(hero.species, hero.calling, hero.name);
+			break;
 		}
 	}
 

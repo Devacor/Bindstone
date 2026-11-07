@@ -1,14 +1,13 @@
-// Game state, the crawler turn loop, facing-locked movement, spawning, saves,
-// and the deterministic smoke autopilot. Same bones as the roguelike: one key
-// = one turn, monsters act on the same grid and could not care less where the
-// camera points.
+// The run: the Game object, spawning, facing-locked movement, the turn loop, saves through the
+// archive, and the autopilot the smoke test drives. One key is one turn; the monsters act on the
+// same grid whichever way the camera points.
 
 class Game {
 	int floor = 1;
 	int turn = 0;
 	int next_id = 1;
-	int facing = 1;             // 0=N 1=E 2=S 3=W — the whole genre in one int
-	bool show_map = false;      // M: overhead minimap replaces the viewport
+	int facing = 1;               // 0 N, 1 E, 2 S, 3 W: the whole genre in one int
+	bool show_map = false;        // m: the overhead map in the forward view's place
 	bool over = false;
 	bool victory = false;
 	bool boss_slain = false;
@@ -19,71 +18,65 @@ class Game {
 	bool smoke = false;
 	string death_cause = "misadventure";
 	int hash = 2166136261;
-	int last_dmg = 0;           // damage the player took since their last action
-	string last_dmg_src = "";   // loudest recent source, shown in the side panel
+	int last_dmg = 0;             // damage taken since the last action
+	string last_dmg_src = "";
 	int stairs_x = -1;
 	int stairs_y = -1;
 	bool statue_used = false;
 	bool mural_used = false;
-	var player = null;
-	var msgs = [];
-	var monsters = [];
-	var ground = [];
-	var tiles = [];
-	var seen = [];
-	var visible = [];
-	var rooms = [];
-	var known_potions = {};
-	var known_scrolls = {};
-	var potion_looks = {};
-	var scroll_looks = {};
-	var boss_co = null;         // Vexadrach's multi-phase fight script (floor 10)
+	Player player;
+	array<string> msgs;
+	array<int> msg_turns;         // the turn each message was last logged on
+	array<int> msg_counts;        // how many times in a row it was logged
+	array<Monster> monsters;
+	array<Item> ground;
+	array<int> tiles;
+	array<bool> seen;
+	array<bool> visible;
+	array<Room> rooms;
+	map<string, bool> known_potions;
+	map<string, bool> known_scrolls;
+	map<string, string> potion_looks;
+	map<string, string> scroll_looks;
+	var boss_co = null;           // Vexadrach's fight, a live boss_brain coroutine
 
-	Game() {}
-
-	// Vexadrach's choreography as a coroutine METHOD: the handle pins the Game
-	// instance, so phase state (enraged, mid-telegraph) survives across turns
-	// with no free-function/global plumbing. The handle itself lives in the
-	// boss_co field above — handles are reference-semantic now, so a field
-	// holds the SAME live coroutine every alias sees.
+	// Vexadrach's choreography. A coroutine method: the handle keeps this Game alive, and the
+	// phase (enraged, mid-telegraph) lives in the coroutine's own locals between turns.
 	coroutine void boss_brain(int boss_id) {
-		var enraged = false;
+		bool enraged = false;
 		while (true) {
-			var bi = monster_index_by_id(boss_id);
+			int bi = monster_index_by_id(boss_id);
 			if (bi < 0) { return; }
 
 			if (!enraged && monsters[bi].hp * 10 < monsters[bi].max_hp * 3) {
 				enraged = true;
-				monsters[bi].atk = monsters[bi].atk + 3;
-				log_msg(col("91", "Vexadrach ROARS. The gray fire in his gullet flickers... almost color."));
+				monsters[bi].atk += 3;
+				log_ink(INK_BAD, "Vexadrach ROARS. The gray fire in his gullet flickers... almost color.");
 			}
 
-			var dist = cheb(monsters[bi].x, monsters[bi].y, player.x, player.y);
+			int dist = cheb(monsters[bi].x, monsters[bi].y, player.x, player.y);
 			if (dist <= monsters[bi].range && dist > 1 && sees_player(monsters[bi])) {
 				// telegraph, then breathe: two turns of committed drama
-				log_msg(col("90", "Vexadrach's throat glows the color of a dead television."));
+				log_ink(INK_DIM, "Vexadrach's throat glows the color of a dead television.");
 				yield;
 
 				bi = monster_index_by_id(boss_id);
 				if (bi < 0) { return; }
-				if (cheb(monsters[bi].x, monsters[bi].y, player.x, player.y) <= monsters[bi].range
-						&& sees_player(monsters[bi])) {
-					log_msg(col("90", "HOLLOW FIRE floods the corridor: heatless light, lightless heat."));
-					var dmg = imax(2, monsters[bi].atk - entity_def(player) + RNG.roll(0, 3));
-					var after = player_hp_after(dmg);
-					log_msg(col("91", `The gray torrent sears you for ${dmg} (HP ${after}/${player.total_max_hp()}).`));
+				if (cheb(monsters[bi].x, monsters[bi].y, player.x, player.y) <= monsters[bi].range && sees_player(monsters[bi])) {
+					log_ink(INK_DIM, "HOLLOW FIRE floods the corridor: heatless light, lightless heat.");
+					int dmg = imax(2, monsters[bi].atk - entity_def(player) + RNG.roll(0, 3));
+					log_ink(INK_BAD, `The gray torrent sears you for ${dmg} (HP ${player_hp_after(dmg)}/${player.total_max_hp()}).`);
 					hurt_entity(player, dmg, "hollow fire");
 					if (player.alive) {
 						add_effect(player, "burn", 3, 2);
-						log_msg(col("91", "You are burning! (-2 HP/turn, 3 turns)"));
+						log_ink(INK_BAD, "You are burning! (-2 HP/turn, 3 turns)");
 					}
 				} else {
-					log_msg(col("90", "The gray torrent scorches empty stone. You were elsewhere."));
+					log_ink(INK_DIM, "The gray torrent scorches empty stone. You were elsewhere.");
 				}
 				yield;
 
-				// recover turn (his one weakness: cardio)
-				if (!enraged) { yield; }
+				if (!enraged) { yield; }   // the recovery turn: his one weakness is cardio
 				continue;
 			}
 
@@ -98,13 +91,6 @@ class Game {
 	}
 }
 
-function monster_index_at(int x, int y) -> int {
-	for (int i = 0; i < G.monsters.size(); ++i) {
-		if (G.monsters[i].alive && G.monsters[i].x == x && G.monsters[i].y == y) { return i; }
-	}
-	return -1;
-}
-
 function ground_index_at(int x, int y) -> int {
 	for (int i = 0; i < G.ground.size(); ++i) {
 		if (G.ground[i].x == x && G.ground[i].y == y) { return i; }
@@ -112,48 +98,44 @@ function ground_index_at(int x, int y) -> int {
 	return -1;
 }
 
-// deterministic per-run identify labels: shuffle looks onto effect ids
+// each run shuffles the potion and scroll looks onto their ids
 function assign_looks() -> void {
 	G.potion_looks = {};
 	G.scroll_looks = {};
-	var looks = [];
-	for (auto l : POTION_LOOKS) { looks.push(l); }
+	array<string> looks = POTION_LOOKS;
 	for (auto id : POTIONS.keys()) {
-		var pick_i = RNG.next(looks.size());
+		int pick_i = RNG.next(looks.size());
 		G.potion_looks[id] = looks[pick_i];
 		looks.remove(pick_i);
 	}
-	var slooks = [];
-	for (auto l : SCROLL_LOOKS) { slooks.push(l); }
+	array<string> scroll_looks = SCROLL_LOOKS;
 	for (auto id : SCROLLS.keys()) {
-		var pick_i = RNG.next(slooks.size());
-		G.scroll_looks[id] = slooks[pick_i];
-		slooks.remove(pick_i);
+		int pick_i = RNG.next(scroll_looks.size());
+		G.scroll_looks[id] = scroll_looks[pick_i];
+		scroll_looks.remove(pick_i);
 	}
 }
 
-// finish configuring BEFORE the push: the array stores a deep copy,
-// and G.monsters[i] is the only real monster from then on
+// configure before the push: the array holds its own copy, the only real monster from then on
 function spawn_monster(string kind, int x, int y) -> void {
-	var m = Monster(kind);
+	Monster m(kind);
 	m.id = G.next_id;
-	G.next_id = G.next_id + 1;
+	G.next_id += 1;
 	m.x = x;
 	m.y = y;
-	var depth_bonus = imax(0, G.floor - BESTIARY[kind]["floors"][0]);
-	m.hp = m.hp + depth_bonus;
-	m.max_hp = m.max_hp + depth_bonus;
+	int depth_bonus = imax(0, G.floor - BESTIARY[kind].min_floor);
+	m.hp += depth_bonus;
+	m.max_hp += depth_bonus;
 	G.monsters.push(m);
 }
 
 function random_open_tile(int min_dist_from_player) -> var {
 	for (int attempt = 0; attempt < 300; ++attempt) {
-		var x = RNG.next(MAP_W);
-		var y = RNG.next(MAP_H);
-		if (tile_at(x, y) != TILE_FLOOR) { continue; }
-		if (monster_index_at(x, y) >= 0) { continue; }
+		int x = RNG.next(MAP_W);
+		int y = RNG.next(MAP_H);
+		if (tile_at(x, y) != TILE_FLOOR || monster_index_at(x, y) >= 0) { continue; }
 		if (cheb(x, y, G.player.x, G.player.y) < min_dist_from_player) { continue; }
-		return [x, y];
+		return Spot{x, y};
 	}
 	return null;
 }
@@ -168,34 +150,34 @@ function populate_floor() -> void {
 		spawn_monster("drakelet", 52, 10);
 		return;
 	}
-	var table = spawn_table(G.floor);
-	var count = 3 + G.floor;
+	SpawnTable table = spawn_table(G.floor);
+	int count = 3 + G.floor;
 	for (int i = 0; i < count; ++i) {
 		var spot = random_open_tile(7);
 		if (spot == null) { continue; }
-		spawn_monster(pick_weighted(RNG, table), spot[0], spot[1]);
+		spawn_monster(table.kinds[pick_weighted(RNG, table.weights)], spot.x, spot.y);
 	}
-	var item_count = 2 + RNG.next(3);
+	int item_count = 2 + RNG.next(3);
 	for (int i = 0; i < item_count; ++i) {
 		var spot = random_open_tile(2);
 		if (spot == null) { continue; }
-		var item = make_floor_item(G.floor);
-		item.x = spot[0];
-		item.y = spot[1];
+		Item item = make_floor_item(G.floor);
+		item.x = spot.x;
+		item.y = spot.y;
 		G.ground.push(item);
 	}
-	var gold_count = 1 + RNG.next(2);
+	int gold_count = 1 + RNG.next(2);
 	for (int i = 0; i < gold_count; ++i) {
 		var spot = random_open_tile(2);
 		if (spot == null) { continue; }
-		var pile = make_gold(G.floor);
-		pile.x = spot[0];
-		pile.y = spot[1];
+		Item pile = make_gold(G.floor);
+		pile.x = spot.x;
+		pile.y = spot.y;
 		G.ground.push(pile);
 	}
 }
 
-// face whichever cardinal has floor in front of it (deterministic scan order)
+// face the first open cardinal, in a fixed scan order
 function face_open_direction() -> void {
 	for (int f = 0; f < 4; ++f) {
 		if (is_walkable(G.player.x + FACE_DX[f], G.player.y + FACE_DY[f])) {
@@ -207,11 +189,11 @@ function face_open_direction() -> void {
 }
 
 function enter_floor() -> void {
-	var layout = generate_floor(G.floor);
-	G.player.x = layout["start"][0];
-	G.player.y = layout["start"][1];
-	G.stairs_x = layout["stairs"][0];
-	G.stairs_y = layout["stairs"][1];
+	FloorPlan plan = generate_floor(G.floor);
+	G.player.x = plan.start.x;
+	G.player.y = plan.start.y;
+	G.stairs_x = plan.stairs.x;
+	G.stairs_y = plan.stairs.y;
 	G.statue_used = false;
 	G.mural_used = false;
 	G.player.stubborn_spent = false;
@@ -221,14 +203,14 @@ function enter_floor() -> void {
 	view_cache_invalidate();
 	compute_fov();
 	if (G.floor == 10) {
-		log_msg(col("91", "The air tastes of ash and unspent color. HE is here."));
+		log_ink(INK_BAD, "The air tastes of ash and unspent color. HE is here.");
 	} else {
-		log_msg(col("90", `You descend to floor ${G.floor}: ${theme_name(G.floor)}.`));
+		log_ink(INK_TITLE, `Floor ${G.floor}: ${theme_name(G.floor)}.`);
 	}
 }
 
-function start_new_game(var species_row, var class_row, string hero_name) -> void {
-	G.player = Player(species_row, class_row);
+function start_new_game(Species species, Profession calling, string hero_name) -> void {
+	G.player = Player(species, calling);
 	if (hero_name != "") { G.player.name = hero_name; }
 	G.player.god = HOST_GOD;
 	if (G.player.god) {
@@ -237,117 +219,126 @@ function start_new_game(var species_row, var class_row, string hero_name) -> voi
 		G.player.hp = 400;
 	}
 	assign_looks();
-	var ration = make_potion();
+	Item ration = make_potion();
 	ration.effect = "mend";
-	ration.name = POTIONS["mend"]["name"];
+	ration.name = POTIONS["mend"].name;
 	G.player.inventory.push(ration);
-	log_msg(`${G.player.name} the ${species_name(G.player.species_id)} ${class_name(G.player.class_id)} steps into GRUBWELL.`);
-	log_msg(col("90", "(? for help. w walks, a/d turn you. m maps - up there, keys walk by compass.)"));
-	log_msg(col("90", "(v: the forward view alone, or with your left, right and behind around it.)"));
+	log_msg(`${G.player.name} the ${species.name} ${calling.name} steps into GRUBWELL.`);
+	log_ink(INK_DIM, "w walks, a/d turn, m maps, esc for help.");
 	enter_floor();
 }
 
-// ---------------------------------------------------------- interaction ----
-// The tile straight ahead, then further down the facing: first live monster
-// within max_range, walls block, disguised mimics stay off the targeting list.
+// --------------------------------------------------------------- moving ---
+// down the facing: the first live monster within max_range (walls block, mimics stay hidden)
 function facing_target_index(int max_range) -> int {
-	var dx = FACE_DX[G.facing];
-	var dy = FACE_DY[G.facing];
-	var cx = G.player.x;
-	var cy = G.player.y;
+	int cx = G.player.x;
+	int cy = G.player.y;
 	for (int step = 0; step < max_range; ++step) {
-		cx = cx + dx;
-		cy = cy + dy;
-		if (!in_bounds(cx, cy) || tile_at(cx, cy) == TILE_WALL) { return -1; }
-		var ti = monster_index_at(cx, cy);
+		cx += FACE_DX[G.facing];
+		cy += FACE_DY[G.facing];
+		if (tile_at(cx, cy) == TILE_WALL) { return -1; }
+		int ti = monster_index_at(cx, cy);
 		if (ti >= 0 && !G.monsters[ti].disguised) { return ti; }
 	}
 	return -1;
 }
 
-// forward/back step; walking INTO a monster (forward only) is the attack
+// a step forward (dir_sign 1) or back (-1); walking into a monster is the attack
 function player_forward(int dir_sign) -> bool {
-	var nx = G.player.x + FACE_DX[G.facing] * dir_sign;
-	var ny = G.player.y + FACE_DY[G.facing] * dir_sign;
-	var ti = monster_index_at(nx, ny);
+	int nx = G.player.x + FACE_DX[G.facing] * dir_sign;
+	int ny = G.player.y + FACE_DY[G.facing] * dir_sign;
+	int ti = monster_index_at(nx, ny);
 	if (ti >= 0) {
-		if (dir_sign < 0) { log_msg("Something is standing there. You feel its breath."); return false; }
+		if (dir_sign < 0) {
+			log_msg("Something is standing there. You feel its breath.");
+			return false;
+		}
 		if (G.monsters[ti].disguised) {
 			G.monsters[ti].disguised = false;
-			log_msg(col("91", "That loot has TEETH. Grinnest!"));
+			log_ink(INK_BAD, "That loot has TEETH. Grinnest!");
 		}
 		attack(G.player, G.monsters[ti], player_attack_verb());
 		return true;
 	}
-	if (!is_walkable(nx, ny)) { return false; }
-	G.player.x = nx;
-	G.player.y = ny;
-	on_step_tile();
-	return true;
+	return walk_to(nx, ny);
 }
 
-// q/e sidestep; no attack on a strafe — shoulders are not weapons
+// q and e sidestep; shoulders are not weapons
 function player_strafe(int side) -> bool {
-	var f = (G.facing + (side > 0 ? 1 : 3)) % 4;
-	var nx = G.player.x + FACE_DX[f];
-	var ny = G.player.y + FACE_DY[f];
-	if (monster_index_at(nx, ny) >= 0) { log_msg("You sidle into something with opinions."); return false; }
-	if (!is_walkable(nx, ny)) { return false; }
+	int f = (G.facing + (side > 0 ? 1 : 3)) % 4;
+	int nx = G.player.x + FACE_DX[f];
+	int ny = G.player.y + FACE_DY[f];
+	if (monster_index_at(nx, ny) >= 0) {
+		log_msg("You sidle into something with opinions.");
+		return false;
+	}
+	return walk_to(nx, ny);
+}
+
+function walk_to(int nx, int ny) -> bool {
+	if (!is_walkable(nx, ny)) {
+		log_ink(INK_FAINT, "Stone. You bump the wall.");
+		return false;
+	}
+	int from_x = G.player.x;
+	int from_y = G.player.y;
 	G.player.x = nx;
 	G.player.y = ny;
+	animate_step(from_x, from_y);
 	on_step_tile();
 	return true;
 }
 
 function player_turn(int rot) -> bool {
-	var old_facing = G.facing;
+	int old_facing = G.facing;
 	G.facing = (G.facing + rot + 4) % 4;
 	animate_turn(old_facing, rot);
 	return true;
 }
 
-// map mode: absolute compass movement, the roguelike's hands. Facing follows
-// the step, so dropping back to first person points where you were walking.
-// A blocked step still turns you (free — no turn consumed, like a failed walk).
-function player_move_map(int dx, int dy) -> bool {
-	G.facing = facing_for(dx, dy);
+// on the overhead map the keys walk by compass, and the facing follows the step
+function player_move_map(Step d) -> bool {
+	if (iabs(d.dx) + iabs(d.dy) != 1) {
+		log_msg("Your facing-locked feet refuse the diagonal.");
+		return false;
+	}
+	G.facing = facing_for(d.dx, d.dy);
 	return player_forward(1);
 }
 
 function on_step_tile() -> void {
-	var t = tile_at(G.player.x, G.player.y);
+	int t = tile_at(G.player.x, G.player.y);
 	if (t == TILE_STAIRS) {
-		log_msg("Stairs spiral down into the dark. Press > to descend.");
+		log_ink(INK_INFO, "Stairs spiral down into the dark. Press > to descend.");
 	} else if (t == TILE_STATUE) {
-		log_msg(col("93", pick(RNG, STATUE_JAI)));
+		log_ink(INK_BLESS, pick(RNG, STATUE_JAI));
 		if (!G.statue_used) {
 			G.statue_used = true;
 			add_effect(G.player, "blessed", 40, 10);
-			log_msg(col("93", "JAI's grin warms you: +10 evasion for a while."));
+			log_ink(INK_BLESS, "JAI's grin warms you: +10 evasion for a while.");
 		}
 	} else if (t == TILE_MURAL) {
-		log_msg(col("95", pick(RNG, MURAL_DEVACOR)));
+		log_ink(INK_MAGIC, pick(RNG, MURAL_DEVACOR));
 		if (!G.mural_used) {
 			G.mural_used = true;
-			var healed = restore_stat(G.player.hp, G.player.total_max_hp(), 999);
-			if (healed > 0) { log_msg(col("92", `Painted warmth closes your wounds (+${healed} HP).`)); }
-			else { log_msg(col("90", "The colors hum, content that you are whole.")); }
+			int healed = restore_stat(G.player.hp, G.player.total_max_hp(), 999);
+			if (healed > 0) { log_ink(INK_GOOD, `Painted warmth closes your wounds (+${healed} HP).`); }
+			else { log_ink(INK_DIM, "The colors hum, content that you are whole."); }
 		}
 	}
-	var gi = ground_index_at(G.player.x, G.player.y);
-	if (gi >= 0) {
-		log_msg(`You see ${item_label(G.ground[gi])} at your feet. (g to grab)`);
-	}
+	int gi = ground_index_at(G.player.x, G.player.y);
+	if (gi >= 0) { log_msg(`You see ${paint(G.ground[gi].ink, item_label(G.ground[gi]))} at your feet. (g to grab)`); }
 }
 
 function pickup_here() -> bool {
-	var gi = ground_index_at(G.player.x, G.player.y);
-	if (gi < 0) { log_msg("Nothing here but dungeon."); return false; }
-	if (give_item(G.player, G.ground[gi])) {
-		G.ground.remove(gi);
-		return true;
+	int gi = ground_index_at(G.player.x, G.player.y);
+	if (gi < 0) {
+		log_msg("Nothing here but dungeon.");
+		return false;
 	}
-	return false;
+	if (!give_item(G.player, G.ground[gi])) { return false; }
+	G.ground.remove(gi);
+	return true;
 }
 
 function quaff_first_potion() -> bool {
@@ -362,26 +353,22 @@ function quaff_first_potion() -> bool {
 }
 
 function try_descend() -> bool {
-	var on_stairs = tile_at(G.player.x, G.player.y) == TILE_STAIRS;
-	if (!on_stairs && !G.player.god) { log_msg("You need to stand on the stairs (>) to descend."); return false; }
-	if (G.floor >= 10) { log_msg("There is nothing below floor 10 but the story's end."); return false; }
-	G.floor = G.floor + 1;
+	if (tile_at(G.player.x, G.player.y) != TILE_STAIRS && !G.player.god) {
+		log_msg("You need to stand on the stairs to descend.");
+		return false;
+	}
+	if (G.floor >= 10) {
+		log_msg("There is nothing below floor 10 but the story's end.");
+		return false;
+	}
+	G.floor += 1;
 	enter_floor();
 	return true;
 }
 
+// true when the key spent a turn
 function handle_key(string key) -> bool {
-	// On the overhead map the body drops the FPS pantomime: any movement key is
-	// an absolute compass step (util.jai's DIR_KEYS, same table as the roguelike),
-	// cardinals only — a facing-locked body still cannot step diagonally.
-	if (G.show_map && DIR_KEYS.has(key)) {
-		var d = DIR_KEYS[key];
-		var dx = d[0];
-		var dy = d[1];
-		if (iabs(dx) + iabs(dy) == 1) { return player_move_map(dx, dy); }
-		log_msg("Your facing-locked feet refuse the diagonal.");
-		return false;
-	}
+	if (G.show_map && MAP_KEYS.has(key)) { return player_move_map(MAP_KEYS[key]); }
 	switch (key) {
 		case "w": return player_forward(1);
 		case "up": return player_forward(1);
@@ -403,8 +390,15 @@ function handle_key(string key) -> bool {
 		case "m": { G.show_map = !G.show_map; return false; }
 		case "M": { G.show_map = !G.show_map; return false; }
 		case "v": { cycle_layout(); return false; }
-		case "c": character_screen(); return false;
-		case "?": help_screen(); return false;
+		case "c": { character_screen(); return false; }
+		case "?": { help_screen(); return false; }
+		case "esc": {
+			if (G.show_map) {
+				G.show_map = false;
+				return false;
+			}
+			return handle_key(pause_screen());
+		}
 		case "S": {
 			save_game();
 			G.over = true;
@@ -413,15 +407,16 @@ function handle_key(string key) -> bool {
 			return false;
 		}
 		case "Q": {
-			G.over = true;
-			G.quit = true;
+			if (confirm_quit()) {
+				G.over = true;
+				G.quit = true;
+			}
 			return false;
 		}
 		case "R": {
 			if (HOST_DEV) {
 				reload_scripts();
-				view_cache_invalidate();
-				log_msg(col("95", "Scripts reloaded. The Well shivers as its rules are rewritten."));
+				log_ink(INK_MAGIC, "Scripts reloaded. The Well shivers as its rules are rewritten.");
 			}
 			return false;
 		}
@@ -429,7 +424,7 @@ function handle_key(string key) -> bool {
 	return false;
 }
 
-// -------------------------------------------------------------- turns ------
+// ---------------------------------------------------------------- turns ---
 function monsters_act() -> void {
 	for (auto& m : G.monsters) {
 		if (G.over) { return; }
@@ -437,12 +432,11 @@ function monsters_act() -> void {
 		if (!m.aggro && cheb(m.x, m.y, G.player.x, G.player.y) > 14) { continue; }
 		monster_act(m);
 	}
-	// sweep the fallen
-	var kept = [];
+	array<Monster> living;
 	for (auto m : G.monsters) {
-		if (m.alive) { kept.push(m); }
+		if (m.alive) { living.push(m); }
 	}
-	G.monsters = kept;
+	G.monsters = living;
 }
 
 function world_tick() -> void {
@@ -451,16 +445,15 @@ function world_tick() -> void {
 	for (auto& m : G.monsters) {
 		if (m.alive) { tick_effects(m); }
 	}
-	if (G.turn % 4 == 0) {
-		restore_stat(G.player.focus, G.player.total_max_focus(), 1);
-	}
+	if (G.turn % 4 == 0) { restore_stat(G.player.focus, G.player.total_max_focus(), 1); }
 	if (G.turn % 5 == 0 && G.player.hp < G.player.total_max_hp() && nearest_visible_monster_index(99) < 0) {
 		heal_entity(G.player, 1);   // catching your breath, out of sight of trouble
 	}
 }
 
+// the smoke run's fingerprint: everything the rules decide, folded once per turn
 function accumulate_hash() -> void {
-	var h = G.hash;
+	int h = G.hash;
 	h = mix32(h, G.turn);
 	h = mix32(h, G.floor);
 	h = mix32(h, G.facing * 7 + 3);
@@ -469,11 +462,11 @@ function accumulate_hash() -> void {
 	h = mix32(h, G.player.xp * 64 + G.player.level);
 	h = mix32(h, G.player.gold);
 	h = mix32(h, G.player.inventory.size() * 16 + G.player.effects.size());
-	var live = 0;
-	var acc = 0;
+	int live = 0;
+	int acc = 0;
 	for (auto m : G.monsters) {
 		if (!m.alive) { continue; }
-		live = live + 1;
+		live += 1;
 		acc = (acc + m.x * 977 + m.y * 331 + m.hp * 7) & 0xFFFFFFFF;
 	}
 	h = mix32(h, live);
@@ -483,27 +476,44 @@ function accumulate_hash() -> void {
 	G.hash = h;
 }
 
+// a level's boon: the pilot draws one from the Rng, a player picks on the level-up screen
+function choose_boon() -> void {
+	while (G.level_pending) {
+		string key = G.autopilot ? to_string(1 + RNG.next(4)) : level_up_screen();
+		switch (key) {
+			case "1": G.player.max_hp += 4; heal_entity(G.player, 4); G.level_pending = false; break;
+			case "2": G.player.atk += 1; G.level_pending = false; break;
+			case "3": G.player.def += 1; G.level_pending = false; break;
+			case "4": G.player.max_focus += 3; G.player.focus += 3; G.level_pending = false; break;
+			case "Q": G.over = true; G.quit = true; G.death_cause = "quit"; return;
+		}
+	}
+}
+
 function game_loop() -> void {
 	while (!G.over) {
 		compute_fov();
 		if (!G.smoke) { render_game(); }
 		else if (VIEW_PROBE != null) { VIEW_PROBE(); }
 		if (G.level_pending) {
-			level_up_screen();
+			choose_boon();
 			if (G.over) { break; }
 			if (!G.smoke) { render_game(); }
 		}
-		var key = G.autopilot ? autopilot_key() : read_key();
-		var acted = handle_key(key);
+		string key = G.autopilot ? autopilot_key() : read_key();
+		bool acted = handle_key(key);
 		if (G.over) { break; }
 		if (acted) {
 			G.last_dmg = 0;
 			G.last_dmg_src = "";
 			monsters_act();
 			if (!G.over) { world_tick(); }
-			G.turn = G.turn + 1;
+			G.turn += 1;
 			if (G.smoke) { accumulate_hash(); }
-			if (G.smoke && G.turn >= HOST_TURNS) { G.over = true; G.quit = true; }
+			if (G.smoke && G.turn >= HOST_TURNS) {
+				G.over = true;
+				G.quit = true;
+			}
 		}
 		if (G.boss_slain && !G.victory) {
 			G.victory = true;
@@ -513,10 +523,10 @@ function game_loop() -> void {
 
 	if (G.victory) {
 		compute_fov();
-		victory_ceremony(G.player.x, G.player.y);
 		victory_screen();
 		delete_file(SAVE_PATH);
 	} else if (!G.quit) {
+		compute_fov();
 		death_screen();
 		delete_file(SAVE_PATH);
 	} else if (G.saved) {
@@ -524,22 +534,17 @@ function game_loop() -> void {
 	}
 }
 
-// ----------------------------------------------------------- autopilot -----
-// The same BFS pilot as the roguelike, translated into a body: it can only
-// step the way it faces, so desires become turn keys until the nose lines up.
-function turn_key_for(int target_facing) -> string {
-	var delta = (target_facing - G.facing + 4) % 4;
-	if (delta == 3) { return "a"; }
-	return "d";
-}
+// ------------------------------------------------------------ autopilot ---
+// A breadth-first pilot in a body that only steps the way it faces: every wish becomes turn keys
+// until the nose lines up.
+function turn_key_for(int target_facing) -> string { return (target_facing - G.facing + 4) % 4 == 3 ? "a" : "d"; }
+
+function key_toward(int target_facing) -> string { return target_facing == G.facing ? "w" : turn_key_for(target_facing); }
 
 function pilot_has_upgrade() -> bool {
 	for (auto it : G.player.inventory) {
-		if (it.kind != "weapon" && it.kind != "armor" && it.kind != "trinket") { continue; }
-		var current = null;
-		if (it.kind == "weapon") { current = G.player.weapon; }
-		else if (it.kind == "armor") { current = G.player.armor; }
-		else { current = G.player.trinket; }
+		if (!it.is_gear()) { continue; }
+		var current = G.player.worn(it.kind);
 		if (current == null || gear_score(it) > gear_score(current)) { return true; }
 	}
 	return false;
@@ -548,348 +553,115 @@ function pilot_has_upgrade() -> bool {
 function autopilot_key() -> string {
 	if (PILOT_CO == null || PILOT_CO.done()) { PILOT_CO = pilot_brain(); }
 	var key = PILOT_CO.next();
-	if (key == null) { return "."; }
-	return key;
+	return key == null ? "." : key;
 }
 
 coroutine string pilot_brain() {
-	// committed loot target lives in the coroutine's suspended state — without
-	// it the goal flickers at the detour-range boundary and the pilot paces
-	var loot_x = -1;
-	var loot_y = -1;
-	var loot_floor = -1;
+	// the loot it committed to, kept across turns so the goal does not flicker
+	int loot_x = -1;
+	int loot_y = -1;
+	int loot_floor = -1;
 	while (true) {
-		// sip when scared
-		var wants_potion = G.player.hp * 3 < G.player.total_max_hp();
-		if (wants_potion) {
-			var has_potion = false;
+		if (G.player.hp * 3 < G.player.total_max_hp()) {
+			bool has_potion = false;
 			for (auto it : G.player.inventory) {
 				if (it.kind == "potion") { has_potion = true; }
 			}
 			if (has_potion) { yield "p"; continue; }
 		}
-		// grab loot underfoot
-		if (ground_index_at(G.player.x, G.player.y) >= 0 && G.player.inventory.size() < 22) {
-			yield "g";
-			continue;
-		}
-		// stairs underfoot: descend
+		if (ground_index_at(G.player.x, G.player.y) >= 0 && G.player.inventory.size() < PACK_SIZE) { yield "g"; continue; }
 		if (tile_at(G.player.x, G.player.y) == TILE_STAIRS) { yield ">"; continue; }
-		// wear upgrades as soon as they're in the pack
 		if (pilot_has_upgrade()) { yield "E"; continue; }
-		// skill down the corridor sometimes
 		if (G.player.focus >= G.player.skill_cost && RNG.chance(25)) {
-			var zrange = G.player.skill == "bulwark" ? 1 : 5;
-			if (facing_target_index(zrange) >= 0) { yield "z"; continue; }
+			if (facing_target_index(G.player.skill == "bulwark" ? 1 : 5) >= 0) { yield "z"; continue; }
 		}
-		// cardinally adjacent enemy: face it, then walk into it (= attack)
-		var fight_key = "";
+		// a foe at a cardinal neighbour: face it, then walk into it
+		string fight_key = "";
 		for (auto m : G.monsters) {
 			if (!m.alive) { continue; }
-			var mdx = m.x - G.player.x;
-			var mdy = m.y - G.player.y;
+			int mdx = m.x - G.player.x;
+			int mdy = m.y - G.player.y;
 			if (iabs(mdx) + iabs(mdy) != 1) { continue; }
-			var want = facing_for(mdx, mdy);
-			fight_key = want == G.facing ? "w" : turn_key_for(want);
+			fight_key = key_toward(facing_for(mdx, mdy));
 			break;
 		}
 		if (fight_key != "") { yield fight_key; continue; }
-		// walk toward the goal: committed loot first, then stairs (boss on 10)
-		if (loot_floor != G.floor || ground_index_at(loot_x, loot_y) < 0) {
-			loot_x = -1;   // picked up, gone, or stale floor
-		}
+		// the committed loot first, then the stairs (the boss on floor 10)
+		if (loot_floor != G.floor || ground_index_at(loot_x, loot_y) < 0) { loot_x = -1; }
 		if (loot_x < 0 && G.player.inventory.size() < 20) {
-			var best_d = 14;
+			int best_d = 14;
 			for (auto it : G.ground) {
-				var d = cheb(it.x, it.y, G.player.x, G.player.y);
-				if (d < best_d) { best_d = d; loot_x = it.x; loot_y = it.y; loot_floor = G.floor; }
+				int d = cheb(it.x, it.y, G.player.x, G.player.y);
+				if (d < best_d) {
+					best_d = d;
+					loot_x = it.x;
+					loot_y = it.y;
+					loot_floor = G.floor;
+				}
 			}
 		}
-		var gx = loot_x >= 0 ? loot_x : G.stairs_x;
-		var gy = loot_x >= 0 ? loot_y : G.stairs_y;
+		int gx = loot_x >= 0 ? loot_x : G.stairs_x;
+		int gy = loot_x >= 0 ? loot_y : G.stairs_y;
 		if (G.floor >= 10) {
 			gx = -1;
 			for (auto m : G.monsters) {
-				if (m.alive && m.behavior == "boss") { gx = m.x; gy = m.y; }
+				if (m.alive && m.behavior == "boss") {
+					gx = m.x;
+					gy = m.y;
+				}
 			}
 			if (gx < 0) { yield "."; continue; }
 		}
 		var step = bfs_step(G.player.x, G.player.y, gx, gy);
-		if (step != null) {
-			var want = facing_for(step[0], step[1]);
-			// stepping into a monster is an attack; that's fine
-			yield want == G.facing ? "w" : turn_key_for(want);
-			continue;
-		}
-		// no path (shouldn't happen): drop the goal and shuffle
-		loot_x = -1;
-		var wander_face = RNG.next(4);
-		yield wander_face == G.facing ? "w" : turn_key_for(wander_face);
+		if (step != null) { yield key_toward(facing_for(step.dx, step.dy)); continue; }
+		loot_x = -1;   // no path: drop the goal and shuffle
+		yield key_toward(RNG.next(4));
 	}
 }
 
-// ------------------------------------------------------------- saving ------
-// The save JSON must contain NO nulls and NO empty containers: from_json
-// builds those without an engine pointer and any later deep copy of the
-// tree throws "Cannot clone script_value: missing engine pointer" (2026-07).
-// So: sentinel "_pad" rows/keys on save, filtered back out on load.
-function pad_effect_row() -> var { return {"kind": "_pad", "turns": 0, "power": 0}; }
+// ---------------------------------------------------------------- saves ---
+// The whole Game goes through the archive: to_json writes every field and from_json rebuilds the
+// classes. A live coroutine is not saved state, so the boss restarts his pattern on load.
+int SAVE_VERSION = 2;
 
-function padded_map(var m) -> var {
-	var out = {"_pad": true};
-	for (auto kv : m) { out[kv.first] = kv.second; }
-	return out;
-}
-
-function padded_effects(var fx_list) -> var {
-	var rows = [pad_effect_row()];
-	for (auto fx : fx_list) { rows.push(fx); }
-	return rows;
-}
-
-function item_to_map(var item) -> var {
-	var bonus_out = {"_pad": 0};
-	for (auto kv : item.bonus) { bonus_out[kv.first] = kv.second; }
-	return {
-		"name": item.name, "kind": item.kind, "glyph": item.glyph, "color": item.color,
-		"rarity": item.rarity, "atk": item.atk, "def": item.def, "bonus": bonus_out,
-		"effect": item.effect, "amount": item.amount, "x": item.x, "y": item.y
-	};
-}
+class SaveFile { int version; int seed; int rng; Game game; }
 
 function save_game() -> void {
-	var inv = [{"kind": "_pad"}];
-	for (auto it : G.player.inventory) { inv.push(item_to_map(it)); }
-	var ground_rows = [{"kind": "_pad"}];
-	for (auto it : G.ground) { ground_rows.push(item_to_map(it)); }
-	var monster_rows = [{"kind": "_pad"}];
-	for (auto m : G.monsters) {
-		if (!m.alive) { continue; }
-		monster_rows.push({
-			"kind": m.kind, "id": m.id, "x": m.x, "y": m.y, "hp": m.hp, "max_hp": m.max_hp,
-			"aggro": m.aggro, "disguised": m.disguised, "atk": m.atk, "def": m.def,
-			"move_clock": m.move_clock, "effects": padded_effects(m.effects)
-		});
-	}
-	var p = G.player;   // read-only snapshot; fine for serializing
-	var state = {
-		"version": 1,
-		"game": "grubwell",
-		"seed": HOST_SEED,
-		"rng": RNG.state(),
-		"turn": G.turn,
-		"next_id": G.next_id,
-		"floor": G.floor,
-		"facing": G.facing,
-		"hash": G.hash,
-		"stairs": [G.stairs_x, G.stairs_y],
-		"statue_used": G.statue_used,
-		"mural_used": G.mural_used,
-		"known_potions": padded_map(G.known_potions),
-		"known_scrolls": padded_map(G.known_scrolls),
-		"potion_looks": G.potion_looks,
-		"scroll_looks": G.scroll_looks,
-		"tiles": G.tiles,
-		"seen": G.seen,
-		"monsters": monster_rows,
-		"ground": ground_rows,
-		"player": {
-			"name": p.name, "species": p.species_id, "class": p.class_id,
-			"x": p.x, "y": p.y, "hp": p.hp, "max_hp": p.max_hp,
-			"atk": p.atk, "def": p.def, "eva": p.eva, "crit": p.crit,
-			"level": p.level, "xp": p.xp, "gold": p.gold,
-			"focus": p.focus, "max_focus": p.max_focus,
-			"kills": p.kills, "stubborn_spent": p.stubborn_spent,
-			"god": p.god,
-			"weapon": p.weapon == null ? {"kind": "none"} : item_to_map(p.weapon),
-			"armor": p.armor == null ? {"kind": "none"} : item_to_map(p.armor),
-			"trinket": p.trinket == null ? {"kind": "none"} : item_to_map(p.trinket),
-			"inventory": inv,
-			"effects": padded_effects(p.effects)
-		}
-	};
-	write_file(SAVE_PATH, to_json(state));
+	G.boss_co = null;
+	write_file(SAVE_PATH, to_json(SaveFile{SAVE_VERSION, HOST_SEED, RNG.state(), G}));
 }
 
 function load_game() -> bool {
 	if (!file_exists(SAVE_PATH)) { return false; }
-	var text = read_file(SAVE_PATH);
-	if (text == "") { return false; }
-	var state = from_json(text);
-	if (state == null) { return false; }
-
-	// SCHEMA-DRIVEN leaf reads only. A from_json tree cannot be deep-copied
-	// (nested values carry no engine pointer -> uncatchable "Cannot clone
-	// script_value"), and even .keys() on it throws. Single element-read
-	// expressions attach the engine, so every field is read individually.
-	RNG.set_state(state["rng"]);
-	var species_row = null;
-	for (auto s : SPECIES) { if (s["id"] == state["player"]["species"]) { species_row = s; } }
-	var class_row = null;
-	for (auto c : CLASSES) { if (c["id"] == state["player"]["class"]) { class_row = c; } }
-	if (species_row == null || class_row == null) { return false; }
-
-	var p = Player(species_row, class_row);
-	p.name = state["player"]["name"];
-	p.x = state["player"]["x"];
-	p.y = state["player"]["y"];
-	p.hp = state["player"]["hp"];
-	p.max_hp = state["player"]["max_hp"];
-	p.atk = state["player"]["atk"];
-	p.def = state["player"]["def"];
-	p.eva = state["player"]["eva"];
-	p.crit = state["player"]["crit"];
-	p.level = state["player"]["level"];
-	p.xp = state["player"]["xp"];
-	p.gold = state["player"]["gold"];
-	p.focus = state["player"]["focus"];
-	p.max_focus = state["player"]["max_focus"];
-	p.kills = state["player"]["kills"];
-	p.stubborn_spent = state["player"]["stubborn_spent"];
-	p.god = state["player"]["god"];
-	p.effects = load_effects(state, "player", -1);
-	if (state["player"]["weapon"]["kind"] != "none") { p.weapon = load_item(state, "weapon", -1); }
-	if (state["player"]["armor"]["kind"] != "none") { p.armor = load_item(state, "armor", -1); }
-	if (state["player"]["trinket"]["kind"] != "none") { p.trinket = load_item(state, "trinket", -1); }
-	for (int i = 0; i < state["player"]["inventory"].size(); ++i) {
-		if (state["player"]["inventory"][i]["kind"] == "_pad") { continue; }
-		p.inventory.push(load_item(state, "inventory", i));
+	SaveFile save;
+	try {
+		save = from_json(read_file(SAVE_PATH));
+	} catch (e) {
+		return false;
 	}
-
-	G.player = p;
-	G.turn = state["turn"];
-	G.next_id = state["next_id"];
-	G.floor = state["floor"];
-	G.facing = state["facing"];
-	G.hash = state["hash"];
-	G.stairs_x = state["stairs"][0];
-	G.stairs_y = state["stairs"][1];
-	G.statue_used = state["statue_used"];
-	G.mural_used = state["mural_used"];
-	G.known_potions = {};
-	for (auto id : POTIONS.keys()) {
-		if (state["known_potions"].has(id)) { G.known_potions[id] = true; }
-		G.potion_looks[id] = state["potion_looks"][id];
-	}
-	G.known_scrolls = {};
-	for (auto id : SCROLLS.keys()) {
-		if (state["known_scrolls"].has(id)) { G.known_scrolls[id] = true; }
-		G.scroll_looks[id] = state["scroll_looks"][id];
-	}
-	G.tiles = [];
-	for (int i = 0; i < state["tiles"].size(); ++i) { G.tiles.push(state["tiles"][i]); }
-	G.seen = [];
-	for (int i = 0; i < state["seen"].size(); ++i) { G.seen.push(state["seen"][i]); }
-
-	G.monsters = [];
-	for (int i = 0; i < state["monsters"].size(); ++i) {
-		if (state["monsters"][i]["kind"] == "_pad") { continue; }
-		var kind_name = state["monsters"][i]["kind"];
-		var m = Monster(kind_name);
-		m.id = state["monsters"][i]["id"];
-		m.x = state["monsters"][i]["x"];
-		m.y = state["monsters"][i]["y"];
-		m.hp = state["monsters"][i]["hp"];
-		m.max_hp = state["monsters"][i]["max_hp"];
-		m.aggro = state["monsters"][i]["aggro"];
-		m.disguised = state["monsters"][i]["disguised"];
-		m.atk = state["monsters"][i]["atk"];
-		m.def = state["monsters"][i]["def"];
-		m.move_clock = state["monsters"][i]["move_clock"];
-		m.effects = load_effects(state, "monster", i);
-		G.monsters.push(m);
-	}
-	G.ground = [];
-	for (int i = 0; i < state["ground"].size(); ++i) {
-		if (state["ground"][i]["kind"] == "_pad") { continue; }
-		G.ground.push(load_item(state, "ground", i));
-	}
-	G.boss_co = null;   // the boss restarts his pattern; his memory is short
+	if (save.version != SAVE_VERSION) { return false; }
+	RNG.set_state(save.rng);
+	G = save.game;
+	G.over = false;
+	G.quit = false;
+	G.saved = false;
+	G.smoke = HOST_SMOKE;
+	G.autopilot = HOST_SMOKE;
 	view_cache_invalidate();
-	log_msg(col("96", `Welcome back to floor ${G.floor}, ${G.player.name}.`));
+	log_ink(INK_INFO, `Welcome back to floor ${G.floor}, ${G.player.name}.`);
 	return true;
 }
 
-var BONUS_KEYS = ["atk", "def", "crit", "eva", "hp", "focus", "burn"];
-
-// Readers take the whole parsed tree by var& (a local IS an lvalue; a chained
-// element expression is NOT — "Cannot pass non-lvalue to reference parameter")
-// and re-walk the path per leaf. Verbose, but every read attaches the engine.
-function item_field(var& root, string slot, int idx, string field) -> var {
-	if (slot == "inventory") { return root["player"]["inventory"][idx][field]; }
-	if (slot == "ground") { return root["ground"][idx][field]; }
-	return root["player"][slot][field];
-}
-
-function item_bonus_field(var& root, string slot, int idx, string key) -> var {
-	if (slot == "inventory") {
-		if (!root["player"]["inventory"][idx]["bonus"].has(key)) { return null; }
-		return root["player"]["inventory"][idx]["bonus"][key];
-	}
-	if (slot == "ground") {
-		if (!root["ground"][idx]["bonus"].has(key)) { return null; }
-		return root["ground"][idx]["bonus"][key];
-	}
-	if (!root["player"][slot]["bonus"].has(key)) { return null; }
-	return root["player"][slot]["bonus"][key];
-}
-
-function load_item(var& root, string slot, int idx) -> var {
-	var item = Item();
-	item.name = item_field(root, slot, idx, "name");
-	item.kind = item_field(root, slot, idx, "kind");
-	item.glyph = item_field(root, slot, idx, "glyph");
-	item.color = item_field(root, slot, idx, "color");
-	item.rarity = item_field(root, slot, idx, "rarity");
-	item.atk = item_field(root, slot, idx, "atk");
-	item.def = item_field(root, slot, idx, "def");
-	item.effect = item_field(root, slot, idx, "effect");
-	item.amount = item_field(root, slot, idx, "amount");
-	item.x = item_field(root, slot, idx, "x");
-	item.y = item_field(root, slot, idx, "y");
-	for (auto k : BONUS_KEYS) {
-		if (k == "_pad") { continue; }
-		var v = item_bonus_field(root, slot, idx, k);
-		if (v != null) { item.bonus[k] = v; }
-	}
-	return item;
-}
-
-function effect_field(var& root, string owner, int mi, int fi, string field) -> var {
-	if (owner == "monster") { return root["monsters"][mi]["effects"][fi][field]; }
-	return root["player"]["effects"][fi][field];
-}
-
-function load_effects(var& root, string owner, int mi) -> var {
-	var count = 0;
-	if (owner == "monster") { count = root["monsters"][mi]["effects"].size(); }
-	else { count = root["player"]["effects"].size(); }
-	var out = [];
-	for (int i = 0; i < count; ++i) {
-		if (effect_field(root, owner, mi, i, "kind") == "_pad") { continue; }
-		out.push({
-			"kind": effect_field(root, owner, mi, i, "kind"),
-			"turns": effect_field(root, owner, mi, i, "turns"),
-			"power": effect_field(root, owner, mi, i, "power")
-		});
-	}
-	return out;
-}
-
-// -------------------------------------------------------------- summary ----
+// -------------------------------------------------------------- summary ---
 function print_run_summary(string label) -> void {
-	var p = G.player;
+	Player p = G.player;
 	host_log("");
 	host_log(`=== ${label} ===`);
 	host_log(`backend: ${HOST_BACKEND}  seed: ${HOST_SEED}`);
 	host_log(`turns: ${G.turn}  floor: ${G.floor}  level: ${p.level}  facing: ${FACE_NAME[G.facing]}`);
 	host_log(`hp: ${p.hp}/${p.total_max_hp()}  kills: ${p.kills}  gold: ${p.gold}  items: ${p.inventory.size()}`);
-	var wname = p.weapon == null ? "-" : p.weapon.name;
-	var aname = p.armor == null ? "-" : p.armor.name;
-	host_log(`weapon: ${wname}  armor: ${aname}`);
+	host_log(`weapon: ${p.weapon == null ? "-" : p.weapon.name}  armor: ${p.armor == null ? "-" : p.armor.name}`);
 	host_log(`victory: ${G.victory}  dead: ${!p.alive}  cause: ${G.death_cause}`);
 	host_log(`STATE_HASH: ${G.hash}`);
-	// last few log lines: lets scripted/smoke runs eyeball the combat narration
-	var mstart = imax(0, G.msgs.size() - 6);
-	for (int mi = mstart; mi < G.msgs.size(); ++mi) { host_log("  log| " + G.msgs[mi]); }
+	for (int i = imax(0, G.msgs.size() - 6); i < G.msgs.size(); ++i) { host_log(`  log| ${plain_text(G.msgs[i])}`); }
 }

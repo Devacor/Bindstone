@@ -10,6 +10,7 @@ class Scene {
 	int seed = 0;
 	var pal = null;
 	var rng = null;
+	float replay = 3.0;   // the sim-seconds a jump replays to arrive mid-flight
 
 	void setup(int w_, int h_, int seed_) {
 		w = w_;
@@ -59,7 +60,7 @@ class Reel {
 	bool hud = true;
 	bool paused = false;
 
-	int nscenes = 17;
+	int nscenes = 18;
 	var durs = [];
 	var cur = null;
 	var nxt = null;
@@ -115,7 +116,7 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 24.0];
+		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 16.0, 24.0];
 		start_scene(0, 0.0);
 	}
 
@@ -137,6 +138,7 @@ class Reel {
 			case 13: return Chrome();
 			case 14: return Fire();
 			case 15: return Ossuary();
+			case 16: return Maelstrom();
 			default: return Finale();
 		}
 	}
@@ -212,11 +214,12 @@ class Reel {
 	}
 
 	// a jump to a scene mid-flight: same scene, same clock; stateful scenes
-	// replay up to 3 sim-seconds so they arrive mid-flight instead of empty.
+	// replay up to their replay seconds so they arrive mid-flight instead of empty.
 	void jump(int idx, float at_t) {
 		start_scene(idx, at_t);
 		int steps = itrunc(at_t * 30.0);
-		steps = steps > 90 ? 90 : steps;
+		int most = itrunc(cur.replay * 30.0);
+		steps = steps > most ? most : steps;
 		float ft = at_t - steps * 0.0333333333;
 		for (int i = 0; i < steps; ++i) {
 			ft += 0.0333333333;

@@ -1,18 +1,18 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Seventeen auto-advancing truecolor scenes, five kinds of transition, pixel-font
+Eighteen auto-advancing truecolor scenes, five kinds of transition, pixel-font
 title cards, and a finale where the word JAISCRIPT ignites out of a wall of
 rainbow fire, cools to neon and rolls the credits — every effect coded in `scenes/*.jai`, every frame drawn at
 **double vertical resolution** with half-block pixels. A ray tracer, a sphere
 tracer, a Menger-sponge raymarcher, a textured Wolfenstein raycaster, a
 VoxelSpace terrain flight, Verlet cloth, metaballs, a falling-sand toy, a
 murmuration, a texture tunnel, a skull-headed spider crawling a morphing gyroid
-labyrinth and the classics. The C++ host (`demoreel_host.cpp`) is a
+labyrinth, a Navier-Stokes ink tank and the classics. The C++ host (`demoreel_host.cpp`) is a
 thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
 class, and the frame pump. Everything you see is script.
 
 The reel doubles as a determinism test: `--smoke` hashes the whole frame stream
-against a reference. Six scenes trace their rows across every core with
+against a reference. Seven scenes trace their rows across every core with
 `parallel_transform`, and the stream stays byte-identical anyway.
 
 ## How a frame is drawn
@@ -125,7 +125,7 @@ Keys while running:
 | `h` | toggle the HUD: a status bar (scene, backend, frame ms split into sim and draw, fps, pixel size) and a key bar that fills as the scene plays |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
-| `1`..`9`, `0` | jump straight to a scene (`0` = scene 17, the finale) |
+| `1`..`9`, `0` | jump straight to a scene (`0` = scene 18, the finale) |
 | `q` / `ESC` | quit |
 
 `jai_demoreel` runs one engine, on the VM: it links the library without the
@@ -154,7 +154,8 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 14 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 15 | FIRE | convection fire with the Doom fire's random sideways jitter at full resolution, 73 heat levels, sparks breaking off and drifting up; ignites into RAINBOW fire mid-scene (house signature) |
 | 16 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp; the body re-projects onto the moving level set every frame, eight two-bone IK legs step in a tetrapod gait, three tendrils writhe behind, and the camera orbits with the surface normal as up; a crown of flame under a spinning ruby, embers and orbiting blood gems are depth-tested against the traced scene; rows in parallel |
-| 17 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (9 px glyphs on a 10 px pitch) that are heat sources; each column's fuel swells and ebbs and the air above the word cools fast, so the flames rise in tongues, burning rainbow; then the wall dies, the letters cool to a neon rainbow with a glint sweeping across, and the credits roll up beneath them |
+| 17 | MAELSTROM | ink in water, simulated: Jos Stam's stable fluids. The flow runs on a half-size grid (vorticity confinement hands back the curl the grid smears away, 20 sweeps of warm-started SOR project it divergence-free, semi-Lagrangian self-advection), and the ink moves per pixel through its bilinear upsampling, so the filaments are finer than the grid; the dye is a density plus a premultiplied hue vector, so inks blend into the hue between them and opposites wash out to pearl, lit as a height field (diffuse + Blinn specular from the density gradient) with motes riding the current. Two jets cross, a ring of nozzles winds the tank up, the tank drains, and eight inks bloom into a rainbow wheel that a whirlpool twists; ink and light rows in parallel |
+| 18 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (9 px glyphs on a 10 px pitch) that are heat sources; each column's fuel swells and ebbs and the air above the word cools fast, so the flames rise in tongues, burning rainbow; then the wall dies, the letters cool to a neon rainbow with a glint sweeping across, and the credits roll up beneath them |
 
 Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
 glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
@@ -191,14 +192,14 @@ Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 | FIRE | 2.7 | 16.1 | 54 |
 | FINALE | 3.1 | 24.5 | 96 |
 
-The table covers the sixteen scenes it lists; OSSUARY is not in it. Every scene
+The table covers the sixteen scenes it lists; OSSUARY and MAELSTROM are not in it. Every scene
 in it holds 30 fps on the VM with room to spare (mean 2.8 ms, worst 5.8 ms); on
 the interpreter each stays under 26 ms (mean 15.7 ms).
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the seventeen scene entries: shim stream hash `3306359932` on
+  every one of the eighteen scene entries: shim stream hash `3173527739` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `76322bdbe2343c29` (the host's HUD
+  `d9e2822f7cb95688` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
@@ -409,7 +410,7 @@ DONUT (`shot 4 at 4` — the frosted torus, specular highlight on the icing):
 ................................::::::::::::::..:........          .................................
 ```
 
-FINALE afterglow (`shot 17 at 17 ascii 1`: the fire is out, the word glows in neon and the credits roll):
+FINALE afterglow (`shot 18 at 17 ascii 1`: the fire is out, the word glows in neon and the credits roll):
 
 ```
 
@@ -423,7 +424,7 @@ FINALE afterglow (`shot 17 at 17 ascii 1`: the fire is out, the word glows in ne
        ###     %%     %% ######### *******     +++++++ **     ** ######### %%           ##
 
 
-                                seventeen scenes . five transitions
+                                 eighteen scenes . five transitions
                               every pixel computed by the jaiscript vm
 
                                            PLASMA  four sine fields
@@ -450,3 +451,9 @@ FINALE afterglow (`shot 17 at 17 ascii 1`: the fire is out, the word glows in ne
   next march 15% short of it, so most surface rays converge in a few steps. Step counts stop
   tracking occlusion under warm starts, so its ambient occlusion is one SDF probe along the
   normal.
+- **Two resolutions.** MAELSTROM's pressure solve is most of a fluid frame, so the flow runs on
+  a grid of half the pixel resolution (a quarter of the cells) and only the ink, which carries
+  the detail, moves per pixel through the bilinearly upsampled flow.
+- **A scene's `replay`.** A jump (`--perf`, `--capture`, a shot) replays a scene's updates so it
+  arrives mid-flight; three seconds rebuild most scenes, while MAELSTROM's water is its whole
+  history, so it sets `replay` to its full length and a shot at second 13 shows second 13.

@@ -25,7 +25,7 @@ class Finale : Fire {
 	var credits = [
 		["title", "THE JAISCRIPT DEMOREEL", ""],
 		["", "", ""],
-		["body", "seventeen scenes . five transitions", ""],
+		["body", "eighteen scenes . five transitions", ""],
 		["body", "every pixel computed by the jaiscript vm", ""],
 		["", "", ""],
 		["role", "PLASMA", "four sine fields"],
@@ -44,6 +44,7 @@ class Finale : Fire {
 		["role", "CHROME", "a ray tracer"],
 		["role", "FIRE", "the doom fire, in rainbow"],
 		["role", "OSSUARY", "a skull spider on a morphing gyroid"],
+		["role", "MAELSTROM", "navier-stokes ink"],
 		["role", "FINALE", "you are here"],
 		["", "", ""],
 		["body", "half-block pixels, two to a cell", ""],

@@ -37,7 +37,7 @@ class StubScene extends Scene {
 
 ::SCENE_CLASSES <- null;
 ::SCENE_NAMES <- ["PLASMA", "STARFIELD", "TUNNEL", "DONUT", "JULIA", "LAVALAMP", "PIPEDREAM", "POWDER",
-	"BOIDS", "KINSTEIN 3D", "CANYONRUN", "SPONGEWORKS", "BANNERFALL", "CHROME", "FIRE", "OSSUARY", "FINALE"];
+	"BOIDS", "GLOBHUNTER", "CANYONRUN", "SPONGEWORKS", "BANNERFALL", "CHROME", "FIRE", "OSSUARY", "FINALE"];
 
 class Reel {
 	w = 0;
@@ -116,7 +116,7 @@ class Reel {
 		if (idx == 6) { return ::Pipes(); }
 		if (idx == 7) { return ::SandBox(); }
 		if (idx == 8) { return ::Boids(); }
-		if (idx == 9) { return ::Kinstein(); }
+		if (idx == 9) { return ::GlobHunter(); }
 		if (idx == 10) { return ::CanyonRun(); }
 		if (idx == 11) { return ::SpongeWorks(); }
 		if (idx == 12) { return ::BannerFall(); }

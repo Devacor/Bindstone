@@ -129,7 +129,7 @@ class Reel {
 			case 2: return Lava();
 			case 3: return Pipes();
 			case 4: return Boids();
-			case 5: return Kinstein();
+			case 5: return GlobHunter();
 			case 6: return CanyonRun();
 			case 7: return Chrome();
 			case 8: return Ossuary();

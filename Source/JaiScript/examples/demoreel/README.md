@@ -143,7 +143,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 3 | LAVALAMP | eight metaballs: one loop sums the inverse-square field, its gradient and a contribution-weighted hue, so merging blobs blend colors; the wax is lit from a normal built out of the gradient (the height of a blob under the field), with a tinted glow outside; rows in parallel |
 | 4 | PIPEDREAM | the 3D Pipes screensaver homage: four pipes grow one segment per tick through a 16x12x16 voxel volume, never intersecting; every tube is a chain of lit sphere impostors a quarter voxel apart (per-pixel normal, specular, fog, depth nudge so crossings intersect), glossy elbow balls at every turn, a static camera per generation, CRT wipe, reseed from a new angle; ~2% of elbows spawn the jackodile's rainbow eye |
 | 5 | BOIDS | a starling murmuration over a lake at sunset: a thousand birds fly in 3D, keeping their distance from and matching the heading of their nearest neighbours (a uniform grid hashed every frame, steering in parallel chunks), drawn to places on a sheet that swings, stretches and folds; a peregrine falcon stoops through them, and panic passes bird to bird as a scare wave that splits the cloud; projected from the shore into a density buffer, so the cloud darkens where it is thick and pales where the sheet faces you, mirrored in the lake under the sun's glitter path |
-| 6 | KINSTEIN 3D | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel, distance fog; billboard Grublins and Orglis brutes lit as spheres per pixel, with eyes and grins, wall-occluded per column; the camera auto-fires on line-of-sight cone lock — recoil, muzzle flash, rainbow tracer, hit-flash, gib scatter, a pixel-font kill counter |
+| 6 | GLOBHUNTER | Wolfenstein-style DDA raycaster over an authored 24x24 keep, TEXTURED: coursed stone, mossy stone, fluted gold and a banner of animated rainbow fire (16x16 textures grown in script), floor and ceiling cast per pixel, distance fog; billboard Grublins and Orglis brutes lit as spheres per pixel, with eyes and grins, wall-occluded per column; the camera auto-fires on line-of-sight cone lock — recoil, muzzle flash, rainbow tracer, hit-flash, gib scatter, a pixel-font kill counter |
 | 7 | CANYONRUN | the Comanche (1992) VoxelSpace algorithm: a 128x128 wrapping heightmap by diamond-square, a river canyon carved along a sine meander, four levels of sun-side slope light plus hashed grain baked into a packed color/height map; 72 geometric depth steps of 16.16 fixed-point marching with a per-column y-buffer, ten haze banks, a sun that tracks the heading, banking into turns |
 | 8 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 9 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp; the body re-projects onto the moving level set every frame, eight two-bone IK legs step in a tetrapod gait, three tendrils writhe behind, and the camera orbits with the surface normal as up; a crown of flame under a spinning ruby, embers and orbiting blood gems are depth-tested against the traced scene; rows in parallel |
@@ -172,7 +172,7 @@ Per scene, mid-flight (`-- bench 60`, no transitions, same size):
 | JULIA | 5.0 | 16.9 | 123 |
 | LAVALAMP | 2.3 | 18.1 | 51 |
 | PIPEDREAM | 1.1 | 10.9 | 56 |
-| KINSTEIN 3D | 1.2 | 12.6 | 33 |
+| GLOBHUNTER | 1.2 | 12.6 | 33 |
 | CANYONRUN | 0.8 | 12.2 | 22 |
 | CHROME | 4.0 | 17.5 | 27 |
 
@@ -212,7 +212,7 @@ jai_demoreel --perf 30 --backend vm --workers 1 --scenes /tmp/natural_scenes  # 
 ## Console performance
 
 Half-block frames carry two colors per cell: 45 KB on average, 123 KB for JULIA, whose
-cycling palette changes nearly every pixel, while KINSTEIN and CANYONRUN stay near 20-30 KB.
+cycling palette changes nearly every pixel, while GLOBHUNTER and CANYONRUN stay near 20-30 KB.
 Legacy conhost parses VT ~16x slower than Windows Terminal, which is what the
 host's post-processing in `demoreel_host.cpp` is for (scenes and the `--smoke` stream
 are untouched by it, so parity hashes don't move):
@@ -318,7 +318,7 @@ are sun glints, the reflections carry the sky and the floor):
 =====*%%%%%%%%%%%%%%%%%%%-----*****%%%%%%%%%*------------------*%%%%%%%***--------**%%%%%%%%%%%%%%%%
 ```
 
-KINSTEIN 3D (`shot 6 at 3.1` — the kill counter top left, oak planks overhead,
+GLOBHUNTER (`shot 6 at 3.1` — the kill counter top left, oak planks overhead,
 coursed stone walls converging on a Grublin down the corridor, flagstones
 below, the pistol at the bottom):
 

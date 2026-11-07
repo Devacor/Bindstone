@@ -1,8 +1,8 @@
-// KINSTEIN 3D (Squirrel port of scenes/kinstein.jai): a textured grid
+// GLOBHUNTER (Squirrel port of scenes/globhunter.jai): a textured grid
 // raycaster with per-pixel floor/ceiling, billboard enemies and an auto-firing
 // camera.
 
-class Kinstein extends Scene {
+class GlobHunter extends Scene {
 	wmap = null;
 	mw = 24;
 	mh = 24;
@@ -62,7 +62,7 @@ class Kinstein extends Scene {
 	}
 
 	function build() {
-		name = "KINSTEIN 3D";
+		name = "GLOBHUNTER";
 		handle = "grublin keep . one ray per column, zero mercy";
 		local rows = [
 			"##################BBBB##",

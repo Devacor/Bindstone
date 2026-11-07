@@ -1,4 +1,4 @@
-// KINSTEIN 3D — a Wolfenstein-style grid raycaster: one DDA ray per screen
+// GLOBHUNTER — a Wolfenstein-style grid raycaster: one DDA ray per screen
 // column over an authored 24x24 keep, perpendicular-distance slices (no fisheye
 // by construction), TEXTURED: the ray's hit coordinate along the wall picks a
 // texel column and each pixel of the slice steps down it (16x16 textures grown
@@ -12,7 +12,7 @@
 // scatter, a kill counter in pixel letters. Enemies respawn each lap. The ray
 // fan comes from the camera-plane vector: no per-column trig.
 
-class Kinstein : Scene {
+class GlobHunter : Scene {
 	array<int> wmap = [];
 	int mw = 24;
 	int mh = 24;
@@ -55,7 +55,7 @@ class Kinstein : Scene {
 	int tr_y = 0;
 
 	void build() override {
-		name = "KINSTEIN 3D";
+		name = "GLOBHUNTER";
 		handle = "grublin keep . one ray per column, zero mercy";
 		// # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
 		var rows = [

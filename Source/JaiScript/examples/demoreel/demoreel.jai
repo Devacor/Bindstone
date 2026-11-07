@@ -95,7 +95,7 @@ import "scenes/lava.jai";
 import "scenes/pipes.jai";
 import "scenes/fire.jai";
 import "scenes/boids.jai";
-import "scenes/kinstein.jai";
+import "scenes/globhunter.jai";
 import "scenes/voxelspace.jai";
 import "scenes/chrome.jai";
 import "scenes/skull.jai";

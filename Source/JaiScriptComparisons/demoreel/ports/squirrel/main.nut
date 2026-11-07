@@ -15,7 +15,7 @@
 ::include("fire.nut");
 ::include("sand.nut");
 ::include("boids.nut");
-::include("kinstein.nut");
+::include("globhunter.nut");
 ::include("voxelspace.nut");
 ::include("marcher.nut");
 ::include("cloth.nut");

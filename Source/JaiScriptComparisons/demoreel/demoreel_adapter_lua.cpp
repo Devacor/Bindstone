@@ -14,7 +14,7 @@ namespace {
 
 const char* kLuaModules[] = {
 	"util", "reel", "plasma", "starfield", "tunnel", "donut", "julia", "lava", "pipes", "fire",
-	"sand", "boids", "kinstein", "voxelspace", "marcher", "cloth", "chrome", "skull", "finale",
+	"sand", "boids", "globhunter", "voxelspace", "marcher", "cloth", "chrome", "skull", "finale",
 };
 
 class lua_session : public demoreel::script_session {

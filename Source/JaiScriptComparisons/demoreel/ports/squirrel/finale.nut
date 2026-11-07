@@ -41,7 +41,7 @@ class Finale extends Fire {
 			["role", "PIPEDREAM", "the 3d pipes screensaver"],
 			["role", "POWDER", "sand, water, ember and plant"],
 			["role", "BOIDS", "a murmuration and a hawk"],
-			["role", "KINSTEIN 3D", "a textured raycaster"],
+			["role", "GLOBHUNTER", "a textured raycaster"],
 			["role", "CANYONRUN", "voxelspace terrain"],
 			["role", "SPONGEWORKS", "a raymarched menger sponge"],
 			["role", "BANNERFALL", "verlet cloth in a gale"],

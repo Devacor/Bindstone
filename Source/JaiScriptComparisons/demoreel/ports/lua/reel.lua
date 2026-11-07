@@ -78,7 +78,7 @@ end
 
 -- looked up per call, so a hot reload's fresh classes build the next scene
 function Reel:make_scene(idx)
-	local classes = {Plasma, Starfield, Tunnel, Donut, Julia, Lava, Pipes, SandBox, Boids, Kinstein,
+	local classes = {Plasma, Starfield, Tunnel, Donut, Julia, Lava, Pipes, SandBox, Boids, GlobHunter,
 		CanyonRun, SpongeWorks, BannerFall, Chrome, Fire, Ossuary, Finale}
 	return (classes[idx + 1] or Finale).new()
 end

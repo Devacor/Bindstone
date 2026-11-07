@@ -1,12 +1,12 @@
--- KINSTEIN 3D: a Wolfenstein-style grid raycaster with textured walls, cast
+-- GLOBHUNTER: a Wolfenstein-style grid raycaster with textured walls, cast
 -- floors and ceilings, fog, sphere-lit billboard enemies occluded per column,
 -- and a scripted camera that auto-fires at whatever sits in the crosshair.
 
 local sin, cos, sqrt, floor = math.sin, math.cos, math.sqrt, math.floor
 
-Kinstein = class(Scene)
+GlobHunter = class(Scene)
 
-function Kinstein:init()
+function GlobHunter:init()
 	Scene.init(self)
 	self.wmap = {}
 	self.mw = 24
@@ -49,8 +49,8 @@ function Kinstein:init()
 	self.tr_y = 0
 end
 
-function Kinstein:build()
-	self.name = "KINSTEIN 3D"
+function GlobHunter:build()
+	self.name = "GLOBHUNTER"
 	self.handle = "grublin keep . one ray per column, zero mercy"
 	local w, pal = self.w, self.pal
 	-- # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
@@ -186,18 +186,18 @@ function Kinstein:build()
 end
 
 -- one entry: a color fogged toward the keep's gloom at fog level f (7 = near)
-function Kinstein:fogged(r, g, b, f, side, fogc)
+function GlobHunter:fogged(r, g, b, f, side, fogc)
 	local k = (0.10 + 0.90 * f / 7.0) * (side == 1 and 0.72 or 1.0)
 	local fr, fg, fb = fogc[1], fogc[2], fogc[3]
 	self.pal:add(r * k + fr * (1.0 - k), g * k + fg * (1.0 - k), b * k + fb * (1.0 - k))
 end
 
-function Kinstein:hash2(a, b)
+function GlobHunter:hash2(a, b)
 	local hs = (a * 73856093 + b * 19349663 + (self.seed & 255) * 83492791) & 1048575
 	return ((hs * 1274126177) >> 12) & 1023
 end
 
-function Kinstein:grow_textures()
+function GlobHunter:grow_textures()
 	-- 0 coursed stone, 1 mossy stone, 2 fluted gold, 3 flagstones, 4 oak planks
 	local tex = self.tex
 	local n = 0
@@ -248,7 +248,7 @@ function Kinstein:grow_textures()
 	end
 end
 
-function Kinstein:path_at(s)
+function GlobHunter:path_at(s)
 	local path_len, nwp, seglen, wpx, wpy = self.path_len, self.nwp, self.seglen, self.wpx, self.wpy
 	s = s - floor(s / path_len) * path_len
 	for i = 1, nwp do
@@ -264,7 +264,7 @@ function Kinstein:path_at(s)
 end
 
 -- DDA toward (dx, dy) in parameter space: true if no wall before frac of the way
-function Kinstein:los_clear(dx, dy, frac)
+function GlobHunter:los_clear(dx, dy, frac)
 	local posx, posy, wmap, mw = self.posx, self.posy, self.wmap, self.mw
 	local mx = itrunc(posx)
 	local my = itrunc(posy)
@@ -287,7 +287,7 @@ function Kinstein:los_clear(dx, dy, frac)
 	return false
 end
 
-function Kinstein:update(t, dt)
+function GlobHunter:update(t, dt)
 	self.tt = t
 	local s = t * 2.4
 	local px, py = self:path_at(s)
@@ -352,7 +352,7 @@ end
 
 -- floor and ceiling, cast per pixel: each row below the horizon is a fixed
 -- distance, stepped across the screen along the camera plane
-function Kinstein:cast_planes(grid)
+function GlobHunter:cast_planes(grid)
 	local ww = self.w
 	local hh = self.h
 	local half = hh // 2
@@ -391,7 +391,7 @@ end
 
 -- one billboard: an ellipsoid body lit as a sphere per pixel, eyes with
 -- pupils, a grin; walls occlude per column; hit-flash paints it white
-function Kinstein:draw_blob(grid, i)
+function GlobHunter:draw_blob(grid, i)
 	local w, h, zcol, sprite_base = self.w, self.h, self.zcol, self.sprite_base
 	local tyy = self.sty[i]
 	local txx = self.stx[i]
@@ -451,7 +451,7 @@ function Kinstein:draw_blob(grid, i)
 	end
 end
 
-function Kinstein:render(grid)
+function GlobHunter:render(grid)
 	self:cast_planes(grid)
 	local ww = self.w
 	local hh = self.h
@@ -581,7 +581,7 @@ function Kinstein:render(grid)
 	self:draw_hud(grid, flick)
 end
 
-function Kinstein:draw_hud(grid, flick)
+function GlobHunter:draw_hud(grid, flick)
 	local w, h, sprite_base = self.w, self.h, self.sprite_base
 	local gx0 = w // 2
 	-- rainbow hitscan tracer from the muzzle to the target

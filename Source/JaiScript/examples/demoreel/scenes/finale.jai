@@ -57,7 +57,7 @@ class Finale : Fire {
 		["role", "LAVALAMP", "lit metaballs"],
 		["role", "PIPEDREAM", "the 3d pipes screensaver"],
 		["role", "BOIDS", "a murmuration and a falcon"],
-		["role", "KINSTEIN 3D", "a textured raycaster"],
+		["role", "GLOBHUNTER", "a textured raycaster"],
 		["role", "CANYONRUN", "voxelspace terrain"],
 		["role", "CHROME", "a ray tracer"],
 		["role", "OSSUARY", "a skull spider on a morphing gyroid"],

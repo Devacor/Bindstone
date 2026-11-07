@@ -3,6 +3,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/execution_backend.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <filesystem>
 #include <fstream>
 
@@ -34,91 +35,28 @@ public:
             check_eq(script_int(6), engine->execute("int g() { int y = 5; var helper = (int x) => x + y; return helper(1); } g();").as_int());
         });
 
-        test("simple_function_declaration_and_call", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto add(auto a, auto b) -> auto {
-                    return a + b;
-                }
-                
-                auto result = add(5, 3);
-                result;
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 8);
-        });
-
-        test("function_with_no_parameters", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto getValue() -> auto {
-                    return 42;
-                }
-                
-                getValue();
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 42);
-        });
-
-        test("function_with_side_effects", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto x = 10;
-                
-                auto setX(auto value) -> auto {
-                    x = value;
-                }
-                
-                setX(25);
-                x;
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 25);
-        });
-
-        test("function_with_multiple_parameters", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function multiply(auto a, auto b, auto c) -> auto {
-                    return a * b * c;
-                }
-                
-                multiply(2, 3, 4);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 24);
-        });
-
-        test("recursive_function", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function factorial(auto n) -> auto {
-                    if (n <= 1) {
-                        return 1;
-                    }
-                    return n * factorial(n - 1);
-                }
-                
-                factorial(5);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 120);
+        test("functions_take_parameters_recurse_and_return_their_value", [this]() {
+            const std::pair<const char*, int> cases[] = {
+                {"auto add(auto a, auto b) -> auto { return a + b; } auto result = add(5, 3); result;", 8},
+                {"auto getValue() -> auto { return 42; } getValue();", 42},
+                {"auto x = 10; auto setX(auto value) -> auto { x = value; } setX(25); x;", 25},
+                {"function multiply(auto a, auto b, auto c) -> auto { return a * b * c; } multiply(2, 3, 4);", 24},
+                {"function factorial(auto n) -> auto { if (n <= 1) { return 1; } return n * factorial(n - 1); } factorial(5);", 120},
+                {"function double(auto x) -> auto { return x * 2; } function add(auto a, auto b) -> auto { return a + b; } double(add(3, 4));", 14},
+                {"function compute(auto n) -> auto { auto temp = n * 2; auto result = temp + 5; return result; } compute(10);", 25},
+                {"function max(auto a, auto b) -> auto { if (a > b) { return a; } else { return b; } } max(15, 10);", 15},
+                {"function findFirst(auto n) -> auto { for (auto i = 0; i < 10; ++i) { if (i == n) { return i; } } return -1; } findFirst(5);", 5},
+                {"auto global_var = 100; function test_scope() -> auto { auto local_var = 50; return local_var + global_var; } test_scope();", 150},
+                {"auto x = 10; function shadow_test(auto x) -> auto { return x * 2; } shadow_test(5);", 10},
+                {"auto cpp_style(auto x) -> auto { return x + 1; } function func_style(auto x) -> auto { return x + 2; } "
+                 "function short_style(auto x) -> auto { return x + 3; } cpp_style(10) + func_style(10) + short_style(10);", 36},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                script_value result = engine->execute(c.first);
+                check(result.is_int());
+                check_eq(result.as<int>(), c.second);
+            });
         });
 
         test("function_returning_string", [this]() {
@@ -137,177 +75,17 @@ public:
             check_eq(result.as<std::string>(), "Hello, World!");
         });
 
-        test("nested_function_calls", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function double(auto x) -> auto {
-                    return x * 2;
-                }
-                
-                function add(auto a, auto b) -> auto {
-                    return a + b;
-                }
-                
-                double(add(3, 4));
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 14); // double(3 + 4) = double(7) = 14
-        });
-
-        test("function_with_local_variables", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function compute(auto n) -> auto {
-                    auto temp = n * 2;
-                    auto result = temp + 5;
-                    return result;
-                }
-                
-                compute(10);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 25); // (10 * 2) + 5 = 25
-        });
-
-        test("function_with_conditional_return", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function max(auto a, auto b) -> auto {
-                    if (a > b) {
-                        return a;
-                    } else {
-                        return b;
-                    }
-                }
-                
-                max(15, 10);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 15);
-        });
-
-        test("function_with_early_return", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                function findFirst(auto n) -> auto {
-                    for (auto i = 0; i < 10; ++i) {
-                        if (i == n) {
-                            return i;
-                        }
-                    }
-                    return -1;
-                }
-                
-                findFirst(5);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 5);
-        });
-
-        test("function_scope_isolation", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto global_var = 100;
-                
-                function test_scope() -> auto {
-                    auto local_var = 50;
-                    return local_var + global_var;
-                }
-                
-                test_scope();
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 150);
-        });
-
-        test("function_parameter_shadowing", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                auto x = 10;
-                
-                function shadow_test(auto x) -> auto {
-                    return x * 2;
-                }
-                
-                shadow_test(5);
-            )";
-            
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 10); // uses parameter x=5, not global x=10
-        });
-
-        test("function_with_different_syntax_styles", [this]() {
-            auto engine = make_engine();
-            
-            std::string script = R"(
-                // C++ style
-                auto cpp_style(auto x) -> auto {
-                    return x + 1;
-                }
-                
-                // Function keyword style
-                function func_style(auto x) -> auto {
-                    return x + 2;
-                }
-                
-                // Alternative function style
-                function short_style(auto x) -> auto {
-                    return x + 3;
-                }
-                
-                cpp_style(10) + func_style(10) + short_style(10);
-            )";
-
-            script_value result = engine->execute(script);
-            check(result.is_int());
-            check_eq(result.as<int>(), 36); // 11 + 12 + 13 = 36
-        });
-
-        test("default_parameter_basic", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(eng);
-            auto result = eng->execute(R"(
-                function add(int a, int b = 10) -> int { return a + b; }
-                add(5);
-            )");
-            check_eq(result.as<int64_t>(), int64_t(15));
-        });
-
-        test("default_parameter_override", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(eng);
-            auto result = eng->execute(R"(
-                function add(int a, int b = 10) -> int { return a + b; }
-                add(5, 20);
-            )");
-            check_eq(result.as<int64_t>(), int64_t(25));
-        });
-
-        test("default_parameter_multiple", [this]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(eng);
-            auto result = eng->execute(R"(
-                function make_point(int x = 0, int y = 0, int z = 0) -> int { return x + y + z; }
-                make_point() + make_point(1) + make_point(1, 2) + make_point(1, 2, 3);
-            )");
-            check_eq(result.as<int64_t>(), int64_t(0 + 1 + 3 + 6));
+        test("default_parameters_fill_the_missing_trailing_arguments", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"function add(int a, int b = 10) -> int { return a + b; } add(5);", 15},
+                {"function add(int a, int b = 10) -> int { return a + b; } add(5, 20);", 25},
+                {"function make_point(int x = 0, int y = 0, int z = 0) -> int { return x + y + z; } make_point() + make_point(1) + make_point(1, 2) + make_point(1, 2, 3);", 0 + 1 + 3 + 6},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto eng = make_engine();
+                jai::stdlib::register_all(eng);
+                check_eq(eng->execute(c.first).as<int64_t>(), c.second);
+            });
         });
 
         test("default_parameter_string", [this]() {
@@ -966,26 +744,16 @@ public:
 
         // ---- C++ return-type-first free functions with class types (top level) ----
 
-        test("class_typed_return_first_top_level_call", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class Point { int x = 5; }
-                Point mk() { return Point(); }
-                mk().x;
-            )");
-            check_eq(int64_t(5), r.as_int());
-        });
-
-        test("class_typed_return_first_assign_and_pass", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class Point { int x = 6; }
-                Point mk() { return Point{}; }
-                function call0(g) { return g(); }
-                var f = mk;
-                f().x + call0(mk).x;
-            )");
-            check_eq(int64_t(12), r.as_int());
+        test("class_typed_return_first_declares_a_function_and_a_class_typed_variable_stays_a_variable", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"class Point { int x = 5; } Point mk() { return Point(); } mk().x;", 5},
+                {"class Point { int x = 6; } Point mk() { return Point{}; } function call0(g) { return g(); } var f = mk; f().x + call0(mk).x;", 12},
+                {"class Point { int x = 8; } Point p = Point(); p.x;", 8},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(c.second, engine->execute(c.first).as_int());
+            });
         });
 
         test("class_typed_return_type_enforced", [this]() {
@@ -998,16 +766,6 @@ public:
                     mk();
                 )");
             });
-        });
-
-        test("class_typed_variable_decl_still_a_variable", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class Point { int x = 8; }
-                Point p = Point();
-                p.x;
-            )");
-            check_eq(int64_t(8), r.as_int());
         });
 
         test("class_typed_return_first_redefinition_last_wins", [this]() {
@@ -1026,22 +784,17 @@ public:
 
         // ---- untyped parameter defaults ----
 
-        test("untyped_param_default_free_function", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(3), engine->execute("function f(x = 3) { return x; } f();").as_int());
-            check_eq(int64_t(10), engine->execute("function g(x = 3) { return x; } g(10);").as_int());
-        });
-
-        test("untyped_param_default_lambda", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute("auto f = [](x = 8) { return x; }; f() + f(1);");
-            check_eq(int64_t(9), r.as_int());
-        });
-
-        test("untyped_param_default_mixed", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute("function f(x, y = 4) { return x + y; } f(1) + f(1, 1);");
-            check_eq(int64_t(7), r.as_int());
+        test("untyped_parameter_defaults", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"function f(x = 3) { return x; } f();", 3},
+                {"function g(x = 3) { return x; } g(10);", 10},
+                {"auto f = [](x = 8) { return x; }; f() + f(1);", 9},
+                {"function f(x, y = 4) { return x + y; } f(1) + f(1, 1);", 7},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(c.second, engine->execute(c.first).as_int());
+            });
         });
 
         test("untyped_param_default_ordering_still_enforced", [this]() {
@@ -1055,85 +808,22 @@ public:
 
         // ---- function-typed variables and fields ----
 
-        test("function_typed_variable_top_level", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                function f = [](x) { return x * 2; };
-                f(21);
-            )");
-            check_eq(int64_t(42), r.as_int());
-        });
-
-        test("function_typed_variable_uninitialized_then_assigned", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                function f;
-                f = [](){ return 7; };
-                f();
-            )");
-            check_eq(int64_t(7), r.as_int());
-        });
-
-        test("function_typed_variable_holds_named_function", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                function g() { return 3; }
-                function f = g;
-                f();
-            )");
-            check_eq(int64_t(3), r.as_int());
-        });
-
-        test("function_typed_variable_in_function_body", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                function outer() {
-                    function f = [](x) { return x + 1; };
-                    return f(41);
-                }
-                outer();
-            )");
-            check_eq(int64_t(42), r.as_int());
-        });
-
-        test("function_typed_field", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class K { function cb = [](){ return 8; }; }
-                K().cb();
-            )");
-            check_eq(int64_t(8), r.as_int());
-        });
-
-        test("function_typed_field_null_then_assigned", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class K { function cb; }
-                auto k = K();
-                k.cb = [](){ return 9; };
-                k.cb();
-            )");
-            check_eq(int64_t(9), r.as_int());
-        });
-
-        test("function_operator_assign_still_a_method", [this]() {
-            auto engine = make_engine();
-            auto r = engine->execute(R"(
-                class V { int x = 0; function operator=(o) { x = o.x + 100; return this; } }
-                var a = V();
-                var b = V();
-                b.x = 1;
-                a = b;
-                a.x;
-            )");
-            // a var holding a V runs V's operator=, which takes any value (x == 101); the point of this test: `function operator=`
-            // keeps parsing as a METHOD and never falls into the function-typed-field lookahead
-            check_eq(int64_t(101), r.as_int());
-        });
-
-        test("function_keyword_declaration_unchanged", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(42), engine->execute("function g(x) { return x * 2; } g(21);").as_int());
+        test("function_types_variables_and_fields_and_still_declares_functions_and_methods", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"function f = [](x) { return x * 2; }; f(21);", 42},
+                {"function f; f = [](){ return 7; }; f();", 7},
+                {"function g() { return 3; } function f = g; f();", 3},
+                {"function outer() { function f = [](x) { return x + 1; }; return f(41); } outer();", 42},
+                {"class K { function cb = [](){ return 8; }; } K().cb();", 8},
+                {"class K { function cb; } auto k = K(); k.cb = [](){ return 9; }; k.cb();", 9},
+                // `function operator=` parses as a method, never as a function-typed field: a var holding a V runs it
+                {"class V { int x = 0; function operator=(o) { x = o.x + 100; return this; } } var a = V(); var b = V(); b.x = 1; a = b; a.x;", 101},
+                {"function g(x) { return x * 2; } g(21);", 42},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(c.second, engine->execute(c.first).as_int());
+            });
         });
 
         // ---- return-type conflicts (contradictory leading +
@@ -1259,27 +949,22 @@ public:
         // Pure desugar to a no-capture lambda ([]-equivalent auto-capture:
         // enclosing-function locals snapshot by value at creation, globals live)
 
-        test("anonymous_function_assign_and_call", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(42), engine->execute(
-                "var f = function(x) { return x * 2; }; f(21);").as_int());
-            check_eq(int64_t(7), engine->execute(
-                "auto g = function(a, b) { return a + b; }; g(3, 4);").as_int());
-            check_eq(int64_t(9), engine->execute(
-                "function h = function() { return 9; }; h();").as_int());
-        });
-
-        test("anonymous_function_as_argument", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(42), engine->execute(
-                "function apply(g, v) { return g(v); }"
-                "apply(function(x) { return x + 1; }, 41);").as_int());
-        });
-
-        test("anonymous_function_immediately_invoked", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(42), engine->execute(
-                "function(x) { return x + 1; }(41);").as_int());
+        test("anonymous_function_expressions_assign_pass_invoke_and_leave_declarations_alone", [this]() {
+            const std::pair<const char*, int64_t> cases[] = {
+                {"var f = function(x) { return x * 2; }; f(21);", 42},
+                {"auto g = function(a, b) { return a + b; }; g(3, 4);", 7},
+                {"function h = function() { return 9; }; h();", 9},
+                {"function apply(g, v) { return g(v); }apply(function(x) { return x + 1; }, 41);", 42},
+                {"function(x) { return x + 1; }(41);", 42},
+                {"var f = function(x = 8) { return x; }; f();", 8},
+                {"function(x) { return x; }; 1;", 1},
+                {"function f(x) { return x * 2; } f(21);", 42},
+                {"function h = [](){ return 3; }; h();", 3},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_eq(c.second, engine->execute(c.first).as_int());
+            });
         });
 
         test("anonymous_function_trailing_return", [this]() {
@@ -1324,46 +1009,15 @@ public:
             check_eq(int64_t(13), engine->execute("C().live();").as_int());
         });
 
-        test("anonymous_function_default_param", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(8), engine->execute(
-                "var f = function(x = 8) { return x; }; f();").as_int());
-        });
-
-        test("anonymous_function_returned_and_nested", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(5), engine->execute(
-                "var adder = function(x) { return function(y) { return x + y; }; };"
-                "adder(2)(3);").as_int());
-        });
-
-        test("anonymous_function_statement_position_discarded", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(1), engine->execute(
-                "function(x) { return x; }; 1;").as_int());
-        });
-
-        test("anonymous_function_named_form_still_error", [this]() {
-            auto engine = make_engine();
-            check_throws([&]() {
-                engine->execute("var f = function g(x) { return x; }; f(1);");
+        test("anonymous_function_takes_no_name_and_no_coroutine_form", [this]() {
+            const std::tuple<const char*> cases[] = {
+                {"var f = function g(x) { return x; }; f(1);"},
+                {"var f = coroutine function() { yield 1; }; 1;"},
+            };
+            check_each(cases, [&](const auto& c) {
+                auto engine = make_engine();
+                check_throws([&]() { engine->execute(std::get<0>(c)); });
             });
-        });
-
-        test("anonymous_function_coroutine_not_supported", [this]() {
-            auto engine = make_engine();
-            // no coroutine lambdas -> no coroutine anonymous functions (documented)
-            check_throws([&]() {
-                engine->execute("var f = coroutine function() { yield 1; }; 1;");
-            });
-        });
-
-        test("anonymous_function_declarations_unchanged", [this]() {
-            auto engine = make_engine();
-            check_eq(int64_t(42), engine->execute(
-                "function f(x) { return x * 2; } f(21);").as_int());
-            check_eq(int64_t(3), engine->execute(
-                "function h = [](){ return 3; }; h();").as_int());
         });
 
         test("destructuring_from_variable", [this]() {

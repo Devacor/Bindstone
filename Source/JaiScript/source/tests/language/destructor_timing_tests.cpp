@@ -2,6 +2,7 @@
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 
 #include <string>
 
@@ -76,13 +77,14 @@ public:
     )";
 
     void forge_tests() override {
-        test("block_locals_die_at_the_closing_brace_in_reverse", [this]() {
-            expect_log(R"(
+        test("locals_die_as_control_leaves_their_scope_innermost_first", [this]() {
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
                 function f() -> void { Token a = Token("a"); { Token i = Token("i"); Token j = Token("j"); } LOG = LOG + "|"; Token b = Token("b"); }
                 f(); LOG;
-            )", "ji|ba");
-            // a const reference holds the temporary it binds and dies as a local, whatever ends its scope
-            expect_log(R"(
+            )", "ji|ba"},
+                // a const reference holds the temporary it binds and dies as a local, whatever ends its scope
+                {R"(
                 function mk(string n) -> Token { return Token(n); }
                 function g() -> int {
                     Token a = Token("a"); const Token& r = mk("r");
@@ -92,81 +94,118 @@ public:
                 }
                 function h() -> void { const Token& t = mk("t"); throw "x"; }
                 g(); try { h(); } catch (e) { LOG = LOG + "c"; } LOG;
-            )", "b|.0.1zratc");
-        });
-
-        test("loop_body_locals_die_each_iteration", [this]() {
-            expect_log(R"(
+            )", "b|.0.1zratc"},
+                {R"(
                 function f() -> void { for (int k = 0; k < 2; k++) { Token t = Token(to_string(k)); LOG = LOG + "."; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", ".0.1|");
-            expect_log(R"(
+            )", ".0.1|"},
+                {R"(
                 function f() -> void { int k = 0; while (k < 2) { Token t = Token(to_string(k)); k++; LOG = LOG + "."; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", ".0.1|");
-        });
-
-        test("break_and_continue_destroy_the_scopes_they_leave", [this]() {
-            expect_log(R"(
+            )", ".0.1|"},
+                {R"(
                 function f() -> void { for (int k = 0; k < 3; k++) { Token t = Token(to_string(k)); { Token u = Token("u"); if (k == 1) { break; } } LOG = LOG + "."; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", "u.0u1|");
-            expect_log(R"(
+            )", "u.0u1|"},
+                {R"(
                 function f() -> void { for (int k = 0; k < 2; k++) { Token t = Token(to_string(k)); if (k == 0) { continue; } LOG = LOG + "."; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", "0.1|");
-        });
-
-        test("return_destroys_every_open_scope_innermost_first", [this]() {
-            expect_log(R"(
+            )", "0.1|"},
+                {R"(
                 function f() -> void { Token a = Token("a"); { Token b = Token("b"); if (true) { Token c = Token("c"); return; } } }
                 f(); LOG;
-            )", "cba");
-            // a range-for's range is the loop's outermost local: the body's locals and the loop variable die before it, the
-            // locals declared ahead of the loop after it; nested loops end innermost first, and a range dies last to first
-            expect_log(R"(
+            )", "cba"},
+                // a range-for's range is the loop's outermost local: the body's locals and the loop variable die before it, the
+                // locals declared ahead of the loop after it; nested loops end innermost first, and a range dies last to first
+                {R"(
                 function arr(string a, string b) -> array<Token> { array<Token> r = [Token(a), Token(b)]; return r; }
                 function g() -> int { Token a = Token("a"); for (auto t : arr("x", "y")) { Token b = Token("b"); return 1; } return 0; }
                 function h() -> int { for (auto o : arr("x", "y")) { for (auto i : arr("m", "n")) { return 1; } } return 0; }
                 g(); LOG = LOG + "|"; h(); LOG = LOG + "|";
                 for (auto t : arr("x", "y")) { LOG = LOG + "["; } LOG = LOG + "|";
                 for (auto t : arr("x", "y")) { LOG = LOG + "["; break; } LOG;
-            )", "bxyxa|mnmxyx|[x[yyx|[xyx");
-        });
-
-        test("throw_destroys_the_scopes_it_leaves", [this]() {
-            expect_log(R"(
+            )", "bxyxa|mnmxyx|[x[yyx|[xyx"},
+                {R"(
                 function f() -> void { try { Token a = Token("a"); { Token b = Token("b"); throw 1; } } catch (e) { LOG = LOG + "!"; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", "ba!|");
-            expect_log(R"(
+            )", "ba!|"},
+                {R"(
                 function g() -> void { Token a = Token("a"); { Token b = Token("b"); throw 1; } }
                 function f() -> void { try { g(); } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "ba!");
-            // a range dies inside the scopes the throw leaves, after its loop's interior, in the same function or a callee
-            expect_log(R"(
+            )", "ba!"},
+                // a range dies inside the scopes the throw leaves, after its loop's interior, in the same function or a callee
+                {R"(
                 function arr() -> array<Token> { array<Token> r = [Token("x"), Token("y")]; return r; }
                 function boom() -> int { throw "boom"; return 0; }
                 function f() -> void { try { Token a = Token("a"); for (auto t : arr()) { Token b = Token("b"); boom(); } } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; }
                 function g() -> void { Token a = Token("a"); for (auto t : arr()) { Token b = Token("b"); boom(); } }
                 function k() -> void { try { g(); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; }
                 f(); k(); LOG;
-            )", "bxyxac|bxyxac|");
+            )", "bxyxac|bxyxac|"},
+                {R"(
+                function f(Token p) -> void { Token l = Token("l"); LOG = LOG + "body"; }
+                f(Token("p")); LOG;
+            )", "bodylp"},
+                {R"(
+                function one(Token p) -> void { LOG = LOG + "body"; }
+                function f() -> void { Token t = Token("t"); one(t); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "bodyt|t"},
+                {R"(
+                function f(array<Token>& ts) -> void { for (Token t : ts) { LOG = LOG + "<" + t.name + ">"; } LOG = LOG + "|"; }
+                array<Token> TS; TS.push(Token("p")); TS.push(Token("q"));
+                LOG = ""; f(TS); LOG;
+            )", "<p>p<q>q|"},
+                {R"(
+                function f(array<Token>& ts) -> void { for (auto& t : ts) { LOG = LOG + "<" + t.name + ">"; } LOG = LOG + "|"; }
+                array<Token> TS; TS.push(Token("p")); TS.push(Token("q"));
+                LOG = ""; f(TS); LOG;
+            )", "<p><q>|"},
+                {R"(
+                function f() -> void { for (Token t = Token("i"); LOG.size() < 3; LOG = LOG + ".") { } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "...i|"},
+                {R"(
+                function f() -> void { if (Token("c").name == "c") { LOG = LOG + "body"; } }
+                f(); LOG;
+            )", "cbody"},
+                {R"(
+                function f() -> void { int k = 0; while (Token(to_string(k)).name != "2") { LOG = LOG + "."; k++; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "0.1.2|"},
+                {R"(
+                function f(int k) -> void { switch (k) { case 1: { Token t = Token("c"); LOG = LOG + "."; break; } default: LOG = LOG + "d"; } LOG = LOG + "|"; }
+                f(1); f(2); LOG;
+            )", ".c|d|"},
+                {R"(
+                function f() -> void { { shared_ptr<Token> h = new Token("h"); LOG = LOG + "."; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", ".h|"},
+                {R"(
+                function f() -> void { { var v = Token("v"); LOG = LOG + "."; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", ".v|"},
+                {R"(
+                function f() -> void { shared_ptr<Token> keep = null; { shared_ptr<Token> h = new Token("h"); keep = h; } LOG = LOG + "|"; }
+                f(); LOG;
+            )", "|h"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
-        test("a_base_constructor_that_throws_leaves_no_destructor_to_run", [this]() {
-            expect_log(R"(
+        // C++ [except.ctor]: a throw out of a constructor destroys every fully constructed subobject in reverse order; the
+        // throwing level's own destructor body never runs, its members (all constructed before its body) do die
+        test("a_throw_out_of_construction_destroys_exactly_the_constructed_subobjects", [this]() {
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
                 class B { B() { throw "boom"; } ~B() { LOG = LOG + "~B"; } }
                 class D : B { int x = 1; ~D() { LOG = LOG + "~D"; } }
                 class E : B { E() {} ~E() { LOG = LOG + "~E"; } }
                 function f() -> void { try { D d; } catch (x) { LOG = LOG + "!"; } try { E e; } catch (x) { LOG = LOG + "?"; } }
                 f(); LOG;
-            )", "!?");
-        });
-
-        test("a_throw_ahead_of_the_body_ends_the_construction", [this]() {
-            expect_log(R"(
+            )", "!?"},
+                {R"(
                 int note(string s) { LOG = LOG + s; return 1; }
                 int thrower() { throw "t"; return 0; }
                 class A { A(int v) { note("A"); } ~A() { note("~A"); } }
@@ -175,60 +214,63 @@ public:
                 class E : B { int k = note("k"); E() { note("E"); } ~E() { note("~E"); } }
                 function f() -> void { try { G g; } catch (x) { LOG = LOG + "|" + x; } try { E e; } catch (x) { LOG = LOG + "|" + x; } }
                 f(); LOG;
-            )", "|t|b");
-        });
-
-        // C++ [except.ctor]: a throw out of a constructor destroys every fully constructed subobject in reverse order; the
-        // throwing level's own destructor body never runs, its members (all constructed before its body) do die
-        test("a_throwing_derived_body_destroys_the_constructed_base", [this]() {
-            expect_log(R"(
+            )", "|t|b"},
+                {R"(
                 class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
                 class D : B { D() { LOG = LOG + "D"; throw "x"; } ~D() { LOG = LOG + "~D"; } }
                 function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "BD~B!");
-            expect_log(R"(
+            )", "BD~B!"},
+                {R"(
                 class B { B() {} ~B() { LOG = LOG + "~B"; } }
                 class D : B { Token t = Token("t"); Token u = Token("u"); D() { throw "x"; } ~D() { LOG = LOG + "~D"; } }
                 function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "ut~B!");
-            expect_log(R"(
+            )", "ut~B!"},
+                {R"(
                 class B { ~B() { LOG = LOG + "~B"; } }
                 class D : B { D() { throw "x"; } ~D() { LOG = LOG + "~D"; } }
                 function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "~B!");
-        });
-
-        test("a_throw_in_a_middle_level_destroys_only_the_levels_below_it", [this]() {
-            expect_log(R"(
+            )", "~B!"},
+                {R"(
                 class A { A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
                 class B : A { B() { LOG = LOG + "B"; throw "x"; } ~B() { LOG = LOG + "~B"; } }
                 class C : B { C() { LOG = LOG + "C"; } ~C() { LOG = LOG + "~C"; } }
                 function f() -> void { try { C c; } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "AB~A!");
-        });
-
-        test("a_field_initializer_throwing_after_the_base_destroys_the_base", [this]() {
-            expect_log(R"(
+            )", "AB~A!"},
+                {R"(
                 int boom() { throw "f"; return 0; }
                 class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
                 class D : B { Token t = Token("t"); int k = boom(); D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
                 class E : B { Token t = Token("e"); int k = boom(); ~E() { LOG = LOG + "~E"; } }
                 function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } try { E e; } catch (e) { LOG = LOG + "?"; } }
                 f(); LOG;
-            )", "Bt~B!Be~B?");
-        });
-
-        test("a_throwing_delegating_body_destroys_the_object_its_target_constructed", [this]() {
-            expect_log(R"(
+            )", "Bt~B!Be~B?"},
+                {R"(
                 class B { B() { LOG = LOG + "B"; } ~B() { LOG = LOG + "~B"; } }
                 class C : B { C(int v) { LOG = LOG + "T"; } C() : this(1) { LOG = LOG + "D"; throw "x"; } ~C() { LOG = LOG + "~C"; } }
                 function f() -> void { try { C c; } catch (e) { LOG = LOG + "!"; } }
                 f(); LOG;
-            )", "BTD~C~B!");
+            )", "BTD~C~B!"},
+                {R"(
+                class M { M() { LOG = LOG + "M"; } ~M() { LOG = LOG + "~M"; } }
+                class B { B() { LOG = LOG + "B"; throw "b"; } ~B() { LOG = LOG + "~B"; } }
+                class D : B { M m; D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
+                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "B!"},
+                {R"(
+                class M { string tag = ""; M(string t) { tag = t; LOG = LOG + t; } ~M() { LOG = LOG + "~" + tag; } }
+                class Bad { Bad() { LOG = LOG + "X"; throw "m"; } ~Bad() { LOG = LOG + "~X"; } }
+                class A { M ma = M("a"); A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
+                class T : A { M mt = M("t"); Bad bad; M after = M("z"); T() { LOG = LOG + "T"; } ~T() { LOG = LOG + "~T"; } }
+                function f() -> void { try { T t; } catch (e) { LOG = LOG + "!"; } }
+                f(); LOG;
+            )", "aAtX~t~A~a!"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         // C++ [class.base.init]: bases first, then members in declaration order (a member without an initializer is
@@ -243,27 +285,6 @@ public:
             expect_log(members + "function f() -> void { A a; LOG = LOG + \"|\"; } f(); LOG;", "aA|~A~a");
             expect_log(members + "function f() -> void { B b; LOG = LOG + \"|\"; } f(); LOG;", "aAbmB|~B~~b~A~a");
             expect_log(members + "function f() -> void { C c; LOG = LOG + \"|\"; } f(); LOG;", "aAbmBcC|~C~c~B~~b~A~a");
-        });
-
-        test("a_throwing_base_leaves_later_members_unconstructed", [this]() {
-            expect_log(R"(
-                class M { M() { LOG = LOG + "M"; } ~M() { LOG = LOG + "~M"; } }
-                class B { B() { LOG = LOG + "B"; throw "b"; } ~B() { LOG = LOG + "~B"; } }
-                class D : B { M m; D() { LOG = LOG + "D"; } ~D() { LOG = LOG + "~D"; } }
-                function f() -> void { try { D d; } catch (e) { LOG = LOG + "!"; } }
-                f(); LOG;
-            )", "B!");
-        });
-
-        test("a_throwing_member_destroys_the_members_before_it_and_the_bases", [this]() {
-            expect_log(R"(
-                class M { string tag = ""; M(string t) { tag = t; LOG = LOG + t; } ~M() { LOG = LOG + "~" + tag; } }
-                class Bad { Bad() { LOG = LOG + "X"; throw "m"; } ~Bad() { LOG = LOG + "~X"; } }
-                class A { M ma = M("a"); A() { LOG = LOG + "A"; } ~A() { LOG = LOG + "~A"; } }
-                class T : A { M mt = M("t"); Bad bad; M after = M("z"); T() { LOG = LOG + "T"; } ~T() { LOG = LOG + "~T"; } }
-                function f() -> void { try { T t; } catch (e) { LOG = LOG + "!"; } }
-                f(); LOG;
-            )", "aAtX~t~A~a!");
         });
 
         test("a_throwing_hybrid_body_destroys_its_cpp_base_once", [this]() {
@@ -290,97 +311,74 @@ public:
             check_eq(1, *deaths, "the C++ base dies once");
         });
 
-        test("prvalue_arguments_are_the_parameters", [this]() {
-            expect_log(R"(
+        test("a_prvalue_argument_is_the_parameter_of_whatever_it_calls", [this]() {
+            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
+            const std::string m = R"(class M { void take(Token p) { LOG = LOG + "body"; } } )";
+            const std::string r = R"(class R { int k = 0; R(Token& r, Token p) { LOG = LOG + "body"; } } )";
+            const std::string t = R"(class T { int k = 0; T(Token p) { LOG = LOG + "body"; throw 1; } } )";
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
                 function args(Token p, Token q) -> void { LOG = LOG + "body"; }
                 args(Token("x"), Token("y")); LOG;
-            )", "bodyyx");
-        });
-
-        test("a_prvalue_argument_is_the_constructor_s_parameter", [this]() {
-            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
-            expect_log(h + R"(function f() -> void { H x = H(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
-            expect_log(h + R"({ H x = H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|");
-            expect_log(h + R"(H G = H(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
-            expect_log(R"(
+            )", "bodyyx"},
+                {h + R"(function f() -> void { H x = H(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|"},
+                {h + R"({ H x = H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|"},
+                {h + R"(H G = H(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|"},
+                {R"(
                 class H2 { int k = 0; H2(Token a, Token b) { LOG = LOG + "body"; } }
                 function f() -> void { H2 x = H2(Token("a"), Token("b")); LOG = LOG + "|"; } f(); LOG;
-            )", "bodyba|");
-        });
-
-        test("a_prvalue_argument_is_new_s_constructor_parameter", [this]() {
-            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
-            expect_log(h + R"({ shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|");
-            expect_log(h + R"(function f() -> void { shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } f(); LOG = LOG + "!"; LOG;)", "bodyp|!");
-            expect_log(h + R"(function f() -> shared_ptr<H> { return new H(Token("p")); } shared_ptr<H> x = f(); LOG = LOG + "|"; LOG;)", "bodyp|");
-            expect_log(h + R"(
+            )", "bodyba|"},
+                {h + R"({ shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } LOG;)", "bodyp|"},
+                {h + R"(function f() -> void { shared_ptr<H> x = new H(Token("p")); LOG = LOG + "|"; } f(); LOG = LOG + "!"; LOG;)", "bodyp|!"},
+                {h + R"(function f() -> shared_ptr<H> { return new H(Token("p")); } shared_ptr<H> x = f(); LOG = LOG + "|"; LOG;)", "bodyp|"},
+                {h + R"(
                 function f() -> void { for (int i = 0; i < 3; i++) { shared_ptr<H> x = new H(Token(to_string(i))); LOG = LOG + "."; } LOG = LOG + "|"; }
                 f(); LOG;
-            )", "body0.body1.body2.|");
-            expect_log(R"(
+            )", "body0.body1.body2.|"},
+                {R"(
                 class H2 { int k = 0; H2(Token a, Token b) { LOG = LOG + "body"; } }
                 function f() -> void { shared_ptr<H2> x = new H2(Token("a"), Token("b")); LOG = LOG + "|"; } f(); LOG;
-            )", "bodyba|");
-        });
-
-        test("a_prvalue_argument_is_a_method_s_parameter_whatever_the_receiver", [this]() {
-            const std::string m = R"(class M { void take(Token p) { LOG = LOG + "body"; } } )";
-            expect_log(m + R"(M G; G.take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
-            expect_log(m + R"(function f() -> void { M m; m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
-            expect_log(m + R"(function f() -> void { shared_ptr<M> m = new M(); m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
-            expect_log(m + R"(function f() -> void { M().take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|");
-            expect_log(R"(class S { static void take(Token p) { LOG = LOG + "body"; } } S::take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
-            expect_log(R"(auto lf = [](Token p) { LOG = LOG + "body"; }; lf(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|");
-        });
-
-        test("a_prvalue_constructor_argument_nested_in_another_call", [this]() {
-            const std::string h = R"(class H { int k = 0; H(Token p) { LOG = LOG + "body"; } } )";
-            expect_log(h + R"(
+            )", "bodyba|"},
+                {m + R"(M G; G.take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|"},
+                {m + R"(function f() -> void { M m; m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|"},
+                {m + R"(function f() -> void { shared_ptr<M> m = new M(); m.take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|"},
+                {m + R"(function f() -> void { M().take(Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|"},
+                {R"(class S { static void take(Token p) { LOG = LOG + "body"; } } S::take(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|"},
+                {R"(auto lf = [](Token p) { LOG = LOG + "body"; }; lf(Token("p")); LOG = LOG + "|"; LOG;)", "bodyp|"},
+                {h + R"(
                 function g(H x) -> void { LOG = LOG + "g"; }
                 function f() -> void { g(H(Token("p"))); LOG = LOG + "|"; } f(); LOG;
-            )", "bodypg|");
-            expect_log(h + R"(
+            )", "bodypg|"},
+                {h + R"(
                 function g(shared_ptr<H> x, Token q) -> void { LOG = LOG + "g"; }
                 function f() -> void { g(new H(Token("p")), Token("q")); LOG = LOG + "|"; } f(); LOG;
-            )", "bodypgq|");
-            expect_log(h + R"(
+            )", "bodypgq|"},
+                {h + R"(
                 class O { int k = 0; O(H a) { LOG = LOG + "o"; } }
                 function f() -> void { O o = O(H(Token("p"))); LOG = LOG + "|"; shared_ptr<O> n = new O(H(Token("q"))); LOG = LOG + "|"; } f(); LOG;
-            )", "bodypo|bodyqo|");
-        });
-
-        test("a_prvalue_argument_beside_a_reference_parameter_is_its_parameter", [this]() {
-            const std::string r = R"(class R { int k = 0; R(Token& r, Token p) { LOG = LOG + "body"; } } )";
-            expect_log(r + R"(function f() -> void { Token t = Token("t"); R x = R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t");
-            expect_log(r + R"(function f() -> void { Token t = Token("t"); shared_ptr<R> x = new R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t");
-            expect_log(r + R"(function f() -> void { Token t = Token("t"); Token u = Token("u"); R x = R(t, u); LOG = LOG + "|"; } f(); LOG;)", "bodyu|ut");
-        });
-
-        test("a_prvalue_initializer_list_argument_is_the_base_s_parameter", [this]() {
-            expect_log(R"(
+            )", "bodypo|bodyqo|"},
+                {r + R"(function f() -> void { Token t = Token("t"); R x = R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t"},
+                {r + R"(function f() -> void { Token t = Token("t"); shared_ptr<R> x = new R(t, Token("p")); LOG = LOG + "|"; } f(); LOG;)", "bodyp|t"},
+                {r + R"(function f() -> void { Token t = Token("t"); Token u = Token("u"); R x = R(t, u); LOG = LOG + "|"; } f(); LOG;)", "bodyu|ut"},
+                {R"(
                 class B { int b = 0; B(Token p) { LOG = LOG + "base"; } }
                 class D : B { int d = 0; D(Token q) : super(Token("p")) { LOG = LOG + "body"; } }
                 function f() -> void { D x = D(Token("q")); LOG = LOG + "|"; shared_ptr<D> y = new D(Token("r")); LOG = LOG + "|"; } f(); LOG;
-            )", "basepbodyq|basepbodyr|");
-            expect_log(R"(
+            )", "basepbodyq|basepbodyr|"},
+                {R"(
                 class G { int k = 0; G(Token p) { LOG = LOG + "target"; } G(int n) : this(Token("p")) { LOG = LOG + "body"; } }
                 function f() -> void { G x = G(1); LOG = LOG + "|"; shared_ptr<G> y = new G(2); LOG = LOG + "|"; } f(); LOG;
-            )", "targetpbody|targetpbody|");
-        });
-
-        test("a_constructor_that_throws_destroys_its_prvalue_parameter_once", [this]() {
-            const std::string t = R"(class T { int k = 0; T(Token p) { LOG = LOG + "body"; throw 1; } } )";
-            expect_log(t + R"(function f() -> void { try { shared_ptr<T> x = new T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|");
-            expect_log(t + R"(function f() -> void { try { T x = T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|");
-        });
-
-        test("a_coroutine_constructs_with_prvalue_arguments", [this]() {
-            expect_log(R"(
+            )", "targetpbody|targetpbody|"},
+                {t + R"(function f() -> void { try { shared_ptr<T> x = new T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|"},
+                {t + R"(function f() -> void { try { T x = T(Token("p")); } catch (e) { LOG = LOG + "c"; } LOG = LOG + "|"; } f(); LOG;)", "bodypc|"},
+                {R"(
                 class H { int k = 0; H(Token p) { LOG = LOG + "body"; } }
                 coroutine gen() -> int { shared_ptr<H> h = new H(Token("p")); LOG = LOG + "y"; yield 1; H k = H(Token("q")); LOG = LOG + "z"; yield 2; }
                 function f() -> void { var g = gen(); g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; g.next(); LOG = LOG + "|"; }
                 f(); LOG;
-            )", "bodypy|bodyqz||");
+            )", "bodypy|bodyqz||"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         // A converting constructor makes the slot's object once, and a temporary it converts is that constructor's parameter
@@ -473,18 +471,6 @@ public:
             )", "ca'|~a'~a");
         });
 
-        test("parameters_die_at_the_callee_end_after_its_locals", [this]() {
-            expect_log(R"(
-                function f(Token p) -> void { Token l = Token("l"); LOG = LOG + "body"; }
-                f(Token("p")); LOG;
-            )", "bodylp");
-            expect_log(R"(
-                function one(Token p) -> void { LOG = LOG + "body"; }
-                function f() -> void { Token t = Token("t"); one(t); LOG = LOG + "|"; }
-                f(); LOG;
-            )", "bodyt|t");
-        });
-
         test("a_returned_local_moves", [this]() {
             expect_log(R"(
                 function make() -> Token { Token t = Token("m"); return t; }
@@ -513,53 +499,22 @@ public:
             )", "h|ata|h");
         });
 
-        test("by_value_range_for_variable_dies_each_iteration", [this]() {
-            expect_log(R"(
-                function f(array<Token>& ts) -> void { for (Token t : ts) { LOG = LOG + "<" + t.name + ">"; } LOG = LOG + "|"; }
-                array<Token> TS; TS.push(Token("p")); TS.push(Token("q"));
-                LOG = ""; f(TS); LOG;
-            )", "<p>p<q>q|");
-            expect_log(R"(
-                function f(array<Token>& ts) -> void { for (auto& t : ts) { LOG = LOG + "<" + t.name + ">"; } LOG = LOG + "|"; }
-                array<Token> TS; TS.push(Token("p")); TS.push(Token("q"));
-                LOG = ""; f(TS); LOG;
-            )", "<p><q>|");
-        });
-
-        test("for_initializer_variables_die_after_the_loop", [this]() {
-            expect_log(R"(
-                function f() -> void { for (Token t = Token("i"); LOG.size() < 3; LOG = LOG + ".") { } LOG = LOG + "|"; }
-                f(); LOG;
-            )", "...i|");
-        });
-
         test("members_die_after_their_class_body_and_before_the_base", [this]() {
-            expect_log(R"(
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
                 class Base { Token bm = Token("bm"); Base() {} ~Base() { LOG = LOG + "~B"; } }
                 class Derived : Base { Token d1 = Token("d1"); Token d2 = Token("d2"); Derived() {} ~Derived() { LOG = LOG + "~D"; } }
                 function f() -> void { Derived d = Derived(); LOG = ""; }
                 f(); LOG;
-            )", "~Dd2d1~Bbm");
-        });
-
-        test("a_base_destructor_runs_for_a_class_that_declares_none", [this]() {
-            expect_log(R"(
+            )", "~Dd2d1~Bbm"},
+                {R"(
                 class Base { Token bm = Token("bm"); Base() {} ~Base() { LOG = LOG + "~B"; } }
                 class Plain : Base { Token pm = Token("pm"); Plain() {} }
                 function f() -> void { Plain p = Plain(); LOG = ""; }
                 f(); LOG;
-            )", "pm~Bbm");
-        });
-
-        test("temporaries_in_conditions_die_before_the_body", [this]() {
-            expect_log(R"(
-                function f() -> void { if (Token("c").name == "c") { LOG = LOG + "body"; } }
-                f(); LOG;
-            )", "cbody");
-            expect_log(R"(
-                function f() -> void { int k = 0; while (Token(to_string(k)).name != "2") { LOG = LOG + "."; k++; } LOG = LOG + "|"; }
-                f(); LOG;
-            )", "0.1.2|");
+            )", "pm~Bbm"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         test("program_scope_variables_die_at_teardown_in_reverse", [this]() {
@@ -645,28 +600,6 @@ public:
                 bool ok = a2(); int n = a5();
                 LOG = LOG + "|" + to_string(ok) + to_string(n); LOG;
             )", "aabc|true3");
-        });
-
-        test("break_out_of_a_block_in_a_case_destroys_it", [this]() {
-            expect_log(R"(
-                function f(int k) -> void { switch (k) { case 1: { Token t = Token("c"); LOG = LOG + "."; break; } default: LOG = LOG + "d"; } LOG = LOG + "|"; }
-                f(1); f(2); LOG;
-            )", ".c|d|");
-        });
-
-        test("handle_and_var_locals_die_at_their_block_end", [this]() {
-            expect_log(R"(
-                function f() -> void { { shared_ptr<Token> h = new Token("h"); LOG = LOG + "."; } LOG = LOG + "|"; }
-                f(); LOG;
-            )", ".h|");
-            expect_log(R"(
-                function f() -> void { { var v = Token("v"); LOG = LOG + "."; } LOG = LOG + "|"; }
-                f(); LOG;
-            )", ".v|");
-            expect_log(R"(
-                function f() -> void { shared_ptr<Token> keep = null; { shared_ptr<Token> h = new Token("h"); keep = h; } LOG = LOG + "|"; }
-                f(); LOG;
-            )", "|h");
         });
 
         test("an_abandoned_coroutine_destroys_its_locals", [this]() {
@@ -779,30 +712,39 @@ public:
         // No slicing: a source of another class the slot admits re-classes the slot's object in place:
         // the levels it loses die (destructor body, then their members), it takes the source's class, every member assigns
         // from the source; references, handles and same_object keep seeing the one object
-        test("assignment_from_a_subclass_source_reclasses_the_object", [this]() {
-            expect_log(std::string(k_family) + R"(
+        test("assignment_from_another_admitted_class_reclasses_the_object_in_place", [this]() {
+            const std::pair<std::string, std::string> cases[] = {
+                {std::string(k_family) + R"(
                 function f() -> string { Base x = Base(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 5; s.d2 = 6; x = s; LOG = LOG + "|";
                     return to_string(x.a) + type_of(h) + to_string(same_object(h, x)) + to_string(cast<D2&>(x).d2); }
                 string out = f(); out + ":" + LOG;
-            )", "5D2true6:|2B2B");
-        });
-
-        test("a_sibling_source_destroys_only_the_levels_the_object_loses", [this]() {
-            expect_log(std::string(k_family) + R"(
+            )", "5D2true6:|2B2B"},
+                {std::string(k_family) + R"(
                 function f() -> string { Base x = D1(); shared_ptr<Base> h = x; D2 s = D2(); s.a = 7; LOG = LOG + "|"; x = s; LOG = LOG + "|";
                     return to_string(x.a) + to_string(cast<D2&>(h).d2) + to_string(same_object(h, x)); }
                 string out = f(); out + ":" + LOG;
-            )", "73true:|1t|2B2B");
-        });
-
-        test("a_base_source_drops_the_derived_level_and_keeps_the_base_members", [this]() {
-            expect_log(std::string(k_family) + R"(
+            )", "73true:|1t|2B2B"},
+                {std::string(k_family) + R"(
                 function f() -> string { Base x = D1(); shared_ptr<Base> h = x; Base b = Base(); b.a = 9; LOG = LOG + "|"; x = b; LOG = LOG + "|";
                     string r = to_string(x.a) + type_of(h) + to_string(same_object(h, x));
                     try { int k = cast<D1&>(x).d1; r = r + "no"; } catch (e) { r = r + "!"; }
                     return r; }
                 string out = f(); out + ":" + LOG;
-            )", "9Basetrue!:|1t|BB");
+            )", "9Basetrue!:|1t|BB"},
+                {R"(
+                class P { int a = 0; P() {} }
+                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
+                function f() -> void { P x = P(); x = Q(); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "Q|Q"},
+                {R"(
+                class P { int a = 0; P() {} ~P() { LOG = LOG + "P"; } }
+                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
+                function f() -> void { P x = Q(); x = P(); LOG = LOG + "|"; }
+                f(); LOG;
+            )", "QP|P"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         test("a_reference_to_a_dropped_member_raises", [this]() {
@@ -879,21 +821,6 @@ public:
                     return out + "|" + type_of(x); }
                 string out = f(); LOG = ""; out;
             )", "Cannot assign D2 to 'r' (declared D1&)|D1");
-        });
-
-        test("a_reclassed_object_dies_as_its_new_class", [this]() {
-            expect_log(R"(
-                class P { int a = 0; P() {} }
-                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
-                function f() -> void { P x = P(); x = Q(); LOG = LOG + "|"; }
-                f(); LOG;
-            )", "Q|Q");
-            expect_log(R"(
-                class P { int a = 0; P() {} ~P() { LOG = LOG + "P"; } }
-                class Q : P { Q() {} ~Q() { LOG = LOG + "Q"; } }
-                function f() -> void { P x = Q(); x = P(); LOG = LOG + "|"; }
-                f(); LOG;
-            )", "QP|P");
         });
 
         test("field_element_map_and_static_stores_copy_assign", [this]() {
@@ -1395,8 +1322,9 @@ public:
         // A value a statement reads or computes on the way to its consumer is held by nothing once the consumer has it: a member
         // read is the member itself (C++ copies it straight into the declaration), and a temporary dies with the operation that
         // consumes it, so the object dies when its last named owner lets go
-        test("a_member_read_into_a_declaration_holds_nothing_after_it", [this]() {
-            expect_log(R"(
+        test("a_value_read_on_the_way_to_its_consumer_is_held_by_nothing_after_it", [this]() {
+            const std::pair<std::string, std::string> cases[] = {
+                {R"(
                 class Box { shared_ptr<Token> t = null; var d = null; int v = 0; Token tv = Token("v"); }
                 function f() -> void {
                     shared_ptr<Box> b = new Box();
@@ -1409,11 +1337,8 @@ public:
                     int k = b.v + 1;
                 }
                 f(); LOG;
-            )", "<a><b><c><d>e|v");
-        });
-
-        test("a_member_read_an_operation_consumes_holds_nothing_after_it", [this]() {
-            expect_log(R"(
+            )", "<a><b><c><d>e|v"},
+                {R"(
                 class Box { shared_ptr<Token> t = null; }
                 function f() -> void {
                     shared_ptr<Box> b = new Box(); shared_ptr<Box> c = new Box();
@@ -1425,11 +1350,8 @@ public:
                     b.t = new Token("e"); c.t = b.t; c.t = null; LOG = LOG + "<"; b.t = null; LOG = LOG + ">";
                 }
                 f(); LOG;
-            )", "<a>?<b>?<c><d><e>");
-        });
-
-        test("a_member_read_dies_with_its_consumer_inside_the_full_expression", [this]() {
-            expect_log(R"(
+            )", "<a>?<b>?<c><d><e>"},
+                {R"(
                 class Box { shared_ptr<Token> t = null; }
                 function clear(shared_ptr<Box> b) -> bool { b.t = null; LOG = LOG + "!"; return true; }
                 function f() -> void {
@@ -1439,11 +1361,8 @@ public:
                     b.t = new Token("c"); bool y = b.t != null && clear(b) && b.t == null; LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "a!|b!?|c!|");
-        });
-
-        test("a_member_read_through_a_this_field_holds_nothing_after_it", [this]() {
-            expect_log(R"(
+            )", "a!|b!?|c!|"},
+                {R"(
                 class Box { shared_ptr<Token> t = null; }
                 class Holder {
                     shared_ptr<Box> bx = null;
@@ -1456,11 +1375,8 @@ public:
                 }
                 function f() -> void { Holder h = Holder(); h.run(); }
                 f(); LOG;
-            )", "<a><b><c>");
-        });
-
-        test("an_element_read_holds_nothing_after_its_consumer", [this]() {
-            expect_log(R"(
+            )", "<a><b><c>"},
+                {R"(
                 class Box { shared_ptr<Token> t = null; int v = 0; }
                 function f() -> void {
                     array<shared_ptr<Box>> arr = [new Box(), new Box()];
@@ -1473,11 +1389,8 @@ public:
                     LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "p.q.|<r>s0.s1.|");
-        });
-
-        test("a_temporary_dies_with_the_operation_that_consumes_it", [this]() {
-            expect_log(R"(
+            )", "p.q.|<r>s0.s1.|"},
+                {R"(
                 class V { int x = 0; string tag = ""; V() {} V(int a, string t) { x = a; tag = t; } ~V() { LOG = LOG + tag; } V operator+(V o) { return V(x + o.x, tag + o.tag); } }
                 class W { string tag = ""; W(string t) { tag = t; } ~W() { LOG = LOG + tag; } W operator+(const W& o) { return W(tag + o.tag); } }
                 function mk(string n) -> shared_ptr<Token> { return new Token(n); }
@@ -1490,11 +1403,8 @@ public:
                     W e = W("p") + W("q"); LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "a|L0.,L1.,|yzxy|qp|pqxyzzyx");
-        });
-
-        test("a_member_read_in_a_loop_never_holds_the_previous_iteration_s_object", [this]() {
-            expect_log(R"(
+            )", "a|L0.,L1.,|yzxy|qp|pqxyzzyx"},
+                {R"(
                 class Box { shared_ptr<Token> t = null; }
                 function f() -> void {
                     shared_ptr<Box> b = new Box();
@@ -1506,7 +1416,9 @@ public:
                     LOG = LOG + "|";
                 }
                 f(); LOG;
-            )", "<0><1><2>w0.w1.|");
+            )", "<0><1><2>w0.w1.|"},
+            };
+            check_each(cases, [&](const auto& c) { expect_log(c.first, c.second); });
         });
 
         test("with_no_destructor_class_every_local_temporary_and_parameter_dies_on_time", [this]() {

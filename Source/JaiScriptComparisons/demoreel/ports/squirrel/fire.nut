@@ -4,7 +4,6 @@
 class Fire extends Scene {
 	heat = null;
 	cool = null;
-	mask = null;
 	spx = null;
 	spy = null;
 	svx = null;
@@ -21,7 +20,6 @@ class Fire extends Scene {
 	constructor() {
 		heat = [];
 		cool = [];
-		mask = [];
 		spx = [];
 		spy = [];
 		svx = [];
@@ -73,7 +71,7 @@ class Fire extends Scene {
 		rainbow_on = t > 5.5 ? 1 : 0;
 		if (rainbow_on == 1) { hue_t += dt * 3.0; }
 		seed_rows(40, 33);
-		convect(false);
+		convect();
 		move_sparks(dt, true);
 	}
 
@@ -88,12 +86,11 @@ class Fire extends Scene {
 		}
 	}
 
-	function convect(lit) {
+	function convect() {
 		local ww = w;
 		local hh = h;
 		local ht = heat;
 		local rn = cool;
-		local mk = mask;
 		local salt = fr * 131;
 		for (local y = 0; y < hh; ++y) {
 			local row = y * ww;
@@ -105,15 +102,6 @@ class Fire extends Scene {
 				xs = xs < 1 ? 1 : (xs > ww - 2 ? ww - 2 : xs);
 				local v = ((ht[below + xs - 1] + ht[below + xs] + ht[below + xs + 1] + ht[below2 + xs]) >> 2) - ((r + 1) >> 1);
 				ht[row + x] = v > 0 ? v : 0;
-			}
-		}
-		if (lit) {
-			local n = ww * hh;
-			for (local i = 0; i < n; ++i) {
-				if (mk[i] == 1) {
-					local glow = 58 + (rn[(i * 7 + fr) & 1023] & 1) * 8;
-					if (ht[i] < glow) { ht[i] = glow; }
-				}
 			}
 		}
 	}

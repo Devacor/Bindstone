@@ -9,7 +9,6 @@ function Fire:init()
 	Scene.init(self)
 	self.heat = {}
 	self.cool = {}
-	self.mask = {}
 	self.spx = {}
 	self.spy = {}
 	self.svx = {}
@@ -73,7 +72,7 @@ function Fire:update(t, dt)
 	self.rainbow_on = t > 5.5 and 1 or 0
 	if self.rainbow_on == 1 then self.hue_t = self.hue_t + dt * 3.0 end
 	self:seed_rows(40, 33)
-	self:convect(false)
+	self:convect()
 	self:move_sparks(dt, true)
 end
 
@@ -89,16 +88,13 @@ function Fire:seed_rows(lo, span)
 	end
 end
 
--- convection with the Doom fire's jitter; with `lit` the mask pixels are heat
--- sources that never drop below a glow
-function Fire:convect(lit)
+-- convection with the Doom fire's jitter
+function Fire:convect()
 	local ww = self.w
 	local hh = self.h
 	local ht = self.heat
 	local rn = self.cool
-	local mk = self.mask
-	local fr = self.fr
-	local salt = fr * 131
+	local salt = self.fr * 131
 	for y = 0, hh - 1 do
 		local row = y * ww
 		local below = row + ww + 1
@@ -109,15 +105,6 @@ function Fire:convect(lit)
 			xs = xs < 1 and 1 or (xs > ww - 2 and ww - 2 or xs)
 			local v = ((ht[below + xs - 1] + ht[below + xs] + ht[below + xs + 1] + ht[below2 + xs]) >> 2) - ((r + 1) >> 1)
 			ht[row + x + 1] = v > 0 and v or 0
-		end
-	end
-	if lit then
-		local n = ww * hh
-		for i = 0, n - 1 do
-			if mk[i + 1] == 1 then
-				local glow = 58 + (rn[((i * 7 + fr) & 1023) + 1] & 1) * 8
-				if ht[i + 1] < glow then ht[i + 1] = glow end
-			end
 		end
 	end
 end

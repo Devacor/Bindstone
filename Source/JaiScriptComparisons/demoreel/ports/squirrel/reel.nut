@@ -22,7 +22,7 @@ class Scene {
 	function build() {}
 	function update(t, dt) {}
 	function render(grid) {}
-	function caption() { return ""; }
+	function text_rows(rows) {}
 }
 
 // porting aid (--only I): an empty scene carrying the real one's name
@@ -101,7 +101,7 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 18.0];
+		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 24.0];
 		start_scene(0, 0.0);
 	}
 
@@ -320,10 +320,7 @@ class Reel {
 		if (!in_trans && !finish_pending && scene_t < title_len) { trow = title_pixels(); }
 		local rows = ::hb_present();
 		title_text(rows, trow);
-		if (!in_trans) {
-			local cap = cur.caption();
-			if (cap != "") { ::gfx.overlay_center(rows, w, h - 3, cap, ::ESC + "[48;2;6;4;12m" + ::ESC + "[38;2;255;226;160m"); }
-		}
+		if (!in_trans) { cur.text_rows(rows); }
 		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
 		return ::join_arr(rows, "\n");
 	}

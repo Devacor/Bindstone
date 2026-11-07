@@ -9,7 +9,6 @@
 class Fire : Scene {
 	array<int> heat = [];    // (h+2) rows: two hidden seed rows below the screen
 	array<int> cool = [];    // prebuilt 0..3 spread noise, indexed cheaply per pixel
-	array<int> mask = [];    // extra heat sources (the finale's letters); empty here
 	array<float> spx = [];   // sparks
 	array<float> spy = [];
 	array<float> svx = [];
@@ -69,7 +68,7 @@ class Fire : Scene {
 		rainbow_on = t > 5.5 ? 1 : 0;
 		if (rainbow_on == 1) { hue_t += dt * 3.0; }
 		seed_rows(40, 33);
-		convect(false);
+		convect();
 		move_sparks(dt, true);
 	}
 
@@ -86,14 +85,12 @@ class Fire : Scene {
 
 	// convection with the Doom fire's jitter: each pixel averages the three
 	// below and one two-below around a column nudged by a random draw, and the
-	// same draw cools it; the average keeps gradients, the jitter licks tongues;
-	// with `lit` the mask pixels are heat sources that never drop below a glow
-	void convect(bool lit) {
+	// same draw cools it; the average keeps gradients, the jitter licks tongues
+	void convect() {
 		int ww = w;
 		int hh = h;
 		var& ht = heat;
 		var& rn = cool;
-		var& mk = mask;
 		int salt = fr * 131;
 		for (int y = 0; y < hh; ++y) {
 			int row = y * ww;
@@ -105,15 +102,6 @@ class Fire : Scene {
 				xs = xs < 1 ? 1 : (xs > ww - 2 ? ww - 2 : xs);
 				int v = ((ht[below + xs - 1] + ht[below + xs] + ht[below + xs + 1] + ht[below2 + xs]) >> 2) - ((r + 1) >> 1);
 				ht[row + x] = v > 0 ? v : 0;
-			}
-		}
-		if (lit) {
-			int n = ww * hh;
-			for (int i = 0; i < n; ++i) {
-				if (mk[i] == 1) {
-					int glow = 58 + (rn[(i * 7 + fr) & 1023] & 1) * 8;
-					if (ht[i] < glow) { ht[i] = glow; }
-				}
 			}
 		}
 	}

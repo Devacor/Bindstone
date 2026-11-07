@@ -23,7 +23,7 @@ class Scene {
 	void build() {}
 	void update(float t, float dt) {}
 	void render(var& grid) {}
-	string caption() { return ""; }
+	void text_rows(var& rows) {}    // glyph rows laid over the picture (the finale's credits)
 }
 
 // one HUD row: styled segments clipped to the row's width, with a second line's
@@ -111,7 +111,7 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 18.0];
+		durs = [12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 24.0];
 		start_scene(0, 0.0);
 	}
 
@@ -355,10 +355,7 @@ class Reel {
 		if (!in_trans && !finish_pending && scene_t < title_len) { trow = title_pixels(); }
 		var rows = hb_present();
 		title_text(rows, trow);
-		if (!in_trans) {
-			string cap = cur.caption();
-			if (cap != "") { gfx.overlay_center(rows, w, h - 3, cap, sgr_bg(6, 4, 12) + sgr_fg(255, 226, 160)); }
-		}
+		if (!in_trans) { cur.text_rows(rows); }
 		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
 		return rows.join("\n");
 	}

@@ -26,7 +26,7 @@ end
 function Scene:build() end
 function Scene:update(t, dt) end
 function Scene:render(grid) end
-function Scene:caption() return "" end
+function Scene:text_rows(rows) end
 
 Reel = class()
 
@@ -72,7 +72,7 @@ function Reel:init(w_, h_, seed_, backend_, smoke_, hud_)
 	self.ui_shine = ui:add(255, 255, 255)
 	self.ui_shadow = ui:add(4, 2, 12)
 	self.ui_edge = ui:add(255, 244, 200)
-	self.durs = {12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 18.0}
+	self.durs = {12.0, 11.0, 12.0, 11.0, 11.0, 12.0, 14.0, 14.0, 12.0, 15.0, 15.0, 16.0, 16.5, 12.0, 11.0, 20.0, 24.0}
 	self:start_scene(0, 0.0)
 end
 
@@ -286,10 +286,7 @@ function Reel:frame(t, dt, key, fps, ms_sim, ms_draw, ms_other)
 	if not self.in_trans and not self.finish_pending and self.scene_t < self.title_len then trow = self:title_pixels() end
 	local rows = hb_present()
 	self:title_text(rows, trow)
-	if not self.in_trans then
-		local cap = self.cur:caption()
-		if cap ~= "" then gfx:overlay_center(rows, self.w, self.h - 3, cap, ESC .. "[48;2;6;4;12m" .. ESC .. "[38;2;255;226;160m") end
-	end
+	if not self.in_trans then self.cur:text_rows(rows) end
 	if self.hud then self:hud_overlay(rows, fps, ms_sim, ms_draw, ms_other) end
 	return table.concat(rows, "\n")
 end

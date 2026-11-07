@@ -2,7 +2,7 @@
 
 Seventeen auto-advancing truecolor scenes, five kinds of transition, pixel-font
 title cards, and a finale where the word JAISCRIPT ignites out of a wall of
-rainbow fire — every effect coded in `scenes/*.jai`, every frame drawn at
+rainbow fire, cools to neon and rolls the credits — every effect coded in `scenes/*.jai`, every frame drawn at
 **double vertical resolution** with half-block pixels. A ray tracer, a sphere
 tracer, a Menger-sponge raymarcher, a textured Wolfenstein raycaster, a
 VoxelSpace terrain flight, Verlet cloth, metaballs, a falling-sand toy, a
@@ -152,7 +152,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 14 | CHROME | the Amiga Juggler's grandchild: a ray tracer, one ray per pixel across every core — three tinted chrome spheres bounce on a checkerboard running to a hazy horizon, one reflection bounce, hard shadows, a sun glint; the ray returns WHAT IT SAW as a class and each sphere looks that up in its own tinted copy of the class table |
 | 15 | FIRE | convection fire with the Doom fire's random sideways jitter at full resolution, 73 heat levels, sparks breaking off and drifting up; ignites into RAINBOW fire mid-scene (house signature) |
 | 16 | OSSUARY | a horned, three-eyed skull on a spider's body crawls a raymarched field that morphs between three triply periodic surfaces (gyroid, Schwarz P, Schwarz D) under a flowing domain warp; the body re-projects onto the moving level set every frame, eight two-bone IK legs step in a tetrapod gait, three tendrils writhe behind, and the camera orbits with the surface normal as up; a crown of flame under a spinning ruby, embers and orbiting blood gems are depth-tested against the traced scene; rows in parallel |
-| 17 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (a heat-source mask), burns in rolling rainbow flame, and remains white-hot as the fire dies while the credits come up |
+| 17 | FINALE | the fire scene's subclass: a wall of fire out of which "JAISCRIPT" ignites in double-size pixel letters (9 px glyphs on a 10 px pitch) that are heat sources; each column's fuel swells and ebbs and the air above the word cools fast, so the flames rise in tongues, burning rainbow; then the wall dies, the letters cool to a neon rainbow with a glint sweeping across, and the credits roll up beneath them |
 
 Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
 glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
@@ -194,9 +194,9 @@ in it holds 30 fps on the VM with room to spare (mean 2.8 ms, worst 5.8 ms); on
 the interpreter each stays under 26 ms (mean 15.7 ms).
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the seventeen scene entries: shim stream hash `4219879756` on
+  every one of the seventeen scene entries: shim stream hash `3306359932` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `006d304a70772e5f` (the host's HUD
+  `76322bdbe2343c29` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel
@@ -400,25 +400,32 @@ DONUT (`shot 4 at 4` — the frosted torus, specular highlight on the icing):
 ................................::::::::::::::..:........          .................................
 ```
 
-FINALE afterglow (`shot 17 at 12` — the fire has died, the word stays white-hot):
+FINALE afterglow (`shot 17 at 17 ascii 1`: the fire is out, the word glows in neon and the credits roll):
 
 ```
-:::::::::::::::::::::-::::::::::::::::::::::::::::::::::::-:::::::::::::::::::::::::::::::::::::::::
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-:::::::::::::::::::::::::::::::--::::::::::::::::::-::-::::::-::::::::::::::::::::::::::::::::::::::
-::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::::
-.*++=*++=*+.:.++=*++.:.+=*++=*++=.:.=*++=*++.:.+=*++=*+.=*++=*++.:.+=*++=*++=.++=*++=*.. *++=*++=*+
-::::::.+=...=*.::::.=*.:::.+=.:::.++.::=::::.*+.:::::::.=*.::::.=*.:::.+=.:::.++.::::.++ . ..*+
-::::::.+= :.=*.::::.=*.:::.+=.:::.++.:::::-:.*+.:::::::.=*.::::.=*.:::.+=.:::.++.::::.++     *+ .
-::::::.+= :.=*++=*++=*.:::.+=.:::::.=*++=*.:.*+.:::::::.=*++=*++.:::::.+-.:::.+==*++=*.    . *+ .
-.*+.::.+= :.=*.    .=*.:::.+=.:::::::::::.++.*+.:::::::.=*  =*.:::::::.+=.:::.++ .   :     . *+
- *+ ::.+= . =*     .=*.:::.+=.:::::::::::.++ *+.:::::::.=*    ++.:::::.+=.:::.++.            *+
-   +=*+     =*      =* +=*+-=*++= ++=*++=*     +=*++=*+ =*      =* +=*++=*++= ++             *+
-                                                                                              .
-                            -
-                                       -                               -        .
+
+
+     #########   %%%%%   #########   *******   +++++++ *******   ######### %%%%%%%   #########
+          ##   %%     %%    ##     **        ++        **     **    ##     %%     %%    ##
+          ##   %%     %%    ##     **        ++        **     **    ##     %%     %%    ##
+          ##   %%%%%%%%%    ##       *****   ++        *******      ##     %%%%%%%      ##
+     ##   ##   %%     %%    ##            ** ++        ** **        ##     %%           ##
+     ##   ##   %%     %%    ##            ** ++        **   **      ##     %%           ##
+       ###     %%     %% ######### *******     +++++++ **     ** ######### %%           ##
+
+
+                                seventeen scenes . five transitions
+                              every pixel computed by the jaiscript vm
+
+                                           PLASMA  four sine fields
+                                        STARFIELD  a warp run through a nebula
+                                           TUNNEL  a table-driven texture tunnel
+                                            DONUT  a sphere-traced torus
+                                            JULIA  a morphing julia set
+                                         LAVALAMP  lit metaballs
+                                        PIPEDREAM  the 3d pipes screensaver
+                                           POWDER  sand, water, ember and plant
+                                            BOIDS  a murmuration and a hawk
 ```
 
 ## Idioms

@@ -1,5 +1,6 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
+#include "../case_table.hpp"
 
 namespace jai::foundry::tests {
 
@@ -46,47 +47,48 @@ public:
 			expect_depth_error(*short_of_the_base, chain);
 		});
 
-		test("implicit_constructor_field_recursion_obeys_cap", [this]() {
-			auto eng = make_engine();
-			configure(*eng, 8);
-			// No script function body is entered. The counter bounds old binaries
-			// to exactly 20 constructions rather than probing unbounded recursion.
-			expect_depth_error(*eng, R"(
-				int remaining = 20;
-				class C { var child = --remaining > 0 ? C() : null; }
-				auto root = C();
-				remaining;
-			)");
-		});
-
-		test("explicit_constructor_field_recursion_obeys_cap", [this]() {
-			auto eng = make_engine();
-			configure(*eng, 8);
-			// All recursive field initialization precedes the first guarded body.
-			expect_depth_error(*eng, R"(
-				int remaining = 20;
-				class C {
-					var child = --remaining > 0 ? C() : null;
-					C() {}
-				}
-				auto root = C();
-				remaining;
-			)");
-		});
-
-		test("super_chain_field_recursion_preserves_depth_error", [this]() {
-			auto eng = make_engine();
-			configure(*eng, 8);
-			expect_depth_error(*eng, R"(
-				int remaining = 20;
-				class Base {
-					var child = --remaining > 0 ? C() : null;
-					Base() {}
-				}
-				class C : Base { C() : super() {} }
-				auto root = C();
-				remaining;
-			)");
+		// recursion inside field initializers (before any guarded body, implicit or explicit constructor, through a super chain) and
+		// inside a constructor's default argument; the counter bounds a binary without the cap to 20 constructions
+		test("construction_recursion_obeys_the_depth_cap", [this]() {
+			struct recursion_case { const char* code; };
+			const recursion_case cases[] = {
+				{R"(
+					int remaining = 20;
+					class C { var child = --remaining > 0 ? C() : null; }
+					auto root = C();
+					remaining;
+				)"},
+				{R"(
+					int remaining = 20;
+					class C {
+						var child = --remaining > 0 ? C() : null;
+						C() {}
+					}
+					auto root = C();
+					remaining;
+				)"},
+				{R"(
+					int remaining = 20;
+					class Base {
+						var child = --remaining > 0 ? C() : null;
+						Base() {}
+					}
+					class C : Base { C() : super() {} }
+					auto root = C();
+					remaining;
+				)"},
+				{R"(
+					int remaining = 20;
+					class C { C(var child = --remaining > 0 ? C() : null) {} }
+					auto root = C();
+					remaining;
+				)"},
+			};
+			check_each(cases, [](const recursion_case& c) {
+				auto eng = make_engine();
+				configure(*eng, 8);
+				expect_depth_error(*eng, c.code);
+			});
 		});
 
 		test("script_catches_field_depth_and_keeps_member_scope", [this]() {
@@ -108,19 +110,6 @@ public:
 			)").as_int());
 			check_true(eng->execute("message;").as<std::string>().find("Maximum recursion depth") != std::string::npos);
 			check_eq(script_int(42), eng->execute("40 + 2;").as_int());
-		});
-
-		test("constructor_default_argument_recursion_obeys_cap", [this]() {
-			auto eng = make_engine();
-			configure(*eng, 8);
-			// Defaults already run inside call_function/call_script_function. This
-			// control separates that path from pre-body field initializer recursion.
-			expect_depth_error(*eng, R"(
-				int remaining = 20;
-				class C { C(var child = --remaining > 0 ? C() : null) {} }
-				auto root = C();
-				remaining;
-			)");
 		});
 
 		test("native_constructor_default_reentry_obeys_cap", [this]() {

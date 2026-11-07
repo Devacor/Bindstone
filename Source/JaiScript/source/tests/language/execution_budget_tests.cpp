@@ -1,6 +1,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <chrono>
 #include <thread>
 
@@ -18,41 +19,21 @@ public:
 			check_near(5.0, jai::engine::make()->execution_budget(), 1e-9);
 		});
 
-		test("budget_stops_infinite_while", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() { e->execute("while (true) { }"); });
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_stops_infinite_fast_path_for", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			// Literal zero step keeps the optimized native counting loop spinning forever
-			check_throws([&]() { e->execute("for (int i = 0; i < 2; i += 0) { }"); });
-		});
-
-		// fuzz seed 33294: the fast counting loop's fall-through continuation
-		// (taken when the counter's storage kind changes mid-loop - here a one-time
-		// reference binding boxes it) had no back-edge limit check, so the loop ran
-		// unbudgeted forever on the interpreter (the vm checks every back-edge)
-		test("budget_stops_fast_path_for_after_counter_is_boxed", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("function bump(int& x) { x += 1; } "
-				           "for (int i = 0; i < 4; i++) { if (i != 0) { i = i - 1; } else { bump(i); i = 0; } }");
+		test("budget_stops_every_loop_lane_and_the_engine_recovers", [this]() {
+			struct loop_case { const char* code; };
+			const loop_case loops[] = {
+				"while (true) { }",
+				"for (int i = 0; i < 2; i += 0) { }",
+				// fuzz seed 33294: the counting loop's fall-through, taken once a reference binding boxes the counter, had no back-edge check
+				"function bump(int& x) { x += 1; } for (int i = 0; i < 4; i++) { if (i != 0) { i = i - 1; } else { bump(i); i = 0; } }",
+				"for (int i = 0; i < 4; i++) { if (i == 0) { auto f = [&]() { i = 0; }; f(); } i = i - 1; }",
+			};
+			check_each(loops, [&](const loop_case& loop) {
+				auto e = make_engine();
+				e->execution_budget(0.05);
+				check_throws([&]() { e->execute(loop.code); });
+				check_eq((int64_t)4, e->execute("2 + 2").as_int());
 			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_stops_fast_path_for_after_counter_is_captured", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("for (int i = 0; i < 4; i++) { if (i == 0) { auto f = [&]() { i = 0; }; f(); } i = i - 1; }");
-			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 
 		test("a_direct_host_call_runs_under_the_budget_set_before_it", [this]() {
@@ -107,59 +88,22 @@ public:
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 
-		// The fuzzer's livelock shape (seeds 436/3507/8285/1213/1462/1788/8356/8391):
-		// catch-and-retry around infinite work must now RETURN from execute() with the
-		// budget error instead of re-raising and re-catching forever.
-		test("budget_livelock_catch_retry_loop_terminates", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("while (true) { try { while (true) { } } catch (e) { } }");
+		// fuzz seeds 436/3507/8285/1213/1462/1788/8356/8391: a catch-and-retry loop around infinite work must return from execute()
+		test("a_terminal_budget_error_skips_every_catch", [this]() {
+			struct spin_case { const char* code; };
+			const spin_case spins[] = {
+				"while (true) { try { while (true) { } } catch (e) { } }",
+				"try { try { while (true) { } } catch (a) { } } catch (b) { }",
+				"void spin() { try { while (true) { } } catch (e) { } } spin();",
+				"auto f = []() -> auto { try { while (true) { } } catch (e) { return 1; } return 2; }; f();",
+				"coroutine int spin() { try { while (true) { } } catch (e) { yield 1; } return 0; } auto c = spin(); c.next();",
+			};
+			check_each(spins, [&](const spin_case& spin) {
+				auto e = make_engine();
+				e->execution_budget(0.05);
+				check_throws([&]() { e->execute(spin.code); });
+				check_eq((int64_t)4, e->execute("2 + 2").as_int());
 			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_terminal_skips_nested_catches", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("try { try { while (true) { } } catch (a) { } } catch (b) { }");
-			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_terminal_skips_catch_inside_function", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("void spin() { try { while (true) { } } catch (e) { } } spin();");
-			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_terminal_skips_catch_inside_lambda", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute("auto f = []() -> auto { try { while (true) { } } catch (e) { return 1; } return 2; }; f();");
-			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		test("budget_terminal_skips_catch_inside_coroutine", [this]() {
-			auto e = make_engine();
-			e->execution_budget(0.05);
-			check_throws([&]() {
-				e->execute(R"(
-					coroutine int spin() {
-						try { while (true) { } } catch (e) { yield 1; }
-						return 0;
-					}
-					auto c = spin();
-					c.next();
-				)");
-			});
-			check_eq((int64_t)4, e->execute("2 + 2").as_int());
 		});
 
 		// A terminal error in a REENTRANT execute (host callback calling execute()
@@ -191,18 +135,13 @@ public:
 
 		// ===== engine::memory_cap (approximate high-water accounting) =====
 
-		test("memory_cap_default_is_unlimited", [this]() {
+		test("memory_cap_defaults_to_zero_and_zero_is_unlimited", [this]() {
 			auto e = make_engine();
 			check_eq((size_t)0, e->memory_cap());
 			e->memory_cap(65536);
 			check_eq((size_t)65536, e->memory_cap());
 			e->memory_cap(0);
 			check_eq((size_t)0, e->memory_cap());
-		});
-
-		test("memory_cap_zero_is_unlimited", [this]() {
-			auto e = make_engine();
-			e->memory_cap(0);
 			auto r = e->execute(R"(
 				var a = [];
 				var n = 0;
@@ -212,21 +151,39 @@ public:
 			check_eq((int64_t)20000, r.as_int());
 		});
 
-		// The legit use case: the FIRST raise per execute is an ordinary catchable
-		// error (the allocation was denied; the counter re-arms so the script can
-		// free its caches and keep working).
-		test("memory_cap_first_raise_is_catchable_and_denies", [this]() {
-			auto e = make_engine();
-			e->memory_cap(256 * 1024);
-			auto r = e->execute(R"(
-				var a = [];
-				var caught = 0;
-				try { while (true) { a.push("xxxxxxxxxx"); } } catch (err) { caught = 1; a = []; }
-				var n = 0;
-				while (n < 1000) { n += 1; }
-				caught;
-			)");
-			check_eq((int64_t)1, r.as_int());
+		// The first raise per execute is an ordinary catchable error, whatever grew: array pushes, a map's subscript auto-insert (raised
+		// at the loop back-edge) and environment storage for names defined in fresh scopes
+		test("memory_cap_first_raise_is_catchable_for_every_growth_kind", [this]() {
+			struct growth_case { const char* code; size_t cap; };
+			const growth_case growths[] = {
+				{R"(
+					var a = [];
+					var caught = 0;
+					try { while (true) { a.push("xxxxxxxxxx"); } } catch (err) { caught = 1; a = []; }
+					var n = 0;
+					while (n < 1000) { n += 1; }
+					caught;
+				)", 256 * 1024},
+				{R"(
+					var m = {};
+					var i = 0;
+					var caught = 0;
+					try { while (true) { m[i] = i; i += 1; } } catch (err) { caught = 1; }
+					caught;
+				)", 128 * 1024},
+				{R"(
+					var caught = 0;
+					try {
+						while (true) { var x = [1]; }
+					} catch (err) { caught = 1; }
+					caught;
+				)", 128 * 1024},
+			};
+			check_each(growths, [&](const growth_case& growth) {
+				auto e = make_engine();
+				e->memory_cap(growth.cap);
+				check_eq((int64_t)1, e->execute(growth.code).as_int());
+			});
 		});
 
 		test("memory_cap_error_text_names_the_cap", [this]() {
@@ -265,36 +222,6 @@ public:
 			check_true(threw);
 			check_true(msg.find("memory cap exceeded") != std::string::npos);
 			check_eq((int64_t)4, e->execute("2 + 2").as_int());
-		});
-
-		// Map growth via subscript auto-insert (no builtin method involved) also
-		// counts; the raise fires at the loop back-edge.
-		test("memory_cap_map_growth_bomb_trips", [this]() {
-			auto e = make_engine();
-			e->memory_cap(128 * 1024);
-			auto r = e->execute(R"(
-				var m = {};
-				var i = 0;
-				var caught = 0;
-				try { while (true) { m[i] = i; i += 1; } } catch (err) { caught = 1; }
-				caught;
-			)");
-			check_eq((int64_t)1, r.as_int());
-		});
-
-		// Environment storage growth (defines of new names in fresh scopes) counts
-		// toward the allowance too (env size is counted deliberately).
-		test("memory_cap_env_growth_bomb_trips", [this]() {
-			auto e = make_engine();
-			e->memory_cap(128 * 1024);
-			auto r = e->execute(R"(
-				var caught = 0;
-				try {
-					while (true) { var x = [1]; }
-				} catch (err) { caught = 1; }
-				caught;
-			)");
-			check_eq((int64_t)1, r.as_int());
 		});
 
 		test("memory_cap_resets_per_execute", [this]() {

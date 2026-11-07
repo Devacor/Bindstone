@@ -9,6 +9,14 @@
 // sphere's pixel is that class looked up in its own tinted copy of the class
 // table, plus a white-hot sun glint.
 //
+// The middle sphere is glass: its ray refracts in, crosses the sphere, refracts
+// out (Snell at both faces, index 1.5) and reads the world upside down through a
+// pale copy of the table, while its grazing rim turns to mirror. The dark tiles
+// are polished: a floor ray that lands on one bounces and shows any sphere above
+// in a dim copy of the table. The camera cranes up from the floor, whips around
+// at the middle and pulls back high as the spheres fall into step; star
+// sparkles bloom on the brightest glints.
+//
 // The row function reads its frame through captured globals (scalars copy
 // into each worker, the index array borrows), calls nothing but script and
 // sqrt, and writes only its own row: parallel_transform's contract. The
@@ -29,6 +37,7 @@ int CH_FLOOR = 0;
 int CH_BALL = 0;
 int CH_NBASE = 0;
 int CH_GLINT = 0;
+int CH_MIRROR = 0;           // the polished tiles' copy of the class table
 array<int> CH_ROWS = [];
 
 // what a ray from (ox,oy,oz) along unit (dx,dy,dz) sees, as a class index;
@@ -137,7 +146,15 @@ function ch_row(int y) -> array<int> {
 			if (t2 > 0.001 && t2 < best) { best = t2; hit = 2; cx = CH_X2; cy = CH_Y2; cz = CH_Z2; cr = CH_R2; }
 		}
 		if (hit < 0) {
-			out.push(ch_trace(ex, ey, ez, dx, dy, dz, -1));
+			int seen = ch_trace(ex, ey, ez, dx, dy, dz, -1);
+			// a lit dark tile is polished: its bounce shows any sphere standing over it
+			int tile = seen - CH_FLOOR;
+			if (tile >= 24 && tile < 36) {
+				float tf = (0.0 - ey) / dy;
+				int above = ch_trace(ex + dx * tf, 0.0, ez + dz * tf, dx, 0.0 - dy, dz, -1);
+				if (above >= CH_BALL && above < CH_BALL + 24) { seen = CH_MIRROR + above; }
+			}
+			out.push(seen);
 			continue;
 		}
 		float hx = ex + dx * best;
@@ -146,7 +163,8 @@ function ch_row(int y) -> array<int> {
 		float nx = (hx - cx) / cr;
 		float ny = (hy - cy) / cr;
 		float nz = (hz - cz) / cr;
-		float dn = 2.0 * (dx * nx + dy * ny + dz * nz);
+		float cosi = 0.0 - (dx * nx + dy * ny + dz * nz);
+		float dn = -2.0 * cosi;
 		float mx = dx - nx * dn;
 		float my = dy - ny * dn;
 		float mz = dz - nz * dn;
@@ -154,6 +172,31 @@ function ch_row(int y) -> array<int> {
 		if (g > 0.975) {
 			int gl = (g - 0.975) * 100.0;
 			out.push(CH_GLINT + (gl > 2 ? 2 : gl));
+		} else if (hit == 1 && cosi > 0.3) {
+			// glass: refract in, cross to the far face, refract out
+			float k = 1.0 - 0.4444444 * (1.0 - cosi * cosi);
+			float f = 0.6666667 * cosi - math::sqrt(k);
+			float tx = dx * 0.6666667 + nx * f;
+			float ty = dy * 0.6666667 + ny * f;
+			float tz = dz * 0.6666667 + nz * f;
+			float across = -2.0 * ((hx - cx) * tx + (hy - cy) * ty + (hz - cz) * tz);
+			float px = hx + tx * across;
+			float py = hy + ty * across;
+			float pz = hz + tz * across;
+			float ox = (px - cx) / cr;
+			float oy = (py - cy) / cr;
+			float oz = (pz - cz) / cr;
+			float cosx = tx * ox + ty * oy + tz * oz;
+			float k2 = 1.0 - 2.25 * (1.0 - cosx * cosx);
+			if (k2 > 0.0) {
+				float f2 = 1.5 * cosx - math::sqrt(k2);
+				float rx = tx * 1.5 - ox * f2;
+				float ry = ty * 1.5 - oy * f2;
+				float rz = tz * 1.5 - oz * f2;
+				out.push(CH_NBASE * 2 + ch_trace(px, py, pz, rx, ry, rz, 1));
+			} else {
+				out.push(CH_NBASE * 2 + ch_trace(hx, hy, hz, mx, my, mz, 1));
+			}
 		} else {
 			out.push(CH_NBASE * (hit + 1) + ch_trace(hx, hy, hz, mx, my, mz, hit));
 		}
@@ -188,15 +231,17 @@ class Chrome : Scene {
 	void build() override {
 		name = "CHROME";
 		handle = "juggler's grandchild . one ray per pixel, every core";
-		var tints = [[1.0, 0.82, 0.45], [0.86, 0.9, 1.0], [1.0, 0.45, 0.55]];
-		// the class table once plain, then once per sphere tint
-		for (int copy = 0; copy < 4; ++copy) {
+		replay = 12.0;
+		var tints = [[1.0, 0.82, 0.45], [0.93, 1.0, 1.04], [1.0, 0.45, 0.55], [0.8, 0.5, 0.56]];
+		// the class table once plain, then once per sphere tint (the glass one pale
+		// and bright), then once dim and dark red for the polished tiles
+		for (int copy = 0; copy < 5; ++copy) {
 			float tr = 1.0; float tg = 1.0; float tb = 1.0;
 			float k = 1.0;
 			if (copy > 0) {
 				var tc = tints[copy - 1];
 				tr = tc[0]; tg = tc[1]; tb = tc[2];
-				k = 0.86;
+				k = copy == 2 ? 1.0 : 0.86;
 			}
 			class_table(tr * k, tg * k, tb * k);
 			if (copy == 0) { nbase = pal.size(); }
@@ -235,20 +280,31 @@ class Chrome : Scene {
 
 	void update(float t, float dt) override {
 		tt = t;
+		// the spheres fall into step: their bounces drift together until they land as one
+		float step = t > 7.5 ? (t - 7.5) / 2.0 : 0.0;
+		step = step > 1.0 ? 1.0 : step;
 		for (int i = 0; i < 3; ++i) {
-			float bounce = math::sin(t * (1.9 + i * 0.37) + i * 2.1);
+			float own = t * (1.9 + i * 0.37) + i * 2.1;
+			float shared = t * 2.6;
+			float bounce = math::sin(own + (shared - own) * step);
 			bounce = bounce < 0.0 ? -bounce : bounce;
 			float a = t * 0.45 + i * 2.0944;
 			bx[i] = math::cos(a) * 1.45;
 			bz[i] = math::sin(a) * 1.45;
 			by[i] = rad[i] + bounce * (1.1 - i * 0.2);
 		}
-		float ca = t * 0.18 + 0.4;
-		ex = math::sin(ca) * 5.2;
-		ez = math::cos(ca) * 5.2;
-		ey = 1.5 + 0.35 * math::sin(t * 0.3);
+		// the camera: a low dolly that cranes up, a whip around the middle, a pull back high
+		float rise = t / 12.0;
+		rise = rise > 1.0 ? 1.0 : rise;
+		float whip = t < 5.0 ? 0.0 : (t > 7.0 ? 1.0 : (t - 5.0) / 2.0);
+		whip = whip * whip * (3.0 - 2.0 * whip);
+		float ca = t * 0.18 + 0.4 + whip * 2.4;
+		float radius = 3.4 + rise * rise * 3.0;
+		ex = math::sin(ca) * radius;
+		ez = math::cos(ca) * radius;
+		ey = 0.45 + rise * 2.4;
 		float tx = 0.0 - ex;
-		float ty = 0.8 - ey;
+		float ty = 0.7 - ey;
 		float tz = 0.0 - ez;
 		float il = 1.0 / math::sqrt(tx * tx + ty * ty + tz * tz);
 		fx = tx * il; fy = ty * il; fz = tz * il;
@@ -276,6 +332,7 @@ class Chrome : Scene {
 		CH_BALL = ball0;
 		CH_NBASE = nbase;
 		CH_GLINT = glint;
+		CH_MIRROR = nbase * 4;
 		if (CH_ROWS.size() != h) {
 			CH_ROWS = [];
 			for (int r = 0; r < h; ++r) { CH_ROWS.push(r); }
@@ -289,5 +346,45 @@ class Chrome : Scene {
 				++idx;
 			}
 		}
+		sparkle(grid);
+	}
+
+	// star sparkles: on up to a dozen of the brightest glints, spaced apart, four
+	// rays that twinkle in length
+	void sparkle(var& grid) {
+		int hot = glint + 2;
+		int gap = w / 10 + 3;
+		array<int> sx = [];
+		array<int> sy = [];
+		for (int y = 1; y < h - 1 && sx.size() < 12; ++y) {
+			int row = y * w;
+			for (int x = 1; x < w - 1; ++x) {
+				if (grid[row + x] != hot) { continue; }
+				bool near = false;
+				for (int k = 0; k < sx.size(); ++k) {
+					int ax = sx[k] - x;
+					int ay = sy[k] - y;
+					if (ax * ax + ay * ay < gap * gap) { near = true; break; }
+				}
+				if (!near) {
+					sx.push(x);
+					sy.push(y);
+				}
+			}
+		}
+		for (int s2 = 0; s2 < sx.size(); ++s2) {
+			int len = itrunc((3.0 + 4.0 * (0.5 + 0.5 * math::sin(tt * 7.0 + s2 * 1.7))) * h / 120.0) + 2;
+			for (int r = 1; r <= len; ++r) {
+				int ink = r * 3 < len ? glint + 2 : (r * 3 < len * 2 ? glint + 1 : glint);
+				star_px(grid, sx[s2] + r, sy[s2], ink);
+				star_px(grid, sx[s2] - r, sy[s2], ink);
+				star_px(grid, sx[s2], sy[s2] + r / 2, ink);
+				star_px(grid, sx[s2], sy[s2] - r / 2, ink);
+			}
+		}
+	}
+
+	void star_px(var& grid, int x, int y, int ink) {
+		if (x >= 0 && x < w && y >= 0 && y < h) { grid[y * w + x] = ink; }
 	}
 }

@@ -2,6 +2,7 @@
 # The targeted tier: the checks a change needs, picked from the paths it touches.
 #
 #   tools/ci/targeted.sh [--plan] [--build] [--lanes] [--interp] <rev-range>       # e.g. HEAD~1..HEAD, master..my-branch
+#                                                                                   # A..B diffs from the merge base of A and B, as A...B
 #   tools/ci/targeted.sh [--plan] [--build] [--lanes] [--interp] --files <path>...  # paths relative to the package root
 #
 # --plan prints the checks and why each was picked, and runs nothing. --build configures and builds what the checks run
@@ -51,6 +52,7 @@ while [ "$#" -gt 0 ]; do
 	shift
 done
 if [ -n "$RANGE" ]; then
+	case "$RANGE" in *...*) ;; *..*) RANGE="${RANGE/../...}" ;; esac   # a branch behind master must not count master's new commits
 	mapfile -t FILES < <(git -C "$JAI_ROOT" diff --name-only --relative "$RANGE" -- . | tr -d '\r')
 fi
 [ -n "$RANGE" ] || [ "${#FILES[@]}" -gt 0 ] || { echo "usage: targeted.sh [--plan] [--build] [--lanes] [--interp] <rev-range> | --files <path>..." >&2; exit 2; }

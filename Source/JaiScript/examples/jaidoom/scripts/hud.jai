@@ -431,14 +431,21 @@ function menu_entry_draw(string label, int x, int y, float ms) -> int {
 
 function menu_draw(var& entries, int sel, string title) -> void {
 	pix_clear(0);
+	int mlu = title == "" ? lump_num("M_DOOM") : -1;
+	float head = 20.0;                               // the heading's height in 320-wide units
+	if (mlu >= 0) {
+		sprite_prepare(mlu);
+		head = SPR_H[mlu] + 10.0;
+	}
+	// sized by the width, but never taller than the screen below its top tenth: a wide console lost the last entries
 	float ms = menu_scale();
+	float fit = (VH - VH / 10) / ((head + 19.0 * entries.size()) * PIXEL_Y);
+	if (fit < ms) { ms = fit; }
 	int y = VH / 10;
 	if (title == "") {
-		int mlu = lump_num("M_DOOM");
 		if (mlu >= 0) {
-			sprite_prepare(mlu);
-			int w = SPR_W[mlu] * VW / 320;
-			int h = SPR_H[mlu] * VH / 200;
+			int w = math::itrunc(SPR_W[mlu] * ms);
+			int h = pixel_rows(SPR_H[mlu] * ms);
 			if (w > 0 && h > 0) {
 				draw_patch(mlu, (VW - w) / 2, y, w, h);
 				y = y + h + pixel_rows(10.0 * ms);
@@ -453,7 +460,6 @@ function menu_draw(var& entries, int sel, string title) -> void {
 	}
 	// entries left-align to the widest so the skull cursor has a lane
 	int step = pixel_rows(19.0 * ms);
-	if (step < pixel_rows(10.0)) { step = pixel_rows(10.0); }
 	for (int i = 0; i < entries.size(); ++i) {
 		var line = entries[i];
 		int x = menu_entry_draw(line, i == 0 ? -1 : MENU_X, y, ms);

@@ -351,6 +351,7 @@ public:
                 {R"(`hello\`world`;)", "hello`world"},
                 {R"(`price: \$${99}`;)", "price: $99"},
                 {"`line1\nline2`;", "line1\nline2"},
+                {R"(`\"\'\t\r\\${1}`;)", "\"'\t\r\\1"},
             });
         });
 

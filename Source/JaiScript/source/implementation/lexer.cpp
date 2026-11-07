@@ -7,6 +7,17 @@
 
 namespace jai {
 
+namespace {
+    // \xNN escapes take EXACTLY two hex digits ("\x41BC" is 'A' then "BC"), unlike C++'s
+    // consume-all-digits rule whose overflow behavior is a known wart.
+    inline int hex_digit_value(char c) {
+        if (c >= '0' && c <= '9') { return c - '0'; }
+        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
+        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
+        return -1;
+    }
+}
+
 // Initialize keyword map
 const std::unordered_map<std::string, token_type, lexer::keyword_hash, std::equal_to<>> lexer::keywords_ = {
     {"bool", token_type::bool_keyword},
@@ -706,8 +717,22 @@ void lexer::scan_template_string() {
                     case 't': current_part += '\t'; break;
                     case 'r': current_part += '\r'; break;
                     case '\\': current_part += '\\'; break;
+                    case '"': current_part += '"'; break;
+                    case '\'': current_part += '\''; break;
                     case '`': current_part += '`'; break;
                     case '$': current_part += '$'; break;
+                    case 'x': {
+                        const int hi = hex_digit_value(peek());
+                        const int lo = hi < 0 ? -1 : hex_digit_value(peek_next());
+                        if (lo < 0) {
+                            result.push_back(error_token("invalid \\x escape: expected two hex digits"));
+                            break;
+                        }
+                        advance();
+                        advance();
+                        current_part += static_cast<char>(static_cast<unsigned char>(hi * 16 + lo));
+                        break;
+                    }
                     default: current_part += '\\'; current_part += escaped; break;
                 }
             }
@@ -798,17 +823,6 @@ std::vector<token> lexer::tokenize_template(uint64_t joiner, uint64_t splice) {
     punct(token_type::right_paren, ")");
     result.push_back(token(token_type::eof, std::string_view(), current_location()));
     return result;
-}
-
-namespace {
-    // \xNN escapes take EXACTLY two hex digits ("\x41BC" is 'A' then "BC"), unlike C++'s
-    // consume-all-digits rule whose overflow behavior is a known wart.
-    inline int hex_digit_value(char c) {
-        if (c >= '0' && c <= '9') { return c - '0'; }
-        if (c >= 'a' && c <= 'f') { return c - 'a' + 10; }
-        if (c >= 'A' && c <= 'F') { return c - 'A' + 10; }
-        return -1;
-    }
 }
 
 token lexer::scan_string() {

@@ -4525,11 +4525,14 @@ public:
             check_eq((int64_t)3, e->execute("\"a\\x00b\".size()").as_int());
             // Exactly two digits: the third hex char is literal text, not part of the escape.
             check_eq(std::string("A5"), e->execute("\"\\x415\"").as_string());
+            check_eq(std::string("A1B5\xC3\xA9"), e->execute("`\\x41${1}\\x425\\xc3\\xA9`").as_string());
         });
         test("hex_escape_malformed_rejected", [this]() {
             auto e = make_engine();
             check_throws([&]() { e->execute("\"\\xZZ\""); });
             check_throws([&]() { e->execute("\"\\x4\""); });
+            check_throws([&]() { e->execute("`\\xZZ`"); });
+            check_throws([&]() { e->execute("`${1}\\x4`"); });
             check_eq((int64_t)3, e->execute("1 + 2").as_int());   // engine stays usable
         });
         test("to_char_mints_bytes", [this]() {

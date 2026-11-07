@@ -1,7 +1,8 @@
-# comparison_benchmarks: the Foundry suites that time JaiScript against ChaiScript, Lua (sol2) and Squirrel in one
-# process. A runtime that is absent compiles its suite down to a skip.
+# comparison_benchmarks: the Foundry suites that time JaiScript against AngelScript, ChaiScript, Lua (sol2) and Squirrel
+# in one process. A runtime that is absent compiles its suite down to a skip.
 add_executable(comparison_benchmarks
     "${JAISCRIPT_DIR}/source/tests/main_test_runner.cpp"
+    angelscript_comparison.cpp
     chaiscript_comparison.cpp
     sol2_comparison.cpp
     squirrel_comparison.cpp
@@ -52,4 +53,13 @@ if(EXISTS "${LUA_ROOT}/src/lua.h" AND EXISTS "${SOL2_ROOT}/include/sol/sol.hpp")
     message(STATUS "comparisons: Lua + sol2 at ${LUA_ROOT} / ${SOL2_ROOT}")
 else()
     message(STATUS "comparisons: Lua/sol2 not found at ${LUA_ROOT} / ${SOL2_ROOT}")
+endif()
+
+if(EXISTS "${COMPARISONS_ANGELSCRIPT_ROOT}/angelscript/include/angelscript.h")
+    include("${PROJECT_SOURCE_DIR}/angelscript/angelscript.cmake")
+    target_link_libraries(comparison_benchmarks PRIVATE angelscript_runtime)
+    target_compile_definitions(comparison_benchmarks PRIVATE HAVE_ANGELSCRIPT=1)
+    message(STATUS "comparisons: AngelScript at ${COMPARISONS_ANGELSCRIPT_ROOT}")
+else()
+    message(STATUS "comparisons: AngelScript not found at ${COMPARISONS_ANGELSCRIPT_ROOT}")
 endif()

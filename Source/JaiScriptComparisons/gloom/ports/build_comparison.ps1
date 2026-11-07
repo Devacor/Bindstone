@@ -38,6 +38,7 @@ $configure = @(
 	'-DJAISCRIPT_BUILD_TESTS=OFF', '-DJAISCRIPT_BUILD_RUNNER=ON', '-DJAISCRIPT_RUNNER_PADDING_CONTROL=ON',
 	'-DJAIDOOM_PORT_LUA=ON', '-DJAIDOOM_PORT_TOOLS=ON',
 	'-DGLOOM_PORT_SQUIRREL=ON',
+	'-DGLOOM_PORT_ANGELSCRIPT=ON', "-DCOMPARISONS_ANGELSCRIPT_ROOT=$deps/angelscript-2.38.0/sdk",
 	'-DGLOOM_PORT_LUA=ON', "-DGLOOM_LUA_ROOT=$deps/lua-5.4.8",
 	'-DGLOOM_PORT_LUA55=ON', "-DGLOOM_LUA55_ROOT=$deps/lua-5.5.1",
 	'-DGLOOM_PORT_LUAJIT=ON', "-DGLOOM_LUAJIT_ROOT=$jitRoot",
@@ -48,6 +49,6 @@ if ($ProfileMarkers) { $configure += '-DCMAKE_CXX_FLAGS=/DGLOOM_PROFILE_CAPTURE'
 else { $configure += '-DCMAKE_CXX_FLAGS=' }
 & cmake @configure
 if ($LASTEXITCODE -ne 0) { throw 'CMake configuration failed.' }
-& cmake --build $release --target jai_doom_lua jai_doom_lua_padding jai_doom_reference jai_doom_export_ast jaiscript_runner jaiscript_runner_padding jai_gloom jai_gloom_padding gloom_squirrel gloom_squirrel_padding gloom_lua gloom_lua_padding gloom_lua55 gloom_lua55_padding gloom_luajit gloom_luajit_padding -j $Jobs
+& cmake --build $release --target jai_doom_lua jai_doom_lua_padding jai_doom_reference jai_doom_export_ast jaiscript_runner jaiscript_runner_padding jai_gloom jai_gloom_padding gloom_squirrel gloom_squirrel_padding gloom_angelscript gloom_angelscript_padding gloom_lua gloom_lua_padding gloom_lua55 gloom_lua55_padding gloom_luajit gloom_luajit_padding -j $Jobs
 if ($LASTEXITCODE -ne 0) { throw 'Comparison build failed.' }
 Write-Output "Built comparison and padding binaries in $release/bin"

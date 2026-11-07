@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Fetch the comparison's pinned runtimes under JaiScript/out and patch sol2's version guards."""
+"""Fetch the comparison's pinned runtimes under JaiScriptComparisons/out and patch sol2's version guards."""
 import argparse
 import hashlib
 import json
 import pathlib
+import stat
 import tarfile
 import urllib.request
+import zipfile
 
 ARCHIVES = (
 	("lua54", "lua-5.4.8", "https://www.lua.org/ftp/lua-5.4.8.tar.gz",
@@ -17,7 +19,29 @@ ARCHIVES = (
 	 "178c656b62bb796e536a23f1d3bb09e1824e4dd28eaf2a4758b295ac328e32e6"),
 	("sol2", "sol2-3.3.0", "https://codeload.github.com/ThePhD/sol2/tar.gz/refs/tags/v3.3.0",
 	 "b82c5de030e18cb2bcbcefcd5f45afd526920c517a96413f0b59b4332d752a1e"),
+	("angelscript", "angelscript-2.38.0", "https://www.angelcode.com/angelscript/sdk/files/angelscript_2.38.0.zip",
+	 "b33b5dbcda10317ef67d628353d83246984ce6fcac102d4dc2aed121eba52e6f"),
 )
+# The AngelScript SDK zip holds everything under sdk/; the CMake root is that folder.
+SOURCE_ROOTS = {"angelscript": "sdk"}
+
+def extract_tar(archive, deps, destination):
+	with tarfile.open(archive) as bundle:
+		# Python 3.11.0 has no extraction filters. Pinned archives contain
+		# only directories and regular files, all under their source root.
+		for member in bundle.getmembers():
+			if not (member.isdir() or member.isfile()):
+				raise RuntimeError("Archive link/device refused: " + member.name)
+			(deps / member.name).resolve().relative_to(destination.resolve())
+		bundle.extractall(deps)
+
+def extract_zip(archive, destination):
+	with zipfile.ZipFile(archive) as bundle:
+		for member in bundle.infolist():
+			if stat.S_ISLNK(member.external_attr >> 16):
+				raise RuntimeError("Archive link refused: " + member.filename)
+			(destination / member.filename).resolve().relative_to(destination.resolve())
+		bundle.extractall(destination)
 
 def main():
 	root = pathlib.Path(__file__).resolve().parents[2]
@@ -29,24 +53,23 @@ def main():
 	deps.mkdir(parents=True, exist_ok=True)
 	manifest = {}
 	for name, folder, url, expected in ARCHIVES:
-		archive = deps / (folder + ".tar.gz")
+		archive = deps / (folder + (".zip" if url.endswith(".zip") else ".tar.gz"))
 		if not archive.exists():
-			with urllib.request.urlopen(url, timeout=60) as response:
+			# Some hosts (angelcode.com) refuse urllib's default agent string.
+			request = urllib.request.Request(url, headers={"User-Agent": "prepare_comparison/1"})
+			with urllib.request.urlopen(request, timeout=60) as response:
 				archive.write_bytes(response.read())
 		actual = hashlib.sha256(archive.read_bytes()).hexdigest()
 		if actual != expected:
 			raise RuntimeError("SHA256 mismatch for " + name)
 		destination = deps / folder
 		if not destination.exists():
-			with tarfile.open(archive) as bundle:
-				# Python 3.11.0 has no extraction filters. Pinned archives contain
-				# only directories and regular files, all under their source root.
-				for member in bundle.getmembers():
-					if not (member.isdir() or member.isfile()):
-						raise RuntimeError("Archive link/device refused: " + member.name)
-					(deps / member.name).resolve().relative_to(destination.resolve())
-				bundle.extractall(deps)
-		manifest[name] = {"root": str(destination), "url": url, "sha256": actual}
+			if archive.suffix == ".zip":
+				extract_zip(archive, destination)
+			else:
+				extract_tar(archive, deps, destination)
+		root_dir = destination / SOURCE_ROOTS.get(name, "")
+		manifest[name] = {"root": str(root_dir), "url": url, "sha256": actual}
 		print(name + ": verified " + actual)
 	# This changes version admission and the removed Lua error-code fallback only.
 	# Lua's real 5.5 header and version number remain visible to sol2 and the adapter.

@@ -23,6 +23,7 @@ gloom_adapter_jai.cpp               JaiScript adapter + main()   -> jai_gloom
 gloom_adapter_chai.cpp              ChaiScript adapter + main()  -> gloom_chai
 gloom_adapter_squirrel.cpp          Squirrel adapter + main()    -> gloom_squirrel
 gloom_adapter_lua.cpp               Lua/sol2 adapter + main()    -> gloom_lua
+gloom_adapter_angelscript.cpp       AngelScript adapter + main() -> gloom_angelscript
 scripts/                            the JaiScript game (reference)
 ports/<lang>/scripts/               your game scripts (you create this)
 ```
@@ -141,6 +142,7 @@ runtime need not exist when OFF:
 | `-DGLOOM_PORT_CHAI=ON` | `gloom_chai` | `External/ChaiScript-6.1.0` two levels above the package root (header-only) |
 | `-DGLOOM_PORT_SQUIRREL=ON` | `gloom_squirrel` | `squirrel/` at the package root (built as `gloom_squirrel_runtime`) |
 | `-DGLOOM_PORT_LUA=ON` | `gloom_lua` | `lua/` + `sol2/` at the package root (Lua built as `gloom_lua_runtime`) |
+| `-DGLOOM_PORT_ANGELSCRIPT=ON` | `gloom_angelscript` | the AngelScript 2.38 SDK at `COMPARISONS_ANGELSCRIPT_ROOT` (default `third_party/angelscript`; built as `angelscript_runtime` by `angelscript/angelscript.cmake`) |
 
 Port targets link `gloom_host` + their runtime only — NOT `jaiscript`. Keep it
 that way: the shared core must never gain a scripting-runtime dependency, and
@@ -198,6 +200,9 @@ The ports execute the shared host's deterministic 100x40, quad-pixel workload.
 Squirrel 3.2 uses the bundled runtime with 64-bit integers and `SQUSEDOUBLE`,
 and the existing scripts in `squirrel/scripts`. Its normal and padding builds
 run the same conformance gates and timing protocol as the Lua configurations.
+AngelScript 2.38 uses the pinned SDK with the native x64 calling convention
+and the scripts in `angelscript/scripts`; its normal and padding builds run the
+same gates and protocol.
 Lua 5.4.8 and Lua 5.5.1 use the same Lua scripts and the same sol2 adapter.
 LuaJIT 2.1 JIT uses the same adapter with the overrides in `luajit/scripts`;
 unmodified modules come from `lua/scripts`.
@@ -222,8 +227,9 @@ that root. Pass its `release` child to the runner's `--build` option and an
 evidence directory inside the same root to `--output`.
 
 `prepare_comparison.py` pins archive SHA256 hashes for Lua 5.4.8, Lua 5.5.1,
-sol2 3.3.0, and LuaJIT JIT branch `v2.1` at
-`24c20c94e7db195b640854619577441f9b4bc6be`. The script patches only its isolated sol2 dependency copy: it admits
+sol2 3.3.0, LuaJIT JIT branch `v2.1` at
+`24c20c94e7db195b640854619577441f9b4bc6be`, and the AngelScript 2.38.0 SDK
+zip, whose `sdk` folder the build passes as `COMPARISONS_ANGELSCRIPT_ROOT`. The script patches only its isolated sol2 dependency copy: it admits
 Lua version 505, supplies the removed error-code fallback, and passes Lua 5.5's
 seed argument in the custom-allocator state constructor. The actual Lua 5.5
 header and version number remain visible. The adapter uses `luaL_newstate`
@@ -272,15 +278,18 @@ run-to-run variation, ASLR and runtime hash-seed variation; it is not a pure
 measurement of one compiler mechanism.
 
 `metadata.json` records source and executable hashes. The runner passes the
-Squirrel script directory explicitly from `--jai-workload-root` and hashes its
-`.nut` inputs, including when that root is a frozen source snapshot. `runs.json` records every
+Squirrel and AngelScript script directories explicitly from
+`--comparison-root` and hashes their `.nut` and `.as` inputs, including when
+that root is a frozen source snapshot. `runs.json` records every
 command, output filename, hash verdict, CPU affinity and background CPU reading.
 `summary.json` contains only accepted runs. A port that fails conformance has
 no timing result.
 
 ### JaiDOOM timedemo
 
-The default command runs both whole programs. JaiDOOM includes the Lua 5.4.8 port as well as JaiScript. For JaiScript increments, omit
+The default command runs both whole programs. JaiDOOM includes the Lua 5.4.8 port as well as JaiScript.
+`--engines jai-angelscript` keeps JaiScript and AngelScript 2.38 (GLOOM only;
+the timedemo runs JaiScript alone). For JaiScript increments, omit
 the rival configurations with:
 
 ```powershell
@@ -387,7 +396,8 @@ successful partial timing summary. JSON checkpoints are replaced atomically.
 
 The competitor list is `cl.exe`, `link.exe`, `ninja.exe`,
 `msbuild.exe`, `bindstone.exe` and names beginning `jai_gloom`,
-`gloom_lua` or `jaiscript`. Other processes are covered only by the
+`gloom_` (every GLOOM port), `jaiscript`, `jai_doom_`, `reference_host`,
+`jai_demoreel` or `demoreel_`. Other processes are covered only by the
 background CPU screen and the coordinated quiet window.
 
 CPU trace analysis additionally needs Windows Performance Toolkit (`xperf`)

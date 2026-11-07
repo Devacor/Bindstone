@@ -18,10 +18,16 @@ CONFIGURATIONS = (
 	("JaiScript VM serial", "jai_gloom", "vm", 0, 1),
 	("JaiScript VM 8 workers", "jai_gloom", "vm", 8, 8),
 	("Squirrel 3.2", "gloom_squirrel", "squirrel", 0, 1),
+	("AngelScript 2.38", "gloom_angelscript", "angelscript", 0, 1),
 	("Lua 5.4.8", "gloom_lua", "lua", 0, 1),
 	("Lua 5.5.1", "gloom_lua55", "lua55", 0, 1),
 	("LuaJIT 2.1 JIT", "gloom_luajit", "luajit-jit", 0, 1),
 )
+# Ports whose scripts the runner passes explicitly with --scripts and hashes: (directory, pattern)
+PORT_SCRIPTS = {"gloom_squirrel": ("gloom/ports/squirrel/scripts", "*.nut"),
+	"gloom_angelscript": ("gloom/ports/angelscript/scripts", "*.as")}
+ENGINE_TARGETS = {"jai": ("jai_gloom",), "jai-lua": ("jai_gloom", "gloom_lua"),
+	"jai-angelscript": ("jai_gloom", "gloom_angelscript")}
 HASHES = ((300, "7fecc09815bb64e0", 3580805725), (600, "dfd969ed5a336dca", 1503537018))
 ROW = re.compile(r"^(\S+)\s+\|\s+([\d.]+)\s+\|\s+([\d.]+)\s+\|\s+([0-9a-f]{16})\s+\|\s+(\d+)\s*$", re.M)
 
@@ -190,14 +196,14 @@ def selected_configurations(workloads, engines):
 	configs=[]
 	if "gloom" in workloads:
 		for label,target,backend,workers,cores in CONFIGURATIONS:
-			if (engines=="jai" and target!="jai_gloom") or (engines=="jai-lua" and target not in ("jai_gloom","gloom_lua")):
+			if engines!="all" and target not in ENGINE_TARGETS[engines]:
 				continue
 			configs.append({"workload":"gloom","name":label,"target":target,"backend":backend,
 				"workers":workers,"cores":cores,"unit":"ms/tick"})
 	if "timedemo" in workloads:
 		configs.append({"workload":"timedemo","name":"JaiDOOM VM timedemo","target":"jaiscript",
 			"backend":"vm","workers":0,"cores":1,"unit":"ms/tic"})
-		if engines!="jai":
+		if engines in ("all","jai-lua"):
 			configs.append({"workload":"timedemo","name":"JaiDOOM Lua 5.4.8 timedemo","target":"jai_doom_lua",
 				"backend":"lua","workers":0,"cores":1,"unit":"ms/tic"})
 	return configs
@@ -340,7 +346,7 @@ def main():
 	parser.add_argument("--resume",action="store_true",help="Resume after completed gates, verifying the original inputs and exact accepted ABAB prefix.")
 	parser.add_argument("--max-attempts",type=int,default=10,help="Busy attempts per required timing; acceptance threshold is unchanged.")
 	parser.add_argument("--workloads",default="gloom,timedemo")
-	parser.add_argument("--engines",choices=("all","jai","jai-lua"),default="all")
+	parser.add_argument("--engines",choices=("all",*ENGINE_TARGETS),default="all")
 	parser.add_argument("--max-background-cores",type=float,default=0.20)
 	parser.add_argument("--conformance-only",action="store_true")
 	parser.add_argument("--timedemo-conformance",type=pathlib.Path,help="Reuse a complete frame certificate for these exact Lua binaries and workload; otherwise generate it before timing.")
@@ -390,7 +396,8 @@ def main():
 	script_paths+=list((jai_workload_root/"examples/jaidoom/scripts").glob("*.jai"))
 	script_paths+=list((comparison_root/"jaidoom/ports/lua").glob("*.lua")) if any(c["target"]=="jai_doom_lua" for c in configs) else []
 	script_paths+=list((comparison_root/"gloom/ports").rglob("*.lua"))
-	script_paths+=list((comparison_root/"gloom/ports/squirrel/scripts").glob("*.nut"))
+	for directory,pattern in PORT_SCRIPTS.values():
+		script_paths+=list((comparison_root/directory).glob(pattern))
 	script_paths += [jai_workload_root/"examples/jaidoom/demo.json",jai_workload_root/"examples/jaidoom/wads/doom1.wad"] if "timedemo" in workloads else []
 	workload_hashes={str(p):file_hash(p) for p in script_paths}
 	metadata={"runner_sha256":file_hash(pathlib.Path(__file__).resolve()),"created_utc":time.strftime("%Y-%m-%dT%H:%M:%SZ",time.gmtime()),
@@ -439,7 +446,7 @@ def main():
 			command=[str(exe),"--smoke","--backend",config["backend"],"--workers",str(config["workers"]),
 				"--ticks",str(ticks),"--warmup","0" if cold else "600","--seed","666","--pix","quad"]
 			if config["target"]=="jai_gloom":command+=["--scripts",str(jai_workload_root/"examples/gloom/scripts")]
-			elif config["target"]=="gloom_squirrel":command+=["--scripts",str(comparison_root/"gloom/ports/squirrel/scripts")]
+			elif config["target"] in PORT_SCRIPTS:command+=["--scripts",str(comparison_root/PORT_SCRIPTS[config["target"]][0])]
 		elif config["target"]=="jai_doom_lua":
 			command=[str(exe),"--scripts",str(comparison_root/"jaidoom/ports/lua"),
 				"--game-root",str(jai_workload_root/"examples/jaidoom"),"--repeat","0" if cold else "1","--",

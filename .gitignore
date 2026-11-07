@@ -85,6 +85,7 @@ Source/JaiScript/lua/
 Source/JaiScriptComparisons/third_party/squirrel/
 Source/JaiScriptComparisons/third_party/sol2/
 Source/JaiScriptComparisons/third_party/lua/
+Source/JaiScriptComparisons/third_party/angelscript/
 Source/JaiScriptComparisons/out/
 
 # JaiScript parse caches (auto-written to a .cache folder beside each script; stray old ones beside the scripts)

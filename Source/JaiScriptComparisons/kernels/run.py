@@ -7,6 +7,8 @@ implementations (round robin) so drift hits every column alike. The shared timin
 per kernel. Writes RESULTS_<date>.md beside this file.
 
     python run.py [--runs 5] [--kernels a,b] [--impls a,b] [--no-lock] [--out FILE]
+
+AS_RUN names the angelscript_run.exe (default: the comparisons build's out/release/bin).
 """
 import argparse, datetime, os, re, statistics, subprocess, sys, time
 
@@ -18,6 +20,7 @@ RUNNER = os.path.join(os.environ.get("JAI_BUILD") or os.path.join(ROOT, "build")
 HOST = os.path.join(JAI_KERNELS, "bin", "jai_kernel_host.exe")
 LUA = os.path.join(BIN, "lua_kernel_host.exe")
 LUAJIT = os.path.join(BIN, "luajit.exe")
+ANGELSCRIPT = os.environ.get("AS_RUN") or os.path.join(HERE, "..", "out", "release", "bin", "angelscript_run.exe")
 LOCK = os.environ.get("TIMING_LOCK", "")
 
 # kernel id, dasProfile board name
@@ -62,10 +65,11 @@ DAS_DARWIN = {  # Apple M1 Max, AppleClang 21, daslang 0.6.4
     "float2string": (0.001219265, 0.01571243), "fibonacci recursive": (0.043297862, 0.067173),
 }
 
-IMPLS = ["jai_vm_typed", "jai_vm_dyn", "jai_interp_typed", "lua", "luajit_joff", "luajit"]
+IMPLS = ["jai_vm_typed", "jai_vm_dyn", "jai_interp_typed", "lua", "luajit_joff", "luajit", "angelscript"]
 TITLES = {
     "jai_vm_typed": "Jai VM typed", "jai_vm_dyn": "Jai VM dyn", "jai_interp_typed": "Jai interp typed",
     "jai_interp_dyn": "Jai interp dyn", "lua": "Lua 5.5.1", "luajit_joff": "LuaJIT -joff", "luajit": "LuaJIT",
+    "angelscript": "AngelScript 2.38",
 }
 
 
@@ -78,6 +82,8 @@ def command(impl, kernel):
         if kernel == "interop":
             return [HOST, f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
         return [RUNNER, "--no-pause", f"--backend={backend}", script], os.path.join(JAI_KERNELS, "jai")
+    if impl == "angelscript":
+        return [ANGELSCRIPT, f"{kernel}.as"], os.path.join(HERE, "angelscript")
     lua_dir = os.path.join(HERE, "lua")
     if impl == "lua":
         return [LUA, f"{kernel}.lua"], lua_dir

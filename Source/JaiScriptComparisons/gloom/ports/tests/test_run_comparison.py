@@ -189,6 +189,24 @@ class LuaTimedemoTests(unittest.TestCase):
 			self.assertFalse(comparison.parse_timedemo(invalid)["hash_match"])
 
 
+class AngelScriptConfigurationTests(unittest.TestCase):
+	def test_angelscript_is_a_gloom_configuration_of_the_full_campaign(self):
+		targets=[c["target"] for c in comparison.selected_configurations(["gloom"],"all")]
+		self.assertIn("gloom_angelscript",targets)
+		config=next(c for c in comparison.selected_configurations(["gloom"],"all") if c["target"]=="gloom_angelscript")
+		self.assertEqual(("angelscript",0,1,"ms/tick"),(config["backend"],config["workers"],config["cores"],config["unit"]))
+
+	def test_angelscript_engine_selection_pairs_it_with_jaiscript_only(self):
+		configs=comparison.selected_configurations(["gloom","timedemo"],"jai-angelscript")
+		self.assertEqual(["jai_gloom","jai_gloom","gloom_angelscript","jaiscript"],[c["target"] for c in configs])
+		self.assertNotIn("gloom_angelscript",[c["target"] for c in comparison.selected_configurations(["gloom"],"jai-lua")])
+
+	def test_angelscript_scripts_are_passed_and_hashed_like_squirrel(self):
+		directory,pattern=comparison.PORT_SCRIPTS["gloom_angelscript"]
+		scripts=list((MODULE.parents[2]/directory).glob(pattern))
+		self.assertIn("main.as",[p.name for p in scripts])
+
+
 class FrameCertificateTests(unittest.TestCase):
 	def setUp(self):
 		import json

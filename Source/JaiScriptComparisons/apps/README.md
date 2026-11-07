@@ -1,8 +1,8 @@
 # Benchmark apps
 
-Four general programs, each written once per language (JaiScript, Lua 5.4, Squirrel 3.2, CPython 3) with the same
-algorithm, workload and deterministic data, so whole-program speed compares across ordinary application shapes rather
-than kernels:
+Four general programs, each written once per language (JaiScript, Lua 5.4, Squirrel 3.2, AngelScript 2.38, CPython 3)
+with the same algorithm, workload and deterministic data, so whole-program speed compares across ordinary application
+shapes rather than kernels:
 
 | app | what it exercises |
 | --- | --- |
@@ -14,14 +14,14 @@ than kernels:
 Every program prints `result <hash>` (a 32-bit hash of its results, folded as `(h * 31 + v) & 0xFFFFFFFF`) and
 `time_ms <ms>` (its own clock around the workload, so start-up and compilation stay out). All arithmetic is integer and
 stays inside 64 bits, the random data comes from one LCG (`state = (state * 1103515245 + 12345) & 0x7FFFFFFF`) every
-port implements, and every division and modulo has non-negative operands, so all five runs of an app (JaiScript on both
+port implements, and every division and modulo has non-negative operands, so all six runs of an app (JaiScript on both
 backends included) print the same hash.
 
 ## Idiom
 
-Each port is that language's ordinary code, not a tuned one: classes with fields and methods in JaiScript, Squirrel and
-Python, metatables in Lua; Python and Lua dispatch the bytecode VM with an `if` chain, JaiScript and Squirrel with
-`switch`. Two differences follow from the languages:
+Each port is that language's ordinary code, not a tuned one: classes with fields and methods in JaiScript, Squirrel,
+AngelScript and Python, metatables in Lua; Python and Lua dispatch the bytecode VM with an `if` chain, JaiScript,
+Squirrel and AngelScript with `switch`. These differences follow from the languages:
 
 - JaiScript objects are values, so the shared object graphs (Richards, DeltaBlue) are `shared_ptr` handles built with
   `new`, a method passes itself on as `shared_from_this()`, and the spatial entities are an `array<Entity>` reached
@@ -30,21 +30,31 @@ Python, metatables in Lua; Python and Lua dispatch the bytecode VM with an `if` 
   collectors.
 - A JaiScript constructor dispatches virtual calls to its own class, as C++ does, so DeltaBlue's constraints call
   `add_constraint()` at the creation site instead of at the end of the base constructor.
+- AngelScript's `int` is 32-bit, so the hash, the LCG and the bytecode VM's stack words are `int64`. The shared object
+  graphs are handles (`@`) to reference-counted classes, and its garbage collector reclaims their cycles. Richards' tasks
+  and DeltaBlue's constraints are an `abstract` base class with overridden methods (every AngelScript method is virtual
+  and dispatches to the derived class during construction, as in Squirrel and JavaScript), and arrays are walked with
+  `foreach`. A `dictionary` keys by string, so the spatial cell map is an `array<array<int>@>` over the 256 x 256 grid
+  with a null handle for an empty cell. A failed check calls `throw()` (the scripthelper add-on's), which ends the run
+  non-zero.
 
 The JaiScript ports run under strict checking.
 
 ## Building and running
 
-The runner needs the JaiScript runner (`jaiscript`, whole-program Release) and two stand-alone interpreters built from
-source by this project, `apps_lua` (Lua 5.4's `lua.c`) and `apps_sq` (Squirrel 3.2's `sq.c`, double floats), behind
-`APPS_PEERS`. Their roots default to `third_party/lua` and `third_party/squirrel`; `APPS_LUA_ROOT` and
-`APPS_SQUIRREL_ROOT` point elsewhere:
+The runner needs the JaiScript runner (`jaiscript`, whole-program Release) and three stand-alone hosts built from source
+by this project: `apps_lua` (Lua 5.4's `lua.c`) and `apps_sq` (Squirrel 3.2's `sq.c`, double floats) behind
+`APPS_PEERS`, and `angelscript_run` (AngelScript 2.38 with its standard add-ons: string, array, math, dictionary, plus
+`print` and a `double clock()`) behind `ANGELSCRIPT_PEERS`. Lua's and Squirrel's roots default to `third_party/lua` and
+`third_party/squirrel`; `APPS_LUA_ROOT` and `APPS_SQUIRREL_ROOT` point elsewhere. The AngelScript SDK goes at
+`third_party/angelscript` (the folder holding `angelscript/include/angelscript.h`); `COMPARISONS_ANGELSCRIPT_ROOT`
+points elsewhere:
 
 ```
-cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPPS_PEERS=ON
-cmake --build Source/JaiScriptComparisons/out/release --target jaiscript_runner apps_lua apps_sq
+cmake -S Source/JaiScriptComparisons -B Source/JaiScriptComparisons/out/release -G Ninja -DCMAKE_BUILD_TYPE=Release -DAPPS_PEERS=ON -DANGELSCRIPT_PEERS=ON
+cmake --build Source/JaiScriptComparisons/out/release --target jaiscript_runner apps_lua apps_sq angelscript_run
 python Source/JaiScriptComparisons/apps/run.py [--rounds 5] [--apps richards,deltablue,bytecode,spatial]
-       [--impls jai_vm,jai_interp,lua,squirrel,python] [--bin DIR] [--python EXE] [--no-lock]
+       [--impls jai_vm,jai_interp,lua,squirrel,angelscript,python] [--bin DIR] [--python EXE] [--no-lock]
 ```
 
 CPython is the interpreter running `run.py` unless `--python` names another. Each sample is one process; samples are

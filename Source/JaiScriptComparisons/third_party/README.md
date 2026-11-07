@@ -7,7 +7,8 @@ Source checkouts the comparison builds compile from. They are not committed (the
 | `lua/` | Lua 5.4 sources (the folder holding `src/lua.h`) | `comparison_benchmarks`, `gloom_lua`, `demoreel_lua`, `jai_doom_lua`, `apps_lua` |
 | `sol2/` | sol2 3.x (the folder holding `include/sol/sol.hpp`) | `comparison_benchmarks`, the Lua ports |
 | `squirrel/` | Squirrel 3.2 (the folder holding `include/squirrel.h`) | `comparison_benchmarks`, `gloom_squirrel`, `demoreel_squirrel`, `apps_sq` |
+| `angelscript/` | the AngelScript 2.38 SDK, zlib license (the folder holding `angelscript/include/angelscript.h` and `add_on/`) | `comparison_benchmarks`, `angelscript_run`, `gloom_angelscript` |
 
 ChaiScript 6.1.0 stays in `Bindstone/External/ChaiScript-6.1.0` (`COMPARISONS_CHAISCRIPT_ROOT` points elsewhere). The pinned
-Lua 5.4.8, Lua 5.5.1, LuaJIT and sol2 archives of the whole-program comparison are fetched by
+Lua 5.4.8, Lua 5.5.1, LuaJIT, sol2 and AngelScript 2.38.0 archives of the whole-program comparison are fetched by
 `gloom/ports/prepare_comparison.py` instead (see `gloom/ports/README.md`).

@@ -1,8 +1,8 @@
 # JaiScriptComparisons
 
-JaiScript against ChaiScript, Lua, LuaJIT, Luau and Squirrel. Everything comparison-related lives here, so the
-JaiScript build carries none of it: this project adds `../JaiScript` as a subdirectory, and nothing in JaiScript refers
-back here.
+JaiScript against AngelScript, ChaiScript, Lua, LuaJIT, Luau and Squirrel. Everything comparison-related lives here,
+so the JaiScript build carries none of it: this project adds `../JaiScript` as a subdirectory, and nothing in JaiScript
+refers back here.
 
 ## Path map (from the JaiScript tree)
 
@@ -10,7 +10,7 @@ back here.
 | --- | --- |
 | `lua/`, `sol2/`, `squirrel/` (local checkouts) | `third_party/lua/`, `third_party/sol2/`, `third_party/squirrel/` (move yours) |
 | `source/tests/performance/{chaiscript,sol2,squirrel}_comparison.cpp` | `benchmarks/` (target `comparison_benchmarks`) |
-| `examples/gloom/ports/`, `gloom_adapter_{chai,lua,squirrel}.cpp` | `gloom/ports/`, `gloom/` |
+| `examples/gloom/ports/`, `gloom_adapter_{chai,lua,squirrel}.cpp` | `gloom/ports/`, `gloom/` (which adds `gloom_adapter_angelscript.cpp`) |
 | `examples/demoreel/ports/`, `demoreel_adapter_{lua,squirrel}.cpp`, the README's Porting section | `demoreel/ports/`, `demoreel/`, `demoreel/README.md` |
 | `internal/examples/demoreel/ports/COMPARISON.md`, `internal/examples/jaidoom/ports/PORTING.md` | `demoreel/ports/`, `jaidoom/ports/` |
 | `examples/jaidoom/ports/` | `jaidoom/ports/` |
@@ -28,29 +28,32 @@ Unchanged: the games (`JaiScript/examples/*`), `JaiScript/bench/kernels/jai/` an
 
 | folder | what |
 | --- | --- |
-| `benchmarks/` | `comparison_benchmarks`: Foundry suites timing JaiScript against ChaiScript, Lua (sol2) and Squirrel in one process |
-| `gloom/` | the GLOOM ports (ChaiScript, Squirrel, Lua 5.4/5.5, LuaJIT, Python) and their runners; `gloom/ports/README.md` holds the adapter contract |
+| `benchmarks/` | `comparison_benchmarks`: Foundry suites timing JaiScript against AngelScript, ChaiScript, Lua (sol2) and Squirrel in one process |
+| `gloom/` | the GLOOM ports (AngelScript, ChaiScript, Squirrel, Lua 5.4/5.5, LuaJIT, Python) and their runners; `gloom/ports/README.md` holds the adapter contract |
 | `demoreel/` | the demoreel ports (Lua, Squirrel), their adapter contract (`README.md`) and the OSSUARY comparison runner |
 | `jaidoom/` | the headless Lua JaiDoom port, its transpiler and conformance checker |
 | `gatorquest/` | the Lua, LuaJIT and Luau twins of the Gator Quest smoke session |
 | `kernels/` | the kernel suite's Lua side and `run.py`, the cross-language runner |
 | `apps/` | the benchmark apps (Richards, DeltaBlue, a bytecode VM, a spatial-hash simulation) in JaiScript, Lua, Squirrel and Python, the hash-checked runner and the `apps_lua`/`apps_sq` interpreters (`APPS_PEERS`); see `apps/README.md` |
-| `third_party/` | where the Lua, sol2 and Squirrel checkouts go |
+| `third_party/` | where the Lua, sol2 and Squirrel checkouts and the AngelScript SDK go |
 
 ## Dependencies
 
 None of the compared languages ship here. Supply the sources yourself; the configure step looks for each one, prints
-what it found, and skips a benchmark comparison whose sources are missing (all four libraries are MIT-licensed):
+what it found, and skips a benchmark comparison whose sources are missing (Lua, sol2, Squirrel and ChaiScript are
+MIT-licensed, AngelScript zlib-licensed):
 
 | comparison | expected location | variable |
 |---|---|---|
 | Lua 5.4 + sol2 | `third_party/lua/src/lua.h` and `third_party/sol2/include/sol/sol.hpp` | `COMPARISONS_THIRD_PARTY` |
 | Squirrel 3 | `third_party/squirrel/include/squirrel.h` | `COMPARISONS_THIRD_PARTY` |
 | ChaiScript 6.1.0 | `include/chaiscript/chaiscript.hpp` under the given folder | `COMPARISONS_CHAISCRIPT_ROOT` |
+| AngelScript 2.38 | the SDK folder holding `angelscript/include/angelscript.h`, by default `third_party/angelscript` | `COMPARISONS_ANGELSCRIPT_ROOT` |
 
-Both variables are cache paths, so `-DCOMPARISONS_THIRD_PARTY=<dir>` or `-DCOMPARISONS_CHAISCRIPT_ROOT=<dir>` points
-elsewhere. The GLOOM and demoreel ports read the same locations behind their own options (`GLOOM_PORT_LUA`,
-`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, all OFF); unlike the
+All three variables are cache paths, so `-DCOMPARISONS_THIRD_PARTY=<dir>`, `-DCOMPARISONS_CHAISCRIPT_ROOT=<dir>` or
+`-DCOMPARISONS_ANGELSCRIPT_ROOT=<dir>` points elsewhere; `COMPARISONS_ANGELSCRIPT_ROOT` defaults to `angelscript/` under
+`COMPARISONS_THIRD_PARTY`. The GLOOM and demoreel ports read the same locations behind their own options (`GLOOM_PORT_LUA`,
+`GLOOM_PORT_SQUIRREL`, `GLOOM_PORT_CHAI`, `GLOOM_PORT_ANGELSCRIPT`, `DEMOREEL_PORT_LUA`, `DEMOREEL_PORT_SQUIRREL`, all OFF); unlike the
 benchmarks, a port option that is ON with its sources missing is a configure error rather than a skip.
 
 ## Building

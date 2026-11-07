@@ -1,4 +1,4 @@
-# JaiScriptComparisons - JaiScript against Lua, LuaJIT, Squirrel and ChaiScript: the GLOOM, demoreel and JaiDoom
+# JaiScriptComparisons - JaiScript against AngelScript, Lua, LuaJIT, Squirrel and ChaiScript: the GLOOM, demoreel and JaiDoom
 # ports, the Gator Quest Lua twin, the interpreter benchmark suites, the kernel suite's Lua side and the benchmark apps. JaiScript builds
 # as a subproject; nothing in it refers back here.
 cmake_minimum_required(VERSION 3.20)
@@ -15,6 +15,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(JAISCRIPT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../JaiScript" CACHE PATH "The JaiScript source root")
 set(COMPARISONS_THIRD_PARTY "${CMAKE_CURRENT_SOURCE_DIR}/third_party" CACHE PATH "Holds the lua/, sol2/ and squirrel/ source checkouts")
 set(COMPARISONS_CHAISCRIPT_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../../External/ChaiScript-6.1.0" CACHE PATH "ChaiScript 6.1.0 (the folder holding include/)")
+set(COMPARISONS_ANGELSCRIPT_ROOT "${COMPARISONS_THIRD_PARTY}/angelscript" CACHE PATH "The AngelScript SDK (the folder holding angelscript/include/angelscript.h)")
 
 # The layout the measurements were taken with: the static runtime, whole-program Release, every program in bin/
 if(MSVC AND NOT DEFINED CMAKE_MSVC_RUNTIME_LIBRARY)
@@ -35,6 +36,7 @@ set(JAISCRIPT_INSTALL OFF)
 set(JAISCRIPT_LTCG ON)
 add_subdirectory("${JAISCRIPT_DIR}" jaiscript)
 
+add_subdirectory(angelscript)
 add_subdirectory(benchmarks)
 add_subdirectory(gloom)
 add_subdirectory(demoreel)

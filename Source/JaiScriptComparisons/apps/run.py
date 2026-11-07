@@ -7,8 +7,8 @@ cell reports the median and the spread (half the sample range as a share of the 
 equal the app's reference hash (the first implementation's), or the run fails. The whole run holds the machine-wide
 timing lock (JaiScript's tools/ci/timing_lock.sh) unless --no-lock. Writes out/apps/RESULTS_<date>.md.
 
-    python run.py [--rounds 5] [--apps richards,deltablue,bytecode,spatial] [--impls jai_vm,jai_interp,lua,squirrel,python]
-                  [--bin <dir holding jaiscript.exe, apps_lua.exe, apps_sq.exe>] [--python <exe>] [--no-lock] [--out FILE]
+    python run.py [--rounds 5] [--apps richards,deltablue,bytecode,spatial] [--impls jai_vm,jai_interp,lua,squirrel,angelscript,python]
+                  [--bin <dir holding jaiscript.exe, apps_lua.exe, apps_sq.exe, angelscript_run.exe>] [--python <exe>] [--no-lock] [--out FILE]
 """
 import argparse
 import datetime
@@ -24,9 +24,9 @@ TIMING_LOCK = os.path.normpath(os.path.join(HERE, "..", "..", "JaiScript", "tool
 DEFAULT_BIN = os.path.normpath(os.path.join(HERE, "..", "out", "release", "bin"))
 
 APPS = ["richards", "deltablue", "bytecode", "spatial"]
-IMPLS = ["jai_vm", "jai_interp", "lua", "squirrel", "python"]
+IMPLS = ["jai_vm", "jai_interp", "lua", "squirrel", "angelscript", "python"]
 TITLES = {"jai_vm": "JaiScript VM", "jai_interp": "JaiScript interp", "lua": "Lua 5.4", "squirrel": "Squirrel 3.2",
-	"python": "CPython"}
+	"angelscript": "AngelScript 2.38", "python": "CPython"}
 EXE = ".exe" if os.name == "nt" else ""
 
 
@@ -40,6 +40,8 @@ def command(impl, app, args):
 		return [os.path.join(args.bin, "apps_lua" + EXE), os.path.join(folder, app + ".lua")]
 	if impl == "squirrel":
 		return [os.path.join(args.bin, "apps_sq" + EXE), os.path.join(folder, app + ".nut")]
+	if impl == "angelscript":
+		return [os.path.join(args.bin, "angelscript_run" + EXE), os.path.join(folder, app + ".as")]
 	return [args.python, "-I", os.path.join(folder, app + ".py")]
 
 

@@ -1,11 +1,13 @@
-# The GLOOM ports (ChaiScript, Squirrel, Lua 5.4, Lua 5.5, LuaJIT) on the game's shared host (gloom_host, built with
+# The GLOOM ports (ChaiScript, Squirrel, Lua 5.4, Lua 5.5, LuaJIT, AngelScript) on the game's shared host (gloom_host, built with
 # jai_gloom in the JaiScript tree), and the cold-function placement controls. Each port is opt-in and needs its runtime:
 #   -DGLOOM_PORT_CHAI=ON      -> gloom_chai      (COMPARISONS_CHAISCRIPT_ROOT)
 #   -DGLOOM_PORT_SQUIRREL=ON  -> gloom_squirrel  (third_party/squirrel)
 #   -DGLOOM_PORT_LUA=ON       -> gloom_lua       (third_party/lua + sol2)
+#   -DGLOOM_PORT_ANGELSCRIPT=ON -> gloom_angelscript (COMPARISONS_ANGELSCRIPT_ROOT)
 option(GLOOM_PORT_CHAI "Build gloom_chai, the ChaiScript port of GLOOM" OFF)
 option(GLOOM_PORT_SQUIRREL "Build gloom_squirrel, the Squirrel port of GLOOM" OFF)
 option(GLOOM_PORT_LUA "Build gloom_lua, the Lua/sol2 port of GLOOM" OFF)
+option(GLOOM_PORT_ANGELSCRIPT "Build gloom_angelscript, the AngelScript 2.38 port of GLOOM" OFF)
 set(GLOOM_DIR "${JAISCRIPT_DIR}/examples/gloom")
 
 # --- gloom_chai: ChaiScript port (opt-in; header-only runtime) ---
@@ -99,6 +101,23 @@ if(GLOOM_PORT_LUA)
         )
     endif()
     message(STATUS "GLOOM: gloom_lua enabled (${GLOOM_LUA_ROOT} + ${GLOOM_SOL2_ROOT})")
+endif()
+
+# --- gloom_angelscript: AngelScript 2.38 port (opt-in; builds the runtime from COMPARISONS_ANGELSCRIPT_ROOT) ---
+if(GLOOM_PORT_ANGELSCRIPT)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/../angelscript/angelscript.cmake")
+    add_executable(gloom_angelscript gloom_adapter_angelscript.cpp)
+    target_link_libraries(gloom_angelscript PRIVATE gloom_host angelscript_runtime)
+    target_compile_definitions(gloom_angelscript PRIVATE
+        GLOOM_SOURCE_SCRIPTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/ports/angelscript/scripts"
+    )
+    gloom_msvc_settings(gloom_angelscript)
+    add_custom_command(TARGET gloom_angelscript POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_directory
+            ${CMAKE_CURRENT_SOURCE_DIR}/ports/angelscript/scripts
+            $<TARGET_FILE_DIR:gloom_angelscript>/gloom_scripts_angelscript
+    )
+    message(STATUS "GLOOM: gloom_angelscript enabled (${COMPARISONS_ANGELSCRIPT_ROOT})")
 endif()
 
 # Additional pinned Lua comparisons and the placement controls.

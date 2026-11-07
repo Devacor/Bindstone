@@ -3,13 +3,45 @@
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <filesystem>
 #include <fstream>
+#include <tuple>
 
 using namespace jai;
 using namespace jai::foundry;
 
 namespace jai::foundry::tests {
+
+namespace {
+
+// Each {code, expected} runs on a fresh engine and checks the result read as Result.
+template<typename Result>
+void check_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto eng = make_engine();
+        check_eq(c.second, eng->execute(c.first).template as<Result>());
+    });
+}
+
+template<typename Result>
+void check_stdlib_results(const std::vector<std::pair<std::string, Result>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto eng = make_engine();
+        jai::stdlib::register_all(*eng);
+        check_eq(c.second, eng->execute(c.first).template as<Result>());
+    });
+}
+
+void check_stdlib_ints(const std::vector<std::pair<std::string, int64_t>>& a_cases) {
+    check_each(a_cases, [](const auto& c) {
+        auto eng = make_engine();
+        jai::stdlib::register_all(*eng);
+        check_eq(c.second, eng->execute(c.first).as_int());
+    });
+}
+
+}
 
 class namespace_tests : public suite {
 public:
@@ -70,22 +102,17 @@ public:
             }
         });
 
-        test("namespace_basic_function", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+        test("namespace_members_resolve_by_their_qualified_names", [this]() {
+            check_results<int>({
+                {R"(
                 namespace utils {
                     auto add(a, b) {
                         return a + b;
                     }
                 }
                 utils::add(10, 20)
-            )");
-            check_eq(result.as<int>(), 30);
-        });
-
-        test("namespace_function_overload", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 30},
+                {R"(
                 namespace math {
                     auto square(x) {
                         return x * x;
@@ -97,25 +124,15 @@ public:
                 auto r1 = math::square(5);
                 auto r2 = math::square(3, 4);
                 r1 + r2
-            )");
-            check_eq(result.as<int>(), 50);
-        });
-
-        test("namespace_variable", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 50},
+                {R"(
                 namespace config {
                     auto MAX_SIZE = 100;
                     auto MIN_SIZE = 10;
                 }
                 config::MAX_SIZE + config::MIN_SIZE
-            )");
-            check_eq(result.as<int>(), 110);
-        });
-
-        test("namespace_class", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 110},
+                {R"(
                 namespace shapes {
                     class Rectangle {
                     public:
@@ -134,13 +151,8 @@ public:
                 }
                 auto rect = shapes::Rectangle(5, 10);
                 rect.area()
-            )");
-            check_eq(result.as<int>(), 50);
-        });
-
-        test("namespace_nested_blocks", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 50},
+                {R"(
                 namespace outer {
                     namespace inner {
                         auto getValue() {
@@ -149,26 +161,16 @@ public:
                     }
                 }
                 outer::inner::getValue()
-            )");
-            check_eq(result.as<int>(), 42);
-        });
-
-        test("namespace_scope_resolution_syntax", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 42},
+                {R"(
                 namespace my::nested::deep {
                     auto getValue() {
                         return 99;
                     }
                 }
                 my::nested::deep::getValue()
-            )");
-            check_eq(result.as<int>(), 99);
-        });
-
-        test("namespace_mixed_members", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 99},
+                {R"(
                 namespace mylib {
                     auto VERSION = 1;
 
@@ -190,68 +192,49 @@ public:
                 auto v3 = info.describe();
 
                 v1 + v2 + v3
-            )");
-            check_eq(result.as<int>(), 3);
-        });
-
-        test("namespace_override_required", [&]() {
-            auto eng = make_engine();
-            check_throws([&]() {
-                eng->execute(R"(
-                    namespace test {
-                        auto func(x) { return x; }
-                        auto func(x) { return x * 2; }
-                    }
-                )");
-            });
-        });
-
-        test("namespace_override_allowed", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 3},
+                {R"(
                 namespace test {
                     auto func(x) { return x; }
                     auto func(x) override { return x * 2; }
                 }
                 test::func(5)
-            )");
-            check_eq(result.as<int>(), 10);
-        });
-
-        test("namespace_string_keyword_as_name", [&]() {
-            auto eng = make_engine();
-            auto result = eng->execute(R"(
+            )", 10},
+                {R"(
                 namespace string {
                     auto length(s) {
                         return 42;
                     }
                 }
                 string::length("test")
-            )");
-            check_eq(result.as<int>(), 42);
+            )", 42},
+            });
         });
 
-        test("namespace_member_not_found", [&]() {
-            auto eng = make_engine();
-            check_throws([&]() {
-                eng->execute(R"(
+        test("namespace_redeclarations_unknown_members_and_wrong_arity_throw", [&]() {
+            const std::tuple<std::string> sources[] = {
+                {R"(
+                    namespace test {
+                        auto func(x) { return x; }
+                        auto func(x) { return x * 2; }
+                    }
+                )"},
+                {R"(
                     namespace test {
                         auto func() { return 1; }
                     }
                     test::nonexistent()
-                )");
-            });
-        });
-
-        test("namespace_function_arity_mismatch", [&]() {
-            auto eng = make_engine();
-            check_throws([&]() {
-                eng->execute(R"(
+                )"},
+                {R"(
                     namespace math {
                         auto add(a, b) { return a + b; }
                     }
                     math::add(1, 2, 3)
-                )");
+                )"},
+            };
+            check_each(sources, [](const auto& source) {
+                auto eng = make_engine();
+                check_throws([&]() { eng->execute(std::get<0>(source)); });
             });
         });
 
@@ -354,23 +337,16 @@ public:
         });
         // A namespace is a scope; its variables are cells (C++). Stores through ns::x, writes from the
         // namespace's own functions, initializers over earlier members, reopening in place, host entries read-only.
-        test("namespace_variable_store_from_outside", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+        test("namespace_variables_store_through_every_path_and_reopen_in_place", [this]() {
+            check_stdlib_results<std::string>({
+                {R"(
                 namespace ns { var x = 3; int y = 4; }
                 ns::x = 10; ns::x += 5; ++ns::x;
                 ns::y = 7; ns::y++;
                 auto r = (ns::x = 20);
                 to_string(ns::x) + " " + to_string(ns::y) + " " + to_string(r)
-            )");
-            check_eq(std::string("20 8 20"), result.as<std::string>());
-        });
-
-        test("namespace_function_writes_and_reads_its_variable", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+            )", "20 8 20"},
+                {R"(
                 namespace ns {
                     var x = 3;
                     function set(v) { x = v; }
@@ -381,47 +357,13 @@ public:
                 var a = to_string(ns::x) + " " + to_string(ns::get());
                 ns::x = 5;
                 a + " " + to_string(ns::get()) + " " + to_string(ns::bump()) + " " + to_string(ns::x)
-            )");
-            check_eq(std::string("42 42 5 6 6"), result.as<std::string>());
-        });
-
-        test("namespace_initializer_sees_earlier_members", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
-                namespace ns { var x = 3; var y = x + 1; int z = y * 2; }
-                ns::y * 100 + ns::z
-            )");
-            check_eq((int64_t)408, result.as_int());
-        });
-
-        test("namespace_reopen_redeclares_in_place", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+            )", "42 42 5 6 6"},
+                {R"(
                 namespace ns { var x = 3; function get() { return x; } }
                 namespace ns { var x = 30; }
                 to_string(ns::x) + " " + to_string(ns::get())
-            )");
-            check_eq(std::string("30 30"), result.as<std::string>());
-        });
-
-        test("nested_namespace_variable_store", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
-                namespace outer::inner { var z = 5; function get() { return z; } }
-                outer::inner::z = 6;
-                outer::inner::z += 1;
-                outer::inner::z * 10 + outer::inner::get()
-            )");
-            check_eq((int64_t)77, result.as_int());
-        });
-
-        test("typed_namespace_variable_store_runs_the_assignment_table", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+            )", "30 30"},
+                {R"(
                 namespace ns { int y = 4; }
                 int y = 4;
                 function s(var flag) { if (flag) { return "s"; } return 1; }
@@ -433,8 +375,31 @@ public:
                 (out == out2 && out != "stored" && to_string(ns::y) == to_string(y))
                     ? "same"
                     : (out + " | " + out2 + " | " + to_string(ns::y) + " | " + to_string(y))
-            )");
-            check_eq(std::string("same"), result.as<std::string>());
+            )", "same"},
+            });
+        });
+
+        test("namespace_initializers_nested_stores_and_member_calls_read_the_cells", [this]() {
+            check_stdlib_ints({
+                {R"(
+                namespace ns { var x = 3; var y = x + 1; int z = y * 2; }
+                ns::y * 100 + ns::z
+            )", 408},
+                {R"(
+                namespace outer::inner { var z = 5; function get() { return z; } }
+                outer::inner::z = 6;
+                outer::inner::z += 1;
+                outer::inner::z * 10 + outer::inner::get()
+            )", 77},
+                {R"(
+                namespace ns { var twice = function(a) { return a * 2; }; }
+                ns::twice(4)
+            )", 8},
+                {R"(
+                namespace ns { function b() { return 11; } function a() { return ns::b(); } }
+                ns::a()
+            )", 11},
+            });
         });
 
         test("host_registered_namespace_entry_is_read_only", [&]() {
@@ -452,32 +417,11 @@ public:
             check_eq(std::string("5 51 Cannot assign to 'host': it is read-only"), result.as<std::string>());
         });
 
-        test("namespace_lambda_variable_is_callable", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
-                namespace ns { var twice = function(a) { return a * 2; }; }
-                ns::twice(4)
-            )");
-            check_eq((int64_t)8, result.as_int());
-        });
-
-        test("namespace_function_reaches_a_sibling_by_its_qualified_name", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
-                namespace ns { function b() { return 11; } function a() { return ns::b(); } }
-                ns::a()
-            )");
-            check_eq((int64_t)11, result.as_int());
-        });
-
         // C++ [basic.lookup.unqual]: a bare name in a namespace's code finds the namespace's members, then the enclosing
         // namespaces' (innermost first), then the globals; ::name reaches the global
-        test("namespace_code_reaches_its_members_by_their_bare_names", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+        test("namespace_code_finds_bare_names_in_its_namespaces_innermost_first", [this]() {
+            check_stdlib_results<std::string>({
+                {R"(
                 int a() { return 100; }
                 int k = 1000;
                 namespace ns {
@@ -493,14 +437,8 @@ public:
                     int drive() { int total = 0; for (var v : twice()) { total += v; } return total; }
                 }
                 `${ns::b()} ${ns::c()} ${ns::mk()(10)} ${ns::pick()} ${ns::drive()} ${a()} ${k}`
-            )");
-            check_eq(std::string("6 1100 11 19 3 100 1000"), result.as<std::string>());
-        });
-
-        test("a_nested_namespace_searches_the_enclosing_namespaces", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+            )", "6 1100 11 19 3 100 1000"},
+                {R"(
                 int depth = 0;
                 namespace outer {
                     int depth = 1;
@@ -513,14 +451,8 @@ public:
                 namespace outer::inner::deep { int h() { return f() * depth; } }
                 namespace outer { int f2() { return depth; } }
                 `${outer::inner::g()} ${outer::inner::deep::h()} ${outer::f2()} ${depth}`
-            )");
-            check_eq(std::string("12 20 1 0"), result.as<std::string>());
-        });
-
-        test("a_namespace_class_reads_the_namespace_by_bare_names", [&]() {
-            auto eng = make_engine();
-            jai::stdlib::register_all(*eng);
-            auto result = eng->execute(R"(
+            )", "12 20 1 0"},
+                {R"(
                 namespace shop {
                     int tax = 3;
                     int price(int v) { return v + tax; }
@@ -536,8 +468,8 @@ public:
                 }
                 auto item = shop::Item();
                 `${item.base} ${item.cost()} ${shop::Item::listed()} ${shop::Crate(2).n}`
-            )");
-            check_eq(std::string("13 16 4 5"), result.as<std::string>());
+            )", "13 16 4 5"},
+            });
         });
 
         test("a_namespace_reload_rebinds_its_bare_calls", [&]() {

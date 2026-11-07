@@ -3,12 +3,14 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/environment.hpp>
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "../case_table.hpp"
 #include <functional>
 #include <memory>
 #include <cstdint>
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <tuple>
 #include <vector>
 
 using namespace jai;
@@ -526,61 +528,36 @@ public:
 			check_eq((int64_t)73, marked, "nested lambda saw the callback parameter (7) and the callback's capture (3)");
 		});
 
-		test("capture_variant_precreated_callback", [this]() {
-			auto eng = make_engine();
-			dynamic_binder<capture_probe> binder(*eng, "CaptureProbe");
-			binder.method("value", &capture_probe::value);
-			binder.build();
-			capture_probe live;
-			int64_t marked = -1;
-			std::string err;
-			eng->set_script_error_handler([&err](const std::string& m) { err += m + " | "; });
-			eng->add_function("mark", [&marked](script_int v) { marked = v; });
-			eng->add_function("with_probe", [&live](script_value cb) { convert_script_function<void(capture_probe&)>(cb)(live); });
-			try { eng->execute(R"(
+		test("a_callback_capturing_the_outer_parameter_sees_it_in_every_spelling", [this]() {
+			const std::tuple<std::string> scripts[] = {
+				{R"(
 				var run = [=](int outer) -> void { var cb = [outer](var& probe) -> void { mark(outer); }; with_probe(cb); };
 				run(3);
-			)"); } catch (const std::exception& e) { err += std::string("execute threw: ") + e.what(); }
-			check_true(err.empty(), "errors: " + err);
-			check_eq((int64_t)3, marked, "value");
-		});
-
-		test("capture_variant_default_capture_inline", [this]() {
-			auto eng = make_engine();
-			dynamic_binder<capture_probe> binder(*eng, "CaptureProbe");
-			binder.method("value", &capture_probe::value);
-			binder.build();
-			capture_probe live;
-			int64_t marked = -1;
-			std::string err;
-			eng->set_script_error_handler([&err](const std::string& m) { err += m + " | "; });
-			eng->add_function("mark", [&marked](script_int v) { marked = v; });
-			eng->add_function("with_probe", [&live](script_value cb) { convert_script_function<void(capture_probe&)>(cb)(live); });
-			try { eng->execute(R"(
+			)"},
+				{R"(
 				var run = [=](int outer) -> void { with_probe([=](var& probe) -> void { mark(outer); }); };
 				run(3);
-			)"); } catch (const std::exception& e) { err += std::string("execute threw: ") + e.what(); }
-			check_true(err.empty(), "errors: " + err);
-			check_eq((int64_t)3, marked, "value");
-		});
-
-		test("capture_variant_function_not_lambda", [this]() {
-			auto eng = make_engine();
-			dynamic_binder<capture_probe> binder(*eng, "CaptureProbe");
-			binder.method("value", &capture_probe::value);
-			binder.build();
-			capture_probe live;
-			int64_t marked = -1;
-			std::string err;
-			eng->set_script_error_handler([&err](const std::string& m) { err += m + " | "; });
-			eng->add_function("mark", [&marked](script_int v) { marked = v; });
-			eng->add_function("with_probe", [&live](script_value cb) { convert_script_function<void(capture_probe&)>(cb)(live); });
-			try { eng->execute(R"(
+			)"},
+				{R"(
 				function run(int outer) -> void { with_probe([outer](var& probe) -> void { mark(outer); }); }
 				run(3);
-			)"); } catch (const std::exception& e) { err += std::string("execute threw: ") + e.what(); }
-			check_true(err.empty(), "errors: " + err);
-			check_eq((int64_t)3, marked, "value");
+			)"},
+			};
+			check_each(scripts, [](const auto& script) {
+				auto eng = make_engine();
+				dynamic_binder<capture_probe> binder(*eng, "CaptureProbe");
+				binder.method("value", &capture_probe::value);
+				binder.build();
+				capture_probe live;
+				int64_t marked = -1;
+				std::string err;
+				eng->set_script_error_handler([&err](const std::string& m) { err += m + " | "; });
+				eng->add_function("mark", [&marked](script_int v) { marked = v; });
+				eng->add_function("with_probe", [&live](script_value cb) { convert_script_function<void(capture_probe&)>(cb)(live); });
+				try { eng->execute(std::get<0>(script)); } catch (const std::exception& e) { err += std::string("execute threw: ") + e.what(); }
+				check_true(err.empty(), "errors: " + err);
+				check_eq((int64_t)3, marked, "value");
+			});
 		});
 
 		// Text-receiver shape fired from inside a script (Clickable::onAccept via press()).

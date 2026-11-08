@@ -26,6 +26,9 @@
 // beats, wipes in two more and the second fills on bar 6, each fill a hit; the kick
 // punches the camera and lights the floor grid, the snare flares the chrome, every
 // chord change recolours the sun and the energy sets how fast the floor rushes in.
+// The growing tips burn white-hot and shower sparks; the floor is glossy, mirroring
+// the pipes and laying the striped sun's reflection down the grid; and the whole
+// frame sways and rolls, punching its roll on the hits.
 
 class Pipes : Scene {
 	array<int> cells = [];   // 0 empty, else 1 + pipe*3 + kind (0 seg, 1 joint, 2 eye)
@@ -71,6 +74,8 @@ class Pipes : Scene {
 	int flick = 0;
 	float scroll = 0.0;  // the floor grid's travel, faster as the music builds
 	int suns = 4;        // the sun's ramps, one per chord colour
+	int hot_base = 0;    // the tips' white heat and the sparks, 8 levels
+	array<int> frame = [];
 
 	void build() override {
 		name = "PIPEDREAM";
@@ -86,6 +91,8 @@ class Pipes : Scene {
 		pal.gradient(16, [[214.0, 255.0, 244.0], [80.0, 220.0, 255.0], [60.0, 110.0, 255.0]]);
 		pal.gradient(16, [[255.0, 250.0, 190.0], [255.0, 120.0, 60.0], [220.0, 30.0, 70.0]]);
 		floor_base = pal.gradient(8, [[5.0, 2.0, 12.0], [70.0, 16.0, 78.0]]);
+		hot_base = pal.gradient(8, [[255.0, 90.0, 40.0], [255.0, 200.0, 90.0], [255.0, 255.0, 240.0]]);
+		frame = gfx.make_grid(w * h);
 		grid_base = pal.gradient(8, [[40.0, 20.0, 90.0], [60.0, 220.0, 255.0]]);
 		pipe_base = pal.size();
 		var hues = [[70.0, 225.0, 195.0], [255.0, 178.0, 58.0], [232.0, 88.0, 212.0], [128.0, 158.0, 255.0],
@@ -353,6 +360,63 @@ class Pipes : Scene {
 		}
 	}
 
+	// a volume point's place in the persistent frame (x, y, the splat scale)
+	array<float> project(float fx, float fy, float fz) {
+		float rx = fx * f_ca + fz * f_sa;
+		float rz = fz * f_ca - fx * f_sa;
+		float ry = fy * f_ct - rz * f_st;
+		float zcam = fy * f_st + rz * f_ct + 30.0;
+		float scale = (w < h * 1.3 ? w : h * 1.3) * 1.02 / zcam;
+		return [w * 0.5 + rx * scale, h * 0.5 - ry * scale, scale];
+	}
+
+	// the tips and their sparks, in persistent-frame coordinates mapped through the camera:
+	// each tip a white-hot ball, and from it a spark born on every sixteenth step, each a
+	// closed-form arc from its birth (so a replay draws the same sparks)
+	void draw_tips(var& fr, float zoom, float pan) {
+		if (phase != 0) { return; }
+		float cx = w * 0.5;
+		float cy = h * 0.5;
+		int now = itrunc(tt / MUSIC_STEP);
+		for (int p = 0; p < npipes; ++p) {
+			var at = project(hx[p] - (gw - 1) * 0.5, hy[p] - (gh - 1) * 0.5, hz[p] - (gd - 1) * 0.5);
+			float px = at[0];
+			float py = at[1];
+			float rad = at[2] * 0.5;
+			float sx = cx + (px - pan - cx) * zoom;
+			float sy = cy + (py - cy) * zoom;
+			float r = rad * zoom;
+			r = r < 1.0 ? 1.0 : r;
+			int x0 = itrunc(sx - r);
+			int y0 = itrunc(sy - r);
+			for (int yy = y0; yy <= itrunc(sy + r) + 1; ++yy) {
+				if (yy < 0 || yy >= h) { continue; }
+				for (int xx = x0; xx <= itrunc(sx + r) + 1; ++xx) {
+					if (xx < 0 || xx >= w) { continue; }
+					float dx = xx + 0.5 - sx;
+					float dy = yy + 0.5 - sy;
+					float q = (dx * dx + dy * dy) / (r * r);
+					if (q < 1.0) { fr[yy * w + xx] = hot_base + 7 - itrunc(q * 4.0); }
+				}
+			}
+			for (int k = 0; k < 5; ++k) {
+				int born = now - k;
+				float age = tt - born * MUSIC_STEP;
+				if (age < 0.0) { continue; }
+				int hs = ((p * 7919 + born * 104729) & 1048575) * 1274126177;
+				float vx = (((hs >> 4) & 255) / 255.0 - 0.5) * w * 0.5;
+				float vy = 0.0 - ((hs >> 12) & 255) / 255.0 * h * 0.45;
+				float qx = sx + vx * age;
+				float qy = sy + vy * age + h * 1.2 * age * age;
+				int ix = itrunc(qx);
+				int iy = itrunc(qy);
+				if (ix < 0 || ix >= w || iy < 0 || iy >= h) { continue; }
+				int heat = 7 - k - ((hs >> 20) & 1);
+				fr[iy * w + ix] = hot_base + (heat < 2 ? 2 : heat);
+			}
+		}
+	}
+
 	// splat one voxel plus midpoints toward every same-pipe neighbor
 	// (midpoints are what keep the tube reading as one solid run)
 	void splat_voxel(int vidx) {
@@ -395,6 +459,7 @@ class Pipes : Scene {
 	}
 
 	void render(var& grid) override {
+		var& out = frame;
 		if (phase == 2) {
 			// generation over: a CRT beam sweeps down and leaves the set behind it
 			int target = itrunc(phase_t * h / (MUSIC_BEAT * 2.0));
@@ -476,10 +541,48 @@ class Pipes : Scene {
 					float gx = (x - cx) * gstep;
 					bool xline = math::floor(gx) != math::floor(gx + gstep);
 					ink = (!far && zline) || (!xfar && xline) ? grid_base + glow : dark;
+					if (ink == dark) {
+						// the glossy floor: the pipes mirrored about the horizon, darker; else the
+						// sun's reflection in broken stripes down the floor
+						int my = 2 * hz - y - 1;
+						int mr = my >= 0 && my < h ? row_map[my] : -1;
+						if (mr >= 0 && cm >= 0 && zz[mr * w + cm] > 0.0) {
+							int pi = pg[mr * w + cm];
+							if (pi >= pipe_base && pi < ramps) {
+								int lv3 = (pi - pipe_base) % 16;
+								ink = pi - lv3 + lv3 / 3;
+							}
+						} else if (my >= 0 && (y - hz) % 2 == 0) {
+							int bi = bd[my * w + x];
+							if (bi >= sun_base && bi < sun_base + 16) {
+								int sl = bi - sun_base + 4;
+								ink = sun_base + sun_shift + (sl > 15 ? 15 : sl);
+							}
+						}
+					}
 				}
 				if (y == beam || y == beam - 1) { ink = grid_base + 7; }
-				grid[i] = ink;
+				out[i] = ink;
 				++i;
+			}
+		}
+		draw_tips(out, zoom, pan);
+		// the roll: a slow sway, punched on each hit
+		float hitv = cue == null ? 0.0 : cue.hit(tt);
+		float roll = 0.045 * math::sin(tt * 0.6 + gen) + hitv * 0.1 * (gen == 0 ? 1.0 : -1.0);
+		float cr = math::cos(roll);
+		float sr = math::sin(roll);
+		int gi = 0;
+		for (int y5 = 0; y5 < h; ++y5) {
+			float vy = y5 + 0.5 - cy;
+			for (int x5 = 0; x5 < w; ++x5) {
+				float vx = x5 + 0.5 - cx;
+				int sx = itrunc(cx + vx * cr - vy * sr);
+				int sy = itrunc(cy + vx * sr + vy * cr);
+				sx = sx < 0 ? 0 : (sx >= w ? w - 1 : sx);
+				sy = sy < 0 ? 0 : (sy >= h ? h - 1 : sy);
+				grid[gi] = out[sy * w + sx];
+				++gi;
 			}
 		}
 	}

@@ -24,7 +24,7 @@ namespace {
 // Load order matters only in that base classes execute before derived ones.
 // main.jai is last and is NEVER hot-reloaded (it owns the persistent globals).
 const char* kSceneFiles[] = {
-	"util.jai", "reel.jai", "donut.jai", "julia.jai", "lava.jai", "pipes.jai", "fire.jai", "boids.jai",
+	"util.jai", "music.jai", "reel.jai", "donut.jai", "julia.jai", "lava.jai", "pipes.jai", "fire.jai", "boids.jai",
 	"globhunter.jai", "voxelspace.jai", "chrome.jai", "skull.jai", "fluid.jai", "show.jai", "finale.jai", "main.jai",
 };
 

@@ -21,7 +21,7 @@
 //   jaiscript demoreel.jai -- shot I at T dump P  scene I from scene time T-0.2, frame n
 //                                                 (default 6) -> P.txt (as presented, so color
 //                                                 and ascii apply) + P.bmp
-//   jaiscript demoreel.jai -- midi F.mid          write the soundtrack and exit
+//   jaiscript demoreel.jai -- midi DIR            write the soundtrack's cues (one MIDI file a scene) and exit
 //   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent) | pix half|sext|auto
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
 
@@ -88,6 +88,7 @@ class Rng {
 // (it reads ESC at import time, so the host API above must already exist).
 
 import "scenes/util.jai";
+import "scenes/music.jai";
 import "scenes/reel.jai";
 import "scenes/donut.jai";
 import "scenes/julia.jai";
@@ -259,139 +260,21 @@ function run_shot(int scene, float at) -> int {
 }
 
 // -------------------------------------------------------------- soundtrack ---
-// A Standard MIDI File composed and written at boot, played through the
-// runner's MIDI sequencer: 64 bars at 124 bpm in A minor over i-VI-III-VII,
-// sectioned intro / build / main / breakdown / finale. Bass pumps eighths,
-// a warm pad holds the chords, a saw arpeggiates sixteenths, a square lead
-// improvises on the pentatonic from the reel's seed, and a four-on-the-floor
-// kit drives it. Events are emitted in time order (pending note-offs flushed
-// before each step's note-ons), so the track needs no sort.
+// The music is the reel's own (scenes/music.jai): one cue per scene, composed at
+// boot and written as Standard MIDI Files for the runner's sequencer. The pump
+// preloads them all and switches cue the frame a scene (or its transition) starts,
+// which is a bar line, so the music and the pictures cut together.
 
-function vlq(int v) -> string {
-	string out = "" + to_char(v & 127);
-	int r = v >> 7;
-	while (r > 0) {
-		out = "" + to_char(128 | (r & 127)) + out;
-		r = r >> 7;
+// the cue files' paths, or [] when they can't be written (then the reel runs silent)
+function write_cues(string dir) -> var {
+	var result = [];
+	if (!make_dirs(dir)) { return result; }
+	for (int i = 0; i < reel.cues.size(); ++i) {
+		string path = dir + `/cue_${i < 10 ? "0" : ""}${i}.mid`;
+		if (!write_file(path, reel.cues[i].midi())) { return []; }
+		result.push(path);
 	}
-	return out;
-}
-
-function b3(int a, int b, int c) -> string { return "" + to_char(a) + to_char(b) + to_char(c); }
-function be32(int v) -> string {
-	return "" + to_char((v >> 24) & 255) + to_char((v >> 16) & 255) + to_char((v >> 8) & 255) + to_char(v & 255);
-}
-
-class MidiTrack {
-	string trk = "";
-	int last = 0;
-	array<int> off_t = [];
-	array<int> off_c = [];
-	array<int> off_n = [];
-
-	void ev(int tick, string bytes) {
-		trk += vlq(tick - last) + bytes;
-		last = tick;
-	}
-
-	void note(int tick, int ch, int n, int vel, int dur) {
-		ev(tick, b3(144 | ch, n, vel));
-		off_t.push(tick + dur);
-		off_c.push(ch);
-		off_n.push(n);
-	}
-
-	// note-offs due by `tick`, emitted in time order (a delta is never negative)
-	void flush(int tick) {
-		while (true) {
-			int pick = -1;
-			for (int i = 0; i < off_t.size(); ++i) {
-				if (off_t[i] <= tick && (pick < 0 || off_t[i] < off_t[pick])) { pick = i; }
-			}
-			if (pick < 0) { return; }
-			ev(off_t[pick], b3(128 | off_c[pick], off_n[pick], 0));
-			int last_i = off_t.size() - 1;
-			off_t[pick] = off_t[last_i];
-			off_c[pick] = off_c[last_i];
-			off_n[pick] = off_n[last_i];
-			off_t.pop();
-			off_c.pop();
-			off_n.pop();
-		}
-	}
-}
-
-function compose_soundtrack(int seed) -> string {
-	var m = MidiTrack();
-	int q = 96;
-	int s16 = q / 4;
-	m.ev(0, "" + to_char(255) + to_char(81) + to_char(3) + to_char(7) + to_char(98) + to_char(31));   // 483871 us per quarter
-	var programs = [38, 89, 81, 80];
-	var volumes = [104, 78, 64, 96];
-	for (int ch = 0; ch < 4; ++ch) {
-		m.ev(0, "" + to_char(192 | ch) + to_char(programs[ch]));
-		m.ev(0, b3(176 | ch, 7, volumes[ch]));
-	}
-	var chords = [[57, 60, 64], [53, 57, 60], [52, 55, 60], [55, 59, 62]];
-	var roots = [45, 41, 48, 43];
-	var penta = [69, 72, 74, 76, 79, 81, 84];
-	int lcg = (seed & 65535) | 1;
-	int mel = 3;
-	for (int bar = 0; bar < 64; ++bar) {
-		int ci = (bar / 2) % 4;
-		var chord = chords[ci];
-		int root = roots[ci];
-		bool intro = bar < 8;
-		bool build = bar >= 8 && bar < 16;
-		bool brk = bar >= 40 && bar < 48;
-		bool fin = bar >= 48;
-		bool drums = !intro && !brk;
-		for (int st = 0; st < 16; ++st) {
-			int tick = (bar * 16 + st) * s16;
-			m.flush(tick);
-			if (st == 0 && (bar % 2 == 0)) {
-				for (int k = 0; k < 3; ++k) { m.note(tick, 1, chord[k], intro ? 60 : 74, q * 8 - 4); }
-			}
-			if (st == 0 && (bar == 16 || bar == 48 || bar == 56)) { m.note(tick, 9, 49, 110, q); }
-			if (!intro && st % 2 == 0) {
-				int bn = st % 8 == 4 ? root + 12 : root;
-				m.note(tick, 0, bn, st % 4 == 0 ? 110 : 84, s16 * 2 - 6);
-			}
-			if (drums && st % 4 == 0) { m.note(tick, 9, 36, 118, s16); }
-			if (drums && !build && (st == 4 || st == 12)) { m.note(tick, 9, 38, 104, s16); }
-			if (st % 2 == 0) { m.note(tick, 9, 42, st % 4 == 0 ? 70 : 52, s16); }
-			if (!intro && !build && !brk && st % 4 == 2) { m.note(tick, 9, 46, 60, s16); }
-			if ((bar >= 16 && !brk) && bar < 64) {
-				var pat = [0, 1, 2, 3, 2, 1, 0, 3];
-				int pi = pat[st % 8];
-				int an = pi == 3 ? chord[0] + 12 : chord[pi];
-				m.note(tick, 2, an + 12, 70 + (st % 4 == 0 ? 20 : 0), s16 - 2);
-			}
-			if ((brk || fin) && st % 2 == 0) {
-				lcg = (lcg * 1103515245 + 12345) & 2147483647;
-				int r = (lcg >> 16) & 15;
-				if (r < 9 || st == 0) {
-					mel = mel + (r % 3) - 1;
-					mel = mel < 0 ? 1 : (mel > 6 ? 5 : mel);
-					int len = r < 3 ? s16 * 4 : s16 * 2;
-					m.note(tick, 3, penta[mel], 96, len - 4);
-				}
-			}
-		}
-	}
-	m.flush(64 * 16 * s16 + q * 8);
-	m.ev(m.last, "" + to_char(255) + to_char(47) + to_char(0));
-	string head = "MThd" + be32(6) + "" + to_char(0) + to_char(0) + to_char(0) + to_char(1) + to_char(0) + to_char(q);
-	return head + "MTrk" + be32(m.trk.size()) + m.trk;
-}
-
-// "" when the file can't be written (then the reel just runs silent)
-function write_soundtrack() -> string {
-	string dir = app_cache_dir("jai_demoreel");
-	if (!make_dirs(dir)) { return ""; }
-	string path = dir + "/soundtrack.mid";
-	if (!write_file(path, compose_soundtrack(OPT_SEED))) { return ""; }
-	return path;
+	return result;
 }
 
 // ---------------------------------------------------------------- terminal ---
@@ -488,8 +371,10 @@ function run_interactive() -> int {
 	demo_boot(w, h, OPT_SEED, RUNNER_BACKEND, false, true);
 	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, 5.0); }
 	HB_WORKERS = w >= 100 ? 1 : 0;
-	string music_path = OPT_MUSIC ? write_soundtrack() : "";
-	var music = music_path != "" ? play_sound(music_path, true) : null;
+	var cue_paths = OPT_MUSIC ? write_cues(app_cache_dir("jai_demoreel")) : [];
+	var cues = [];
+	for (int c = 0; c < cue_paths.size(); ++c) { cues.push(load_sound(cue_paths[c])); }
+	int playing = -1;
 
 	var terminal = Terminal();
 	terminal.cube = OPT_CUBE;
@@ -506,7 +391,7 @@ function run_interactive() -> int {
 		float t = show.elapsed();
 		float dt = pace.elapsed();
 		pace.start();
-		if (dt > 0.1) { dt = 0.1; }
+		if (dt > 0.25) { dt = 0.25; }
 		if (dt > 0.0001) { fps_ema = fps_ema * 0.92 + (1.0 / dt) * 0.08; }
 
 		string key = read_key();
@@ -514,6 +399,12 @@ function run_interactive() -> int {
 		if (key == "r") { key = ""; }   // hot reload is the C++ host's
 
 		string frame = demo_frame(t, dt, key, fps_ema, sim_ms, draw_ms, 0.0);
+		int want = reel.music_cue();
+		if (want != playing && want < cues.size()) {
+			if (playing >= 0 && cues[playing] != null) { cues[playing].stop(); }
+			if (cues[want] != null) { cues[want].play(true); }
+			playing = want;
+		}
 		sim_ms = pace.delta() * 1000;
 		print(ESC + "[H" + terminal.present(frame) + ESC + "[0m", skip_newline);
 		draw_ms = pace.delta() * 1000;
@@ -522,12 +413,16 @@ function run_interactive() -> int {
 		float used = pace.elapsed() * 1000;
 		if (used < budget_ms) { sleep((budget_ms - used) / 1000.0); }
 	}
-	if (music != null) { music.stop(); }
+	stop_sounds();
 	print(ESC + "[0m" + ESC + "[?1049l" + ESC + "[?25h", skip_newline);
 	return 0;
 }
 
-if (OPT_MIDI != "") { write_file(OPT_MIDI, compose_soundtrack(OPT_SEED)); print("soundtrack -> " + OPT_MIDI); }
+if (OPT_MIDI != "") {
+	demo_boot(100, 40, OPT_SEED, "vm", false, false);
+	var written = write_cues(OPT_MIDI);
+	print(`${written.size()} cues -> ${OPT_MIDI}`);
+}
 else if (OPT_BENCH > 0) { run_bench(OPT_BENCH); }
 else if (OPT_SHOT >= 0) { run_shot(OPT_SHOT, OPT_AT); }
 else if (OPT_FRAMES > 0) { run_headless(OPT_FRAMES); }

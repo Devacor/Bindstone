@@ -12,6 +12,8 @@ class Scene {
 	var pal = null;
 	var rng = null;
 	float replay = 3.0;   // the sim-seconds a jump replays to arrive mid-flight
+	var cue = null;       // the scene's music (scenes/music.jai): ask it for the kick, the chord, the energy, the hits
+	int pixel_budget = 0; // when the grid holds more pixels than this, the scene renders smaller and scales up
 
 	void setup(int w_, int h_, int seed_) {
 		w = w_;
@@ -26,6 +28,10 @@ class Scene {
 	void update(float t, float dt) {}
 	void render(var& grid) {}
 	void text_rows(var& rows) {}    // glyph rows laid over the picture (the finale's credits)
+	// the scene's big moments in its own seconds (on beats or bar lines), and how big:
+	// 2 an impact with a riser into it, 1 an accent; the composer scores them
+	array<float> hit_times() { return []; }
+	array<int> hit_levels() { return []; }
 }
 
 // one HUD row: styled segments clipped to the row's width, with a second line's
@@ -64,7 +70,8 @@ class Reel {
 	bool paused = false;
 
 	int nscenes = 11;
-	var durs = [];
+	var bars = [];         // each scene's length in bars of the 124 bpm soundtrack
+	var cues = [];
 	var seed_slots = [];   // each scene seeds from its own slot, so the running order never changes a scene's frames
 	var cur = null;
 	var nxt = null;
@@ -72,8 +79,8 @@ class Reel {
 	int pending_idx = 0;
 	float scene_t = 0.0;
 	float dur_cur = 10.0;
-	float title_len = 2.4;
-	float trans_len = 1.1;
+	float title_len = MUSIC_BAR;
+	float trans_len = MUSIC_BEAT * 2.0;
 	bool in_trans = false;
 	bool finish_pending = false;
 	float trans_t = 0.0;
@@ -82,6 +89,8 @@ class Reel {
 
 	array<int> grid_a = [];
 	array<int> grid_b = [];
+	array<int> small_a = [];   // the scaled-down frames of scenes past their pixel budget
+	array<int> small_b = [];
 	array<float> melt = [];
 	var ui = null;
 	int ui_off = 0;
@@ -122,8 +131,12 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		durs = [11.0, 11.0, 12.0, 14.0, 14.0, 15.0, 15.0, 12.0, 20.0, 16.0, 94.0];
+		bars = [6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 49];
 		seed_slots = [3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 16];
+		for (int i = 0; i < nscenes; ++i) {
+			var probe = make_scene(i);
+			cues.push(Cue(bars[i], music_mood(i), seed + i * 101, probe.hit_times(), probe.hit_levels()));
+		}
 		start_scene(0, 0.0);
 	}
 
@@ -144,7 +157,46 @@ class Reel {
 	}
 
 	float dur_for(int idx) {
-		return smoke ? 3.0 : durs[idx];
+		return smoke ? 3.0 : bars[idx] * MUSIC_BAR;
+	}
+
+	// the cue that should be sounding: the incoming scene's from the moment its transition starts
+	int music_cue() { return in_trans || finish_pending ? pending_idx : cur_idx; }
+
+	// a scene at its grid, or at the largest grid within its pixel budget
+	void setup_scene(var& sc, int idx) {
+		sc.cue = cues[idx];
+		int sw = pw;
+		int sh = ph;
+		if (sc.pixel_budget > 0 && pw * ph > sc.pixel_budget) {
+			float k = math::sqrt(sc.pixel_budget * 1.0 / (pw * ph));
+			sw = itrunc(pw * k);
+			sh = itrunc(ph * k);
+		}
+		sc.setup(sw, sh, seed + seed_slots[idx] * 7919);
+	}
+
+	// render into a grid of the reel's size, scaling up a scene that renders smaller
+	void render_scene(var& sc, var& target, var& scratch) {
+		if (sc.w == pw && sc.h == ph) {
+			sc.render(target);
+			return;
+		}
+		if (scratch.size() != sc.w * sc.h) {
+			scratch = [];
+			for (int i = 0; i < sc.w * sc.h; ++i) { scratch.push(0); }
+		}
+		sc.render(scratch);
+		int sw = sc.w;
+		int sh = sc.h;
+		int idx = 0;
+		for (int y = 0; y < ph; ++y) {
+			int row = (y * sh / ph) * sw;
+			for (int x = 0; x < pw; ++x) {
+				target[idx] = scratch[row + x * sw / pw];
+				++idx;
+			}
+		}
 	}
 
 	// the presenter's string tables: current scene, incoming scene (during a
@@ -176,7 +228,7 @@ class Reel {
 	void start_scene(int idx, float at_t) {
 		cur_idx = ((idx % nscenes) + nscenes) % nscenes;
 		cur = make_scene(cur_idx);
-		cur.setup(pw, ph, seed + seed_slots[cur_idx] * 7919);
+		setup_scene(cur, cur_idx);
 		dur_cur = dur_for(cur_idx);
 		scene_t = at_t;
 		in_trans = false;
@@ -202,7 +254,7 @@ class Reel {
 	void begin_transition() {
 		pending_idx = (cur_idx + 1) % nscenes;
 		nxt = make_scene(pending_idx);
-		nxt.setup(pw, ph, seed + seed_slots[pending_idx] * 7919);
+		setup_scene(nxt, pending_idx);
 		in_trans = true;
 		trans_t = 0.0;
 		trans_kind = (trans_count + seed) % 5;
@@ -393,15 +445,15 @@ class Reel {
 		cur.update(scene_t, step);
 		if (in_trans) {
 			trans_t += step;
-			cur.render(grid_a);
+			render_scene(cur, grid_a, small_a);
 			nxt.update(trans_t, step);
-			nxt.render(grid_b);
+			render_scene(nxt, grid_b, small_b);
 			float prog = trans_t / trans_len;
 			prog = prog > 1.0 ? 1.0 : prog;
 			gfx.mix_grids(grid_a, grid_b, HB_PIX, pw, ph, trans_kind, prog, off_b, ui_off + ui_edge, melt);
 			if (trans_t >= trans_len) { finish_pending = true; }
 		} else {
-			cur.render(HB_PIX);
+			render_scene(cur, HB_PIX, small_a);
 		}
 		int trow = -1;
 		if (!in_trans && !finish_pending && scene_t < title_len) { trow = title_pixels(); }

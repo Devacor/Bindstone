@@ -230,7 +230,22 @@ class Cue {
 			int ci = (b2 / mood.chord_bars) % 4;
 			chord_root.push(mood.root + degree(prog[ci]));
 		}
-		int mel = 4;
+		// the lead's motif: two bars of rhythm and scale steps from the seed, sung over each
+		// chord from its root and varied on its repeats, so the tune has a shape to remember
+		array<int> motif_at = [];
+		array<int> motif_deg = [];
+		array<int> motif_len = [];
+		int walk = 0;
+		for (int ms = 0; ms < 32; ms += 2) {
+			int r0 = roll(16);
+			if (ms == 0 || ms == 16 || r0 < 8) {
+				walk = walk + (r0 % 5) - 2;
+				walk = walk < -2 ? -1 : (walk > 6 ? 5 : walk);
+				motif_at.push(ms);
+				motif_deg.push(walk);
+				motif_len.push(r0 < 4 ? 4 : 2);
+			}
+		}
 		for (int s = 0; s < steps; ++s) {
 			int b3 = s / 16;
 			int st = s % 16;
@@ -257,9 +272,9 @@ class Cue {
 					bass_lane.add(s, st % 4 == 0 ? 112 : 88, n, style == 3 ? 16 : 2);
 				}
 			}
-			// the pad holds the triad from each chord's first bar
+			// the pad holds the chord with its seventh from each chord's first bar
 			if (st == 0 && b3 % mood.chord_bars == 0) {
-				for (int v = 0; v < 3; ++v) { pad_lane.add(s, 60 + itrunc(e * 30.0), mood.root + 12 + degree(deg + v * 2), 16 * mood.chord_bars); }
+				for (int v = 0; v < 4; ++v) { pad_lane.add(s, (v == 3 ? 48 : 60) + itrunc(e * 30.0), mood.root + 12 + degree(deg + v * 2), 16 * mood.chord_bars); }
 			}
 			// the arpeggio climbs the chord in sixteenths once the energy is up
 			if (e > 0.55) {
@@ -268,13 +283,13 @@ class Cue {
 				int tone = pi == 3 ? degree(deg) + 12 : degree(deg + pi * 2);
 				arp_lane.add(s, 64 + (st % 4 == 0 ? 22 : 0), mood.root + 24 + tone, 1);
 			}
-			// the lead wanders the scale at the peaks
-			if (e > 0.82 && st % 2 == 0) {
-				int r = roll(16);
-				if (r < 9 || st == 0) {
-					mel = mel + (r % 3) - 1;
-					mel = mel < 0 ? 1 : (mel > 9 ? 8 : mel);
-					lead_lane.add(s, 96, mood.root + 24 + degree(mel), r < 3 ? 4 : 2);
+			// the lead sings the motif at the peaks, a step higher on every other pass
+			if (e > 0.78) {
+				int ms2 = s % 32;
+				for (int mi = 0; mi < motif_at.size(); ++mi) {
+					if (motif_at[mi] != ms2) { continue; }
+					int lift = (s / 64) % 2 == 1 && mi >= motif_at.size() / 2 ? 2 : 0;
+					lead_lane.add(s, 100, mood.root + 24 + degree(deg + motif_deg[mi] + lift), motif_len[mi]);
 				}
 			}
 		}
@@ -315,6 +330,13 @@ class Cue {
 			if (sn) { snare.add(s, 106, style == 4 ? 39 : 38, 1); }
 		}
 		if (riser_bar && st >= 8) { snare.add(s, 60 + (st - 8) * 8, 38, 1); }
+		// a fill into every fourth bar: the toms falling through the last beat
+		bool fill = !riser_bar && e > 0.5 && (s / 16) % 4 == 3 && st >= 12;
+		if (fill) {
+			var toms = [50, 48, 47, 45];
+			snare.add(s, 92 + (st - 12) * 6, toms[st - 12], 1);
+		}
+		if (e > 0.72 && (st == 4 || st == 12) && (style == 0 || style == 1 || style == 4)) { snare.add(s, 84, 39, 1); }
 		if (e > 0.3) {
 			bool sixteen = style == 4 || e > 0.85;
 			if (sixteen || st % 2 == 0) { hat.add(s, st % 4 == 0 ? 76 : 54, e > 0.7 && st % 4 == 2 ? 46 : 42, 1); }

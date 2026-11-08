@@ -1936,6 +1936,17 @@ public:
 			const std::string method = error_of(e, prelude + "parallel_for (auto& w : ws) { w.m(grid); }");
 			check_true(method.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'W::m', which writes it", 0) == 0, method);
 			check_eq((int64_t)4, e->execute(prelude + "parallel_for (auto& w : ws) { w.n(grid); } return ws[0].v + ws[1].v - 4;").as_int());
+			// a conditional's arms bind a reference only where the parameter is one: a by-value parameter reads the arm picked
+			check_eq(std::string("[34,12,18]"), e->execute(prelude + "int twice(int v) { return v * 2; } int a0 = 5; int b0 = 7;"
+			                                               " parallel_for (int i : idx) { int lo = i; int hi = i + 10; out[i] = twice(i > 0 ? lo : hi) + twice(i == 1 ? a0 : b0); }"
+			                                               " return to_json(out);").as<std::string>());
+			const std::string arm = error_of(e, prelude + "int bump(int& v) { v += 1; return v; } int a0 = 5;"
+			                                    " parallel_for (int i : idx) { int mine = 0; out[i] = bump(i > 0 ? mine : a0); }");
+			check_true(arm.rfind("parallel_for: argument passes enclosing state 'a0' to reference parameter 'v' of 'bump', which writes it", 0) == 0, arm);
+			const std::string method_arm = error_of(e, prelude + "parallel_for (auto& w : ws) { array<int> mine = [1]; w.m(w.v > 0 ? mine : grid); }");
+			check_true(method_arm.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'W::m', which writes it", 0) == 0, method_arm);
+			const std::string cast = error_of(e, prelude + "parallel_for (int i : idx) { out[i] = cast<int&>(grid[i]); }");
+			check_true(cast.rfind("parallel_for: cast<T&> is not allowed in a parallel body at 7:", 0) == 0, cast);
 		});
 
 		test("a_loop_variable_a_reference_parameter_writes_is_written", [this]() {
@@ -1954,6 +1965,13 @@ public:
 			check_true(function.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, function);
 			const std::string method = error_of(e, prelude + "parallel_for (auto& b, int i : bs, idx) { b.reset(i); out[i] = 1; }");
 			check_true(method.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, method);
+			const std::string arm = error_of(e, prelude + "parallel_for (int i : idx) { int other = 0; zero(i > 3 ? i : other); out[i] = out[i] + 1; }");
+			check_true(arm.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, arm);
+			const std::string method_arm = error_of(e, prelude + "parallel_for (auto& b, int i : bs, idx) { int other = 0; b.reset(i > 3 ? i : other); out[i] = 1; }");
+			check_true(method_arm.rfind("parallel_for: body writes enclosing state 'out' at an index the body changes at 6:", 0) == 0, method_arm);
+			// a by-value element a conditional's arm hands a writing T& is the iteration's copy, never the array's slot
+			check_eq(std::string("[1,2,3,4,5,6,7,8]"), e->execute(prelude + "array<int> vals = [1, 2, 3, 4, 5, 6, 7, 8];"
+			                                                      " parallel_for (int v : vals) { int other = 0; zero(v > 2 ? v : other); } return to_json(vals);").as<std::string>());
 			check_eq(std::string("[1,2,3,4,5,6,7,8]"), e->execute(prelude + "parallel_for (int i : idx) { out[i] = peek(i) + 1; } return to_json(out);").as<std::string>());
 			// a callee's own variable of the loop variable's name is not the loop variable
 			check_eq(std::string("[0,0,1,3,6,10,15,21]"), e->execute(prelude + "int sum_below(int x) { int s = 0; for (int i = 0; i < x; i++) { s += i; } return s; }"

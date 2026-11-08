@@ -1149,7 +1149,9 @@ namespace {
 		}
 		// A loop variable handed to a reference parameter that writes it is written
 		void note_loop_variable_reference_argument(const expression_ptr& arg) {
-			if (loop_variable_position(arg.get()) != SIZE_MAX) { note_loop_variable_write(static_cast<const identifier_expr*>(arg.get())); }
+			for_each_bound_arm(arg, [&](const expression_ptr& arm) {
+				if (loop_variable_position(arm.get()) != SIZE_MAX) { note_loop_variable_write(static_cast<const identifier_expr*>(arm.get())); }
+			});
 		}
 
 		// After the walk: an index-written name is touched as out[i] alone, with one loop variable the body never writes
@@ -1187,7 +1189,9 @@ namespace {
 					enclosing |= uint64_t(1) << i;
 					if (!enclosing_site) { enclosing_site = root; }
 				}
-				if (const size_t position = loop_variable_position(call->arguments[i].get()); position != SIZE_MAX) { loop_variables.emplace_back(i, position); }
+				for_each_bound_arm(call->arguments[i], [&](const expression_ptr& arm) {
+					if (const size_t position = loop_variable_position(arm.get()); position != SIZE_MAX) { loop_variables.emplace_back(i, position); }
+				});
 			}
 			for (auto& rec : adm.element_method_calls) {
 				if (rec.name_id != name_id) { continue; }
@@ -1285,7 +1289,32 @@ namespace {
 
 		// The enclosing identifier at the root of a bare name or a [ ]-chain
 		// (nullptr when the expression roots elsewhere or at a local)
+		// Each place a reference argument can bind: the expression, or each storage arm of a conditional the parser bound
+		template<typename Visit>
+		static void for_each_bound_arm(const expression_ptr& a_expr, Visit&& a_visit) {
+			if (!a_expr || a_expr->get_type() != node_type::ternary_expr) {
+				a_visit(a_expr);
+				return;
+			}
+			auto* conditional = static_cast<const ternary_expr*>(a_expr.get());
+			for (const expression_ptr* arm : {&conditional->then_expression, &conditional->else_expression}) {
+				if ((*arm)->get_type() == node_type::ternary_expr) {
+					for_each_bound_arm(*arm, a_visit);
+				} else if ((*arm)->get_type() == node_type::cast_expr && static_cast<const cast_expr*>(arm->get())->binding_ref) {
+					for_each_bound_arm(static_cast<const cast_expr*>(arm->get())->operand, a_visit);
+				}
+			}
+		}
+
 		identifier_expr* enclosing_root(const expression_ptr& e) const {
+			identifier_expr* result = nullptr;
+			for_each_bound_arm(e, [&](const expression_ptr& arm) {
+				if (!result) { result = enclosing_storage_root(arm); }
+			});
+			return result;
+		}
+
+		identifier_expr* enclosing_storage_root(const expression_ptr& e) const {
 			const expression* cur = e.get();
 			while (cur) {
 				if (cur->get_type() == node_type::identifier_expr) {
@@ -2338,6 +2367,8 @@ namespace {
 				return walk_expr(static_cast<throw_expr*>(e.get())->value);
 			case node_type::cast_expr: {
 				auto* n = static_cast<cast_expr*>(e.get());
+				// a conditional's arm where a reference may bind reads as a value here; a T& it binds is checked where it binds
+				if (n->binding_ref && !proof_mode) { return walk_expr(n->operand); }
 				if (n->by_reference) { return fail(e.get(), "cast<T&> is not allowed in a parallel body"); }
 				if (proof_mode && conversion_may_run_code(n->target, n->operand)) { root_escaped = true; }
 				note_converting_construction(n->target, n->operand, n);

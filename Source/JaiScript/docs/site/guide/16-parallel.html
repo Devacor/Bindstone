@@ -239,7 +239,7 @@ parallel_for: method 'scale' of 'Vec3' writes its object, and captured 'sun' is 
 <li>compound stores</li>
 <li><code>g.push(...)</code> (any mutating or unrecognized method on a captured value)</li>
 <li><code>var&amp; r = g</code> aliases</li>
-<li>passing captured state to a non-const reference parameter (a <code>const T&amp;</code> one reads it, above)</li>
+<li>passing captured state to a non-const reference parameter (a <code>const T&amp;</code> one reads it, above), directly or as an arm of <code>c ? a : b</code>; a conditional passed to a by-value parameter just reads the arm it picks</li>
 <li><code>for (auto&amp; v : g)</code>.</li>
 </ul>
 <p>A captured object is read-only like any captured value: <code>cam.x = 1.0</code> raises <code>parallel_for: member store reaches captured state 'cam' (captured reads are read-only) at 4:45</code>. Per-element object state goes through the arrays. Calls to other script functions (including recursion) and builtin container/string methods are fine.</p>

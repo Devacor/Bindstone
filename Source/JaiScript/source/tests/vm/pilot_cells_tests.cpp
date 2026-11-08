@@ -1338,19 +1338,19 @@ public:
 		test("open_loops_are_named_by_class_and_first_instruction", [this]() {
 			// the translation's refusals are recorded per loop: a call is an effect (a break and a string append are not: both close),
 			// a member read of a frame-slot instance is a load site, a tree deeper than
-			// the lift's node cap (21 binary nodes: the lifted part pushes a fused binary and the general BINARY consumes it) is a translation gap
+			// the lift's temp cap (a right-deep tree 20 levels deep, its left sides counted held: the lifted part pushes and the general BINARYs consume it) is a translation gap
 			const std::string listing = listing_of(
 				"var g = function(int x) { return x; }; class P { int v = 1; }"
 				" var f1 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + g(i); i = i + 1; } return acc; };"
 				" var f2 = function(int n) { int acc = 0; int i = 0; while (i < n) { if (i == 3) { break; } acc = acc + i; i = i + 1; } return acc; };"
 				" var f3 = function(int n) { string s = \"\"; int i = 0; while (i < n) { s += \"x\"; i = i + 1; } return s; };"
 				" var f4 = function(int n, P p) { int acc = 0; int i = 0; while (i < n) { acc = acc + p.v; i = i + 1; } return acc; };"
-				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i + i; acc = acc + v; i = i + 1; } return acc; };"
+				" var f5 = function(int n) { int acc = 0; int i = 0; while (i < n) { int v = i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i + (i)))))))))))))))))))); acc = acc + v; i = i + 1; } return acc; };"
 				" var f6 = function(int n) { int acc = 0; int i = 0; while (i < n) { acc = acc + to_string(i).size(); i = i + 1; } return acc; };");
 			check_true(listing.find("-- open loop") != std::string::npos, "refusals listed: " + listing);
 			check_true(listing.find(": effect at") != std::string::npos, "the method call on a call's result is an effect, its loop too thin for a boundary: " + listing);
 			check_true(listing.find("CALL_TEMP") != std::string::npos && listing.find("C_PROBE") != std::string::npos, "the call the sum consumes lands in a temp and its loop closes through the door: " + listing);
-			check_true(listing.find(": translation at") != std::string::npos && listing.find("(BINARY_FUSED)") != std::string::npos, "the tree past the lift's cap is a translation gap (the pushing fused binary the stack binary consumes; as a boundary it would be most of the body): " + listing);
+			check_true(listing.find(": translation at") != std::string::npos && listing.find("BINARY op=") != std::string::npos, "the tree past the lift's cap is a translation gap (the lifted part pushes, the stack binaries consume it; as a boundary it would be most of the body): " + listing);
 			check_true(listing.find("C_MLOAD") != std::string::npos && listing.find("(MEMBER_TEMP)") == std::string::npos, "the member read of a frame-slot instance is a load site and its loop closes: " + listing);
 		});
 		test("head_spans_the_math_family_and_untyped_compounds_close", [this]() {

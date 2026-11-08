@@ -31,6 +31,8 @@ float DN_GLINT = 0.0;        // the sweep's level
 float DN_RIM = 0.0;          // rim light level
 float DN_STAGE = 1.0;        // the set's light level
 float DN_DRIFT = 0.0;        // bokeh drift
+float DN_FALL = 0.0;         // the donut storm's fall
+int DN_STORM = 4;            // how many of every eight backdrop cells hold a falling donut
 float DN_FLOOR = -3.4;
 float DN_POP = 0.0;          // how far the sprinkles stand off the icing beyond their rest
 int DN_W = 0;
@@ -239,21 +241,23 @@ function donut_backdrop(float dx, float dy, float dz) -> int {
 	int b = 0;
 	if (dy > 0.05) {
 		float az = math::atan2(dx, dz) * 4.0 + DN_DRIFT;
-		float el = dy * 4.0;
+		float el = dy * 4.0 + DN_FALL;
 		int ca = math::ifloor(az);
 		int ce = math::ifloor(el);
 		int hs = ((ca * 92837111 + ce * 689287499 + DN_SEED) & 1048575) * 1274126177;
-		if (((hs >> 10) & 7) < 4) {
+		if (((hs >> 10) & 7) < DN_STORM) {
 			float jx = ((hs >> 4) & 15) / 15.0 * 0.4 + 0.3;
 			float jy = ((hs >> 14) & 15) / 15.0 * 0.4 + 0.3;
 			float ex = az - ca - jx;
 			float ey = el - ce - jy;
 			float rr = 0.14 + ((hs >> 18) & 7) * 0.028;
 			float q = (ex * ex + ey * ey) / (rr * rr);
-			if (q < 1.0) {
-				// a lens disc: flat, a touch brighter at the rim, feathered at the edge
+			if (q < 1.0 && q > 0.22) {
+				// an out-of-focus donut falling past: a soft ring, brighter at its outer rim,
+				// feathered at both edges
 				float lit = 0.55 + (q > 0.7 ? (q - 0.7) * 1.2 : 0.0) + ((hs >> 21) & 3) * 0.12;
 				if (q > 0.88) { lit *= (1.0 - q) / 0.12; }
+				if (q < 0.34) { lit *= (q - 0.22) / 0.12; }
 				b = 1 + itrunc(lit * DN_STAGE * 7.0);
 				b = b > 8 ? 8 : b;
 				b += ((hs >> 24) % 3) * 8;
@@ -381,6 +385,61 @@ class Donut : Scene {
 		tt = t;
 	}
 
+	// the sprinkle bursts: each a set of sprinkles flung off the icing at one moment, every
+	// one a closed-form arc from its spawn (out, up, then down under gravity), so a jump or a
+	// replay lands on exactly the same sprinkles; the landing and the big accent are bursts of
+	// 90, every beat between a puff of 12
+	void draw_sprinkles(var& grid, float t) {
+		array<float> born = [MUSIC_BAR, MUSIC_BAR * 4.0];
+		array<int> counts = [90, 90];
+		for (int b = 0; b < 15; ++b) {
+			born.push(MUSIC_BAR + MUSIC_BEAT * (b + 1));
+			counts.push(12);
+		}
+		float sc = 1.5 / (w * DN_ZOOM);
+		for (int k = 0; k < born.size(); ++k) {
+			float age = t - born[k];
+			if (age < 0.0 || age > 1.8) { continue; }
+			int n = counts[k];
+			for (int i = 0; i < n; ++i) {
+				int hs = ((k * 7919 + i * 104729 + DN_SEED * 31) & 1048575) * 1274126177;
+				float a = ((hs >> 4) & 1023) / 1023.0 * 6.2831853;
+				float out = 2.0 + ((hs >> 14) & 63) / 63.0 * 0.6;
+				float sp = (counts[k] > 20 ? 1.3 : 0.9) + ((hs >> 20) & 31) / 31.0 * 1.6;
+				float up = (counts[k] > 20 ? 5.6 : 3.4) + ((hs >> 9) & 31) / 31.0 * 2.6;
+				float px = math::cos(a) * (out + sp * age);
+				float pz = math::sin(a) * (out + sp * age);
+				float py = 0.7 + up * age - 4.9 * age * age;
+				float vx = math::cos(a) * sp;
+				float vz = math::sin(a) * sp;
+				float vy = up - 9.8 * age;
+				if (py < DN_FLOOR) { continue; }
+				int mat = 3 + (hs >> 26) % 5;
+				int ink = DN_MAT + mat * 64 + 15 * 4 + (age < 0.3 ? 2 : 1);
+				// the head and a short tail along the velocity, projected through the camera
+				for (int q = 0; q < 3; ++q) {
+					float back = q * 0.025;
+					float wx = px - vx * back - DN_CX;
+					float wy = py - vy * back - DN_CY;
+					float wz = pz - vz * back - DN_CZ;
+					float z = wx * DN_FX + wy * DN_FY + wz * DN_FZ;
+					if (z < 0.6) { continue; }
+					float u = (wx * DN_RX + wy * DN_RY + wz * DN_RZ) / z;
+					float v = (wx * DN_UX + wy * DN_UY + wz * DN_UZ) / z;
+					int sx = itrunc(u / sc + w * 0.5);
+					int sy = itrunc(h * 0.5 - v / sc);
+					if (sx < 0 || sx >= w - 1 || sy < 0 || sy >= h - 1) { continue; }
+					int c = q == 0 ? ink : ink - 8;
+					grid[sy * w + sx] = c;
+					if (q == 0) {
+						grid[sy * w + sx + 1] = c;
+						grid[(sy + 1) * w + sx] = c - 4;
+					}
+				}
+			}
+		}
+	}
+
 	float smooth(float a, float b, float t) {
 		float k = (t - a) / (b - a);
 		k = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
@@ -445,7 +504,10 @@ class Donut : Scene {
 		DN_FX = fx; DN_FY = fy; DN_FZ = fz;
 		DN_RX = rx; DN_RY = 0.0; DN_RZ = rz;
 		DN_UX = rz * fy; DN_UY = rx * fz - rz * fx; DN_UZ = 0.0 - rx * fy;
-		DN_ZOOM = 1.0 + kick * 0.04;
+		// the push in is a dolly zoom: the lens widens as the camera closes, so the donut holds its
+		// size and the set behind it stretches away
+		float vertigo = smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.5, t) * (1.0 - smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 4.6, t));
+		DN_ZOOM = (1.0 + kick * 0.04) * (1.0 - 0.3 * vertigo);
 		// the lights: dark through the title bar with a glint tracing the silhouette, the key
 		// slamming on at the landing with a flash, then pumping with the kick
 		float flash = landed ? math::pow(2.718281828, 0.0 - after * 5.0) : 0.0;
@@ -472,6 +534,8 @@ class Donut : Scene {
 		DN_SY = DN_M10 * gx + DN_M11 * gy + DN_M12 * gz;
 		DN_SZ = DN_M20 * gx + DN_M21 * gy + DN_M22 * gz;
 		DN_DRIFT = t * 0.12;
+		DN_FALL = t * 0.55 + (landed ? kick * 0.04 : 0.0);
+		DN_STORM = landed ? (energy > 0.85 ? 6 : 5) : 2;
 		DN_W = w;
 		DN_H = h;
 		DN_MAT = mat0;
@@ -489,5 +553,6 @@ class Donut : Scene {
 				++idx;
 			}
 		}
+		draw_sprinkles(grid, t);
 	}
 }

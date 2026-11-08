@@ -490,19 +490,24 @@ class Lava : Scene {
 	int sets = 3;
 	float tt = 0.0;
 
-	// the camera's marks, one on every bar line: eye, the point it looks at, roll
-	array<float> key_ex = [0.0, 0.07, 0.62, 2.6, 3.5, 3.48, 3.96];
-	array<float> key_ey = [0.52, 0.56, 0.72, 3.3, 0.36, 0.62, 0.5];
-	array<float> key_ez = [-0.22, -0.34, -1.45, -3.1, 0.45, 3.25, 3.81];
-	array<float> key_lx = [0.0, 0.0, 0.0, 1.2, 3.5, 4.0, 4.0];
-	array<float> key_ly = [0.5, 0.5, 0.45, 0.25, 0.5, 0.5, 0.5];
-	array<float> key_lz = [0.2, 0.0, 0.0, 1.6, 4.0, 4.0, 4.2];
-	array<float> key_roll = [0.0, 0.12, -0.28, 0.42, -0.62, 1.2, 2.3];
+	// the camera's marks, one on every bar line: eye, the point it looks at, roll; the
+	// skim between the rows takes two bars, the dive lands on bar 7 and its close-up
+	// holds through the last bar
+	array<float> key_ex = [0.0, 0.07, 0.62, 2.6, 3.5, 3.5, 3.48, 3.96, 3.98];
+	array<float> key_ey = [0.52, 0.56, 0.72, 3.3, 0.36, 0.42, 0.62, 0.5, 0.5];
+	array<float> key_ez = [-0.22, -0.34, -1.45, -3.1, 0.45, 1.9, 3.25, 3.81, 3.84];
+	array<float> key_lx = [0.0, 0.0, 0.0, 1.2, 3.5, 3.8, 4.0, 4.0, 4.0];
+	array<float> key_ly = [0.5, 0.5, 0.45, 0.25, 0.5, 0.5, 0.5, 0.5, 0.5];
+	array<float> key_lz = [0.2, 0.0, 0.0, 1.6, 4.0, 4.0, 4.0, 4.2, 4.2];
+	array<float> key_roll = [0.0, 0.12, -0.28, 0.42, -0.62, 0.2, 1.2, 2.3, 2.4];
 
 	// the budget is set before setup, which is when the reel reads it
 	Lava() { pixel_budget = 17000; }
 
-	array<float> hit_times() override { return [MUSIC_BAR * 2.0, MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 5.0]; }
+	// eight bars: the dive completes on bar 7 and the close-up holds a whole bar
+	int length_bars() override { return 8; }
+
+	array<float> hit_times() override { return [MUSIC_BAR * 2.0, MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
 	array<int> hit_levels() override { return [1, 2, 1, 2]; }
 
 	void build() override {

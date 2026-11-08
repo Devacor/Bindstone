@@ -257,9 +257,9 @@ about 22 ms; at 120x40 sextants with rows drawn in parallel the runner holds 29 
 30 fps through every scene's heaviest bars.
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the eleven scene entries: shim stream hash `3334852713` on
+  every one of the eleven scene entries: shim stream hash `166873055` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `18dfa83f8938b358` (the host's HUD
+  `a2d04624f10d4140` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel

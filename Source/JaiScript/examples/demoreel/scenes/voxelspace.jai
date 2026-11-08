@@ -17,8 +17,12 @@
 // lit by the setting sun. The camera skims the river between the walls, banks
 // hard through the bends, climbs out over the rim through bar three to the reveal
 // on bar four's downbeat (the sun flaring with the hit) and dives back in from bar
-// six to skim the river home through the last bars, nodding on the kick and
-// leaning on the snare all the way. Over the
+// six to skim the river home. From bar nine the gorge pinches into a slot canyon
+// between towering shadowed walls, its river racing white for a lip; on bar
+// eleven's downbeat the drone shoots over the falls into a wide basin and drops to
+// skim a lake mirroring the sky, then climbs out of the basin and turns into the
+// sun as it blazes over the rim. The kick nods the nose and punches the lens in,
+// the snare leans the drone, each hit punches harder. Over the
 // terrain: dust streaks rushing past the lens (longer with speed, pumping on the
 // kick), a flock of birds beating across the sky, and on each hit a fan of god rays
 // bursting from the sun across the sky.
@@ -31,6 +35,9 @@ float CR_LX = 0.0;          // toward the sun: horizontal unit vector, elevation
 float CR_LY = 1.0;          // and the height gained per texel along it
 float CR_LZ = 0.3;
 float CR_RISE = 1.4;
+int CR_LAKE = 14;           // the lake below the falls: its water level
+int CR_LIP = 424;           // the row where the slot canyon ends and the river falls into the lake
+int CR_SHORE = 508;         // the row past the lake's far shore where the river runs on
 
 // one row of the colormap: material * 8 + light level 0..7
 function canyon_light_row(int y) -> array<int> {
@@ -87,8 +94,9 @@ function canyon_light_row(int y) -> array<int> {
 		int warp = itrunc(14.0 * math::sin(x * 0.036 + y * 0.024) + 7.0 * math::sin(x * 0.095 - y * 0.065));
 		int layer = ((hv * 4 + warp + 400) / 38) % 10;
 		int mat = 4 + layer;
-		if (ad < 10) { mat = 0; }
-		else if (ad < 15) { mat = 1; }
+		if (ad < 10 && y >= CR_LIP - 10 && y < CR_LIP && hv > CR_LAKE) { mat = 15; }   // whitewater racing for the lip
+		else if ((ad < 10 && (y < CR_LIP || y >= CR_SHORE)) || hv <= CR_LAKE) { mat = 0; }
+		else if (ad < 15 || hv < CR_LAKE + 9) { mat = 1; }
 		else if (hv > 236) { mat = 15; }
 		else if (slope < 0.32 && hv < 92) { mat = 2; }
 		else if (slope < 0.36 && hv >= 172) { mat = 14; }
@@ -311,12 +319,20 @@ class CanyonRun : Scene {
 			CR_RIV.push(itrunc(256.0 + 104.0 * math::sin(ry * 0.01227184630 + ph1) + 44.0 * math::sin(ry * 0.03681553891 + ph2)));
 		}
 		// carve a U-shaped gorge 68 texels wide down to the floor, lift the land
-		// around it, then terrace: flat benches broken by steep risers
+		// around it, then terrace: flat benches broken by steep risers. Toward the end
+		// of the loop the gorge pinches into a slot canyon between towering walls that
+		// ends at a lip where the river falls into a lake in a wide basin
+		int lake_x = CR_RIV[462];
 		for (int cy = 0; cy < n; ++cy) {
 			int rc = CR_RIV[cy];
 			int rowc = cy * n;
+			float slot = (cy - 250.0) / 50.0;
+			slot = cy >= CR_LIP + 4 ? 0.0 : (slot < 0.0 ? 0.0 : (slot > 1.0 ? 1.0 : slot * slot * (3.0 - 2.0 * slot)));
+			float ly = (cy - 462.0) / 38.0;
+			ly = ly < 0.0 ? -ly : ly;
 			for (int cx = 0; cx < n; ++cx) {
-				float hv = 60.0 + (hm[rowc + cx] - hmin) * 196.0 / range;
+				float hv0 = 60.0 + (hm[rowc + cx] - hmin) * 196.0 / range;
+				float hv = hv0;
 				int dxr = cx - rc;
 				dxr = dxr > 256 ? dxr - 512 : dxr;
 				dxr = dxr < -256 ? dxr + 512 : dxr;
@@ -327,6 +343,27 @@ class CanyonRun : Scene {
 					f = math::pow(f, 0.7);
 					hv = 40.0 + (hv - 40.0) * f;
 				}
+				if (slot > 0.0) {
+					float wall = hv0 + 80.0;
+					wall = wall > 250.0 ? 250.0 : wall;
+					float sh = wall;
+					if (ad < 12.0) { sh = 40.0; }
+					else if (ad < 20.0) { sh = 40.0 + (wall - 40.0) * math::pow((ad - 12.0) / 8.0, 0.6); }
+					hv += (sh - hv) * slot;
+				}
+				if (ly < 1.2) {
+					// the basin: a rounded lake, its shore climbing back to the land in a cliff
+					int dxl = cx - lake_x;
+					dxl = dxl > 256 ? dxl - 512 : dxl;
+					dxl = dxl < -256 ? dxl + 512 : dxl;
+					float lx = (dxl < 0 ? 0 - dxl : dxl) / 130.0;
+					float q = lx * lx * lx + ly * ly * ly;
+					if (q < 1.7) {
+						float sf = (q - 1.0) / 0.7;
+						sf = sf < 0.0 ? 0.0 : sf * sf * (3.0 - 2.0 * sf);
+						hv = CR_LAKE + (hv - CR_LAKE) * sf;
+					}
+				}
 				float tf = hv / 23.0;
 				float fl = math::floor(tf);
 				float fr = tf - fl;
@@ -335,13 +372,18 @@ class CanyonRun : Scene {
 				float terr = (fl + rs) * 23.0;
 				hv = hv * 0.3 + terr * 0.7;
 				int hi = itrunc(hv);
+				hi = hv <= CR_LAKE + 0.5 ? CR_LAKE : hi;
 				hm[rowc + cx] = hi < 0 ? 0 : (hi > 255 ? 255 : hi);
 			}
 		}
 		// the river's water sits flat in the channel
 		for (int wy = 0; wy < n; ++wy) {
+			if (wy >= CR_LIP && wy < CR_SHORE) { continue; }
 			int rcw = CR_RIV[wy];
-			for (int wd = -10; wd <= 10; ++wd) { hm[wy * n + ((rcw + wd) & mm)] = 40; }
+			for (int wd = -10; wd <= 10; ++wd) {
+				int wi = wy * n + ((rcw + wd) & mm);
+				if (hm[wi] > CR_LAKE) { hm[wi] = 40; }
+			}
 		}
 		CR_H = hm;
 		// the blur for occlusion: a separable 17-wide box by running sums, wrapping
@@ -419,23 +461,33 @@ class CanyonRun : Scene {
 		}
 	}
 
-	int length_bars() override { return 9; }
-	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
-	array<int> hit_levels() override { return [2, 1]; }
+	int length_bars() override { return 12; }
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, MUSIC_BAR * 9.0, MUSIC_BAR * 11.0]; }
+	array<int> hit_levels() override { return [2, 1, 1, 2]; }
+
+	float ease(float a, float b, float t) {
+		float k = (t - a) / (b - a);
+		k = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
+		return k * k * (3.0 - 2.0 * k);
+	}
 
 	// the drone's altitude plan: skim the river, climb out over the rim through bar
-	// three for the reveal on bar four, dive back into the gorge from bar six, skim again
+	// three for the reveal on bar four, dive back into the gorge from bar six, skim again,
+	// thread the slot canyon from bar nine, drop over the falls on bar eleven's downbeat
+	// to skim the lake, and rise into the sunset at the end
 	float plan_alt(float t) {
 		float lo = 60.0 + 8.0 * math::sin(t * 1.3);
 		float hi = 330.0;
-		float up = (t - MUSIC_BAR * 3.0) / MUSIC_BAR;
-		up = up < 0.0 ? 0.0 : (up > 1.0 ? 1.0 : up);
-		up = up * up * (3.0 - 2.0 * up);
-		float down = (t - MUSIC_BAR * 6.0) / MUSIC_BAR;
-		down = down < 0.0 ? 0.0 : (down > 1.0 ? 1.0 : down);
-		down = down * down * (3.0 - 2.0 * down);
-		return lo + (hi - lo) * up * (1.0 - down);
+		float up = ease(MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, t);
+		float down = ease(MUSIC_BAR * 6.0, MUSIC_BAR * 7.0, t);
+		float result = lo + (hi - lo) * up * (1.0 - down);
+		float lake = ease(MUSIC_BAR * 11.0, MUSIC_BAR * 11.4, t);
+		result += (34.0 - result) * lake;
+		return result + ease(MUSIC_BAR * 11.45, MUSIC_BAR * 12.0, t) * 270.0;
 	}
+
+	// how far the drone has turned from the river into the sun, climbing out of the basin
+	float sun_turn(float t) { return ease(MUSIC_BAR * 11.55, MUSIC_BAR * 12.0, t); }
 
 	float path_x(float u, float t) {
 		return 256.0 + 104.0 * math::sin(u * 0.01227184630 + ph1) + 44.0 * math::sin(u * 0.03681553891 + ph2) + 4.0 * math::sin(t * 0.6 + 0.8);
@@ -455,6 +507,15 @@ class CanyonRun : Scene {
 		float dl = math::sqrt(ddx * ddx + ahead * ahead);
 		dirx = ddx / dl;
 		diry = ahead / dl;
+		// out over the lake the drone turns into the sun as it climbs
+		float sunward = sun_turn(t);
+		if (sunward > 0.0) {
+			float hx = dirx + (CR_LX - dirx) * sunward;
+			float hy = diry + (CR_LY - diry) * sunward;
+			float hl = math::sqrt(hx * hx + hy * hy);
+			dirx = hx / hl;
+			diry = hy / hl;
+		}
 		planex = 0.0 - diry * 0.9;
 		planey = dirx * 0.9;
 		// bank into the turn: roll target from the heading's turn rate
@@ -464,7 +525,7 @@ class CanyonRun : Scene {
 			rt = rt > 0.55 ? 0.55 : rt;
 			rt = rt < -0.55 ? -0.55 : rt;
 			// a lean on the snare, to the left one bar and the right the next
-			if (cue != null) { rt += cue.snare_env(t) * 0.06 * ((math::ifloor(t / MUSIC_BAR) & 1) == 0 ? 1.0 : -1.0); }
+			if (cue != null) { rt += cue.snare_env(t) * 0.09 * ((math::ifloor(t / MUSIC_BAR) & 1) == 0 ? 1.0 : -1.0); }
 			float mixr = dt * 3.6;
 			mixr = mixr > 1.0 ? 1.0 : mixr;
 			roll += (rt - roll) * mixr;
@@ -475,6 +536,11 @@ class CanyonRun : Scene {
 		int g0 = CR_H[((ifloor(posy) & mmask) * msz) + (ifloor(posx) & mmask)];
 		int g1 = CR_H[((ifloor(posy + diry * 16.0) & mmask) * msz) + (ifloor(posx + dirx * 16.0) & mmask)];
 		int g2 = CR_H[((ifloor(posy + diry * 40.0) & mmask) * msz) + (ifloor(posx + dirx * 40.0) & mmask)];
+		if (t > MUSIC_BAR * 8.5) {
+			// in the slot the clearance is read along the river itself, never off a bend into a wall
+			g1 = CR_H[((ifloor(posy + 16.0) & mmask) * msz) + (ifloor(path_x(u + 16.0, t)) & mmask)];
+			g2 = CR_H[((ifloor(posy + 40.0) & mmask) * msz) + (ifloor(path_x(u + 40.0, t)) & mmask)];
+		}
 		int gm = g0 > g1 ? g0 : g1;
 		gm = g2 > gm ? g2 : gm;
 		float targ = plan_alt(t);
@@ -493,10 +559,14 @@ class CanyonRun : Scene {
 		float pit = climb * 0.0019;
 		pit = pit > 0.16 ? 0.16 : pit;
 		pit = pit < -0.24 ? -0.24 : pit;
-		float nod = cue != null ? cue.kick_env(t) * 0.014 : 0.0;
-		horizon = itrunc(h * (0.36 + pit + nod));
-		// the dust rushes at the lens; a mote that passes it is born again far ahead
 		float kick = cue != null ? cue.kick_env(t) : 0.0;
+		float nod = kick * 0.024;
+		horizon = itrunc(h * (0.36 + pit + nod));
+		// the kick punches the lens in
+		float lens = 0.9 * (1.0 - kick * 0.07 - (cue != null ? cue.hit(t) * 0.08 : 0.0));
+		planex = 0.0 - diry * lens;
+		planey = dirx * lens;
+		// the dust rushes at the lens; a mote that passes it is born again far ahead
 		for (int m = 0; m < dust_z.size(); ++m) {
 			dust_z[m] = dust_z[m] - dt * (0.9 + kick * 0.6);
 			if (dust_z[m] < 0.04) { dust_z[m] = dust_z[m] + 1.0; }
@@ -641,7 +711,10 @@ class CanyonRun : Scene {
 		float cz = hh * 0.085 * 260.0 * 0.25;
 		float cu0 = posx * 0.25 + tt * 1.6;
 		float cv0 = posy * 0.25 + tt * 0.7;
+		// the sun flares with each hit and blazes as the drone turns into it at the end
 		float flare = cue != null ? cue.hit(tt) : 0.0;
+		float blaze = sun_turn(tt) * 0.75;
+		flare = blaze > flare ? blaze : flare;
 		float sr = hh * 0.065 * (1.0 + flare * 0.8);
 		float halo = 5.5 + flare * 9.0;
 		float syf = horiz - hh * 0.10;

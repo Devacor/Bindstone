@@ -80,7 +80,7 @@ class Pipes : Scene {
 	void build() override {
 		name = "PIPEDREAM";
 		handle = "screensaver seance . watch for the jackodile";
-		replay = 14.0;
+		replay = 16.0;
 		cells = gfx.make_grid(gw * gh * gd);
 		pgrid = gfx.make_grid(w * h);
 		pz = gfx.make_fgrid(w * h);
@@ -254,6 +254,9 @@ class Pipes : Scene {
 
 	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
 	array<int> hit_levels() override { return [2, 1, 2]; }
+	// eight bars: the second generation fills on bar 6 and its glint, flash and the finished
+	// sculpture hold two bars before the cut
+	int length_bars() override { return 8; }
 
 	void update(float t, float dt) override {
 		tt = t;

@@ -100,6 +100,7 @@ jaiscript demoreel.jai -- shot 8 at 4 dump P    # one frame of scene 8 at scene 
 jaiscript demoreel.jai -- midi cues          # write the soundtrack's cues (one MIDI file a scene) and exit
 jaiscript demoreel.jai -- video frames every 2   # the whole reel's frames as 24-bit text, with the cues, for a video
 jaiscript demoreel.jai -- music 0            # the reel, silent
+jaiscript demoreel.jai -- frames 90 w 120 scene 10 workers 1   # headless with rows drawn in parallel (the reel's default from 100 columns)
 ```
 
 The soundtrack is procedural and the scenes hear it (`scenes/music.jai`). At boot

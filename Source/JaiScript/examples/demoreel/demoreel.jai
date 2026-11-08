@@ -24,6 +24,7 @@
 //   jaiscript demoreel.jai -- midi DIR            write the soundtrack's cues (one MIDI file a scene) and exit
 //   jaiscript demoreel.jai -- video DIR every N   the whole reel's frames (every Nth, 24-bit text) and its cues
 //   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent) | pix half|sext|auto
+//               | workers 0|1 (rows in parallel; the reel's default: on at 100 columns or more, off headless)
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
 
 // ---------------------------------------------------------------- host API ---
@@ -127,6 +128,7 @@ var OPT_ASCII = false;
 var OPT_PIX = "";
 var OPT_VIDEO = "";
 var OPT_EVERY = 2;
+var OPT_WORKERS = -1;       // -1 = the run's default
 
 for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	string k = ARGS[i];
@@ -149,7 +151,8 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	else if (k == "pix") { OPT_PIX = v; }
 	else if (k == "video") { OPT_VIDEO = v; }
 	else if (k == "every") { OPT_EVERY = v.to_int(); }
-	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii/pix/video/every)`); }
+	else if (k == "workers") { OPT_WORKERS = v.to_int(); }
+	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii/pix/video/every/workers)`); }
 }
 // the density map reads two pixels a cell
 demo_pixels(OPT_ASCII ? "half" : OPT_PIX);
@@ -165,10 +168,12 @@ function run_headless(int frames) -> int {
 	float dt = 1.0 / 30.0;
 	demo_boot(w, h, OPT_SEED, "vm", true, false);
 	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, 5.0); }
+	HB_WORKERS = OPT_WORKERS > 0 ? 1 : 0;
 	print(format("demoreel shim headless: {0} frames @ {1}x{2}, seed {3}, dt {4}", frames, w, h, OPT_SEED, dt));
 	int hash = 0;
 	int total_bytes = 0;
 	int min_len = 0; int max_len = 0;
+	int text_frames = 0;
 	time::stopwatch run;
 	time::stopwatch render;
 	run.start();
@@ -176,6 +181,7 @@ function run_headless(int frames) -> int {
 		render.resume();
 		string frame = demo_frame(f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
 		render.pause();
+		if (TXT_USED) { ++text_frames; }
 		int len = frame.size();
 		total_bytes += len;
 		if (f == 0 || len < min_len) { min_len = len; }
@@ -189,6 +195,7 @@ function run_headless(int frames) -> int {
 	int elapsed = run.elapsed() * 1000;
 	print(format("frames {0} | bytes {1} (len {2}..{3}) | stream hash {4} | {5} ms total, {6} ms/frame incl. hashing, {7} ms/frame render",
 		frames, total_bytes, min_len, max_len, hash, elapsed, (elapsed * 1.0) / frames, render.elapsed() * 1000 / frames));
+	print(`rows ${HB_WORKERS != 0 ? "parallel" : "serial"} | pixels ${HB_SEXT ? "sext" : "half"} | text in ${text_frames} frames`);
 	return 0;
 }
 
@@ -402,7 +409,7 @@ function run_interactive() -> int {
 	h = h > 44 ? 44 : (h < 24 ? 24 : h);
 	demo_boot(w, h, OPT_SEED, RUNNER_BACKEND, false, true);
 	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, 5.0); }
-	HB_WORKERS = w >= 100 ? 1 : 0;
+	HB_WORKERS = OPT_WORKERS >= 0 ? (OPT_WORKERS > 0 ? 1 : 0) : (w >= 100 ? 1 : 0);
 	var cue_paths = OPT_MUSIC ? write_cues(app_cache_dir("jai_demoreel")) : [];
 	var cues = [];
 	for (int c = 0; c < cue_paths.size(); ++c) { cues.push(load_sound(cue_paths[c])); }

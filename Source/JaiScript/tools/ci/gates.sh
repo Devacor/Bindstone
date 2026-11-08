@@ -188,8 +188,24 @@ PYEOF
 }
 
 gate_demoreel() {
-	vm_only demoreel || return 0
-	run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM"
+	if vm_only demoreel; then
+		run "$BIN/jai_demoreel" --smoke --expect "$DEMOREEL_STREAM"
+	fi
+	# the runner's presenter at a width the reel draws rows in parallel, through FINALE's text cards: each backend's parallel
+	# rows must reproduce the VM's serial frames, in both pixel modes
+	cd "$ROOT/examples/demoreel"
+	local pix serial
+	for pix in sext half; do
+		run_logged "$BIN/jaiscript" --backend=vm demoreel.jai -- frames 90 w 120 h 40 scene 10 pix "$pix" workers 0
+		want "demoreel $pix serial: the text cards were not drawn" "rows serial \| pixels $pix \| text in [1-9][0-9]* frames"
+		serial="$(grep -Eo 'stream hash [0-9]+' "$LOG")"
+		for backend in vm interp; do
+			hash_on "$backend" || continue
+			run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 90 w 120 h 40 scene 10 pix "$pix" workers 1
+			want "demoreel $pix $backend: parallel rows did not reproduce the serial frames ($serial)" "$serial \|"
+			want "demoreel $pix $backend: the rows did not run in parallel through the text cards" "rows parallel \| pixels $pix \| text in [1-9][0-9]* frames"
+		done
+	done
 }
 
 gate_crawler() {

@@ -116,6 +116,28 @@ magic: 20 (fell through into enchanted)
 enchanted: 5
 fists: 1</code></pre></div>
 <p>Note <code>enchanted</code> alone gives <code>0 += 5</code> = 5, and no match lands in <code>default</code>. Switches nest, <code>return</code> works from inside a case, and <code>break</code>/<code>continue</code> in a loop-enclosed switch affect the loop, never leak into the switch.</p>
+<p>A case body holds statements, as in C++. A variable declared in a case needs the body in braces, which also keeps the variable to that case:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string order = "heal";
+switch (order) {
+    case "heal": {
+        int amount = 5;
+        print("healed {}", amount);
+    }
+    default: print("nothing");
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">healed 5</code></pre></div>
+<p>Without the braces the declaration is a parse error:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string order = "heal";
+switch (order) {
+    case "heal":
+        int amount = 5;
+        print("healed {}", amount);
+    default: print("nothing");
+}</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
+&lt;script&gt;:4:9: error: a declaration in a case body needs the body in braces: case value: { ... }
+            int amount = 5;
+            ^</code></pre></div>
 <h2 id="try-catch-throw">try / catch / throw<a class="hlink" href="#try-catch-throw" aria-label="link">&#8203;</a></h2>
 <p>Any value can be thrown. <code>catch (e)</code> binds the error, and <code>catch</code> without a variable is allowed. A bare <code>throw;</code> inside a catch re-throws, and one with no active exception raises the catchable <code>Bare throw with no active exception thrown.</code> <code>throw</code> is an expression, so it composes (<code>x &gt; 0 ? x : throw "negative"</code>). Uncaught script throws surface to the C++ host as exceptions (with a captured script stack trace).</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">try {

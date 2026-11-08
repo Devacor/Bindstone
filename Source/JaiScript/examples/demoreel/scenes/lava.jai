@@ -1,33 +1,43 @@
-// LAVALAMP — metaballs, lit, in a lamp. The shot opens in macro on the wax and
-// pulls back to show where it lives: a tapered glass vessel on a steel base under
-// a steel cap, in a dark room its glow lights. Eight blobs rise from the heat
-// at the bottom and sink as they cool, stretched into taffy by their speed, over a
-// pool that never leaves the base. Per pixel one loop sums the inverse-square
-// field, its gradient and a contribution-weighted hue, so merging blobs blend
-// their colours into a bridge, and the wax is lit from a normal built out of the
-// gradient (diffuse + a sharp specular), bulging out of the glass; between blobs
-// the liquid glows with the wax's light, the glass carries a fresnel edge and a
-// highlight stripe, the steel a studio reflection, the wall a halo of the lamp's
-// colour. On the beat the light pulses and the wax burns through the rainbow
-// before the camera pushes back into the glass. Rows run in parallel.
+// LAVALAMP — a wall of lava lamps, and a camera that will not sit still. It opens
+// in macro on one lamp's wax, rolls and pulls back to the lamp, keeps pulling back
+// until the lamp is one of dozens on a shelved wall turning through the frame, pans
+// across them while a rainbow wave rolls over the wall and the zoom pumps on the
+// beat, then spins and dives into another lamp's wax. Each pixel goes through the
+// camera (a turn, a scale, a pan) into the lattice of lamps and is shaded by the
+// one lamp whose cell it lands in, so the cost per pixel stays flat however many
+// lamps are in view; each lamp takes one of three blob simulations, mirrored on
+// alternate lamps, and its own colour family. A lamp is metaballs, lit: eight
+// blobs rise off the heater and sink as they cool, stretched into taffy by their
+// speed, over a pool on the base. One loop sums the inverse-square field, its
+// gradient and a contribution-weighted hue, so merging blobs blend their colours,
+// and the wax is lit from a normal built out of the gradient; between blobs the
+// liquid glows with the wax's light, the glass carries a fresnel edge and a
+// highlight stripe, the steel a studio reflection, the wall a halo of each lamp's
+// colour. Rows run in parallel.
 
-array<float> LV_BX = [];
+array<float> LV_BX = [];     // three blob sets, LV_N blobs each
 array<float> LV_BY = [];
 array<float> LV_R2 = [];
 array<float> LV_ST = [];     // each blob's stretch: its speed pulls it into taffy
 array<float> LV_HUE = [];
 array<int> LV_ROWS = [];
+int LV_N = 9;
 int LV_W = 0;
 int LV_H = 0;
 int LV_GLOW = 0;
 int LV_GLASS = 0;
 int LV_STEEL = 0;
 int LV_ROOM = 0;
-float LV_CX = 0.0;           // the camera: the lamp-space point at the screen's centre
+float LV_CX = 0.0;           // the camera: the world point at the screen's centre,
 float LV_CY = 0.5;
-float LV_SCALE = 0.004;      // and lamp units per pixel
-float LV_LAMP = 1.0;         // how bright the lamp burns
-float LV_HUE0 = 0.0;         // the room's tint: the wax's hue
+float LV_SCALE = 0.004;      // world units per pixel,
+float LV_COS = 1.0;          // and its roll
+float LV_SIN = 0.0;
+float LV_LAMP = 1.0;         // how bright the lamps burn
+float LV_BURN = 0.0;         // the rainbow wave's strength and clock
+float LV_T = 0.0;
+float LV_SPX = 0.55;         // the lattice: lamps across, shelves up
+float LV_SPY = 1.25;
 
 // the vessel's half-width at height y (lamp units: 0 the base's foot, 1 the cap's top)
 function lamp_width(float y) -> float {
@@ -43,10 +53,13 @@ function lamp_width(float y) -> float {
 function lava_row(int y) -> array<int> {
 	array<int> out = [];
 	int ww = LV_W;
-	int n = LV_BX.size();
+	int nb = LV_N;
 	float sc = LV_SCALE;
-	float ly = LV_CY - (y + 0.5 - LV_H * 0.5) * sc;
-	float hw = lamp_width(ly);
+	float co = LV_COS;
+	float si = LV_SIN;
+	float spx = LV_SPX;
+	float spy = LV_SPY;
+	float py = (LV_H * 0.5 - y - 0.5) * sc;
 	float lux = -0.45;
 	float luy = 0.55;
 	float luz = 0.70;
@@ -55,9 +68,22 @@ function lava_row(int y) -> array<int> {
 	float hy = luy * hl;
 	float hz = (luz + 1.0) * hl;
 	float lamp = LV_LAMP;
-	int room_hue = itrunc(LV_HUE0) % 24;
+	float burn = LV_BURN;
+	float clock = LV_T;
 	for (int x = 0; x < ww; ++x) {
-		float lx = LV_CX + (x + 0.5 - ww * 0.5) * sc;
+		float px = (x + 0.5 - ww * 0.5) * sc;
+		float wx = LV_CX + px * co - py * si;
+		float wy = LV_CY + px * si + py * co;
+		int ci = math::ifloor(wx / spx + 0.5);
+		int cj = math::ifloor(wy / spy);
+		float lx = wx - ci * spx;
+		float ly = wy - cj * spy;
+		int id = ((ci * 7349 + cj * 1931) % 997 + 997) % 997;
+		if ((id & 1) == 1) { lx = -lx; }
+		int set = id % 3;
+		int b0 = set * nb;
+		float hue_off = (id % 6) * 4.0 + burn * ((ci + cj * 2) * 2.0 + clock * 9.0);
+		float hw = lamp_width(ly);
 		float across = lx / hw;
 		float aa = across < 0.0 ? -across : across;
 		if (ly >= 0.2 && ly <= 0.84 && aa < 1.0) {
@@ -65,7 +91,7 @@ function lava_row(int y) -> array<int> {
 			float gx = 0.0;
 			float gy = 0.0;
 			float hsum = 0.0;
-			for (int b = 0; b < n; ++b) {
+			for (int b = b0; b < b0 + nb; ++b) {
 				float dx = lx - LV_BX[b];
 				float st = LV_ST[b];
 				float dy = (ly - LV_BY[b]) / st;
@@ -77,7 +103,7 @@ function lava_row(int y) -> array<int> {
 				gy += q * dy / st;
 				hsum += inv * LV_HUE[b];
 			}
-			int hq = itrunc(hsum / f + 0.5) % 24;
+			int hq = itrunc(hsum / f + hue_off + 0.5) % 24;
 			if (f >= 1.0) {
 				// the height of a blob under this field gives its normal, vertical at the rim
 				float rim = 1.0 - 1.0 / f;
@@ -120,18 +146,19 @@ function lava_row(int y) -> array<int> {
 			out.push(LV_STEEL + (sl < 0 ? 0 : (sl > 15 ? 15 : sl)));
 			continue;
 		}
-		// the room: the wall takes a halo of the lamp's colour; below the foot, the
-		// table catches a pool of it
-		float rx = lx;
-		float ry = ly - 0.5;
-		float halo = 0.0;
-		if (ly < 0.0) {
-			float pool = 1.0 / (1.0 + (rx * rx * 18.0 + ly * ly * 260.0));
-			halo = pool * 1.1;
-		} else {
-			halo = 1.0 / (1.0 + (rx * rx * 9.0 + ry * ry * 3.0));
-			halo = halo * halo;
+		int room_hue = itrunc(hue_off + 2.5) % 24;
+		// the shelf the lamp stands on: its front edge catches the lamp's light
+		if (ly > spy - 0.045) {
+			float lit = 1.0 / (1.0 + lx * lx * 30.0);
+			int sh = itrunc((0.25 + lit * 0.7 * lamp) * 15.99);
+			out.push(LV_ROOM + room_hue * 16 + (sh > 15 ? 15 : sh));
+			continue;
 		}
+		// the wall behind: a halo of the lamp's colour, pooling on the shelf at its foot
+		float ry = ly - 0.5;
+		float halo = 1.0 / (1.0 + (lx * lx * 9.0 + ry * ry * 3.0));
+		halo = halo * halo;
+		if (ly < 0.06) { halo += 0.5 / (1.0 + lx * lx * 40.0); }
 		int rl = itrunc(halo * lamp * 15.99);
 		out.push(LV_ROOM + room_hue * 16 + (rl > 15 ? 15 : rl));
 	}
@@ -147,9 +174,17 @@ class Lava : Scene {
 	array<float> period = [];
 	array<float> phase = [];
 	array<float> sway = [];
-	int nb = 7;
+	int nb = 7;          // rising blobs per set; each set adds the pool and the cap's drip
+	int sets = 3;
 	float tt = 0.0;
 	float beat = 0.48387097;
+
+	// the camera's keyframes: time, span (world units the screen's height shows), roll, centre
+	array<float> key_t = [0.0, 2.5, 4.8, 7.3, 9.4, 11.6];
+	array<float> key_span = [0.30, 0.34, 1.45, 3.9, 3.0, 0.27];
+	array<float> key_roll = [-0.18, 0.12, 0.5, 1.95, 3.3, 5.6];
+	array<float> key_x = [0.0, 0.02, 0.0, 0.5, 1.9, 2.2];
+	array<float> key_y = [0.52, 0.5, 0.52, 1.1, 2.55, 3.02];
 
 	void build() override {
 		name = "LAVALAMP";
@@ -189,28 +224,31 @@ class Lava : Scene {
 				pal.add(7.0 + c3[0] * k3, 6.0 + c3[1] * k3, 10.0 + c3[2] * k3);
 			}
 		}
-		for (int i = 0; i < nb; ++i) {
-			float r = 0.024 + rng.next(40) * 0.0004;
-			br2.push(r * r);
-			hue.push(2.0 + rng.next(60) * 0.06);
-			period.push(5.5 + rng.next(100) * 0.05);
-			phase.push(rng.next(628) * 0.01);
-			sway.push(rng.next(628) * 0.01);
+		for (int s2 = 0; s2 < sets; ++s2) {
+			for (int i = 0; i < nb; ++i) {
+				float r = 0.024 + rng.next(40) * 0.0004;
+				br2.push(r * r);
+				hue.push(2.0 + rng.next(60) * 0.06);
+				period.push(5.5 + rng.next(100) * 0.05);
+				phase.push(rng.next(628) * 0.01);
+				sway.push(rng.next(628) * 0.01);
+				bx.push(0.0);
+				by.push(0.0);
+				st.push(1.0);
+			}
+			// the pool on the heater and the wax hanging under the cap
+			br2.push(0.06 * 0.06);
+			hue.push(3.5);
 			bx.push(0.0);
-			by.push(0.0);
+			by.push(0.17);
+			st.push(1.0);
+			br2.push(0.022 * 0.022);
+			hue.push(4.5);
+			bx.push(0.0);
+			by.push(0.87);
 			st.push(1.0);
 		}
-		// the pool on the heater and the wax hanging under the cap
-		br2.push(0.06 * 0.06);
-		hue.push(3.5);
-		bx.push(0.0);
-		by.push(0.17);
-		st.push(1.0);
-		br2.push(0.022 * 0.022);
-		hue.push(4.5);
-		bx.push(0.0);
-		by.push(0.87);
-		st.push(1.0);
+		LV_N = nb + 2;
 	}
 
 	float smooth(float a, float b, float t) {
@@ -225,38 +263,59 @@ class Lava : Scene {
 		return (1.0 - f) * (1.0 - f);
 	}
 
+	// a Catmull-Rom spline through one keyframe track, so the camera flows through
+	// its marks instead of stopping at each
+	float track(var& keys, float t) {
+		int last = key_t.size() - 1;
+		int k = 0;
+		while (k < last - 1 && t >= key_t[k + 1]) { ++k; }
+		float u = (t - key_t[k]) / (key_t[k + 1] - key_t[k]);
+		u = u < 0.0 ? 0.0 : (u > 1.0 ? 1.0 : u);
+		float p0 = keys[k > 0 ? k - 1 : 0];
+		float p1 = keys[k];
+		float p2 = keys[k + 1];
+		float p3 = keys[k + 2 <= last ? k + 2 : last];
+		float u2 = u * u;
+		float u3 = u2 * u;
+		return 0.5 * (2.0 * p1 + (p2 - p0) * u + (2.0 * p0 - 5.0 * p1 + 4.0 * p2 - p3) * u2 + (3.0 * p1 - p0 - 3.0 * p2 + p3) * u3);
+	}
+
 	void update(float t, float dt) override {
 		tt = t;
 		// up off the heater, down as they cool, swaying to the glass; speed stretches them
-		for (int i = 0; i < nb; ++i) {
-			float a = t * 6.2831853 / period[i] + phase[i];
-			float y = 0.27 + 0.5 * (0.5 - 0.5 * math::cos(a));
-			float vy = math::sin(a);
-			float w = lamp_width(y);
-			by[i] = y;
-			bx[i] = w * 0.5 * math::sin(t * 0.37 + sway[i]);
-			st[i] = 1.0 + (vy < 0.0 ? -vy : vy) * 0.9;
-		}
-		// the hues: a warm family, burning through the rainbow at the peak
-		float burn = smooth(7.0, 8.2, t) * (1.0 - smooth(10.2, 11.2, t));
-		for (int j = 0; j < nb; ++j) {
-			float base = 2.0 + j * 0.25;
-			hue[j] = base + burn * (j * 2.3 + t * 9.0);
-			while (hue[j] >= 24.0) { hue[j] -= 24.0; }
+		for (int s = 0; s < sets; ++s) {
+			for (int i = 0; i < nb; ++i) {
+				int k = s * nb + i;
+				int slot = s * LV_N + i;
+				float a = t * 6.2831853 / period[k] + phase[k];
+				float y = 0.27 + 0.5 * (0.5 - 0.5 * math::cos(a));
+				float vy = math::sin(a);
+				float w = lamp_width(y);
+				by[slot] = y;
+				bx[slot] = w * 0.5 * math::sin(t * 0.37 + sway[k]);
+				st[slot] = 1.0 + (vy < 0.0 ? -vy : vy) * 0.9;
+				hue[slot] = 2.0 + i * 0.25;
+			}
 		}
 	}
 
 	void render(var& grid) override {
 		float t = tt;
-		// macro on the wax, the pull back to the whole lamp, a sway, the push back in
-		float out_k = smooth(2.6, 5.4, t) * (1.0 - smooth(10.0, 11.8, t));
-		float span = 0.3 + (1.12 - 0.3) * out_k;
+		// the zoom flies in log space, so pulling back feels steady at every scale
+		var log_span = [];
+		for (int k = 0; k < key_span.size(); ++k) { log_span.push(math::log2(key_span[k])); }
+		float span = math::pow(2.0, track(log_span, t));
+		float drive = smooth(4.8, 5.8, t) * (1.0 - smooth(9.4, 10.2, t));
+		span *= 1.0 - pulse(t) * 0.07 * drive;
+		float roll = track(key_roll, t) + 0.03 * math::sin(t * 7.1) * drive;
 		LV_SCALE = span / h;
-		LV_CX = 0.02 * math::sin(t * 0.7) * out_k + 0.03 * (1.0 - out_k) * math::sin(t * 0.5);
-		LV_CY = 0.5 + (0.48 - 0.5) * out_k + 0.06 * (1.0 - out_k) * math::sin(t * 0.43);
-		float burn = smooth(7.0, 8.2, t) * (1.0 - smooth(10.2, 11.2, t));
-		LV_LAMP = 0.85 + 0.15 * math::sin(t * 1.3) + pulse(t) * (0.12 + 0.35 * burn);
-		LV_HUE0 = hue[0];
+		LV_COS = math::cos(roll);
+		LV_SIN = math::sin(roll);
+		LV_CX = track(key_x, t);
+		LV_CY = track(key_y, t);
+		LV_BURN = smooth(6.9, 7.7, t) * (1.0 - smooth(9.6, 10.6, t));
+		LV_T = t;
+		LV_LAMP = 0.85 + 0.15 * math::sin(t * 1.3) + pulse(t) * (0.12 + 0.35 * LV_BURN);
 		LV_BX = bx;
 		LV_BY = by;
 		LV_R2 = br2;

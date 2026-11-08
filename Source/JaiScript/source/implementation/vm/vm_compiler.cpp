@@ -233,6 +233,7 @@ namespace {
 			case opcode::op_concat_pending:
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
+			case opcode::op_text_append:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -470,6 +471,7 @@ namespace {
 			case opcode::op_concat_pending:
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
+			case opcode::op_text_append:
 			case opcode::op_push_fused:
 			case opcode::op_this:
 			case opcode::op_super:
@@ -2850,6 +2852,91 @@ JAI_NOINLINE bool vm_compiler::try_emit_text_builder_index(binary_expr* sub, ass
 	return true;
 }
 
+// `s += x0 + ... + xn;` (s declared string) and `s = s + x1 + ... + xn;` (the checker typed the right side a string) onto a private local:
+// one op_text_append appends each piece to the target's own node at its step. A piece is a literal, a name, or an element read that lands
+// in a temp first; a name ahead of such a read that user code could rebind is snapshotted there, and no piece reaches the target, so the
+// pieces read what the chain reads, in its order, and the target is the target's alone while they append
+JAI_NOINLINE bool vm_compiler::try_emit_text_append(identifier_expr* ident, assignment_expr* assign) {
+	if (!typed_lowering_ || !temps_active_ || !chunk_ || !chunk_->is_function_body || !callable_.active) return false;
+	const bool assign_form = assign->op.type == token_type::equal;
+	if ((!assign_form && assign->op.type != token_type::plus_equal) || assign->value->get_type() != node_type::binary_expr || !private_local(ident)) return false;
+	const uint32_t slot = identifier_slot_operand(ident);
+	if (slot >= k_typed_slot_mask) return false;
+	std::vector<const binary_expr*> chain;
+	const expression_ptr* head = &assign->value;
+	while ((*head)->get_type() == node_type::binary_expr && static_cast<const binary_expr*>(head->get())->op.type == token_type::plus) {
+		const auto* b = static_cast<const binary_expr*>(head->get());
+		if (b->op.joins_text) return false;
+		chain.push_back(b);
+		head = &b->left;
+	}
+	if (chain.empty()) return false;
+	std::vector<const expression_ptr*> pieces;
+	if (assign_form) {
+		if (assign->static_operand_class != operand_class_string_string || (*head)->get_type() != node_type::identifier_expr) return false;
+		auto* h = static_cast<identifier_expr*>(head->get());
+		if (h->symbol_id != ident->symbol_id || h->global_qualified || identifier_slot_operand(h) != slot) return false;
+		if (chain.size() == 1) {
+			const node_type rt = chain[0]->right->get_type();
+			if (rt == node_type::literal_expr || rt == node_type::identifier_expr) return false;   // the fused store appends in place itself
+		}
+	} else {
+		const auto declared = callable_.slot_types.find(slot);
+		const type_info* t = declared != callable_.slot_types.end() ? declared->second : nullptr;
+		if (!t || t->is_reference() || t->base_type != script_value_type::jai_string_type) return false;
+		pieces.push_back(head);
+	}
+	for (auto it = chain.rbegin(); it != chain.rend(); ++it) { pieces.push_back(&(*it)->right); }
+	size_t last_read = 0;   // one past the last piece that lands in a temp
+	for (size_t k = 0; k < pieces.size(); ++k) {
+		const expression* e = pieces[k]->get();
+		if (e->get_type() == node_type::literal_expr) continue;
+		if (names_slot(e, slot)) return false;
+		if (e->get_type() == node_type::identifier_expr) {
+			auto* id = static_cast<identifier_expr*>(const_cast<expression*>(e));
+			const uint32_t s = identifier_slot_operand(id);
+			if ((s != k_invalid_u32 && s >= chunk_->first_temp_slot) || id->name.starts_with("weak_ptr<") || id->name.starts_with("shared_ptr<")) return false;   // a graft's result temp, a type constructor
+			continue;
+		}
+		if (!fusable_index_expr(e)) return false;
+		last_read = k + 1;
+	}
+	flush_kills();   // the reads begin the statement's own instructions
+	const size_t temp_mark = temp_next_;
+	text_append_proto p;
+	p.reads_ip = static_cast<uint32_t>(chunk_->code.size());
+	uint32_t env_reads = 0;
+	for (size_t k = 0; k < pieces.size(); ++k) {
+		const expression_ptr& e = *pieces[k];
+		fused_operand o;
+		if (e->get_type() == node_type::literal_expr) {
+			o = make_fused_operand(e);
+		} else if (e->get_type() == node_type::identifier_expr) {
+			o = make_fused_operand(e);
+			// the op reads at most three environment names through its lookup-cache roles; a name ahead of a read that may run user code keeps its place
+			if ((k < last_read && !private_local(e.get())) || (o.slot == k_invalid_u32 && ++env_reads > 3)) { materialize_operand_temp(e, o); }
+		} else if (!compile_subscript_into_temp(e, 0xFF, o)) {
+			compile_expression(e);
+			const uint32_t t = static_cast<uint32_t>(temp_next_++);
+			if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+			emit(opcode::op_call_temp, t);
+			o = fused_operand{};
+			o.slot = t;
+			o.symbol = temp_symbol_index();
+			o.direct = true;
+		}
+		p.pieces.push_back(std::move(o));
+	}
+	p.symbol = add_symbol(ident->symbol_id);
+	p.slot = slot;
+	p.assign = assign_form;
+	p.store_flags = store_flag_no_result | (ident->names_var_decl ? store_flag_var_target : 0u) | (assign->static_store_proof == proof_same_type ? store_flag_same_type : 0u);
+	chunk_->text_append_protos.push_back(std::move(p));
+	emit(opcode::op_text_append, static_cast<uint32_t>(chunk_->text_append_protos.size() - 1));
+	free_temps(temp_mark);
+	return true;
+}
+
 JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr& expr) {
 	if (reference_ || detail::const_site_of(expr.get())) return false;   // the reference mode: the value form and its pop   // compile_expression emits its guard first
 	if (expr->get_type() == node_type::assignment_expr) {
@@ -2867,6 +2954,7 @@ JAI_NOINLINE bool vm_compiler::compile_no_result_expression(const expression_ptr
 		}
 		if (assign->target->get_type() == node_type::identifier_expr) {
 			auto* ident = static_cast<identifier_expr*>(assign->target.get());
+			if (try_emit_text_append(ident, assign)) return true;
 			if (assign->op.type == token_type::equal && try_emit_text_builder_store(ident, assign)) return true;
 			if (assign->op.type == token_type::equal && callable_.active && ident->names_value_decl && !ident->global_qualified &&
 			    value_temp_operand(assign->value.get())) {
@@ -5225,6 +5313,42 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (st.b >= k_typed_slot_mask || !value(op, c.fused_binary_protos[st.a].left, 0, static_cast<uint32_t>(ip * 3), ip, op.b)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				use_slot(st.b, 0, true, k_typed_dst_temp, nullptr, ip);
 				op.kind = ir::mov; op.a = st.b; op.writes = st.b;
+			} else if (st.op == opcode::op_text_append && st.a < c.text_append_protos.size()) {
+				// `s += x0 + ...`: the target slot's own string takes the pieces' strings in place; the temps the statement's reads landed borrow
+				// their strings, so a miss at any of those reads or here re-runs the statement from its first read, which reads nothing twice
+				// that a second read could observe
+				const text_append_proto& tp = c.text_append_protos[st.a];
+				if (tp.slot >= k_typed_slot_mask || tp.pieces.size() > std::size(op.pieces) || tp.reads_ip > ip || tp.reads_ip < first) { refuse(chunk::cell_refusal_representation, ip); break; }
+				bool taken = true;
+				uint32_t env_role = 0;
+				for (const fused_operand& piece : tp.pieces) {
+					const uint32_t role = piece.const_index == k_invalid_u32 && piece.slot == k_invalid_u32 ? env_role++ : 0;
+					// a name's snapshot ahead of the reads keeps its place against user code a read may run; the block runs none, and an environment
+					// value's cell holds it until the op, so the op reads the cell and the move goes
+					bool snapshot = false;
+					if (piece.direct && piece.slot != k_invalid_u32 && piece.slot >= c.first_temp_slot) {
+						for (size_t q = ip; q-- > tp.reads_ip;) {
+							ir_op& def = ops[q - first];
+							if (def.writes != piece.slot) continue;
+							if (def.kind == ir::mov && (def.b & k_ir_env_bit)) { op.pieces[op.npieces] = def.b; def = ir_op{}; def.kind = ir::skip; snapshot = true; }
+							break;
+						}
+					}
+					if (!snapshot && !value(op, piece, 0, static_cast<uint32_t>(ip * 3 + role), ip, op.pieces[op.npieces])) { taken = false; break; }
+					++op.npieces;
+				}
+				if (!taken) { refuse(chunk::cell_refusal_representation, ip); break; }
+				use_slot(tp.slot, 0, false, 0, nullptr, ip); use_slot(tp.slot, 0, true, k_typed_dst_compound, nullptr, ip);
+				op.kind = ir::text; op.a = tp.slot; op.proto = st.a; op.writes = tp.slot; slot_read(op, tp.slot);
+				op.origin = tp.reads_ip;
+				for (size_t q = tp.reads_ip; q < ip; ++q) {
+					ir_op& read = ops[q - first];
+					if (read.kind == ir::skip) continue;
+					read.origin = tp.reads_ip;
+					if (read.writes == k_invalid_u32) continue;
+					const int tk = find_cell(read.writes);
+					if (tk >= 0 && cells[tk].temp) { cells[tk].string_borrow = true; }
+				}
 			} else if (st.op == opcode::op_compound_fused && st.a < c.compound_fused_protos.size()) {
 				// x op= y the typed lowering left general (a slot the checker could not pin, a float literal): arith with the
 				// compound landing, kinds at run time (a kind change on the slot misses onto the general conversion)
@@ -6157,6 +6281,15 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			case ir::ret: ret_pads.push_back({ static_cast<uint32_t>(code.size()), op.proto, op.origin }); append(vm_instruction{opcode::op_c_ret, cell_of(op.a), 0, op.origin}, ip); break;   // the pad is patched after the copy
 			case ir::size:   // the array site's live size; an environment receiver: b = its general ip | k_typed_const_bit, c = its call site
 				append(vm_instruction{opcode::op_c_size, dst_of(op.a), op.container != k_invalid_u32 ? op.container : (static_cast<uint32_t>(ip) | k_typed_const_bit), op.proto}, ip); break;
+			case ir::text: {
+				chunk::cell_loop::text_append ta;
+				ta.target = cell_of(op.a);
+				ta.proto = op.proto;
+				for (uint8_t k = 0; k < op.npieces; ++k) { ta.pieces.push_back(cell_of(op.pieces[k])); }
+				loop.text_appends.push_back(std::move(ta));
+				append(vm_instruction{opcode::op_c_text_append, static_cast<uint32_t>(loop.text_appends.size() - 1), 0, 0}, ip);
+				break;
+			}
 			case ir::append: {
 				// a plus onto a cell pinned to int or float with an operand of the same pinned kind is the typed add (no string row can apply)
 				const uint32_t b2 = cell_of(op.b), c2 = cell_of(op.c);
@@ -7311,6 +7444,13 @@ bool vm_compiler::consumer_releases(uint32_t t) {
 		if (!p.value.direct || p.value.slot != t) return false;
 		p.release = true;
 		return true;
+	}
+	case opcode::op_text_append: {
+		text_append_proto& p = chunk_->text_append_protos[c.a];
+		uint32_t bits = 0;
+		for (size_t k = 0; k < p.pieces.size() && k < 32; ++k) { if (p.pieces[k].direct && p.pieces[k].slot == t) { bits |= uint32_t{1} << k; } }
+		p.release |= bits;
+		return bits != 0;
 	}
 	case opcode::op_index_fused: case opcode::op_index_store_fused: case opcode::op_index_compound_operand: case opcode::op_index_fused_decl: {
 		fused_index_proto& p = chunk_->fused_index_protos[c.a];

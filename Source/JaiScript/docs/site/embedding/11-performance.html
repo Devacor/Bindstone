@@ -160,7 +160,9 @@ a <code>string&amp;</code> parameter or a map entry's binding.</li>
 <li>Strings stay values: a copy taken before an
 append shares the text until the append, which then writes its own copy, so the copy never sees it.</li>
 <li>A chain such as <code>a + "/" + b + "/" + c</code> or a template string joins into one accumulator sized
-for its text, and <code>format()</code> writes its values straight into its result.</li>
+for its text, and <code>format()</code> writes its values straight into its result. A chain of literals, names and
+elements that a local string takes (<code>s += a + "/" + b[i]</code>, <code>s = s + a + "/" + b[i]</code>) needs no
+accumulator: each piece appends to the local's own buffer, as the same appends written one per statement would.</li>
 </ul></li>
 <li><strong>Class declaration is bookkeeping, not construction.</strong> Executing a <code>class</code>
 declaration pays redefinition/hot-reload machinery every time: cheap once, wasteful per-frame.</li>

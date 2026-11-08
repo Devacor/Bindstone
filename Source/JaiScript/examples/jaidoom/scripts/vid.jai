@@ -505,7 +505,7 @@ function vid_row_sext_mean(int cy) -> string {
 				int bn = 6 - fn;
 				int mr = br / bn; int mg = bg / bn; int mb = bb / bn;
 				int k = (mr << 16) | (mg << 8) | mb;
-				if (k != bgk) { row += BG24; row += DEC[mr]; row += DEC_SEMI[mg]; row += DEC_SEMI[mb]; row += "m"; bgk = k; }
+				if (k != bgk) { row += BG24 + DEC[mr] + DEC_SEMI[mg] + DEC_SEMI[mb] + "m"; bgk = k; }
 			}
 		}
 		if (fi < 0) {
@@ -515,7 +515,7 @@ function vid_row_sext_mean(int cy) -> string {
 		} else {
 			int mr = fr / fn; int mg = fg / fn; int mb = fb / fn;
 			int k = (mr << 16) | (mg << 8) | mb;
-			if (k != fgk) { row += FG24; row += DEC[mr]; row += DEC_SEMI[mg]; row += DEC_SEMI[mb]; row += "m"; fgk = k; }
+			if (k != fgk) { row += FG24 + DEC[mr] + DEC_SEMI[mg] + DEC_SEMI[mb] + "m"; fgk = k; }
 		}
 		row += SEXTG[bits];
 	}

@@ -7848,7 +7848,7 @@ static bool cells_miss_plain(const vm_instruction& ci) {
 	case opcode::op_c_guard: case opcode::op_c_mov: case opcode::op_c_math:
 	case opcode::op_c_cmp_any: case opcode::op_c_jcmp_any: case opcode::op_c_cmpval:
 	case opcode::op_c_neg: case opcode::op_c_bnot: case opcode::op_c_lnot:
-	case opcode::op_c_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
+	case opcode::op_c_append: case opcode::op_c_text_append: case opcode::op_c_push: case opcode::op_c_mload: case opcode::op_c_mstore: case opcode::op_c_size:
 	case opcode::op_c_arith2: case opcode::op_c_jcmp2: case opcode::op_c_load2: case opcode::op_c_arith_load: case opcode::op_c_load_jcmp:
 	case opcode::op_c_ret:
 	case opcode::op_c_add_ff: case opcode::op_c_sub_ff: case opcode::op_c_mul_ff: case opcode::op_c_add_ffk: case opcode::op_c_sub_ffk: case opcode::op_c_mul_ffk:
@@ -8038,6 +8038,7 @@ next_frame:
 		case opcode::op_c_lnot: { size_t at = ip; st = exec_c_lnot(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_cmpval: { size_t at = ip; st = exec_c_cmpval(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_append: { size_t at = ip; st = exec_c_append(f, at, ci, regs); ip = at; } break;
+		case opcode::op_c_text_append: { size_t at = ip; st = exec_c_text_append(f, at, ci, regs); ip = at; } break;
 		case opcode::op_c_push: {
 			// the common row here (exec_c_push, out of line, has the rest): a frame-slot array holding the site's node takes an int or float
 			// cell into its own typed buffer under the kernel's charge
@@ -9423,6 +9424,64 @@ op_status vm_backend::exec_c_append(frame& f, size_t& ip, const vm_instruction& 
 	script_string& out = s->unchecked_as_string_ref(engine_);
 	if (src != &out && out.capacity() - out.size() < src->size()) { grow_text_for_site(out, src->size(), &ins); }
 	out += *src;   // in place (unique, so no unshare): the slot owns the node, the cell's borrow stays valid
+	++ip;
+	return {};
+}
+// a text append's pieces onto a slot's string: the slot must still hold the cell's node and hold it uniquely, every piece a string, and the
+// memory cap must accept the charges the general form takes, all checked before a byte moves; anything else misses onto the general form
+// from the statement's first read
+op_status vm_backend::exec_c_text_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr) {
+	JAI_CELLS_COUNT(7);
+	const chunk::cell_loop& loop = *cr.loop;
+	const chunk::cell_loop::text_append& ta = loop.text_appends[ins.a];
+	const text_append_proto& p = f.code->text_append_protos[ta.proto];
+	const uint8_t kstr = static_cast<uint8_t>(script_value::TYPEID_STRING);
+	auto miss = [&]() { cells_miss_ip(f, ip, loop, loop.origin[ip - loop.copy_head], 1); return op_status::ok; };
+	const chunk::cell_loop::cell& cl = loop.cells[ta.target];
+	if (cr.cells[ta.target].kind != kstr || cl.temp || cl.env_operand != k_invalid_u32 || (operator_table_ && operator_table_->any())) return miss();
+	script_value* s = frame_slot(f, cl.slot);
+	if (!s || s->raw_storage_index() != script_value::TYPEID_STRING) return miss();
+	const strong_ptr<script_string>& h = s->unchecked_string_handle();
+	if (reinterpret_cast<int64_t>(h.get()) != cr.cells[ta.target].bits || !h.unique()) return miss();   // rebound, or shared: the general form unshares
+	for (size_t k = 0; k < p.pieces.size() && k < 32; ++k) {
+		// a temp the op gives up holds a value the general form left there: one a release could run a destructor for goes the general way
+		if (!(p.release & (uint32_t{1} << k))) continue;
+		const script_value* held = frame_slot(f, p.pieces[k].slot);
+		const size_t hk = held ? held->raw_storage_index() : script_value::TYPEID_NULL;
+		if (hk != script_value::TYPEID_NULL && hk != script_value::TYPEID_STRING && hk != script_value::TYPEID_INT && hk != script_value::TYPEID_FLOAT &&
+		    hk != script_value::TYPEID_BOOL && hk != script_value::TYPEID_CHAR) return miss();
+	}
+	const script_string* src[8];
+	const size_t n = ta.pieces.size();
+	size_t used = limits_->memory_used;
+	const size_t limit = limits_->memory_limit;
+	size_t joined = p.assign ? h->size() : 0;
+	for (size_t k = 0; k < n; ++k) {
+		const uint32_t o = ta.pieces[k];
+		if (o & k_typed_const_bit) {
+			const script_value& cv = cr.consts[o & ~k_typed_const_bit];
+			if (cv.raw_storage_index() != script_value::TYPEID_STRING) return miss();
+			src[k] = cv.unchecked_string_handle().get();
+		} else {
+			if (cr.cells[o].kind != kstr) return miss();
+			src[k] = reinterpret_cast<const script_string*>(cr.cells[o].bits);
+		}
+		if (!src[k]) return miss();
+		if (!p.assign && k == 0) { joined = src[k]->size(); continue; }
+		const size_t step = sizeof(script_value) + joined + src[k]->size();
+		if (used + step > limit) return miss();   // the cap: the general form raises its own text where its step does
+		used += step;
+		joined += src[k]->size();
+	}
+	if (!p.assign) {
+		if (used + joined > limit) return miss();
+		used += joined;
+	}
+	limits_->memory_used = used;
+	script_string& out = s->unchecked_as_string_ref(engine_);
+	const size_t add = p.assign ? joined - out.size() : joined;
+	if (out.capacity() - out.size() < add) { grow_text_for_site(out, add, &ins); }
+	for (size_t k = 0; k < n; ++k) { out += *src[k]; }   // unique, so no unshare: the slot owns the node and the cell's borrow stays valid
 	++ip;
 	return {};
 }
@@ -16790,6 +16849,122 @@ op_status vm_backend::exec_concat_pending(frame& f, const vm_instruction& ins) {
 	return {};
 }
 
+// a piece of op_text_append: a constant, a name read through its lookup-cache role, or a temp the statement landed
+const script_value* vm_backend::text_piece(frame& f, const fused_operand& piece, std::optional<script_value>& scratch, uint32_t& env_role) {
+	if (piece.const_index != k_invalid_u32) return &f.code->constants[piece.const_index];
+	const size_t cache_slot = f.ip * 3 + (piece.slot == k_invalid_u32 ? env_role++ : 0);
+	const script_value* v = fused_cmp_operand(f, piece, cache_slot);
+	if (!v) { v = fused_ident_value(f, piece, scratch, cache_slot); }
+	return v ? &v->deref() : nullptr;
+}
+
+// op_text_append (vm_compiler::try_emit_text_append): a string target takes each piece's string at the piece's step, under the charges the
+// chain's own steps take (`s += ...`: each join, then the append of the joined value; `s = s + ...`: each join over the
+// snapshot), its node copied first when another holder shares it; a raise restores the target's length first. A piece that is no string, a
+// target that is none, or a registered operator: the bytes appended so far become the chain's value, the target holds its own again, and
+// the general `+` and store finish the chain. The temps the compiler left it go once it is done, as a fused index op's do
+op_status vm_backend::exec_text_append(frame& f, const vm_instruction& ins) {
+	const uint32_t release = f.code->text_append_protos[ins.a].release;
+	const op_status st = text_append_rows(f, ins);
+	if (release && st != op_status::failed) [[unlikely]] {
+		const text_append_proto& p = f.code->text_append_protos[ins.a];
+		for (size_t k = 0; k < p.pieces.size() && k < 32; ++k) { if (release & (uint32_t{1} << k)) { kill_frame_slot(f, p.pieces[k].slot); } }
+	}
+	return st;
+}
+
+op_status vm_backend::text_append_rows(frame& f, const vm_instruction& ins) {
+	const text_append_proto& p = f.code->text_append_protos[ins.a];
+	const bool slotted = has_slots(f);
+	auto target_value = [&]() -> script_value* { return slotted ? frame_slot(f, p.slot) : resolve_local_or_env(f, p.slot, f.code->symbols[p.symbol]); };
+	uint32_t env_role = 0;
+	script_value* target = target_value();
+	if (!target || target->raw_storage_index() != script_value::TYPEID_STRING || has_custom_numeric_ops_ || (operator_table_ && operator_table_->any())) [[unlikely]] {
+		script_value snapshot = target && p.assign ? target->deref() : make_null();
+		return text_append_general(f, p, 0, nullptr, std::move(snapshot), p.assign, env_role);
+	}
+	const size_t base = target->unchecked_as_string().size();
+	const bool shared = !target->unchecked_string_handle().unique();
+	const size_t n = p.pieces.size();
+	size_t joined = p.assign ? base : 0;
+	auto restore = [&]() {
+		script_value* t = target_value();
+		if (t && t->raw_storage_index() == script_value::TYPEID_STRING && t->unchecked_as_string().size() != base) { replacing_text_storage(*t).resize(base); }
+	};
+	for (size_t k = 0; k < n; ++k) {
+		std::optional<script_value> scratch;
+		const script_value* v = text_piece(f, p.pieces[k], scratch, env_role);
+		if (!v || is_unwinding_) [[unlikely]] {
+			restore();
+			return v ? op_status::ok : op_status::failed;
+		}
+		script_value* t = target_value();
+		if (v->raw_storage_index() != script_value::TYPEID_STRING) [[unlikely]] {
+			script_value held = p.pieces[k].const_index != k_invalid_u32 ? materialize_constant(*f.code, p.pieces[k].const_index) : *v;
+			const std::string& text = t->unchecked_as_string();
+			script_value acc = p.assign ? (k == 0 ? *t : script_value(script_string(text), engine_))
+			                            : (k == 0 ? make_null() : script_value(script_string(text.substr(base)), engine_));
+			restore();
+			return text_append_general(f, p, k, &held, std::move(acc), p.assign || k > 0, env_role);
+		}
+		const std::string_view text = v->unchecked_as_string();
+		if ((p.assign || k > 0) && !limits_->memory_charge(sizeof(script_value) + joined + text.size())) [[unlikely]] {
+			restore();
+			return raise_from(detail::raise_memory_cap(*limits_));
+		}
+		std::string& out = replacing_text_storage(*t);
+		if (out.capacity() - out.size() < text.size()) { grow_text_for_site(out, text.size(), &ins); }
+		out.append(text.data(), text.size());
+		joined += text.size();
+	}
+	if (!p.assign) {
+		if (!limits_->memory_charge(joined)) [[unlikely]] {   // the compound store's append of the joined value
+			restore();
+			return raise_from(detail::raise_memory_cap(*limits_));
+		}
+		if (shared) { limits_->memory_charge_deferred(base + sizeof(script_string)); }   // the write gate's copy of a shared target, where the append unshares it
+	}
+	return {};
+}
+
+// op_text_append's general form from piece `next` (`held` its value when the fast form read it): each piece joins the chain's value as
+// the chain's own step joins it (op_concat_append for `s += ...`, op_concat_pending's general `+` for `s = s + ...`), then op_compound_store
+// or op_store's tail takes it
+op_status vm_backend::text_append_general(frame& f, const text_append_proto& p, size_t next, script_value* held, script_value acc, bool has_acc, uint32_t env_role) {
+	const size_t n = p.pieces.size();
+	for (size_t k = next; k < n; ++k) {
+		script_value v = make_null();
+		if (k == next && held) {
+			v = std::move(*held);
+		} else {
+			std::optional<script_value> scratch;
+			const script_value* r = text_piece(f, p.pieces[k], scratch, env_role);
+			if (!r) return op_status::failed;
+			if (is_unwinding_) return {};
+			v = p.pieces[k].const_index != k_invalid_u32 ? materialize_constant(*f.code, p.pieces[k].const_index) : *r;
+		}
+		if (!has_acc) {
+			acc = std::move(v);
+			has_acc = true;
+			continue;
+		}
+		if (p.assign) {
+			auto step = binary_general(token_type::plus, acc.deref(), v);
+			if (!step) return raise_from(step);
+			acc = std::move(step.value());
+			continue;
+		}
+		stack_.push_back(std::move(acc));
+		VM_TRY(concat_step(v, k == 1 && n >= 3 ? static_cast<uint32_t>((std::min)(n * 16, size_t{4096})) : 0u, &p.pieces[k], false));
+		if (is_unwinding_) return {};
+		acc = std::move(stack_.back());
+		stack_.pop_back();
+	}
+	if (p.assign) return store_popped_value(f, vm_instruction{opcode::op_store, p.symbol, p.slot, p.store_flags}, std::move(acc));
+	stack_.push_back(std::move(acc));
+	return exec_compound_store(f, vm_instruction{opcode::op_compound_store, p.symbol, p.slot, compound_plus | compound_flag_no_result});
+}
+
 // The storage `s = s + ...;` appends its tail to in place: the target's own string when the store would write it plainly (a frame slot,
 // a plain cell a reference holds, an environment cell the lookup cache answers, a bare field the store site's this-field row answers)
 // and it still holds the snapshot's node; null otherwise. A field's store stamps its tag, which `field_tag` takes (null: the tag stays).
@@ -20100,6 +20275,7 @@ op_status vm_backend::exec_extended(frame& f, const vm_instruction& ins) {
 		case opcode::op_concat_pending: return exec_concat_pending(f, ins);
 		case opcode::op_concat_operands: return exec_concat_operands(f, ins);
 		case opcode::op_concat_store: return exec_concat_store(f, ins);
+		case opcode::op_text_append: return exec_text_append(f, ins);
 		case opcode::op_new: return exec_new(f, ins);
 		case opcode::op_ctor_base: return exec_ctor_base(f, ins);
 		case opcode::op_ctor_delegate: return exec_ctor_delegate(f, ins);
@@ -20625,6 +20801,7 @@ op_status vm_backend::run_dispatch_loop(frame*& fp, const size_t records_base) {
 			case opcode::op_concat_pending:
 			case opcode::op_concat_operands:
 			case opcode::op_concat_store:
+			case opcode::op_text_append:
 			case opcode::op_sleep:
 			case opcode::op_format_call:
 			case opcode::op_ctor_base:

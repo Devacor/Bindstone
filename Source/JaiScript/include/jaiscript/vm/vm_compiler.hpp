@@ -391,6 +391,7 @@ namespace jai::vm {
         // no-result form (no push, no op_pop). Returns false if the shape doesn't apply.
         bool compile_no_result_expression(const expression_ptr& expr);
         bool try_emit_text_builder_store(identifier_expr* ident, assignment_expr* assign);
+        bool try_emit_text_append(identifier_expr* ident, assignment_expr* assign);
         bool try_emit_text_builder_member(const std::shared_ptr<member_expr>& member, assignment_expr* assign);
         bool try_emit_text_builder_index(binary_expr* sub, assignment_expr* assign, uint32_t string_site);
         const expression* text_builder_chain(assignment_expr* assign, std::vector<const binary_expr*>& chain);

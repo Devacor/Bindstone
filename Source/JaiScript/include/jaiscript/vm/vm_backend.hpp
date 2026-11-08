@@ -2547,7 +2547,8 @@ namespace jai::vm {
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
-        op_status exec_c_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // the compound plus with run-time kinds: strings in place
+        op_status exec_c_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);
+        op_status exec_c_text_append(frame& f, size_t& ip, const vm_instruction& ins, const cell_regs& cr);   // a statement's pieces appended to a slot's string in place   // the compound plus with run-time kinds: strings in place
 #if defined(_MSC_VER)
         __declspec(noinline)
 #endif
@@ -2666,6 +2667,10 @@ namespace jai::vm {
         op_status exec_concat_store(frame& f, const vm_instruction& ins);
         op_status exec_concat_store_member(frame& f, const vm_instruction& ins);
         op_status exec_concat_store_index(frame& f, const vm_instruction& ins);
+        op_status exec_text_append(frame& f, const vm_instruction& ins);
+        op_status text_append_rows(frame& f, const vm_instruction& ins);
+        const script_value* text_piece(frame& f, const fused_operand& piece, std::optional<script_value>& scratch, uint32_t& env_role);
+        op_status text_append_general(frame& f, const text_append_proto& p, size_t next, script_value* held, script_value acc, bool has_acc, uint32_t env_role);
         script_value* text_builder_target(frame& f, const vm_instruction& ins, const script_value& snapshot, type_info*& field_tag);
         op_status exec_size_temp(frame& f, const vm_instruction& ins);
         const builtin_method* open_receiver_builtin(const call_site& site, size_t kind, uint32_t receiver_rule) const;

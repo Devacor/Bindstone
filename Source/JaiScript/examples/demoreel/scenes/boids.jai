@@ -13,6 +13,14 @@
 // and clouds are baked tones; every palette entry is a sky tone darkened by a
 // level, so the birds shade whatever they cross.
 //
+// The camera flies: it leaves the shore, glides up to the murmuration, rides
+// alongside and then inside it as birds stream past as beating chevrons, the
+// sky turning with it, and pulls up and away for the veil. Near birds are black
+// chevrons, far ones specks fading into the haze, and a bird whose wings turn to
+// the sun flashes gold, so a turn of the flock sweeps a wave of light across it.
+// Late in the scene the flock gathers into a wheeling vortex, and each kick sends
+// a ripple down its fold.
+//
 // Cut like a film: sun rays fan across the sky and the grade sinks toward dusk;
 // the first stoop plays in slow motion as the camera pushes in on the strike
 // (the flock squeezes into a ball, a flash and a lens flare land on impact); the
@@ -61,6 +69,11 @@ float BD_FLOOR = 18.0;       // how low the birds will fly over the water
 float BD_FX = 0.0;           // the falcon
 float BD_FY = 0.0;
 float BD_FZ = 0.0;
+float BD_PULL = 0.32;        // how hard each bird is drawn to its place (harder as the veil sweeps in)
+float BD_FR2 = 400.0;        // the reach of its scare, squared (wider at the strike's shockwave)
+float BD_VORTEX = 0.0;       // how far the flock has gathered into its wheeling ring,
+float BD_VSPIN = 0.0;        // the ring's turn
+float BD_VR = 30.0;          // and its radius
 
 // the grid: 12-unit cells over x and z in [-96, 96), y in [0, 96)
 int BD_GX = 16;
@@ -156,10 +169,25 @@ function boids_steer(int c) -> array<float> {
 		float su = BD_U[i] * BD_LEN;
 		float sv = BD_V[i] * BD_WID;
 		float fold = BD_FOLD * math::sin(BD_U[i] * 2.4 + BD_PHASE);
-		float gx = tx + BD_AX * su + BD_BX * sv + BD_NX * fold - x;
-		float gy = ty + BD_AY * su + BD_BY * sv + BD_NY * fold - y;
-		float gz = tz + BD_AZ * su + BD_BZ * sv + BD_NZ * fold - z;
-		float pull = 0.32 * (1.0 - panic * 0.7);
+		float qx = tx + BD_AX * su + BD_BX * sv + BD_NX * fold;
+		float qy = ty + BD_AY * su + BD_BY * sv + BD_NY * fold;
+		float qz = tz + BD_AZ * su + BD_BZ * sv + BD_NZ * fold;
+		// the vortex: each bird's place on a wheeling ring around the flock's heart
+		float vt = BD_VORTEX;
+		if (vt > 0.0) {
+			float ra = BD_U[i] * 3.1415927 + BD_VSPIN;
+			float rr = BD_VR * (0.7 + 0.3 * BD_V[i]);
+			float wx = tx + math::cos(ra) * rr;
+			float wy = ty + BD_V[i] * 7.0 + math::sin(ra * 2.0 + BD_VSPIN) * 5.0;
+			float wz = tz + math::sin(ra) * rr;
+			qx += (wx - qx) * vt;
+			qy += (wy - qy) * vt;
+			qz += (wz - qz) * vt;
+		}
+		float gx = qx - x;
+		float gy = qy - y;
+		float gz = qz - z;
+		float pull = BD_PULL * (1.0 - panic * 0.7);
 		ax += gx * pull;
 		ay += gy * pull;
 		az += gz * pull;
@@ -170,9 +198,11 @@ function boids_steer(int c) -> array<float> {
 		float py = y - fy;
 		float pz = z - fz;
 		float pd2 = px * px + py * py + pz * pz;
-		if (pd2 < 400.0) {
+		float reach2 = BD_FR2;
+		if (pd2 < reach2) {
+			float reach = math::sqrt(reach2);
 			float pd = math::sqrt(pd2) + 0.01;
-			float k2 = 160.0 * (1.0 - pd / 20.0) / pd;
+			float k2 = 160.0 * (1.0 - pd / reach) / pd;
 			ax += px * k2;
 			ay += py * k2;
 			az += pz * k2;
@@ -193,7 +223,7 @@ function boids_steer(int c) -> array<float> {
 }
 
 class Boids : Scene {
-	int nb = 1000;
+	int nb = 1500;
 	int tones = 32;
 	array<int> sky = [];        // per pixel: tone * 8 (darkness 0)
 	array<float> glint = [];    // per lake pixel: the sun glitter's phase, < 0 off the path
@@ -232,6 +262,15 @@ class Boids : Scene {
 	float cen_x = 0.0;          // the flock's centre: the falcon dives through it
 	float cen_y = 40.0;
 	float cen_z = 0.0;
+	int sky_w = 0;              // the backdrop is baked twice the screen's width
+	int sky_x0 = 0;             // and the screen's left edge sits here in it, before the pan
+	float pan = 0.0;            // how far the camera's turn pans the sky, in pixels
+	float yaw0 = 0.0;           // the camera's first heading, where the pan starts from
+	bool yaw_set = false;
+	float sun_dx = 0.0;         // the sun's direction in the world: wings facing it flash
+	float sun_dy = 0.0;
+	float sun_dz = 0.0;
+	array<float> lit = [];      // per pixel: the gold of wings caught by the sun
 
 	void build() override {
 		name = "BOIDS";
@@ -260,6 +299,7 @@ class Boids : Scene {
 		horizon = itrunc(h * 0.74);
 		bake_sky();
 		dens = gfx.make_fgrid(w * h);
+		lit = gfx.make_fgrid(w * h);
 		BD_N = nb;
 		BD_CHUNK = 64;
 		BD_CHUNKS = [];
@@ -298,16 +338,19 @@ class Boids : Scene {
 	// cloud lit from below, and the lake mirroring
 	// it all a shade darker, with a glitter path under the sun
 	void bake_sky() {
-		sky = gfx.make_grid(w * h);
-		glint = gfx.make_fgrid(w * h);
-		float sunx = w * 0.62;
+		int bw = w * 2;
+		sky_w = bw;
+		sky_x0 = w / 2;
+		sky = gfx.make_grid(bw * h);
+		glint = gfx.make_fgrid(bw * h);
+		float sunx = sky_x0 + w * 0.62;
 		float suny = horizon - h * 0.07;
 		float sr = h * 0.075;
 		sun_x = sunx;
 		sun_y = suny;
-		rays = gfx.make_grid(w * h);
+		rays = gfx.make_grid(bw * h);
 		for (int y = 0; y < horizon; ++y) {
-			for (int x2 = 0; x2 < w; ++x2) {
+			for (int x2 = 0; x2 < bw; ++x2) {
 				float g = y * 1.0 / horizon;
 				float tone = 2.0 + g * g * 19.0;
 				float dx = x2 - sunx;
@@ -327,28 +370,28 @@ class Boids : Scene {
 					tone = tone + (body + lit - tone) * cover;
 				}
 				int it = itrunc(tone);
-				sky[y * w + x2] = (it > 31 ? 31 : (it < 0 ? 0 : it)) * 8;
+				sky[y * bw + x2] = (it > 31 ? 31 : (it < 0 ? 0 : it)) * 8;
 				// god rays: a fan of beams from the sun, broken where the clouds are thick
 				float ang = math::atan2(dy, dx);
 				float beam = math::sin(ang * 23.0) * 0.6 + math::sin(ang * 9.0 + 1.3) * 0.5;
 				float reach = 1.0 - d / (w * 0.75);
-				rays[y * w + x2] = beam > 0.35 && reach > 0.0 && d > sr ? itrunc((beam - 0.35) * reach * (1.0 - cover) * 9.0 * 16.0) : 0;
+				rays[y * bw + x2] = beam > 0.35 && reach > 0.0 && d > sr ? itrunc((beam - 0.35) * reach * (1.0 - cover) * 9.0 * 16.0) : 0;
 			}
 		}
 		for (int y2 = horizon; y2 < h; ++y2) {
 			int mirror = 2 * horizon - 1 - y2;
 			mirror = mirror < 0 ? 0 : mirror;
 			float depth = (y2 - horizon) * 1.0 / (h - horizon);
-			for (int x4 = 0; x4 < w; ++x4) {
-				int src = sky[mirror * w + x4];
+			for (int x4 = 0; x4 < bw; ++x4) {
+				int src = sky[mirror * bw + x4];
 				int dk = src % 8;
 				int tn = src / 8 - itrunc(2.0 + depth * 6.0);
 				tn = tn < 0 ? 0 : tn;
 				dk = dk > 1 ? dk : 1 + itrunc(depth * 2.0);
-				sky[y2 * w + x4] = tn * 8 + (dk > 7 ? 7 : dk);
+				sky[y2 * bw + x4] = tn * 8 + (dk > 7 ? 7 : dk);
 				float spread = 2.0 + depth * 14.0;
 				float off = x4 - sunx;
-				glint[y2 * w + x4] = off * off < spread * spread ? x4 * 1.7 + y2 * 2.9 + rng.nextf() * 6.28 : -1.0;
+				glint[y2 * bw + x4] = off * off < spread * spread ? x4 * 1.7 + y2 * 2.9 + rng.nextf() * 6.28 : -1.0;
 			}
 		}
 	}
@@ -368,6 +411,9 @@ class Boids : Scene {
 		return 0.3;
 	}
 
+	// long enough for the showpiece to land and its last image to hold a bar
+	int length_bars() override { return 8; }
+
 	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 5.5]; }
 	array<int> hit_levels() override { return [2, 1]; }
 
@@ -385,15 +431,30 @@ class Boids : Scene {
 		BD_TZ = 30.0 * math::sin(st * 0.47 + 1.3);
 		// the finale: the murmuration sweeps in low and close, a vast veil across the sun
 		float veil = 0.0;
-		if (t > 9.9) {
-			veil = (t - 9.9) / 2.6;
+		if (t > 9.0) {
+			veil = (t - 9.0) / 2.0;
 			veil = veil > 1.0 ? 1.0 : veil * veil * (3.0 - 2.0 * veil);
-			BD_TX += (cam_x * 0.06 + (sun_x - w * 0.5) * 0.2 - BD_TX) * veil;
-			BD_TY += (20.0 - BD_TY) * veil;
-			BD_TZ += (cam_z * 0.06 - BD_TZ) * veil;
+			// in front of the camera, across the sun as the camera sees it now
+			float side = (sun_x - w * 0.5) / focal * 62.0;
+			BD_TX += (cam_x + fwx * 62.0 + rx_ * side - BD_TX) * veil;
+			BD_TY += (cam_y - 1.0 - BD_TY) * veil;
+			BD_TZ += (cam_z + fwz * 62.0 + rz_ * side - BD_TZ) * veil;
 		}
 		BD_FLOOR = 18.0 - veil * 10.0;
+		BD_PULL = 0.32 + veil * 1.1;
 		shape_sheet(st);
+		float kick = cue == null ? 0.0 : cue.kick_env(t);
+		BD_FOLD += kick * 7.0;
+		// the vortex gathers through bar 5 and lets go into the veil
+		float gather = (t - MUSIC_BAR * 4.6) / (MUSIC_BAR * 0.8);
+		float release = (t - MUSIC_BAR * 6.0) / (MUSIC_BAR * 0.6);
+		gather = gather < 0.0 ? 0.0 : (gather > 1.0 ? 1.0 : gather);
+		release = release < 0.0 ? 0.0 : (release > 1.0 ? 1.0 : release);
+		BD_VORTEX = gather * (1.0 - release) * 0.85;
+		BD_VSPIN = st * 1.6;
+		BD_VR = 26.0 + 6.0 * math::sin(st * 0.9);
+		float since = strike_t < 0.0 ? -1.0 : t - strike_t;
+		BD_FR2 = since >= 0.0 && since < 0.45 ? 1800.0 : 400.0;
 		BD_LEN *= 1.0 + veil * 0.3;
 		float ox = BD_FX;
 		float oy = BD_FY;
@@ -535,12 +596,37 @@ class Boids : Scene {
 
 	// on the shore, turning slowly to follow the flock; the pitch stays fixed so
 	// the horizon stays where the backdrop was baked
+	float ease(float a, float b, float t) {
+		float k = (t - a) / (b - a);
+		k = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
+		return k * k * (3.0 - 2.0 * k);
+	}
+
 	void place_camera(float t) {
-		float ang = -1.5707963 + 0.25 * math::sin(t * 0.11);
-		cam_x = 115.0 * math::cos(ang);
-		cam_z = 115.0 * math::sin(ang);
-		cam_y = 6.0;
+		// from the shore, round the world's centre, the camera glides in to circle the
+		// flock, closes to ride inside it, then climbs away for the veil
+		float follow = ease(MUSIC_BAR * 1.5, MUSIC_BAR * 3.1, t);
+		float close = ease(MUSIC_BAR * 4.3, MUSIC_BAR * 5.1, t) * (1.0 - ease(MUSIC_BAR * 5.9, MUSIC_BAR * 6.5, t));
+		float dist = 115.0 - follow * 55.0 - close * 22.0 + ease(MUSIC_BAR * 5.9, MUSIC_BAR * 6.7, t) * 8.0;
+		float orbit = ease(MUSIC_BAR * 4.3, MUSIC_BAR * 5.1, t);
+		float ang = -1.5707963 + 0.25 * math::sin(t * 0.11) + orbit * 0.9 + follow * 0.25 * math::sin(t * 0.3);
+		float ox = look_x * follow;
+		float oz = look_z * follow;
+		cam_x = ox + dist * math::cos(ang);
+		cam_z = oz + dist * math::sin(ang);
+		cam_y = 6.0 + follow * 14.0 + close * 12.0 - ease(MUSIC_BAR * 5.9, MUSIC_BAR * 6.7, t) * 14.0;
 		float yaw = math::atan2(look_z - cam_z, look_x - cam_x);
+		if (!yaw_set) {
+			yaw0 = yaw;
+			yaw_set = true;
+		}
+		float dyaw = yaw - yaw0;
+		while (dyaw > 3.1415927) { dyaw -= 6.2831853; }
+		while (dyaw < -3.1415927) { dyaw += 6.2831853; }
+		pan = dyaw * focal * 0.7;
+		float lim = w * 0.5 - 1.0;
+		pan = pan > lim ? lim : (pan < -lim ? -lim : pan);
+		sun_x = w * 0.62 - pan;
 		float pitch = math::atan2(horizon - h * 0.5, focal);
 		float cp = math::cos(pitch);
 		float sp = math::sin(pitch);
@@ -579,7 +665,7 @@ class Boids : Scene {
 		var& fr = frame;
 		focus_x += (fsx - focus_x) * 0.12;
 		focus_y += (fsy - focus_y) * 0.12;
-		float zoom = 1.0 + push * 0.75;
+		float zoom = 1.0 + push * 0.3;
 		float ox = math::sin(tt * 61.0) * shake;
 		float oy = math::cos(tt * 47.0) * shake * 0.6;
 		float fx = focus_x * push + w * 0.5 * (1.0 - push);
@@ -660,7 +746,23 @@ class Boids : Scene {
 	void compose(var& grid) {
 		int n = w * h;
 		var& dn = dens;
-		for (int i = 0; i < n; ++i) { dn[i] = 0.0; }
+		var& gold = lit;
+		for (int i = 0; i < n; ++i) {
+			dn[i] = 0.0;
+			gold[i] = 0.0;
+		}
+		if (sun_dx == 0.0 && sun_dz == 0.0) {
+			// the sun's direction: the ray through its pixel from the camera's first pose
+			float sxo = w * 0.62 - w * 0.5;
+			float syo = h * 0.5 - (horizon - h * 0.07);
+			float dxs = fwx * focal + rx_ * sxo + upx * syo;
+			float dys = fwy * focal + upy * syo;
+			float dzs = fwz * focal + rz_ * sxo + upz * syo;
+			float ls = 1.0 / math::sqrt(dxs * dxs + dys * dys + dzs * dzs);
+			sun_dx = dxs * ls;
+			sun_dy = dys * ls;
+			sun_dz = dzs * ls;
+		}
 		float half_w = w * 0.5;
 		float half_h = h * 0.5;
 		float px_scale = w / 180.0;   // bird sizes are in a 180-pixel-wide frame's pixels
@@ -670,13 +772,20 @@ class Boids : Scene {
 			float ey = BD_Y[b] - cam_y;
 			float ez = BD_Z[b] - cam_z;
 			float zc = ex * fwx + ey * fwy + ez * fwz;
-			if (zc < 8.0) { continue; }
+			if (zc < 14.0) { continue; }
 			float iz = focal / zc;
 			int sx = half_w + (ex * rx_ + ez * rz_) * iz;
 			int sy = half_h - (ex * upx + ey * upy + ez * upz) * iz;
 			if (sx < 1 || sx >= w - 1 || sy < 1 || sy >= horizon) { continue; }
 			float size = 1.6 * iz * px_inv;
 			float beat = math::sin(flap[b] + sim_t * (14.0 + BD_PANIC[b] * 10.0));
+			// wings turned to the sun on the upstroke flash gold
+			float vl = math::sqrt(BD_VX[b] * BD_VX[b] + BD_VY[b] * BD_VY[b] + BD_VZ[b] * BD_VZ[b]) + 0.001;
+			float face = (BD_VX[b] * sun_dx + BD_VY[b] * sun_dy + BD_VZ[b] * sun_dz) / vl;
+			if (beat > 0.4 && face > -0.3 && face < 0.3 && size > 0.4) {
+				gold[sy * w + sx] += (beat - 0.55) * 4.0 * (size > 1.5 ? 1.5 : size);
+				continue;
+			}
 			if (size > 3.0) {
 				wings(sx, sy, size * px_scale, beat, BD_PANIC[b]);
 				continue;
@@ -712,16 +821,22 @@ class Boids : Scene {
 		float swell = 0.45 + 0.55 * math::sin(tt * 0.45) * math::sin(tt * 0.45) + kick * 0.35 + bass * 0.15;
 		int shine = itrunc(swell * (1.0 - breath * 0.7) * 16.0);
 		int dusk = itrunc(tt * 0.22);
+		int bw = sky_w;
+		int shift = sky_x0 + itrunc(pan);
 		for (int y = 0; y < h; ++y) {
 			int row = y * w;
+			int srow = y * bw + shift;
 			if (y < horizon) {
 				for (int x = 0; x < w; ++x) {
-					int s = sk[row + x];
+					int s = sk[srow + x];
 					int tone = s / 8;
-					int lifted = tone + ((ry[row + x] * shine) >> 8) - (tone < 27 ? dusk : 0);
+					int lifted = tone + ((ry[srow + x] * shine) >> 8) - (tone < 27 ? dusk : 0);
+					int glow = itrunc(gold[row + x]);
+					lifted += glow > 6 ? 6 : glow;
 					lifted = lifted < 0 ? 0 : (lifted > 31 ? 31 : lifted);
 					int lv = dn[row + x] * flock_gain;
-					int dk = s % 8 + lv;
+					int dk = s % 8 + lv - glow;
+					dk = dk < 0 ? 0 : dk;
 					grid[row + x] = lifted * 8 + (dk > 7 ? 7 : dk);
 				}
 				continue;
@@ -729,13 +844,13 @@ class Boids : Scene {
 			int mirror = 2 * horizon - 1 - y;
 			int ripple = itrunc(1.6 * math::sin(y * 1.1 + tt * 2.3));
 			for (int x2 = 0; x2 < w; ++x2) {
-				int s2 = sk[row + x2];
+				int s2 = sk[srow + x2];
 				int mx = x2 + ripple;
 				mx = mx < 0 ? 0 : (mx >= w ? w - 1 : mx);
 				int lv2 = mirror >= 0 ? dn[mirror * w + mx] * 2.0 : 0.0;
 				int dk2 = s2 % 8 + lv2;
 				int tone = s2 - s2 % 8;
-				float ph = gl[row + x2];
+				float ph = gl[srow + x2];
 				if (ph >= 0.0 && math::sin(ph + glit_on * 0.7) > glit_cut) { tone = 30 * 8; dk2 = lv2; }
 				grid[row + x2] = tone + (dk2 > 7 ? 7 : dk2);
 			}
@@ -746,14 +861,14 @@ class Boids : Scene {
 	void wings(int sx, int sy, float size, float beat, float panic) {
 		var& dn = dens;
 		int span = itrunc(size * 1.1);
-		span = span > 14 ? 14 : span;
+		span = span > 26 ? 26 : span;
 		for (int k = -span; k <= span; ++k) {
 			float a = (k < 0 ? -k : k) * 1.0 / span;
 			int x = sx + k;
 			int y = sy - itrunc(a * beat * size * 0.55) + itrunc(a * a * size * 0.2);
 			if (x < 0 || x >= w || y < 0 || y >= horizon) { continue; }
-			dn[y * w + x] += 2.4;
-			if (a < 0.25 && y + 1 < horizon) { dn[(y + 1) * w + x] += 2.4; }
+			dn[y * w + x] += 1.5;
+			if (a < 0.15 && y + 1 < horizon) { dn[(y + 1) * w + x] += 1.2; }
 		}
 	}
 

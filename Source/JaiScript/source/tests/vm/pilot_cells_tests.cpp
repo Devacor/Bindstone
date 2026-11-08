@@ -6214,18 +6214,19 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			const size_t c = vm.find(',');
 			check_true(c != std::string::npos && vm.substr(0, vm.find('=')) == vm.substr(vm.find('=') + 1, c - vm.find('=') - 1), "serial and parallel agree: " + vm);
 		});
-		// a straight-line span of typed statements outside every closed loop runs as a region: entered at its first instruction,
-		// left at its end; a refusal or a miss at the first instruction runs the trampoline's copy of it
+		// a straight-line span of typed statements outside every closed loop runs as a region (a var parameter keeps the bodies off frame
+		// programs): entered at its first instruction, left at its end; a refusal or a miss at the first instruction runs the trampoline's
+		// copy of it
 		test("straight_line_regions", [this]() {
 			const std::string src = "[[warn_mode]]\n"
-				"function shade(float x, float y, float z) -> float {\n"
+				"function shade(float x, float y, float z, var tag) -> float {\n"
 				"  float a = x * 1.5 + y * 2.5; float b = a * a - z * 0.25; float c = b / (a + 1.0);\n"
 				"  float d = c * c + a * b - x; float e = d * 0.5 + c * 0.25 + b * 0.125; float f = e - d * 0.75 + a;\n"
 				"  return f * 2.0 + e; }\n"
-				"function mix(int p, int q) -> int {\n"
+				"function mix(int p, int q, var tag) -> int {\n"
 				"  int r = p * 3 + q; int s = r * r - p; int t = s % 7 + r / 3; int u = t * t + s - r; int v = u + p * q - t; int w = v % 11 + u * 2 - s; int z = w * 3 + v - t;\n"
 				"  return z + u * 2; }\n"
-				"function run() -> string { var sh = shade; var mx = mix; float t = 0.0; int it = 0; for (int i = 0; i < 60; ++i) { t = t + sh(i * 0.5, 1.25, i * 0.125); it = it + mx(i, 7); } return to_string(t) + \" \" + to_string(it); }\n"
+				"function run() -> string { var sh = shade; var mx = mix; float t = 0.0; int it = 0; for (int i = 0; i < 60; ++i) { t = t + sh(i * 0.5, 1.25, i * 0.125, 0); it = it + mx(i, 7, 0); } return to_string(t) + \" \" + to_string(it); }\n"
 				"run();";
 			both(src, "", "straight regions");
 			both(src, "", "straight regions, proofs off", false);
@@ -6246,17 +6247,17 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		// a return whose expression is a graft: the graft's result lands before the return's own instructions, where the block exits, so the
-		// exit flushes it (a region's last statement, and a return inside a closed loop)
+		// exit flushes it (a region's last statement, and a return inside a closed loop; a var parameter keeps the region bodies off frame programs)
 		test("exit_after_a_graft_flushes_its_result", [this]() {
 			const std::string src = "[[warn_mode]]\n"
 				"function mul3(int a, int b) -> int { return a * b + 3; }\n"
-				"function tailcall(int x) -> int { int v = x * 7 + 1; int w = v * v - x; int y = w % 13 + v * 3; int z = y * y - w + v; int q = z + x * 2; int r = q * 3 - z + y; return mul3(r, 5); }\n"
+				"function tailcall(int x, var tag) -> int { int v = x * 7 + 1; int w = v * v - x; int y = w % 13 + v * 3; int z = y * y - w + v; int q = z + x * 2; int r = q * 3 - z + y; return mul3(r, 5); }\n"
 				"function loopret(int n) -> int { int acc = 0; for (int i = 0; i < n; ++i) { acc = acc * 3 + i; if (acc > 1000) { return mul3(acc, 2); } } return acc; }\n"
 				"class R { int s = 5; int raw() { int v = s; v = v ^ (v >> 3); v = v ^ (v << 5); v = v ^ (v >> 7); v = v * 3 + 1; s = v & 65535; return mul3(v & 255, 7); } }\n"
 				"function early(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += i * 0.5; if (t > 5.0) { return host_sqrt(t) + 1.0; } } return t; }\n"
-				"function rowr(int i) -> float { float x0 = i * 0.5; float y = x0 * x0 + 1.0; float z = y * 0.5 - x0; float w = z * z + y * 0.25; float x = w - z * 0.125 + y * 0.01; return host_sqrt(x * x + 1.0) + host_sin(x) * host_cos(x * 0.5) + host_floor(x * 0.25); }\n"
-				"function run() -> string { string out = \"\"; for (int i = 0; i < 4; ++i) { out += to_string(tailcall(i)) + \" \" + to_string(loopret(i * 4)) + \" \"; } R r = R(); for (int i = 0; i < 4; ++i) { out += to_string(r.raw()) + \" \"; }\n"
-				"  var ea = early; var rw = rowr; for (int i = 0; i < 8; ++i) { out += to_string(ea(i)) + \" \" + to_string(rw(i)) + \" \"; } return out; }\n"
+				"function rowr(int i, var tag) -> float { float x0 = i * 0.5; float y = x0 * x0 + 1.0; float z = y * 0.5 - x0; float w = z * z + y * 0.25; float x = w - z * 0.125 + y * 0.01; return host_sqrt(x * x + 1.0) + host_sin(x) * host_cos(x * 0.5) + host_floor(x * 0.25); }\n"
+				"function run() -> string { string out = \"\"; for (int i = 0; i < 4; ++i) { out += to_string(tailcall(i, 0)) + \" \" + to_string(loopret(i * 4)) + \" \"; } R r = R(); for (int i = 0; i < 4; ++i) { out += to_string(r.raw()) + \" \"; }\n"
+				"  var ea = early; var rw = rowr; for (int i = 0; i < 8; ++i) { out += to_string(ea(i)) + \" \" + to_string(rw(i, 0)) + \" \"; } return out; }\n"
 				"string first = run(); host_sqrt = function(float v) { return v * 2.0; }; first + \",\" + run();";
 			both(src, "", "exit after a graft");
 			both(src, "", "exit after a graft, proofs off", false);

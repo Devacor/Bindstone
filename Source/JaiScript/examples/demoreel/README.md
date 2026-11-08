@@ -116,6 +116,14 @@ audio analysis. Every scene is a whole number of bars and starts on a bar line,
 so the cues play back to back: the runner preloads them as MIDI files and
 switches the frame a scene's transition starts.
 
+`docs/site_tools/render_reel_video.py` turns the reel into a video with that
+soundtrack, an H.264 MP4 and a VP9 WebM: it runs the `video` mode, renders every
+kept frame through the examples page's terminal renderer across all cores, plays
+the cues back to back through a small numpy synthesizer (drums, toms and claps,
+a filtered-saw bass, a detuned pad, a square arpeggio, a vibrato lead, brass
+stabs), and hands both to ffmpeg, scaling by nearest neighbour so the pixels
+stay crisp (`--seconds N` for a short cut, `--frames DIR` to reuse a dump).
+
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
 The shim picks its color depth as `jai_demoreel` does, through the runner's

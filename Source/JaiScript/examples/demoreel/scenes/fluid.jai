@@ -16,12 +16,18 @@
 // Graded for the screen: caustic light ripples across the bare water, the jets
 // pump their ink on the beat, a starburst of jets fires out from the middle of
 // the tank, the frame darkens toward its corners, and at the
-// end the camera pushes in on the whirlpool.
+// end the camera pushes in on the whirlpool. Then the whirlpool winds tighter and
+// sinks into a funnel through bar nine, and on bar ten's downbeat it erupts: a geyser
+// of ink towers out of the middle, sixteen jets fire a rainbow ring across the tank
+// and a shock ring races over the water, and the camera is thrown up and back; the
+// geyser falls back pulsing on every kick, each kick sends a ring out across the
+// surface, and bar eleven fires it again.
 //
 // Scored to its cue: the jets pump on the kick, the crossing jets' inks turn with
 // each chord, the snare flares the ink's light and the bass the caustics, the
 // energy feeds the curl, the ring's nozzles race through the bar before the burst,
-// and the starburst (bar 4) and the bloom (bar 6) land as hits.
+// the starburst (bar 4), the bloom (bar 6) and the geyser (bar 10) land as hits, its
+// second spout (bar 11) as an accent.
 
 // Globals on purpose: the parallel row bodies read them (arrays borrow zero-copy).
 array<float> MS_U = [];      // the flow, cells per second, on the half-size grid
@@ -59,6 +65,11 @@ float MS_HOR = 0.0;
 float MS_FOC = 100.0;
 float MS_PEAK = 10.0;        // how tall the thickest ink stands
 float MS_ZMAX = 200.0;
+bool MS_SURGE = false;       // the water's own heights are on: the funnel, the geyser and the kick's rings
+float MS_GX = 0.0;           // where they stand, in tank pixels
+float MS_GY = 0.0;
+array<float> MS_RAD = [];    // by whole pixels of radius from there: the height they add,
+array<int> MS_RADL = [];     // and how many shades a ring's crest lights
 
 // one screen column of the tank in perspective, on a parallel_transform worker: the
 // ray walks the water's plane from near to far and each step raises the ink by its
@@ -90,9 +101,34 @@ function maelstrom_column(int x) -> array<int> {
 			int i = itrunc(py) * ww + itrunc(px);
 			float d = MS_D[i];
 			float rise = d / (d + 0.35) * peak;
+			int lift = 0;
+			if (MS_SURGE) {
+				float gx = px - MS_GX;
+				float gy = py - MS_GY;
+				float rr = math::sqrt(gx * gx + gy * gy);
+				int ri = itrunc(rr);
+				rise += MS_RAD[ri] + (MS_RAD[ri + 1] - MS_RAD[ri]) * (rr - ri);
+				lift = MS_RADL[ri];
+			}
 			int sy = itrunc(hor + (hc - rise) * foc / z);
 			if (sy < ybuf) {
 				int c = MS_IMG[i];
+				if (lift != 0) {
+					// a ring's crest catches the light and its trough falls dark: the ink moves through its
+					// shades, the water through its caustic levels
+					int lv0 = c - ink;
+					if (lv0 >= 0 && lv0 < 500) {
+						int l20 = lv0 % 20;
+						if (l20 < 16) {
+							int to = l20 + lift * 3;
+							c += (to > 15 ? 15 : (to < 0 ? 0 : to)) - l20;
+						}
+					} else {
+						int g4 = (c - MS_BG) % 4;
+						int to2 = g4 + lift;
+						c += (to2 > 3 ? 3 : (to2 < 0 ? 0 : to2)) - g4;
+					}
+				}
 				int top = sy < 0 ? 0 : sy;
 				// below its lit top the ink's side faces the camera: a few shades darker
 				int lv = c - ink;
@@ -329,11 +365,17 @@ class Maelstrom : Scene {
 		}
 	}
 
-	// long enough for the showpiece to land and its last image to hold a bar
-	int length_bars() override { return 9; }
+	int length_bars() override { return 12; }
 
-	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
-	array<int> hit_levels() override { return [2, 2]; }
+	float t_geyser = MUSIC_BAR * 10.0;
+	float t_spout = MUSIC_BAR * 11.0;
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, MUSIC_BAR * 10.0, MUSIC_BAR * 11.0]; }
+	array<int> hit_levels() override { return [2, 2, 2, 1]; }
+
+	float smooth01(float u) {
+		float c = u < 0.0 ? 0.0 : (u > 1.0 ? 1.0 : u);
+		return c * c * (3.0 - 2.0 * c);
+	}
 
 	void update(float t, float dt) override {
 		tt = t;
@@ -393,6 +435,19 @@ class Maelstrom : Scene {
 				jet(cx + c2 * h * 0.34, cy + s2 * h * 0.3, -c2, -s2, 84.0, a2, 22.0, 2.6 * h / 120.0, step);
 			}
 		}
+		// the geyser: sixteen jets fire outward from the middle, then eight more on the second spout
+		float erupt = t - t_geyser;
+		float spout = t - t_spout;
+		if ((erupt > 0.0 && erupt < 0.8) || (spout > 0.0 && spout < 0.45)) {
+			int n = erupt < 0.8 ? 16 : 8;
+			float fan = 6.2831853 / n;
+			for (int k4 = 0; k4 < n; ++k4) {
+				float a4 = k4 * fan + (erupt < 0.8 ? 0.1 : 0.5) + erupt * 0.6;
+				float c4 = math::cos(a4);
+				float s4 = math::sin(a4);
+				jet(cx + c4 * h * 0.06, cy + s4 * h * 0.06, c4, s4, 200.0, a4 + tint, 34.0 * pump, 3.2 * h / 120.0, step);
+			}
+		}
 	}
 
 	// the whirlpool's strength: it winds up with the ring, eases off while the
@@ -400,8 +455,11 @@ class Maelstrom : Scene {
 	float swirl(float t) {
 		if (t < 11.577) { return (t - MUSIC_BAR * 5.0) * 0.3; }
 		if (t < 12.377) { return 0.25; }
+		if (t > t_geyser) { return 0.15 + 0.6 * math::exp(0.0 - (t - t_geyser) * 0.8); }
 		float k = 0.25 + (t - 12.377) * 0.6;
-		return k > 1.0 ? 1.0 : k;
+		k = k > 1.0 ? 1.0 : k;
+		float wind = (t - MUSIC_BAR * 9.0) / MUSIC_BAR;
+		return wind > 0.0 ? k + wind * wind * 1.8 : k;
 	}
 
 	// a nozzle at pixel (x, y) shooting `speed` pixels a second along (dx, dy):
@@ -667,18 +725,87 @@ class Maelstrom : Scene {
 		float fy = 0.0 - math::cos(ang);
 		float dive = t > 11.977 ? (t - 11.977) / 3.2 : 0.0;
 		dive = dive > 1.0 ? 1.0 : dive * dive * (3.0 - 2.0 * dive);
-		float back = h * (0.82 - dive * 0.34);
+		// it circles faster and sinks as the funnel winds up, then the geyser throws it up and back
+		float wind = (t - MUSIC_BAR * 9.0) / MUSIC_BAR;
+		wind = wind < 0.0 ? 0.0 : (wind > 1.0 ? 1.0 : wind);
+		float thrown = smooth01((t - t_geyser) / (MUSIC_BAR * 1.4));
+		ang += wind * wind * 1.1 - thrown * 0.5;
+		fx = math::sin(ang);
+		fy = 0.0 - math::cos(ang);
+		float flash = cue == null ? 0.0 : cue.hit(t);
+		float back = h * (0.82 - dive * 0.34 - wind * 0.08 + thrown * 0.32);
 		MS_FX = fx;
 		MS_FY = fy;
 		MS_RX = 0.0 - fy;
 		MS_RY = fx;
 		MS_CX = w * 0.5 - fx * back;
 		MS_CY = h * 0.5 - fy * back;
-		MS_HC = h * (0.62 - dive * 0.26) * (1.0 - kick * 0.05);
-		MS_FOC = w * 0.6;
-		MS_HOR = 0.0 - h * (0.25 - dive * 0.12);
+		MS_HC = h * (0.62 - dive * 0.26 - wind * 0.06 + thrown * 0.26) * (1.0 - kick * 0.05);
+		MS_FOC = w * 0.6 * (1.0 + kick * 0.04 + flash * 0.1);
+		MS_HOR = 0.0 - h * (0.25 - dive * 0.12 + thrown * 0.08) + math::sin(t * 53.0) * flash * flash * h * 0.04;
 		MS_PEAK = h * (0.085 + kick * 0.03);
 		MS_ZMAX = back + h * 1.2;
+		surge(t, wind);
+	}
+
+	// the water's own heights about the middle, by radius: the funnel the whirlpool sinks, the geyser's tower
+	// and a ring out across the surface on every kick from the whirlpool on (the geyser's the biggest)
+	void surge(float t, float wind) {
+		MS_SURGE = t > MUSIC_BAR * 5.0;
+		if (!MS_SURGE) { return; }
+		MS_GX = w * 0.5;
+		MS_GY = h * 0.5;
+		int n = itrunc(math::sqrt(w * w + h * h * 1.0)) + 2;
+		var& rad = MS_RAD;
+		var& lit = MS_RADL;
+		if (rad.size() != n) {
+			rad = gfx.make_fgrid(n);
+			lit = gfx.make_grid(n);
+		}
+		float kick = cue == null ? 0.0 : cue.kick_env(t);
+		float erupt = t - t_geyser;
+		float spout = t - t_spout;
+		float funnel = erupt < 0.0 ? h * 0.07 * wind * wind : h * 0.07 * math::exp(0.0 - erupt * 9.0);
+		float fr2 = h * h * 0.012;
+		float tower = 0.0;
+		if (erupt > 0.0) {
+			tower = h * 0.3 * (1.0 - math::exp(0.0 - erupt * 14.0)) * (0.35 + 0.65 * math::exp(0.0 - erupt * 1.1)) * (1.0 + kick * 0.35);
+			if (spout > 0.0) { tower += h * 0.18 * (1.0 - math::exp(0.0 - spout * 14.0)) * math::exp(0.0 - spout * 1.6); }
+		}
+		float tw2 = h * h * 0.0018;
+		for (int r = 0; r < n; ++r) {
+			float q = r * r / tw2;
+			rad[r] = tower / (1.0 + q * q) - funnel / (1.0 + r * r / fr2);
+			lit[r] = 0;
+		}
+		if (cue == null) { return; }
+		// the rings: each kick's spreads at a constant speed and dies away, a lit crest with a dark trough
+		// behind it; the geyser's is bigger
+		float speed = h * 0.75;
+		float wd = h * 0.045;
+		int k = cue.kick.last(t / MUSIC_STEP + 0.0001);
+		while (k >= 0) {
+			float born = cue.kick.at[k] * MUSIC_STEP;
+			float age = t - born;
+			if (age > 2.6) { break; }
+			if (born >= MUSIC_BAR * 5.0) {
+				bool big = born >= t_geyser - 0.01 && born < t_geyser + 0.05;
+				float amp = h * (erupt > 0.0 ? 0.035 : 0.02) * (big ? 1.8 : 1.0) * cue.kick.vel[k] / 127.0 * math::exp(0.0 - age * 1.1);
+				float ring_r = big ? h * 0.12 + age * speed * 1.4 : age * speed;
+				int r0 = math::max(0, itrunc(ring_r - wd * 2.6));
+				int r1 = math::min(n - 1, itrunc(ring_r + wd) + 1);
+				for (int r2 = r0; r2 <= r1; ++r2) {
+					float e = (r2 - ring_r) / wd;
+					float f = e > -1.0 ? 1.0 - e * e : -0.5 * (1.0 - (e + 1.8) * (e + 1.8) / 0.64);
+					if (e < -2.6 || (e > -1.0 && f <= 0.0)) { continue; }
+					rad[r2] += amp * f;
+					int l = itrunc(f * amp / (h * 0.01));
+					l = lit[r2] + l;
+					lit[r2] = l > 3 ? 3 : (l < -3 ? -3 : l);
+				}
+			}
+			--k;
+		}
 	}
 
 	void render(var& grid) override {

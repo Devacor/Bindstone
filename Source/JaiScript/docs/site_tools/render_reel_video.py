@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Render the demoreel to a video with its own soundtrack (an MP4 and a WebM).
 
-    python docs/site_tools/render_reel_video.py [--runner PATH] [--out DIR] [--frames DIR] [--seconds N]
-                                                [--cols 120] [--rows 40] [--every 2] [--width W] [--crf 33] [--jobs N]
+    python docs/site_tools/render_reel_video.py [--runner=PATH] [--out=DIR] [--frames=DIR] [--seconds=N]
+                                                [--cols=120] [--rows=40] [--every=2] [--width=W] [--crf=33] [--jobs=N]
 
 1. The runner plays the whole reel headless (examples/demoreel/demoreel.jai's `video` mode) at a fixed 1/30 s step,
    writing every `--every`-th frame as 24-bit terminal text, the soundtrack's cues (one MIDI file a scene) and

@@ -2461,6 +2461,7 @@ namespace jai::vm {
         // lands raw in a raw caller's cell, else boxes through its return pad. Both switch the block loop's frame through raw_switch_
         // in_loop: the frame-program loop follows the callee itself (*in_loop names it; raw_switch_ untouched)
         bool raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop = nullptr);
+        const script_value* raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) const;
         static constexpr size_t k_raw_small_cells = 16;   // a small program's cells clear with fixed-size stores (the vectors keep at least this many)
         frame& raw_push(frame& f, const chunk::cell_loop& loop, uint32_t index, const chunk::cell_loop::call_plan& plan);
         void raw_pop(call_record& rec);

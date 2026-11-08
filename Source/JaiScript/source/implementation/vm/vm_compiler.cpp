@@ -616,10 +616,11 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 		switch (rhs->get_type()) {
 		case node_type::binary_expr:
 			if (code.back().op == opcode::op_binary_fused) {
-				if (!loops_.empty() && typed_lowering_ && temps_active_ && chunk_->is_function_body &&
+				if (typed_lowering_ && temps_active_ && chunk_->is_function_body &&
 				    (kind_flags & compound_flag_no_result) && !(kind_flags & (compound_flag_old_result | compound_flag_incdec))) {
-					// inside a loop the operand lands in a temp first (the same kernel, the result into the temp) and the compound reads
-					// the temp: the typed rows and the cell translation take both halves, where a compound over a binary proto stays general
+					// the operand lands in a temp first (the same kernel, the result into the temp) and the compound reads the temp: the typed
+					// rows and the cell translation (a loop's block, a straight region, a frame program) take both halves, where a compound
+					// over a binary proto stays general
 					const uint32_t t0 = static_cast<uint32_t>(temp_next_);
 					++temp_next_;
 					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
@@ -1132,8 +1133,9 @@ static bool loop_free_body(const ast_node* n, const detail::native_stack_mark& s
 }
 
 // a call a frame program's body makes that can be raw at run time: to the function itself, or to a loop-free function of the raw shape that forms a
-// frame program itself (one of its own raw-signature calls reaches one; a cycle of such functions forms programs all round); a leaf, or a function
-// whose calls reach only loops, has no frame program, so a call to one stays the general call
+// frame program itself: one of its own raw-signature calls reaches one (a cycle of such functions forms programs all round), or its body does a
+// region's work (frame_program_candidate's rule, its operations counted here on the tree); a function with loops has none, so a call to one stays
+// the general call
 bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const block_stmt* self_body, const detail::native_stack_mark& mark) {
 	std::vector<const function_decl*> visiting;
 	return raw_call_reaches_program(callee, self_body, visiting, mark);
@@ -1147,6 +1149,7 @@ bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const bl
 	if (visiting.size() >= 8) return false;
 	visiting.push_back(callee);
 	bool found = false;
+	size_t work = 0;
 	auto visit_expr = [&](auto&& self, const expression* e) -> void {
 		if (!e || found) return;
 		mark.guard(e->location);
@@ -1155,12 +1158,13 @@ bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const bl
 			const auto* c = static_cast<const call_expr*>(e);
 			const auto d = c->proven_callee_decl.lock();
 			if (d && raw_signature(d.get()) && c->arguments.size() == d->parameters.size() && raw_call_reaches_program(d.get(), callee->body.get(), visiting, mark)) { found = true; return; }
+			++work;
 			for (const auto& a : c->arguments) { self(self, a.get()); }
 			return;
 		}
-		case node_type::binary_expr: { const auto* b = static_cast<const binary_expr*>(e); self(self, b->left.get()); self(self, b->right.get()); return; }
-		case node_type::unary_expr: self(self, static_cast<const unary_expr*>(e)->operand.get()); return;
-		case node_type::ternary_expr: { const auto* t = static_cast<const ternary_expr*>(e); self(self, t->condition.get()); self(self, t->then_expression.get()); self(self, t->else_expression.get()); return; }
+		case node_type::binary_expr: { const auto* b = static_cast<const binary_expr*>(e); ++work; self(self, b->left.get()); self(self, b->right.get()); return; }
+		case node_type::unary_expr: ++work; self(self, static_cast<const unary_expr*>(e)->operand.get()); return;
+		case node_type::ternary_expr: { const auto* t = static_cast<const ternary_expr*>(e); ++work; self(self, t->condition.get()); self(self, t->then_expression.get()); self(self, t->else_expression.get()); return; }
 		case node_type::assignment_expr: self(self, static_cast<const assignment_expr*>(e)->value.get()); return;
 		case node_type::cast_expr: self(self, static_cast<const cast_expr*>(e)->operand.get()); return;
 		default: return;
@@ -1183,7 +1187,7 @@ bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const bl
 		}
 	}
 	visiting.pop_back();
-	return found;
+	return found || work >= k_region_min_work;
 }
 
 uint8_t vm_compiler::raw_scalar_kind(const type_info* t) {
@@ -1648,6 +1652,13 @@ JAI_NOINLINE void vm_compiler::compile_return(const statement_ptr& stmt) {
 				table[ret_ip] = symbol + 1;
 			}
 			return;
+		} else if (fuse_return && frame_eligible_ && ternary_temp_operand(rs->value.get()) && scalar_value_expr(rs->value.get())) {
+			// a scalar ternary lands in a temp (each arm by one move) and the return reads the temp, which a frame program's ret takes as a cell
+			const size_t mark = temp_next_;
+			fused_operand landed;
+			compile_ternary_into_temp(rs->value, landed);
+			emit(opcode::op_load, landed.slot, landed.symbol, 0);
+			free_temps(mark);
 		} else {
 			// Calls that already yield a reference pass through; anything else
 			// rejects in the ref-return conversion (return site / completion door)
@@ -4152,8 +4163,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	auto frame_program_candidate = [&]() -> bool {
 		if (!frame_eligible_ || !c.is_function_body || original_size < 2 || code[original_size - 1].op != opcode::op_halt || !c.cell_loops.empty()) return false;
 		bool raw_site = false;
+		size_t work = 0;
 		for (size_t ip = 0; ip + 1 < original_size; ++ip) {
 			const vm_instruction& ins = code[ip];
+			if (work_op(ins.op)) { ++work; }
 			if (ins.op == opcode::op_loop_back || ins.op == opcode::op_cfor_back || ins.op == opcode::op_cells_back || ins.op == opcode::op_cells_cfor_back || ins.op == opcode::op_iter_next) return false;
 			if (ins.op == opcode::op_jump && ins.a <= ip) return false;
 			if (ins.op == opcode::op_probe_callee && ins.a < c.call_sites.size() && c.call_sites[ins.a].call_node < c.nodes.size()) {
@@ -4162,7 +4175,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (decl && raw_signature(decl.get()) && ce->arguments.size() == decl->parameters.size() && raw_call_reaches_program(decl.get(), callable_body_, stack_)) { raw_site = true; }
 			}
 		}
-		if (!raw_site) return false;
+		if (!raw_site && work < k_region_min_work) return false;   // a leaf pays its entry with its own work, as a straight span does
 		const vm_instruction& h = code[0];   // the trampoline runs it when the entry is refused: an instruction that looks at nothing after it
 		return entry_op(h) || (h.op >= opcode::op_t_jlt_ii && h.op <= opcode::op_t_jne_ff) || h.op == opcode::op_fused_cmp_jump || h.op == opcode::op_probe_callee || h.op == opcode::op_const || h.op == opcode::op_load;
 	};
@@ -4603,7 +4616,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						ret.a = k_typed_const_bit | st.a;
 						op.kind = ir::skip;
 					} else if (st.op == opcode::op_load) {
-						if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || st.c != 0) { refuse(chunk::cell_refusal_translation, ip); break; }
+						if (st.a == k_invalid_u32 || st.a >= k_typed_slot_mask || (st.c & ~load_flag_take) != 0) { refuse(chunk::cell_refusal_translation, ip); break; }   // a last use's take moves nothing a cell holds
 						use_slot(st.a, 0, false, 0, nullptr, ip); ret.a = st.a; slot_read(ret, st.a);
 						op.kind = ir::skip;
 					} else {
@@ -5587,10 +5600,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		if (refusal == chunk::cell_refusal_none) { const region_verdict v = verify(region, cells); if (v.refusal != chunk::cell_refusal_none) { refuse(v.refusal, v.at); } }
 		if (refusal == chunk::cell_refusal_none && !line) { uint32_t at = 0; if (bail_dominates_back_edge(region, at)) { refuse(chunk::cell_refusal_bail_dominates, at); } }
 		if (fn_mode) {
-			// a frame program pays its entry only for its raw calls: without one (or refused) the body keeps its ordinary spans
+			// a frame program pays its entry with its raw calls or with its own work: without either (or refused) the body keeps its ordinary spans
 			bool any_raw = false;
+			size_t work = 0;
 			for (const auto& rc : calls) { if (rc.raw) { any_raw = true; } }
-			if (refusal != chunk::cell_refusal_none || !any_raw) { add_spans(0, original_size); continue; }
+			for (const ir_op& o : ops) { if (ir_work(o)) { ++work; } }
+			if (refusal != chunk::cell_refusal_none || (!any_raw && work < k_region_min_work)) { add_spans(0, original_size); continue; }
 		}
 		if (refusal != chunk::cell_refusal_none) {
 			if (line) {
@@ -6289,14 +6304,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			// the frame program: a raw call enters it at copy_head with the parameters in their cells when nothing else needs reading at entry
 			loop.frame_program = true;
 			c.frame_program = loop_index;
-			bool enterable = loop.env_cells.empty() && loop.sites.empty() && loop.inline_sites.empty() && loop.math_alias_sites.empty() && loop.rebinds.empty() && loop.iter_proto == k_invalid_u32;
+			bool enterable = loop.sites.empty() && loop.inline_sites.empty() && loop.math_alias_sites.empty() && loop.rebinds.empty() && loop.iter_proto == k_invalid_u32;
+			for (const uint32_t k : loop.env_cells) {   // a global the body only reads resolves at the raw entry (raw_enter_env); one it writes would flush past the raw return
+				if (loop.cells[k].defined || loop.env_operands[loop.cells[k].env_operand].member_node != k_invalid_u32) { enterable = false; }
+			}
 			for (size_t i = 0; i < frame_param_kinds_.size(); ++i) {
 				const uint32_t k = i < loop.slot_to_cell.size() ? loop.slot_to_cell[i] : k_invalid_u32;
 				if (k == k_invalid_u32 || loop.cells[k].kind != frame_param_kinds_[i] || loop.cells[k].temp) { enterable = false; }
 				loop.param_cells.push_back(k);
 				loop.param_kinds |= static_cast<uint32_t>(frame_param_kinds_[i]) << (4 * i);
 			}
-			for (const uint32_t k : loop.entry_cells) { if (std::find(loop.param_cells.begin(), loop.param_cells.end(), k) == loop.param_cells.end()) { enterable = false; } }
+			for (const uint32_t k : loop.entry_cells) { if (loop.cells[k].env_operand == k_invalid_u32 && std::find(loop.param_cells.begin(), loop.param_cells.end(), k) == loop.param_cells.end()) { enterable = false; } }
 			for (const auto& cl : loop.cells) { if (cl.kind == static_cast<uint8_t>(script_value::TYPEID_STRING)) { enterable = false; } }
 			loop.raw_enterable = enterable;
 			loop.writes_stamps = !loop.boundaries.empty();
@@ -6709,6 +6727,23 @@ bool vm_compiler::ternary_temp_operand(const expression* e) {
 		return a->get_type() == node_type::binary_expr && binary_lands_fused(const_cast<binary_expr*>(static_cast<const binary_expr*>(a)));
 	};
 	return t->condition && arm_ok(t->then_expression.get()) && arm_ok(t->else_expression.get());
+}
+
+// a value the checker proved an int, a float or a bool: a scalar literal, a scalar-declared local, a numeric binary, a unary or an
+// intrinsic over such values, a ternary of them
+bool vm_compiler::scalar_value_expr(const expression* e) {
+	if (!e) return false;
+	switch (e->get_type()) {
+	case node_type::literal_expr: {
+		const auto k = static_cast<const literal_expr*>(e)->value.raw_storage_index();
+		return k == script_value::TYPEID_INT || k == script_value::TYPEID_FLOAT || k == script_value::TYPEID_BOOL;
+	}
+	case node_type::identifier_expr: return !reference_slot_operand(e) && raw_scalar_kind(declared_type_of(e)) != 0;
+	case node_type::binary_expr: return numeric_value_binary(const_cast<expression*>(e));
+	case node_type::unary_expr: return unary_temp_operand(e) && scalar_value_expr(static_cast<const unary_expr*>(e)->operand.get());
+	case node_type::ternary_expr: { const auto* t = static_cast<const ternary_expr*>(e); return scalar_value_expr(t->then_expression.get()) && scalar_value_expr(t->else_expression.get()); }
+	default: return math_temp_operand(e) != detail::math_fn::none;
+	}
 }
 
 void vm_compiler::compile_ternary_into_temp(const expression_ptr& e, fused_operand& out) {

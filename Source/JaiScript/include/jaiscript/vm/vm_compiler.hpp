@@ -219,6 +219,7 @@ namespace jai::vm {
         int lift_temp_peak(const expression* e, int a_limit);
         bool lift_takes(const binary_expr* b);
         bool binary_lands_fused(binary_expr* b);
+        bool scalar_value_expr(const expression* e);
         bool numeric_value_binary(expression* e);
         bool reference_slot_operand(const expression* e);
         void materialize_operand_temp(const expression_ptr& e, fused_operand& out);

@@ -717,19 +717,23 @@ ever sees one.
 
 A function body compiles to one cell region spanning it whole, its frame program, when its body has no loop (the first
 form; a switch, a try or a nested declaration counts as one), every parameter is a by-value `int`, `float` or `bool` in its
-own slot without a default (the declared type is the proof), and at least one call in the body can be raw: it resolves (the
+own slot without a default (the declared type is the proof), and the region pays its entry: at least one call in the body can
+be raw, or the body does a straight span's work (`k_region_min_work` operations). A call can be raw when it resolves (the
 checker's `proven_callee_decl`) to a function of the same shape with a scalar result that is the function itself or a
-loop-free function that forms a frame program by the same rule (a cycle of such functions forms programs all round; a leaf,
-or a function whose calls reach only loops, has none, and a call to one stays the general call). A tail call keeps its
-splice. The region is the
+loop-free function that forms a frame program by the same rule: one of its own calls can be raw (a cycle of such functions
+forms programs all round), or its body's operations, counted on the tree, reach that work. A leaf the inliner keeps (one over
+its clone budget) is therefore a frame program entered raw from a block, not a general call; a function with loops has none,
+and a call to one stays the general call. A tail call keeps its splice. The region is the
 straight-line region of the cell blocks with three differences: its span is the body from its first instruction to its
 `HALT`, whatever its amount of work; a `return` is a ret operation rather than an exit (its value a cell or a constant; a
-returned binary lands in an argument value first, and the ret reads the binary's operands so a miss at it re-runs the tail
-whole); and a call is the door of the loop blocks, raw when its callee is. A refusal leaves the body its ordinary spans, and
-so does a region without a raw call, since its entry would cost a general caller more than the dispatches it saves.
+returned binary lands in an argument value first, a returned scalar ternary lands in a temp the ret reads, and the ret reads
+the binary's operands so a miss at it re-runs the tail whole); and a call is the door of the loop blocks, raw when its callee
+is. A refusal leaves the body its ordinary spans, and so does a region with neither a raw call nor the work.
 
 A parameter is a live-in cell pinned to its declared kind. A frame program is raw-enterable when its entry reads nothing but
-its parameters: no environment value, no container site, no graft or stdlib-alias guard, no string cell. Its general entry is
+its parameters and the plain globals it only reads: no container site, no graft or stdlib-alias guard, no string cell, no
+global it writes or an enum member. The raw entry reads those globals through the program's own lookup-cache head (a raw frame
+has no member scope); a head not armed, or a value of another kind, sends the call through the door, whose general entry arms it. Its general entry is
 the region's `CELLS_ENTER` at the first instruction, whose guards take a parameter slot holding its declared kind with no stamp
 (an argument pushed as a literal or a temp): the flush stamps it with the declared type.
 

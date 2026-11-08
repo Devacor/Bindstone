@@ -6962,8 +6962,7 @@ JAI_FORCEINLINE void vm_backend::env_flush_one(frame& f, const chunk::cell_loop&
 void vm_backend::cells_miss(frame& f, const chunk::cell_loop& loop, uint32_t original_ip, unsigned step) {
 	JAI_CELLS_COUNT(6); JAI_CELLS_COUNT(5);
 	JAI_COVERAGE_MISS(f);
-	++cells_counters_.misses;
-	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
+	++cells_counters_.misses;	park_raw_callee(f, loop);   // a miss inside a raw call's argument zone: the general form resumes with the callee parked
 	(void)step;
 	if (loop.iter_proto != k_invalid_u32 && loop.iter_index_cell != k_invalid_u32 && !iter_states_.empty()) {
 		// the iteration state's next index: the element the block bound this iteration is done with (a miss inside the body), or is the
@@ -8078,7 +8077,7 @@ next_frame:
 		case opcode::op_c_probe:
 			if constexpr (Raw) {
 				// a raw site whose plan holds (no general code ran since the probe validated it) resolves nothing
-				if (loop.plans.data()[ci.a].epoch == raw_epoch_ && loop.calls[ci.a].raw && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; JAI_CELL_NEXT; }
+				if (loop.calls[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; JAI_CELL_NEXT; }
 				f.ip = ip; st = exec_c_probe(f, ci); ip = f.ip; break;
 			}
 			[[fallthrough]];
@@ -8188,7 +8187,7 @@ void vm_backend::cells_run_lean(frame*& fp, const chunk::cell_loop*& lp) {
 			case opcode::op_c_mov_p: cells[ci.a].bits = cells[ci.b].bits; cells[ci.a].kind = cells[ci.b].kind; dirty.set(ci.a); ++ip; continue;
 			case opcode::op_c_jump: if (ci.c == 1) break; ip = ci.a; continue;   // a back edge polls the budget on the block loop's case
 			case opcode::op_c_probe:
-				if (loop.plans.data()[ci.a].epoch == raw_epoch_ && loop.calls.data()[ci.a].raw && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; continue; }
+				if (loop.calls.data()[ci.a].raw && loop.plans.data()[ci.a].epoch == raw_epoch_ && cs.raw_call == 0) { cs.raw_call = static_cast<uint16_t>(ci.a + 1); ++ip; continue; }
 				break;
 			case opcode::op_c_args:
 				if (cs.raw_call == ci.a + 1) {
@@ -8431,6 +8430,23 @@ void vm_backend::park_raw_callee(frame& f, const chunk::cell_loop& loop) {
 // from its head in this block loop; the caller parks on its call instruction exactly as the door leaves it, so a callee that leaves its cells
 // returns through the general return and the door's landing. A depth or budget limit raises at the caller's call instruction, as the general push
 // raises it. false: the callee is parked and the general door runs
+// a global a raw-entered frame program reads: the program's chunk's armed lookup-cache head (a raw frame has no member scope), a plain
+// int, float or bool of the cell's kind; null sends the call through the door, whose general entry resolves and arms it
+const script_value* vm_backend::raw_env_value(const chunk& body, const chunk::cell_loop& loop, uint32_t k) const {
+	const chunk::cell_loop::cell& cl = loop.cells[k];
+	const chunk::cell_loop::env_operand_ref& er = loop.env_operands[cl.env_operand];
+	if (!cached_global_env_ || er.cache_slot >= body.env_lookup_cache.size() || (er.operand.load_flags & (load_flag_type_ctor | load_flag_global_only))) return nullptr;
+	const env_lookup_cache_entry& e = body.env_lookup_cache[er.cache_slot];
+	if (!e.fast_ptr || e.fast_env != environment_.get() || e.fast_serial != env_symbolizer_->env_epoch()) return nullptr;
+	const script_value* v = e.fast_ptr;
+	if (v->raw_storage_index() == script_value::TYPEID_REFERENCE) {
+		if (!ref_plain_cell(*v)) return nullptr;
+		v = &v->deref();
+	}
+	const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
+	if (vk != script_value::TYPEID_INT && vk != script_value::TYPEID_FLOAT && vk != script_value::TYPEID_BOOL) return nullptr;
+	return cl.kind == 0 || vk == cl.kind ? v : nullptr;
+}
 bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm_instruction& ins, op_status& st, frame** in_loop) {
 	cell_state& cs = *f.cells;
 	if (cs.raw_call != ins.a + 1) return false;   // the probe parked the callee
@@ -8452,6 +8468,7 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 	} else {
 		for (size_t i = 0; i < argc; ++i) { if (cc.args[i].kind != 1 && raw_constant_kind(*f.code, cc.args[i].v) == 0) { park_raw_callee(f, loop); return false; } }
 	}
+	for (const uint32_t k : callee_loop.env_cells) { if (!raw_env_value(*body, callee_loop, k)) { park_raw_callee(f, loop); return false; } }
 	cs.raw_call = 0;
 	if (current_call_depth_ >= limits_->vm_depth_gate) [[unlikely]] {
 		if (auto blocked = pass_depth_gate()) {
@@ -8498,6 +8515,19 @@ bool vm_backend::raw_call_enter(frame& f, const chunk::cell_loop& loop, const vm
 		for (cell_word& c : ncs.cells) { c.set_stamp(nullptr); }   // after this a raw run of the body stamps a cell only where writes_stamps says
 	}
 	frame& callee = raw_push(f, loop, ins.a, plan);
+	if (!callee_loop.env_cells.empty()) {
+		// the globals the program reads, as its general entry would read them (nothing has run since the check above)
+		cell_state& ncs = *callee.cells;
+		if (ncs.env_ptr.size() < callee_loop.cells.size()) { ncs.env_ptr.resize(callee_loop.cells.size(), nullptr); }
+		ncs.env_of = environment_.get(); ncs.env_serial = env_symbolizer_->env_epoch();
+		for (const uint32_t k : callee_loop.env_cells) {
+			const script_value* v = raw_env_value(*body, callee_loop, k);
+			const uint8_t vk = static_cast<uint8_t>(v->raw_storage_index());
+			ncs.cells[k].bits = cell_bits(*v, vk);
+			ncs.cells[k].set_kind_stamp(vk, v->type_info_raw());
+			ncs.env_ptr[k] = v;
+		}
+	}
 	st = op_status::ok;
 	if (in_loop) { *in_loop = &callee; return true; }
 	raw_switch_ = &callee;
@@ -8570,7 +8600,7 @@ JAI_FORCEINLINE void vm_backend::raw_pop(call_record& rec) {
 // next record prepared for the body; nullptr leaves the call to raw_call_enter's checks
 vm_backend::frame* vm_backend::raw_enter_lean(frame& f, const chunk::cell_loop& loop, uint32_t index) {
 	const chunk::cell_loop::call_plan& plan = loop.plans.data()[index];
-	if (!loop.calls.data()[index].raw_proven || current_call_depth_ >= limits_->vm_depth_gate || budget_tick_ + 1 >= 1024 || limits_->memory_tripped() ||
+	if (!loop.calls.data()[index].raw_proven || !plan.program->env_cells.empty() || current_call_depth_ >= limits_->vm_depth_gate || budget_tick_ + 1 >= 1024 || limits_->memory_tripped() ||
 	    call_records_top_ >= call_records_.size() || call_records_.data()[call_records_top_]->raw_prepared != plan.body) return nullptr;
 	++budget_tick_;
 	return &raw_push(f, loop, index, plan);

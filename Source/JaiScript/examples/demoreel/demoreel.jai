@@ -22,6 +22,7 @@
 //                                                 (default 6) -> P.txt (as presented, so color
 //                                                 and ascii apply) + P.bmp
 //   jaiscript demoreel.jai -- midi DIR            write the soundtrack's cues (one MIDI file a scene) and exit
+//   jaiscript demoreel.jai -- video DIR every N   the whole reel's frames (every Nth, 24-bit text) and its cues
 //   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent) | pix half|sext|auto
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
 
@@ -124,6 +125,8 @@ var OPT_MIDI = "";
 var OPT_CUBE = !(env_var("COLORTERM") == "truecolor" || env_var("COLORTERM") == "24bit" || env_var("WT_SESSION") != "");
 var OPT_ASCII = false;
 var OPT_PIX = "";
+var OPT_VIDEO = "";
+var OPT_EVERY = 2;
 
 for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	string k = ARGS[i];
@@ -144,7 +147,9 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	else if (k == "color") { OPT_CUBE = v == "256"; }
 	else if (k == "ascii") { OPT_ASCII = v != "0"; }
 	else if (k == "pix") { OPT_PIX = v; }
-	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii/pix)`); }
+	else if (k == "video") { OPT_VIDEO = v; }
+	else if (k == "every") { OPT_EVERY = v.to_int(); }
+	else { print(`demoreel.jai: unknown arg '${k}' (frames/seed/fps/w/h/scene/dump/bench/shot/at/n/music/midi/color/ascii/pix/video/every)`); }
 }
 // the density map reads two pixels a cell
 demo_pixels(OPT_ASCII ? "half" : OPT_PIX);
@@ -212,6 +217,33 @@ function write_bmp(string path) -> void {
 		out += row + padding;
 	}
 	write_file(path, out);
+}
+
+// the whole reel at its real lengths with a fixed 1/30 s step, every `every`-th frame
+// written as it would reach a 24-bit terminal (DIR/frame_00000.txt ...), and the cues
+// beside them: the material for a video of the reel (docs/site_tools/render_reel_video.py)
+function run_video(string dir) -> int {
+	int w = OPT_W > 0 ? OPT_W : 120;
+	int h = OPT_H > 0 ? OPT_H : 40;
+	float dt = 1.0 / 30.0;
+	demo_boot(w, h, OPT_SEED, "vm", false, false);
+	make_dirs(dir);
+	write_cues(dir);
+	float total = 0.0;
+	for (int i = 0; i < reel.nscenes; ++i) { total += reel.dur_for(i); }
+	int frames = itrunc(total / dt);
+	var terminal = Terminal();
+	int written = 0;
+	for (int f = 0; f < frames; ++f) {
+		string frame = demo_frame(f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
+		if (f % OPT_EVERY != 0) { continue; }
+		string n = to_string(written);
+		write_file(dir + "/frame_" + string::repeat("0", 5 - n.size()) + n + ".txt", terminal.present(frame));
+		++written;
+	}
+	write_file(dir + "/reel.txt", `frames ${written}\nfps ${30.0 / OPT_EVERY}\ncols ${w}\nrows ${h}\nseconds ${total}\n`);
+	print(`video: ${written} frames at ${30.0 / OPT_EVERY} fps (${total} s) -> ${dir}`);
+	return 0;
 }
 
 // every scene mid-flight (past its title card), no transitions: script cost
@@ -423,6 +455,7 @@ if (OPT_MIDI != "") {
 	var written = write_cues(OPT_MIDI);
 	print(`${written.size()} cues -> ${OPT_MIDI}`);
 }
+else if (OPT_VIDEO != "") { run_video(OPT_VIDEO); }
 else if (OPT_BENCH > 0) { run_bench(OPT_BENCH); }
 else if (OPT_SHOT >= 0) { run_shot(OPT_SHOT, OPT_AT); }
 else if (OPT_FRAMES > 0) { run_headless(OPT_FRAMES); }

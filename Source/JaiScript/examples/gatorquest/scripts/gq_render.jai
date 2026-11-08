@@ -239,7 +239,7 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 			}
 			if (c00 == c10 && c00 == c01 && c00 == c11 && c00 % 16 == 0) {
 				// even light, a cloud's edge: only the shadow's dither varies
-				int base = (c00 >= 240 ? NLEV - 1 : c00 / 16) * nb;
+				int even = (c00 >= 240 ? NLEV - 1 : c00 / 16) * nb;
 				for (int py = ya; py < yb; ++py) {
 					int dst = (sy0 + py) * VW + sx0;
 					int s2 = src + py * S;
@@ -247,7 +247,7 @@ void draw_tiles(ClientView& v, int camx, int camy, int amb) {
 					int kl = k00 * S + (k01 - k00) * py;
 					int kr = k10 * S + (k11 - k10) * py;
 					for (int px = xa; px < xb; ++px) {
-						int sh = (kl * S + (kr - kl) * px) / (S * S) > BAYER[krow + ((sx0 + px + 1) & 3)] ? base + cloud_rows : base;
+						int sh = (kl * S + (kr - kl) * px) / (S * S) > BAYER[krow + ((sx0 + px + 1) & 3)] ? even + cloud_rows : even;
 						PIX[dst + px] = SHADE[sh + TEX[s2 + px]];
 					}
 				}

@@ -121,6 +121,16 @@ function fx_skill(string skill, int tx, int ty) -> void {
 
 function fx_alert(var& m) -> void {
 	Fx f = fx_new(FX_ALERT, m.x + 0.5, m.y + 0.5, INK_TITLE);
+	f.text = "!";
+	f.size = monster_sizef(m);
+	f.lift = sprite_lift(m);
+	FX.push(f);
+}
+
+// a throw on its way: "!!" in red over the thrower, the turn before it lands
+function fx_windup(var& m) -> void {
+	Fx f = fx_new(FX_ALERT, m.x + 0.5, m.y + 0.5, INK_BAD);
+	f.text = "!!";
 	f.size = monster_sizef(m);
 	f.lift = sprite_lift(m);
 	FX.push(f);
@@ -204,6 +214,9 @@ function gather_lights() -> void {
 	for (auto& it : G.ground) {
 		if (loot_tier(it) >= 2 && cheb(it.x, it.y, G.player.x, G.player.y) <= 9) { dyn_light(it.x + 0.5, it.y + 0.4, 2.0 + loot_tier(it)); }
 	}
+	for (auto& m : G.monsters) {
+		if (m.alive && m.disguised && cheb(m.x, m.y, G.player.x, G.player.y) <= 9) { dyn_light(m.x + 0.5, m.y + 0.4, 6.0); }
+	}
 }
 
 // 0 plain, 1 uncommon, 2 rare, 3 epic, 4 legendary: how loudly a thing on the floor glows
@@ -221,6 +234,14 @@ class FSpot { float fx; float fy; }
 function bolt_progress(Fx f) -> float {
 	float p = fx_age(f) >= 1 && FX_PHASE >= 1.0 ? 1.0 : FX_PHASE / 0.75;
 	return p > 1.0 ? 1.0 : p;
+}
+
+// a bolt still flying at this tile this turn: what it does there waits for it to land
+function bolt_pending(Fx f) -> bool {
+	for (auto b : FX) {
+		if (b.kind == FX_BOLT && b.turn == f.turn && b.tx == f.x && b.ty == f.y && bolt_progress(b) < 1.0) { return true; }
+	}
+	return false;
 }
 
 function bolt_at(Fx f) -> FSpot {
@@ -247,25 +268,32 @@ function notice_player(var& m) -> void {
 }
 
 // ---------------------------------------------------------------- loot glow ---
-// Finer gear on the floor sends up a column of its rarity's light, a spark riding it.
+// Finer gear on the floor sends up a column of its rarity's light, a spark riding it. A
+// Grinnest still pretending to be a chest sends up the brightest beam on the floor: gold.
 function draw_loot_beams() -> void {
 	for (auto& it : G.ground) {
 		int tier = loot_tier(it);
-		if (tier == 0) { continue; }
-		Projected at = project(it.x + 0.5, it.y + 0.5, 0.3, 0.0);
-		if (at.depth <= 0.0) { continue; }
-		int top = at.bot - at.hgt - at.hgt * (1 + tier);
-		int c = pal(rarity_ink(it.rarity));
-		int dim = pal(scale_rgb(rarity_ink(it.rarity), 0.55));
-		int x = at.sx;
-		int spark = top + ((G.turn * 3 + it.x) % imax(1, at.bot - at.hgt - top));
-		for (int y = imax(0, top); y < at.bot - at.hgt; ++y) {
-			if ((y + G.turn) % 2 == 0) { fx_plot(x, y, y == spark ? pal(0xFFFFFF) : dim, at.depth); }
-			if (tier >= 3 && y % 3 == 0) { fx_plot(x - 1, y, dim, at.depth); }
-		}
-		fx_plot(x, spark, pal(0xFFFFFF), at.depth);
-		fx_plot(x, at.bot - at.hgt - 1, c, at.depth);
+		if (tier > 0) { draw_beam(it.x, it.y, tier, rarity_ink(it.rarity), 0.3); }
 	}
+	for (auto& m : G.monsters) {
+		if (m.alive && m.disguised) { draw_beam(m.x, m.y, 4, INK_COIN, 0.36); }
+	}
+}
+
+function draw_beam(int tx, int ty, int tier, int rgb, float height) -> void {
+	Projected at = project(tx + 0.5, ty + 0.5, height, 0.0);
+	if (at.depth <= 0.0) { return; }
+	int top = at.bot - at.hgt - at.hgt * (1 + tier);
+	int c = pal(rgb);
+	int dim = pal(scale_rgb(rgb, 0.55));
+	int x = at.sx;
+	int spark = top + ((G.turn * 3 + tx) % imax(1, at.bot - at.hgt - top));
+	for (int y = imax(0, top); y < at.bot - at.hgt; ++y) {
+		if ((y + G.turn) % 2 == 0) { fx_plot(x, y, y == spark ? pal(0xFFFFFF) : dim, at.depth); }
+		if (tier >= 3 && y % 3 == 0) { fx_plot(x - 1, y, dim, at.depth); }
+	}
+	fx_plot(x, spark, pal(0xFFFFFF), at.depth);
+	fx_plot(x, at.bot - at.hgt - 1, c, at.depth);
 }
 
 // ------------------------------------------------------------ the pixel fonts ---
@@ -345,7 +373,7 @@ function fx_sprites() -> void {
 		if (f.kind == FX_DEATH) {
 			Sprite sp = sprite_at(f.x, f.y, glyph_art(f.text), f.rgb, 1.15 * f.size, f.lift, PH + 12, -1, false);
 			if (sp.depth > 0.0) {
-				sp.melt = FX_PHASE;
+				sp.melt = bolt_pending(f) ? 0.0 : FX_PHASE;
 				sp.fx = f.value;
 				SPRITES.push(sp);
 			}
@@ -366,6 +394,7 @@ function fx_sprites() -> void {
 function fx_overlays() -> void {
 	for (auto f : FX) {
 		if (fx_age(f) > 1) { continue; }
+		if ((f.kind == FX_NUMBER || f.kind == FX_DEATH) && bolt_pending(f)) { continue; }
 		if (f.kind == FX_NUMBER) { fx_draw_number(f); }
 		else if (f.kind == FX_SLASH) { fx_draw_slash(f); }
 		else if (f.kind == FX_ALERT) { fx_draw_alert(f); }
@@ -432,7 +461,8 @@ function fx_draw_alert(Fx f) -> void {
 	if (at.depth <= 0.0) { return; }
 	int scale = at.hgt >= 30 ? 2 : 1;
 	int bob = (1.0 - FX_PHASE) * 4;
-	pane_text("!", math::floor(at.sx - 1.5 * scale), at.bot - at.hgt - 7 * scale - bob, scale, pal(INK_TITLE), pal(0x3A1000), true, at.depth);
+	int w = tiny_width(f.text, scale);
+	pane_text(f.text, math::floor(at.sx - w * 0.5), at.bot - at.hgt - 7 * scale - bob, scale, pal(f.rgb), pal(0x3A1000), true, at.depth);
 }
 
 // the blast where a bolt lands: a ring of its colour opening out, white at the heart

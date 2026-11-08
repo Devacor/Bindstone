@@ -214,6 +214,7 @@ function enter_floor() -> void {
 	G.mural_used = false;
 	G.player.stubborn_spent = false;
 	G.boss_co = null;
+	MONSTER_BRAINS = {};
 	populate_floor();
 	face_open_direction();
 	view_cache_invalidate();
@@ -242,6 +243,7 @@ function floor_summary() -> void {
 }
 
 function start_new_game(Species species, Profession calling, string hero_name) -> void {
+	NOTICED = {};
 	G.player = Player(species, calling);
 	if (hero_name != "") { G.player.name = hero_name; }
 	G.player.god = HOST_GOD;
@@ -543,6 +545,7 @@ function game_loop() -> void {
 			G.last_dmg_src = "";
 			monsters_act();
 			if (!G.over) { world_tick(); }
+			flush_spawns();
 			G.turn += 1;
 			if (G.smoke) { accumulate_hash(); }
 			fx_prune();
@@ -693,6 +696,7 @@ function load_game() -> bool {
 	if (save.version != SAVE_VERSION) { return false; }
 	RNG.set_state(save.rng);
 	G = save.game;
+	MONSTER_BRAINS = {};
 	G.over = false;
 	G.quit = false;
 	G.saved = false;

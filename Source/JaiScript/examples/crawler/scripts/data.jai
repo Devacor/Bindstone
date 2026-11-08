@@ -54,7 +54,8 @@ function profession_of(string id) -> Profession {
 
 // ---------------------------------------------------------------- bestiary ---
 // behavior: chase | ranged | pack | erratic | sluggish | mimic | boss. tier feeds xp and gold;
-// a breed spawns on floors min_floor to max_floor; range is the reach of a ranged attack.
+// a breed spawns on floors min_floor to max_floor (a Gloopling never spawns: a slain Gloop
+// splits into two); range is the reach of a ranged attack.
 class Breed {
 	string name; string glyph; int ink; int min_floor; int max_floor;
 	int hp; int atk; int def; int eva; int range; string behavior; int tier; bool withers; bool burns;
@@ -68,6 +69,8 @@ map<string, Breed> BESTIARY = {
 		"Throws pebbles, insults, and the occasional cousin."},
 	"gloop": Breed{"Gloop", "o", 0x32AABE, 1, 4, 12, 2, 1, 0, 1, "sluggish", 1, false, false,
 		"A slime with commitment issues. It jiggles ominously."},
+	"gloopling": Breed{"Gloopling", "o", 0x64DCF0, 99, 99, 4, 1, 0, 10, 1, "chase", 0, false, false,
+		"Half a Gloop, twice as cross about it."},
 	"snarlbat": Breed{"Snarlbat", "b", 0xAF50BE, 1, 4, 4, 3, 0, 18, 1, "erratic", 1, false, false,
 		"All wing, no plan."},
 	"scrappit": Breed{"Scrappit", "k", 0xC8A03C, 2, 6, 7, 4, 1, 8, 1, "pack", 2, false, false,
@@ -96,6 +99,7 @@ map<string, array<string>> BARKS = {
 	"grublin": ["Oi! Dinner's walkin'!", "Mine! Whatever you got, mine!", "It's got a TORCH. Get it!"],
 	"slinger": ["Got a rock with your name on it!", "Hold still, I'm aiming!", "Fetch this, cousin!"],
 	"gloop": ["*turns, jiggling. It has seen you.*", "*blorps hungrily.*", "*oozes your way with intent.*"],
+	"gloopling": ["*wobbles at you, tiny and furious.*", "*squeaks a very small blorp.*"],
 	"snarlbat": ["SKREEEE!", "Skree skree SKREE!", "*flaps closer, all wing and no plan.*"],
 	"scrappit": ["Get 'im, lads!", "Three of us, one of you. Maths!", "Scrap 'im! Scrap 'im!"],
 	"rattlekin": ["*rattles disapprovingly.*", "Posture, intruder. POSTURE.", "*clacks its jaw: you'll do.*"],
@@ -111,7 +115,8 @@ map<string, array<string>> BARKS = {
 map<string, string> DEATH_LINES = {
 	"grublin": "The Grublin goes down clutching something regrettable.",
 	"slinger": "The Grublin Slinger drops its last pebble.",
-	"gloop": "The Gloop un-jiggles, forever.",
+	"gloop": "The Gloop bursts and splits in two!",
+	"gloopling": "The Gloopling pops like a soap bubble with opinions.",
 	"snarlbat": "The Snarlbat flaps its last bad idea.",
 	"scrappit": "The Scrappit is scrapped.",
 	"rattlekin": "The Rattlekin collapses into a tidy pile of grudges.",

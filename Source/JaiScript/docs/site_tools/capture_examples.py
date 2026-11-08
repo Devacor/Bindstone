@@ -83,7 +83,7 @@ SHOTS = [
     gloom("gloom-tally", 3065),
     Shot("grubwell-title", "crawler", CRAWLER + ["input", "n"], "-", 0, (135, 37)),
     Shot("grubwell-fight", "crawler", CRAWLER + ["smoke", "seed", "6", "turns", "300", "anim", "dump", "{out}/run"],
-         "run.ans", 959, (135, 37), "erase"),
+         "run.ans", 629, (135, 37), "erase"),
     Shot("grubwell-welcome", "crawler", CRAWLER + ["smoke", "seed", "6", "turns", "2", "dump", "{out}/run"],
          "run.ans", 0, (135, 37), "erase"),
     Shot("grubwell-reload", "crawler", CRAWLER + ["smoke", "seed", "6", "turns", "62", "anim", "reload-every", "60", "dump",

@@ -44,8 +44,9 @@ GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
 GLOOM_SHOWCASE_FRAME=6559224cca20d1f0
 DEMOREEL_STREAM=c63907befa4adff0
-CRAWLER_STATE=938196497
-CRAWLER_FRAMES=c5e07f67e283c2a54ec1a6503d1a52a642c3063cfbe26d569a31503e1dea779d
+CRAWLER_STATE=2459230215
+CRAWLER_GOD_STATE=4133945146
+CRAWLER_FRAMES=a36b9a559cf181a17c6d5d20ea7eadf7e0f6ae4c4c4682b70576dc1dd84916d1
 CRAWLER_SMALL_FRAMES=6603814f43ca70b55e24cd901d97d94f709cc9f3b7c5d444f77cf9e2bb83ec2a
 CRAWLER_WIDE_FRAMES=aa849fd242eeaeaf5a808184e13be3cfaaac7863bba5c6c1e92f3e0a6e936e9a
 GATORQUEST_STATE=3218840367
@@ -228,11 +229,15 @@ gate_crawler() {
 		run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500
 		want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
 		# hot reload keeps the run: the pilot re-runs every script each 100 turns (its first try, of a missing file, is
-		# refused) and must play the same game, every animation frame built through the reloads, laid out for a 135x37
-		# console as a player would see them
+		# refused) and must play the same game, every animation frame built through the reloads and the death page drawn,
+		# laid out for a 135x37 console as a player would see them
 		run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500 --reload-every 100 --anim --screen 135x37
 		want "crawler vm --reload-every: the reloads did not run" "hot reloads: [1-9][0-9]* kept the run, 1 refused"
 		want "crawler vm --reload-every: a reload changed the run (expected STATE_HASH $CRAWLER_STATE)" "STATE_HASH: $CRAWLER_STATE\$"
+		# tourist mode down to Vexadrach: floor 10, the boss's coroutine and the victory page, drawn
+		run_logged "$BIN/jai_crawler" --god --smoke --seed 5 --turns 3000 --anim --screen 135x37
+		want "crawler vm --god: expected Vexadrach slain and STATE_HASH $CRAWLER_GOD_STATE" "victory: true"
+		want "crawler vm --god: expected STATE_HASH $CRAWLER_GOD_STATE" "STATE_HASH: $CRAWLER_GOD_STATE\$"
 	fi
 	# the runner shim draws every frame, the animations' in-between frames too: the cockpit at 135x37 through the floor 1
 	# welcome, fights, spells, a level, the stairs and the reload sweep; the forward view alone at 80x24 in the 256-colour

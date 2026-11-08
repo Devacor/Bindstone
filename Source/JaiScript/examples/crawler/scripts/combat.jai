@@ -104,6 +104,7 @@ function on_monster_death(var& monster) -> void {
 	}
 	G.player.kills += 1;
 	gain_xp(monster.xp_reward());
+	if (monster.kind == "gloop") { split_gloop(monster.x, monster.y); }
 	int coins = monster.gold_reward(RNG);
 	if (coins > 0) {
 		Item pile = make_gold(G.floor);
@@ -119,6 +120,34 @@ function on_monster_death(var& monster) -> void {
 		G.ground.push(drop);
 		log_msg(`${mon_subject(monster)} drops something.`);
 	}
+}
+
+// Two Glooplings well up on the free tiles around a slain Gloop, in a fixed scan order. They
+// wait in SPAWNS until the turn ends, since a death can land while G.monsters is being walked.
+array<Spot> SPAWNS = [];
+
+function split_gloop(int x, int y) -> void {
+	int made = 0;
+	for (Step d : EIGHT_DIRS) {
+		if (made >= 2) { break; }
+		int nx = x + d.dx;
+		int ny = y + d.dy;
+		if (!is_walkable(nx, ny) || (nx == G.player.x && ny == G.player.y) || monster_index_at(nx, ny) >= 0) { continue; }
+		bool taken = false;
+		for (auto s : SPAWNS) {
+			if (s.x == nx && s.y == ny) { taken = true; }
+		}
+		if (taken) { continue; }
+		SPAWNS.push(Spot{nx, ny});
+		made += 1;
+	}
+}
+
+function flush_spawns() -> void {
+	for (auto s : SPAWNS) {
+		if (monster_index_at(s.x, s.y) < 0 && !(s.x == G.player.x && s.y == G.player.y)) { spawn_monster("gloopling", s.x, s.y); }
+	}
+	SPAWNS = [];
 }
 
 function gain_xp(int amount) -> void {

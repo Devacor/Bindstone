@@ -847,7 +847,7 @@ class Sprite { float depth; float sx; int art; int rgb; float height; float lift
 array<Sprite> SPRITES = [];
 map<int, int> SPRITE_RAMPS = {};
 
-function monster_sizef(var& m) -> float { return m.behavior == "boss" ? 1.4 : 0.5 + m.tier * 0.08; }
+function monster_sizef(var& m) -> float { return m.behavior == "boss" ? 1.4 : (m.kind == "gloopling" ? 0.34 : 0.5 + m.tier * 0.08); }
 
 function body_ramps(int rgb) -> int {
 	if (SPRITE_RAMPS.has(rgb)) { return SPRITE_RAMPS[rgb]; }

@@ -545,7 +545,7 @@ function run_summary_lines() -> array<Line> {
 }
 
 function death_screen() -> void {
-	if (G.smoke && VIEW_PROBE == null) { return; }   // a dump captures the ending too
+	if (G.smoke && VIEW_PROBE == null && !HOST_ANIM) { return; }   // a dump or an --anim run draws the ending too
 	page_from_view();
 	array<int> base = PAGE_PIX;
 	for (int frame = 0; frame <= 6; ++frame) {
@@ -559,7 +559,43 @@ function death_screen() -> void {
 	if (HOST_INTERACTIVE) { read_key(); }
 }
 
+// The one that killed you, large, in full colour over the washed-out view, when it was a monster.
+function killer_portrait() -> void {
+	string glyph = "";
+	int rgb = 0;
+	for (auto kv : BESTIARY) {
+		if (kv.second.name == G.death_cause) {
+			glyph = kv.second.glyph;
+			rgb = kv.second.ink;
+		}
+	}
+	if (glyph == "") { return; }
+	int a = glyph_art(glyph);
+	int h = PAGE_H * 2 * 11 / 20;
+	int w = h * ART_W[a] / ART_H[a];
+	page_art(a, rgb, PAGE_W - w - imax(2, PAGE_W / 14), PAGE_H * 2 - h - 2, w, h);
+}
+
+// art a at w x h pixels on the page, lit full: the body roles take rgb and its shade and highlight
+function page_art(int a, int rgb, int x0, int y0, int w, int h) -> void {
+	array<int> colors;
+	for (int i = 0; i < ROLE_RGB.size(); ++i) { colors.push(pal(ROLE_RGB[i])); }
+	colors[1] = pal(rgb);
+	colors[2] = pal(scale_rgb(rgb, 0.55));
+	colors[3] = pal(mix_rgb(rgb, 0xFFFFFF, 0.45));
+	int aw = ART_W[a];
+	int ah = ART_H[a];
+	int off = ART_OFF[a];
+	for (int y = imax(0, y0); y < imin(PAGE_H * 2, y0 + h); ++y) {
+		for (int x = imax(0, x0); x < imin(PAGE_W, x0 + w); ++x) {
+			int code = ART_TEX[off + ((x - x0) * aw) / w + (((y - y0) * ah) / h) * aw];
+			if (code >= 0) { PAGE_PIX[y * PAGE_W + x] = colors[code]; }
+		}
+	}
+}
+
 function death_overlay() -> void {
+	killer_portrait();
 	bool big = PAGE_W >= 110;
 	int sx = big ? 2 : 1;
 	int sy = big ? 3 : 2;
@@ -584,7 +620,7 @@ array<int> RAINBOW = [0xFF3030, 0xFF9020, 0xFFE040, 0x50E060, 0x40C8FF, 0x6060FF
 // The stolen fire comes home: flames climb the screen in rainbow bands rising like the colour
 // climbing the Well. The flames run on their own little LCG, never the game's Rng.
 function victory_screen() -> void {
-	if (G.smoke && VIEW_PROBE == null) { return; }   // a dump captures the ending too
+	if (G.smoke && VIEW_PROBE == null && !HOST_ANIM) { return; }   // a dump or an --anim run draws the ending too
 	page_open(page_size_cols(), page_size_rows());
 	int w = PAGE_W;
 	int h = PAGE_H * 2;

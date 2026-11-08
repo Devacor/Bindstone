@@ -122,8 +122,8 @@ lines under it.
 
 The map, the pack, the keys, the character sheet, the level-up boon and the pause page take the
 forward view's place, framed and labelled like it, while the rest of the cockpit stays live.
-Death washes the run's last view in blood under its epitaph; victory fills the screen with
-rainbow fire.
+Death washes the run's last view in blood under its epitaph, your killer looming beside it in
+full colour; victory fills the screen with rainbow fire.
 
 Floor 1 opens on a set piece: JAI's statue a few steps ahead, the bones of the last one down at
 your feet with their blade (the Lastlight Fang, a rare find glowing blue), and a Grublin by the
@@ -149,6 +149,11 @@ wear.
 
 The first time a monster sees you it says so, a line in its colour (`Grublin: "Oi! Dinner's
 walkin'!"`) and a `!` over its head; each breed has its own lines, and its own line in death.
+
+Some have tricks. A Grublin Slinger winds up one turn (a red `!!` over it) and throws harder the
+next; step out of its line of sight in between and the rock cracks off the stone. A slain Gloop
+bursts into two Glooplings on the tiles around it. A Grinnest still pretending to be a chest sends
+up the brightest beam on the floor, gold, and lights the room like treasure.
 
 Interactive play animates each turn's effects through four in-between frames before the turn's
 final frame; `anim` keeps those frames in a headless dump.
@@ -206,17 +211,18 @@ and drinks when scared. The run folds its state (turn, floor, facing, position, 
 count, every live monster and the `Rng`) into `STATE_HASH` after each turn:
 
 ```bash
-jai_crawler --smoke --seed 6 --turns 1500                                            # STATE_HASH: 938196497
+jai_crawler --smoke --seed 6 --turns 1500                                            # STATE_HASH: 2459230215
 jai_crawler --smoke --seed 6 --turns 1500 --reload-every 100 --anim --screen 135x37  # the same hash
 ```
 
-Seed 6's pilot fights down to floor 6 and dies there to a Hexmoth on turn 562; `--god --smoke
---turns 3000 --seed 5` kills Vexadrach on turn 1248. With `--reload-every 100` the pilot reloads
+Seed 6's pilot fights down to floor 8 and dies there to a Marrowmaw on turn 839; `--god --smoke
+--turns 3000 --seed 5` kills Vexadrach on turn 1008. With `--reload-every 100` the pilot reloads
 every script each hundred turns (its first try asks for a missing file and is refused) and plays
 the same game to the same hash. The runner's `Rng` is a bit-exact script twin of the host's, so
 the shim prints the same hashes on `--backend=vm` and `--backend=interp`, and the `dump` frames
 hash alike on both. The screens and effects read the game but never the `Rng`, so drawing them
-leaves the hash unchanged. `tools/ci/gates.sh crawler` checks both runs on the host, then three
+leaves the hash unchanged. `tools/ci/gates.sh crawler` checks both runs on the host (the second
+drawing every animation and the death page), the god-mode run down to the victory page, then three
 animated frame dumps on each backend: the cockpit at 135x37 with reloads, the forward view alone
 at 80x24 in the 256-colour cube with ASCII glyphs, and the cockpit at 200x60, whose rows build in
 parallel.
@@ -251,9 +257,11 @@ scripts/crawler.jai  the standalone-runner shim (the host contract in script)
   `BESTIARY["grublin"].min_floor` reads like the struct it is.
 - **Saves through the archive.** `to_json(SaveFile{version, seed, rng, G})` writes the whole
   `Game` with its player, monsters, items and effects, and `from_json` rebuilds every class.
-- **Coroutine methods.** Vexadrach's fight is `coroutine void boss_brain(int boss_id)` on `Game`:
-  the phase (enraged, mid-telegraph) lives in its locals between turns, and the handle sits in a
-  `Game` field.
+- **Coroutines.** Vexadrach's fight is `coroutine void boss_brain(int boss_id)` on `Game`: the
+  phase (enraged, mid-telegraph) lives in its locals between turns, and the handle sits in a
+  `Game` field. Each Grublin Slinger runs `coroutine void slinger_brain(int id)`, its wind-up a
+  `yield` between two turns; the handles live in `MONSTER_BRAINS` by monster id, and a hot reload
+  keeps them running.
 - **References.** Everything that changes an entity takes it as `var&` (`attack(m, G.player,
   "claws")`), so the one real monster in `G.monsters` is the one that changes; `restore_stat(int&
   stat, ...)` and `spend_focus(int& pool, ...)` change a field in place.

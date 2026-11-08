@@ -97,15 +97,24 @@ jaiscript demoreel.jai -- frames 1700        # headless self-test: smoke frames,
 jaiscript demoreel.jai -- frames 60 dump P   # also write frames 0/N-2/N-1 to P_<i>.txt (+ P_<i>.bmp, the pixel grid)
 jaiscript demoreel.jai -- bench 60           # every scene mid-flight: script ms/frame and KB/frame
 jaiscript demoreel.jai -- shot 8 at 4 dump P    # one frame of scene 8 at scene time 4 -> P.txt (as presented) + P.bmp
-jaiscript demoreel.jai -- midi song.mid      # write the soundtrack and exit
+jaiscript demoreel.jai -- midi cues          # write the soundtrack's cues (one MIDI file a scene) and exit
+jaiscript demoreel.jai -- video frames every 2   # the whole reel's frames as 24-bit text, with the cues, for a video
 jaiscript demoreel.jai -- music 0            # the reel, silent
 ```
 
-The soundtrack is composed by the script at boot: a Standard MIDI File (64 bars
-at 124 bpm in A minor over i-VI-III-VII — pumping synth bass, warm pad, a saw
-arpeggiating sixteenths, a square lead improvising on the pentatonic from the
-reel's seed, a four-on-the-floor kit) written to the app cache dir and looped
-through the runner's `play_sound`.
+The soundtrack is procedural and the scenes hear it (`scenes/music.jai`). At boot
+the script composes one cue per scene at 124 bpm: each scene has a mood (a scale
+and chord progression, a drum style, General MIDI instruments for bass, pad,
+arpeggio and lead, a level of energy), the energy builds into each of the
+scene's declared hits and drops on it, the lead sings a two-bar motif from the
+reel's seed over each chord, the toms fill into every fourth bar, and each hit
+lands a crash, a low boom and a brass stab with a snare riser into the big ones.
+The same score is data the scenes query every frame (`cue.kick_env(t)`,
+`snare_env`, `hat_env`, `bass_env`, `chord`, `energy`, `hit`, `riser`), so the
+pictures move with exactly the music being played, deterministically and with no
+audio analysis. Every scene is a whole number of bars and starts on a bar line,
+so the cues play back to back: the runner preloads them as MIDI files and
+switches the frame a scene's transition starts.
 
 Verified: the 1700-frame smoke reel produces the same stream hash and
 byte-identical dumped frames under `--backend=vm` and `--backend=interp`.
@@ -140,7 +149,7 @@ Keys while running:
 | key | action |
 | --- | ------ |
 | `r` | hot-reload every `scenes/*.jai` from disk; a band under the HUD names the files that changed, or the file that failed to load with its error |
-| `h` | toggle the HUD: a status bar (scene, backend, frame ms split into sim and draw, fps, pixel size) and a key bar that fills as the scene plays |
+| `h` | step the HUD: two quiet chips on the bottom row (the scene; the VM's ms per frame, cores and fps), then the full status bar (backend, frame ms split into sim and draw, fps, pixel size) and a key bar that fills as the scene plays, then off |
 | `f` | freeze the clock (render keeps running) |
 | `n` / `p` / space / arrows | next / previous scene |
 | `1`..`9`, `0` | jump straight to a scene (`0` = scene 11, the finale) |
@@ -168,10 +177,20 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 | 10 | MAELSTROM | ink in water, simulated: Jos Stam's stable fluids. The flow runs on a half-size grid (vorticity confinement hands back the curl the grid smears away, 20 sweeps of warm-started SOR project it divergence-free, semi-Lagrangian self-advection), and the ink moves per pixel through its bilinear upsampling, so the filaments are finer than the grid; the dye is a density plus a premultiplied hue vector, so inks blend into the hue between them and opposites wash out to pearl, lit as a height field (diffuse + Blinn specular from the density gradient) with motes riding the current. Two jets cross, a ring of nozzles winds the tank up, the tank drains, and eight inks bloom into a rainbow wheel that a whirlpool twists; ink and light rows in parallel; graded for the screen: caustic light (two crossing waves through a cosine table) ripples over the bare water, the jets pump their ink on the 124 bpm beat, a starburst of twelve jets fires a rainbow wheel out of the middle of the tank, a vignette darkens the corners, and the camera pushes in on the whirlpool at the end |
 | 11 | FINALE | JaiScript in eight dimensions, a 94-second music video on the soundtrack's 124 bpm: after a title sequence and a four-beat count-in it counts the language in, ONE (scripting), TWO (serialization), THREE (reflection), FOUR (hot reload), FIVE (parallel), SIX (signals), SEVEN (debugging), EIGHT (embedding), four bars a slide (`scenes/show.jai`): the counted word slams in on a sweep of light, a code card slides in and types a real snippet in syntax colours (every script one runs on the runner), a live demonstration plays beside it (Spark objects, an archive round trip, a reflect:: inspector, a file edited mid-loop, eight cores on one frame, a signal fanning out, a paused debugger, C++ and script trading calls), captions run along the lower third and a checklist lights; every slide opens one more axis of an 8-cube (256 vertices, 1024 edges) turning in a window above the demonstration as a world turns in Fez, in eased quarter-turns snapping on the beat, on Escher's hyperbolic plane: the {8,3} tiling in the Poincaré disk, folded per pixel by its three mirrors, three-coloured, opening ring by ring with the dimensions and mirrored through the circle at infinity to fill the screen; with all eight shown the cube takes the screen, the snaps double up every half beat and the whole scene turns, swirls and ripples as one per-pixel map while the plane warps; the cube shatters into a vortex of sparks that wind onto JAISCRIPT, which slams in with a flash, shockwaves and a shake as the fire wall erupts (the fire scene in `fire.jai`), the flames pump in rainbow on the beat with the plane behind them, then the letters cool to neon and the credits roll |
 
-Between scenes: dissolve (hashed per pixel), slant wipe and iris (both with a
-glowing seam), blinds, and the Doom screen melt — two grids merged per pixel
-into the combined palette. A title card with a demoscene handle opens on every
-scene.
+Between scenes, two beats from the bar line, each scene hands over its own way:
+DONUT dives through its hole into JULIA (zoom through), JULIA swirls into the
+lamps, the wax ripples into the chrome pipes, the pipes iris onto the flock, the
+flock melts like Doom into GLOBHUNTER, the hunt zooms out over the canyon, the
+canyon ripples into CHROME, the glass shatters into OSSUARY, the web swirls into
+the ink, the ink dives into FINALE and FINALE irises back to the start. The
+motion transitions read the departing frame through a moving map (a turning
+zoom, tiles spinning away, a ring wave, a vortex); the wipes merge two grids per
+pixel into the combined palette. A title card with a demoscene handle opens
+every scene for one bar, in one of three styles taking turns (a band opening
+from the middle, a shutter closing from both sides, a glitch slipping on the
+hats), pumping on the kick. A scene can set `pixel_budget`: past it the scene
+renders smaller and the reel scales it up, so the heaviest scenes hold their
+frame rate on large terminals.
 
 ## Measured numbers
 

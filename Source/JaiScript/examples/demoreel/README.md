@@ -252,9 +252,9 @@ Every scene in it holds 30 fps on the VM, the raytraced LAVALAMP heaviest at 21 
 interpreter LAVALAMP takes 233 ms and the others stay under 19 ms.
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the eleven scene entries: shim stream hash `1746491939` on
+  every one of the eleven scene entries: shim stream hash `3334852713` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `35100103e8c0eaa0` (the host's HUD
+  `18dfa83f8938b358` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel

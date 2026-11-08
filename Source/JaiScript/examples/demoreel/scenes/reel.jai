@@ -13,7 +13,7 @@ class Scene {
 	var rng = null;
 	float replay = 3.0;   // the sim-seconds a jump replays to arrive mid-flight
 	var cue = null;       // the scene's music (scenes/music.jai): ask it for the kick, the chord, the energy, the hits
-	int pixel_budget = 0; // when the grid holds more pixels than this, the scene renders smaller and scales up
+	int pixel_budget = 0; // set in the scene's constructor: past this many pixels the scene renders smaller and scales up
 
 	void setup(int w_, int h_, int seed_) {
 		w = w_;

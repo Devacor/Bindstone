@@ -3710,9 +3710,33 @@ namespace {
 		}
 		case script_value::TYPEID_NULL: case script_value::TYPEID_INT: case script_value::TYPEID_FLOAT: case script_value::TYPEID_CHAR:
 		case script_value::TYPEID_BOOL: case script_value::TYPEID_STRING:
+		case script_value::TYPEID_VEC2: case script_value::TYPEID_IVEC2: case script_value::TYPEID_VEC3: case script_value::TYPEID_IVEC3:
+		case script_value::TYPEID_VEC4: case script_value::TYPEID_COLOR:
 			return false;
 		default:
 			return true;
+		}
+	}
+
+	// A value that holds a math vector somewhere: its components are members a read may name
+	bool holds_math(const script_value& v) {
+		const script_value& value = v.deref();
+		switch (value.raw_storage_index()) {
+		case script_value::TYPEID_ARRAY: {
+			const script_array* node = value.unchecked_array_node();
+			if (node->is_typed()) { return script_array::is_vec_kind(node->kind()); }
+			for (const auto& element : node->values()) {
+				if (holds_math(element)) { return true; }
+			}
+			return false;
+		}
+		case script_value::TYPEID_MAP:
+			for (const auto& [key, element] : value.unchecked_as_map()) {
+				if (holds_math(key) || holds_math(element)) { return true; }
+			}
+			return false;
+		default:
+			return script_value::is_math_index(value.raw_storage_index());
 		}
 	}
 
@@ -4056,6 +4080,14 @@ namespace {
 			}
 			return true;
 		}
+		case script_value::TYPEID_VEC2:
+		case script_value::TYPEID_IVEC2:
+		case script_value::TYPEID_VEC3:
+		case script_value::TYPEID_IVEC3:
+		case script_value::TYPEID_VEC4:
+		case script_value::TYPEID_COLOR:
+			if (v.unchecked_vec_node_shared()) { v.unshare_vec_node(); }   // a copy shares its node, as a string shares its buffer
+			return true;
 		case script_value::TYPEID_ARRAY: {
 			if (statically_all_scalar(v)) { return true; }
 			auto& handle = v.unchecked_get_array_storage();
@@ -4202,6 +4234,12 @@ namespace {
 		case script_value::TYPEID_CHAR:
 		case script_value::TYPEID_BOOL:
 		case script_value::TYPEID_STRING:
+		case script_value::TYPEID_VEC2:
+		case script_value::TYPEID_IVEC2:
+		case script_value::TYPEID_VEC3:
+		case script_value::TYPEID_IVEC3:
+		case script_value::TYPEID_VEC4:
+		case script_value::TYPEID_COLOR:
 			return nullptr;
 		case script_value::TYPEID_ARRAY: {
 			const script_array* node = v.unchecked_array_node();
@@ -4608,10 +4646,16 @@ namespace {
 		return bounds;
 	}
 
-	// Flat-table content equality for the snapshot-capture cache: top-level string, or
-	// a hetero array (same type stamp) whose elements are strings / raw scalars / null.
-	// Live elements compare through deref; detached copies hold no references. Any
-	// deeper shape returns false - the caller re-detaches rather than risks.
+	// The storage index names the kind, so equal indices share a component count; bitwise, as floats compare below
+	bool vec_words_equal(const script_value& a, const script_value& b) {
+		const script_vec_node& an = a.unchecked_vec_node();
+		return std::memcmp(an.words, b.unchecked_vec_node().words, an.count * sizeof(uint32_t)) == 0;
+	}
+
+	// Flat-table content equality for the snapshot-capture cache: top-level string or math
+	// vector, or a hetero array (same type stamp) whose elements are strings / vectors / raw
+	// scalars / null. Live elements compare through deref; detached copies hold no references.
+	// Any deeper shape returns false - the caller re-detaches rather than risks.
 	bool flat_snapshot_equal(const script_value& live_in, const script_value& cached) {
 		const script_value& live = live_in.deref();
 		const size_t li = live.raw_storage_index();
@@ -4620,6 +4664,7 @@ namespace {
 			return *live.get_storage().get<strong_ptr<script_string>>() ==
 			       *cached.get_storage().get<strong_ptr<script_string>>();
 		}
+		if (script_value::is_math_index(li)) { return vec_words_equal(live, cached); }
 		if (li != script_value::TYPEID_ARRAY) { return false; }
 		const script_array* ln = live.unchecked_array_node();
 		const script_array* cn = cached.unchecked_array_node();
@@ -4657,7 +4702,8 @@ namespace {
 			case script_value::TYPEID_NULL:
 				break;
 			default:
-				return false;
+				if (!script_value::is_math_index(ai) || !vec_words_equal(a, b)) { return false; }
+				break;
 			}
 		}
 		return true;
@@ -5460,6 +5506,12 @@ struct region_run {
 			break;
 		}
 		case script_value::TYPEID_STRING:
+		case script_value::TYPEID_VEC2:
+		case script_value::TYPEID_IVEC2:
+		case script_value::TYPEID_VEC3:
+		case script_value::TYPEID_IVEC3:
+		case script_value::TYPEID_VEC4:
+		case script_value::TYPEID_COLOR:
 			cap.kind = parallel_capture_kind::string;
 			break;
 		case script_value::TYPEID_ARRAY:
@@ -5520,7 +5572,7 @@ struct region_run {
 		default:
 			return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (object/shared_ptr/weak_ptr)");
 		}
-		if (entry.member_use && cap.kind != parallel_capture_kind::object && cap.kind != parallel_capture_kind::stream) {
+		if (entry.member_use && cap.kind != parallel_capture_kind::object && cap.kind != parallel_capture_kind::stream && !holds_math(*cap.source)) {
 			return usage("member access reaches captured state '" + std::string(entry.name) + "' (captured reads are read-only, and only a captured object has members) at " +
 			             std::to_string(entry.member_use->location.line) + ":" + std::to_string(entry.member_use->location.column));
 		}
@@ -5627,7 +5679,7 @@ struct region_run {
 				}
 				if (plan.inplace) {
 					return usage("element " + std::to_string(proof.failed) +
-					             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings,"
+					             " cannot be proven exclusive (only value-semantic shapes are: primitives, strings, math vectors,"
 					             " value containers, flat value-class instances and distinct handles to them)");
 				}
 				const script_value failed_element = typed_obj ? node->get(proof.failed, &eng) : node->values()[proof.failed];

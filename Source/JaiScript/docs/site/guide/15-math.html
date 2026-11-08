@@ -162,7 +162,7 @@ Division by zero
 Modulo by zero
 Integer overflow in &#x27;+&#x27;</code></pre></div>
 <h2 id="values-and-references">Values and references<a class="hlink" href="#values-and-references" aria-label="link">&#8203;</a></h2>
-<p>A vector is a value everywhere: assignment, a by-value parameter, an array element and a field each hold their own copy, exactly like a C++ struct. A <code>&amp;</code> parameter is the caller's vector. A field's components store through the object:</p>
+<p>A vector is a value everywhere: assignment, a by-value parameter, an array element and a field each hold their own copy, exactly like a C++ struct. A <code>&amp;</code> parameter is the caller's vector. A <code>parallel_for</code> over vectors, or over objects holding them, writes each element in place, and a captured vector reads as a value (<a href="16-parallel.html#parallel-for">Parallel Loops</a>). A field's components store through the object:</p>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
 math::vec3 b = a;                      // a copy
 b.x = 9;

@@ -229,7 +229,7 @@ reference or `[&]` capture target, an argument to or result from a dynamic host 
 | type stamps | one canonical `type_info` per kind (`engine::get_type_info_math`), registered after the older canonical types so their interned ids stay put |
 | copy | shares the node (one refcount); a component store unshares a node whose count is above one first (`script_value::unchecked_set_vec_word`), so a copy never sees the write |
 | allocation | a per-engine block pool (`script_value::acquire_vec_node`, value.cpp) with the `reference_holder` pool's discipline: the free list is owner-thread only, a parallel region's workers take plain self-deleting blocks, a block released off the owner thread is deleted, and engine teardown orphans the pool until its last block returns |
-| parallel regions | a vector is not value-semantic to the admission walk (captures and elements reject it), so no worker shares a node's non-atomic count; `parallel_detached_copy` gives a fresh node |
+| parallel regions | a vector is a value to the admission walk, as a string is: the barrier unshares an element's or a field's node another value holds, and a captured vector reaches each worker as its own copy (`parallel_detached_copy` gives a fresh node), so no worker shares a node's non-atomic count |
 
 Everything else about a boxed vector is the shared kernel `detail/math_values.hpp`: construction, components, the
 typed-slot conversions, the operator rows, equality, ordering, hashing and text (section 5), used verbatim by the value

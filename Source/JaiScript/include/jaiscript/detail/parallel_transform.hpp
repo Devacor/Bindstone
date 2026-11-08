@@ -129,7 +129,7 @@ namespace jai::detail {
     // How a captured enclosing name is provisioned into the workers, decided at the
     // barrier from the LIVE value (admission only collects the touches):
     //   scalar   - plain per-worker copy (null/int/float/char/bool; bound primitives decode)
-    //   string   - per-worker detached copy (string storage is shared under plain copy)
+    //   string   - per-worker detached copy (a string's or a math vector's storage is shared under plain copy)
     //   borrow   - zero-copy view of the shared container (all-primitive content AND
     //              every body touch is a subscript read - the raw-read fast tier)
     //   snapshot - one per-worker detached deep copy at the barrier (everything else:

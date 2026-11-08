@@ -2674,7 +2674,7 @@ public:
 				{"array<shared_ptr<C>> other = hs; other[3] = hs[1]; try { parallel_for (auto& h, auto& o : hs, other) { h.x = 1; } } catch (err) { return err; } return \"ran\";",
 				 "parallel_for: elements 1 and 3 hold the same object (an object a body reaches through a handle element belongs to one element)"},
 				{"var rows = []; for (int i = 0; i < 64; i++) { rows.push([registry[i]]); } try { parallel_for (auto& r : rows) { r[0].x = 1; } } catch (err) { return err; } return \"ran\";",
-				 "parallel_for: element 0 cannot be proven exclusive (only value-semantic shapes are: primitives, strings, value containers, flat value-class instances and distinct handles to them)"},
+				 "parallel_for: element 0 cannot be proven exclusive (only value-semantic shapes are: primitives, strings, math vectors, value containers, flat value-class instances and distinct handles to them)"},
 				{"int bump(shared_ptr<C> h) { return h.x + 5; } var out = parallel_transform(hs, bump); return out[63];", "5"},
 			};
 			for (const auto& [body, expected] : cases) {
@@ -3192,6 +3192,38 @@ public:
 					const std::string got = parallel_error(classes + r.source, vm);
 					check_true(got.rfind(r.text, 0) == 0, std::string(r.name) + (vm ? " vm" : " interp") + ": expected '" + r.text + "', got '" + got + "'");
 				}
+			}
+		});
+
+		test("math_vectors_are_values_to_the_element_and_capture_proofs", [this, parallel_matches_serial, parallel_error]() {
+			// A math vector is a value: an array of them, a class holding them (at any depth) and a var array of them bind in place,
+			// even when every element shares one node (pushed copies of one instance), and a captured vector, or a container of
+			// them, reads its components through a worker's own copy; a captured vector is still read-only
+			const std::string decls = R"(
+				using math::vec2; using math::vec3; using math::ivec2; using math::color;
+				class P { vec2 pos; vec2 vel = vec2(1.0, 0.5); }
+				class Holder { P p; vec3 v3; ivec2 cell = ivec2(1, 2); color c = color(0.1, 0.2, 0.3, 1.0); }
+				vec2 gravity = vec2(0.0, -2.0);
+				array<vec2> table = [vec2(1, 2), vec2(3, 4)];
+				map<string, vec2> named = {"a": vec2(5, 6)};
+				P proto;
+				Holder h0;
+				vec2 one = vec2(1.0, 1.0);
+				array<P> ps; array<Holder> hs; array<vec2> pts; var boxed = []; array<float> outs;
+				for (int i = 0; i < 200; ++i) { ps.push(proto); hs.push(h0); pts.push(one); boxed.push(one); outs.push(0.0); }
+			)";
+			parallel_matches_serial(decls + R"(
+				parallel_for (auto& p : ps) { p.vel += gravity; p.pos += p.vel; }
+				parallel_for (auto& q : pts) { q.x += 1.0; q += table[1]; }
+				parallel_for (auto& h : hs) { h.p.pos += h.p.vel; h.v3 = h.v3 + vec3(1.0, 2.0, 3.0); h.cell.y += 1; h.c.r = 0.9; }
+				parallel_for (auto& b : boxed) { b += vec2(0.5, 0.5); }
+				parallel_for (int i = 0; i < 200; ++i) { outs[i] = pts[i].x + gravity.y + table[0].x + named["a"].y; }
+				to_string(ps[199].pos) + to_string(proto.pos) + to_string(pts[0]) + to_string(one) + to_string(hs[7].p.pos) + to_string(hs[7].cell) +
+					to_string(hs[7].c) + to_string(h0.c) + to_string(boxed[3]) + to_string(outs[5]);
+			)", "math vectors");
+			for (bool vm : {false, true}) {
+				const std::string got = parallel_error(decls + "parallel_for (auto& o : outs) { gravity.x = o; }", vm);
+				check_eq(std::string("parallel_for: member store reaches captured state 'gravity' (captured reads are read-only) at 13:44"), got, vm ? "vm" : "interp");
 			}
 		});
 

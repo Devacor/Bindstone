@@ -5,12 +5,17 @@
 #include <jaiscript/testing/foundry.hpp>
 #include "../case_table.hpp"
 #include <map>
+#include <set>
 #include <jaiscript/core/engine.hpp>
 #include <jaiscript/detail/class_runtime.hpp>
 #include <jaiscript/core/class_registry.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>
+#include <jaiscript/detail/engine_access.hpp>
+#include <jaiscript/core/script_namespace.hpp>
+#include <jaiscript/stdlib/spider.hpp>
+#include <jaiscript/stdlib/web_text.hpp>
 #include <jaiscript/core/jaibite.hpp>
 #include <jaiscript/detail/string_symbolizer.hpp>
 #include <jaiscript/thread_pool.hpp>
@@ -3421,6 +3426,93 @@ public:
 				try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
 				check_eq(std::to_string(expected), got, std::string("reference parameters ") + (vm ? "vm" : "interp"));
 				check_true(detail::engine_access::get_current_parameter_storage(*e) == nullptr, std::string("no call's storage outlives the region ") + (vm ? "vm" : "interp"));
+			}
+		});
+
+		// Each library builtin is parallel unless the library marks it serial; a new one takes its row here, so the choice is made
+		test("every_library_builtin_is_classified_parallel_or_serial", [this]() {
+			auto e = make_engine();
+			jai::stdlib::register_all(*e);
+			jai::stdlib::register_web(*e);
+			jai::stdlib::register_spider(*e);
+			std::set<std::string> names;
+			for (const std::string& name : detail::engine_access::host_function_names(*e)) { names.insert(name); }
+			auto* sym = detail::engine_access::get_symbolizer(*e);
+			for (const auto& [space_id, space] : detail::engine_access::script_namespaces(*e)) {
+				if (!space) { continue; }
+				for (const auto& [member_id, value] : space->variables) {
+					if (value.is_function() && !space->functions.count(member_id)) {
+						names.insert(std::string(sym->get_string(space_id)) + "::" + std::string(sym->get_string(member_id)));
+					}
+				}
+			}
+			const std::set<std::string> serial = {
+				"__jai_parallel_range",
+				"app_cache_dir", "app_data_dir", "array::filter", "array::map", "array::sort", "crypto::sha256_file", "extend",
+				"file_data", "from_base64", "from_binary", "from_json", "import_recheck_interval", "map::filter", "parallel_reduce",
+				"parallel_transform", "print", "reflect::bases", "reflect::bind", "reflect::call", "reflect::classes",
+				"reflect::construct", "reflect::construct_shared", "reflect::fields", "reflect::function_arguments",
+				"reflect::functions", "reflect::generation", "reflect::get", "reflect::globals", "reflect::has_field",
+				"reflect::has_method", "reflect::instances", "reflect::invoke", "reflect::is_cpp_bound", "reflect::is_enabled",
+				"reflect::method_arguments", "reflect::methods", "reflect::scoped_template_dirs",
+				"reflect::scoped_template_output_limit", "reflect::set", "reflect::template_output_limit", "reflect::type_name",
+				"resolve_path", "sleep", "spider::Response", "spider::catch", "spider::get", "spider::post", "spider::sling",
+				"template#dynamic", "template#html", "template#raw", "template#scoped", "template#scoped_file", "template#splice",
+				"time::date", "time::date_from_unix", "time::date_now", "time::engine_elapsed", "time::execute_elapsed",
+				"time::local_date", "time::local_now", "time::now", "time::stopwatch", "time::unix_ms", "time::unix_time",
+				"time::utc_date", "time::utc_now", "to_base64", "to_binary", "to_json"
+			};
+			const std::set<std::string> parallel = {
+				"array::append", "array::concat", "array::fill", "array::resize", "array::reverse", "array::slice", "base64_decode",
+				"base64_encode", "bin_dir", "binary::bytes", "binary::layout", "binary::reader", "binary::text", "binary::width",
+				"binary::writer", "crypto::equals", "crypto::hmac_sha256", "crypto::hmac_sha256_bytes", "crypto::hmac_sha512",
+				"crypto::hmac_sha512_bytes", "crypto::md5", "crypto::md5_bytes", "crypto::password_hash", "crypto::password_verify",
+				"crypto::random_bytes", "crypto::random_hex", "crypto::random_int", "crypto::sha1", "crypto::sha1_bytes",
+				"crypto::sha256", "crypto::sha256_bytes", "crypto::sha512", "crypto::sha512_bytes", "current_script_dir",
+				"current_script_path", "executable_dir", "executable_path", "file_name", "format", "format_value",
+				"is_registered_type", "math::abs", "math::acos", "math::angle_between", "math::asin", "math::atan", "math::atan2",
+				"math::cbrt", "math::ceil", "math::clamp", "math::color", "math::cos", "math::cosh", "math::cross", "math::degrees",
+				"math::degrees_to_radians", "math::distance", "math::distance_squared", "math::dot", "math::exp", "math::exp2",
+				"math::floor", "math::fmod", "math::hypot", "math::ifloor", "math::is_inf", "math::is_nan", "math::itrunc",
+				"math::ivec2", "math::ivec3", "math::length", "math::length_squared", "math::lerp", "math::log", "math::log10",
+				"math::log2", "math::max", "math::min", "math::mix", "math::mix_hsv", "math::mix_in", "math::mix_in_out",
+				"math::mix_out", "math::mix_out_in", "math::mix_rgb", "math::normalize", "math::perpendicular", "math::pow",
+				"math::project", "math::radians", "math::radians_to_degrees", "math::reflect", "math::remap", "math::rotate",
+				"math::round", "math::saturate", "math::sign", "math::sin", "math::sinh", "math::sqrt", "math::tan", "math::tanh",
+				"math::trunc", "math::unmix", "math::unmix_in", "math::unmix_in_out", "math::unmix_out", "math::unmix_out_in",
+				"math::vec2", "math::vec3", "math::vec4", "math::wrap", "math::wrap_add", "math::wrap_mul", "math::wrap_sub", "merge",
+				"pair", "parent_dir", "random", "regex", "regex::match", "root_script_dir", "root_script_path", "same_object",
+				"skip_flush_t", "skip_newline_t", "string::append", "string::from_bytes", "string::from_code", "string::is_valid_utf8",
+				"string::join", "string::pad_left", "string::pad_right", "string::repeat", "string::replace", "string::to_lower",
+				"string::to_upper", "string::trim", "thread_count", "to_char", "to_string", "type_of", "utf8_string", "vformat",
+				"web::build_query", "web::form_decode", "web::form_encode", "web::html", "web::html_escape", "web::html_unescape",
+				"web::parse_query", "web::parse_query_all", "web::parse_url", "web::url", "web::url_decode", "web::url_encode",
+				"working_dir"
+			};
+			std::string table;
+			for (const std::string& name : names) {
+				const bool is_serial = detail::engine_access::host_function_serial(*e, name);
+				const bool listed = is_serial ? serial.count(name) != 0 : parallel.count(name) != 0;
+				if (!listed) { table += std::string(is_serial ? "serial   " : "parallel ") + name + "\n"; }
+			}
+			for (const auto* listed : {&serial, &parallel}) {
+				for (const std::string& name : *listed) {
+					if (!names.count(name)) { table += "gone     " + name + "\n"; }
+				}
+			}
+			check_eq(std::string(), table, "library builtins whose row is missing or wrong");
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				auto run = make_engine();
+				jai::stdlib::register_all(*run);
+				run->parallel_thread_count(workers);
+				const std::string got = run->execute(R"(
+					string glyph(int x) { return string::repeat(to_string(to_char(65 + x % 26)), 2); }
+					array<int> xs;
+					for (int i = 0; i < 520; ++i) { xs.push(i); }
+					array<string> out = parallel_transform(xs, glyph);
+					out[0] + out[25] + out[519];
+				)").as<std::string>();
+				check_eq(std::string("AAZZZZ"), got, "to_char and string:: in a parallel body, workers " + std::to_string(workers));
 			}
 		});
 

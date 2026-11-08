@@ -78,9 +78,6 @@ namespace jai::detail {
         std::string message;
     };
 
-    // A library builtin a parallel body may call: pure math and to_string (everything else the library registers is serial)
-    bool parallel_pure_function(std::string_view name);
-
     struct parallel_region_table {
         struct entry {
             std::thread::id id;

@@ -2,7 +2,7 @@
 
 `parallel_for` (including zip), `parallel_transform` and `parallel_reduce` are implemented with
 captured reads, element members, construction, C++ calls that are parallel unless registered serial
-(the library's own builtins are serial apart from pure math and `to_string`, §3) and random draws
+(the library's own builtins too, apart from those it marks serial, §3) and random draws
 from a per-region counter stream (§3). Safe mode proves a body or rejects
 it; nothing silently runs serial for safety, though the cost cap may run a cheap small range on
 one thread. Worker count does not change the semantic admission rule, and any merge over
@@ -234,8 +234,10 @@ for them: safe on any thread by default, refused with every script class over th
 is bound `.serial_only_constructor()`. A worker gets a copy of each host constructor a construction
 reaches (`make_parallel_host_function_copy`), and a hybrid's script layer joins the engine's
 script-layer map at the join (`pending_script_layers`). C++ calls are parallel unless registered serial
-(`serial_function`, `serial_method`, `serial_static_method`; the library's builtins register serial
-under `engine::library_registration` unless `parallel_pure_function`). A free function or static method
+(`serial_function`, `serial_method`, `serial_static_method`; the library marks its own serial builtins the same way, and
+whole namespaces with `serial_namespace` (`reflect`, `time`, `spider`); the test
+`every_library_builtin_is_classified_parallel_or_serial` lists every builtin's choice). A namespaced host entry is marked by
+its qualified name. A free function or static method
 refuses at admission; a method's class is a runtime fact, so every class whose chain binds a called name
 in C++ gets a worker pin (a copy of the bound value), and a serial one's pin raises when called. Receiver
 safety follows constness, per overload by arity (`class_definition::host_overloads`): a non-const one or a property

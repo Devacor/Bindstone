@@ -441,8 +441,8 @@ namespace {
 		return value != found->second->variables.end() && value->second.is_function() ? &value->second : nullptr;
 	}
 
-	// The library builtins that stay parallel (parallel_pure_function): pure math, to_string, the web:: text functions and crypto:: (apart from its file read); the rest register serial
-	bool parallel_host_whitelisted(std::string_view name) {
+	// The host functions a read-only proof takes as reading only their arguments
+	bool proof_pure_host_function(std::string_view name) {
 		static constexpr std::string_view k_whitelist[] = {
 			"abs", "sign", "min", "max", "clamp",
 			"floor", "ceil", "round", "trunc",
@@ -2434,9 +2434,13 @@ namespace {
 						return fail(m, "time:: calls are not allowed in a parallel body (engine-owned clock)");
 					}
 					if (!proof_mode && m->object && m->object->get_type() == node_type::identifier_expr) {
-						// a pure library namespace entry (web::url_encode): each worker calls its own copy, pinned at the barrier
+						// a host namespace entry (web::url_encode) not marked serial: each worker calls its own copy, pinned at the barrier
 						auto* space = static_cast<identifier_expr*>(m->object.get());
-						if (parallel_host_whitelisted(std::string(space->name) + "::" + std::string(m->member)) && namespace_host_entry(*eng, space->name, m->member)) {
+						if (namespace_host_entry(*eng, space->name, m->member)) {
+							const std::string qualified = std::string(space->name) + "::" + std::string(m->member);
+							if (engine_access::host_function_serial(*eng, qualified)) {
+								return fail(m, "host function '" + qualified + "' is marked serial_function() and cannot be called in a parallel body");
+							}
 							if (space->symbol_id == UINT64_MAX) { space->symbol_id = sym->intern(space->name); }
 							if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 							adm.static_calls.push_back({ space->symbol_id, m->member_id });
@@ -2644,7 +2648,7 @@ namespace {
 						}
 					}
 					callee_ok = true;
-				} else if (proof_mode ? parallel_host_whitelisted(callee->name) : engine_access::host_function_registered(*eng, callee_name) && !engine_access::host_function_serial(*eng, callee_name)) {
+				} else if (proof_mode ? proof_pure_host_function(callee->name) : engine_access::host_function_registered(*eng, callee_name) && !engine_access::host_function_serial(*eng, callee_name)) {
 					// A host function runs on any thread unless it is marked serial; a non-const T& parameter writes
 					// back into its argument, which enclosing state cannot take
 					const uint64_t writeback = engine_access::host_function_writeback(*eng, callee_name);
@@ -4537,8 +4541,6 @@ namespace {
 } // namespace
 
 // ============================== THE REGION (one fork for both forms) ==============================
-bool parallel_pure_function(std::string_view name) { return parallel_host_whitelisted(name); }
-
 script_value parallel_bound_pin(const parallel_method_pin& pin, const script_value& receiver, uint64_t name_id, engine* eng) {
 	return script_value::make_function([pin_ptr = &pin, receiver, name_id, eng](const std::vector<script_value>& args) {
 		return call_parallel_host_pin(*pin_ptr, receiver, name_id, args, eng);

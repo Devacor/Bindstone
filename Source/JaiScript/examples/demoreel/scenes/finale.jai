@@ -665,6 +665,12 @@ class Finale : Fire {
 				float my = (y0 + dy * 0.5 - cy) * outer;
 				float reach = mx * mx + my * my;
 				float lum = gain * (0.55 + (sz[v] + sz[u]) * 0.18) * (0.22 + 0.78 * (reach > 1.0 ? 1.0 : reach));
+				// in the dance two of the eight axes light on each beat and the rest dim, so the
+				// lattice reads as structure strobing with the music instead of a tangle
+				if (tt > dance_t && tt < shatter_t) {
+					int lit = (itrunc((tt - dance_t) / beat) * 2) % 8;
+					lum *= d == lit || d == lit + 1 ? 1.45 : 0.18;
+				}
 				float ix = dx / steps;
 				float iy = dy / steps;
 				for (int s = 0; s <= steps; ++s) {

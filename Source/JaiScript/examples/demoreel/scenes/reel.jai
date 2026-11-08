@@ -71,6 +71,7 @@ class Reel {
 	bool paused = false;
 
 	int nscenes = 11;
+	int intro_idx = 11;    // the cold open: one more entry past the scenes, played once at the start
 	var bars = [];         // each scene's length in bars of the 124 bpm soundtrack
 	var cues = [];
 	var seed_slots = [];   // each scene seeds from its own slot, so the running order never changes a scene's frames
@@ -91,11 +92,12 @@ class Reel {
 	// melts like Doom into GLOBHUNTER, the hunt zooms out over the canyon, the canyon ripples
 	// into CHROME, the glass shatters into OSSUARY, the web swirls into the ink, the ink dives
 	// into FINALE, and FINALE irises back to the start
-	array<int> out_transition = [5, 8, 7, 3, 4, 5, 7, 6, 8, 5, 3];
+	array<int> out_transition = [5, 8, 7, 3, 4, 5, 7, 6, 8, 5, 3, 5];
 	int trans_count = 0;
 
 	array<int> grid_a = [];
 	array<int> grid_b = [];
+	array<int> flash_noise = [];   // a threshold per pixel for the cut's dithered flash
 	array<int> small_a = [];   // the scaled-down frames of scenes past their pixel budget
 	array<int> small_b = [];
 	array<float> melt = [];
@@ -138,13 +140,13 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		bars = [6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 49];
-		seed_slots = [3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 16];
-		for (int i = 0; i < nscenes; ++i) {
+		bars = [6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 49, 4];
+		seed_slots = [3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 16, 21];
+		for (int i = 0; i <= intro_idx; ++i) {
 			var probe = make_scene(i);
 			cues.push(Cue(bars[i], music_mood(i), seed + i * 101, probe.hit_times(), probe.hit_levels()));
 		}
-		start_scene(0, 0.0);
+		start_scene(intro_idx, 0.0);
 	}
 
 	var make_scene(int idx) {
@@ -159,7 +161,8 @@ class Reel {
 			case 7: return Chrome();
 			case 8: return Ossuary();
 			case 9: return Maelstrom();
-			default: return Finale();
+			case 10: return Finale();
+			default: return Intro();
 		}
 	}
 
@@ -233,7 +236,7 @@ class Reel {
 	}
 
 	void start_scene(int idx, float at_t) {
-		cur_idx = ((idx % nscenes) + nscenes) % nscenes;
+		cur_idx = idx == intro_idx ? idx : ((idx % nscenes) + nscenes) % nscenes;
 		cur = make_scene(cur_idx);
 		setup_scene(cur, cur_idx);
 		dur_cur = dur_for(cur_idx);
@@ -259,7 +262,7 @@ class Reel {
 	}
 
 	void begin_transition() {
-		pending_idx = (cur_idx + 1) % nscenes;
+		pending_idx = cur_idx == intro_idx ? 0 : (cur_idx + 1) % nscenes;
 		nxt = make_scene(pending_idx);
 		setup_scene(nxt, pending_idx);
 		in_trans = true;
@@ -353,6 +356,24 @@ class Reel {
 				if (d <= nscenes) { start_scene(d - 1, 0.0); }
 			}
 			else if (c0 == '0') { start_scene(nscenes - 1, 0.0); }
+		}
+	}
+
+	// the cut lands on the bar line: a white flash dithered across the frame, gone within a few frames
+	void cut_flash(float prog) {
+		float k = 1.0 - prog / 0.14;
+		if (k <= 0.0) { return; }
+		int keep = itrunc(k * k * 1000.0);
+		var& pix = HB_PIX;
+		int shine = ui_off + ui_shine;
+		int n = pw * ph;
+		if (flash_noise.size() != n) {
+			var noise_rng = Rng(seed + 977);
+			flash_noise = [];
+			for (int k = 0; k < n; ++k) { flash_noise.push(noise_rng.next(1000)); }
+		}
+		for (int i = 0; i < n; ++i) {
+			if (flash_noise[i] < keep) { pix[i] = shine; }
 		}
 	}
 
@@ -454,7 +475,7 @@ class Reel {
 		string band = sgr_bg(16, 11, 34);
 		var top = HudLine(w);
 		top.put(sgr_bg(255, 206, 110) + sgr_fg(30, 16, 44), " JAISCRIPT DEMOREEL ");
-		top.put(band + sgr_fg(120, 112, 168), `  ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  `);
+		top.put(band + sgr_fg(120, 112, 168), cur_idx == intro_idx ? "  intro  " : `  ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  `);
 		top.put(band + sgr_fg(255, 226, 160), cur.name);
 		var stats = hud_stats(band, fps, ms_sim, ms_draw, ms_other, true);
 		if (top.used + stats.used > w) { stats = hud_stats(band, fps, ms_sim, ms_draw, ms_other, false); }
@@ -471,7 +492,7 @@ class Reel {
 	// the default HUD: two quiet chips on the bottom row, the scene on the left and the
 	// frame's cost on the right (the VM's time per frame, the cores it can use, the rate)
 	void perf_chip(var& rows, float fps, float ms_sim, float ms_draw) {
-		string scene = ` ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  ${cur.name} `;
+		string scene = cur_idx == intro_idx ? " JAISCRIPT DEMOREEL " : ` ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  ${cur.name} `;
 		string cost = ` JaiScript ${backend} ${gfx.fmt1(ms_sim + ms_draw)} ms . ${thread_count()} cores . ${gfx.fmt1(fps)} fps `;
 		int gap = w - scene.size() - cost.size();
 		if (gap < 1) { return; }
@@ -511,12 +532,13 @@ class Reel {
 			float prog = trans_t / trans_len;
 			prog = prog > 1.0 ? 1.0 : prog;
 			gfx.mix_grids(grid_a, grid_b, HB_PIX, pw, ph, trans_kind, prog, off_b, ui_off + ui_edge, melt);
+			cut_flash(prog);
 			if (trans_t >= trans_len) { finish_pending = true; }
 		} else {
 			render_scene(cur, HB_PIX, small_a);
 		}
 		int trow = -1;
-		if (!in_trans && !finish_pending && scene_t < title_len) { trow = title_pixels(); }
+		if (!in_trans && !finish_pending && scene_t < title_len && cur_idx != intro_idx) { trow = title_pixels(); }
 		var rows = hb_present();
 		title_text(rows, trow);
 		if (!in_trans) { cur.text_rows(rows); }

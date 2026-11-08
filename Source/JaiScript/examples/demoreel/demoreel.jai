@@ -22,7 +22,7 @@
 //                                                 (default 6) -> P.txt (as presented, so color
 //                                                 and ascii apply) + P.bmp
 //   jaiscript demoreel.jai -- midi DIR            write the soundtrack's cues (one MIDI file a scene) and exit
-//   jaiscript demoreel.jai -- video DIR every N   the whole reel's frames (every Nth, 24-bit text) and its cues
+//   jaiscript demoreel.jai -- video DIR every N   the whole reel's frames (every Nth, 24-bit text) and its cues; frames M stops early
 //   other args: seed N | fps N | w N | h N | scene I (jump after boot) | music 0 (silent) | pix half|sext|auto
 //               | workers 0|1 (rows in parallel; the reel's default: on at 100 columns or more, off headless)
 //   keys: h HUD | f freeze | n/p/space/arrows scene skip | 1-9,0 jump | q/esc quit
@@ -89,6 +89,8 @@ class Rng {
 // the jai adapter's kSceneFiles order: base classes before derived, main.jai last
 // (it reads ESC at import time, so the host API above must already exist).
 
+// where the scene files live: the FINALE imports a module from there while it runs
+var SCENES_DIR = current_script_dir() + "/scenes";
 import "scenes/util.jai";
 import "scenes/music.jai";
 import "scenes/reel.jai";
@@ -105,6 +107,7 @@ import "scenes/skull.jai";
 import "scenes/fluid.jai";
 import "scenes/show.jai";
 import "scenes/finale.jai";
+import "scenes/intro.jai";
 import "scenes/main.jai";
 
 // -------------------------------------------------------------------- args ---
@@ -119,6 +122,7 @@ var OPT_DUMP = "";
 var OPT_BENCH = 0;
 var OPT_SHOT = -1;
 var OPT_AT = 4.0;
+var OPT_AT_GIVEN = false;
 var OPT_SHOTN = 6;
 var OPT_MUSIC = true;
 var OPT_MIDI = "";
@@ -142,7 +146,7 @@ for (int i = 0; i + 1 < ARGS.size(); i += 2) {
 	else if (k == "dump") { OPT_DUMP = v; }
 	else if (k == "bench") { OPT_BENCH = v.to_int(); }
 	else if (k == "shot") { OPT_SHOT = v.to_int() - 1; }
-	else if (k == "at") { OPT_AT = v.to_float(); }
+	else if (k == "at") { OPT_AT = v.to_float(); OPT_AT_GIVEN = true; }
 	else if (k == "n") { OPT_SHOTN = v.to_int(); }
 	else if (k == "music") { OPT_MUSIC = v != "0"; }
 	else if (k == "midi") { OPT_MIDI = v; }
@@ -167,7 +171,7 @@ function run_headless(int frames) -> int {
 	int h = OPT_H > 0 ? OPT_H : 40;
 	float dt = 1.0 / 30.0;
 	demo_boot(w, h, OPT_SEED, "vm", true, false);
-	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, 5.0); }
+	if (OPT_SCENE >= 0) { demo_jump(OPT_SCENE, OPT_AT_GIVEN ? OPT_AT : 5.0); }
 	HB_WORKERS = OPT_WORKERS > 0 ? 1 : 0;
 	print(format("demoreel shim headless: {0} frames @ {1}x{2}, seed {3}, dt {4}", frames, w, h, OPT_SEED, dt));
 	int hash = 0;
@@ -195,7 +199,7 @@ function run_headless(int frames) -> int {
 	int elapsed = run.elapsed() * 1000;
 	print(format("frames {0} | bytes {1} (len {2}..{3}) | stream hash {4} | {5} ms total, {6} ms/frame incl. hashing, {7} ms/frame render",
 		frames, total_bytes, min_len, max_len, hash, elapsed, (elapsed * 1.0) / frames, render.elapsed() * 1000 / frames));
-	print(`rows ${HB_WORKERS != 0 ? "parallel" : "serial"} | pixels ${HB_SEXT ? "sext" : "half"} | text in ${text_frames} frames`);
+	print(`rows ${HB_WORKERS != 0 ? "parallel" : "serial"} | pixels ${HB_SEXT ? "sext" : "half"} | text in ${text_frames} frames | live reloads ${LIVE_RELOADS}`);
 	return 0;
 }
 
@@ -237,10 +241,11 @@ function run_video(string dir) -> int {
 	make_dirs(dir);
 	write_cues(dir);
 	float total = 0.0;
-	for (int i = 0; i < reel.nscenes; ++i) { total += reel.dur_for(i); }
+	for (int i = 0; i <= reel.intro_idx; ++i) { total += reel.dur_for(i); }
 	int frames = itrunc(total / dt);
 	var terminal = Terminal();
 	int written = 0;
+	if (OPT_FRAMES > 0 && OPT_FRAMES < frames) { frames = OPT_FRAMES; }
 	for (int f = 0; f < frames; ++f) {
 		string frame = demo_frame(f * dt, dt, "", 0.0, 0.0, 0.0, 0.0);
 		if (f % OPT_EVERY != 0) { continue; }

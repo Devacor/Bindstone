@@ -1,6 +1,6 @@
 # jai_demoreel — a demoscene tech reel written in JaiScript
 
-Eleven auto-advancing truecolor scenes, five kinds of transition, pixel-font
+A cold open and eleven auto-advancing truecolor scenes, nine kinds of transition, pixel-font
 title cards, and a finale where an eight-dimensional hypercube unfolds over
 Escher's hyperbolic plane, shatters into the word JAISCRIPT and slams it into a
 wall of rainbow fire before the credits roll — every effect coded in
@@ -200,6 +200,21 @@ from the middle, a shutter closing from both sides, a glitch slipping on the
 hats), pumping on the kick. A scene can set `pixel_budget`: past it the scene
 renders smaller and the reel scales it up, so the heaviest scenes hold their
 frame rate on large terminals.
+
+The reel opens cold (`scenes/intro.jai`, four bars, played once): a dead signal
+flickers over the riser and a CRT line powers on, JAISCRIPT slams in on the first
+downbeat split into red and cyan ghosts with a shockwave over a warping
+starfield, the tagline types itself, and on the second impact the logo bursts into
+the warp and whites out into DONUT. Every cut lands with a dithered white flash on
+its bar line.
+
+The reel hot-reloads itself on screen: FINALE's FOUR slide turns a star with
+`live_spin()` (defined in `show.jai`), and on the slide's beat it imports
+`scenes/live/spin_tweaked.jai`, which redefines the function. The engine swaps the
+code under the running scene; the star keeps its angle and turns six times as fast
+from the next frame. A module runs once a process, so a second pass through the
+reel finds the tweak already live and says so; `r` re-executes `show.jai` and
+puts it back.
 
 ## Measured numbers
 

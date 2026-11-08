@@ -222,6 +222,20 @@ gate_demoreel() {
 			want "demoreel $pix $backend: the rows did not run in parallel through the text cards" "rows parallel \| pixels $pix \| text in [1-9][0-9]* frames"
 		done
 	done
+	# FINALE's FOUR slide reloads scenes/live/spin_tweaked.jai while it runs, with parallel rows on
+	for backend in vm interp; do
+		hash_on "$backend" || continue
+		run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 40 w 120 h 40 scene 10 at 32.4 pix sext workers 1
+		want "demoreel $backend: FINALE did not reload its live module" "live reloads 1\$"
+	done
+	# the soundtrack's cues and the video frames
+	vm_only demoreel || return 0
+	local out="${TMPDIR:-/tmp}/demoreel_gate_$$"
+	run_logged "$BIN/jaiscript" demoreel.jai -- midi "$out/cues"
+	want "demoreel midi: expected one cue a scene" "^12 cues -> "
+	run_logged "$BIN/jaiscript" demoreel.jai -- video "$out/video" every 10 frames 60
+	want "demoreel video: expected six frames" "^video: 6 frames"
+	rm -rf "$out"
 }
 
 gate_crawler() {

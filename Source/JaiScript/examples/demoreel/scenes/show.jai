@@ -7,6 +7,12 @@
 
 function rgb(int r, int g, int b) -> int { return r * 65536 + g * 256 + b; }
 
+// the FOUR slide's live code: the slide imports scenes/live/spin_tweaked.jai over this
+// definition while it runs (the reel's own hot reload, on screen); 'r' re-executes this
+// file and puts it back
+function live_spin() -> float { return 1.0; }
+int LIVE_RELOADS = 0;
+
 int INK_TEXT = rgb(232, 232, 240);
 int INK_KEY = rgb(255, 121, 198);
 int INK_TYPE = rgb(139, 233, 253);
@@ -116,7 +122,7 @@ class Slide {
 
 class Deck {
 	var slides = [];
-	int ui = 0;          // palette: 10 panel shades, the title bar, a line highlight, three window dots, white, black
+	int ui = 0;          // palette: 10 panel shades, the title bar, a line highlight, three window dots, white, black, reload green
 	int hyper = 0;       // the finale's 8 axes x 12 levels
 	float beat = 0.48387097;
 	float bar = 1.93548388;
@@ -140,6 +146,7 @@ class Deck {
 		pal.add(39.0, 201.0, 63.0);
 		pal.add(250.0, 250.0, 255.0);
 		pal.add(0.0, 0.0, 0.0);
+		pal.add(96.0, 224.0, 168.0);
 		slides = [
 			Slide("ONE", "SCRIPTING", "spark.jai", 0, [
 				"class Spark {",
@@ -601,36 +608,56 @@ class Deck {
 		}
 	}
 
-	// FOUR: rules.jai is edited while the loop runs: v1 becomes v2 between two ticks and
-	// the log carries straight on
+	// FOUR, for real: a star turned by live_spin(), whose code this reel reloads while it
+	// runs. On the slide's beat the reel imports scenes/live/spin_tweaked.jai; the engine
+	// redefines live_spin() under the running scene, and the star keeps the angle it has
+	// and turns at the new speed from the next frame. A second pass through the reel
+	// finds the tweak already live (a module runs once a process) and says so.
+	float live_angle = 0.0;
+	float live_last = -1.0;
+	float live_at = -1.0;
+	bool live_was_live = false;
+
 	void demo_reload(var& grid, int x0, int y0, int x1, int y1, int c0, int r0, int c1, float lt) {
-		bool edited = lt > 3.6;
-		txt_put(c0 + 2, r0, "rules.jai", rgb(200, 196, 240));
-		txt_put(c0 + 2, r0 + 1, "function tick(int n) {", INK_KEY);
-		txt_put(c0 + 11, r0 + 1, "tick", INK_FUNC);
-		txt_put(c0 + 16, r0 + 1, "int", INK_TYPE);
-		txt_put(c0 + 2, r0 + 2, "  print(\"v1 tick {}\", n);", INK_STR);
-		txt_put(c0 + 4, r0 + 2, "print", INK_FUNC);
-		if (edited) {
-			fill(grid, col_px(c0 + 11), row_px(r0 + 2), col_px(c0 + 13), row_px(r0 + 3), ui + 11);
-			txt_put(c0 + 11, r0 + 2, lt > 3.75 ? "v2" : "v ", INK_STR);
+		if (lt < live_last || live_last < 0.0) {
+			live_angle = 0.0;
+			live_at = -1.0;
+			live_was_live = live_spin() != 1.0;
 		}
+		float step = live_last < 0.0 || lt < live_last ? 0.0 : lt - live_last;
+		live_last = lt;
+		if (live_at < 0.0 && lt >= 3.85) {
+			live_at = lt;
+			if (!live_was_live) {
+				import(SCENES_DIR + "/live/spin_tweaked.jai");
+				++LIVE_RELOADS;
+			}
+		}
+		float spin = live_spin();
+		live_angle += spin * step;
+		float cx = (x0 + x1) * 0.5;
+		float cy = (y0 + y1) * 0.5 + 3.0;
+		float r = (x1 - x0 < y1 - y0 ? x1 - x0 : y1 - y0) * 0.3;
+		for (int k = 0; k < 5; ++k) {
+			float a = live_angle + k * 1.2566371;
+			float b = a + 2.5132742;
+			wire(grid, cx + math::cos(a) * r, cy + math::sin(a) * r, cx + math::cos(b) * r, cy + math::sin(b) * r, hyper + 3 * 12 + 9);
+		}
+		dot(grid, cx, cy, 1.5, ui + 15);
+		txt_put(c0 + 2, r0, "scenes/live/spin_tweaked.jai", rgb(200, 196, 240));
+		txt_put(c0 + 2, r0 + 1, "function live_spin() -> float {", INK_KEY);
+		txt_put(c0 + 11, r0 + 1, "live_spin", INK_FUNC);
+		txt_put(c0 + 26, r0 + 1, "float", INK_TYPE);
+		txt_put(c0 + 2, r0 + 2, "  return 6.0;", INK_NUM);
+		txt_put(c0 + 4, r0 + 2, "return", INK_KEY);
 		txt_put(c0 + 2, r0 + 3, "}", INK_PUNCT);
-		int ticks = itrunc(lt / 0.25);
-		ticks = ticks > 11 ? 11 : ticks;
-		int switched = itrunc(3.85 / 0.25);
-		int log_rows = 6;
-		int first_tick = ticks - log_rows + 1 < 0 ? 0 : ticks - log_rows + 1;
-		for (int k = first_tick; k <= ticks; ++k) {
-			int row = r0 + 5 + (k - first_tick);
-			bool v2 = k >= switched;
-			txt_put(c0 + 2, row, `${v2 ? "v2" : "v1"} tick ${k}`, v2 ? rgb(120, 255, 170) : rgb(200, 200, 220));
-		}
-		if (lt > 3.85 && lt < 6.4) {
-			int br = r0 + 5 + log_rows + 1;
+		int vr = row_of(y1) - 1;
+		txt_put(c0 + 2, vr, `live_spin() = ${gfx.fmt1(spin)}   angle ${gfx.fmt1(live_angle)}`, spin > 1.0 ? rgb(120, 255, 170) : rgb(200, 200, 220));
+		if (live_at >= 0.0 && lt - live_at < 2.6) {
+			int br = r0 + 5;
 			fill(grid, col_px(c0 + 1), row_px(br), col_px(c1 - 1), row_px(br + 1), ui + 17);
-			txt_put(c0 + 1, br, " RELOADED ", rgb(10, 34, 28));
-			txt_put(c0 + 12, br, "rules.jai", rgb(226, 255, 240));
+			txt_put(c0 + 1, br, live_was_live ? " ALREADY LIVE " : " RELOADED ", rgb(10, 34, 28));
+			txt_put(c0 + (live_was_live ? 16 : 12), br, live_was_live ? "since the reel's last pass" : "imported mid-scene, state kept", rgb(226, 255, 240));
 		}
 	}
 

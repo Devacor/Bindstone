@@ -465,6 +465,7 @@ function music_mood(int idx) -> var {
 		case 7: return Mood(0, 0, 47, 38, 89, 11, 98, 0.7, 2);     // CHROME: B minor, four on the floor, crystal
 		case 8: return Mood(2, 3, 45, 33, 91, 14, 53, 0.45, 2);    // OSSUARY: A phrygian, sparse, choir and bells
 		case 9: return Mood(1, 1, 40, 38, 94, 81, 80, 0.7, 2);     // MAELSTROM: E dorian, breakbeat
-		default: return Mood(0, 0, 45, 38, 89, 81, 80, 0.7, 2);    // FINALE: A minor, the reel's anthem
+		case 10: return Mood(0, 0, 45, 38, 89, 81, 80, 0.7, 2);    // FINALE: A minor, the reel's anthem
+		default: return Mood(0, 4, 45, 38, 95, 81, 81, 0.8, 1);    // the cold open: A minor, driving sixteenths
 	}
 }

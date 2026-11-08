@@ -200,7 +200,15 @@ function donut_shade(float wx, float wy, float wz, float vx, float vy, float vz,
 	facing = facing < 0.0 ? 0.0 : facing;
 	float rim = 1.0 - facing;
 	rim = rim * rim * rim * DN_RIM;
-	float diffuse = (0.1 * DN_STAGE + DN_KEY * lit * (0.25 + 0.75 * sh)) * ao + rim;
+	// the light that reaches the side the key misses: a dim ambient, a warm bounce off the
+	// table onto whatever faces down, and a fill from the lit backdrop behind, so the shadow
+	// side keeps its shape and is never pure black
+	float wny = DN_M01 * nx + DN_M11 * ny + DN_M21 * nz;
+	float bounce = wny < 0.0 ? (0.0 - wny) * 0.26 : 0.0;
+	float back = 0.0 - nd;
+	back = back > 0.0 ? back * 0.12 : 0.0;
+	float fill = (0.13 + bounce + back) * (0.45 + 0.55 * DN_STAGE);
+	float diffuse = (0.1 * DN_STAGE + fill + DN_KEY * lit * (0.25 + 0.75 * sh)) * ao + rim;
 	if (mat == 2) { diffuse += 0.08 * DN_KEY * (1.0 - facing); }
 	// Blinn speculars: the key light and the sweeping glint, glossier on icing and sprinkles
 	float hx = lx - ux; float hy = ly - uy; float hz = lz - uz;
@@ -325,6 +333,8 @@ class Donut : Scene {
 	Donut() { pixel_budget = 26000; }
 
 	array<float> hit_times() override { return [MUSIC_BAR, MUSIC_BAR * 4.0]; }
+	// seven bars: the spin out lands by bar 6 and the final image holds a bar before the cut
+	int length_bars() override { return 7; }
 	array<int> hit_levels() override { return [2, 1]; }
 
 	void build() override {
@@ -392,7 +402,7 @@ class Donut : Scene {
 	void draw_sprinkles(var& grid, float t) {
 		array<float> born = [MUSIC_BAR, MUSIC_BAR * 4.0];
 		array<int> counts = [90, 90];
-		for (int b = 0; b < 15; ++b) {
+		for (int b = 0; b < 19; ++b) {
 			born.push(MUSIC_BAR + MUSIC_BEAT * (b + 1));
 			counts.push(12);
 		}
@@ -468,7 +478,7 @@ class Donut : Scene {
 		bool landed = t >= land;
 		// the donut: tipped toward the camera, spinning on its own axis, faster with the energy
 		float tilt = 0.82 + 0.2 * math::sin(t * 0.55) + (landed ? 0.0 : (land - t) * 0.6);
-		float spin = t * (0.5 + energy * 0.35) + 0.4 + smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, t) * 4.0;
+		float spin = t * (0.5 + energy * 0.35) + 0.4 + smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 5.8, t) * 4.0;
 		float ct = math::cos(tilt); float st = math::sin(tilt);
 		float cs = math::cos(spin); float ss = math::sin(spin);
 		// world-from-donut R = Rx(tilt) * Ry(spin); the field wants its transpose

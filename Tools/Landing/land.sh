@@ -14,8 +14,9 @@
 # when MutedVision compiles a changed file, and -verifyassets when the property system, the archives, the engine or the
 # assets changed. The milestone tier runs Source/JaiScript/tools/ci/battery.sh and the full client gate.
 #
-# Every heavy step waits while someone holds the timing lock. Logs go to LAND_LOG_DIR (default bindstone-land under
-# ../tempclaudefolders/tmp beside the checkout when that folder exists, else in the system temp directory). JAI_DEBUG_DIR and JAI_RELEASE_DIR default to the Visual Studio build directories under Source/JaiScript.
+# Every heavy step waits while someone holds the timing lock. Logs go to LAND_LOG_DIR (default a folder of the run's own,
+# bindstone-land/<time>-<pid>, under ../tempclaudefolders/tmp beside the checkout when that folder exists, else in the
+# system temp directory; its run folders older than a week are removed). JAI_DEBUG_DIR and JAI_RELEASE_DIR default to the Visual Studio build directories under Source/JaiScript.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export JAI_DEBUG_DIR="${JAI_DEBUG_DIR:-out/build/x64-Debug}"
@@ -31,7 +32,10 @@ if [ -d "$LAND_TEMP_ROOT" ]; then
 	if command -v cygpath >/dev/null 2>&1; then export TEMP="$(cygpath -w "$TMPDIR")"; else export TEMP="$TMPDIR"; fi
 	export TMP="$TEMP"
 fi
-LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land}"
+# Two landings at once must never write one log: each run defaults to a folder of its own
+LAND_LOG_ROOT="$(lockq_temp_dir)/bindstone-land"
+if [ -d "$LAND_LOG_ROOT" ]; then find "$LAND_LOG_ROOT" -mindepth 1 -maxdepth 1 -type d -name "20[0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9][0-9][0-9]-*" -mtime +7 -exec rm -rf {} + 2>/dev/null; fi
+LOG_DIR="${LAND_LOG_DIR:-$LAND_LOG_ROOT/$(date +%Y%m%d-%H%M%S)-$$}"
 export LAND_LOG_DIR="$LOG_DIR" JAI_CI_LOG_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
 UNION_FILES="${LAND_UNION_FILES:-Source/JaiScript/docs/PERF_PASS_2026-09-02.md}"

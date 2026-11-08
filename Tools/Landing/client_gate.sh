@@ -4,7 +4,8 @@
 #
 #   Tools/Landing/client_gate.sh [--build-only] [--no-loginshot] [label]
 #
-# LAND_LOG_DIR holds the logs (default bindstone-land in the system temp directory); CLIENT_BUILD_JOBS caps msbuild's
+# LAND_LOG_DIR holds the logs (land.sh passes its run's folder; alone, the default is a folder of the run's own under
+# bindstone-land in the system temp directory); CLIENT_BUILD_JOBS caps msbuild's
 # parallel projects (default 4); VSDEVCMD overrides the Visual Studio vswhere finds.
 set -uo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
@@ -20,7 +21,7 @@ for arg in "$@"; do
 		*) LABEL="$arg" ;;
 	esac
 done
-LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land}"
+LOG_DIR="${LAND_LOG_DIR:-$(lockq_temp_dir)/bindstone-land/$(date +%Y%m%d-%H%M%S)-$$}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/${LABEL}_bindstone.log"
 : > "$LOG"

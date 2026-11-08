@@ -182,6 +182,10 @@ namespace jai::detail {
 		// (source pins it, so the identity names one function): a registration or redefinition binds another and the copy is minted again
 		struct host_copy { const void* identity = nullptr; script_value source{std::monostate{}, nullptr}; script_value copy{std::monostate{}, nullptr}; };
 		std::unordered_map<uint64_t, host_copy> host_copies;
+		// a copy of print or format answers a literal-format call with a row of its own: the literal entry a copy too, so no
+		// handle the engine's row holds is copied on this worker
+		std::unordered_map<uint64_t, engine_access::format_literal_row> format_rows;
+		std::vector<detail::format_literal_alias> format_aliases;
 
 	};
 
@@ -3046,6 +3050,31 @@ namespace {
 		return copy;
 	}
 
+	// Main thread: a host function's copy defined in a worker environment; a copy of a builtin formatter gets a literal row of its
+	// own, minted with the copy (format_literal_for matches by identity)
+	void define_host_copy(engine& eng, parallel_worker_slot& slot, environment& env, uint64_t name_id, const std::string& name) {
+		script_value copy = parallel_host_copy(eng, slot, name_id, name);
+		if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
+		const parallel_worker_slot::host_copy& cached = slot.host_copies[name_id];
+		const engine_access::format_literal_row* source = cached.identity ? engine_access::format_literal_for(eng, cached.identity) : nullptr;
+		if (source && copy.raw_storage_index() == script_value::TYPEID_FUNCTION) {
+			engine_access::format_literal_row& row = slot.format_rows[name_id];
+			if (row.identity != &copy.unchecked_as_function()) {
+				row.identity = &copy.unchecked_as_function();
+				row.function = copy;
+				row.literal = script_value::make_function(script_function(source->literal.unchecked_as_function()), &eng);
+				row.invoke = source->invoke;
+				row.target = source->target;
+			}
+		}
+		env.define(name_id, std::move(copy));
+	}
+
+	void refresh_format_aliases(parallel_worker_slot& slot) {
+		slot.format_aliases.clear();
+		for (const auto& [name_id, row] : slot.format_rows) { slot.format_aliases.push_back({ row.identity, &row }); }
+	}
+
 	void reset_worker_slot(engine& eng, parallel_worker_slot& slot, std::chrono::nanoseconds budget) {
 		slice_worker_limits(eng, slot);
 		slot.deferred_reports.clear();
@@ -3053,11 +3082,7 @@ namespace {
 		slot.borrows.clear();
 		slot.deferred_releases.clear();
 		slot.backend->configure_parallel_worker(slot.root_env, slot.env_epoch_sink.get(), &slot.limits, budget);
-		for (const auto& [name_id, name] : slot.host_functions) {
-			script_value copy = parallel_host_copy(eng, slot, name_id, name);
-			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
-			slot.root_env->define(name_id, std::move(copy));
-		}
+		for (const auto& [name_id, name] : slot.host_functions) { define_host_copy(eng, slot, *slot.root_env, name_id, name); }
 		slot.error.reset();
 	}
 
@@ -3492,11 +3517,7 @@ namespace {
 					script_value::make_function(script_callable_thunk{ &eng, payload }, &eng));
 			}
 		}
-		for (const auto& [name_id, name] : adm.host_functions) {
-			script_value copy = parallel_host_copy(eng, *ctx, name_id, name);
-			if (ctx->vm) { ctx->vm->adopt_math_alias(name_id, copy); }
-			ctx->root_env->define(name_id, std::move(copy));
-		}
+		for (const auto& [name_id, name] : adm.host_functions) { define_host_copy(eng, *ctx, *ctx->root_env, name_id, name); }
 		if (chunk_wrapper && *chunk_wrapper) {
 			const std::shared_ptr<function_decl>& wrapper = *chunk_wrapper;
 			ctx->root_env->define(engine_access::symbolize(eng, adm.inplace_root ? "__jai_parallel_body" : "__jai_parallel_fn"),
@@ -5946,10 +5967,8 @@ struct region_run {
 			slot.method_env->define(name_id, script_value::make_function(script_callable_thunk{ &eng, std::move(payload) }, &eng));
 		}
 		for (const auto& [name_id, name] : builder.adm.host_functions) {
-			script_value copy = parallel_host_copy(eng, slot, name_id, std::string(name));
-			if (slot.vm) { slot.vm->adopt_math_alias(name_id, copy); }
 			slot.pinned_name_ids.push_back(name_id);
-			slot.method_env->define(name_id, std::move(copy));
+			define_host_copy(eng, slot, *slot.method_env, name_id, std::string(name));
 		}
 		if (slot.vm) {
 			for (const auto& body : builder.admitted_bodies) { slot.vm->precompile_parallel_method(*body); }
@@ -6171,6 +6190,8 @@ struct region_run {
 		table.entries.push_back({ std::this_thread::get_id(), &contexts[0]->limits, &contexts[0]->pending_instances, contexts[0]->backend.get(), &contexts[0]->method_env,
 		                          &contexts[0]->deferred_reports, &contexts[0]->pending_script_layers, &contexts[0]->deferred_releases, &contexts[0]->cursors,
 		                          &contexts[0]->borrows });
+		refresh_format_aliases(*contexts[0]);
+		table.entries.back().format_aliases = &contexts[0]->format_aliases;
 		if (worker_count > 1) {
 			const size_t pool_workers_needed = worker_count - 1;
 			if (!state.pool || state.pool->worker_count() < pool_workers_needed) {
@@ -6194,6 +6215,8 @@ struct region_run {
 				table.entries.push_back({ detail::thread_pool_access::worker_thread_id(*state.pool, k - 1), &contexts[k]->limits, &contexts[k]->pending_instances,
 				                          contexts[k]->backend.get(), &contexts[k]->method_env, &contexts[k]->deferred_reports,
 				                          &contexts[k]->pending_script_layers, &contexts[k]->deferred_releases, &contexts[k]->cursors, &contexts[k]->borrows });
+				refresh_format_aliases(*contexts[k]);
+				table.entries.back().format_aliases = &contexts[k]->format_aliases;
 			}
 		}
 		guard->prepared = true;

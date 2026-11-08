@@ -5945,6 +5945,13 @@ const engine::format_literal_row* engine::format_literal_for(const void* functio
     for (const auto& row : impl->format_literal_rows_) {
         if (row.identity == function) { return &row; }
     }
+    const detail::parallel_region_table* region = parallel_region_active_ && impl->parallel_ ? impl->parallel_->active_region : nullptr;
+    const detail::parallel_region_table::entry* here = region ? region->find_entry(std::this_thread::get_id()) : nullptr;
+    if (here && here->format_aliases) {
+        for (const auto& alias : *here->format_aliases) {
+            if (alias.copy == function) { return static_cast<const format_literal_row*>(alias.row); }
+        }
+    }
     return nullptr;
 }
 

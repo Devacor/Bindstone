@@ -78,6 +78,12 @@ namespace jai::detail {
         std::string message;
     };
 
+    // A chunk's copy of a builtin formatter and the chunk's own literal entry for it (an engine::format_literal_row)
+    struct format_literal_alias {
+        const void* copy = nullptr;
+        const void* row = nullptr;
+    };
+
     struct parallel_region_table {
         struct entry {
             std::thread::id id;
@@ -99,6 +105,8 @@ namespace jai::detail {
             object_borrows* borrows = nullptr;
             // The parameter storage of the bound call this thread is in (engine::get_current_parameter_storage while a region runs)
             mutable parameter_storage* call_storage = nullptr;
+            // engine::format_literal_for answers a chunk's copy of print or format with the chunk's own row
+            const std::vector<format_literal_alias>* format_aliases = nullptr;
             size_t element() const noexcept { return cursors && !cursors->empty() ? cursors->front().element_cursor_index() : SIZE_MAX; }
         };
         std::vector<entry> entries;

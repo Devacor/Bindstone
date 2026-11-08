@@ -30,6 +30,7 @@ namespace jai::detail {
         JAI_FORCEINLINE static checked_result<script_value> sleep_builtin(engine& a_engine, const script_value& seconds) { return a_engine.sleep_builtin(seconds); }
         JAI_FORCEINLINE static bool sleep_callee(const engine& a_engine, const void* function) noexcept { return a_engine.sleep_callee(function); }
         JAI_FORCEINLINE static void add_format_literal(engine& a_engine, std::string_view name, script_function literal, engine::host_direct_invoke invoke, const void* target) { return a_engine.add_format_literal(name, std::move(literal), invoke, target); }
+        using format_literal_row = engine::format_literal_row;
         JAI_FORCEINLINE static const engine::format_literal_row* format_literal_for(const engine& a_engine, const void* function) noexcept { return a_engine.format_literal_for(function); }
         JAI_FORCEINLINE static void pin_run(engine& a_engine) noexcept { return a_engine.pin_run(); }
         JAI_FORCEINLINE static void unpin_run(engine& a_engine) noexcept { return a_engine.unpin_run(); }

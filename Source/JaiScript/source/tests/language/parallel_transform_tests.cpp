@@ -3557,6 +3557,20 @@ public:
 					out[0] + out[25] + out[519];
 				)").as<std::string>();
 				check_eq(std::string("AAZZZZ"), got, "to_char and string:: in a parallel body, workers " + std::to_string(workers));
+				// a worker's copy of format still formats its literal: in the body, a callee, an element's method, a reference argument
+				const std::string formatted = run->execute(R"(
+					string tag(int x) { return format("<{0}>", x); }
+					class Cell { int v = 0; string label = ""; void name() { label = format("c{0}", v); } }
+					array<int> idx = [0, 1, 2];
+					array<string> out = ["", "", ""];
+					array<Cell> cells = [Cell(), Cell(), Cell()];
+					array<int> vals = [7, 8, 9];
+					parallel_for (int i : idx) { out[i] = format("{0}-{1}", i, i * 2) + tag(i); }
+					parallel_for (auto& c, int i : cells, idx) { c.v = i; c.name(); }
+					parallel_for (auto& v, int i : vals, idx) { out[i] = out[i] + format("={0}", v); }
+					to_json(out) + cells[2].label;
+				)").as<std::string>();
+				check_eq(std::string(R"(["0-0<0>=7","1-2<1>=8","2-4<2>=9"]c2)"), formatted, "format in a parallel body, workers " + std::to_string(workers));
 			}
 		});
 

@@ -17,7 +17,8 @@
 // lit by the setting sun. The camera skims the river between the walls, banks
 // hard through the bends, climbs out over the rim through bar three to the reveal
 // on bar four's downbeat (the sun flaring with the hit) and dives back in from bar
-// six, nodding on the kick and leaning on the snare all the way. Over the
+// six to skim the river home through the last bars, nodding on the kick and
+// leaning on the snare all the way. Over the
 // terrain: dust streaks rushing past the lens (longer with speed, pumping on the
 // kick), a flock of birds beating across the sky, and on each hit a fan of god rays
 // bursting from the sun across the sky.
@@ -418,6 +419,7 @@ class CanyonRun : Scene {
 		}
 	}
 
+	int length_bars() override { return 9; }
 	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
 	array<int> hit_levels() override { return [2, 1]; }
 

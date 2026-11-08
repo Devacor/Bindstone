@@ -375,6 +375,7 @@ class Chrome : Scene {
 		pal.add(255.0 * tr, 250.0 * tg, 225.0 * tb);
 	}
 
+	int length_bars() override { return 7; }
 	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
 	array<int> hit_levels() override { return [2, 1]; }
 
@@ -428,7 +429,7 @@ class Chrome : Scene {
 		}
 		// the camera: a low dolly that cranes up, rides the riser in, whips around on the
 		// bar-three hit and pulls back high through the last bars
-		float span = MUSIC_BAR * 6.0;
+		float span = MUSIC_BAR * 7.0;
 		float rise = t / span;
 		rise = rise > 1.0 ? 1.0 : rise;
 		float hit_at = MUSIC_BAR * 3.0;
@@ -437,10 +438,10 @@ class Chrome : Scene {
 		whip = whip * whip * (3.0 - 2.0 * whip);
 		float push = cue != null ? cue.riser(t) : 0.0;
 		float ca = t * 0.18 + 0.4 + whip * 2.4;
-		float radius = 3.4 + rise * rise * 3.0 - push * 0.9;
+		float radius = 3.4 + rise * rise * 2.2 - push * 0.9;
 		ex = math::sin(ca) * radius;
 		ez = math::cos(ca) * radius;
-		ey = 0.45 + rise * 2.4;
+		ey = 0.45 + rise * 1.55;
 		float tx = 0.0 - ex;
 		float ty = 0.7 - ey;
 		float tz = 0.0 - ez;

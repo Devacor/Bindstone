@@ -20,9 +20,11 @@
 // downbeat floods the hall with light, and the last bar slows the walk and holds
 // fire on the corridor ahead. Every burst lights the hall around it, the view quakes
 // with each kill, the big hit drops into bullet time for two beats (the walk crawls,
-// the goo hangs in the air), and in the last bar a boss glob twice a brute's size
-// rises in the corridor ahead, eyes burning, swelling on every kick. The ray fan
-// comes from the camera-plane vector: no per-column trig.
+// the goo hangs in the air), and on bar seven a boss glob twice a brute's size rises
+// in the corridor ahead, eyes burning, swelling on every kick: two bars of fight, a
+// hit on every beat flashing it, until it bursts on bar nine's downbeat in bullet
+// time, flooding the hall with goo, and the last bar walks on through the aftermath.
+// The ray fan comes from the camera-plane vector: no per-column trig.
 
 class GlobHunter : Scene {
 	array<int> wmap = [];
@@ -62,6 +64,7 @@ class GlobHunter : Scene {
 	array<float> zcol = [];  // per-column wall depth from the last wall pass
 	var gun = [];
 	int ne = 12;             // eleven of the garrison, and the boss in the last slot
+	float boss_flash = 0.0;  // the boss shrugs off each hit with a flash until bar nine
 	int kills = 0;
 	float cool = 0.6;
 	int last_step = -1;      // the last beat (or eighth) the gun was allowed to fire on
@@ -388,15 +391,17 @@ class GlobHunter : Scene {
 		return false;
 	}
 
-	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
-	array<int> hit_levels() override { return [1, 2]; }
+	int length_bars() override { return 10; }
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 7.0, MUSIC_BAR * 9.0]; }
+	array<int> hit_levels() override { return [1, 2, 1, 2]; }
 
 	void update(float t, float dt) override {
 		tt = t;
 		++fr;
-		bool last_bar = t > MUSIC_BAR * 7.0;
+		bool last_bar = t > MUSIC_BAR * 9.0;
+		bool fight = t > MUSIC_BAR * 7.0 && !last_bar;
 		float bullet = slow_mo(t);
-		float pace = stop_t > 0.0 ? 0.18 : (last_bar ? 0.4 : 1.0);
+		float pace = stop_t > 0.0 ? 0.18 : (last_bar ? 0.4 : (fight ? 0.16 : 1.0));
 		pace *= bullet;
 		travel += dt * 2.4 * pace;
 		var p = path_at(travel);
@@ -442,6 +447,7 @@ class GlobHunter : Scene {
 		kick_t -= dt;
 		stop_t -= dt;
 		call_t -= dt;
+		boss_flash -= dt;
 		for (int i = 0; i < ne; ++i) {
 			int st = es[i];
 			if (st == 1) { est[i] = est[i] + dt; if (est[i] > 0.14) { es[i] = 2; est[i] = 0.0; } }
@@ -499,6 +505,15 @@ class GlobHunter : Scene {
 				}
 			}
 		}
+		// bar nine's downbeat: the boss bursts
+		if (t >= MUSIC_BAR * 9.0 && t - dt < MUSIC_BAR * 9.0 && es[boss] == 0) {
+			float invdet2 = 1.0 / (planex * diry - dirx * planey);
+			float rbx = ex[boss] - posx;
+			float rby = ey[boss] - posy;
+			float bsx = invdet2 * (diry * rbx - dirx * rby);
+			float bsy = invdet2 * (planex * rby - planey * rbx);
+			fire(boss, bsx, bsy > 0.3 ? bsy : 0.3, t);
+		}
 		move_goo(dt * bullet);
 		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns or the kick lands
 		float beat_light = cue != null ? cue.kick_env(t) + cue.hit(t) : 0.0;
@@ -511,9 +526,10 @@ class GlobHunter : Scene {
 		pitch = bob + kick + shud;
 	}
 
-	// bullet time: two beats after the big hit play at a fifth of the speed
+	// bullet time: two beats after each big hit play at a fifth of the speed
 	float slow_mo(float t) {
 		float since = t - MUSIC_BAR * 5.0;
+		if (t >= MUSIC_BAR * 9.0) { since = t - MUSIC_BAR * 9.0; }
 		if (since < 0.0 || since > MUSIC_BEAT * 2.5) { return 1.0; }
 		float back = (since - MUSIC_BEAT * 2.0) / (MUSIC_BEAT * 0.5);
 		back = back < 0.0 ? 0.0 : (back > 1.0 ? 1.0 : back);
@@ -521,6 +537,33 @@ class GlobHunter : Scene {
 	}
 
 	void fire(int i, float bx, float by, float t) {
+		bool boss = i == ne - 1;
+		bool boss_down = boss && t >= MUSIC_BAR * 9.0 - 0.01;
+		if (boss && !boss_down) {
+			// a hit the boss takes: the muzzle, the tracer and a flash, but it stands
+			boss_flash = 0.1;
+			cool = 0.2;
+			muzzle_t = 0.12;
+			tracer_t = 0.14;
+			kick_t = 0.2;
+			tr_x = itrunc(w * 0.5 * (1.0 + bx / by));
+			tr_y = h / 2 + itrunc(h * 0.10 / by);
+			callout = "";
+			for (int k0 = 0; k0 < 8; ++k0) {
+				int g0 = goo_next;
+				goo_next = (goo_next + 1) % ngoo;
+				float a0 = rng.nextf() * 6.2831853;
+				gx[g0] = ex[i];
+				gy[g0] = ey[i];
+				gz[g0] = 0.5 + rng.nextf() * 0.4;
+				gvx[g0] = math::cos(a0) * 1.2 - dirx * 0.8;
+				gvy[g0] = math::sin(a0) * 1.2 - diry * 0.8;
+				gvz[g0] = 1.0 + rng.nextf() * 2.0;
+				glife[g0] = 1.6;
+				gtype[g0] = 1;
+			}
+			return;
+		}
 		es[i] = 1;
 		est[i] = 0.0;
 		++kills;
@@ -535,10 +578,11 @@ class GlobHunter : Scene {
 		combo = t - last_kill < 1.8 ? combo + 1 : 1;
 		last_kill = t;
 		var words = ["SPLAT", "GLOBBED", "SQUISH", "POP"];
-		callout = combo >= 3 ? "MULTI KILL" : (combo == 2 ? "DOUBLE KILL" : words[kills % 4]);
-		call_t = 0.9;
+		callout = boss_down ? "BOSS DOWN" : (combo >= 3 ? "MULTI KILL" : (combo == 2 ? "DOUBLE KILL" : words[kills % 4]));
+		call_t = boss_down ? 2.2 : 0.9;
+		if (boss_down) { hot_t = 0.8; }
 		// the burst: goo flung out of the body, mostly up and back from the shot
-		for (int k = 0; k < 34; ++k) {
+		for (int k = 0; k < (boss_down ? 120 : 34); ++k) {
 			int g = goo_next;
 			goo_next = (goo_next + 1) % ngoo;
 			float a = rng.nextf() * 6.2831853;
@@ -729,7 +773,7 @@ class GlobHunter : Scene {
 		int feet = h / 2 + itrunc(pitch) + itrunc(h * 0.5 / tyy);
 		int top = feet - sh;
 		float wob = math::sin(tt * 5.0 + i * 2.1) * 0.10;
-		bool flash = es[i] == 1;
+		bool flash = es[i] == 1 || (boss && boss_flash > 0.0);
 		int body = sprite_base + typ * 12;
 		float fogk = 0.18 + light_at(ex[i], ey[i]) * 0.15 + 0.35 / (tyy + 0.6);
 		fogk = fogk < 0.2 ? 0.2 : (fogk > 1.0 ? 1.0 : fogk);
@@ -1017,7 +1061,7 @@ class GlobHunter : Scene {
 		string tally = `KILLS ${(kills < 10 ? "0" : "")}${kills}`;
 		gfx.draw_text(grid, w, h, tally, 2, 2, ts, ts, sprite_base + 42, 2, sprite_base + 44, 99);
 		// the callout: it punches in large and settles, rising as it fades
-		if (call_t > 0.0) {
+		if (call_t > 0.0 && callout.size() > 0) {
 			float age = 0.9 - call_t;
 			int cs = w * 3 / 5 / (callout.size() * 6);
 			cs = cs < 1 ? 1 : (cs > 3 * ts ? 3 * ts : cs);

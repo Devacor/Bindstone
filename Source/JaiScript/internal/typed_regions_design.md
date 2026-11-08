@@ -716,15 +716,18 @@ ever sees one.
 
 ### The frame program
 
-A function body compiles to one cell region spanning it whole, its frame program, when its body has no loop (the first
-form; a switch, a try or a nested declaration counts as one), every parameter is a by-value `int`, `float` or `bool` in its
+A function body compiles to one cell region spanning it whole, its frame program, when its body is blocks, ifs, C-style
+`for` and `while` loops (with `break` and `continue`), expressions, declarations and returns (a switch, a try, a range-for or a
+nested declaration is none), every parameter is a by-value `int`, `float` or `bool` in its
 own slot without a default (the declared type is the proof), and the region pays its entry: at least one call in the body can
-be raw, or the body does a straight span's work (`k_region_min_work` operations). A call can be raw when it resolves (the
-checker's `proven_callee_decl`) to a function of the same shape with a scalar result that is the function itself or a
-loop-free function that forms a frame program by the same rule: one of its own calls can be raw (a cycle of such functions
-forms programs all round), or its body's operations, counted on the tree, reach that work. A leaf the inliner keeps (one over
-its clone budget) is therefore a frame program entered raw from a block, not a general call; a function with loops has none,
-and a call to one stays the general call. A tail call keeps its splice. The region is the
+be raw, or the body does a straight span's work (`k_region_min_work` operations; a loop counts as that work, since its body
+repeats). A call can be raw when it resolves (the checker's `proven_callee_decl`) to a function of the same shape with a scalar
+result that is the function itself or a function that forms a frame program by the same rule: one of its own calls can be raw
+(a cycle of such functions forms programs all round), or its body's operations, counted on the tree, reach that work. A leaf the
+inliner keeps (one over its clone budget) and a function whose loops do the work are therefore frame programs entered raw from
+a block, not general calls. A tail call keeps its splice. The body's loops are inner loops of the program, as an inner loop is
+of a block: a counted loop's head compare and stepped back edge, a while's backward jump with the budget poll; the loops' own
+blocks stay for the general form. The region is the
 straight-line region of the cell blocks with three differences: its span is the body from its first instruction to its
 `HALT`, whatever its amount of work; a `return` is a ret operation rather than an exit (its value a cell or a constant; a
 returned binary lands in an argument value first, a returned scalar ternary lands in a temp the ret reads, and the ret reads
@@ -815,13 +818,12 @@ exception converts at that frame too). A block that makes no raw call pays one p
 A frame program is a cell region, so a raw frame's values are the block machinery's cells: the raw entry writes the parameters'
 payloads into them directly and the region runs from its first instruction, with no guard and no unboxing. A raw call from any
 block (a loop in a general function, a program-scope loop, another frame program) parks the block exactly as the door does and
-resumes it past the landing, re-validating nothing when no general code ran. A body with a loop is not a frame-program
-candidate.
+resumes it past the landing, re-validating nothing when no general code ran.
 
 ### Typed locals fast everywhere
 
-Not built: this section's frame-program form (loops inside a frame program, boundary operations and per-operation misses
-inside one). Boundary operations exist for cell blocks ("Boundary operations" below).
+Not built: this section's frame-program form beyond loops (boundary operations and per-operation misses inside a frame
+program). Boundary operations exist for cell blocks ("Boundary operations" below).
 
 The cell blocks made typed code fast by admission: a loop runs as a block only when every construct in it has a cell form, and
 one construct without one drops the whole loop to the general form. Raw frames are the structural answer.

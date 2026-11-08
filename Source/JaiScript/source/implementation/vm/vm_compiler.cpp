@@ -875,7 +875,7 @@ uint32_t vm_compiler::binary_shape(binary_expr* expr) {
 	return binary_shape_none;
 }
 
-static bool loop_free_body(const ast_node* n, const detail::native_stack_mark& stack);
+static bool frame_body_shape(const ast_node* n, const detail::native_stack_mark& stack);
 
 std::shared_ptr<chunk> vm_compiler::compile_program(const std::vector<declaration_ptr>& declarations, bool program_frame) {
 	return within_native_stack({}, 0, false, [&] { return compile_program_code(declarations, program_frame); });
@@ -1050,7 +1050,7 @@ JAI_NOINLINE std::shared_ptr<chunk> vm_compiler::open_callable(std::string_view 
 	callable_.coroutine_body = detail::aggregate_lowering_impl::contains_yield(body.get());
 	callable_body_ = body.get();
 	frame_param_kinds_.clear();
-	frame_eligible_ = parameters.size() <= 8 && loop_free_body(body.get(), stack_);
+	frame_eligible_ = parameters.size() <= 8 && frame_body_shape(body.get(), stack_);
 	for (size_t i = 0; frame_eligible_ && i < parameters.size(); ++i) {
 		const parameter& p = parameters[i];
 		const uint8_t k = raw_scalar_kind(p.type.get());
@@ -1135,17 +1135,20 @@ JAI_NOINLINE void vm_compiler::close_callable(chunk& result, const block_stmt& b
 	chunk_ = nullptr;
 }
 
-// a body the first form of a frame program covers: no loop anywhere (a switch, a try or a nested declaration counts as one: the region refuses them)
-static bool loop_free_body(const ast_node* n, const detail::native_stack_mark& stack) {
+// a body a frame program can cover: blocks, ifs, C-style for and while loops (with break and continue), expressions, declarations and
+// returns (a switch, a try, a range-for or a nested declaration is none: the region refuses them)
+static bool frame_body_shape(const ast_node* n, const detail::native_stack_mark& stack) {
 	if (!n) return true;
 	stack.guard(n->location);
 	switch (n->get_type()) {
 	case node_type::block_stmt:
-		for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { if (!loop_free_body(d.get(), stack)) return false; }
+		for (const auto& d : static_cast<const block_stmt*>(n)->declarations) { if (!frame_body_shape(d.get(), stack)) return false; }
 		return true;
-	case node_type::statement_decl: return loop_free_body(static_cast<const statement_decl*>(n)->statement.get(), stack);
-	case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); return loop_free_body(s->then_statement.get(), stack) && loop_free_body(s->else_statement.get(), stack); }
-	case node_type::expression_stmt: case node_type::return_stmt: case node_type::variable_decl: case node_type::expression_decl: return true;
+	case node_type::statement_decl: return frame_body_shape(static_cast<const statement_decl*>(n)->statement.get(), stack);
+	case node_type::if_stmt: { const auto* s = static_cast<const if_stmt*>(n); return frame_body_shape(s->then_statement.get(), stack) && frame_body_shape(s->else_statement.get(), stack); }
+	case node_type::while_stmt: return frame_body_shape(static_cast<const while_stmt*>(n)->body.get(), stack);
+	case node_type::for_stmt: { const auto* s = static_cast<const for_stmt*>(n); return frame_body_shape(s->initializer.get(), stack) && frame_body_shape(s->body.get(), stack); }
+	case node_type::expression_stmt: case node_type::return_stmt: case node_type::variable_decl: case node_type::expression_decl: case node_type::break_stmt: case node_type::continue_stmt: return true;
 	default: return false;
 	}
 }
@@ -1162,7 +1165,7 @@ bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const bl
                                            const detail::native_stack_mark& mark) {
 	if (!callee || !callee->body) return false;
 	if (callee->body.get() == self_body) return true;
-	if (!loop_free_body(callee->body.get(), mark)) return false;
+	if (!frame_body_shape(callee->body.get(), mark)) return false;
 	if (std::find(visiting.begin(), visiting.end(), callee) != visiting.end()) return true;
 	if (visiting.size() >= 8) return false;
 	visiting.push_back(callee);
@@ -1201,6 +1204,8 @@ bool vm_compiler::raw_call_reaches_program(const function_decl* callee, const bl
 		case node_type::expression_decl: visit_expr(visit_expr, static_cast<const expression_decl*>(n)->expression.get()); break;
 		case node_type::return_stmt: visit_expr(visit_expr, static_cast<const return_stmt*>(n)->value.get()); break;
 		case node_type::variable_decl: visit_expr(visit_expr, static_cast<const variable_decl*>(n)->initializer.get()); break;
+		case node_type::while_stmt: { const auto* w = static_cast<const while_stmt*>(n); work += k_region_min_work; visit_expr(visit_expr, w->condition.get()); stack.push_back(w->body.get()); break; }   // a loop repeats its work
+		case node_type::for_stmt: { const auto* f = static_cast<const for_stmt*>(n); work += k_region_min_work; stack.push_back(f->initializer.get()); visit_expr(visit_expr, f->condition.get()); visit_expr(visit_expr, f->update.get()); stack.push_back(f->body.get()); break; }
 		default: break;
 		}
 	}
@@ -4181,14 +4186,14 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	// body's spans
 	size_t fn_candidate = SIZE_MAX;
 	auto frame_program_candidate = [&]() -> bool {
-		if (!frame_eligible_ || !c.is_function_body || original_size < 2 || code[original_size - 1].op != opcode::op_halt || !c.cell_loops.empty()) return false;
+		if (!frame_eligible_ || !c.is_function_body || original_size < 2 || code[original_size - 1].op != opcode::op_halt) return false;
 		bool raw_site = false;
 		size_t work = 0;
 		for (size_t ip = 0; ip + 1 < original_size; ++ip) {
 			const vm_instruction& ins = code[ip];
 			if (work_op(ins.op)) { ++work; }
-			if (ins.op == opcode::op_loop_back || ins.op == opcode::op_cfor_back || ins.op == opcode::op_cells_back || ins.op == opcode::op_cells_cfor_back || ins.op == opcode::op_iter_next) return false;
-			if (ins.op == opcode::op_jump && ins.a <= ip) return false;
+			if (ins.op == opcode::op_iter_next) return false;
+			if (ins.op == opcode::op_loop_back || ins.op == opcode::op_cfor_back || ins.op == opcode::op_cells_back || ins.op == opcode::op_cells_cfor_back) { work += k_region_min_work; }   // an inner loop of the program: its work repeats
 			if (ins.op == opcode::op_probe_callee && ins.a < c.call_sites.size() && c.call_sites[ins.a].call_node < c.nodes.size()) {
 				const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[ins.a].call_node].get());
 				const auto decl = ce->proven_callee_decl.lock();
@@ -5690,7 +5695,8 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			bool any_raw = false;
 			size_t work = 0;
 			for (const auto& rc : calls) { if (rc.raw) { any_raw = true; } }
-			for (const ir_op& o : ops) { if (ir_work(o)) { ++work; } }
+			for (const ir_op& o : ops) { if (ir_work(o)) { ++work; } if (o.kind == ir::jump && o.tok == 1) { work += k_region_min_work; } }   // an inner while's back edge: its work repeats
+			if (!inner_counted.empty()) { work += k_region_min_work; }
 			if (refusal != chunk::cell_refusal_none || (!any_raw && work < k_region_min_work)) { add_spans(0, original_size); continue; }
 		}
 		if (refusal != chunk::cell_refusal_none) {
@@ -5817,7 +5823,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		std::fill(live_row(live_cfg.exit_node), live_row(live_cfg.exit_node) + live_words, ~0ull);
 		auto live_escape = [](ir k) {
 			switch (k) {
-			case ir::exit: case ir::bail: case ir::boundary: case ir::call: case ir::land: case ir::probe: case ir::ret: case ir::range: case ir::rebind: case ir::placeholder: return true;
+			case ir::exit: case ir::bail: case ir::boundary: case ir::call: case ir::land: case ir::probe: case ir::range: case ir::rebind: case ir::placeholder: return true;
 			default: return false;
 			}
 		};
@@ -5836,7 +5842,10 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			changed = false;
 			for (size_t n = ops.size(); n-- > 0;) {
 				const ir_op& o = ops[n];
-				if (live_escape(o.kind)) { live_scratch.assign(live_words, ~0ull); }
+				if (o.kind == ir::ret) {   // the frame ends: a miss there re-runs the return's tail, whose operands are the ret's reads
+					live_scratch.assign(live_words, 0);
+					for (uint8_t r = 0; r < o.nreads; ++r) { const size_t b = live_bit(o.reads[r]); live_scratch[b / 64] |= 1ull << (b % 64); }
+				} else if (live_escape(o.kind)) { live_scratch.assign(live_words, ~0ull); }
 				else {
 					live_out_of(n, live_scratch.data());
 					if (o.writes != k_invalid_u32) { const size_t b = live_bit(o.writes); live_scratch[b / 64] &= ~(1ull << (b % 64)); }

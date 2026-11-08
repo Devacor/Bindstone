@@ -196,7 +196,7 @@ public:
 			const std::string ma = jai::vm::chunk_manifest(*a.program, detail::engine_access::get_symbolizer(*a.eng)) + jai::vm::chunk_manifest(*a.function, detail::engine_access::get_symbolizer(*a.eng));
 			const std::string mb = jai::vm::chunk_manifest(*b.program, detail::engine_access::get_symbolizer(*b.eng)) + jai::vm::chunk_manifest(*b.function, detail::engine_access::get_symbolizer(*b.eng));
 			check_eq(ma, mb, "the same program and function manifest the same in two engines");
-			check_true(ma.find("cell_loops 1") != std::string::npos, "the function's loop closed");
+			check_true(ma.find("cell_loops 2") != std::string::npos, "the function's loop closed, and the frame program over its body");
 		});
 		test("manifest_changes_with_a_constants_low_bit", [this]() {
 			// 1.0000001 and 1.0000002 never list the same; the manifest carries the constant's 64 bits
@@ -1585,7 +1585,12 @@ var values = function(int n) { int acc = 0; float r = 2.5; for (int i = 0; i < n
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(11), closed, "every loop with a call closes (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 			size_t calls = 0; for (size_t at = listing.find("\tC_CALL "); at != std::string::npos; at = listing.find("\tC_CALL ", at + 1)) { ++calls; }
-			check_eq(size_t(15), calls, "one C_CALL per call in a closed loop: " + listing);
+			size_t program_calls = 0;   // a frame program's copy holds its own C_CALL per call
+			for (size_t at = listing.find("-- frame program "); at != std::string::npos; at = listing.find("-- frame program ", at + 1)) {
+				const size_t c = listing.find("(calls ", at), eol = listing.find('\n', at);
+				if (c != std::string::npos && c < eol) { program_calls += std::stoul(listing.substr(c + 7)); }
+			}
+			check_eq(size_t(15) + program_calls, calls, "one C_CALL per call in a closed loop: " + listing);
 		});
 		test("globals_written_inside_a_block", [this]() {
 			// draw_seg's REMAIN = REMAIN - 1: an environment scalar written by a fused store, a compound, an increment, a move and a
@@ -2099,7 +2104,8 @@ var cont = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { if (i ==
 			size_t closed = 0; for (size_t at = listing.find("-- cell loop "); at != std::string::npos; at = listing.find("-- cell loop ", at + 1)) { ++closed; }
 			check_eq(size_t(3), closed, "the three loops close (open loops: " + listing.substr(listing.find("-- open loop ") == std::string::npos ? listing.size() : listing.find("-- open loop "), 800) + ")");
 			size_t ir_lines = 0; for (size_t at = listing.find("-- ir "); at != std::string::npos; at = listing.find("-- ir ", at + 1)) { ++ir_lines; }
-			check_eq(size_t(3), ir_lines, "one IR line per closed region: " + listing);
+			size_t programs = 0; for (size_t at = listing.find("-- frame program "); at != std::string::npos; at = listing.find("-- frame program ", at + 1)) { ++programs; }
+			check_eq(size_t(3) + programs, ir_lines, "one IR line per closed region: " + listing);
 			check(listing.find("-- ir 0:cmp->exit") != std::string::npos, "the while loop's head compare exits: " + listing);
 			check(listing.find(":jump->") != std::string::npos, "the diamond's else arm is a jump to an operation: " + listing);
 			check(listing.find(":exit->exit") != std::string::npos, "the break is an exit: " + listing);
@@ -4238,8 +4244,8 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			{
 				auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); stdlib::register_all(*e);
 				e->execute(prelude);
-				struct shape { const char* call; uint64_t entries; };
-				for (const shape& sh : { shape{ "once(1);", 1 }, shape{ "once(0);", 0 }, shape{ "once(6);", 1 }, shape{ "brk(5);", 1 }, shape{ "later(4);", 1 } }) {
+				struct shape { const char* call; uint64_t entries; };   // one entry per call: the frame program's, whose loop is a jump inside it
+				for (const shape& sh : { shape{ "once(1);", 1 }, shape{ "once(0);", 1 }, shape{ "once(6);", 1 }, shape{ "brk(5);", 1 }, shape{ "later(4);", 1 } }) {
 					const cell_counters c0 = detail::engine_access::cells_counters(*e);
 					e->execute(sh.call);
 					const cell_counters c1 = detail::engine_access::cells_counters(*e);
@@ -6054,32 +6060,67 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
-		// a loop-free function too big to graft is a frame program by its own work: a loop enters it raw (its globals read at the entry, as
-		// they stand after the program scope rewrites them; arguments that are lifted trees; its result compounded into the sum), the program
-		// scope enters it generally, a straight region of a function with a loop calls it raw, a call it makes to a function with a loop is a
-		// door, its ternary return and its compound over a quotient stay cells
+		// a function with for and while loops is a frame program, its loops inner loops of the program: a return inside a counted loop is a
+		// ret, a break leaves the inner loop, nested loops and a while with a compound condition run as cells, an overflow inside a loop
+		// raises through the general form; a loop calls them raw, the program scope enters them generally
+		test("loops_inside_frame_programs", [this]() {
+			const std::string defs = "[[warn_mode]]\n"
+				"function find(int n, int key) -> int { for (int i = 0; i < n; ++i) { int h = (i * 7 + 3) % 17; if (h == key) { return i; } } return -1; }\n"
+				"function brk(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s += i * 3; if (s > 500) { break; } } return s; }\n"
+				"function wh(float x) -> float { float t = x; int k = 0; while (t < 100.0 && k < 50) { t = t * 1.3 + 0.5; ++k; } return t + k; }\n"
+				"function grid(int n) -> int { int s = 0; for (int y = 0; y < n; ++y) { for (int x = 0; x < n; ++x) { s += x * y - (x ^ y); } } return s; }\n"
+				"function ov(int n) -> int { int s = 1; for (int i = 0; i < n; ++i) { s = s * 3; } return s; }\n"
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += find(20, i % 17) + brk(i * 4) + grid(i % 5) + wh(i * 0.5) + ov(i % 30); } return t; }\n";
+			const std::string src = defs + "to_string(run(60)) + \",\" + to_string(find(20, 99)) + \",\" + to_string(wh(1.0)) + \",\" + to_string(grid(7));";
+			const std::string overflows = defs + "to_string(run(3)) + to_string(ov(45));";
+			both(src, "", "loops inside frame programs");
+			both(src, "", "loops inside frame programs, proofs off", false);
+			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
+			both(overflows, "", "an overflow inside a frame program's loop");
+			check_true(run_on(true, overflows).find("throw:") != std::string::npos, "the overflow raises: " + run_on(true, overflows));
+			const std::string l = listing_run(src);
+			auto section = [&](const char* fn) { const size_t fb = l.find(fn); return fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb); };
+			for (const char* fn : { "== find ", "== brk ", "== wh ", "== grid ", "== ov " }) {
+				check_true(section(fn).find("-- frame program") != std::string::npos && section(fn).find("(raw entry)") != std::string::npos, std::string("a raw-enterable frame program: ") + section(fn));
+			}
+			check_true(section("== run ").find("raw 5") != std::string::npos, "run's loop calls all five raw: " + section("== run "));
+			if (!engine::miss_injection_available()) { return; }
+			for (const std::string* s : { &src, &overflows }) {
+				const std::string oracle = run_on(false, *s);
+				for (uint32_t every = 1; every <= 5; ++every) {
+					auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+					std::string got;
+					try { got = e->execute(*s).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+					check_eq(oracle, got, "a miss at every " + std::to_string(every));
+				}
+			}
+		});
+		// a loop-free function too big to graft is a frame program by its own work, as is the function whose loop calls it: the loop enters
+		// it raw (its globals read at the entry, as they stand after the program scope rewrites them; arguments that are lifted trees; its
+		// result compounded into the sum), the program scope enters it generally, a straight region of a function with a var parameter calls
+		// it raw, its call to a function with a var parameter is a door, its ternary return and its compound over a quotient stay cells
 		test("big_leaves_are_raw_frame_programs", [this]() {
 			std::string big = "function big(float x, float y, bool m) -> float {\n";
 			for (int k = 0; k < 100; ++k) { big += "  float a" + std::to_string(k) + " = " + (k ? "a" + std::to_string(k - 1) : std::string("x")) + " * 0.5 + " + (k % 3 ? "x" : "G") + ";\n"; }
 			big += "  float ice = 0.0;\n  if (y > 0.2) { ice = a99 * 0.5; ice += 0.032 / (1.0 + a98 * a98); }\n"
-				"  if (m) { int w = 23 - slow(3); float h = w * 0.5 + w; return h; }\n"
+				"  if (m) { int w = 23 - slow(3, 0); float h = w * 0.5 + w; return h; }\n"
 				"  return ice < 0.045 ? ice : 0.045 + (ice - 0.045) * 0.5 + V;\n}\n";
-			std::string slow = "function slow(int k) -> int { int s = 0; for (int i = 0; i < k; ++i) { s += i; }";   // a loop, too big to graft: a door
+			std::string slow = "function slow(int k, var tag) -> int { int s = 0; for (int i = 0; i < k; ++i) { s += i; }";   // too big to graft, a var parameter: a door
 			for (int k = 0; k < 80; ++k) { slow += " s = (s * 3 + k - " + std::to_string(k) + ") % 1000;"; }
 			slow += " return s % 1000; }\n";
 			const std::string src = "[[warn_mode]]\nfloat G = 0.25; float V = 3.0;\n" + slow + big +
 				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += big(i * 0.01, (i & 3) * 0.1 - (i % 5) * 0.05, (i & 7) == 0); } return t; }\n"
-				"function shade(float x) -> float { float p = x * 1.5 + G; float q = p * p - x; float a = big(p, 0.3, false); float b = big(q + 0.1, 0.3, false) * 2.0;\n"
+				"function shade(float x, var tag) -> float { float p = x * 1.5 + G; float q = p * p - x; float a = big(p, 0.3, false); float b = big(q + 0.1, 0.3, false) * 2.0;\n"
 				"  float c = a * b + p * q - a; float d = c * 0.5 + b * 0.25 - q; float e = d * d + c; float s = 0.0; for (int k = 0; k < 3; ++k) { s += e * k; } return s + d; }\n"
-				"string out = to_string(run(40)) + \",\" + to_string(big(0.5, 0.3, true)) + \",\" + to_string(big(0.5, 0.3, false)) + \",\" + to_string(shade(0.4));\n"
-				"V = 2.5; G = -1.0;\nout += \",\" + to_string(run(40)) + \",\" + to_string(big(0.5, 0.1, false)) + \",\" + to_string(shade(0.4));\nout;";
+				"string out = to_string(run(40)) + \",\" + to_string(big(0.5, 0.3, true)) + \",\" + to_string(big(0.5, 0.3, false)) + \",\" + to_string(shade(0.4, 0));\n"
+				"V = 2.5; G = -1.0;\nout += \",\" + to_string(run(40)) + \",\" + to_string(big(0.5, 0.1, false)) + \",\" + to_string(shade(0.4, 0));\nout;";
 			both(src, "", "big leaves");
 			both(src, "", "big leaves, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
 			const std::string l = listing_run(src);
 			auto section = [&](const char* fn) { const size_t fb = l.find(fn); return fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb); };
 			check_true(section("== big ").find("(raw entry)") != std::string::npos, "big is a raw-enterable frame program: " + section("== big "));
-			check_true(section("== run ").find("raw 1") != std::string::npos, "run's loop calls it raw: " + section("== run "));
+			check_true(section("== run ").find("-- frame program") != std::string::npos && section("== run ").find("raw 1") != std::string::npos, "run, a function with a loop, is a frame program whose loop calls big raw: " + section("== run "));
 			check_true(section("== shade ").find("-- cell region") != std::string::npos && section("== shade ").find("raw 2") != std::string::npos, "shade's straight region calls it raw: " + section("== shade "));
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);

@@ -8612,6 +8612,7 @@ vm_backend::frame* vm_backend::raw_return_lean(frame& f, uint8_t kind, int64_t b
 	call_record& rec = *call_records_.data()[call_records_top_ - 1];
 	if (&rec.f != &f || kind != rec.raw_ret_kind || rec.raw_mark != raw_epoch_) return nullptr;
 	frame& caller = *rec.caller;
+	if (!caller.cells) return nullptr;   // a general caller that never ran cells (a host callback's program scope): no raw call is parked there
 	cell_state& ccs = *caller.cells;
 	const uint8_t land = rec.raw_land;
 	if (ccs.raw_landing == 0 || ccs.raw_landing != rec.raw_landing || ccs.loop == k_invalid_u32 || caller.ip != rec.raw_parked_ip || !rec.raw_caller_loop->frame_program ||

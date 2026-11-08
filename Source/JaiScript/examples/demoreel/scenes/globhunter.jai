@@ -18,8 +18,11 @@
 // only on a beat (on the eighths through the bar after the big hit), footfalls
 // land on the beat, the torches flare with the kick, the big hit on bar five's
 // downbeat floods the hall with light, and the last bar slows the walk and holds
-// fire on the corridor ahead. The ray fan comes from the camera-plane vector: no
-// per-column trig.
+// fire on the corridor ahead. Every burst lights the hall around it, the view quakes
+// with each kill, the big hit drops into bullet time for two beats (the walk crawls,
+// the goo hangs in the air), and in the last bar a boss glob twice a brute's size
+// rises in the corridor ahead, eyes burning, swelling on every kick. The ray fan
+// comes from the camera-plane vector: no per-column trig.
 
 class GlobHunter : Scene {
 	array<int> wmap = [];
@@ -58,7 +61,7 @@ class GlobHunter : Scene {
 	array<int> drawn = [];
 	array<float> zcol = [];  // per-column wall depth from the last wall pass
 	var gun = [];
-	int ne = 11;
+	int ne = 12;             // eleven of the garrison, and the boss in the last slot
 	int kills = 0;
 	float cool = 0.6;
 	int last_step = -1;      // the last beat (or eighth) the gun was allowed to fire on
@@ -218,9 +221,9 @@ class GlobHunter : Scene {
 			path_len += seglen[i];
 		}
 		// garrison, posted along the route (a couple wait around corners)
-		ex = [2.5, 2.5, 2.5, 4.5, 5.5, 12.5, 12.5, 14.5, 18.5, 21.5, 20.5];
-		ey = [6.5, 12.5, 16.5, 19.5, 21.5, 18.5, 13.5, 12.5, 12.5, 8.5, 2.5];
-		et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1];
+		ex = [2.5, 2.5, 2.5, 4.5, 5.5, 12.5, 12.5, 14.5, 18.5, 21.5, 20.5, 0.0];
+		ey = [6.5, 12.5, 16.5, 19.5, 21.5, 18.5, 13.5, 12.5, 12.5, 8.5, 2.5, 0.0];
+		et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1];
 		for (int i2 = 0; i2 < ne; ++i2) {
 			es.push(0);
 			est.push(0.0);
@@ -228,6 +231,7 @@ class GlobHunter : Scene {
 			sty.push(0.0);
 			drawn.push(0);
 		}
+		es[ne - 1] = 3;   // the boss waits for the last bar
 		zcol = gfx.make_fgrid(w);
 		for (int i3 = 0; i3 < w; ++i3) { zcol[i3] = 99.0; }
 		// torches hang beside the walls along the route; each keeps its falloff over the light map
@@ -391,7 +395,9 @@ class GlobHunter : Scene {
 		tt = t;
 		++fr;
 		bool last_bar = t > MUSIC_BAR * 7.0;
+		float bullet = slow_mo(t);
 		float pace = stop_t > 0.0 ? 0.18 : (last_bar ? 0.4 : 1.0);
+		pace *= bullet;
 		travel += dt * 2.4 * pace;
 		var p = path_at(travel);
 		var q = path_at(travel + 1.7);   // look-ahead steers the turns
@@ -419,8 +425,11 @@ class GlobHunter : Scene {
 		float ease = dt * 7.0;
 		ease = ease > 1.0 ? 1.0 : ease;
 		aim += (want - aim) * ease;
-		float ca = math::cos(aim);
-		float sa = math::sin(aim);
+		// the quake: each kill shakes the view, the big hit hardest
+		float quake = (hot_t > 0.0 ? hot_t * 0.16 : 0.0) + (cue != null ? cue.hit(t) * 0.05 : 0.0);
+		float view = aim + quake * math::sin(fr * 2.7);
+		float ca = math::cos(view);
+		float sa = math::sin(view);
 		dirx = bx * ca - by * sa;
 		diry = bx * sa + by * ca;
 		planex = 0.0 - diry * 0.66;
@@ -470,7 +479,27 @@ class GlobHunter : Scene {
 			}
 			if (best >= 0) { fire(best, bestx, besty, t); }
 		}
-		move_goo(dt);
+		// the boss rises in the corridor ahead as the last bar begins
+		int boss = ne - 1;
+		if (t >= MUSIC_BAR * 7.0 && t - dt < MUSIC_BAR * 7.0) {
+			var ahead = path_at(travel + 4.4);
+			ex[boss] = ahead[0];
+			ey[boss] = ahead[1];
+			es[boss] = 0;
+			est[boss] = 0.0;
+			callout = "BOSS GLOB";
+			call_t = 1.6;
+			// the garrison scatters before it
+			for (int m2 = 0; m2 < boss; ++m2) {
+				float ddx2 = ex[m2] - posx;
+				float ddy2 = ey[m2] - posy;
+				if (ddx2 * ddx2 + ddy2 * ddy2 < 64.0) {
+					es[m2] = 3;
+					est[m2] = 0.0;
+				}
+			}
+		}
+		move_goo(dt * bullet);
 		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns or the kick lands
 		float beat_light = cue != null ? cue.kick_env(t) + cue.hit(t) : 0.0;
 		if ((fr & 1) == 0 || muzzle_t > -0.05 || beat_light > 0.2) { light_up(); }
@@ -480,6 +509,15 @@ class GlobHunter : Scene {
 		float kick = kick_t > 0.0 ? h * 0.05 * kick_t / 0.2 : 0.0;
 		float shud = muzzle_t > 0.0 ? ((fr * 7) % 3 - 1) * h * 0.012 : 0.0;
 		pitch = bob + kick + shud;
+	}
+
+	// bullet time: two beats after the big hit play at a fifth of the speed
+	float slow_mo(float t) {
+		float since = t - MUSIC_BAR * 5.0;
+		if (since < 0.0 || since > MUSIC_BEAT * 2.5) { return 1.0; }
+		float back = (since - MUSIC_BEAT * 2.0) / (MUSIC_BEAT * 0.5);
+		back = back < 0.0 ? 0.0 : (back > 1.0 ? 1.0 : back);
+		return 0.2 + 0.8 * back;
 	}
 
 	void fire(int i, float bx, float by, float t) {
@@ -558,6 +596,28 @@ class GlobHunter : Scene {
 		for (int c = 0; c < n; ++c) {
 			int lv = itrunc(st[c] * flick[ow[c]]) + flood;
 			lm[c] = lv > 5 ? 5 : lv;
+		}
+		// every burst lights the hall around it while the goo flies
+		for (int b = 0; b < ne; ++b) {
+			int sb = es[b];
+			if (sb != 1 && sb != 2) { continue; }
+			float age = sb == 1 ? est[b] : 0.14 + est[b];
+			float power = 5.0 * (1.0 - age / 0.7);
+			if (power <= 0.0) { continue; }
+			int bx0 = itrunc(ex[b] * 2.0);
+			int by0 = itrunc(ey[b] * 2.0);
+			for (int dy2 = -9; dy2 <= 9; ++dy2) {
+				int cy2 = by0 + dy2;
+				if (cy2 < 0 || cy2 >= lres) { continue; }
+				for (int dx2 = -9; dx2 <= 9; ++dx2) {
+					int cx2 = bx0 + dx2;
+					if (cx2 < 0 || cx2 >= lres) { continue; }
+					float dd = (dx2 * dx2 + dy2 * dy2) * 0.25;
+					int c3 = cy2 * lres + cx2;
+					int lv3 = lm[c3] + itrunc(power / (1.0 + dd * 0.5));
+					lm[c3] = lv3 > 5 ? 5 : lv3;
+				}
+			}
 		}
 		if (muzzle_t > 0.0) {
 			int cx0 = itrunc(posx * 2.0);
@@ -660,7 +720,8 @@ class GlobHunter : Scene {
 		float txx = stx[i];
 		int scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
 		int typ = et[i];
-		float size = typ == 1 ? 1.1 : 0.78;
+		bool boss = i == ne - 1;
+		float size = boss ? 1.7 + (cue != null ? cue.kick_env(tt) * 0.22 : 0.0) : (typ == 1 ? 1.1 : 0.78);
 		int sh = itrunc(h * size / tyy);
 		sh = sh < 3 ? 3 : sh;
 		sh = sh > h ? h : sh;
@@ -672,7 +733,7 @@ class GlobHunter : Scene {
 		int body = sprite_base + typ * 12;
 		float fogk = 0.18 + light_at(ex[i], ey[i]) * 0.15 + 0.35 / (tyy + 0.6);
 		fogk = fogk < 0.2 ? 0.2 : (fogk > 1.0 ? 1.0 : fogk);
-		bool glow = fogk < 0.55;
+		bool glow = fogk < 0.55 || boss;
 		for (int dy = 0; dy < sh; ++dy) {
 			int rr = top + dy;
 			if (rr < 0 || rr >= h) { continue; }

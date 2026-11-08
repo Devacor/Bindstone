@@ -215,6 +215,9 @@ class Finale : Fire {
 	float embers_t = 0.0;        // the letters stop feeding the flames
 	float neon_t = 0.0;          // ... and have cooled to neon
 	float credits_t = 0.0;
+	float encore_t = 0.0;        // the word reignites for one last slam
+	float encore_out_t = 0.0;    // ... and burns down again
+	float end_t = 0.0;           // the frame has dithered to black
 	float credit_rows_per_s = 5.0;
 
 	// [kind, left column, right column]: a "role" row splits at the gutter
@@ -267,6 +270,9 @@ class Finale : Fire {
 		embers_t = slam_t + 7.75;
 		neon_t = slam_t + 9.75;
 		credits_t = slam_t + 8.75;
+		encore_t = bar * 49.0;
+		encore_out_t = encore_t + bar * 1.5;
+		end_t = bar * length_bars();
 		build_fire();
 		fuel = gfx.make_grid(w);
 		stamp_word("JAISCRIPT");
@@ -390,17 +396,25 @@ class Finale : Fire {
 		return (1.0 - f) * (1.0 - f);
 	}
 
-	// the score's marks: an accent on each slide's downbeat, impacts on the dance, the shatter and the slam
+	// the score's marks: an accent on each slide's downbeat, impacts on the dance, the shatter, the slam
+	// and the encore
 	array<float> hit_times() override {
 		array<float> result = [];
 		for (int k = 0; k < 8; ++k) { result.push(MUSIC_BAR * (3 + 4 * k)); }
 		result.push(MUSIC_BAR * 35.0);
 		result.push(MUSIC_BAR * 37.0);
 		result.push(MUSIC_BAR * 37.0 + MUSIC_BEAT * 3.0);
+		result.push(MUSIC_BAR * 49.0);
+		result.push(MUSIC_BAR * 50.0);
 		return result;
 	}
 
-	array<int> hit_levels() override { return [1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2]; }
+	array<int> hit_levels() override { return [1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2, 2, 1]; }
+
+	int length_bars() override { return 52; }
+
+	// the latest of the two slams at or before t
+	float slam_of(float t) { return t > encore_t ? encore_t : slam_t; }
 
 	void update(float t, float dt) override {
 		tt = t;
@@ -414,6 +428,12 @@ class Finale : Fire {
 			float pump = t < wall_out_t ? pulse(t) * 16.0 : 0.0;
 			amp = itrunc((40.0 + pump) * erupt);
 			if (t > wall_out_t) { amp = itrunc(42.0 - (t - wall_out_t) * 19.0); }
+			if (t > encore_t) {
+				float again = (t - encore_t) * 4.0;
+				again = again > 1.0 ? 1.0 : again;
+				amp = itrunc((44.0 + pulse(t) * 18.0) * again);
+				if (t > encore_out_t) { amp = itrunc(44.0 - (t - encore_out_t) * 16.0); }
+			}
 			amp = amp < 0 ? 0 : amp;
 		}
 		seed_rows(amp, amp / 2 + 2);
@@ -618,6 +638,12 @@ class Finale : Fire {
 	void burn_letters(float t) {
 		float strength = t < embers_t ? 1.0 : (t > neon_t ? 0.0 : (neon_t - t) / (neon_t - embers_t));
 		float pump = t < wall_out_t ? 1.0 + pulse(t) * 0.35 : 1.0;
+		bool encore = t > encore_t;
+		if (encore) {
+			strength = t < encore_out_t ? 1.0 : 1.0 - (t - encore_out_t) / 1.2;
+			strength = strength < 0.0 ? 0.0 : strength;
+			pump = 1.0 + pulse(t) * 0.45;
+		}
 		for (int x = 0; x < w; ++x) {
 			float wave = math::sin(x * 0.61 + t * 6.1) + math::sin(x * 0.23 - t * 3.7 + 1.7);
 			fuel[x] = itrunc((46.0 + wave * 15.0) * strength * pump);
@@ -631,7 +657,7 @@ class Finale : Fire {
 			int v = fuel[i % w] + (rn[(i * 7 + fr) & 1023] & 1) * 8;
 			if (ht[i] < v) { ht[i] = v; }
 		}
-		int quenched = t > neon_t ? w * h : word_top * w;
+		int quenched = t > neon_t && (!encore || strength <= 0.0) ? w * h : word_top * w;
 		for (int i2 = 0; i2 < quenched; ++i2) {
 			int v2 = ht[i2] - 2;
 			ht[i2] = v2 > 0 ? v2 : 0;
@@ -708,7 +734,7 @@ class Finale : Fire {
 			for (int c = 0; c < n; ++c) { g[c] = 0.0; }
 		}
 		if (flight) { draw_flight(); }
-		bool tiles_on = tt > deck.first - 0.7 && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5));
+		bool tiles_on = tt > deck.first - 0.7 && (tt < slam_t || (tt > slam_t + 0.5 && tt < wall_out_t + 1.5) || (tt > encore_t + 0.1 && tt < end_t - MUSIC_BAR * 0.5));
 		bool warped = tt > deck.first - 0.7 && (cube_on || flight || tiles_on);
 		HY_SHOW = tiles_on;
 		var rows = [];
@@ -751,6 +777,21 @@ class Finale : Fire {
 			draw_dimension(grid);
 		}
 		slam(grid);
+		fade_out(grid);
+	}
+
+	// over the last bar the frame dithers to black, the word last of all
+	void fade_out(var& grid) {
+		float k = (tt - (end_t - MUSIC_BAR)) / MUSIC_BAR;
+		if (k <= 0.0) { return; }
+		int keep = itrunc((k > 1.0 ? 1.0 : k) * 1100.0);
+		int b = bank();
+		for (int i = 0; i < w * h; ++i) {
+			int x = i * 2654435761;
+			x = (x ^ (x >> 15)) * 2246822519;
+			int d = (x ^ (x >> 13)) & 1023;
+			if (d < keep - (heat[i] > 40 ? 200 : 0)) { grid[i] = b; }
+		}
 	}
 
 	// the warped scene, a row at a time: the plane's colour and the cube light's source
@@ -795,6 +836,12 @@ class Finale : Fire {
 			gain = gain > 0.45 ? 0.45 : gain;
 			spun = itrunc(t / beat);
 		}
+		if (t > encore_t) {
+			float rise2 = (t - encore_t) * 2.0;
+			float fall2 = (end_t - MUSIC_BAR * 0.5 - t) / MUSIC_BAR;
+			gain = 0.55 * (rise2 < fall2 ? rise2 : fall2) * (0.8 + pulse(t) * 0.5);
+			gain = gain > 0.55 ? 0.55 : (gain < 0.0 ? 0.0 : gain);
+		}
 		HY_GAIN = gain;
 		HY_SPIN = spun % 3;
 	}
@@ -830,7 +877,7 @@ class Finale : Fire {
 	// the slam: a white flash, two shockwave rings racing out from the word
 	// (white leading edges, a rainbow wake) and a shake that settles over half a second
 	void slam(var& grid) {
-		float s = tt - slam_t;
+		float s = tt - slam_of(tt);
 		if (s < 0.0 || s > 0.9) { return; }
 		int n = w * h;
 		if (s < 0.1) {
@@ -881,7 +928,7 @@ class Finale : Fire {
 	void draw_letters(var& grid, int b) {
 		var& at = letter_at;
 		int n = at.size();
-		if (tt < embers_t) {
+		if (tt < embers_t || (tt > encore_t && tt < encore_out_t + 0.6)) {
 			for (int k = 0; k < n; ++k) {
 				int i = at[k];
 				grid[i] = b + 64 + ((i * 7 + fr) & 7);
@@ -911,7 +958,9 @@ class Finale : Fire {
 		int rest = bottom + last - (top + bottom) / 2;
 		int scroll = itrunc((tt - credits_t) * credit_rows_per_s);
 		scroll = scroll > rest ? rest : scroll;
-		for (int k = 0; k <= last; ++k) {
+		// from the encore only the farewell stays up
+		int first = tt > encore_t ? last - 1 : 0;
+		for (int k = first; k <= last; ++k) {
 			int row = bottom + 1 + k - scroll;
 			if (row < top || row > bottom) { continue; }
 			var& line = credits[k];

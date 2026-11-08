@@ -224,7 +224,7 @@ class Finale : Fire {
 	var credits = [
 		["title", "THE JAISCRIPT DEMOREEL", ""],
 		["", "", ""],
-		["body", "eleven scenes . nine transitions", ""],
+		["body", "eleven scenes . six transitions", ""],
 		["body", "every pixel computed by the jaiscript vm", ""],
 		["", "", ""],
 		["role", "ONE", "scripting"],
@@ -787,9 +787,9 @@ class Finale : Fire {
 		int keep = itrunc((k > 1.0 ? 1.0 : k) * 1100.0);
 		int b = bank();
 		for (int i = 0; i < w * h; ++i) {
-			int x = i * 2654435761;
-			x = (x ^ (x >> 15)) * 2246822519;
-			int d = (x ^ (x >> 13)) & 1023;
+			int x = (((i >> 16) ^ i) * 73244475) & 4294967295;
+			x = (((x >> 16) ^ x) * 73244475) & 4294967295;
+			int d = ((x >> 16) ^ x) & 1023;
 			if (d < keep - (heat[i] > 40 ? 200 : 0)) { grid[i] = b; }
 		}
 	}

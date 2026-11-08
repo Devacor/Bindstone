@@ -129,7 +129,7 @@ function fog_level(int level, float dist) -> int {
 
 // inside the glass: march the bent ray through the wax field; the wax lit from its gradient, or the liquid's glow
 function wax_shade(float x, float y, float z, float dx, float dy, float dz, int b0, int q, float hue_off, float dist, float boost) -> int {
-	if (q == 0) { return LV_GLOW + (itrunc(hue_off + 3.0) % 24) * 8 + fog_level(itrunc((0.12 + boost * 0.6) * LV_GAIN * 7.99), dist); }
+	if (q == 0) { return LV_GLOW + ((itrunc(hue_off + 3.0) % 24 + 24) % 24) * 8 + fog_level(itrunc((0.12 + boost * 0.6) * LV_GAIN * 7.99), dist); }
 	float stepl = 0.032;
 	float fmax = 0.0;
 	float mx = x;
@@ -160,7 +160,7 @@ function wax_shade(float x, float y, float z, float dx, float dy, float dz, int 
 		}
 		px = nx; py = ny; pz = nz;
 	}
-	int hq = itrunc(wax_hue(mx, my, mz, b0, q) + hue_off + 0.5) % 24;
+	int hq = (itrunc(wax_hue(mx, my, mz, b0, q) + hue_off + 0.5) % 24 + 24) % 24;
 	int gl = itrunc((fmax * fmax * 0.85 + 0.12 + boost * 0.5) * LV_GAIN * 7.99);
 	gl = fog_level(gl > 7 ? 7 : gl, dist);
 	return LV_GLOW + hq * 8 + gl;
@@ -191,7 +191,7 @@ function wax_lit(float x, float y, float z, float dx, float dy, float dz, int b0
 	rim = rim < 0.0 ? 0.0 : rim;
 	int lv = itrunc((d * 0.62 * LV_GAIN + 0.14 + s8 * s8 * 0.5 + rim * rim * 0.25 + LV_FLASH * 0.3 + boost * 0.55) * 15.99);
 	lv = fog_level(lv > 15 ? 15 : lv, dist);
-	int hq = itrunc(wax_hue(x, y, z, b0, q) + hue_off + 0.5) % 24;
+	int hq = (itrunc(wax_hue(x, y, z, b0, q) + hue_off + 0.5) % 24 + 24) % 24;
 	return hq * 16 + lv;
 }
 
@@ -393,7 +393,7 @@ function floor_shade(float px, float pz, float dist) -> int {
 		}
 	}
 	float hue_off = (best_id % 6) * 4.0 + LV_HUE0 + 3.0 + LV_BURN * LV_T * 9.0;
-	int hq = itrunc(hue_off) % 24;
+	int hq = (itrunc(hue_off) % 24 + 24) % 24;
 	// the ring of heat runs across the floor as a line of light
 	float ring = 0.0;
 	if (LV_RING_A > 0.0) {

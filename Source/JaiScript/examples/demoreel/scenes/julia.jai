@@ -302,8 +302,10 @@ class Julia : Scene {
 		// c orbits the cardioid; on the drop it jumps to a new set and moves faster; then it
 		// glides to the first of the snapped sets and steps through them a beat at a time
 		float ot = dropped ? t * 0.55 + 2.4 : t * 0.25;
-		float ca = 0.7885 * math::cos(ot + 2.0);
-		float cb = 0.7885 * math::sin(ot * 0.8 + 2.0);
+		// just inside the main cardioid (e^ia / 2 - e^2ia / 4), where every set stays connected
+		float th = ot + 2.0;
+		float ca = 0.97 * (0.5 * math::cos(th) - 0.25 * math::cos(th * 2.0));
+		float cb = 0.97 * (0.5 * math::sin(th) - 0.25 * math::sin(th * 2.0));
 		JU_CA = ca + (snap_c[0] - ca) * morph;
 		JU_CB = cb + (snap_c[1] - cb) * morph;
 		int snap = 0;

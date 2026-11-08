@@ -12,6 +12,7 @@
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/parallel_transform.hpp>   // parallel_capture_kind (classification pins)
 #include <jaiscript/stdlib/stdlib.hpp>
+#include "fuzz/fuzz_parallel_band.hpp"
 #include <jaiscript/detail/engine_access.hpp>
 #include <jaiscript/core/script_namespace.hpp>
 #include <jaiscript/stdlib/spider.hpp>
@@ -927,6 +928,7 @@ public:
 			// ::g is the program's g whatever a local of the name says
 			expect_error("var g = 0; ::g = [9];", "body writes enclosing state 'g'");
 			expect_error("var g = [0]; ::g[0] = 5;", "body writes enclosing state 'g'");
+			expect_error("array<int> mine = [1]; parallel_for (auto& v : mine) { v = 2; }", "a nested parallel_for is not allowed in a parallel body");
 		});
 
 		test("captured_reads_deterministic_1_2_8", [this]() {
@@ -3559,6 +3561,17 @@ public:
 				try { got = std::to_string(e->execute(program).as_int()); } catch (const std::exception& ex) { got = std::string("error ") + ex.what(); }
 				check_eq(std::to_string(expected), got, std::string("reference parameters ") + (vm ? "vm" : "interp"));
 				check_true(detail::engine_access::get_current_parameter_storage(*e) == nullptr, std::string("no call's storage outlives the region ") + (vm ? "vm" : "interp"));
+			}
+		});
+
+		test("generated_bodies_run_as_the_serial_loop", [this]() {
+			// the parallel band's seeds: an admitted body prints the serial loop's output at 1, 3 and 8 workers on the interpreter,
+			// the vm and its reference mode; a hazard body is refused naming what it wrote (source/tests/fuzz/fuzz_parallel_band.hpp)
+			for (uint64_t seed = 0; seed < 24; ++seed) {
+				for (bool hazard : {false, true}) {
+					const jai::fuzz::parallel::generated g = jai::fuzz::parallel::generate(seed, hazard);
+					check_eq(std::string(), jai::fuzz::parallel::check(g), "seed " + std::to_string(seed) + (hazard ? " (hazard)" : "") + "\n" + g.program);
+				}
 			}
 		});
 

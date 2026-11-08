@@ -530,9 +530,17 @@ text names the parameter, and the `const T&` to declare when `ref_parameter_take
 says the callee never writes it), by-reference iteration over a
 captured container, and any method on a captured receiver that is not a known read-only
 builtin (a mutating method on a worker's private snapshot would silently diverge across
-worker counts — so unknown = rejected, fail-closed). Soundness never depends on the
-walker: the runtime write wall (the kernel's lvalue_write check; snapshots are
-worker-private) holds regardless.
+worker counts — so unknown = rejected, fail-closed). Where a reference binds — an argument, a
+default the call leaves to bind (`admit_reference_defaults`, per call site by argument count), an
+lvalue conditional's arms (`implicit_reference_operand`) — the root is found through members and
+subscripts alike (`enclosing_reference_root`): `setf(cfg.f)` writes `cfg`. A `::name` is never a
+local, an own field or the element (the `identifier_expr` overloads of `is_local`, `self_field`,
+`is_element_symbol`). A const reference (`const T& r = g[i]`, `for (const auto& v : g)`) reads its
+root, touched whole so a worker binds its own copy, never a borrow. The runtime write wall stops a
+store into a shared container, but a write into a worker's private copy (a snapshot, an object view)
+reaches no wall: for those the walk is the guarantee, and the parallel band
+(`source/tests/fuzz/fuzz_parallel_band.hpp`, `jaiscript_fuzz --parallel-band`) holds every admitted
+body to the serial loop's output and every hazard body to a refusal naming what it wrote.
 
 ### 13b. Provisioning tiers (classified per region entry, from the LIVE value)
 
@@ -597,7 +605,17 @@ another thread's: a script value class (`class_definition::flat_value_semantics`
 no runtime-added fields) gets a detached copy per worker at the barrier (`clone()`, which runs no user code, then
 `normalize_element_inplace` detaches the strings and containers the copy shares with the source), and a C++ class's
 instance gets a new instance and holders over the same C++ object (`script_value::parallel_host_view`). Script values
-holding a C++ object, script classes over a C++ base and `weak_ptr` captures stay refused.
+holding a C++ object, script classes over a C++ base and `weak_ptr` captures stay refused. A captured array or map whose
+content holds value-class instances (`TABLE[i].field`) is an object capture too (`captured_container_refusal`): each worker
+gets the same clone-and-normalize copy of the whole container; a `shared_ptr`, a `weak_ptr` or a C++ object inside one is
+refused by name. A method called on a chain rooted at a captured name (`T[i].m()`, and a class method named like a
+builtin) is recorded for the barrier's check like a captured object's.
+
+A `::name` on a worker resolves in the worker's program scope (`program_scope()` on both backends: the root of the
+worker's own chain, where its copies of the program's names live), and its capture resolves from the program scope; a
+body that reads both `::K` and a nearer `K` is refused, since a worker holds one variable of a name. A worker's copy of
+`print` or `format` carries its own literal-format row (`define_host_copy`, found by `engine::format_literal_for` through
+the chunk's region entry), so a literal format string formats on every chunk.
 
 Admission (`walk_local_member_chain`, `walk_call`): member chains rooted at a captured name read (`capture_entry::member_use`;
 a non-object capture with one is refused at the barrier), stores through them are refused, and a method on such a chain

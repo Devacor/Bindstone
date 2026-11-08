@@ -2295,6 +2295,10 @@ namespace {
 			case node_type::include_decl:
 			case node_type::import_decl:
 				return fail(s.get(), "include/import is not allowed in a parallel body");
+			case node_type::parallel_for_stmt:
+				return fail(s.get(), "a nested parallel_for is not allowed in a parallel body (the outer loop's iterations already run in parallel: write the inner loop as for)");
+			case node_type::extern_decl:
+				return fail(s.get(), "extern declarations are not allowed in a parallel body");
 			default:
 				return fail(s.get(), "statement is not allowed in a parallel body");
 			}

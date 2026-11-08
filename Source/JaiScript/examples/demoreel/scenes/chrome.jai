@@ -13,9 +13,12 @@
 // out (Snell at both faces, index 1.5) and reads the world upside down through a
 // pale copy of the table, while its grazing rim turns to mirror. The dark tiles
 // are polished: a floor ray that lands on one bounces and shows any sphere above
-// in a dim copy of the table. The camera cranes up from the floor, whips around
-// at the middle and pulls back high as the spheres fall into step; star
-// sparkles bloom on the brightest glints.
+// in a dim copy of the table. It plays to its cue: every bounce is a parabola that
+// lands on a beat (one sphere on each beat, one every other, one on the offbeats),
+// the camera cranes up from the floor, rides the riser in and whips around on the
+// downbeat of bar three, and in bar four the spheres fall into step until they land
+// as one on the downbeat of bar five, then pull back high; star sparkles bloom on
+// the brightest glints, flaring on the hits and twinkling on the snare.
 //
 // The row function reads its frame through captured globals (scalars copy
 // into each worker, the index array borrows), calls nothing but script and
@@ -278,28 +281,46 @@ class Chrome : Scene {
 		}
 	}
 
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
+	array<int> hit_levels() override { return [2, 1]; }
+
+	// a bounce that lands every `period` beats, `offset` beats late: 0 on the floor, 1 at the top
+	float hop(float t, float period, float offset) {
+		float b = (t / MUSIC_BEAT - offset) / period;
+		float f = b - math::floor(b);
+		return 4.0 * f * (1.0 - f);
+	}
+
 	void update(float t, float dt) override {
 		tt = t;
-		// the spheres fall into step: their bounces drift together until they land as one
-		float step = t > 7.5 ? (t - 7.5) / 2.0 : 0.0;
-		step = step > 1.0 ? 1.0 : step;
+		// each sphere lands on its own beats until bar four, when they fall into step
+		// and land together from bar five on
+		float step = (t - MUSIC_BAR * 4.0) / MUSIC_BAR;
+		step = step < 0.0 ? 0.0 : (step > 1.0 ? 1.0 : step);
+		step = step * step * (3.0 - 2.0 * step);
+		array<float> periods = [1.0, 2.0, 1.0];
+		array<float> offsets = [0.0, 0.0, 0.5];
 		for (int i = 0; i < 3; ++i) {
-			float own = t * (1.9 + i * 0.37) + i * 2.1;
-			float shared = t * 2.6;
-			float bounce = math::sin(own + (shared - own) * step);
-			bounce = bounce < 0.0 ? -bounce : bounce;
+			float own = hop(t, periods[i], offsets[i]);
+			float shared = hop(t, 1.0, 0.0);
+			float bounce = own + (shared - own) * step;
 			float a = t * 0.45 + i * 2.0944;
 			bx[i] = math::cos(a) * 1.45;
 			bz[i] = math::sin(a) * 1.45;
-			by[i] = rad[i] + bounce * (1.1 - i * 0.2);
+			by[i] = rad[i] + bounce * (1.15 - i * 0.2);
 		}
-		// the camera: a low dolly that cranes up, a whip around the middle, a pull back high
-		float rise = t / 12.0;
+		// the camera: a low dolly that cranes up, rides the riser in, whips around on the
+		// bar-three hit and pulls back high through the last bars
+		float span = MUSIC_BAR * 6.0;
+		float rise = t / span;
 		rise = rise > 1.0 ? 1.0 : rise;
-		float whip = t < 5.0 ? 0.0 : (t > 7.0 ? 1.0 : (t - 5.0) / 2.0);
+		float hit_at = MUSIC_BAR * 3.0;
+		float whip = (t - hit_at) / (MUSIC_BEAT * 3.0);
+		whip = whip < 0.0 ? 0.0 : (whip > 1.0 ? 1.0 : whip);
 		whip = whip * whip * (3.0 - 2.0 * whip);
+		float push = cue != null ? cue.riser(t) : 0.0;
 		float ca = t * 0.18 + 0.4 + whip * 2.4;
-		float radius = 3.4 + rise * rise * 3.0;
+		float radius = 3.4 + rise * rise * 3.0 - push * 0.9;
 		ex = math::sin(ca) * radius;
 		ez = math::cos(ca) * radius;
 		ey = 0.45 + rise * 2.4;
@@ -373,7 +394,8 @@ class Chrome : Scene {
 			}
 		}
 		for (int s2 = 0; s2 < sx.size(); ++s2) {
-			int len = itrunc((3.0 + 4.0 * (0.5 + 0.5 * math::sin(tt * 7.0 + s2 * 1.7))) * h / 120.0) + 2;
+			float flare = cue != null ? 1.0 + cue.hit(tt) * 2.2 + cue.snare_env(tt) * 0.8 : 1.0;
+			int len = itrunc((3.0 + 4.0 * (0.5 + 0.5 * math::sin(tt * 7.0 + s2 * 1.7))) * flare * h / 120.0) + 2;
 			for (int r = 1; r <= len; ++r) {
 				int ink = r * 3 < len ? glint + 2 : (r * 3 < len * 2 ? glint + 1 : glint);
 				star_px(grid, sx[s2] + r, sy[s2], ink);

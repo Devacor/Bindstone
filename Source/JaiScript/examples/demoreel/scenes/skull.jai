@@ -1700,10 +1700,10 @@ class Ossuary : Scene {
 
 	void render(var& grid) override {
 		set_world(tt);
-		// the rays trace at most about 9,000 pixels (a sextant grid is 2.25 times a half-block
+		// the rays trace at most about 7,000 pixels (a sextant grid is 2.25 times a half-block
 		// one) and the picture scales up to the grid; the web, the moth's dust and the
 		// particles draw over it at full size
-		float trace_k = math::sqrt(9000.0 / (w * h));
+		float trace_k = math::sqrt(7000.0 / (w * h));
 		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
 		int tw = itrunc(w * trace_k);
 		int th = itrunc(h * trace_k);

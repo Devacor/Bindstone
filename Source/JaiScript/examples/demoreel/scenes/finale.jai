@@ -382,12 +382,25 @@ class Finale : Fire {
 		}
 	}
 
-	// how hard the current beat hits: 1 on the beat, falling away before the next
+	// how hard the current beat hits: the kick in the finale's own score
 	float pulse(float t) {
+		if (cue != null) { return cue.kick_env(t); }
 		float ph = t / beat;
 		float f = ph - math::floor(ph);
 		return (1.0 - f) * (1.0 - f);
 	}
+
+	// the score's marks: an accent on each slide's downbeat, impacts on the dance, the shatter and the slam
+	array<float> hit_times() override {
+		array<float> result = [];
+		for (int k = 0; k < 8; ++k) { result.push(MUSIC_BAR * (3 + 4 * k)); }
+		result.push(MUSIC_BAR * 35.0);
+		result.push(MUSIC_BAR * 37.0);
+		result.push(MUSIC_BAR * 37.0 + MUSIC_BEAT * 3.0);
+		return result;
+	}
+
+	array<int> hit_levels() override { return [1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2]; }
 
 	void update(float t, float dt) override {
 		tt = t;

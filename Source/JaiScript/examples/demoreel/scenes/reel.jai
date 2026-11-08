@@ -67,6 +67,7 @@ class Reel {
 	bool smoke = false;
 	string backend = "";
 	bool hud = true;
+	bool hud_full = false;   // 'h' steps the HUD: the performance chip, the full status and key bars, off
 	bool paused = false;
 
 	int nscenes = 11;
@@ -85,6 +86,12 @@ class Reel {
 	bool finish_pending = false;
 	float trans_t = 0.0;
 	int trans_kind = 0;
+	// how each scene hands over to the next: DONUT dives through its hole into JULIA, JULIA swirls
+	// into the lamps, the wax ripples into chrome pipes, the pipes iris onto the flock, the flock
+	// melts like Doom into GLOBHUNTER, the hunt zooms out over the canyon, the canyon ripples
+	// into CHROME, the glass shatters into OSSUARY, the web swirls into the ink, the ink dives
+	// into FINALE, and FINALE irises back to the start
+	array<int> out_transition = [5, 8, 7, 3, 4, 5, 7, 6, 8, 5, 3];
 	int trans_count = 0;
 
 	array<int> grid_a = [];
@@ -257,7 +264,7 @@ class Reel {
 		setup_scene(nxt, pending_idx);
 		in_trans = true;
 		trans_t = 0.0;
-		trans_kind = (trans_count + seed) % 5;
+		trans_kind = out_transition[cur_idx];
 		++trans_count;
 		int m = 0;
 		for (int x = 0; x < pw; ++x) {
@@ -298,7 +305,7 @@ class Reel {
 	// what the last reload did, under the HUD: the files it changed and the scene it
 	// rebuilt, or the file that failed (its previous code still running) with the error
 	void reload_overlay(var& rows) {
-		int row = hud ? 1 : 0;
+		int row = hud && hud_full ? 1 : 0;
 		var none = HudLine(0);
 		var head = HudLine(w);
 		if (reload_error == "") {
@@ -326,7 +333,16 @@ class Reel {
 
 	void handle_key(string key) {
 		if (key == "") { return; }
-		if (key == "h") { hud = !hud; }
+		if (key == "h") {
+			if (!hud) {
+				hud = true;
+				hud_full = false;
+			} else if (!hud_full) {
+				hud_full = true;
+			} else {
+				hud = false;
+			}
+		}
 		else if (key == "f") { paused = !paused; }
 		else if (key == "n" || key == " " || key == "right") { start_scene(cur_idx + 1, 0.0); }
 		else if (key == "p" || key == "left") { start_scene(cur_idx - 1, 0.0); }
@@ -359,22 +375,32 @@ class Reel {
 		int y0 = (ph - band_h) / 2 - ph / 24;
 		if (!sext) { y0 = (y0 / 2) * 2; }
 		int mid = y0 + band_h / 2;
-		int reach = itrunc(k * band_h * 0.5 + 0.5);
+		// three styles take turns: the band opening from the middle, a shutter closing from
+		// both sides, and a glitch whose rows slip sideways on the hats
+		int style = cur_idx % 3;
+		int reach = style == 1 ? band_h / 2 : itrunc(k * band_h * 0.5 + 0.5);
 		var& pix = HB_PIX;
 		int band = ui_off + ui_band;
+		int kick = cur.cue != null ? itrunc(cur.cue.kick_env(scene_t) * 2.5) : 0;
 		for (int y = mid - reach; y < mid + reach; ++y) {
 			if (y < 0 || y >= ph) { continue; }
 			int ry = y - y0;
-			int c = ry == 0 ? ui_off + ui_rule : (ry == band_h - 1 ? ui_off + ui_rule + 1 : band + ry * 12 / band_h);
+			int shade = ry * 12 / band_h + kick;
+			int c = ry == 0 ? ui_off + ui_rule : (ry == band_h - 1 ? ui_off + ui_rule + 1 : band + (shade > 11 ? 11 : shade));
 			int gi = y * pw;
-			for (int x = 0; x < pw; ++x) { pix[gi + x] = c; }
+			int edge_l = style == 1 ? itrunc(pw * 0.5 * k) : pw;
+			for (int x = 0; x < pw; ++x) {
+				if (style == 1 && x >= edge_l && x < pw - edge_l) { continue; }
+				pix[gi + x] = c;
+			}
 		}
 		if (k < 1.0) { return -1; }
 		int tw = gfx.text_width(name, sx);
 		int tx = (pw - tw) / 2;
 		int ty = y0 + 3;
 		int shown = itrunc((scene_t - 0.28) * 34.0) + 1;
-		gfx.draw_text(pix, pw, ph, name, tx, ty, sx, sy, ui_off + ui_ink, 8, ui_off + ui_shadow, shown);
+		gfx.draw_text(pix, pw, ph, name, tx, ty, sx, sy, ui_off + ui_ink, 8, ui_off + ui_shadow, style == 1 ? name.size() : shown);
+		if (style == 2 && cur.cue != null) { title_glitch(ty, ty + 7 * sy, cur.cue.hat_env(scene_t)); }
 		// the shine: a diagonal stripe of white sweeping over the ink
 		int sweep = itrunc((scene_t - 0.6) * 90.0 * sx / 2) - 20;
 		int ink0 = ui_off + ui_ink;
@@ -389,6 +415,29 @@ class Reel {
 			}
 		}
 		return (ty + th + 2) * h / ph + 1;
+	}
+
+	// the glitch: rows of the lettering slip sideways in slices, harder on each hat
+	void title_glitch(int y0, int y1, float hit) {
+		var& pix = HB_PIX;
+		int step = itrunc(scene_t / MUSIC_STEP);
+		int amount = itrunc(hit * pw * 0.05) + (scene_t < 0.6 ? 6 : 0);
+		if (amount <= 0) { return; }
+		array<int> row = [];
+		for (int x = 0; x < pw; ++x) { row.push(0); }
+		for (int y = y0; y < y1; ++y) {
+			if (y < 0 || y >= ph) { continue; }
+			int slice = (y / 3 + step * 7) % 5;
+			if (slice > 1) { continue; }
+			int off = slice == 0 ? amount : -amount;
+			int gi = y * pw;
+			for (int x2 = 0; x2 < pw; ++x2) { row[x2] = pix[gi + x2]; }
+			for (int x3 = 0; x3 < pw; ++x3) {
+				int from = x3 - off;
+				from = from < 0 ? 0 : (from >= pw ? pw - 1 : from);
+				pix[gi + x3] = row[from];
+			}
+		}
 	}
 
 	void title_text(var& rows, int row) {
@@ -417,6 +466,17 @@ class Reel {
 		int filled = itrunc((played > 1.0 ? 1.0 : played) * w);
 		rows[h - 1] = sgr_bg(52, 38, 96) + sgr_fg(214, 206, 255) + keys.substr(0, filled)
 			+ band + sgr_fg(120, 112, 168) + keys.substr(filled) + RESET;
+	}
+
+	// the default HUD: two quiet chips on the bottom row, the scene on the left and the
+	// frame's cost on the right (the VM's time per frame, the cores it can use, the rate)
+	void perf_chip(var& rows, float fps, float ms_sim, float ms_draw) {
+		string scene = ` ${cur_idx + 1 < 10 ? "0" : ""}${cur_idx + 1}/${nscenes}  ${cur.name} `;
+		string cost = ` JaiScript ${backend} ${gfx.fmt1(ms_sim + ms_draw)} ms . ${thread_count()} cores . ${gfx.fmt1(fps)} fps `;
+		int gap = w - scene.size() - cost.size();
+		if (gap < 1) { return; }
+		string dim = sgr_bg(10, 8, 22);
+		rows[h - 1] = dim + sgr_fg(255, 206, 110) + scene + sgr_bg(0, 0, 0) + string::repeat(" ", gap) + dim + sgr_fg(186, 180, 236) + cost + RESET;
 	}
 
 	// the frame's cost, with its split and the grid size when the row has room for them
@@ -460,7 +520,10 @@ class Reel {
 		var rows = hb_present();
 		title_text(rows, trow);
 		if (!in_trans) { cur.text_rows(rows); }
-		if (hud) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
+		if (hud) {
+			if (hud_full) { hud_overlay(rows, fps, ms_sim, ms_draw, ms_other); }
+			else { perf_chip(rows, fps, ms_sim, ms_draw); }
+		}
 		if (reload_left > 0.0) {
 			reload_left -= dt;
 			reload_overlay(rows);

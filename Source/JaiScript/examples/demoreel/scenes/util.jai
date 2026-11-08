@@ -369,10 +369,14 @@ class Gfx {
 
 	// transitions between two pixel grids; gb's indices shift by `off` into the
 	// merged palette, `edge` is the palette index of a glowing seam
-	// kind: 0 dissolve, 1 slant wipe, 2 blinds, 3 iris, 4 melt
+	// kind: 0 dissolve, 1 slant wipe, 2 blinds, 3 iris, 4 melt, 5 zoom through, 6 shatter, 7 ripple, 8 swirl
 	void mix_grids(var& ga, var& gb, var& gm, int w, int h, int kind, float prog, int off, int edge, var& melt) {
 		int kilo = itrunc(prog * 1000.0);
 		int idx = 0;
+		if (kind >= 5) {
+			mix_motion(ga, gb, gm, w, h, kind, prog, off, edge);
+			return;
+		}
 		if (kind == 0) {
 			for (int y = 0; y < h; ++y) {
 				for (int x = 0; x < w; ++x) {
@@ -434,6 +438,94 @@ class Gfx {
 			for (int y = 0; y < h; ++y) {
 				gm[gi] = y < o ? gb[gi] + off : ga[gi - o * w];
 				gi += w;
+			}
+		}
+	}
+
+	// the transitions that move the picture: each pixel of the result reads the departing
+	// frame through a moving map (or the arriving one where the map has let go of it)
+	// 5 zoom through: the departing frame rushes at the viewer, turning, and the arriving
+	//   one opens from the centre behind it
+	// 6 shatter: the departing frame breaks into tiles that spin away from the centre
+	// 7 ripple: a ring wave runs out from the centre; behind it the arriving frame
+	// 8 swirl: the departing frame twists into a vortex and drains into the arriving one
+	void mix_motion(var& ga, var& gb, var& gm, int w, int h, int kind, float prog, int off, int edge) {
+		float cx = w * 0.5;
+		float cy = h * 0.5;
+		float e = prog * prog * (3.0 - 2.0 * prog);
+		float reach = math::sqrt(cx * cx + cy * cy);
+		int idx = 0;
+		int tile = h / 9 < 3 ? 3 : h / 9;
+		for (int y = 0; y < h; ++y) {
+			float dy = y + 0.5 - cy;
+			for (int x = 0; x < w; ++x) {
+				float dx = x + 0.5 - cx;
+				int src = -1;
+				if (kind == 5) {
+					float zoom = 1.0 + e * e * 7.0;
+					float a = e * 1.4;
+					float ca = math::cos(a);
+					float sa = math::sin(a);
+					float sx = cx + (dx * ca + dy * sa) / zoom;
+					float sy = cy + (dy * ca - dx * sa) / zoom;
+					float r = math::sqrt(dx * dx + dy * dy) / reach;
+					bool open = r < e * e * 1.3;
+					if (!open && sx >= 0.0 && sx < w && sy >= 0.0 && sy < h) { src = itrunc(sy) * w + itrunc(sx); }
+					gm[idx] = src >= 0 ? ga[src] : gb[idx] + off;
+				} else if (kind == 6) {
+					int tx = x / tile;
+					int ty = y / tile;
+					int hsh = ((tx * 73 + ty * 151) % 97 + 97) % 97;
+					float delay = hsh / 97.0 * 0.45;
+					float k = (prog - delay) / 0.55;
+					k = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
+					float tcx = (tx + 0.5) * tile - cx;
+					float tcy = (ty + 0.5) * tile - cy;
+					float push = k * k * reach * 1.4;
+					float tl = math::sqrt(tcx * tcx + tcy * tcy) + 1.0;
+					float spin = k * (hsh % 2 == 0 ? 2.0 : -2.0);
+					float shrink = 1.0 - k * 0.6;
+					float lx = x + 0.5 - ((tx + 0.5) * tile + tcx / tl * push);
+					float ly = y + 0.5 - ((ty + 0.5) * tile + tcy / tl * push + k * k * h * 0.5);
+					float cs = math::cos(spin);
+					float sn = math::sin(spin);
+					float ux = (lx * cs + ly * sn) / shrink;
+					float uy = (ly * cs - lx * sn) / shrink;
+					float half = tile * 0.5;
+					if (k < 1.0 && ux > -half && ux < half && uy > -half && uy < half) {
+						int sx2 = itrunc((tx + 0.5) * tile + ux);
+						int sy2 = itrunc((ty + 0.5) * tile + uy);
+						if (sx2 >= 0 && sx2 < w && sy2 >= 0 && sy2 < h) { src = sy2 * w + sx2; }
+					}
+					bool seam = k > 0.0 && k < 0.15 && (x % tile == 0 || y % tile == 0);
+					gm[idx] = seam ? edge : (src >= 0 ? ga[src] : gb[idx] + off);
+				} else if (kind == 7) {
+					float r2 = math::sqrt(dx * dx + dy * dy);
+					float front = e * (reach + 12.0);
+					float d = r2 - front;
+					float wave = d > -10.0 && d < 10.0 ? math::sin(d * 0.6) * (10.0 - (d < 0.0 ? -d : d)) * 0.35 : 0.0;
+					float sx3 = x + dx / (r2 + 0.01) * wave;
+					float sy3 = y + dy / (r2 + 0.01) * wave;
+					bool arrived = d < 0.0;
+					int ix = itrunc(sx3);
+					int iy = itrunc(sy3);
+					ix = ix < 0 ? 0 : (ix >= w ? w - 1 : ix);
+					iy = iy < 0 ? 0 : (iy >= h ? h - 1 : iy);
+					int si = iy * w + ix;
+					gm[idx] = d > -1.2 && d < 0.6 ? edge : (arrived ? gb[si] + off : ga[si]);
+				} else {
+					float r3 = math::sqrt(dx * dx + dy * dy) / reach;
+					float twist = e * 9.0 * (1.0 - r3) * (1.0 - r3);
+					float pull = 1.0 + e * e * 3.0 * (1.0 - r3);
+					float ca2 = math::cos(twist);
+					float sa2 = math::sin(twist);
+					float sx4 = cx + (dx * ca2 - dy * sa2) * pull;
+					float sy4 = cy + (dx * sa2 + dy * ca2) * pull;
+					bool drained = r3 > 1.15 - e * 1.3;
+					if (!drained && sx4 >= 0.0 && sx4 < w && sy4 >= 0.0 && sy4 < h) { src = itrunc(sy4) * w + itrunc(sx4); }
+					gm[idx] = src >= 0 ? ga[src] : gb[idx] + off;
+				}
+				++idx;
 			}
 		}
 	}

@@ -17,7 +17,10 @@
 // lit by the setting sun. The camera skims the river between the walls, banks
 // hard through the bends, climbs out over the rim through bar three to the reveal
 // on bar four's downbeat (the sun flaring with the hit) and dives back in from bar
-// six, nodding on the kick and leaning on the snare all the way.
+// six, nodding on the kick and leaning on the snare all the way. Over the
+// terrain: dust streaks rushing past the lens (longer with speed, pumping on the
+// kick), a flock of birds beating across the sky, and on each hit a fan of god rays
+// bursting from the sun across the sky.
 
 int CR_N = 512;
 array<int> CR_H = [];       // heights, shared with the parallel light bake
@@ -133,6 +136,12 @@ class CanyonRun : Scene {
 	int horizon = 12;
 	int frame = 0;
 	float tt = 0.0;
+	array<float> dust_x = [];   // dust motes in camera space: across, up, depth
+	array<float> dust_y = [];
+	array<float> dust_z = [];
+	int dust_ink = 0;
+	int bird_ink = 0;
+	float speed = 44.0;
 
 	void build() override {
 		name = "CANYONRUN";
@@ -169,6 +178,13 @@ class CanyonRun : Scene {
 			pal.add(12.0 + wr * 0.52, 30.0 + wg * 0.56, 44.0 + wb * 0.66);
 		}
 		glintb = pal.gradient(4, [[255.0, 196.0, 120.0], [255.0, 236.0, 190.0], [255.0, 255.0, 245.0]]);
+		dust_ink = pal.gradient(3, [[150.0, 120.0, 100.0], [220.0, 190.0, 150.0], [255.0, 240.0, 210.0]]);
+		bird_ink = pal.add(24.0, 14.0, 28.0);
+		for (int m = 0; m < 70; ++m) {
+			dust_x.push((rng.next(2000) - 1000) * 0.001);
+			dust_y.push((rng.next(2000) - 1000) * 0.0006);
+			dust_z.push(0.05 + rng.next(1000) * 0.001);
+		}
 		// terrain: 16 materials x 8 light levels x 12 haze banks; light warms, shadow cools
 		var mats = [[40.0, 70.0, 90.0], [150.0, 124.0, 86.0], [70.0, 104.0, 46.0], [124.0, 112.0, 64.0],
 			[186.0, 92.0, 56.0], [214.0, 146.0, 92.0], [150.0, 68.0, 54.0], [228.0, 186.0, 136.0], [176.0, 108.0, 76.0],
@@ -408,7 +424,7 @@ class CanyonRun : Scene {
 	// the drone's altitude plan: skim the river, climb out over the rim through bar
 	// three for the reveal on bar four, dive back into the gorge from bar six, skim again
 	float plan_alt(float t) {
-		float lo = 72.0 + 8.0 * math::sin(t * 1.3);
+		float lo = 60.0 + 8.0 * math::sin(t * 1.3);
 		float hi = 330.0;
 		float up = (t - MUSIC_BAR * 3.0) / MUSIC_BAR;
 		up = up < 0.0 ? 0.0 : (up > 1.0 ? 1.0 : up);
@@ -426,7 +442,7 @@ class CanyonRun : Scene {
 	void update(float t, float dt) override {
 		tt = t;
 		++frame;
-		float sp = 34.0;
+		float sp = speed;
 		float u = t * sp;
 		posy = u;
 		posx = path_x(u, t);
@@ -477,6 +493,12 @@ class CanyonRun : Scene {
 		pit = pit < -0.24 ? -0.24 : pit;
 		float nod = cue != null ? cue.kick_env(t) * 0.014 : 0.0;
 		horizon = itrunc(h * (0.36 + pit + nod));
+		// the dust rushes at the lens; a mote that passes it is born again far ahead
+		float kick = cue != null ? cue.kick_env(t) : 0.0;
+		for (int m = 0; m < dust_z.size(); ++m) {
+			dust_z[m] = dust_z[m] - dt * (0.9 + kick * 0.6);
+			if (dust_z[m] < 0.04) { dust_z[m] = dust_z[m] + 1.0; }
+		}
 	}
 
 	// field access resolves through the environment chain per hit — ~2x the cost
@@ -653,6 +675,74 @@ class CanyonRun : Scene {
 				}
 				grid[gi2] = pix2;
 				gi2 += ww;
+			}
+		}
+		god_rays(grid, sxf, syf, flare);
+		birds(grid);
+		dust(grid);
+	}
+
+	// on a hit, rays of the sun fan out across the sky (never over the land)
+	void god_rays(var& grid, float sx, float sy, float flare) {
+		if (flare < 0.05 || sx < -50.0 || sx > w + 50.0) { return; }
+		var& yb = ybuf;
+		float reach = h * (0.25 + flare * 0.7);
+		for (int r = 0; r < 14; ++r) {
+			float a = r * 0.4487989 + tt * 0.15;
+			float cx = math::cos(a);
+			float cy = math::sin(a);
+			int steps = itrunc(reach);
+			for (int k = 2; k < steps; ++k) {
+				int x = itrunc(sx + cx * k);
+				int y = itrunc(sy + cy * k * 0.8);
+				if (x < 0 || x >= w || y < 0 || y >= h || y >= yb[x]) { continue; }
+				int lv = itrunc((1.0 - k * 1.0 / steps) * flare * 4.0);
+				if (lv > 0) { grid[y * w + x] = sunb + (lv > 3 ? 3 : lv); }
+			}
+		}
+	}
+
+	// a flock beating its wings across the sky, silhouettes against the sunset
+	void birds(var& grid) {
+		var& yb = ybuf;
+		int span = w + 60;
+		float size = h / 60.0 + 1.0;
+		for (int b = 0; b < 11; ++b) {
+			float fx = math::fmod(tt * (9.0 + b * 0.7) + b * 37.0, span * 1.0) - 30.0;
+			float fy = horizon - h * 0.2 - (b % 4) * size * 2.2 + math::sin(tt * 1.3 + b) * size * 1.5;
+			float flap = math::sin(tt * 11.0 + b * 1.7);
+			int wing = itrunc(size * 2.2);
+			for (int k = 0; k <= wing; ++k) {
+				int dy = itrunc(k * 0.6 * flap) - (flap < 0.0 ? 0 : 0);
+				bird_px(grid, yb, itrunc(fx) + k, itrunc(fy) - dy);
+				bird_px(grid, yb, itrunc(fx) - k, itrunc(fy) - dy);
+			}
+		}
+	}
+
+	void bird_px(var& grid, var& yb, int x, int y) {
+		if (x >= 0 && x < w && y >= 0 && y < h && y < yb[x]) { grid[y * w + x] = bird_ink; }
+	}
+
+	// dust streaks: each mote drawn from where it is to where it was, longer with speed
+	void dust(var& grid) {
+		float f = w * 0.45;
+		float kick = cue != null ? cue.kick_env(tt) : 0.0;
+		float trail = 0.05 + kick * 0.04;
+		for (int m = 0; m < dust_z.size(); ++m) {
+			float z = dust_z[m];
+			float z2 = z + trail;
+			int x0 = itrunc(w * 0.5 + dust_x[m] / z * f);
+			int y0 = itrunc(horizon + dust_y[m] / z * f);
+			int x1 = itrunc(w * 0.5 + dust_x[m] / z2 * f);
+			int y1 = itrunc(horizon + dust_y[m] / z2 * f);
+			int lv = z < 0.25 ? 2 : (z < 0.55 ? 1 : 0);
+			int n = (x0 - x1 < 0 ? x1 - x0 : x0 - x1) + (y0 - y1 < 0 ? y1 - y0 : y0 - y1);
+			n = n > 40 ? 40 : n;
+			for (int k = 0; k <= n; ++k) {
+				int x = n == 0 ? x0 : x1 + (x0 - x1) * k / n;
+				int y = n == 0 ? y0 : y1 + (y0 - y1) * k / n;
+				if (x >= 0 && x < w && y >= 0 && y < h) { grid[y * w + x] = dust_ink + lv; }
 			}
 		}
 	}

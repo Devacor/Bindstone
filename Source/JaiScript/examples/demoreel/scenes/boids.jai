@@ -24,14 +24,24 @@
 // Cut like a film: sun rays fan across the sky and the grade sinks toward dusk;
 // the first stoop plays in slow motion as the camera pushes in on the strike
 // (the flock squeezes into a ball, a flash and a lens flare land on impact); the
-// second comes at full speed with the frame shaking; and at the end the whole
-// murmuration sweeps in low and close, a vast veil drawn across the sun.
+// second comes at full speed with the frame shaking; then the whole murmuration
+// sweeps in low and close, a vast veil drawn across the sun.
+//
+// The last act: the veil lifts off the water and gathers into a black sun, one
+// dense sphere of birds wheeling over the real one, turning faster and drawing
+// tighter as the lens pushes in through the riser, swelling on every kick. On bar
+// ten's downbeat the falcon stoops from high behind it through its heart and past
+// the lens: the sphere bursts, every bird thrown straight out from the heart as a
+// streak, a shockwave of light rings out across the sky with a flash and a shake,
+// and the scattered flock settles into a vast wheeling halo standing on the water
+// round the setting sun, mirrored in the lake, slowing its turn as it spreads.
 //
 // Scored to its cue: the slow-motion strike lands on the downbeat of bar 4 and the
-// second stoop on beat 3 of bar 5, both hits, and the veil fills the last bar; the
-// kick swells the sun's rays and darkens the flock a touch, the snare sets the
-// lake's glitter sparking, the bass breathes through the sky, and the bar before
-// the strike draws the light in like a held breath.
+// second stoop on beat 3 of bar 5, both hits, the black sun gathers on bar 8 and
+// bursts on bar 10; the kick punches the lens in and swells the sun's rays, the
+// snare punches a little less and sets the lake's glitter sparking, the bass
+// breathes through the sky, each hit blazes the rays, and the bar before each
+// strike draws the light in like a held breath.
 
 // Globals on purpose: the parallel steering reads them (arrays borrow zero-copy).
 array<float> BD_X = [];
@@ -74,15 +84,37 @@ float BD_FR2 = 400.0;        // the reach of its scare, squared (wider at the st
 float BD_VORTEX = 0.0;       // how far the flock has gathered into its wheeling ring,
 float BD_VSPIN = 0.0;        // the ring's turn
 float BD_VR = 30.0;          // and its radius
+array<float> BD_SX = [];     // per bird: its place in the black sun, a point in the unit ball
+array<float> BD_SY = [];
+array<float> BD_SZ = [];
+float BD_BALL = 0.0;         // how far the flock has gathered into the black sun,
+float BD_BCX = 0.0;          // its centre,
+float BD_BCY = 0.0;
+float BD_BCZ = 0.0;
+float BD_BR = 12.0;          // its radius (plus how far the burst has flung it),
+float BD_BCOS = 1.0;         // and its turn
+float BD_BSIN = 0.0;
+float BD_BURST = 0.0;        // 1 once the falcon has burst the sphere: the birds fly out alone
+array<float> BD_RA = [];     // per bird: its place around the halo the burst leaves
+float BD_HALO = 0.0;         // how far the burst has settled into a halo facing the camera,
+float BD_HR = 22.0;          // its radius,
+float BD_HSPIN = 0.0;        // its turn,
+float BD_HRX = 1.0;          // and the camera's right and forward, across the ground
+float BD_HRZ = 0.0;
+float BD_HFX = 0.0;
+float BD_HFZ = 1.0;
+float BD_DAMP = 0.0;         // how hard a bird in the black sun or the halo settles onto its place
+float BD_OX = 0.0;           // the grid's centre: it follows the black sun
+float BD_OZ = 0.0;
 
-// the grid: 12-unit cells over x and z in [-96, 96), y in [0, 96)
+// the grid: 12-unit cells over x and z in [-96, 96) about its centre, y in [0, 96)
 int BD_GX = 16;
 int BD_GY = 8;
 
 function bd_cell(float x, float y, float z) -> int {
-	int cx = (x + 96.0) * 0.0833333;
+	int cx = (x - BD_OX + 96.0) * 0.0833333;
 	int cy = y * 0.0833333;
-	int cz = (z + 96.0) * 0.0833333;
+	int cz = (z - BD_OZ + 96.0) * 0.0833333;
 	cx = cx < 0 ? 0 : (cx > 15 ? 15 : cx);
 	cy = cy < 0 ? 0 : (cy > 7 ? 7 : cy);
 	cz = cz < 0 ? 0 : (cz > 15 ? 15 : cz);
@@ -119,10 +151,12 @@ function boids_steer(int c) -> array<float> {
 		float uy = 0.0;
 		float uz = 0.0;
 		int near = 0;
-		int cx = (x + 96.0) * 0.0833333;
+		int cx = (x - BD_OX + 96.0) * 0.0833333;
 		int cy = y * 0.0833333;
-		int cz = (z + 96.0) * 0.0833333;
-		for (int dz = -1; dz <= 1 && near < 10; ++dz) {
+		int cz = (z - BD_OZ + 96.0) * 0.0833333;
+		// a burst bird flies out alone, and a crowded cell is read only so far
+		int seen = BD_BURST > 0.0 || BD_HALO > 0.0 ? 99 : 0;
+		for (int dz = -1; dz <= 1 && near < 10 && seen < 60; ++dz) {
 			int zz = cz + dz;
 			if (zz < 0 || zz > 15) { continue; }
 			for (int dy = -1; dy <= 1 && near < 10; ++dy) {
@@ -132,7 +166,8 @@ function boids_steer(int c) -> array<float> {
 					int xx = cx + dx;
 					if (xx < 0 || xx > 15) { continue; }
 					int j = BD_HEAD[(zz * 8 + yy) * 16 + xx];
-					while (j >= 0 && near < 10) {
+					while (j >= 0 && near < 10 && seen < 60) {
+						++seen;
 						if (j != i) {
 							float ex = BD_X[j] - x;
 							float ey = BD_Y[j] - y;
@@ -184,13 +219,40 @@ function boids_steer(int c) -> array<float> {
 			qy += (wy - qy) * vt;
 			qz += (wz - qz) * vt;
 		}
+		// the black sun: each bird's place in a turning sphere, flung outward by the burst
+		float bl = BD_BALL;
+		if (bl > 0.0) {
+			float sx0 = BD_SX[i];
+			float sz0 = BD_SZ[i];
+			float br = BD_BR;
+			float bx = BD_BCX + (sx0 * BD_BCOS - sz0 * BD_BSIN) * br;
+			float by = BD_BCY + BD_SY[i] * br;
+			float bz = BD_BCZ + (sx0 * BD_BSIN + sz0 * BD_BCOS) * br;
+			qx += (bx - qx) * bl;
+			qy += (by - qy) * bl;
+			qz += (bz - qz) * bl;
+		}
+		float hl = BD_HALO;
+		if (hl > 0.0) {
+			float ra = BD_RA[i] + BD_HSPIN;
+			float rr = BD_HR * (0.9 + 0.1 * BD_SY[i]);
+			float cr = math::cos(ra) * rr;
+			float dj = BD_SZ[i] * 6.0;
+			float hx = BD_BCX + cr * BD_HRX + dj * BD_HFX;
+			float hy = BD_BCY + math::sin(ra) * rr;
+			float hz = BD_BCZ + cr * BD_HRZ + dj * BD_HFZ;
+			qx += (hx - qx) * hl;
+			qy += (hy - qy) * hl;
+			qz += (hz - qz) * hl;
+		}
 		float gx = qx - x;
 		float gy = qy - y;
 		float gz = qz - z;
 		float pull = BD_PULL * (1.0 - panic * 0.7);
-		ax += gx * pull;
-		ay += gy * pull;
-		az += gz * pull;
+		float damp = BD_DAMP;
+		ax += gx * pull - vx * damp;
+		ay += gy * pull - vy * damp;
+		az += gz * pull - vz * damp;
 		if (y < BD_FLOOR) { ay += (BD_FLOOR - y) * 5.0; }
 		if (y > 88.0) { ay -= (y - 88.0) * 5.0; }
 		// the falcon: birds within its reach flee and panic
@@ -212,8 +274,9 @@ function boids_steer(int c) -> array<float> {
 		vy += ay * dt;
 		vz += az * dt;
 		float sp = math::sqrt(vx * vx + vy * vy + vz * vz) + 0.0001;
-		float top = 30.0 + panic * 16.0;
-		float k3 = sp > top ? top / sp : (sp < 16.0 ? 16.0 / sp : 1.0);
+		float top = 30.0 + panic * 16.0 + BD_BURST * 40.0;
+		float least = 16.0 - BD_HALO * 9.0;
+		float k3 = sp > top ? top / sp : (sp < least ? least / sp : 1.0);
 		out.push(vx * k3);
 		out.push(vy * k3);
 		out.push(vz * k3);
@@ -271,11 +334,20 @@ class Boids : Scene {
 	float sun_dy = 0.0;
 	float sun_dz = 0.0;
 	array<float> lit = [];      // per pixel: the gold of wings caught by the sun
+	bool anchored = false;      // the last act's camera: where it stood as the act began
+	float anc_x = 0.0;
+	float anc_y = 0.0;
+	float anc_z = 0.0;
+	float anc_yaw = 0.0;
+	float burst_t = -1.0;       // when the falcon burst the black sun
+	float bspin = 0.0;          // the black sun's turn
+	float bsx = 0.0;            // the black sun on screen, where the shockwave rings out from
+	float bsy = 0.0;
 
 	void build() override {
 		name = "BOIDS";
 		handle = "murmuration . a thousand starlings and a falcon";
-		replay = 14.0;
+		replay = 22.0;
 		frame = gfx.make_grid(w * h);
 		col_of = gfx.make_grid(w);
 		var stops = [[10.0, 12.0, 40.0], [48.0, 30.0, 90.0], [150.0, 60.0, 120.0], [240.0, 110.0, 90.0], [255.0, 190.0, 110.0], [255.0, 244.0, 200.0]];
@@ -327,6 +399,26 @@ class Boids : Scene {
 			BD_V.push(math::sin(ang) * rad);
 			flap.push(rng.nextf() * 6.28);
 		}
+		// places in the black sun: a dense core under a thick shell
+		BD_SX = []; BD_SY = []; BD_SZ = [];
+		for (int i2 = 0; i2 < nb; ++i2) {
+			float zz = rng.nextf() * 2.0 - 1.0;
+			float az = rng.nextf() * 6.2831853;
+			float rr = math::sqrt(1.0 - zz * zz);
+			float shell = 0.55 + 0.45 * math::sqrt(rng.nextf());
+			BD_SX.push(math::cos(az) * rr * shell);
+			BD_SY.push(zz * shell);
+			BD_SZ.push(math::sin(az) * rr * shell);
+		}
+		BD_RA = [];
+		for (int i3 = 0; i3 < nb; ++i3) { BD_RA.push(i3 * 2.3999632); }
+		BD_HALO = 0.0;
+		BD_HSPIN = 0.0;
+		BD_DAMP = 0.0;
+		BD_BALL = 0.0;
+		BD_BURST = 0.0;
+		BD_OX = 0.0;
+		BD_OZ = 0.0;
 		BD_HEAD = gfx.make_grid(BD_GX * BD_GY * BD_GX);
 		look_x = -65.0;
 		look_z = 5.0;
@@ -411,11 +503,11 @@ class Boids : Scene {
 		return 0.3;
 	}
 
-	// long enough for the showpiece to land and its last image to hold a bar
-	int length_bars() override { return 8; }
+	// the strike, the veil, then the black sun gathers and bursts on bar ten's downbeat
+	int length_bars() override { return 11; }
 
-	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 5.5]; }
-	array<int> hit_levels() override { return [2, 1]; }
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 5.5, MUSIC_BAR * 8.0, MUSIC_BAR * 10.0]; }
+	array<int> hit_levels() override { return [2, 1, 1, 2]; }
 
 	void update(float t, float dt) override {
 		tt = t;
@@ -445,6 +537,7 @@ class Boids : Scene {
 		shape_sheet(st);
 		float kick = cue == null ? 0.0 : cue.kick_env(t);
 		BD_FOLD += kick * 7.0;
+		black_sun(t, dt, kick);
 		// the vortex gathers through bar 5 and lets go into the veil
 		float gather = (t - MUSIC_BAR * 4.6) / (MUSIC_BAR * 0.8);
 		float release = (t - MUSIC_BAR * 6.0) / (MUSIC_BAR * 0.6);
@@ -456,6 +549,7 @@ class Boids : Scene {
 		float since = strike_t < 0.0 ? -1.0 : t - strike_t;
 		BD_FR2 = since >= 0.0 && since < 0.45 ? 1800.0 : 400.0;
 		BD_LEN *= 1.0 + veil * 0.3;
+		if (burst_t < 0.0 && t >= MUSIC_BAR * 10.0) { burst(t); }
 		float ox = BD_FX;
 		float oy = BD_FY;
 		float oz = BD_FZ;
@@ -488,6 +582,77 @@ class Boids : Scene {
 				z[i] += vz[i] * step;
 				++i;
 			}
+		}
+	}
+
+	// the last act: the veil lifts off the water and gathers into one vast dark
+	// sphere hanging over the sun, turning faster and drawing tighter through the
+	// riser, swelling on every kick, until the falcon bursts it into a vast halo
+	// that slows its turn as it spreads
+	void black_sun(float t, float dt, float kick) {
+		BD_BALL = ease(MUSIC_BAR * 8.0, MUSIC_BAR * 8.9, t);
+		if (BD_BALL <= 0.0) { return; }
+		float depth = 85.0;
+		float side = (sun_x - w * 0.5) / focal * depth;
+		float lift = h * 0.33 / focal * depth;
+		float cy = math::cos(anc_yaw);
+		float sy = math::sin(anc_yaw);
+		BD_BCX = anc_x + cy * depth - sy * side;
+		BD_BCY = anc_y + lift;
+		BD_BCZ = anc_z + sy * depth + cy * side;
+		BD_OX = BD_BCX;
+		BD_OZ = BD_BCZ;
+		BD_TX += (BD_BCX - BD_TX) * BD_BALL;
+		BD_TY += (BD_BCY - BD_TY) * BD_BALL;
+		BD_TZ += (BD_BCZ - BD_TZ) * BD_BALL;
+		BD_FLOOR = 8.0;
+		float tighten = ease(MUSIC_BAR * 9.0, MUSIC_BAR * 10.0, t);
+		BD_PULL += (9.0 + tighten * 4.0 - BD_PULL) * BD_BALL;
+		BD_DAMP = 2.5 * BD_BALL;
+		BD_BR = (12.0 - tighten * 3.5) * (1.0 + kick * 0.14);
+		float turn = 1.4 + tighten * 2.6;
+		BD_HRX = 0.0 - sy;
+		BD_HRZ = cy;
+		BD_HFX = cy;
+		BD_HFZ = sy;
+		if (burst_t >= 0.0) {
+			// flung outward, each bird's place runs out from the heart, and the shell
+			// settles into a wheeling halo standing on the water round the sun
+			float since = t - burst_t;
+			float r = 8.5 + 16.0 * (1.0 - math::exp(0.0 - since * 4.0));
+			turn = 4.0 * (8.5 / r) * (8.5 / r) + 0.25;
+			BD_BR = r;
+			BD_PULL = 7.0 + BD_HALO * 9.0;
+			BD_DAMP = 2.5 + BD_HALO * 5.5;
+			BD_FLOOR = 4.0;
+			BD_BURST = since < 0.9 ? 1.0 : 0.0;
+			BD_HALO = ease(0.15, 0.75, since);
+			BD_HR = (8.5 + 10.5 * (1.0 - math::exp(0.0 - since * 4.0))) * (1.0 + kick * 0.07);
+			BD_BCY += (cam_y + BD_HR - BD_BCY) * BD_HALO;
+			BD_HSPIN += (0.4 + 2.5 * math::exp(0.0 - since * 2.0)) * dt;
+		}
+		bspin += turn * dt;
+		BD_BCOS = math::cos(bspin);
+		BD_BSIN = math::sin(bspin);
+	}
+
+	// the falcon strikes the heart: every bird is thrown straight out from it
+	void burst(float t) {
+		burst_t = MUSIC_BAR * 10.0;
+		BD_BURST = 1.0;
+		var& vx = BD_VX;
+		var& vy = BD_VY;
+		var& vz = BD_VZ;
+		var& pn = BD_PANIC;
+		for (int i = 0; i < nb; ++i) {
+			float dx = BD_X[i] - BD_BCX;
+			float dy = BD_Y[i] - BD_BCY;
+			float dz = BD_Z[i] - BD_BCZ;
+			float k = 50.0 / (math::sqrt(dx * dx + dy * dy + dz * dz) + 0.5);
+			vx[i] = dx * k;
+			vy[i] = dy * k;
+			vz[i] = dz * k;
+			pn[i] = 1.0;
 		}
 	}
 
@@ -573,6 +738,36 @@ class Boids : Scene {
 		float dive = -1.0;
 		if (t > 6.215 && t < 7.815) { dive = (t - 6.215) / 1.6; }
 		if (t > 8.724 && t < 10.324) { dive = (t - 8.724) / 1.6; }
+		if (BD_BALL > 0.0) {
+			// over the black sun it circles high, then stoops from high behind the
+			// sphere through its heart on bar ten's downbeat and on past the lens
+			hx = BD_BCX + 30.0 * math::cos(ca * 1.4);
+			hy = BD_BCY + 26.0;
+			hz = BD_BCZ + 30.0 * math::sin(ca * 1.4);
+			float last = (tt - (MUSIC_BAR * 10.0 - 0.75)) / 1.5;
+			if (last <= 0.0 || last >= 1.0) {
+				BD_FX = hx;
+				BD_FY = hy;
+				BD_FZ = hz;
+				return;
+			}
+			float sx = BD_BCX + (BD_BCX - cam_x) * 0.8;
+			float sy = BD_BCY + 40.0;
+			float sz = BD_BCZ + (BD_BCZ - cam_z) * 0.8;
+			float lx = cam_x + rx_ * 7.0;
+			float ly = cam_y + 3.0;
+			float lz = cam_z + rz_ * 7.0;
+			float a0 = (1.0 - last) * (1.0 - last);
+			float b0 = 2.0 * last * (1.0 - last);
+			float c0 = last * last;
+			float mx0 = 2.0 * BD_BCX - 0.5 * (sx + lx);
+			float my0 = 2.0 * BD_BCY - 0.5 * (sy + ly);
+			float mz0 = 2.0 * BD_BCZ - 0.5 * (sz + lz);
+			BD_FX = sx * a0 + mx0 * b0 + lx * c0;
+			BD_FY = sy * a0 + my0 * b0 + ly * c0;
+			BD_FZ = sz * a0 + mz0 * b0 + lz * c0;
+			return;
+		}
 		if (dive < 0.0) {
 			BD_FX = hx;
 			BD_FY = hy;
@@ -603,6 +798,10 @@ class Boids : Scene {
 	}
 
 	void place_camera(float t) {
+		if (t >= MUSIC_BAR * 8.0 && anchored) {
+			anchored_camera(t);
+			return;
+		}
 		// from the shore, round the world's centre, the camera glides in to circle the
 		// flock, closes to ride inside it, then climbs away for the veil
 		float follow = ease(MUSIC_BAR * 1.5, MUSIC_BAR * 3.1, t);
@@ -640,6 +839,21 @@ class Boids : Scene {
 		upx = -cy * sp;
 		upy = cp;
 		upz = -sy * sp;
+		if (t >= MUSIC_BAR * 8.0 && !anchored) {
+			anchored = true;
+			anc_x = cam_x;
+			anc_y = cam_y;
+			anc_z = cam_z;
+			anc_yaw = yaw;
+		}
+	}
+
+	// the last act's camera: it holds its heading on the sun and cranes up a little
+	// (the lens pushes in on the sphere through the riser and lets go on the burst)
+	void anchored_camera(float t) {
+		cam_x = anc_x;
+		cam_z = anc_z;
+		cam_y = anc_y + ease(MUSIC_BAR * 8.0, MUSIC_BAR * 9.5, t) * 3.0;
 	}
 
 	void render(var& grid) override {
@@ -649,7 +863,16 @@ class Boids : Scene {
 			push = u * u * (3.0 - 2.0 * u);
 		}
 		float shake = sim_t > 9.424 && sim_t < 10.024 ? (10.024 - sim_t) * 5.0 : 0.0;
-		if (push == 0.0 && shake == 0.0 && flash_level() == 0) {
+		float since = burst_t < 0.0 ? -1.0 : tt - burst_t;
+		if (since >= 0.0 && since < 0.8) { shake += (0.8 - since) * 7.0; }
+		// the riser's push-in on the black sun, let go by the burst
+		if (anchored && since < 0.0) {
+			push = ease(MUSIC_BAR * 8.6, MUSIC_BAR * 10.0, tt) * 0.6;
+		}
+		// the kick punches the lens in, the snare a touch less
+		float punch = cue == null ? 0.0 : cue.kick_env(tt) * 0.04 + cue.snare_env(tt) * 0.02;
+		punch = punch < 0.006 ? 0.0 : punch;
+		if (push == 0.0 && shake == 0.0 && punch == 0.0 && flash_level() == 0) {
 			compose(grid);
 			focus_x = fsx;
 			focus_y = fsy;
@@ -657,15 +880,17 @@ class Boids : Scene {
 			return;
 		}
 		compose(frame);
-		finish(grid, push, shake);
+		finish(grid, push, shake, punch);
 	}
 
 	// the push-in toward the strike, the shake of the second stoop, the flash and the flare
-	void finish(var& grid, float push, float shake) {
+	void finish(var& grid, float push, float shake, float punch) {
 		var& fr = frame;
-		focus_x += (fsx - focus_x) * 0.12;
-		focus_y += (fsy - focus_y) * 0.12;
-		float zoom = 1.0 + push * 0.3;
+		// the falcon's strike draws the eye; in the last act the black sun over the sun does
+		bool lens = anchored && burst_t < 0.0;
+		focus_x += ((lens ? sun_x : fsx) - focus_x) * 0.12;
+		focus_y += ((lens ? (sun_y + h * 0.4) * 0.5 : fsy) - focus_y) * 0.12;
+		float zoom = 1.0 + push * 0.3 + punch;
 		float ox = math::sin(tt * 61.0) * shake;
 		float oy = math::cos(tt * 47.0) * shake * 0.6;
 		float fx = focus_x * push + w * 0.5 * (1.0 - push);
@@ -703,6 +928,8 @@ class Boids : Scene {
 	// the strike's flash: the first stoop's impact, in slow motion, a white-hot beat
 	int flash_level() {
 		float since = strike_t < 0.0 ? -1.0 : tt - strike_t;
+		float since2 = burst_t < 0.0 ? -1.0 : tt - burst_t;
+		if (since2 >= 0.0 && since2 < 0.7) { return itrunc((0.7 - since2) * 22.0); }
 		if (since < 0.0 || since > 0.5) { return 0; }
 		return itrunc((0.5 - since) * 24.0);
 	}
@@ -767,6 +994,8 @@ class Boids : Scene {
 		float half_h = h * 0.5;
 		float px_scale = w / 180.0;   // bird sizes are in a 180-pixel-wide frame's pixels
 		float px_inv = 1.0 / px_scale;
+		float since = burst_t < 0.0 ? -1.0 : tt - burst_t;
+		float streak = since >= 0.0 && since < 1.4 ? 0.07 * (1.4 - since) : 0.0;
 		for (int b = 0; b < nb; ++b) {
 			float ex = BD_X[b] - cam_x;
 			float ey = BD_Y[b] - cam_y;
@@ -785,6 +1014,18 @@ class Boids : Scene {
 			if (beat > 0.4 && face > -0.3 && face < 0.3 && size > 0.4) {
 				gold[sy * w + sx] += (beat - 0.55) * 4.0 * (size > 1.5 ? 1.5 : size);
 				continue;
+			}
+			if (streak > 0.0) {
+				// the sunburst: each bird drawn as a streak back along its flight
+				float tx = ex - BD_VX[b] * streak;
+				float ty = ey - BD_VY[b] * streak;
+				float tz = ez - BD_VZ[b] * streak;
+				float tzc = tx * fwx + ty * fwy + tz * fwz;
+				if (tzc > 14.0) {
+					float tiz = focal / tzc;
+					streak_line(sx, sy, itrunc(half_w + (tx * rx_ + tz * rz_) * tiz), itrunc(half_h - (tx * upx + ty * upy + tz * upz) * tiz), size);
+					continue;
+				}
 			}
 			if (size > 3.0) {
 				wings(sx, sy, size * px_scale, beat, BD_PANIC[b]);
@@ -813,12 +1054,13 @@ class Boids : Scene {
 		float snare = cue == null ? 0.0 : cue.snare_env(tt);
 		float bass = cue == null ? 0.0 : cue.bass_env(tt);
 		float breath = cue == null ? 0.0 : cue.riser(tt);
+		float blaze = cue == null ? 0.0 : cue.hit(tt);
 		int glit_on = itrunc(tt * 9.0) + itrunc(snare * 6.0);
 		float glit_cut = 0.8 - snare * 0.25;
 		float flock_gain = 1.8 * (1.0 + kick * 0.18);
 		// the rays swell with the kick and the bass, draw in before the strike, and the
 		// light sinks toward dusk as the scene runs
-		float swell = 0.45 + 0.55 * math::sin(tt * 0.45) * math::sin(tt * 0.45) + kick * 0.35 + bass * 0.15;
+		float swell = 0.45 + 0.55 * math::sin(tt * 0.45) * math::sin(tt * 0.45) + kick * 0.5 + snare * 0.2 + bass * 0.15 + blaze * 1.6;
 		int shine = itrunc(swell * (1.0 - breath * 0.7) * 16.0);
 		int dusk = itrunc(tt * 0.22);
 		int bw = sky_w;
@@ -854,6 +1096,67 @@ class Boids : Scene {
 				if (ph >= 0.0 && math::sin(ph + glit_on * 0.7) > glit_cut) { tone = 30 * 8; dk2 = lv2; }
 				grid[row + x2] = tone + (dk2 > 7 ? 7 : dk2);
 			}
+		}
+		shockwave(grid);
+	}
+
+	// the burst's shockwave: a ring of light racing out from the heart across the sky
+	void shockwave(var& grid) {
+		float since = burst_t < 0.0 ? -1.0 : tt - burst_t;
+		if (since < 0.0 || since > 0.9) { return; }
+		float ex = BD_BCX - cam_x;
+		float ey = BD_BCY - cam_y;
+		float ez = BD_BCZ - cam_z;
+		float zc = ex * fwx + ey * fwy + ez * fwz;
+		if (zc < 10.0) { return; }
+		float iz = focal / zc;
+		bsx = w * 0.5 + (ex * rx_ + ez * rz_) * iz;
+		bsy = h * 0.5 - (ex * upx + ey * upy + ez * upz) * iz;
+		float r1 = 4.0 + since * w * 1.1;
+		float r0 = r1 - 2.0 - since * 6.0;
+		int lift = itrunc((0.9 - since) * 9.0);
+		if (lift <= 0) { return; }
+		int y0 = itrunc(bsy - r1);
+		int y1 = itrunc(bsy + r1) + 1;
+		y0 = y0 < 0 ? 0 : y0;
+		y1 = y1 > horizon ? horizon : y1;
+		for (int y = y0; y < y1; ++y) {
+			float dy = y + 0.5 - bsy;
+			float oo = r1 * r1 - dy * dy;
+			if (oo <= 0.0) { continue; }
+			float ox = math::sqrt(oo);
+			float ii = r0 * r0 - dy * dy;
+			float ix = ii > 0.0 ? math::sqrt(ii) : 0.0;
+			for (int side = -1; side <= 1; side += 2) {
+				int xa = itrunc(bsx + side * ix);
+				int xb = itrunc(bsx + side * ox);
+				int lo = xa < xb ? xa : xb;
+				int hi = xa < xb ? xb : xa;
+				lo = lo < 0 ? 0 : lo;
+				hi = hi >= w ? w - 1 : hi;
+				for (int x = lo; x <= hi; ++x) {
+					int v = grid[y * w + x];
+					int tone = v / 8 + lift;
+					int dk = v % 8 - lift / 2;
+					grid[y * w + x] = (tone > 31 ? 31 : tone) * 8 + (dk < 0 ? 0 : dk);
+				}
+			}
+		}
+	}
+
+	// a bird flung out by the burst: a dark streak from where it was to where it is
+	void streak_line(int x0, int y0, int x1, int y1, float size) {
+		var& dn = dens;
+		int dx = x1 - x0;
+		int dy = y1 - y0;
+		int n = (dx < 0 ? -dx : dx) > (dy < 0 ? -dy : dy) ? (dx < 0 ? -dx : dx) : (dy < 0 ? -dy : dy);
+		n = n > 40 ? 40 : n;
+		float wgt = size > 1.0 ? 1.0 : (size < 0.3 ? 0.3 : size);
+		for (int k = 0; k <= n; ++k) {
+			int x = n == 0 ? x0 : x0 + dx * k / n;
+			int y = n == 0 ? y0 : y0 + dy * k / n;
+			if (x < 0 || x >= w || y < 0 || y >= horizon) { continue; }
+			dn[y * w + x] += wgt * (1.0 - k * 0.6 / (n + 1));
 		}
 	}
 

@@ -49,6 +49,7 @@ float SK_FLICK = 0.0;
 float SK_KAGE = 9.0;         // seconds since the cue's last kick
 float SK_KICK = 0.0;         // and its envelope
 float SK_ZOOM = 0.5;         // the lens: half the view's height at unit distance, punching in on the hits
+float SK_PUNCH = 0.0;        // how far it has punched in
 float SK_ENERGY = 0.5;       // the cue's energy
 float SK_HUE0 = 0.36;        // the wall's hue, following the chord
 float SK_WAKE = 1.0;         // 0 while the creature sleeps
@@ -954,7 +955,7 @@ class Ossuary : Scene {
 	void build() override {
 		name = "OSSUARY";
 		handle = "eight legs of inverse kinematics . an orb web . a moth that came too close";
-		replay = 41.0;
+		replay = 43.0;
 		SK_WORLD = pal.size();
 		for (int hq = 0; hq < 12; ++hq) {
 			var c = gfx.rainbow_rgb(hq * 0.5236 + 2.2);
@@ -1047,6 +1048,9 @@ class Ossuary : Scene {
 		wander = rng.next(628) * 0.01;
 	}
 
+	// twenty-two bars: the closing image holds well past the camera's draw back
+	int length_bars() override { return 22; }
+
 	array<float> hit_times() override { return [3.871, 9.677, 15.484, 29.032, 36.774]; }
 	array<int> hit_levels() override { return [1, 1, 1, 2, 1]; }
 
@@ -1061,7 +1065,8 @@ class Ossuary : Scene {
 		SK_HUE0 += (want - SK_HUE0) * 0.08;
 		// the lens is long, so the creature fills the frame; it punches in on each hit and breathes on the kick
 		float punch = cue.hit(t);
-		SK_ZOOM = 0.5 * (1.0 - punch * punch * 0.26 - SK_KICK * 0.015 * SK_WAKE);
+		SK_PUNCH = punch * punch;
+		SK_ZOOM = 0.5 * (1.0 - SK_PUNCH * 0.26 - SK_KICK * 0.015 * SK_WAKE);
 	}
 
 	void set_world(float t) {
@@ -1707,7 +1712,9 @@ class Ossuary : Scene {
 		// the rays trace at most about 5,200 pixels (a sextant grid is 2.25 times a half-block
 		// one) and the picture scales up to the grid; the web, the moth's dust and the
 		// particles draw over it at full size
-		float trace_k = math::sqrt(5200.0 / (w * h));
+		// from the strike through the wrap the creature fills the frame and every ray is dear, so fewer are traced
+		float close = smooth((tt - t_impact + 0.6) / 0.5) * (1.0 - smooth((tt - t_wrap1 - 0.3) / 1.2));
+		float trace_k = math::sqrt((5200.0 - close * 2500.0) * (1.0 - SK_PUNCH * 0.25) / (w * h));
 		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
 		int tw = itrunc(w * trace_k);
 		int th = itrunc(h * trace_k);

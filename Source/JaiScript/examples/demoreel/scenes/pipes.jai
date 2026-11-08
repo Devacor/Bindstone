@@ -21,6 +21,11 @@
 // sweeps every pipe and the frame flashes; the wipe is a CRT beam that leaves
 // the set behind it. Canon demands the teapot: ~2% of joints instead spawn the
 // jackodile's eye, a rainbow-flickering ball (re-splatted per frame so it shimmers).
+//
+// Scored to its cue: the first generation fills on the downbeat of bar 3, holds two
+// beats, wipes in two more and the second fills on bar 6, each fill a hit; the kick
+// punches the camera and lights the floor grid, the snare flares the chrome, every
+// chord change recolours the sun and the energy sets how fast the floor rushes in.
 
 class Pipes : Scene {
 	array<int> cells = [];   // 0 empty, else 1 + pipe*3 + kind (0 seg, 1 joint, 2 eye)
@@ -64,6 +69,8 @@ class Pipes : Scene {
 	float f_ct = 1.0;
 	float f_st = 0.0;
 	int flick = 0;
+	float scroll = 0.0;  // the floor grid's travel, faster as the music builds
+	int suns = 4;        // the sun's ramps, one per chord colour
 
 	void build() override {
 		name = "PIPEDREAM";
@@ -75,6 +82,9 @@ class Pipes : Scene {
 		cap = gw * gh * gd * 34 / 100;
 		sky_base = pal.gradient(32, [[4.0, 2.0, 18.0], [22.0, 8.0, 52.0], [92.0, 18.0, 96.0], [230.0, 60.0, 120.0], [255.0, 150.0, 90.0]]);
 		sun_base = pal.gradient(16, [[255.0, 236.0, 120.0], [255.0, 150.0, 70.0], [255.0, 60.0, 140.0]]);
+		pal.gradient(16, [[255.0, 226.0, 255.0], [214.0, 120.0, 255.0], [120.0, 60.0, 255.0]]);
+		pal.gradient(16, [[214.0, 255.0, 244.0], [80.0, 220.0, 255.0], [60.0, 110.0, 255.0]]);
+		pal.gradient(16, [[255.0, 250.0, 190.0], [255.0, 120.0, 60.0], [220.0, 30.0, 70.0]]);
 		floor_base = pal.gradient(8, [[5.0, 2.0, 12.0], [70.0, 16.0, 78.0]]);
 		grid_base = pal.gradient(8, [[40.0, 20.0, 90.0], [60.0, 220.0, 255.0]]);
 		pipe_base = pal.size();
@@ -230,21 +240,39 @@ class Pipes : Scene {
 		advance(p, x + DX[nd], y + DY[nd], z + DZ[nd]);
 	}
 
+	// the generations on the bar grid: the first fills by bar 3, holds two beats and
+	// wipes by bar 4; the second fills by bar 6 and holds to the end
+	float fill_end() { return gen == 0 ? MUSIC_BAR * 3.0 : MUSIC_BAR * 6.0; }
+	float fill_start() { return gen == 0 ? 0.0 : MUSIC_BAR * 4.0; }
+
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
+	array<int> hit_levels() override { return [2, 1, 2]; }
+
 	void update(float t, float dt) override {
 		tt = t;
+		float energy = cue == null ? 0.6 : cue.energy(t);
+		scroll += dt * 1.6 * (0.55 + 0.9 * energy);
 		if (phase == 0) {
-			step_acc += dt;
-			while (phase == 0 && step_acc >= 0.03) {
-				step_acc -= 0.03;
+			// grow toward the fill the clock calls for: steady, and full on the beat
+			float k = (t - fill_start()) / (fill_end() - fill_start());
+			k = k < 0.0 ? 0.0 : (k > 1.0 ? 1.0 : k);
+			int target = itrunc(cap * k);
+			int guard = 0;
+			while (filled < target && guard < 400) {
 				for (int p = 0; p < npipes; ++p) { step_one(p); }
-				if (filled >= cap) { phase = 1; phase_t = 0.0; step_acc = 0.0; done_t = t; }
+				++guard;
+			}
+			if (t >= fill_end()) {
+				phase = 1;
+				phase_t = 0.0;
+				done_t = fill_end();
 			}
 		} else if (phase == 1) {
 			phase_t += dt;
-			if (phase_t > 1.8) { phase = 2; phase_t = 0.0; }
+			if (gen == 0 && t >= fill_end() + MUSIC_BEAT * 2.0) { phase = 2; phase_t = t - (fill_end() + MUSIC_BEAT * 2.0); }
 		} else {
 			phase_t += dt;
-			if (phase_t > 1.3) { reset_volume(); }
+			if (t >= MUSIC_BAR * 4.0) { reset_volume(); }
 		}
 	}
 
@@ -369,13 +397,13 @@ class Pipes : Scene {
 	void render(var& grid) override {
 		if (phase == 2) {
 			// generation over: a CRT beam sweeps down and leaves the set behind it
-			int target = itrunc(phase_t * h / 1.1);
+			int target = itrunc(phase_t * h / (MUSIC_BEAT * 2.0));
 			target = target > h ? h : target;
 			int stop = target * w;
 			for (int q = last_wipe * w; q < stop; ++q) { pz[q] = 0.0; }
 			last_wipe = target;
 		} else {
-			flick = itrunc(tt * 8.0);
+			flick = itrunc(tt / MUSIC_STEP);
 			for (auto v : pending) { splat_voxel(v); }
 			pending.clear();
 			for (auto e : eggs) { splat_voxel(e); }   // the eyes shimmer every frame
@@ -384,7 +412,10 @@ class Pipes : Scene {
 		float grow = phase == 0 ? filled * 1.0 / cap : 1.0;
 		float since = tt - done_t;
 		float kick = phase == 0 ? 0.0 : (since < 1.8 ? since / 1.8 : 1.0);
-		float zoom = 0.86 + grow * 0.16 + kick * kick * 0.12;
+		float beat_kick = cue == null ? 0.0 : cue.kick_env(tt);
+		float snare = cue == null ? 0.0 : cue.snare_env(tt);
+		float rise = cue == null ? 0.0 : cue.riser(tt);
+		float zoom = (0.86 + grow * 0.16 + kick * kick * 0.12) * (1.0 + beat_kick * 0.035 + rise * 0.05);
 		float pan = math::sin(tt * 0.35 + gen * 2.1) * w * 0.03;
 		float cx = w * 0.5;
 		float cy = h * 0.5;
@@ -399,9 +430,10 @@ class Pipes : Scene {
 		// the glint: a bright diagonal band crosses every pipe as the volume fills,
 		// over a flash that lifts the whole frame and decays
 		float glint = since >= 0.0 && since < 0.9 ? since / 0.9 * (w + h) * 1.3 - h * 0.3 : -999.0;
-		int lift = since >= 0.0 && since < 0.35 ? itrunc((0.35 - since) * 20.0) : 0;
+		int lift = (since >= 0.0 && since < 0.35 ? itrunc((0.35 - since) * 20.0) : 0) + itrunc(snare * 3.5);
 		int hz = horizon();
-		float scroll = tt * 1.6;
+		int sun_shift = (cue == null ? 0 : cue.chord(tt) % suns) * 16;
+		int grid_kick = itrunc(beat_kick * 2.5);
 		int beam = phase == 2 ? last_wipe : -9;
 		var& pg = pgrid;
 		var& zz = pz;
@@ -417,7 +449,8 @@ class Pipes : Scene {
 			bool zline = y >= hz && math::floor(floor_z * 0.1 + scroll) != math::floor(next_z * 0.1 + scroll);
 			float near = y >= hz ? (y - hz) * 1.0 / (h - hz) : 0.0;
 			bool far = (floor_z - next_z) * 0.1 > 0.34;
-			int glow = itrunc(near * 7.99);
+			int glow = itrunc(near * 7.99) + grid_kick;
+			glow = glow > 7 ? 7 : glow;
 			int dark = floor_base + itrunc((1.0 - near) * 7.99);
 			float gstep = floor_z * 0.045;
 			bool xfar = gstep > 0.17;
@@ -438,6 +471,7 @@ class Pipes : Scene {
 					}
 				} else if (y < hz) {
 					ink = bd[i];
+					if (ink >= sun_base && ink < sun_base + 16) { ink += sun_shift; }
 				} else {
 					float gx = (x - cx) * gstep;
 					bool xline = math::floor(gx) != math::floor(gx + gstep);

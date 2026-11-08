@@ -48,6 +48,7 @@ float SK_LX = 0.0; float SK_LY = 0.0; float SK_LZ = 0.0;
 float SK_FLICK = 0.0;
 float SK_KAGE = 9.0;         // seconds since the cue's last kick
 float SK_KICK = 0.0;         // and its envelope
+float SK_ZOOM = 0.5;         // the lens: half the view's height at unit distance, punching in on the hits
 float SK_ENERGY = 0.5;       // the cue's energy
 float SK_HUE0 = 0.36;        // the wall's hue, following the chord
 float SK_WAKE = 1.0;         // 0 while the creature sleeps
@@ -815,7 +816,7 @@ function sk_row(int y) -> array<int> {
 	for (int k = 0; k < 64; ++k) { cand.push(0); }
 	int ww = SK_W;
 	float half_h = SK_H * 0.5;
-	float zoom = 0.6 / half_h;
+	float zoom = SK_ZOOM / half_h;
 	float v = (half_h - y - 0.5) * zoom;
 	// the row's rays all lie in the plane through the eye spanned by R and F + U v: a capsule (0..SK_CROWN0) or a leg glow
 	// (100 + g) farther from that plane than its reach passes near none of them, so the pixels test only the rest
@@ -1058,6 +1059,9 @@ class Ossuary : Scene {
 		SK_ENERGY = cue.energy(t);
 		float want = 0.34 + cue.chord(t) / 12.0 * 0.12 + cue.hit(t) * 0.06;
 		SK_HUE0 += (want - SK_HUE0) * 0.08;
+		// the lens is long, so the creature fills the frame; it punches in on each hit and breathes on the kick
+		float punch = cue.hit(t);
+		SK_ZOOM = 0.5 * (1.0 - punch * punch * 0.26 - SK_KICK * 0.015 * SK_WAKE);
 	}
 
 	void set_world(float t) {
@@ -1566,8 +1570,8 @@ class Ossuary : Scene {
 		float hz = bz + uz * bob;
 		float orbit = 2.4 + t * 0.2 + 0.5 * math::sin(t * 0.13);
 		float wide = 1.0 + 1.1 * (1.0 - smooth((t - t_wake) / 2.5));
-		float oc = math::cos(orbit) * 2.1 * wide;
-		float os = math::sin(orbit) * 2.1 * wide;
+		float oc = math::cos(orbit) * 1.7 * wide;
+		float os = math::sin(orbit) * 1.7 * wide;
 		float dex = hx + fx * oc + rx * os + ux * 1.0 * wide;
 		float dey = hy + fy * oc + ry * os + uy * 1.0 * wide;
 		float dez = hz + fz * oc + rz * os + uz * 1.0 * wide;
@@ -1581,7 +1585,7 @@ class Ossuary : Scene {
 				moth_pose(t);
 				wtx += ((hx + mox) * 0.5 - wtx) * near; wty += ((hy + moy) * 0.5 - wty) * near; wtz += ((hz + moz) * 0.5 - wtz) * near;
 			}
-			float dist = 3.6 + (2.6 - 3.6) * near + 1.6 * smooth((t - t_wrap1 + 0.4) / 2.8);
+			float dist = 3.4 + (2.0 - 3.4) * near + 1.6 * smooth((t - t_wrap1 + 0.4) / 2.8);
 			float oa = 0.3 + 0.3 * math::sin(t * 0.19);
 			float el = 0.45 + 0.15 * math::sin(t * 0.31);
 			float dx = nnx * math::cos(oa) + e1x * math::sin(oa) + e2x * el;
@@ -1700,10 +1704,10 @@ class Ossuary : Scene {
 
 	void render(var& grid) override {
 		set_world(tt);
-		// the rays trace at most about 7,000 pixels (a sextant grid is 2.25 times a half-block
+		// the rays trace at most about 5,200 pixels (a sextant grid is 2.25 times a half-block
 		// one) and the picture scales up to the grid; the web, the moth's dust and the
 		// particles draw over it at full size
-		float trace_k = math::sqrt(7000.0 / (w * h));
+		float trace_k = math::sqrt(5200.0 / (w * h));
 		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
 		int tw = itrunc(w * trace_k);
 		int th = itrunc(h * trace_k);
@@ -1876,8 +1880,72 @@ class Ossuary : Scene {
 				idx = idx + 1;
 			}
 		}
+		light_shafts(grid);
 		draw_web(grid);
 		draw_particles(grid);
+		strike_shake(grid);
+	}
+
+	// shafts of light fall through the chamber from high off the frame's right, swaying slowly and
+	// brightening on the kick; dust drifts in them
+	void light_shafts(var& grid) {
+		if (SK_WAKE <= 0.0) { return; }
+		float lsx = w * 0.84;
+		float lsy = 0.0 - h * 0.4;
+		float reach = 1.0 / (h * 2.2);
+		float boost = (0.55 + 0.7 * SK_KICK + (cue != null ? cue.hit(tt) * 0.6 : 0.0)) * SK_WAKE;
+		int idx = 0;
+		for (int y = 0; y < h; ++y) {
+			float ay = y - lsy;
+			for (int x = 0; x < w; ++x) {
+				int v = grid[idx];
+				bool wall = v >= SK_WORLD && v < SK_WORLD + 144;
+				bool fog = v >= SK_FOG && v < SK_FOG + 10;
+				if (wall || fog) {
+					// a line through the light keeps its slope, so the slope names the shaft
+					float ax = x - lsx;
+					float ang = ax / ay;
+					float beam = math::sin(ang * 17.0 + tt * 0.05 + math::sin(ang * 5.0 + tt * 0.11) * 1.5);
+					if (beam > 0.3) {
+						float fall = 1.0 - math::sqrt(ax * ax + ay * ay) * reach;
+						int add = itrunc((beam - 0.3) * 10.0 * (fall < 0.0 ? 0.0 : fall) * boost);
+						if (add > 0) {
+							if (wall) {
+								int lv = (v - SK_WORLD) % 12;
+								grid[idx] = v + (lv + add > 11 ? 11 - lv : add);
+							} else {
+								int lv2 = v - SK_FOG;
+								grid[idx] = v + (lv2 + add > 9 ? 9 - lv2 : add);
+							}
+							// a mote of dust in the beam
+							int mote = (x * 7349 + y * 1931 + itrunc(tt * 9.0) * 31) % 997;
+							if (mote < 6 && beam > 0.8) { grid[idx] = SK_SILK + ((x + y) % 8) * 6 + 2 + mote % 3; }
+						}
+					}
+				}
+				++idx;
+			}
+		}
+	}
+
+	// the strike shakes the frame for half a second
+	void strike_shake(var& grid) {
+		float s = tt - t_impact;
+		if (s < 0.0 || s > 0.5) { return; }
+		float amp = (0.5 - s) * w * 0.05;
+		array<int> row = [];
+		for (int x = 0; x < w; ++x) { row.push(0); }
+		for (int y = 0; y < h; ++y) {
+			int off = itrunc(math::sin(y * 0.7 + tt * 61.0) * amp);
+			if (off == 0) { continue; }
+			int base = y * w;
+			for (int x2 = 0; x2 < w; ++x2) { row[x2] = grid[base + x2]; }
+			for (int x3 = 0; x3 < w; ++x3) {
+				int from = x3 - off;
+				from = from < 0 ? 0 : (from >= w ? w - 1 : from);
+				grid[base + x3] = row[from];
+			}
+		}
 	}
 
 	void pose_moth() {
@@ -1916,7 +1984,7 @@ class Ossuary : Scene {
 		float zc = ox * SK_FX + oy * SK_FY + oz * SK_FZ;
 		if (zc < 0.08) { return false; }
 		float half_h = h * 0.5;
-		float scale = half_h / (0.6 * zc);
+		float scale = half_h / (SK_ZOOM * zc);
 		qsx = (ox * SK_RX + oy * SK_RY + oz * SK_RZ) * scale + w * 0.5;
 		qsy = half_h - (ox * SK_UX + oy * SK_UY + oz * SK_UZ) * scale;
 		qzc = zc;
@@ -1980,6 +2048,7 @@ class Ossuary : Scene {
 				float r = len * s / 12.0;
 				web_point(ca * r, sa * r);
 				thread(grid, px, py, pz, wx, wy, wz, 0.78);
+				if (grow >= 1.0 && s % 3 == 0 && math::sin(tt * 1.1 + k * 2.3 + s) > 0.9 - SK_KICK * 0.1) { glint(grid, wx, wy, wz); }
 				px = wx; py = wy; pz = wz;
 			}
 			if (grow < 1.0) { glint(grid, px, py, pz); }
@@ -2008,7 +2077,7 @@ class Ossuary : Scene {
 				if (spl[i] > laid) { break; }
 				web_point(spa[i], spb[i]);
 				thread(grid, px, py, pz, wx, wy, wz, 0.88);
-				if (math::sin(tt * 1.3 + i * 1.7) > 0.93 - SK_KICK * 0.08) { glint(grid, wx, wy, wz); }
+				if (math::sin(tt * 1.3 + i * 1.7) > 0.84 - SK_KICK * 0.12) { glint(grid, wx, wy, wz); }
 				px = wx; py = wy; pz = wz;
 			}
 			if (tt < t_spiral1) {

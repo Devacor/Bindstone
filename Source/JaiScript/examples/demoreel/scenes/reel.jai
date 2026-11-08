@@ -97,6 +97,7 @@ class Reel {
 	// into FINALE, and FINALE irises back to the start
 	array<int> out_transition = [5, 8, 7, 3, 4, 5, 7, 6, 8, 5, 3, 5];
 	int trans_count = 0;
+	int trans_frame = 0;
 
 	array<int> grid_a = [];
 	array<int> grid_b = [];
@@ -273,6 +274,7 @@ class Reel {
 		trans_t = 0.0;
 		trans_kind = out_transition[cur_idx];
 		++trans_count;
+		trans_frame = 0;
 		int m = 0;
 		for (int x = 0; x < pw; ++x) {
 			m += ((x * 7 + trans_count * 13 + (x * x) % 11) % 3) - 1;
@@ -530,7 +532,10 @@ class Reel {
 		cur.update(scene_t, step);
 		if (in_trans) {
 			trans_t += step;
-			render_scene(cur, grid_a, small_a);
+			// two scenes draw through a cut: the departing one draws every other frame (the
+			// transition's own motion carries it), so the heaviest pairs hold the frame rate
+			if (trans_frame % 2 == 0) { render_scene(cur, grid_a, small_a); }
+			++trans_frame;
 			nxt.update(trans_t, step);
 			render_scene(nxt, grid_b, small_b);
 			float prog = trans_t / trans_len;

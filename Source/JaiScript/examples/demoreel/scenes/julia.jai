@@ -10,7 +10,8 @@
 // fast canyon run as c jumps to a new set. The set's inside is still water: it
 // mirrors the ridges and the sky (ripples wobbling the mirror on the kick), a moon
 // lays a glitter path across it, stars turn overhead, the crystal ridge tops spark
-// in the light, and the whole frame banks into the flight's turns.
+// in the light, and the land banks into the flight's turns (the horizon tilts across
+// the columns as they are cast).
 
 float JU_CA = 0.0;
 float JU_CB = 0.0;
@@ -40,6 +41,7 @@ float JU_ZFAR = 2.6;
 float JU_WATER = 0.13;      // the lake's surface, in field height
 float JU_T = 0.0;
 float JU_RIPPLE = 0.0;
+float JU_BANK = 0.0;         // the bank, as the horizon's rise per column
 
 // one row of the height field: the smooth escape count rises to the boundary, the inside is a terraced mesa
 function julia_hrow(int gy) -> array<int> {
@@ -98,7 +100,8 @@ function julia_col(int x) -> array<int> {
 	float dy = math::sin(a);
 	float corr = math::cos(rel);
 	float focal = hh * 0.95;
-	float horizon = JU_HORIZON;
+	// the bank tilts the horizon across the columns, which rolls the land without a pass of its own
+	float horizon = JU_HORIZON + (x + 0.5 - JU_W * 0.5) * JU_BANK;
 	float alt = JU_ALT;
 	float hs = JU_HSCALE;
 	float lift = JU_LIFT;
@@ -195,11 +198,12 @@ class Julia : Scene {
 	int moon = 0;
 	int glitter = 0;
 	int stars = 0;
-	array<int> frame = [];
 	float moon_az = 0.6;     // the moon's bearing in the world
 
 	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
 	array<int> hit_levels() override { return [2, 1]; }
+	// seven bars: the climb out over the set ends on bar 6 and the high view holds a bar
+	int length_bars() override { return 7; }
 
 	void build() override {
 		name = "JULIA";
@@ -253,7 +257,6 @@ class Julia : Scene {
 		moon = pal.ramp(8, 120.0, 90.0, 120.0, 255.0, 246.0, 220.0);
 		glitter = pal.ramp(4, 120.0, 110.0, 150.0, 255.0, 250.0, 230.0);
 		stars = pal.ramp(4, 60.0, 60.0, 100.0, 255.0, 255.0, 255.0);
-		frame = gfx.make_grid(w * h);
 		JU_HT = gfx.make_fgrid(JU_N * JU_N);
 		JU_HUE = gfx.make_grid(JU_N * JU_N);
 	}
@@ -294,7 +297,7 @@ class Julia : Scene {
 		// altitude: cruising, climbing high on the riser, skimming the canyon after the drop
 		float cruise = 0.32 + 0.06 * math::sin(t * 1.1);
 		float alt = dropped ? 0.22 + 0.05 * math::sin(t * 3.0) : cruise + riser * riser * 0.9;
-		alt += smooth(MUSIC_BAR * 5.4, MUSIC_BAR * 6.0, t) * 0.8;
+		alt += smooth(MUSIC_BAR * 5.0, MUSIC_BAR * 6.0, t) * 0.42;
 		JU_ALT = alt;
 		JU_HSCALE = 0.18 * (1.0 + kick * 0.45 + hitv * 0.5);
 		JU_HORIZON = h * (0.34 + riser * 0.22) - kick * h * 0.015 + 0.04 * h * math::sin(t * 0.9);
@@ -347,18 +350,21 @@ class Julia : Scene {
 		if (JU_ALT < floor_alt) { JU_ALT = floor_alt; }
 		JU_T = t;
 		JU_RIPPLE = kick;
+		// the bank: the frame rolls into the flight's turn, harder after the drop
+		float bank = 0.0 - 0.12 * math::cos(t * 0.7) - (dropped ? 0.18 * math::sin(t * 1.3) : 0.0) + snare * 0.03;
+		JU_BANK = math::sin(bank) / math::cos(bank);
 		var cols = parallel_transform(JU_COLS, julia_col);
 		int sky = JU_SKY + (JU_SKYLIFT > 3 ? 3 : JU_SKYLIFT) * 24;
-		float hz = JU_HORIZON;
+		float hz0 = JU_HORIZON;
 		// the moon rides ahead of the flight, drifting across the frame as it banks
 		float rel = 0.22 * math::sin(t * 0.35) - 0.12;
 		float mx = w * 0.5 + rel / JU_FOV * w;
-		float my = hz * 0.4;
+		float my = hz0 * 0.4 + (mx - w * 0.5) * JU_BANK;
 		float mr = h * 0.1;
-		var& fr = frame;
 		for (int x = 0; x < w; ++x) {
 			var& col = cols[x];
 			float ddx = x - mx;
+			float hz = hz0 + (x + 0.5 - w * 0.5) * JU_BANK;
 			bool glitter_col = ddx < mr * 0.7 && ddx > -mr * 0.7;
 			for (int y = 0; y < h; ++y) {
 				int c = col[y];
@@ -390,27 +396,7 @@ class Julia : Scene {
 						if (((hs2 >> 12) & 7) < 3) { c = glitter + ((hs2 >> 16) & 3); }
 					}
 				}
-				fr[y * w + x] = c;
-			}
-		}
-		// the bank: the frame rolls into the flight's turn (harder after the drop), each pixel
-		// reading the unrolled frame about the centre
-		float bank = 0.0 - 0.12 * math::cos(t * 0.7) - (dropped ? 0.18 * math::sin(t * 1.3) : 0.0) + snare * 0.03;
-		float cb2 = math::cos(bank) / 1.12;
-		float sb2 = math::sin(bank) / 1.12;
-		float ox = w * 0.5;
-		float oy = h * 0.5;
-		int gi = 0;
-		for (int y4 = 0; y4 < h; ++y4) {
-			float vy = y4 + 0.5 - oy;
-			for (int x4 = 0; x4 < w; ++x4) {
-				float vx = x4 + 0.5 - ox;
-				int sx = itrunc(ox + vx * cb2 - vy * sb2);
-				int sy = itrunc(oy + vx * sb2 + vy * cb2);
-				sx = sx < 0 ? 0 : (sx >= w ? w - 1 : sx);
-				sy = sy < 0 ? 0 : (sy >= h ? h - 1 : sy);
-				grid[gi] = fr[sy * w + sx];
-				++gi;
+				grid[y * w + x] = c;
 			}
 		}
 	}

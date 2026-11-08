@@ -1,20 +1,20 @@
-// OSSUARY — a horned, three-eyed skull on a spider's body crawls a landscape
-// that will not hold still, then spins a web and catches a moth. The world is
-// one raymarched field that morphs between three triply periodic surfaces
-// (gyroid, Schwarz P, Schwarz D) under a flowing domain warp, its walls an
-// oil slick whose hue turns with the viewing angle, crawled by contour lines
-// and rings of light pulsing out from the creature. The creature walks the
-// sheet on eight three-segment IK legs in a tetrapod gait, its glossy
-// iridescent abdomen marked with crawling chevrons, until the sheet melts away
-// into a chamber around it: it climbs its dragline to the hub, casts the
-// spokes, lays the capture spiral from the rim inward at a scuttle, and waits
-// head-down with its skull reared toward the viewer. A moth with eyespotted
-// wings flutters in and strikes; the strike rings out through every thread,
-// the spider runs it down, turns and wraps it in a cocoon that spins as it
-// closes. The silk is drawn over the trace, depth-tested, its hue turning with
-// each thread's angle; the moth and cocoon are distance fields in the same
-// march as the spider. A crown of flame floats above the skull under a spinning
-// ruby, embers spiral up around it. Rows trace in parallel.
+// OSSUARY — a story in seven acts over 21 bars. A horned, three-eyed skull on a
+// spider's body sleeps on a landscape that will not hold still: one raymarched
+// field morphing between three triply periodic surfaces (gyroid, Schwarz P,
+// Schwarz D) under a flowing domain warp, its walls dark and quiet, veined with a
+// slow glow. It wakes as its crown of flame catches, and explores the sheet on
+// eight three-segment IK legs in a tetrapod gait, until the sheet melts away into
+// a chamber around it. It climbs its dragline to the hub, casts the spokes one by
+// one, lays the capture spiral from the rim inward and waits, head-down, skull
+// reared toward the viewer, while dew glints on the silk. A moth with eyespotted
+// wings flutters in and strikes on the downbeat; the strike rings out through
+// every thread, the spider runs it down, turns and wraps it in a cocoon that spins
+// as it closes, and the camera draws back on the web, the cocoon and the resting
+// hunter. The walls breathe with the music: the veins light on the kick, a ring of
+// light leaves the creature on every kick, the wall's hue follows the chord and
+// its light the cue's energy. The silk is drawn over the trace, depth-tested; the
+// moth and cocoon are distance fields in the same march as the spider. Rows trace
+// in parallel.
 
 float SK_T = 0.0;
 float SK_S = 0.8;
@@ -46,6 +46,11 @@ float SK_QFX = 0.0; float SK_QFY = 0.0; float SK_QFZ = 1.0;
 float SK_QUX = 0.0; float SK_QUY = 1.0; float SK_QUZ = 0.0;
 float SK_LX = 0.0; float SK_LY = 0.0; float SK_LZ = 0.0;
 float SK_FLICK = 0.0;
+float SK_KAGE = 9.0;         // seconds since the cue's last kick
+float SK_KICK = 0.0;         // and its envelope
+float SK_ENERGY = 0.5;       // the cue's energy
+float SK_HUE0 = 0.36;        // the wall's hue, following the chord
+float SK_WAKE = 1.0;         // 0 while the creature sleeps
 array<float> SK_CAX = [];
 array<float> SK_CAY = [];
 array<float> SK_CAZ = [];
@@ -648,37 +653,35 @@ function sk_trace(float dx, float dy, float dz, int px, int py, array<int>& cand
 		float vz = z * s;
 		float vein = math::sin(vx) * math::cos(vy) + math::sin(vy) * math::cos(vz) + math::sin(vz) * math::cos(vx);
 		float va = vein < 0.0 ? -vein : vein;
-		float pulse = 0.5 + 0.5 * math::sin(vein * 5.0 - SK_T * 3.4 + vz * 0.25);
+		float pulse = (0.35 + 0.65 * SK_KICK) * (0.5 + 0.5 * math::sin(vein * 5.0 - SK_T * 1.6 + vz * 0.25));
 		float ao = 1.0 - i * 0.011;
 		ao = ao < 0.3 ? 0.3 : ao;
-		float lit = (0.06 + head * 0.7) * fog * ao;
+		float lit = (0.04 + head * 0.5) * fog * ao;
 		// the walls glow in slow drifting bands of their own, the chamber's cut faces brightest
 		float far = 1.0 - t / 24.0;
 		float swirl = math::sin(vx * 0.35 + vy * 0.45 - vz * 0.3 + g * 3.0 + SK_T * 1.4) + math::sin(vy * 0.3 - vx * 0.25 + SK_T * 0.9);
-		lit = lit + (0.12 + 0.08 * swirl + (cut ? 0.14 : 0.0)) * far;
+		lit = lit + (0.05 + 0.02 * swirl + (cut ? 0.07 : 0.0)) * far * (0.6 + 0.6 * SK_ENERGY);
 		if (va < 0.3) {
 			float edge = 1.0 - va / 0.3;
-			float glowv = pulse * pulse * edge * 1.15 * (0.35 + fog * 0.65);
+			float glowv = pulse * pulse * edge * 0.8 * (0.35 + fog * 0.65) * (0.4 + 0.6 * SK_WAKE);
 			lit = glowv > lit ? glowv : lit * 0.4;
 		}
 		// oil-slick hue: it turns with the viewing angle, crawls with time and jumps on the veins
-		float hue = (vx * 0.11 + vy * 0.07 - vz * 0.05) * 0.3 + g * 0.35 + SK_T * 0.08 + t * 0.035 + head * 0.55 + (va < 0.3 ? 0.33 : 0.0);
+		float hue = SK_HUE0 + ((vx * 0.11 + vy * 0.07 - vz * 0.05) * 0.3 + g * 0.35 + t * 0.035 + head * 0.55) * 0.12 + (va < 0.3 ? 0.06 : 0.0);
 		// contour lines of the field crawl over the walls; on the chamber's cut faces they are the sheet's strata
 		float cv = (cut ? g * 16.0 : g * 2.4) - SK_T * 0.7;
 		float cf = cv - math::floor(cv);
-		if (cf < 0.1) {
-			float c2 = (0.1 - cf) * 9.0 * far;
+		if (cf < 0.06 && cut) {
+			float c2 = (0.06 - cf) * 6.0 * far;
 			lit = lit > c2 ? lit + c2 * 0.3 : c2;
-			hue = hue + 0.5;
 		}
 		// rings of light pulse out through the walls from the creature
 		float plx = x - SK_PLX; float ply = y - SK_PLY; float plz = z - SK_PLZ;
 		float pd = math::sqrt(plx * plx + ply * ply + plz * plz);
-		float rp = pd * 0.85 - SK_T * 1.25;
-		float rf = rp - math::floor(rp);
-		if (rf < 0.08 && pd < 12.0) {
-			lit = lit + (1.0 - rf / 0.08) * (1.0 - pd / 12.0) * 1.1;
-			hue = hue + 0.17;
+		float rf = pd - SK_KAGE * 6.0;
+		rf = rf < 0.0 ? -rf : rf;
+		if (rf < 0.22 && pd < 9.0) {
+			lit = lit + (1.0 - rf / 0.22) * (1.0 - pd / 9.0) * 0.7 * (0.5 + SK_ENERGY);
 		}
 		if (ember * fog > lit * 1.15 + (va < 0.3 ? 0.25 : 0.0)) {
 			int e = itrunc((ember * fog * 0.85 + lit * 0.3) * 11.0 + dith + 0.5);
@@ -899,24 +902,26 @@ class Ossuary : Scene {
 	float wander = 0.0;
 	float spawn_acc = 0.0;
 
-	// the story: it crawls the sheet until the sheet melts away into a chamber around it, climbs its dragline to
-	// the hub, casts the spokes, lays the capture spiral from the rim inward and waits head-down; a moth blunders
-	// into the web, the strike rings out through the threads, and the spider runs it down, turns and wraps it
-	float t_melt = 2.3;
-	float t_lift = 3.0;
-	float t_hub = 3.8;
-	float t_spokes = 3.9;
-	float t_out = 5.5;
-	float t_spiral0 = 6.0;
-	float t_spiral1 = 11.2;
-	float t_home = 11.8;
-	float t_moth = 10.6;
-	float t_impact = 13.2;
-	float t_rush = 13.5;
-	float t_reach = 14.4;
-	float t_turn = 14.9;
-	float t_wrap0 = 15.0;
-	float t_wrap1 = 18.6;
+	// the story, act by act on the cue's bars: it sleeps (bars 0-1), wakes and explores the sheet (2-4), the sheet
+	// melts into a chamber and it climbs to the hub (5-6), casts the spokes and lays the spiral (6-12), waits (13-14),
+	// the moth strikes on bar 15 and the spider runs it down and wraps it (15-18), and the camera draws back (19-20)
+	float t_wake = 3.871;
+	float t_melt = 9.677;
+	float t_lift = 10.9;
+	float t_hub = 12.0;
+	float t_spokes = 12.2;
+	float t_spoke_gap = 0.16;
+	float t_out = 14.9;
+	float t_spiral0 = 15.484;
+	float t_spiral1 = 24.2;
+	float t_home = 25.2;
+	float t_moth = 27.1;
+	float t_impact = 29.032;
+	float t_rush = 29.6;
+	float t_reach = 30.6;
+	float t_turn = 31.2;
+	float t_wrap0 = 31.4;
+	float t_wrap1 = 36.774;
 	float hub_up = 2.0;
 	float cav_full = 4.6;
 	bool planned = false;
@@ -948,7 +953,7 @@ class Ossuary : Scene {
 	void build() override {
 		name = "OSSUARY";
 		handle = "eight legs of inverse kinematics . an orb web . a moth that came too close";
-		replay = 20.0;
+		replay = 41.0;
 		SK_WORLD = pal.size();
 		for (int hq = 0; hq < 12; ++hq) {
 			var c = gfx.rainbow_rgb(hq * 0.5236 + 2.2);
@@ -956,9 +961,9 @@ class Ossuary : Scene {
 				float f = s / 11.0;
 				float k = f * f * 0.9 + f * 0.25;
 				float wh = f > 0.82 ? (f - 0.82) * 2.2 : 0.0;
-				float r = 5.0 + c[0] * k * 0.9;
-				float g = 2.0 + c[1] * k * 0.9;
-				float b = 10.0 + c[2] * k * 0.9;
+				float r = 3.0 + c[0] * k * 0.62;
+				float g = 2.0 + c[1] * k * 0.62;
+				float b = 7.0 + c[2] * k * 0.62;
 				pal.add(r + (255.0 - r) * wh, g + (255.0 - g) * wh, b + (255.0 - b) * wh);
 			}
 		}
@@ -1019,9 +1024,9 @@ class Ossuary : Scene {
 		SK_SILK = pal.size();
 		for (int hq = 0; hq < 8; ++hq) {
 			var c = gfx.rainbow_rgb(hq * 0.7854 + 0.3);
-			float cr = c[0] * 0.55 + 115.0;
-			float cg = c[1] * 0.55 + 115.0;
-			float cb = c[2] * 0.55 + 115.0;
+			float cr = c[0] * 0.12 + 196.0;
+			float cg = c[1] * 0.12 + 204.0;
+			float cb = c[2] * 0.12 + 222.0;
 			for (int l = 0; l < 6; ++l) {
 				float f = 0.14 + 0.86 * (l + 1) / 6.0;
 				pal.add(cr * f, cg * f, cb * f);
@@ -1039,6 +1044,20 @@ class Ossuary : Scene {
 			plife.push(0.0); prate.push(1.0);
 		}
 		wander = rng.next(628) * 0.01;
+	}
+
+	array<float> hit_times() override { return [3.871, 9.677, 15.484, 29.032, 36.774]; }
+	array<int> hit_levels() override { return [1, 1, 1, 2, 1]; }
+
+	// the music the walls breathe with: the last kick's age and envelope, the energy, the chord's hue
+	void hear(float t) {
+		if (cue == null) { return; }
+		int k = cue.kick.last(t / MUSIC_STEP + 0.0001);
+		SK_KAGE = k < 0 ? 9.0 : t - cue.kick.at[k] * MUSIC_STEP;
+		SK_KICK = cue.kick_env(t);
+		SK_ENERGY = cue.energy(t);
+		float want = 0.34 + cue.chord(t) / 12.0 * 0.12 + cue.hit(t) * 0.06;
+		SK_HUE0 += (want - SK_HUE0) * 0.08;
 	}
 
 	void set_world(float t) {
@@ -1392,7 +1411,7 @@ class Ossuary : Scene {
 		float hz = bz + uz * 0.2;
 		// embers rise along the sheet's normal, or the web's up once it hangs there
 		float lx = on_web ? e2x : ux; float ly = on_web ? e2y : uy; float lz = on_web ? e2z : uz;
-		spawn_acc += dt * (on_web ? 25.0 : 110.0);
+		spawn_acc += dt * (on_web ? 8.0 : 22.0) * SK_WAKE * (0.4 + SK_KICK * 1.6 + SK_ENERGY * 0.5);
 		while (spawn_acc >= 1.0) {
 			spawn_acc -= 1.0;
 			int kind = rng.next(14);
@@ -1444,16 +1463,18 @@ class Ossuary : Scene {
 			cxs = bx; cys = by; czs = bz;
 		}
 		set_world(t);
+		hear(t);
+		SK_WAKE = smooth((t - t_wake + 0.4) / 1.0);
 		if (!on_web) {
 			float turn = 0.75 * math::sin(t * 0.53 + wander) + 0.45 * math::sin(t * 1.37 + wander * 2.0) + 0.2 * math::sin(t * 2.9);
-			float ang = turn * dt * 1.6;
+			float ang = turn * dt * 1.2 * smooth((t - t_wake) / 1.2);
 			float c = math::cos(ang);
 			float s = math::sin(ang);
 			float nfx = fx * c + rx * s;
 			float nfy = fy * c + ry * s;
 			float nfz = fz * c + rz * s;
 			fx = nfx; fy = nfy; fz = nfz;
-			float speed = 0.55 + 0.2 * math::sin(t * 0.8);
+			float speed = (0.38 + 0.12 * math::sin(t * 0.8)) * smooth((t - t_wake) / 1.2);
 			bx += fx * speed * dt;
 			by += fy * speed * dt;
 			bz += fz * speed * dt;
@@ -1543,23 +1564,24 @@ class Ossuary : Scene {
 		float hx = bx + ux * bob;
 		float hy = by + uy * bob;
 		float hz = bz + uz * bob;
-		float orbit = 2.4 + t * 0.33 + 0.5 * math::sin(t * 0.17);
-		float oc = math::cos(orbit) * 2.1;
-		float os = math::sin(orbit) * 2.1;
-		float dex = hx + fx * oc + rx * os + ux * 1.0;
-		float dey = hy + fy * oc + ry * os + uy * 1.0;
-		float dez = hz + fz * oc + rz * os + uz * 1.0;
+		float orbit = 2.4 + t * 0.2 + 0.5 * math::sin(t * 0.13);
+		float wide = 1.0 + 1.1 * (1.0 - smooth((t - t_wake) / 2.5));
+		float oc = math::cos(orbit) * 2.1 * wide;
+		float os = math::sin(orbit) * 2.1 * wide;
+		float dex = hx + fx * oc + rx * os + ux * 1.0 * wide;
+		float dey = hy + fy * oc + ry * os + uy * 1.0 * wide;
+		float dez = hz + fz * oc + rz * os + uz * 1.0 * wide;
 		float tgx = hx; float tgy = hy; float tgz = hz;
 		float lax = hx + fx * 0.3 + ux * 0.25; float lay = hy + fy * 0.3 + uy * 0.25; float laz = hz + fz * 0.3 + uz * 0.25;
 		float min_reach = 1.5;
 		if (planned) {
-			float near = smooth((t - t_impact + 0.4) / (t_reach - t_impact + 0.4));
+			float near = smooth((t - t_impact + 0.4) / (t_reach - t_impact + 0.4)) * (1.0 - smooth((t - t_wrap1 + 0.4) / 2.8));
 			float wtx = hbx + (hx - hbx) * 0.55; float wty = hby + (hy - hby) * 0.55; float wtz = hbz + (hz - hbz) * 0.55;
 			if (on_web && t > t_moth) {
 				moth_pose(t);
 				wtx += ((hx + mox) * 0.5 - wtx) * near; wty += ((hy + moy) * 0.5 - wty) * near; wtz += ((hz + moz) * 0.5 - wtz) * near;
 			}
-			float dist = 3.6 + (2.6 - 3.6) * near;
+			float dist = 3.6 + (2.6 - 3.6) * near + 1.6 * smooth((t - t_wrap1 + 0.4) / 2.8);
 			float oa = 0.3 + 0.3 * math::sin(t * 0.19);
 			float el = 0.45 + 0.15 * math::sin(t * 0.31);
 			float dx = nnx * math::cos(oa) + e1x * math::sin(oa) + e2x * el;
@@ -1788,7 +1810,7 @@ class Ossuary : Scene {
 			float a = k * 0.8976 + tt * 0.6;
 			float ca = math::cos(a) * 0.2;
 			float sa = math::sin(a) * 0.2;
-			float flame = 0.1 + 0.05 * math::sin(tt * 9.0 + k * 1.9) + 0.03 * math::sin(tt * 23.0 + k);
+			float flame = (0.02 + 0.08 * SK_WAKE) + (0.05 * math::sin(tt * 9.0 + k * 1.9) + 0.03 * math::sin(tt * 23.0 + k)) * SK_WAKE + 0.03 * SK_KICK * SK_WAKE;
 			float bxk = SK_CRX + hfx * ca + rx * sa;
 			float byk = SK_CRY + hfy * ca + ry * sa;
 			float bzk = SK_CRZ + hfz * ca + rz * sa;
@@ -1912,7 +1934,7 @@ class Ossuary : Scene {
 		float ady = ddy < 0.0 ? -ddy : ddy;
 		int steps = itrunc((adx > ady ? adx : ady) + 1.0);
 		if (steps > 400) { return; }
-		float hue = math::atan2(ddy, ddx) * 1.27 + tt * 0.7 + (sx0 + sy0) * 0.02;
+		float hue = math::atan2(ddy, ddx) * 0.4 + tt * 0.15 + (sx0 + sy0) * 0.006;
 		hue = hue - math::floor(hue / 8.0) * 8.0;
 		int hq = itrunc(hue);
 		hq = hq > 7 ? 7 : hq;
@@ -1946,9 +1968,9 @@ class Ossuary : Scene {
 		if (!on_web) { return; }
 		// the spokes: the dragline first, then the rest cast one after another, a spark at each growing tip
 		for (int k = 0; k < nspoke; ++k) {
-			float start = k == 0 ? t_lift : t_spokes + (k - 1) * 0.11;
+			float start = k == 0 ? t_lift : t_spokes + (k - 1) * t_spoke_gap;
 			if (tt < start) { continue; }
-			float grow = k == 0 ? 1.0 : (tt - start) / 0.28;
+			float grow = k == 0 ? 1.0 : (tt - start) / 0.4;
 			grow = grow > 1.0 ? 1.0 : grow;
 			float len = spoke_len[k] * grow;
 			float ca = math::cos(spoke_ang[k]); float sa = math::sin(spoke_ang[k]);
@@ -1986,7 +2008,7 @@ class Ossuary : Scene {
 				if (spl[i] > laid) { break; }
 				web_point(spa[i], spb[i]);
 				thread(grid, px, py, pz, wx, wy, wz, 0.88);
-				if (math::sin(tt * 3.0 + i * 1.7) > 0.75) { glint(grid, wx, wy, wz); }
+				if (math::sin(tt * 1.3 + i * 1.7) > 0.93 - SK_KICK * 0.08) { glint(grid, wx, wy, wz); }
 				px = wx; py = wy; pz = wz;
 			}
 			if (tt < t_spiral1) {
@@ -2047,7 +2069,8 @@ class Ossuary : Scene {
 		float hx = bx + ux * 0.25;
 		float hy = by + uy * 0.25;
 		float hz = bz + uz * 0.25;
-		for (int g = 0; g < 7; ++g) {
+		int orbiting = SK_WAKE > 0.5 ? 3 : 0;
+		for (int g = 0; g < orbiting; ++g) {
 			float a = tt * (0.9 + g * 0.07) + g * 0.8976;
 			float r = 1.05 + 0.2 * math::sin(tt * 1.3 + g);
 			float ca = math::cos(a) * r;

@@ -101,7 +101,8 @@ class Reel {
 
 	array<int> grid_a = [];
 	array<int> grid_b = [];
-	array<int> flash_noise = [];   // a threshold per pixel for the cut's dithered flash
+	array<int> flash_noise = [];   // a threshold per pixel for the dithered flashes and the vignette
+	array<int> ring = [];          // per pixel: its distance from the centre, 0 there to 1000 at the corners
 	array<int> small_a = [];   // the scaled-down frames of scenes past their pixel budget
 	array<int> small_b = [];
 	array<float> melt = [];
@@ -365,21 +366,94 @@ class Reel {
 		}
 	}
 
+	void ensure_noise() {
+		int n = pw * ph;
+		if (flash_noise.size() == n) { return; }
+		var noise_rng = Rng(seed + 977);
+		flash_noise = [];
+		ring = [];
+		for (int i = 0; i < n; ++i) {
+			flash_noise.push(noise_rng.next(1000));
+			float dx = (i % pw - pw * 0.5) / (pw * 0.5);
+			float dy = (i / pw - ph * 0.5) / (ph * 0.5);
+			ring.push(itrunc((dx * dx + dy * dy) * 500.0));
+		}
+	}
+
 	// the cut lands on the bar line: a white flash dithered across the frame, gone within a few frames
 	void cut_flash(float prog) {
 		float k = 1.0 - prog / 0.14;
 		if (k <= 0.0) { return; }
-		int keep = itrunc(k * k * 1000.0);
+		dither_flash(itrunc(k * k * 1000.0));
+	}
+
+	void dither_flash(int keep) {
+		ensure_noise();
 		var& pix = HB_PIX;
 		int shine = ui_off + ui_shine;
-		int n = pw * ph;
-		if (flash_noise.size() != n) {
-			var noise_rng = Rng(seed + 977);
-			flash_noise = [];
-			for (int k = 0; k < n; ++k) { flash_noise.push(noise_rng.next(1000)); }
+		var& noise = flash_noise;
+		for (int i = 0; i < pw * ph; ++i) {
+			if (noise[i] < keep) { pix[i] = shine; }
 		}
-		for (int i = 0; i < n; ++i) {
-			if (flash_noise[i] < keep) { pix[i] = shine; }
+	}
+
+	// every big hit lands on the whole frame: over the bar before it an iris closes in,
+	// tightest through the score's beat of silence, then the hit throws it open and
+	// shakes the picture
+	void drop_fx(var& sc, float t) {
+		if (sc.cue == null) { return; }
+		var& cue = sc.cue;
+		float close = 0.0;
+		float since = 9.0;
+		for (int k = 0; k < cue.hit_t.size(); ++k) {
+			if (cue.hit_level[k] < 2) { continue; }
+			float to = cue.hit_t[k] - t;
+			if (to > 0.0 && to <= MUSIC_BAR) {
+				float c = 1.0 - to / MUSIC_BAR;
+				c = to <= MUSIC_STEP * 4.0 ? 0.62 : c * c * 0.45;
+				close = c > close ? c : close;
+			}
+			if (to <= 0.0 && 0.0 - to < since) { since = 0.0 - to; }
+		}
+		if (close > 0.0) {
+			ensure_noise();
+			var& pix = HB_PIX;
+			var& noise = flash_noise;
+			var& rg = ring;
+			int dark = ui_off + ui_shadow;
+			// past the iris everything is dark, across a thin rim it dithers in
+			int edge = itrunc((1.04 - close) * 1000.0);
+			int rim = 70;
+			for (int i = 0; i < pw * ph; ++i) {
+				int over = rg[i] - edge + rim;
+				if (over > 0 && (over >= rim || noise[i] * rim < over * 1000)) { pix[i] = dark; }
+			}
+		}
+		if (since < 0.32) {
+			float amp = (0.32 - since) / 0.32 * (sext ? 4.0 : 2.5);
+			int dx = itrunc(math::sin(t * 97.0) * amp);
+			int dy = itrunc(math::cos(t * 71.0) * amp * 0.6);
+			if (dx != 0 || dy != 0) { shift_frame(dx, dy); }
+		}
+	}
+
+	// the frame moved by (dx, dy) pixels, its edges smeared in
+	void shift_frame(int dx, int dy) {
+		var& pix = HB_PIX;
+		var& tmp = grid_b;
+		int n = pw * ph;
+		for (int i = 0; i < n; ++i) { tmp[i] = pix[i]; }
+		int i2 = 0;
+		for (int y = 0; y < ph; ++y) {
+			int sy = y - dy;
+			sy = sy < 0 ? 0 : (sy >= ph ? ph - 1 : sy);
+			int row = sy * pw;
+			for (int x = 0; x < pw; ++x) {
+				int sx = x - dx;
+				sx = sx < 0 ? 0 : (sx >= pw ? pw - 1 : sx);
+				pix[i2] = tmp[row + sx];
+				++i2;
+			}
 		}
 	}
 
@@ -545,6 +619,7 @@ class Reel {
 			if (trans_t >= trans_len) { finish_pending = true; }
 		} else {
 			render_scene(cur, HB_PIX, small_a);
+			drop_fx(cur, scene_t);
 		}
 		int trow = -1;
 		if (!in_trans && !finish_pending && scene_t < title_len && cur_idx != intro_idx) { trow = title_pixels(); }

@@ -214,7 +214,9 @@ flickers over the riser and a CRT line powers on, JAISCRIPT slams in on the firs
 downbeat split into red and cyan ghosts with a shockwave over a warping
 starfield, the tagline types itself, and on the second impact the logo bursts into
 the warp and whites out into DONUT. Every cut lands with a dithered white flash on
-its bar line.
+its bar line, and every big hit lands on the whole frame: over the bar before it an
+iris closes in on the picture, tightest through the score's beat of silence, and the
+hit throws it open with a shake.
 
 The reel hot-reloads itself on screen: FINALE's FOUR slide turns a star with
 `live_spin()` (defined in `show.jai`), and on the slide's beat it imports

@@ -224,7 +224,7 @@ class Finale : Fire {
 	var credits = [
 		["title", "THE JAISCRIPT DEMOREEL", ""],
 		["", "", ""],
-		["body", "eleven scenes . five transitions", ""],
+		["body", "eleven scenes . nine transitions", ""],
 		["body", "every pixel computed by the jaiscript vm", ""],
 		["", "", ""],
 		["role", "ONE", "scripting"],

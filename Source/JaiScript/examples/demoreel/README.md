@@ -228,28 +228,33 @@ puts it back.
 
 ## Measured numbers
 
-The whole reel on the standalone runner (100x40 cells = 100x80 = 8,000 pixels
-per frame, seed 20260705, fixed dt 1/30, transitions included, smoke durations
+The whole reel on the standalone runner (100x40 cells = 150x120 = 18,000 sextant
+pixels per frame, seed 20260705, fixed dt 1/30, transitions included, smoke durations
 of 3 s per scene) reports its own timing: `jaiscript demoreel.jai -- frames 1700`
 prints the render cost per frame (`demo_frame` alone: update, render and
 presentation), the cost including the shim's per-byte script hash of every
 frame, and the mean frame size (45 KB). Measure it on a quiet Release build.
 
-Per scene, mid-flight (`-- bench 60`, no transitions, same size):
+Per scene, three seconds in (`-- bench 20` on the VM, `-- bench 10` on the
+interpreter, no transitions, same size):
 
 | scene | VM ms | interp ms | KB/frame |
 | ----- | ----- | --------- | -------- |
-| DONUT | 7.5 | 121.5 | 50 |
-| JULIA | 1.5 | 59.0 | 73 |
-| LAVALAMP | 21.3 | 233.3 | 45 |
-| PIPEDREAM | 1.1 | 10.9 | 56 |
-| GLOBHUNTER | 1.8 | 28.9 | 35 |
-| CANYONRUN | 1.6 | 32.3 | 90 |
-| CHROME | 4.0 | 17.5 | 27 |
+| DONUT | 13.2 | 108.7 | 56 |
+| JULIA | 7.8 | 143.1 | 44 |
+| LAVALAMP | 21.6 | 299.8 | 52 |
+| PIPEDREAM | 5.6 | 62.2 | 51 |
+| BOIDS | 9.8 | 93.9 | 38 |
+| GLOBHUNTER | 4.1 | 52.9 | 42 |
+| CANYONRUN | 4.1 | 58.9 | 91 |
+| CHROME | 7.3 | 79.2 | 36 |
+| OSSUARY | 22.9 | 297.8 | 47 |
+| MAELSTROM | 12.3 | 213.4 | 37 |
+| FINALE | 4.3 | 69.3 | 6 |
 
-The table covers the seven scenes it lists; BOIDS, OSSUARY, MAELSTROM and FINALE are not in it.
-Every scene in it holds 30 fps on the VM, the raytraced LAVALAMP heaviest at 21 ms; on the
-interpreter LAVALAMP takes 233 ms and the others stay under 19 ms.
+Every scene holds 30 fps on the VM, OSSUARY and the raytraced LAVALAMP heaviest at
+about 22 ms; at 120x40 sextants with rows drawn in parallel the runner holds 29 to
+30 fps through every scene's heaviest bars.
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
   every one of the eleven scene entries: shim stream hash `3334852713` on

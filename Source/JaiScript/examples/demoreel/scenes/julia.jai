@@ -406,7 +406,6 @@ class Julia : Scene {
 			var& col = cols[x];
 			float ddx = x - mx;
 			float hz = hz0 + (x + 0.5 - w * 0.5) * JU_BANK;
-			bool glitter_col = ddx < mr * 0.7 && ddx > -mr * 0.7;
 			for (int y = 0; y < h; ++y) {
 				int c = col[y];
 				if (c == -1) {
@@ -432,9 +431,18 @@ class Julia : Scene {
 					float up2 = (hz - row) / (hz + 1.0);
 					int s2 = itrunc((up2 < 0.0 ? 0.0 : (up2 > 1.0 ? 1.0 : up2)) * 23.0);
 					c = water_sky + s2;
-					if (glitter_col) {
-						int hs2 = ((x * 92837111 + y * 689287499 + itrunc(t * 12.0) * 15731) & 1048575) * 1274126177;
-						if (((hs2 >> 12) & 7) < 3) { c = glitter + ((hs2 >> 16) & 3); }
+					// the glitter path: under the moon, narrow at the horizon and widening toward the
+					// lens, thinning out to its edges
+					float below = y - hz;
+					if (below > 0.0) {
+						float halfw = mr * 0.25 + below * 0.5;
+						float k = 1.0 - (ddx < 0.0 ? 0.0 - ddx : ddx) / halfw;
+						if (k > 0.0) {
+							int hs2 = (x * 73856093) ^ (y * 19349663) ^ (itrunc(t * 12.0) * 83492791);
+							hs2 = ((hs2 ^ (hs2 >> 13)) & 4294967295) * 1274126177;
+							hs2 = hs2 ^ (hs2 >> 16);
+							if ((hs2 & 255) < itrunc(k * k * 110.0)) { c = glitter + ((hs2 >> 8) & 3); }
+						}
 					}
 				}
 				grid[y * w + x] = c;

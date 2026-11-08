@@ -271,7 +271,12 @@ function surface(int ci, int cj, float px, float py, float pz, float dx, float d
 	float g2 = glint * glint;
 	float g8 = g2 * g2 * g2 * g2;
 	float g16 = g8 * g8;
-	if (g16 * g16 > 0.42 - LV_FLASH * 0.25) { return LV_GLASS + 7; }
+	// the glint: a hot core with two softer rings, so near glass shows a highlight, not a flat white shape
+	float g32 = g16 * g16;
+	float hot = 0.42 - LV_FLASH * 0.25;
+	if (g32 > hot) { return LV_GLASS + 7; }
+	if (g32 > hot * 0.45) { return LV_GLASS + 6; }
+	if (g32 > hot * 0.18) { return LV_GLASS + 5; }
 	if (fres > 0.55) { return LV_GLASS + 2 + fog_level(itrunc(fres * 5.0), dist); }
 	// into the wax, the ray bent a little toward the axis
 	float bx = dx - nx * 0.14;

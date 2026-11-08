@@ -17,6 +17,11 @@
 // pump their ink on the beat, a starburst of jets fires out from the middle of
 // the tank, the frame darkens toward its corners, and at the
 // end the camera pushes in on the whirlpool.
+//
+// Scored to its cue: the jets pump on the kick, the crossing jets' inks turn with
+// each chord, the snare flares the ink's light and the bass the caustics, the
+// energy feeds the curl, the ring's nozzles race through the bar before the burst,
+// and the starburst (bar 4) and the bloom (bar 6) land as hits.
 
 // Globals on purpose: the parallel row bodies read them (arrays borrow zero-copy).
 array<float> MS_U = [];      // the flow, cells per second, on the half-size grid
@@ -27,6 +32,8 @@ array<float> MS_B = [];      // density * sin(hue)
 array<float> MS_ZEROS = [];  // one ink row's result, cleared
 array<int> MS_INNER = [];    // the rows the ink moves on (the walls stay dry)
 array<int> MS_ALL = [];
+int MS_LIFT = 0;             // the snare's flare on the ink, in shades
+int MS_GLOW = 0;             // the bass's lift on the caustics
 int MS_W = 0;
 int MS_H = 0;
 int MS_CW = 0;
@@ -114,7 +121,7 @@ function maelstrom_row(int y) -> array<int> {
 		if (den < 0.03) {
 			float cv = MS_COS[itrunc((x * 0.21 + rowp) * 40.743666) & 255] + MS_COS[itrunc((yq + MS_CCOL[x]) * 40.743666) & 255];
 			cv = cv < 0.0 ? -cv : cv;
-			int glow = cv < 0.24 ? itrunc((0.24 - cv) * 12.5) + 1 : 0;
+			int glow = cv < 0.24 ? itrunc((0.24 - cv) * 12.5) + 1 + MS_GLOW : 0;
 			int tone = (y * 16 / hh) + vig * 2;
 			out.push(MS_BG + (tone > 15 ? 15 : tone) * 4 + (glow > 3 ? 3 : glow));
 			++i;
@@ -133,7 +140,7 @@ function maelstrom_row(int y) -> array<int> {
 		float s8 = s4 * s4;
 		float s32 = s8 * s8 * s8 * s8;
 		float cover = den / (den + 0.3);
-		int lv = cover * (0.42 + 0.78 * diff) * 16.0 - vig * 2;
+		int lv = cover * (0.42 + 0.78 * diff) * 16.0 - vig * 2 + MS_LIFT;
 		lv = lv > 15 ? 15 : (lv < 0 ? 0 : lv);
 		if (s32 > 0.4 && cover > 0.4) {
 			int sp = 16 + (s32 - 0.4) * 6.6;
@@ -258,9 +265,13 @@ class Maelstrom : Scene {
 		}
 	}
 
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
+	array<int> hit_levels() override { return [2, 2]; }
+
 	void update(float t, float dt) override {
 		tt = t;
 		if (dt <= 0.0) { return; }
+		vorticity = 10.0 + 8.0 * (cue == null ? 0.6 : cue.energy(t));
 		float step = dt > 0.05 ? 0.05 : dt;
 		stir(t, step);
 		confine(step);
@@ -276,18 +287,19 @@ class Maelstrom : Scene {
 	void stir(float t, float step) {
 		float cx = w * 0.5;
 		float cy = h * 0.5;
-		// the jets pump on the beat
-		float ph = t / beat;
-		float hit = 1.0 - (ph - math::floor(ph));
-		float pump = 0.45 + 1.3 * hit * hit;
-		if (t < 6.5) {
+		// the jets pump on the kick; the crossing jets' inks turn with the chord
+		float hit = cue == null ? 0.0 : cue.kick_env(t);
+		float pump = 0.45 + 1.3 * hit;
+		float tint = (cue == null ? 0 : cue.chord(t)) * 0.5235988;
+		float rush = cue == null ? 0.0 : cue.riser(t);
+		if (t < MUSIC_BAR * 3.0) {
 			float pulse = (0.8 + 0.2 * math::sin(t * 2.7)) * (0.85 + 0.3 * hit);
-			jet(3.0, h * 0.30, 1.0, 0.10, 70.0 * pulse, 5.3 + 0.3 * math::sin(t * 0.9), 24.0 * pump, 3.0 * h / 120.0, step);
-			jet(w - 4.0, h * 0.70, -1.0, -0.10, 70.0 * pulse, 2.9 + 0.3 * math::sin(t * 1.1), 24.0 * pump, 3.0 * h / 120.0, step);
+			jet(3.0, h * 0.30, 1.0, 0.10, 70.0 * pulse, 5.3 + tint + 0.3 * math::sin(t * 0.9), 24.0 * pump, 3.0 * h / 120.0, step);
+			jet(w - 4.0, h * 0.70, -1.0, -0.10, 70.0 * pulse, 2.9 + tint + 0.3 * math::sin(t * 1.1), 24.0 * pump, 3.0 * h / 120.0, step);
 		}
-		if (t > 5.0 && t < 11.0) {
+		if (t > MUSIC_BAR * 2.5 && t < 10.177) {
 			float ring = h * 0.38;
-			float spin = t * 0.6;
+			float spin = t * 0.6 + rush * rush * 1.4;
 			for (int k = 0; k < 4; ++k) {
 				float a = spin + k * 1.5707963;
 				float ca = math::cos(a);
@@ -297,7 +309,7 @@ class Maelstrom : Scene {
 			}
 		}
 		// the burst: twelve jets fire outward from the middle, a rainbow starburst
-		if (t > 8.2 && t < 8.9) {
+		if (t > MUSIC_BAR * 4.0 && t < MUSIC_BAR * 4.0 + 0.7) {
 			for (int k3 = 0; k3 < 12; ++k3) {
 				float a3 = k3 * 0.5235988 + 0.2;
 				float c3 = math::cos(a3);
@@ -305,8 +317,8 @@ class Maelstrom : Scene {
 				jet(cx + c3 * h * 0.1, cy + s3 * h * 0.1, c3, s3, 170.0, a3, 30.0 * pump, 3.6 * h / 120.0, step);
 			}
 		}
-		if (t > 10.5) { vortex(cx, cy, swirl(t), step); }
-		if (t > 12.6 && t < 13.6) {
+		if (t > MUSIC_BAR * 5.0) { vortex(cx, cy, swirl(t), step); }
+		if (t > MUSIC_BAR * 6.0 && t < MUSIC_BAR * 6.0 + 1.0) {
 			for (int k2 = 0; k2 < 8; ++k2) {
 				float a2 = k2 * 0.7853982 + 0.3;
 				float c2 = math::cos(a2);
@@ -319,9 +331,9 @@ class Maelstrom : Scene {
 	// the whirlpool's strength: it winds up with the ring, eases off while the
 	// bloom fires, then takes over
 	float swirl(float t) {
-		if (t < 12.4) { return (t - 10.5) * 0.3; }
-		if (t < 13.2) { return 0.25; }
-		float k = 0.25 + (t - 13.2) * 0.6;
+		if (t < 11.577) { return (t - MUSIC_BAR * 5.0) * 0.3; }
+		if (t < 12.377) { return 0.25; }
+		float k = 0.25 + (t - 12.377) * 0.6;
 		return k > 1.0 ? 1.0 : k;
 	}
 
@@ -537,7 +549,7 @@ class Maelstrom : Scene {
 		MS_CW = cw;
 		MS_CH = ch;
 		MS_RUN = step * 2.0;
-		MS_FADE = 1.0 - (tt > 11.0 && tt < 12.8 ? 0.9 : 0.22) * step;
+		MS_FADE = 1.0 - (tt > 10.177 && tt < 11.977 ? 0.9 : 0.22) * step;
 		var rows = parallel_transform(MS_INNER, maelstrom_ink_row);
 		var& d = MS_D;
 		var& a = MS_A;
@@ -582,11 +594,15 @@ class Maelstrom : Scene {
 		MS_INK = ink;
 		MS_BG = bg;
 		MS_T = tt;
+		float snare = cue == null ? 0.0 : cue.snare_env(tt);
+		float flash = cue == null ? 0.0 : cue.hit(tt);
+		MS_LIFT = itrunc(snare * 2.5 + flash * 3.0);
+		MS_GLOW = itrunc((cue == null ? 0.0 : cue.bass_env(tt)) * 1.5);
 		var& cc = MS_CCOL;
 		for (int c = 0; c < w; ++c) { cc[c] = 2.0 * math::sin(c * 0.13 - tt * 0.9); }
 		var rows = parallel_transform(MS_ALL, maelstrom_row);
 		// the push-in on the whirlpool over the last seconds
-		float push = tt > 12.8 ? (tt - 12.8) / 3.2 : 0.0;
+		float push = tt > 11.977 ? (tt - 11.977) / 3.2 : 0.0;
 		push = push > 1.0 ? 1.0 : push * push * (3.0 - 2.0 * push);
 		float zoom = 1.0 + push * 0.45;
 		int ww = w;

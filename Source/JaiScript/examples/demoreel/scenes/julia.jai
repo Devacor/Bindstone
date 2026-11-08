@@ -1,76 +1,58 @@
-// JULIA — a morphing Julia set, lit and dived. c orbits just inside the
-// Mandelbrot cardioid so the set stays connected while it writhes. Every pixel at
-// full resolution, rows across all cores with parallel_transform. The iteration
-// carries the derivative dz along with z, which buys two things: a distance
-// estimate (filaments thinner than a pixel still glow) and a normal (the
-// direction of z/dz), so the set is lit as embossed metal by a light circling
-// it, coloured by the continuous escape count (the log-log fraction removes the
-// bands) through a graded 64-hue palette; the inside is shaded by an orbit trap.
-// Then the camera goes in: c holds still, a point of the set is found by
-// refining toward the slowest escape, and the view dives three hundred times deeper into it, spinning,
-// the iteration budget rising with the depth; at the bottom the light strobes on
-// the beat and the picture folds into a six-way kaleidoscope before the camera
-// rubber-bands back out and c starts moving again.
+// JULIA — the Julia set as a landscape, flown low and played loud. Every frame a
+// height field is iterated across all cores: the smooth escape count of a morphing
+// c (orbiting just inside the Mandelbrot cardioid, so the set stays connected)
+// raises ridges along the set's boundary, and the set's inside is a low lake
+// they wall in, its floor rippled by the orbit trap. Then each screen column is cast voxelspace-style
+// across the field from a camera skimming the ridges: slope light, fog toward the
+// horizon, a sky above. It is scored on the beat: kicks punch the terrain up,
+// snares flash the sky, the chord turns the palette, the section's energy drives
+// the speed; the riser climbs high over the set and the drop plunges into a low,
+// fast canyon run as c jumps to a new set.
 
 float JU_CA = 0.0;
 float JU_CB = 0.0;
-float JU_SC = 0.01;
-float JU_X0 = 0.0;          // the view's centre
-float JU_Y0 = 0.0;
-float JU_RC = 1.0;          // and its turn
-float JU_RS = 0.0;
-float JU_LX = 0.6;          // the light, in the picture's plane
-float JU_LY = 0.6;
-float JU_LIFT = 0.0;        // added light: the beat and the flash
-float JU_DEPTH = 0.0;       // how far into the dive: the colouring moves from escape count to distance
+int JU_N = 200;             // the height field's cells a side
+float JU_GX0 = -1.6;        // its world box
+float JU_GY0 = -1.6;
+float JU_CELL = 0.016;
+int JU_MAXIT = 40;
+array<float> JU_HT = [];    // per cell: height 0..1 and hue
+array<int> JU_HUE = [];
+array<int> JU_HROWS = [];
+array<int> JU_COLS = [];
 int JU_W = 0;
 int JU_H = 0;
-int JU_MAXIT = 48;
-int JU_PHASE = 0;
-int JU_INNER = 0;
-int JU_FOLD = 0;            // kaleidoscope sectors, 0 for none
-float JU_AX = 0.0;          // the attracting fixed point alpha, which the inside's orbits spiral into
-float JU_AY = 0.0;
-array<int> JU_ROWS = [];
+float JU_CAMX = 0.0;        // the camera: position, altitude, heading, horizon
+float JU_CAMY = 0.0;
+float JU_ALT = 0.4;
+float JU_HEAD = 0.0;
+float JU_HORIZON = 30.0;
+float JU_HSCALE = 0.25;     // world units of height at 1.0
+float JU_FOV = 1.1;
+float JU_LIFT = 0.0;        // light added on the beat
+int JU_PHASE = 0;           // the palette's turn
+int JU_SKY = 0;
+int JU_SKYLIFT = 0;
+float JU_ZFAR = 2.6;
 
-function julia_row(int y) -> array<int> {
+// one row of the height field: the smooth escape count rises to the boundary, the inside is a terraced mesa
+function julia_hrow(int gy) -> array<int> {
 	array<int> out = [];
-	int ww = JU_W;
+	int n = JU_N;
 	int mi = JU_MAXIT;
 	float ca = JU_CA;
 	float cb = JU_CB;
-	float sc = JU_SC;
-	float rc = JU_RC;
-	float rs = JU_RS;
-	float lx = JU_LX;
-	float ly = JU_LY;
-	float lift = JU_LIFT;
-	int fold = JU_FOLD;
-	float sector = fold > 0 ? 6.2831853 / fold : 1.0;
-	float oy = (y + 0.5 - JU_H * 0.5) * sc;
-	for (int x = 0; x < ww; ++x) {
-		float ox = (x + 0.5 - ww * 0.5) * sc;
-		float py = oy;
-		if (fold > 0) {
-			float r = math::sqrt(ox * ox + py * py);
-			float a = math::atan2(py, ox);
-			a -= math::floor(a / sector) * sector;
-			if (a > sector * 0.5) { a = sector - a; }
-			ox = r * math::cos(a);
-			py = r * math::sin(a);
-		}
-		float zx = JU_X0 + ox * rc - py * rs;
-		float zy = JU_Y0 + ox * rs + py * rc;
-		float dx = 1.0;
-		float dy = 0.0;
+	float y0 = JU_GY0 + (gy + 0.5) * JU_CELL;
+	float x00 = JU_GX0;
+	float cell = JU_CELL;
+	for (int gx = 0; gx < n; ++gx) {
+		float zx = x00 + (gx + 0.5) * cell;
+		float zy = y0;
 		float x2 = zx * zx;
 		float y2 = zy * zy;
 		float trap = 9.0;
 		int k = 0;
-		while (k < mi && x2 + y2 < 256.0) {
-			float ndx = 2.0 * (zx * dx - zy * dy);
-			dy = 2.0 * (zx * dy + zy * dx);
-			dx = ndx;
+		while (k < mi && x2 + y2 < 64.0) {
 			zy = 2.0 * zx * zy + cb;
 			zx = x2 - y2 + ca;
 			x2 = zx * zx;
@@ -79,60 +61,112 @@ function julia_row(int y) -> array<int> {
 			trap = m < trap ? m : trap;
 			++k;
 		}
+		int ht = 0;
+		int hue = 0;
 		if (k >= mi) {
-			// inside: the angle round alpha the orbit has reached names a petal,
-			// the orbit trap its light
-			float pa = math::atan2(zy - JU_AY, zx - JU_AX);
-			int hue = itrunc((pa + 3.1415927) * 2.546479) + (JU_PHASE >> 2);
-			int tl = itrunc(math::sqrt(trap) * 9.0);
-			int il = 7 - (tl > 7 ? 7 : tl) + (lift > 0.2 ? 1 : 0);
-			out.push(JU_INNER + (hue & 15) * 8 + (il > 7 ? 7 : il));
-			continue;
+			// the inside: a low lake the boundary's ridges wall in, its floor rippled by the orbit trap
+			float tl = math::sqrt(trap);
+			ht = 60 + itrunc(120.0 * math::pow(2.718281828, 0.0 - tl * 3.0));
+			hue = 17 + itrunc(tl * 9.0);
+		} else {
+			float nu = k + 1.0 - math::log2(math::log2(x2 + y2) * 0.5);
+			float f = nu / mi;
+			f = f < 0.0 ? 0.0 : (f > 1.0 ? 1.0 : f);
+			ht = itrunc(math::sqrt(f) * 1000.0);
+			hue = itrunc(math::sqrt(nu) * 5.0);
 		}
-		float m2 = x2 + y2;
-		float nu = k + 1.0 - math::log2(math::log2(m2) * 0.5);
-		// the normal: the direction of z / dz, lifted out of the plane
-		float dd = dx * dx + dy * dy + 0.000000001;
-		float ux = (zx * dx + zy * dy) / dd;
-		float uy = (zy * dx - zx * dy) / dd;
-		float ul = 1.0 / math::sqrt(ux * ux + uy * uy + 0.000000001);
-		ux *= ul;
-		uy *= ul;
-		float shade = (ux * lx + uy * ly + 0.75) / 1.75;
-		shade = shade < 0.0 ? 0.0 : shade;
-		// the distance estimate: filaments near the set glow
-		float de = 0.5 * math::sqrt(m2 / dd) * math::log2(m2) * 0.6931472 / sc;
-		if (de < 1.5) { shade += (1.5 - de) * 0.25; }
-		// deep in the dive the escape count barely changes across the view, so the
-		// hue follows the distance in pixels instead: bands that hug the filaments at any depth
-		float depth = JU_DEPTH;
-		int ci = itrunc(math::sqrt(nu) * 9.0 * (1.0 - depth) + math::log2(de + 1.0) * 7.0 * depth);
-		int lv = itrunc((shade + lift) * 7.99);
-		out.push(((ci + JU_PHASE) & 63) * 8 + (lv < 0 ? 0 : (lv > 7 ? 7 : lv)));
+		out.push(ht * 64 + (hue & 63));
+	}
+	return out;
+}
+
+// one screen column, cast across the field front to back; returns its pixels top to bottom
+function julia_col(int x) -> array<int> {
+	int hh = JU_H;
+	array<int> out = [];
+	for (int i = 0; i < hh; ++i) { out.push(-1); }
+	int n = JU_N;
+	float rel = (x + 0.5 - JU_W * 0.5) / JU_W * JU_FOV;
+	float a = JU_HEAD + rel;
+	float dx = math::cos(a);
+	float dy = math::sin(a);
+	float corr = math::cos(rel);
+	float focal = hh * 0.95;
+	float horizon = JU_HORIZON;
+	float alt = JU_ALT;
+	float hs = JU_HSCALE;
+	float lift = JU_LIFT;
+	int phase = JU_PHASE;
+	float gx0 = JU_GX0;
+	float gy0 = JU_GY0;
+	float icell = 1.0 / JU_CELL;
+	float zfar = JU_ZFAR;
+	int ybuf = hh;
+	float z = 0.012;
+	float dz = 0.003;
+	while (z < zfar && ybuf > 0) {
+		float wx = JU_CAMX + dx * z;
+		float wy = JU_CAMY + dy * z;
+		float fx = (wx - gx0) * icell;
+		float fy = (wy - gy0) * icell;
+		int cx = itrunc(fx);
+		int cy = itrunc(fy);
+		float ht = 0.0;
+		int hue = 8;
+		float light = 0.4;
+		if (fx >= 1.0 && fy >= 1.0 && cx < n - 1 && cy < n - 1) {
+			int idx = cy * n + cx;
+			// bilinear between the four cells round the sample, so the land is smooth up close
+			float ux = fx - cx;
+			float uy = fy - cy;
+			float h00 = JU_HT[idx];
+			float h10 = JU_HT[idx + 1];
+			float h01 = JU_HT[idx + n];
+			float h11 = JU_HT[idx + n + 1];
+			ht = (h00 + (h10 - h00) * ux) * (1.0 - uy) + (h01 + (h11 - h01) * ux) * uy;
+			hue = JU_HUE[idx];
+			// slope light from the up-left, the light's side
+			float back = JU_HT[idx - n - 1];
+			light = 0.5 + (ht - back) * 7.0 + ht * 0.35;
+		}
+		int sy = itrunc(horizon + (alt - ht * hs) / (z * corr) * focal);
+		if (sy < ybuf) {
+			float fog = z / zfar;
+			int fl = itrunc(fog * fog * 3.99);
+			int lv = itrunc((light + lift) * 7.99);
+			lv = lv < 0 ? 0 : (lv > 7 ? 7 : lv);
+			int c = ((hue + phase) & 31) * 32 + lv * 4 + fl;
+			int top = sy < 0 ? 0 : sy;
+			for (int y = top; y < ybuf; ++y) { out[y] = c; }
+			ybuf = top;
+		}
+		z += dz;
+		dz *= 1.012;
 	}
 	return out;
 }
 
 class Julia : Scene {
-	int inner = 0;
 	float tt = 0.0;
-	float beat = 0.48387097;
-	float dive_t = 3.6;      // c freezes and the camera goes in
-	float bottom_t = 8.0;    // the deepest point: strobe and kaleidoscope
-	float climb_t = 9.4;     // the rubber band back out
-	float tx = 0.0;          // the boundary point the dive is aimed at
-	float ty = 0.0;
-	bool aimed = false;
+	float drop_t = 0.0;       // the big hit: bar 3
+	float cx = 0.0;           // where the flight is
+	float cy = 0.0;
+	float travel = 0.0;
+
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
+	array<int> hit_levels() override { return [2, 1]; }
 
 	void build() override {
 		name = "JULIA";
-		handle = "a dive into the boundary . by the type ladder";
-		// 64 graded hues x 8 light levels, the top levels catching a white glint
+		handle = "a fractal flown low . by the type ladder";
+		drop_t = MUSIC_BAR * 3.0;
+		// 32 graded hues x 8 light levels x 4 fog steps toward the horizon's haze
 		var stops = [[10.0, 12.0, 48.0], [40.0, 30.0, 130.0], [150.0, 40.0, 180.0], [255.0, 70.0, 120.0],
 			[255.0, 150.0, 60.0], [255.0, 230.0, 140.0], [120.0, 230.0, 255.0], [30.0, 110.0, 200.0], [10.0, 12.0, 48.0]];
 		int ns = stops.size() - 1;
-		for (int hq = 0; hq < 64; ++hq) {
-			float f = hq * ns / 64.0;
+		float hr = 34.0; float hg = 14.0; float hb = 58.0;
+		for (int hq = 0; hq < 32; ++hq) {
+			float f = hq * ns / 32.0;
 			int k = itrunc(f);
 			float u = f - k;
 			var a = stops[k];
@@ -141,27 +175,31 @@ class Julia : Scene {
 			float cg = a[1] + (b[1] - a[1]) * u;
 			float cb = a[2] + (b[2] - a[2]) * u;
 			for (int l = 0; l < 8; ++l) {
-				float lit = 0.12 + l / 7.0 * 0.95;
-				float wh = l >= 6 ? (l - 5) * 0.22 : 0.0;
-				float r = cr * lit;
-				float g = cg * lit;
-				float bl = cb * lit;
-				pal.add(r + (255.0 - r) * wh, g + (255.0 - g) * wh, bl + (255.0 - bl) * wh);
+				float lit = 0.1 + l / 7.0 * 1.0;
+				float wh = l >= 6 ? (l - 5) * 0.2 : 0.0;
+				float r = cr * lit + (255.0 - cr * lit) * wh;
+				float g = cg * lit + (255.0 - cg * lit) * wh;
+				float bl = cb * lit + (255.0 - cb * lit) * wh;
+				for (int fg = 0; fg < 4; ++fg) {
+					float m = fg / 3.0 * 0.85;
+					pal.add(r + (hr - r) * m, g + (hg - g) * m, bl + (hb - bl) * m);
+				}
 			}
 		}
-		// inside: 16 jewel hues round alpha x 8 trap levels, darker than the outside
-		inner = pal.size();
-		for (int ih = 0; ih < 16; ++ih) {
-			var c = gfx.rainbow_rgb(ih * 0.3927 + 3.6);
-			for (int il = 0; il < 8; ++il) {
-				float f = 0.02 + il / 7.0 * 0.3;
-				pal.add(4.0 + c[0] * f * 0.8, 4.0 + c[1] * f * 0.7, 12.0 + c[2] * f);
+		// the sky: 24 steps from the horizon's haze up to night, and 8 flash levels over it
+		JU_SKY = pal.size();
+		for (int fl = 0; fl < 4; ++fl) {
+			for (int s = 0; s < 24; ++s) {
+				float k2 = s / 23.0;
+				float f2 = fl * 0.22;
+				float r2 = hr + (4.0 - hr) * k2;
+				float g2 = hg + (2.0 - hg) * k2;
+				float b2 = hb + (16.0 - hb) * k2;
+				pal.add(r2 + (220.0 - r2) * f2, g2 + (160.0 - g2) * f2, b2 + (255.0 - b2) * f2);
 			}
 		}
-	}
-
-	void update(float t, float dt) override {
-		tt = t;
+		JU_HT = gfx.make_fgrid(JU_N * JU_N);
+		JU_HUE = gfx.make_grid(JU_N * JU_N);
 	}
 
 	float smooth(float a, float b, float t) {
@@ -170,108 +208,100 @@ class Julia : Scene {
 		return k * k * (3.0 - 2.0 * k);
 	}
 
-
-	int escape_count(float zx0, float zy0, int its) {
-		float zx = zx0;
-		float zy = zy0;
-		for (int k = 0; k < its; ++k) {
-			float x2 = zx * zx;
-			float y2 = zy * zy;
-			if (x2 + y2 > 16.0) { return k; }
-			zy = 2.0 * zx * zy + JU_CB;
-			zx = x2 - y2 + JU_CA;
-		}
-		return its;
-	}
-
-	// a point on the set, dust or dendrite alike: the slowest-escaping point of a
-	// small grid, then a grid four times finer round it, five times over
-	void aim() {
-		float cx = 0.35;
-		float cy = 0.3;
-		float span = 2.4;
-		for (int round = 0; round < 6; ++round) {
-			int best = -1;
-			float bx = cx;
-			float by = cy;
-			for (int gy = 0; gy < 20; ++gy) {
-				for (int gx = 0; gx < 20; ++gx) {
-					float px = cx + (gx / 19.0 - 0.5) * span;
-					float py = cy + (gy / 19.0 - 0.5) * span;
-					int k = escape_count(px, py, 120 + round * 60);
-					if (k > best) {
-						best = k;
-						bx = px;
-						by = py;
-					}
-				}
-			}
-			cx = bx;
-			cy = by;
-			span *= 0.25;
-		}
-		tx = cx;
-		ty = cy;
-		aimed = true;
-	}
-
-	float pulse(float t) {
-		float ph = t / beat;
-		float f = ph - math::floor(ph);
-		return (1.0 - f) * (1.0 - f);
+	void update(float t, float dt) override {
+		tt = t;
 	}
 
 	void render(var& grid) override {
 		float t = tt;
-		// c orbits, holds still for the dive, then moves on faster
-		float ot = t < dive_t ? t : (t < climb_t ? dive_t : dive_t + (t - climb_t) * 1.8);
-		JU_CA = 0.7885 * math::cos(ot * 0.31 + 2.0);
-		JU_CB = 0.7885 * math::sin(ot * 0.23 + 2.0);
-		if (t >= dive_t && !aimed) { aim(); }
-		// alpha = (1 - sqrt(1 - 4c)) / 2
-		float qa = 1.0 - 4.0 * JU_CA;
-		float qb = -4.0 * JU_CB;
-		float qm = math::sqrt(math::sqrt(qa * qa + qb * qb));
-		float qh = math::atan2(qb, qa) * 0.5;
-		JU_AX = (1.0 - qm * math::cos(qh)) * 0.5;
-		JU_AY = (0.0 - qm * math::sin(qh)) * 0.5;
-		// depth: wide, the dive (three hundredfold, exponential), the bottom, the climb
-		float into = smooth(dive_t, bottom_t, t) * (1.0 - smooth(climb_t, climb_t + 1.3, t));
-		float zoom = (1.05 + 0.3 * math::sin(t * 0.4)) * math::pow(300.0, into);
-		float spin = t * 0.15 + into * 9.4;
-		JU_SC = 3.3 / (w * zoom);
-		// zoom about the target: it keeps its place on screen while everything grows round it
-		float keep = 1.0 - 1.0 / math::pow(300.0, into);
-		JU_X0 = tx * keep;
-		JU_Y0 = ty * keep;
-		JU_RC = math::cos(spin);
-		JU_RS = math::sin(spin);
-		JU_MAXIT = 48 + itrunc(into * 170.0);
-		JU_DEPTH = into;
-		// the light circles, faster as the dive deepens, and strobes at the bottom
-		float la = t * (0.9 + into * 1.6);
-		JU_LX = math::cos(la);
-		JU_LY = math::sin(la);
-		bool at_bottom = t > bottom_t && t < climb_t + 0.4;
-		JU_LIFT = at_bottom ? pulse(t) * 0.45 : pulse(t) * 0.08 * into;
-		JU_FOLD = t > bottom_t + 0.25 && t < climb_t + 0.15 ? 6 : 0;
-		// the hues roll, faster as the dive deepens, racing at the bottom
-		float roll = t * 9.0 + into * into * 40.0 + (at_bottom ? (t - bottom_t) * 60.0 : 0.0);
-		JU_PHASE = itrunc(roll);
+		float kick = cue.kick_env(t);
+		float snare = cue.snare_env(t);
+		float energy = cue.energy(t);
+		float riser = cue.riser(t);
+		float hitv = cue.hit(t);
+		bool dropped = t >= drop_t;
+		// c orbits the cardioid; on the drop it jumps to a new set and moves faster
+		float ot = dropped ? t * 0.55 + 2.4 : t * 0.25;
+		JU_CA = 0.7885 * math::cos(ot + 2.0);
+		JU_CB = 0.7885 * math::sin(ot * 0.8 + 2.0);
+		// the flight: a loop round the set, faster with the energy and racing after the drop
+		float speed = 0.18 + energy * 0.25 + (dropped ? 0.35 : 0.0);
+		float path = t * speed + (dropped ? 1.7 : 0.0);
+		float radius = dropped ? 0.55 : 0.95 - riser * 0.3;
+		float px = radius * math::cos(path);
+		float py = radius * math::sin(path) * 0.8;
+		float nx = -radius * math::sin(path);
+		float ny = radius * math::cos(path) * 0.8;
+		JU_CAMX = px;
+		JU_CAMY = py;
+		JU_HEAD = math::atan2(ny, nx) + 0.25 * math::sin(t * 0.7);
+		// altitude: cruising, climbing high on the riser, skimming the canyon after the drop
+		float cruise = 0.32 + 0.06 * math::sin(t * 1.1);
+		float alt = dropped ? 0.22 + 0.05 * math::sin(t * 3.0) : cruise + riser * riser * 0.9;
+		alt += smooth(MUSIC_BAR * 5.4, MUSIC_BAR * 6.0, t) * 0.8;
+		JU_ALT = alt;
+		JU_HSCALE = 0.18 * (1.0 + kick * 0.45 + hitv * 0.5);
+		JU_HORIZON = h * (0.34 + riser * 0.22) - kick * h * 0.015 + 0.04 * h * math::sin(t * 0.9);
+		JU_FOV = 1.05 + kick * 0.08 + hitv * 0.25;
+		JU_LIFT = kick * 0.16 + snare * 0.06 + hitv * 0.08 - 0.05;
+		JU_PHASE = itrunc(t * 3.0) + cue.chord(t) * 3 + (dropped && hitv > 0.75 ? itrunc(t * 24.0) : 0);
+		JU_SKYLIFT = itrunc(snare * 2.0 + hitv * 3.5);
+		JU_ZFAR = 2.2 + energy * 0.6;
+		// the height field covers the box the camera can see
+		JU_GX0 = px - 1.6;
+		JU_GY0 = py - 1.6;
+		JU_CELL = 3.2 / JU_N;
+		JU_MAXIT = 34 + itrunc(energy * 14.0);
+		if (JU_HROWS.size() != JU_N) {
+			JU_HROWS = [];
+			for (int r = 0; r < JU_N; ++r) { JU_HROWS.push(r); }
+		}
+		var field = parallel_transform(JU_HROWS, julia_hrow);
+		var& ht = JU_HT;
+		var& hue = JU_HUE;
+		int i = 0;
+		for (int gy = 0; gy < JU_N; ++gy) {
+			var& row = field[gy];
+			for (int gx = 0; gx < JU_N; ++gx) {
+				int v = row[gx];
+				ht[i] = (v >> 6) / 1000.0;
+				hue[i] = v & 63;
+				++i;
+			}
+		}
 		JU_W = w;
 		JU_H = h;
-		JU_INNER = inner;
-		if (JU_ROWS.size() != h) {
-			JU_ROWS = [];
-			for (int r = 0; r < h; ++r) { JU_ROWS.push(r); }
+		if (JU_COLS.size() != w) {
+			JU_COLS = [];
+			for (int c = 0; c < w; ++c) { JU_COLS.push(c); }
 		}
-		var rows = parallel_transform(JU_ROWS, julia_row);
-		int idx = 0;
-		for (int y = 0; y < h; ++y) {
-			var& row = rows[y];
-			for (int x = 0; x < w; ++x) {
-				grid[idx] = row[x];
-				++idx;
+		// the camera keeps clear of the ground under it and a little ahead
+		float ground = 0.0;
+		for (int a = 0; a < 3; ++a) {
+			float gx2 = (px + math::cos(JU_HEAD) * a * 0.06 - JU_GX0) / JU_CELL;
+			float gy2 = (py + math::sin(JU_HEAD) * a * 0.06 - JU_GY0) / JU_CELL;
+			int ci = itrunc(gx2);
+			int cj = itrunc(gy2);
+			if (ci >= 0 && cj >= 0 && ci < JU_N && cj < JU_N) {
+				float g = ht[cj * JU_N + ci];
+				ground = g > ground ? g : ground;
+			}
+		}
+		float floor_alt = ground * JU_HSCALE + 0.07;
+		if (JU_ALT < floor_alt) { JU_ALT = floor_alt; }
+		var cols = parallel_transform(JU_COLS, julia_col);
+		int sky = JU_SKY + (JU_SKYLIFT > 3 ? 3 : JU_SKYLIFT) * 24;
+		float hz = JU_HORIZON;
+		for (int x = 0; x < w; ++x) {
+			var& col = cols[x];
+			for (int y = 0; y < h; ++y) {
+				int c = col[y];
+				if (c < 0) {
+					float up = (hz - y) / (hz + 1.0);
+					int s = itrunc((up < 0.0 ? 0.0 : (up > 1.0 ? 1.0 : up)) * 23.0);
+					c = sky + s;
+				}
+				grid[y * w + x] = c;
 			}
 		}
 	}

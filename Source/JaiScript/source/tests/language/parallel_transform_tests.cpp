@@ -975,6 +975,30 @@ public:
 			}
 			auto conflict = q->execute("int K = 5; array<int> out = [0, 0]; var f() { int K = 2; try { parallel_for (int i : [0, 1]) { out[i] = ::K + K; } } catch (e) { return e; } return \"no-error\"; } f();");
 			check_true(conflict.as<std::string>().rfind("parallel_for: '::K' names the program's 'K' and the body also reads a nearer 'K'", 0) == 0, conflict.as<std::string>());
+			// a const reference to captured state reads the worker's own copy: a declaration, a by-reference loop, a field
+			const std::string const_refs = R"(
+				array<array<int>> grid = [[1, 2], [3, 4], [5, 6]];
+				array<int> table = [10, 20, 30];
+				class Cfg { array<int> items = [7, 8, 9]; }
+				Cfg cfg;
+				array<int> idx = [0, 1, 2, 3, 4, 5];
+				array<int> out = [0, 0, 0, 0, 0, 0];
+				parallel_for (int i : idx) {
+					const auto& row = grid[i % 3]; const int& t = table[i % 3]; const auto& items = cfg.items;
+					int s = 0;
+					for (const auto& v : table) { s += v; }
+					for (const auto& r : grid) { s += r[1]; }
+					out[i] = row[0] + row[1] + t + items[i % 3] + s;
+				}
+				return to_json(out);
+			)";
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				q->parallel_thread_count(workers);
+				check_eq(std::string("[92,107,122,92,107,122]"), q->execute(const_refs).as<std::string>(), "const references, workers " + std::to_string(workers));
+			}
+			// a writing method through a const loop variable raises as the serial loop does, on every worker
+			const std::string const_call = "class V { int a = 7; void bump() { a += 1; } } array<V> ws = [V(), V()]; try { parallel_for (const auto& w : ws) { w.bump(); } } catch (e) { return e; } return \"no-error\";";
+			check_true(q->execute(const_call).as<std::string>().rfind("Cannot call 'bump' on 'w': 'w' is const and 'bump' writes its receiver", 0) == 0, q->execute(const_call).as<std::string>());
 		});
 
 		test("captured_snapshot_equals_barrier_content", [this]() {

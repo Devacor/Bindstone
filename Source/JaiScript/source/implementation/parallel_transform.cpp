@@ -2171,7 +2171,10 @@ namespace {
 			}
 			case node_type::range_for_stmt: {
 				auto* n = static_cast<range_for_stmt*>(s.get());
-				if (n->is_reference) {
+				if (n->is_reference && n->is_const && !proof_mode) {
+					// const auto& over captured state reads it: each worker iterates its own copy (never a borrow, which names no storage)
+					if (identifier_expr* root = enclosing_reference_root(n->container)) { touch_capture(root, false); }
+				} else if (n->is_reference) {
 					// By-ref iteration mutates elements in place - on captured state (a member of a captured object
 					// included) that is a write, and on a worker's view it would silently diverge
 					if (identifier_expr* root = global_rooted(n->container.get()) ? chain_root_identifier(n->container.get()) : nullptr) {
@@ -2249,7 +2252,12 @@ namespace {
 				if (n->name_id == UINT64_MAX) { n->name_id = sym->intern(n->name); }
 				collect_type(n->type);
 				bool ok;
-				if (n->type.get() && n->type->is_reference()) {
+				identifier_expr* read_root = n->type.get() && n->type->is_reference() && n->is_const && !proof_mode ? enclosing_reference_root(n->initializer) : nullptr;
+				if (read_root) {
+					// const T& to captured state reads it: the worker binds its own copy (never a borrow, which names no storage)
+					ok = walk_expr(n->initializer);
+					touch_capture(read_root, false);
+				} else if (n->type.get() && n->type->is_reference()) {
 					// Reference declaration: the alias must root at worker-local storage
 					ok = walk_target(n->initializer, "reference declaration", /*aliasing*/ true);
 				} else {

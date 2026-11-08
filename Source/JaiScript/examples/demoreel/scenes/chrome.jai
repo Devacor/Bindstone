@@ -24,6 +24,12 @@
 // music and flung wide on each hit (one bounding sphere skips the six for rays that
 // miss the ring), a sun hangs low in the sky so every mirror carries it, and each
 // hit sends a glowing shockwave racing across the checkerboard from under the spheres.
+// Through bar seven the three whirl inward, faster and faster, and crash together on
+// bar eight's downbeat (a big hit, the frame whited out) into one giant mirror ball:
+// its normal snaps to a facet, so each tile mirrors one piece of the world and whole
+// tiles flash on the kick, and it throws wheeling rings of light spots on the floor
+// that swell on the kick. The camera dives in around it and whips back on bar nine.
+// The kick punches the lens in, the hits shake its roll.
 //
 // The row function reads its frame through captured globals (scalars copy
 // into each worker, the index array borrows), calls nothing but script and
@@ -36,7 +42,7 @@ float CH_X1 = 0.0; float CH_Y1 = 0.0; float CH_Z1 = 0.0; float CH_R1 = 0.7;
 float CH_X2 = 0.0; float CH_Y2 = 0.0; float CH_Z2 = 0.0; float CH_R2 = 0.55;
 float CH_EX = 0.0; float CH_EY = 1.6; float CH_EZ = 5.0;
 float CH_FX = 0.0; float CH_FY = 0.0; float CH_FZ = -1.0;
-float CH_RX = 1.0; float CH_RZ = 0.0;
+float CH_RX = 1.0; float CH_RY = 0.0; float CH_RZ = 0.0;
 float CH_UX = 0.0; float CH_UY = 1.0; float CH_UZ = 0.0;
 float CH_LX = 0.5; float CH_LY = 0.75; float CH_LZ = 0.43;
 int CH_W = 0;
@@ -55,6 +61,12 @@ array<float> CH_SZ = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 float CH_SR = 0.2;
 float CH_BX = 0.0; float CH_BY = 0.0; float CH_BZ = 0.0; float CH_BR = 0.0;   // the ring's bounding sphere
 float CH_WX = 0.0; float CH_WZ = 0.0; float CH_WR = -1.0; float CH_WW = 0.3;  // the shockwave: centre, radius, width
+float CH_FOC = 1.35;         // the lens, punching in on the kick
+bool CH_DISCO = false;       // the three spheres fused into one faceted mirror ball
+float CH_SPIN = 0.0;         // its turn about the vertical
+float CH_GT = 0.975;         // the big sphere's glint threshold (a facet flashes whole)
+float CH_GS = 100.0;
+float CH_SPOT = 0.0;         // the light spots it throws on the floor, their radius in spot spacings
 array<int> CH_ROWS = [];
 
 // the distance to the nearest satellite a ray hits, or `best` when it hits none nearer
@@ -156,6 +168,19 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 		float sx2 = fx - CH_X2; float sz2 = fz - CH_Z2;
 		float sb2 = sx2 * CH_LX - CH_Y2 * CH_LY + sz2 * CH_LZ;
 		if (sb2 < 0.0 && sb2 * sb2 - (sx2 * sx2 + CH_Y2 * CH_Y2 + sz2 * sz2 - CH_R2 * CH_R2) > 0.0) { shade = 1; }
+		if (CH_DISCO) {
+			// the mirror ball throws rings of light spots that wheel with it
+			float ox2 = fx - CH_X0; float oz2 = fz - CH_Z0;
+			float r = math::sqrt(ox2 * ox2 + oz2 * oz2);
+			if (r > 1.0 && r < 11.0) {
+				float ring = r * 0.9;
+				float ri = math::floor(ring);
+				float a = (math::atan2(oz2, ox2) - CH_SPIN) * (3.0 + ri * 5.5) * 0.1591549 + ri * 0.37;
+				float fa = a - math::floor(a) - 0.5;
+				float fr = ring - ri - 0.5;
+				if (fa * fa + fr * fr < CH_SPOT * CH_SPOT) { return CH_RING + fog; }
+			}
+		}
 		if (CH_WR > 0.0) {
 			float wx = fx - CH_WX;
 			float wz = fz - CH_WZ;
@@ -175,13 +200,13 @@ function ch_row(int y) -> array<int> {
 	float sc = 2.0 / ww;
 	float v = (CH_H * 0.5 - y - 0.5) * sc;
 	float ex = CH_EX; float ey = CH_EY; float ez = CH_EZ;
-	float bx = CH_FX * 1.35 + CH_UX * v;
-	float by = CH_FY * 1.35 + CH_UY * v;
-	float bz = CH_FZ * 1.35 + CH_UZ * v;
+	float bx = CH_FX * CH_FOC + CH_UX * v;
+	float by = CH_FY * CH_FOC + CH_UY * v;
+	float bz = CH_FZ * CH_FOC + CH_UZ * v;
 	for (int x = 0; x < ww; ++x) {
 		float u = (x + 0.5 - ww * 0.5) * sc;
 		float dx = bx + CH_RX * u;
-		float dy = by;
+		float dy = by + CH_RY * u;
 		float dz = bz + CH_RZ * u;
 		float il = 1.0 / math::sqrt(dx * dx + dy * dy + dz * dz);
 		dx *= il; dy *= il; dz *= il;
@@ -235,14 +260,36 @@ function ch_row(int y) -> array<int> {
 		float nx = (hx - cx) / cr;
 		float ny = (hy - cy) / cr;
 		float nz = (hz - cz) / cr;
+		if (hit == 0 && CH_DISCO) {
+			// the mirror ball: snap the normal to its facet, tiles fewer toward the poles, dark grout between
+			float lat = math::atan2(ny, math::sqrt(nx * nx + nz * nz)) * 5.7295780;
+			float li = math::floor(lat + 0.5);
+			float qlat = li * 0.1745329;
+			float cl = math::cos(qlat);
+			float nl = math::floor(36.0 * cl + 0.5);
+			nl = nl < 4.0 ? 4.0 : nl;
+			float lon = (math::atan2(nz, nx) + CH_SPIN) * nl * 0.1591549;
+			float lo = math::floor(lon + 0.5);
+			float el = lat - li;
+			float eo = lon - lo;
+			if (el > 0.42 || el < -0.42 || eo > 0.42 || eo < -0.42) {
+				out.push(CH_BALL + 9);
+				continue;
+			}
+			float qlon = lo / nl * 6.2831853 - CH_SPIN;
+			nx = cl * math::cos(qlon);
+			ny = math::sin(qlat);
+			nz = cl * math::sin(qlon);
+		}
 		float cosi = 0.0 - (dx * nx + dy * ny + dz * nz);
 		float dn = -2.0 * cosi;
 		float mx = dx - nx * dn;
 		float my = dy - ny * dn;
 		float mz = dz - nz * dn;
 		float g = mx * CH_LX + my * CH_LY + mz * CH_LZ;
-		if (g > 0.975) {
-			int gl = (g - 0.975) * 100.0;
+		float gt = hit == 0 ? CH_GT : 0.975;
+		if (g > gt) {
+			int gl = (g - gt) * (hit == 0 ? CH_GS : 100.0);
 			out.push(CH_GLINT + (gl > 2 ? 2 : gl));
 		} else if (hit == 1 && cosi > 0.3) {
 			// glass: refract in, cross to the far face, refract out
@@ -269,8 +316,8 @@ function ch_row(int y) -> array<int> {
 			} else {
 				out.push(CH_NBASE * 2 + ch_trace(hx, hy, hz, mx, my, mz, 1));
 			}
-		} else if (hit == 3) {
-			out.push(ch_trace(hx, hy, hz, mx, my, mz, 2 + sat));
+		} else if (hit == 3 || (hit == 0 && CH_DISCO)) {
+			out.push(ch_trace(hx, hy, hz, mx, my, mz, hit == 3 ? 2 + sat : 0));
 		} else {
 			out.push(CH_NBASE * (hit + 1) + ch_trace(hx, hy, hz, mx, my, mz, hit));
 		}
@@ -279,6 +326,7 @@ function ch_row(int y) -> array<int> {
 }
 
 class Chrome : Scene {
+	array<float> base_rad = [0.9, 0.7, 0.55];
 	array<float> rad = [0.9, 0.7, 0.55];
 	array<float> bx = [0.0, 0.0, 0.0];
 	array<float> by = [0.0, 0.0, 0.0];
@@ -296,6 +344,7 @@ class Chrome : Scene {
 	array<float> sat_y = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 	array<float> sat_z = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
 	float ring_spin = 0.0;
+	bool disco = false;
 	float wave_r = -1.0;
 	float wave_w = 0.3;
 	float ex = 0.0;
@@ -305,11 +354,15 @@ class Chrome : Scene {
 	float fy = 0.0;
 	float fz = -1.0;
 	float rx = 1.0;
+	float ry = 0.0;
 	float rz = 0.0;
 	float ux = 0.0;
 	float uy = 1.0;
 	float uz = 0.0;
 	float tt = 0.0;
+	float foc = 1.35;
+	float spin = 0.0;
+	float t_merge = MUSIC_BAR * 8.0;
 
 	void build() override {
 		name = "CHROME";
@@ -375,9 +428,14 @@ class Chrome : Scene {
 		pal.add(255.0 * tr, 250.0 * tg, 225.0 * tb);
 	}
 
-	int length_bars() override { return 7; }
-	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
-	array<int> hit_levels() override { return [2, 1]; }
+	int length_bars() override { return 10; }
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 8.0, MUSIC_BAR * 9.0]; }
+	array<int> hit_levels() override { return [2, 1, 2, 1]; }
+
+	float smooth01(float u) {
+		float c = u < 0.0 ? 0.0 : (u > 1.0 ? 1.0 : u);
+		return c * c * (3.0 - 2.0 * c);
+	}
 
 	// a bounce that lands every `period` beats, `offset` beats late: 0 on the floor, 1 at the top
 	float hop(float t, float period, float offset) {
@@ -395,19 +453,40 @@ class Chrome : Scene {
 		step = step * step * (3.0 - 2.0 * step);
 		array<float> periods = [1.0, 2.0, 1.0];
 		array<float> offsets = [0.0, 0.0, 0.5];
+		float energy = cue != null ? cue.energy(t) : 0.6;
+		float kick = cue != null ? cue.kick_env(t) : 0.0;
+		float fling = cue != null ? cue.hit(t) : 0.0;
+		// through bar seven they whirl inward, faster and faster, and crash together on bar eight's
+		// downbeat into one giant mirror ball that rises and turns, jolted round by every kick
+		float gather = (t - MUSIC_BAR * 7.0) / MUSIC_BAR;
+		gather = gather < 0.0 ? 0.0 : (gather > 1.0 ? 1.0 : gather);
+		float orbit_r = 1.45 - 0.5 * gather * gather;
 		for (int i = 0; i < 3; ++i) {
 			float own = hop(t, periods[i], offsets[i]);
 			float shared = hop(t, 1.0, 0.0);
 			float bounce = own + (shared - own) * step;
-			float a = t * 0.45 + i * 2.0944;
-			bx[i] = math::cos(a) * 1.45;
-			bz[i] = math::sin(a) * 1.45;
-			by[i] = rad[i] + bounce * (1.15 - i * 0.2);
+			float a = t * 0.45 + i * 2.0944 + gather * gather * gather * 7.0;
+			rad[i] = base_rad[i];
+			bx[i] = math::cos(a) * orbit_r;
+			bz[i] = math::sin(a) * orbit_r;
+			by[i] = rad[i] + bounce * (1.15 - i * 0.2) * (1.0 - gather * 0.5);
 		}
-		// the satellites orbit the big sphere, spun up by the energy and the kick, flung wide on hits
-		float energy = cue != null ? cue.energy(t) : 0.6;
-		float kick = cue != null ? cue.kick_env(t) : 0.0;
-		float fling = cue != null ? cue.hit(t) : 0.0;
+		disco = t >= t_merge;
+		if (disco) {
+			float s = t - t_merge;
+			float again = t - MUSIC_BAR * 9.0;
+			float pop = again >= 0.0 ? 0.22 * math::exp(0.0 - again * 6.0) : 0.0;
+			float big = 1.5 + (0.9 - 1.5) * math::exp(0.0 - s * 6.0) * math::cos(s * 15.0);
+			rad[0] = big * (1.0 + kick * 0.04 + pop);
+			bx[0] = 0.0;
+			bz[0] = 0.0;
+			by[0] = rad[0] + 0.45 * smooth01(s / 1.2) + 0.08 * math::sin(t * 1.9) - kick * 0.07;
+			for (int j = 1; j < 3; ++j) {
+				rad[j] = 0.3;
+				bx[j] = 0.0; by[j] = by[0]; bz[j] = 0.0;
+			}
+			spin += dt * (0.5 + kick * 4.0 + fling * 3.0);
+		}
 		ring_spin += dt * (1.2 + energy * 2.6 + kick * 2.0);
 		float orbit = rad[0] + 0.55 + fling * 0.9 + kick * 0.12;
 		for (int k = 0; k < 6; ++k) {
@@ -423,7 +502,7 @@ class Chrome : Scene {
 		for (int h2 = 0; h2 < hits.size(); ++h2) {
 			float since = t - hits[h2];
 			if (since >= 0.0 && since < 2.2) {
-				wave_r = since * 7.5;
+				wave_r = since * 7.5 + (disco ? rad[0] : 0.0);
 				wave_w = 0.18 + since * 0.35;
 			}
 		}
@@ -437,22 +516,35 @@ class Chrome : Scene {
 		whip = whip < 0.0 ? 0.0 : (whip > 1.0 ? 1.0 : whip);
 		whip = whip * whip * (3.0 - 2.0 * whip);
 		float push = cue != null ? cue.riser(t) : 0.0;
-		float ca = t * 0.18 + 0.4 + whip * 2.4;
-		float radius = 3.4 + rise * rise * 2.2 - push * 0.9;
+		// from the crash it dives down and in around the mirror ball, whipping round again on the bar-nine accent
+		float dive = smooth01((t - t_merge) / (MUSIC_BAR * 1.6));
+		float whip2 = smooth01((t - t_merge) / (MUSIC_BEAT * 3.0));
+		float whip3 = smooth01((t - MUSIC_BAR * 9.0) / (MUSIC_BEAT * 2.0));
+		float ca = t * 0.18 + 0.4 + whip * 2.4 + whip2 * 1.9 - whip3 * 1.3;
+		float radius = 3.4 + rise * rise * 2.2 - push * 0.9 - dive * 1.4;
 		ex = math::sin(ca) * radius;
 		ez = math::cos(ca) * radius;
-		ey = 0.45 + rise * 1.55;
+		ey = 0.45 + rise * 1.55 - dive * 0.75;
 		float tx = 0.0 - ex;
-		float ty = 0.7 - ey;
+		float ty = 0.7 + dive * 1.25 - ey;
 		float tz = 0.0 - ez;
 		float il = 1.0 / math::sqrt(tx * tx + ty * ty + tz * tz);
 		fx = tx * il; fy = ty * il; fz = tz * il;
 		float rl = 1.0 / math::sqrt(fx * fx + fz * fz);
 		rx = 0.0 - fz * rl;
+		ry = 0.0;
 		rz = fx * rl;
 		ux = 0.0 - rz * fy;
 		uy = rz * fx - rx * fz;
 		uz = rx * fy;
+		// the hits shake the roll, the kick punches the lens in
+		float roll = fling * fling * 0.16 * math::sin(t * 37.0);
+		float cr = math::cos(roll);
+		float sr = math::sin(roll);
+		float nrx = rx * cr + ux * sr; float nry = ry * cr + uy * sr; float nrz = rz * cr + uz * sr;
+		ux = ux * cr - rx * sr; uy = uy * cr - ry * sr; uz = uz * cr - rz * sr;
+		rx = nrx; ry = nry; rz = nrz;
+		foc = 1.35 * (1.0 + kick * 0.07 + fling * 0.12);
 	}
 
 	void render(var& grid) override {
@@ -461,7 +553,14 @@ class Chrome : Scene {
 		CH_X2 = bx[2]; CH_Y2 = by[2]; CH_Z2 = bz[2]; CH_R2 = rad[2];
 		CH_EX = ex; CH_EY = ey; CH_EZ = ez;
 		CH_FX = fx; CH_FY = fy; CH_FZ = fz;
-		CH_RX = rx; CH_RZ = rz;
+		CH_RX = rx; CH_RY = ry; CH_RZ = rz;
+		CH_FOC = foc;
+		CH_DISCO = disco;
+		CH_SPIN = spin;
+		float kick = cue != null ? cue.kick_env(tt) : 0.0;
+		CH_GT = 0.93 - kick * 0.07;
+		CH_GS = 3.0 / (1.0 - CH_GT);
+		CH_SPOT = disco ? (0.1 + kick * 0.16) * smooth01((tt - t_merge) / 0.4) : 0.0;
 		CH_UX = ux; CH_UY = uy; CH_UZ = uz;
 		float ll = 1.0 / math::sqrt(0.5 * 0.5 + 0.75 * 0.75 + 0.43 * 0.43);
 		CH_LX = 0.5 * ll; CH_LY = 0.75 * ll; CH_LZ = 0.43 * ll;
@@ -505,6 +604,30 @@ class Chrome : Scene {
 			}
 		}
 		sparkle(grid);
+		flash(grid);
+	}
+
+	// the big hits white the frame out and let it fall back through a dither
+	void flash(var& grid) {
+		array<int> bayer = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
+		var hits = hit_times();
+		var levels = hit_levels();
+		float since = 9.0;
+		for (int k = 0; k < hits.size(); ++k) {
+			float s = tt - hits[k];
+			if (levels[k] >= 2 && s >= 0.0 && s < since) { since = s; }
+		}
+		if (since >= 0.35) { return; }
+		float a = 1.0 - since / 0.35;
+		int edge = itrunc(a * a * 17.0);
+		for (int y = 0; y < h; ++y) {
+			int row = y * w;
+			int by4 = (y & 3) * 4;
+			for (int x = 0; x < w; ++x) {
+				int b = bayer[by4 + (x & 3)];
+				if (b < edge) { grid[row + x] = b * 2 < edge ? glint + 2 : glint + 1; }
+			}
+		}
 	}
 
 	// star sparkles: on up to a dozen of the brightest glints, spaced apart, four

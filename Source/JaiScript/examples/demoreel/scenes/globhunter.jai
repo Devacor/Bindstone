@@ -14,8 +14,12 @@
 // fires — recoil kicking the view, muzzle flash lighting the hall, a rainbow
 // hitscan tracer, a hit-flash, a hit-stop, goo that bursts in 3D and bounces off
 // the flagstones, a callout (DOUBLE KILL on a quick second), a kill counter in
-// pixel letters. Enemies respawn each lap. The ray fan comes from the
-// camera-plane vector: no per-column trig.
+// pixel letters. Enemies respawn each lap. It plays to its cue: the gun fires
+// only on a beat (on the eighths through the bar after the big hit), footfalls
+// land on the beat, the torches flare with the kick, the big hit on bar five's
+// downbeat floods the hall with light, and the last bar slows the walk and holds
+// fire on the corridor ahead. The ray fan comes from the camera-plane vector: no
+// per-column trig.
 
 class GlobHunter : Scene {
 	array<int> wmap = [];
@@ -57,6 +61,7 @@ class GlobHunter : Scene {
 	int ne = 11;
 	int kills = 0;
 	float cool = 0.6;
+	int last_step = -1;      // the last beat (or eighth) the gun was allowed to fire on
 	float muzzle_t = 0.0;
 	float tracer_t = 0.0;
 	float hot_t = 0.0;
@@ -379,10 +384,14 @@ class GlobHunter : Scene {
 		return false;
 	}
 
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
+	array<int> hit_levels() override { return [1, 2]; }
+
 	void update(float t, float dt) override {
 		tt = t;
 		++fr;
-		float pace = stop_t > 0.0 ? 0.18 : 1.0;
+		bool last_bar = t > MUSIC_BAR * 7.0;
+		float pace = stop_t > 0.0 ? 0.18 : (last_bar ? 0.4 : 1.0);
 		travel += dt * 2.4 * pace;
 		var p = path_at(travel);
 		var q = path_at(travel + 1.7);   // look-ahead steers the turns
@@ -430,8 +439,18 @@ class GlobHunter : Scene {
 			else if (st == 2) { est[i] = est[i] + dt; if (est[i] > 0.55) { es[i] = 3; est[i] = 0.0; } }
 			else if (st == 3) { est[i] = est[i] + dt; if (est[i] > 16.0) { es[i] = 0; est[i] = 0.0; } }
 		}
-		// auto-fire: nearest alive enemy in the crosshair cone with clear LOS
-		if (cool <= 0.0) {
+		// auto-fire on the beat: nearest alive enemy in the crosshair cone with clear LOS
+		float e = cue != null ? cue.energy(t) : 0.6;
+		bool eighths = e > 0.92 || (t > MUSIC_BAR * 5.0 && t < MUSIC_BAR * 6.0);
+		// the big hit: the hall floods with light and the frenzy is called
+		if (t >= MUSIC_BAR * 5.0 && t - dt < MUSIC_BAR * 5.0) {
+			callout = "FRENZY";
+			call_t = 1.2;
+		}
+		int step = math::ifloor(t / (eighths ? MUSIC_BEAT * 0.5 : MUSIC_BEAT));
+		bool on_step = step != last_step;
+		last_step = step;
+		if (cool <= 0.0 && on_step && !last_bar && t > MUSIC_BAR) {
 			float invdet = 1.0 / (planex * diry - dirx * planey);
 			int best = -1;
 			float besty = 99.0;
@@ -452,10 +471,12 @@ class GlobHunter : Scene {
 			if (best >= 0) { fire(best, bestx, besty, t); }
 		}
 		move_goo(dt);
-		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns
-		if ((fr & 1) == 0 || muzzle_t > -0.05) { light_up(); }
-		// the view: a walking bob, the recoil's kick, a shudder while the muzzle burns
-		float bob = math::sin(travel * 5.2) * h * 0.012;
+		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns or the kick lands
+		float beat_light = cue != null ? cue.kick_env(t) + cue.hit(t) : 0.0;
+		if ((fr & 1) == 0 || muzzle_t > -0.05 || beat_light > 0.2) { light_up(); }
+		// the view: a footfall on each beat, the recoil's kick, a shudder while the muzzle burns
+		float stride = cue != null ? cue.beat_phase(t) : travel * 0.83;
+		float bob = math::sin(stride * 3.1415927) * h * 0.014 * (last_bar ? 0.4 : 1.0);
 		float kick = kick_t > 0.0 ? h * 0.05 * kick_t / 0.2 : 0.0;
 		float shud = muzzle_t > 0.0 ? ((fr * 7) % 3 - 1) * h * 0.012 : 0.0;
 		pitch = bob + kick + shud;
@@ -465,7 +486,7 @@ class GlobHunter : Scene {
 		es[i] = 1;
 		est[i] = 0.0;
 		++kills;
-		cool = 0.62;
+		cool = 0.2;
 		muzzle_t = 0.12;
 		tracer_t = 0.14;
 		hot_t = 0.35;
@@ -527,13 +548,15 @@ class GlobHunter : Scene {
 		int nt = tox.size();
 		array<float> flick = [];
 		for (int k = 0; k < nt; ++k) {
-			flick.push(1.0 + 0.12 * math::sin(tt * 13.0 + k * 2.3) + 0.10 * math::sin(tt * 29.0 + k * 5.1));
+			float beat_flare = cue != null ? 0.32 * cue.kick_env(tt) + 0.7 * cue.hit(tt) : 0.0;
+			flick.push(1.0 + 0.12 * math::sin(tt * 13.0 + k * 2.3) + 0.10 * math::sin(tt * 29.0 + k * 5.1) + beat_flare);
 		}
 		var& st = still;
 		var& ow = owner;
 		var& lm = lmap;
+		int flood = cue != null ? itrunc(cue.hit(tt) * 4.0) : 0;
 		for (int c = 0; c < n; ++c) {
-			int lv = itrunc(st[c] * flick[ow[c]]);
+			int lv = itrunc(st[c] * flick[ow[c]]) + flood;
 			lm[c] = lv > 5 ? 5 : lv;
 		}
 		if (muzzle_t > 0.0) {

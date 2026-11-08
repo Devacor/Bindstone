@@ -13,8 +13,8 @@ thin shell: a VT console, a monotonic clock, non-blocking keys, a seeded rng
 class, and the frame pump. Everything you see is script.
 
 The reel doubles as a determinism test: `--smoke` hashes the whole frame stream
-against a reference. Six scenes trace their rows across every core with
-`parallel_transform`, and the stream stays byte-identical anyway.
+against a reference. Ten of the eleven scenes split their work across every core
+with `parallel_transform`, and the stream stays byte-identical anyway.
 
 ## How a frame is drawn
 
@@ -210,10 +210,12 @@ renders smaller and the reel scales it up, so the heaviest scenes hold their
 frame rate on large terminals.
 
 The reel opens cold (`scenes/intro.jai`, four bars, played once): a dead signal
-flickers over the riser and a CRT line powers on, JAISCRIPT slams in on the first
-downbeat split into red and cyan ghosts with a shockwave over a warping
-starfield, the tagline types itself, and on the second impact the logo bursts into
-the warp and whites out into DONUT. Every cut lands with a dithered white flash on
+rolls and flickers over the riser and a CRT line powers on, JAISCRIPT slams in on
+the first downbeat split into red and cyan ghosts with a chromatic shockwave over a
+warping starfield of blue and rose stars, a violet glow breathing behind the letters
+on the kick, the tagline types itself, and on the second impact the logo bursts into
+sparks of its own colours behind a second shockwave, streams into the warp and
+whites out into DONUT. Every cut lands with a dithered white flash on
 its bar line, and every big hit lands on the whole frame: over the bar before it an
 iris closes in on the picture, tightest through the score's beat of silence, and the
 hit throws it open with a shake.
@@ -257,9 +259,9 @@ about 22 ms; at 120x40 sextants with rows drawn in parallel the runner holds 29 
 30 fps through every scene's heaviest bars.
 
 - Parity: frame streams **byte-identical** across backends over 1,700 frames,
-  every one of the eleven scene entries: shim stream hash `166873055` on
+  every one of the eleven scene entries: shim stream hash `512157162` on
   both. The C++ host's `--smoke` hash is FNV-1a 64 over the same frames:
-  `a2d04624f10d4140` (the host's HUD
+  `c0086107f2b4bac1` (the host's HUD
   is off in smoke, so its frames are the shim's bytes).
 - `--reload-test` re-executes every scene file into the engine. The
   presenter's globals live in `util.jai`, so a reload resets them and the reel

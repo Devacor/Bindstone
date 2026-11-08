@@ -1238,9 +1238,10 @@ namespace {
 			auto& v = adm.element_reached_whole;
 			if (std::find(v.begin(), v.end(), id) == v.end()) { v.push_back(id); }
 		}
-		bool walk_local_member_chain(const member_expr* m, const char* what) {
+		bool walk_local_member_chain(const member_expr* m, const char* what, bool aliasing = false) {
 			std::vector<const expression_ptr*> indexes;
 			const expression* cur = m;
+			const expression_ptr* base = nullptr;   // the chain's computed root: a call's result, a conditional, a literal
 			identifier_expr* root = nullptr;
 			bool rooted_at_self = false;
 			while (cur) {
@@ -1259,6 +1260,7 @@ namespace {
 					if (cur == m) { note_reached_whole(node->member_id); }
 					node->getter_id = sym->get_getter_id_with_view(node->member_id).first;
 					(void)sym->get_setter_id_with_view(node->member_id);
+					base = &node->object;
 					cur = node->object.get();
 					continue;
 				}
@@ -1266,6 +1268,7 @@ namespace {
 					auto* b = static_cast<const binary_expr*>(cur);
 					if (b->op.type != token_type::left_bracket) { break; }
 					indexes.push_back(&b->right);
+					base = &b->left;
 					cur = b->left.get();
 					continue;
 				}
@@ -1275,7 +1278,23 @@ namespace {
 				return fail(m, "'this' is not allowed in a parallel body");
 			}
 			if (!root && !rooted_at_self) {
-				return fail(m, std::string(what) + " must root at a local variable in a parallel body");
+				// a chain on a computed value reads it as the body reads any expression; a store or a reference through a
+				// conditional names the storage of the arm it picks, and anything else it names is the body's own temporary
+				if (!base || !*base) { return fail(m, std::string(what) + " must root at a local variable in a parallel body"); }
+				if (proof_mode) { root_escaped = true; }
+				const expression_ptr& named = implicit_reference_operand(*base);
+				const bool store = std::string_view(what) != "member access";
+				if (store && named->get_type() == node_type::ternary_expr) {
+					if (!walk_target(named, what, aliasing)) { return false; }
+				} else if (store && !makes_temporary(named.get())) {
+					return fail(m, std::string(what) + " must root at a local variable in a parallel body");
+				} else if (!walk_expr(*base)) {
+					return false;
+				}
+				for (const expression_ptr* idx : indexes) {
+					if (!walk_expr(*idx)) { return false; }
+				}
+				return true;
 			}
 			if (root && !is_local(root) && !self_field(root)) {
 				// a captured object reads through its fields; the barrier proves what it holds and gives each worker its own view
@@ -2432,6 +2451,37 @@ namespace {
 			}
 		}
 
+		// A value the body makes and owns: a construction, a literal, or a call of a script function that returns by value (one
+		// returning T& may name enclosing state)
+		bool makes_temporary(const expression* e) {
+			switch (e->get_type()) {
+			case node_type::new_expr: case node_type::array_literal_expr: case node_type::map_literal_expr: case node_type::literal_expr:
+				return true;
+			case node_type::call_expr: {
+				const auto* call = static_cast<const call_expr*>(e);
+				if (!call->callee || call->callee->get_type() != node_type::identifier_expr) { return false; }
+				const auto* callee = static_cast<const identifier_expr*>(call->callee.get());
+				if (is_local(callee) || (method_class && !callee->global_qualified && method_class->defines_method(callee->symbol_id))) { return false; }
+				if (primitive_ctor_name(callee->name) || constructor_class(callee->symbol_id) != nullptr) { return true; }
+				const script_value* bound = engine_access::get_global_environment(*eng)->get_value_ptr(callee->symbol_id);
+				const script_callable* payload = bound && bound->is_function() ? payload_from_function_value(*bound) : nullptr;
+				return payload && payload->kind == script_callable::kind_type::function && payload->fn &&
+				       !(payload->fn->return_type && payload->fn->return_type->is_reference());
+			}
+			default:
+				return false;
+			}
+		}
+
+		// The expression the parser bound as a reference (an lvalue conditional's arm, an assignment's target): what the user wrote
+		static const expression_ptr& implicit_reference_operand(const expression_ptr& e) {
+			const expression_ptr* result = &e;
+			while (*result && (*result)->get_type() == node_type::cast_expr && static_cast<const cast_expr*>(result->get())->implicit_ref) {
+				result = &static_cast<const cast_expr*>(result->get())->operand;
+			}
+			return *result;
+		}
+
 		// Stores and reference bindings must root at worker-local storage. These are the
 		// statically-FREE write rejections (early diagnostics for the runtime write
 		// wall): a store or alias rooted at an enclosing name errors here with position.
@@ -2479,8 +2529,22 @@ namespace {
 					}
 				}
 				if (chain_root_is_element(t)) { adm.element_mutated = true; }
-				return walk_local_member_chain(static_cast<member_expr*>(t.get()), aliasing ? what : "member store");
+				return walk_local_member_chain(static_cast<member_expr*>(t.get()), aliasing ? what : "member store", aliasing);
 			}
+			case node_type::ternary_expr: {
+				// an lvalue conditional: the store or the reference names the storage of the arm it picks, each held to the rules
+				auto* n = static_cast<ternary_expr*>(t.get());
+				if (proof_mode && maybe_object(n->condition)) { root_escaped = true; }
+				return walk_expr(n->condition) && walk_target(implicit_reference_operand(n->then_expression), what, aliasing) &&
+				       walk_target(implicit_reference_operand(n->else_expression), what, aliasing);
+			}
+			case node_type::cast_expr:
+				if (static_cast<cast_expr*>(t.get())->implicit_ref) { return walk_target(implicit_reference_operand(t), what, aliasing); }
+				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
+			case node_type::assignment_expr:
+				// (a = b) = c and ++a = c store through the assignment's own target, which its walk holds to the rules
+				if (!static_cast<assignment_expr*>(t.get())->yields_reference) { return fail(t.get(), std::string(what) + " target is not allowed in a parallel body"); }
+				return walk_expr(t) && (!aliasing || walk_target(implicit_reference_operand(static_cast<assignment_expr*>(t.get())->target), what, aliasing));
 			default:
 				return fail(t.get(), std::string(what) + " target is not allowed in a parallel body");
 			}

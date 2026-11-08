@@ -1142,6 +1142,37 @@ public:
 				return "no-error";
 			)");
 			check_true(r3.as<std::string>().find("parallel_transform: member access reaches captured state 'm' (captured reads are read-only, and only a captured object has members) at 3:") != std::string::npos, r3.as<std::string>());
+
+			// a chain on a computed value: a call's result and a conditional read as any expression, and a store or a reference
+			// through a conditional names the arm it picks; a call that may return a reference stays refused as a store root
+			const std::string computed = R"(
+				class V { int a = 1; }
+				V g1; V g2; g2.a = 5;
+				V& pick() { return g1; }
+				V mk(int k) { V v; v.a = k; return v; }
+				array<int> idx = [0, 1, 2, 3, 4, 5, 6, 7];
+				array<int> out = [0, 0, 0, 0, 0, 0, 0, 0];
+				parallel_for (int i : idx) {
+					V p; V q; int a = 0; int b = 0; array<int> s = [0]; array<int> t = [0];
+					(i > 3 ? p : q).a = 4; (i > 3 ? a : b) = 5; (i > 3 ? s : t)[0] = 6; ++a = a + 1;
+					auto& r = i > 5 ? a : b; r = r + 1;
+					out[i] = mk(i).a + (i > 3 ? g1 : g2).a + pick().a + p.a * 10 + q.a * 100 + a * 1000 + b * 10000 + s[0] * 100000 + t[0] * 1000000;
+				}
+				to_json(out);
+			)";
+			for (size_t workers : {size_t(1), size_t(8)}) {
+				e->parallel_thread_count(workers);
+				check_eq(std::string("[6061416,6061417,6061418,6061419,616146,616147,607148,607149]"), e->execute(computed).as<std::string>(), "computed roots, workers " + std::to_string(workers));
+			}
+			const auto refused = [&](const char* body) {
+				auto got = e->execute(std::string("class V { int a = 1; } V g1; V& pick() { return g1; } int ga = 0; array<int> idx = [0, 1]; try { parallel_for (int i : idx) { ") + body + " } } catch (e) { return e; } return \"no-error\";");
+				return got.as<std::string>();
+			};
+			check_true(refused("pick().a = 9;").rfind("parallel_for: member store must root at a local variable in a parallel body", 0) == 0, refused("pick().a = 9;"));
+			check_true(refused("int b = 0; (i > 0 ? ga : b) = 5;").rfind("parallel_for: body writes enclosing state 'ga'", 0) == 0, refused("int b = 0; (i > 0 ? ga : b) = 5;"));
+			check_true(refused("int b = 0; auto& r = i > 0 ? ga : b; r = 7;").rfind("parallel_for: reference declaration would alias enclosing state 'ga'", 0) == 0,
+			           refused("int b = 0; auto& r = i > 0 ? ga : b; r = 7;"));
+			check_true(refused("++ga = 7;").rfind("parallel_for: body writes enclosing state 'ga'", 0) == 0, refused("++ga = 7;"));
 		});
 
 		// === Element members (transformmembers): a body reads members of its own element ===

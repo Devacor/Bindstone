@@ -148,7 +148,7 @@ void fill_px(int x0, int y0, int w, int h, int c) {
 	}
 }
 
-// ---- shade tables: 16 light levels x NBASE, tinted toward a night color
+// ---- shade tables: 16 light levels x NBASE, tinted toward a night color, then the same 16 in a cloud's shadow
 int NLEV = 16;
 array<int> SHADE;
 array<int> GRAYSHADE;        // ghost vision: desaturated, cold
@@ -197,6 +197,11 @@ void shade_build(int tr, int tg, int tb, bool ghost, int warm_pct, int day_warm)
 			SHADE.push(lev == NLEV - 1 && !ghost && warm == 0 ? c : rgb(r, g, b));
 		}
 	}
+	// levels NLEV.. repeat the light under a passing cloud's shadow: darker and cooler
+	for (int i = 0; i < NLEV * n; ++i) {
+		int s = SHADE[i];
+		SHADE.push(ghost ? s : rgb(PAL_R[s] * 80 / 100, PAL_G[s] * 84 / 100, PAL_B[s] * 91 / 100 + 4));
+	}
 }
 
 // shade any palette color: colors interned after the tables were built pass through unshaded
@@ -207,7 +212,7 @@ array<int> BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 // ---- a 3x5 pixel font (digits, letters, a few marks) for floating numbers and banners
 array<string> FONT_CHARS = ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N",
-	"O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "+", "-", "!", "?", ".", " ", ":", "'", "~"];
+	"O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z", "+", "-", "!", "?", ".", " ", ":", "'", "~", "_", "/", ",", "*"];
 array<string> FONT_BITS = [
 	"111101101101111", "010110010010111", "111001111100111", "111001111001111", "101101111001001",
 	"111100111001111", "111100111101111", "111001010010010", "111101111101111", "111101111001111",
@@ -217,7 +222,8 @@ array<string> FONT_BITS = [
 	"110101110100100", "010101101111011", "110101110101101", "011100010001110", "111010010010010",
 	"101101101101111", "101101101101010", "101101111111101", "101101010101101", "101101010010010",
 	"111001010100111", "000010111010000", "000000111000000", "010010010000010", "111001010000010",
-	"000000000000010", "000000000000000", "000010000010000", "010010000000000", "000011110000000"
+	"000000000000010", "000000000000000", "000010000010000", "010010000000000", "000011110000000",
+	"000000000000111", "001001010100100", "000000000010100", "000101010101000"
 ];
 map<string, int> FONT_INDEX;
 

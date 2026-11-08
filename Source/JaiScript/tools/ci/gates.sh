@@ -55,6 +55,9 @@ CRAWLER_FRAMES=a36b9a559cf181a17c6d5d20ea7eadf7e0f6ae4c4c4682b70576dc1dd84916d1
 CRAWLER_SMALL_FRAMES=6603814f43ca70b55e24cd901d97d94f709cc9f3b7c5d444f77cf9e2bb83ec2a
 CRAWLER_WIDE_FRAMES=aa849fd242eeaeaf5a808184e13be3cfaaac7863bba5c6c1e92f3e0a6e936e9a
 GATORQUEST_STATE=3218840367
+GATORQUEST_TOUR_STATE=2752036546
+GATORQUEST_TOUR_FRAMES=3186012716
+GATORQUEST_TITLE_FRAMES=3110860618
 GLOOM_LONG_FRAME=dfd969ed5a336dca
 GLOOM_LONG_STATE=1503537018
 TIMEDEMO_STATE=1746772898
@@ -319,13 +322,23 @@ gate_lsp() {
 
 gate_lsp_latency() { lsp_test --only latency; }
 
+# The tour and the title pages hash the terminal text of every capture they write: the renderer's gate. The tour's last
+# stops hot-reload its own copy of the live tweak file, so the reload card and the seasons are covered too.
 gate_gatorquest() {
+	local shots
 	cd "$ROOT/examples/gatorquest"
+	shots="$(mktemp -d)"
 	for backend in vm interp; do
 		hash_on "$backend" || continue
 		run_logged "$BIN/jaiscript" --backend="$backend" scripts/gatorquest.jai -- smoke ticks 2000 bots 2
 		want "Gator Quest $backend: expected STATE_HASH $GATORQUEST_STATE" "STATE_HASH: $GATORQUEST_STATE\$"
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/gatorquest.jai -- tour screen 150x44 out "$shots/tour_$backend"
+		want "Gator Quest tour $backend: expected STATE_HASH $GATORQUEST_TOUR_STATE FRAME_HASH $GATORQUEST_TOUR_FRAMES" \
+			"tour: done \(STATE_HASH $GATORQUEST_TOUR_STATE FRAME_HASH $GATORQUEST_TOUR_FRAMES\)\$"
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/gatorquest.jai -- shot title out "$shots/title_$backend"
+		want "Gator Quest title $backend: expected FRAME_HASH $GATORQUEST_TITLE_FRAMES" "\(FRAME_HASH $GATORQUEST_TITLE_FRAMES\)\$"
 	done
+	rm -rf "$shots"
 }
 
 android_ndk() {

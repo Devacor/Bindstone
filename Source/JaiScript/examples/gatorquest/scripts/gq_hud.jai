@@ -248,6 +248,7 @@ void build_menu(ClientView& v) {
 		menu_add(MUSIC_ON ? "Music: on" : "Music: off", SGR_TEXT, 3);
 		menu_add(SFX_ON ? "Sound: on" : "Sound: off", SGR_TEXT, 4);
 		menu_add(`Zoom: ${TILE_ZOOM == 0 ? "auto" : to_string(TILE_ZOOM) + "px"}`, SGR_TEXT, 5);
+		if (LIVE_PATH != "" && DEV_ON) { menu_add(`Next season: ${SEASON_NAMES[(SEASON + 1) % 4]} (hot reload)`, "38;2;120;255;240", 11); }
 		menu_add("Help", SGR_TEXT, 6);
 		if (net_hosting()) { menu_add(`Stop hosting (${net_player_count()} joined)`, SGR_TEXT, 9); }
 		else if (!NET_CLIENT) { menu_add(`Host this game (port ${TM_PORT})`, SGR_TEXT, 8); }

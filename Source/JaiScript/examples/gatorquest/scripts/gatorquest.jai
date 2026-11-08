@@ -10,7 +10,7 @@
 //   jaiscript gatorquest.jai -- savetest             save robustness suite
 //   jaiscript gatorquest.jai -- thieftest            the Raccoon Bandits: warrens, pace, thefts, the purse, the quest
 //   powershell -File hotreload.ps1 [-Backend interp]  hot-reload test (it edits its scripts: runs a scratch copy)
-//   jaiscript gatorquest.jai -- dev                  play with live script reload
+//   jaiscript gatorquest.jai -- noreload             play without live script reload (on by default)
 //   jaiscript gatorquest.jai -- predtest | menutest | nettest | endgame | tour | serve | client   see README.md
 
 import "gq_enums.jai";
@@ -34,6 +34,7 @@ import "gq_proto.jai";
 import "gq_vid.jai";
 import "gq_art.jai";
 import "gq_render.jai";
+import "gq_fx.jai";
 import "gq_audio.jai";
 import "gq_predict.jai";
 import "gq_hud.jai";
@@ -149,8 +150,10 @@ int run_play() {
 	AUDIO_ON = !arg_flag("mute") && audio_prepare(data_root() + "/cache");
 	title_setup(arg_value("join", ""), arg_flag("host"), port);
 	if (arg_flag("join") && TM_PAGE == "main") { tm_open("join"); }
-	bool dev = arg_flag("dev");
+	// hot reload is on unless asked off: a saved script, or the live tweak file, lands on the next frame
+	bool dev = !arg_flag("noreload");
 	if (dev) {
+		live_start(save_dir() + "/live");
 		dev_start();
 		DEV_ON = true;
 	}
@@ -162,7 +165,7 @@ int run_play() {
 		string choice = title_screen(resumed, demo ? 45 : 0);
 		if (choice == "quit") { break; }
 		string welcome = session_start(choice, demo);
-		if (dev) { welcome = welcome + ` Dev mode: ${DEV_MODULES.size()} scripts reload when saved.`; }
+		if (dev) { welcome = welcome + ` Hot reload is on: save any of the ${DEV_MODULES.size()} scripts, or ${LIVE_PATH}, and it lands live (ESC, Next season, tries it).`; }
 		if (!NET_CLIENT) {
 			say_to(LOCAL_SLOT, welcome, C_YELLOW);
 			music_play(MOB_WORLD[CHARS[LOCAL_SLOT].mob]);

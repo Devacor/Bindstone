@@ -485,6 +485,36 @@ int tile_animates(int t) {
 	return 0;
 }
 
+// the live file's season, baked into the land's textures: autumn leaves, winter snow, spring blossom
+int season_px(int t, int c) {
+	if (SEASON == 0 || c < 0) { return c; }
+	bool ground = t == T_GRASS || t == T_TALLGRASS || t == T_FLOWERS;
+	bool leaf = t == T_OAK || t == T_PINE || t == T_BUSH || t == T_REEDS || t == T_CYPRESS;
+	if (!ground && !leaf) { return c; }
+	int r = PAL_R[c];
+	int g = PAL_G[c];
+	int b = PAL_B[c];
+	int lum = (r * 3 + g * 6 + b) / 10;
+	bool green = g > r + 6 && g > b;
+	if (SEASON == 2) {
+		if (ground) { return rgb(176 + lum / 4, 188 + lum / 5, 210 + lum / 6); }
+		if (green) { return lum > 100 ? rgb(226 + lum / 10, 234 + lum / 12, 248) : rgb(38 + lum / 3, 70 + lum / 3, 76 + lum / 3); }
+		return c;
+	}
+	if (!green) { return c; }
+	if (SEASON == 1) {
+		if (ground) { return rgb(g * 82 / 100 + 22, g * 66 / 100, b / 2); }
+		int band = lum < 70 ? 0 : (lum < 115 ? 1 : 2);
+		if ((c * 7) % 5 == 0 && band > 0) { band = band - 1; }
+		if (band == 0) { return rgb(130 + lum / 3, 40 + lum / 5, 22); }
+		if (band == 1) { return rgb(204 + lum / 6, 92 + lum / 5, 28); }
+		return rgb(242, 172 + lum / 8, 52);
+	}
+	if (ground) { return rgb(r * 90 / 100, g * 112 / 100 + 8, b * 90 / 100); }
+	if (t == T_OAK && lum > 110) { return rgb(246, 176 + lum / 12, 206); }
+	return rgb(r * 92 / 100, g * 110 / 100, b);
+}
+
 void textures_build(int S) {
 	TS = S;
 	TEX = [];
@@ -506,7 +536,7 @@ void textures_build(int S) {
 				if (f == 0) { base_off = off; }
 				TEX_OFF.push(off);
 				for (int py = 0; py < S; ++py) {
-					for (int px = 0; px < S; ++px) { TEX.push(tex_pixel(t, vr, f, px, py, S)); }
+					for (int px = 0; px < S; ++px) { TEX.push(season_px(t, tex_pixel(t, vr, f, px, py, S))); }
 				}
 			}
 		}
@@ -662,6 +692,7 @@ void icons_init() {
 
 void art_init(int tile_size) {
 	pal_reset();
+	palette_users_reset();
 	colors_init();
 	font_init();
 	sprites_init();

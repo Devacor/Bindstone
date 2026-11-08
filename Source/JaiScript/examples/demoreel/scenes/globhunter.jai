@@ -17,14 +17,23 @@
 // pixel letters. Enemies respawn each lap. It plays to its cue: the gun fires
 // only on a beat (on the eighths through the bar after the big hit), footfalls
 // land on the beat, the torches flare with the kick, the big hit on bar five's
-// downbeat floods the hall with light, and the last bar slows the walk and holds
+// downbeat floods the hall with light, and the bar after the boss slows the walk and holds
 // fire on the corridor ahead. Every burst lights the hall around it, the view quakes
 // with each kill, the big hit drops into bullet time for two beats (the walk crawls,
 // the goo hangs in the air), and on bar seven a boss glob twice a brute's size rises
 // in the corridor ahead, eyes burning, swelling on every kick: two bars of fight, a
 // hit on every beat flashing it, until it bursts on bar nine's downbeat in bullet
-// time, flooding the hall with goo, and the last bar walks on through the aftermath.
+// time, flooding the hall with goo, and the camera walks on through the aftermath.
+// Then the keep falls: on bar ten it calls RUN, the torches gutter low and strobe
+// back up on every kick, the view trembles, stone shakes loose from the vault on
+// every snare, an ambush rises in the mid hall and the gun fires on the eighths as
+// the camera sprints (just fast enough to arrive on time) for the east wall, whose
+// cracks glow hotter with daylight the closer it gets. On bar twelve's downbeat
+// the wall blows in, stone flying at the lens, the frame whites out, KEEP CLEARED,
+// and the last bar walks out through the breach as daylight blooms over the frame.
 // The ray fan comes from the camera-plane vector: no per-column trig.
+
+array<int> BAYER4 = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
 
 class GlobHunter : Scene {
 	array<int> wmap = [];
@@ -63,7 +72,7 @@ class GlobHunter : Scene {
 	array<int> drawn = [];
 	array<float> zcol = [];  // per-column wall depth from the last wall pass
 	var gun = [];
-	int ne = 12;             // eleven of the garrison, and the boss in the last slot
+	int ne = 18;             // seventeen of the garrison (three wait in ambush for the escape), and the boss in the last slot
 	float boss_flash = 0.0;  // the boss shrugs off each hit with a flash until bar nine
 	int kills = 0;
 	float cool = 0.6;
@@ -95,15 +104,19 @@ class GlobHunter : Scene {
 	array<float> gvz = [];
 	array<float> glife = [];
 	array<int> gtype = [];
-	int ngoo = 160;
+	int ngoo = 220;
 	int goo_next = 0;
 	array<int> vigx = [];    // the vignette: light levels lost toward the edges
 	array<int> vigy = [];
+	int rubble_base = 0;     // falling stone, 12 levels
+	int breach_x = 22;       // the wall the escape blows open, east at the end of the mid hall
+	int breach_y = 12;
+	float last_snare = 0.0;
 
 	void build() override {
 		name = "GLOBHUNTER";
 		handle = "grublin keep . torchlight, one ray per column, zero mercy";
-		replay = 15.0;
+		replay = 26.0;
 		// # stone  M moss  G gold pillar  B banner (rainbow-fire, animated)
 		var rows = [
 			"##################BBBB##",
@@ -143,6 +156,7 @@ class GlobHunter : Scene {
 				wmap.push(v);
 			}
 		}
+		wmap[breach_y * mw + breach_x] = 5;
 		var fogc = [5.0, 7.0, 18.0];
 		var wall_cols = [
 			[[40.0, 36.0, 44.0], [88.0, 88.0, 100.0], [104.0, 104.0, 118.0], [120.0, 120.0, 136.0], [138.0, 138.0, 152.0], [156.0, 156.0, 170.0], [186.0, 186.0, 200.0], [70.0, 70.0, 82.0]],
@@ -210,6 +224,8 @@ class GlobHunter : Scene {
 		pal.add(255, 60, 40);                                     // +48 glowing eye
 		pal.ramp(4, 120.0, 255.0, 120.0, 230.0, 255.0, 200.0);    // +49..52 callout ink, grublin goo glint
 		pal.ramp(4, 255.0, 120.0, 220.0, 255.0, 240.0, 255.0);    // +53..56 combo ink
+		rubble_base = pal.size();
+		pal.ramp(12, 22.0, 20.0, 28.0, 196.0, 186.0, 172.0);
 		grow_textures();
 		gun = ["......dlhd......", "......dlmd......", "......dlmd......", ".....ddlmdd.....", ".....dlhmmd.....",
 			"....ddlmmmdd....", "....dlhmmmmd....", "...kdlmmmmmdk...", "..kkdmmmmmmdkk..", ".kkkkdmmmmdkkkk.",
@@ -224,9 +240,10 @@ class GlobHunter : Scene {
 			path_len += seglen[i];
 		}
 		// garrison, posted along the route (a couple wait around corners)
-		ex = [2.5, 2.5, 2.5, 4.5, 5.5, 12.5, 12.5, 14.5, 18.5, 21.5, 20.5, 0.0];
-		ey = [6.5, 12.5, 16.5, 19.5, 21.5, 18.5, 13.5, 12.5, 12.5, 8.5, 2.5, 0.0];
-		et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 1];
+		// (three more hold the bottom hall for the frenzy, three wait in the mid hall for the escape)
+		ex = [2.5, 2.5, 2.5, 4.5, 5.5, 12.5, 12.5, 14.5, 18.5, 21.5, 20.5, 9.0, 11.0, 12.5, 11.5, 16.5, 19.5, 0.0];
+		ey = [6.5, 12.5, 16.5, 19.5, 21.5, 18.5, 13.5, 12.5, 12.5, 8.5, 2.5, 21.5, 21.3, 19.0, 11.5, 12.5, 12.3, 0.0];
+		et = [0, 0, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0, 1, 0, 0, 1, 0, 1];
 		for (int i2 = 0; i2 < ne; ++i2) {
 			es.push(0);
 			est.push(0.0);
@@ -234,7 +251,12 @@ class GlobHunter : Scene {
 			sty.push(0.0);
 			drawn.push(0);
 		}
-		es[ne - 1] = 3;   // the boss waits for the last bar
+		es[ne - 1] = 3;   // the boss waits for bar seven
+		for (int a = ne - 4; a < ne - 1; ++a) {
+			// the ambush rises (a downed mark stands again after 16 s) as the escape begins
+			es[a] = 3;
+			est[a] = 16.0 - MUSIC_BAR * 10.0;
+		}
 		zcol = gfx.make_fgrid(w);
 		for (int i3 = 0; i3 < w; ++i3) { zcol[i3] = 99.0; }
 		// torches hang beside the walls along the route; each keeps its falloff over the light map
@@ -391,26 +413,52 @@ class GlobHunter : Scene {
 		return false;
 	}
 
-	int length_bars() override { return 10; }
-	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 7.0, MUSIC_BAR * 9.0]; }
-	array<int> hit_levels() override { return [1, 2, 1, 2]; }
+	int length_bars() override { return 13; }
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 7.0, MUSIC_BAR * 9.0, MUSIC_BAR * 10.0, MUSIC_BAR * 12.0]; }
+	array<int> hit_levels() override { return [1, 2, 1, 2, 1, 2]; }
+
+	// the route's distance at which the escape reaches the breach, facing it
+	float breach_stop() { return 19.0 + 10.0 + 9.0 + 8.3; }
 
 	void update(float t, float dt) override {
 		tt = t;
 		++fr;
-		bool last_bar = t > MUSIC_BAR * 9.0;
-		bool fight = t > MUSIC_BAR * 7.0 && !last_bar;
+		bool aftermath = t > MUSIC_BAR * 9.0 && t < MUSIC_BAR * 10.0;
+		bool escape = t >= MUSIC_BAR * 10.0 && t < MUSIC_BAR * 12.0;
+		bool out = t >= MUSIC_BAR * 12.0;
+		bool fight = t > MUSIC_BAR * 7.0 && t < MUSIC_BAR * 9.0;
 		float bullet = slow_mo(t);
-		float pace = stop_t > 0.0 ? 0.18 : (last_bar ? 0.4 : (fight ? 0.16 : 1.0));
+		float lap = travel - math::floor(travel / path_len) * path_len;
+		float pace = stop_t > 0.0 ? 0.18 : (aftermath ? 0.4 : (fight ? 0.16 : 1.0));
+		if (escape) {
+			// the run for the breach: always just fast enough to reach it on bar twelve
+			float want = (breach_stop() - lap) / (MUSIC_BAR * 12.0 - t + 0.05) / 2.4;
+			want = want < 0.0 ? 0.0 : (want > 3.0 ? 3.0 : want);
+			pace = stop_t > 0.0 ? want * 0.5 : want;
+		}
+		if (out) { pace = 0.0; }
 		pace *= bullet;
 		travel += dt * 2.4 * pace;
+		lap = travel - math::floor(travel / path_len) * path_len;
+		float look = 1.7;
+		if (escape || out) {
+			float to_corner = 19.0 + 10.0 + 9.0 + 9.0 - lap;
+			look = to_corner < look && to_corner > 0.0 ? to_corner : look;
+		}
 		var p = path_at(travel);
-		var q = path_at(travel + 1.7);   // look-ahead steers the turns
+		var q = path_at(travel + look);   // look-ahead steers the turns
 		posx = p[0];
 		posy = p[1];
+		if (out) {
+			// into the light: the last bar walks through the breach
+			float walk = (t - MUSIC_BAR * 12.0) / MUSIC_BAR;
+			walk = walk > 1.0 ? 1.0 : walk;
+			posx += walk * (2.0 - walk) * 0.92;
+		}
 		float bx = q[0] - posx;
 		float by = q[1] - posy;
 		float bl = math::sqrt(bx * bx + by * by);
+		if (out) { bx = 1.0; by = 0.0; bl = 1.0; }
 		if (bl > 0.0001) { bx /= bl; by /= bl; } else { bx = dirx; by = diry; }
 		// the hunt: swing toward the nearest live mark in clear sight ahead
 		float want = 0.0;
@@ -427,11 +475,14 @@ class GlobHunter : Scene {
 			near = md;
 			want = ang;
 		}
+		if (out) { want = 0.0; }
 		float ease = dt * 7.0;
 		ease = ease > 1.0 ? 1.0 : ease;
 		aim += (want - aim) * ease;
-		// the quake: each kill shakes the view, the big hit hardest
+		// the quake: each kill shakes the view, the big hit hardest, and the keep rumbles as it falls
+		float kick_now = cue != null ? cue.kick_env(t) : 0.0;
 		float quake = (hot_t > 0.0 ? hot_t * 0.16 : 0.0) + (cue != null ? cue.hit(t) * 0.05 : 0.0);
+		if (escape) { quake += 0.012 + kick_now * 0.03; }
 		float view = aim + quake * math::sin(fr * 2.7);
 		float ca = math::cos(view);
 		float sa = math::sin(view);
@@ -456,7 +507,7 @@ class GlobHunter : Scene {
 		}
 		// auto-fire on the beat: nearest alive enemy in the crosshair cone with clear LOS
 		float e = cue != null ? cue.energy(t) : 0.6;
-		bool eighths = e > 0.92 || (t > MUSIC_BAR * 5.0 && t < MUSIC_BAR * 6.0);
+		bool eighths = e > 0.92 || (t > MUSIC_BAR * 5.0 && t < MUSIC_BAR * 6.0) || escape;
 		// the big hit: the hall floods with light and the frenzy is called
 		if (t >= MUSIC_BAR * 5.0 && t - dt < MUSIC_BAR * 5.0) {
 			callout = "FRENZY";
@@ -465,7 +516,14 @@ class GlobHunter : Scene {
 		int step = math::ifloor(t / (eighths ? MUSIC_BEAT * 0.5 : MUSIC_BEAT));
 		bool on_step = step != last_step;
 		last_step = step;
-		if (cool <= 0.0 && on_step && !last_bar && t > MUSIC_BAR) {
+		if (t >= MUSIC_BAR * 10.0 && t - dt < MUSIC_BAR * 10.0) {
+			callout = "RUN";
+			call_t = 1.3;
+			hot_t = 0.5;
+		}
+		if (t >= MUSIC_BAR * 12.0 && t - dt < MUSIC_BAR * 12.0) { blow_breach(); }
+		if (escape) { falling_stone(t); }
+		if (cool <= 0.0 && on_step && !aftermath && !out && t > MUSIC_BAR) {
 			float invdet = 1.0 / (planex * diry - dirx * planey);
 			int best = -1;
 			float besty = 99.0;
@@ -517,19 +575,74 @@ class GlobHunter : Scene {
 		move_goo(dt * bullet);
 		// the flicker is redrawn at 15 Hz, and every frame while the muzzle burns or the kick lands
 		float beat_light = cue != null ? cue.kick_env(t) + cue.hit(t) : 0.0;
-		if ((fr & 1) == 0 || muzzle_t > -0.05 || beat_light > 0.2) { light_up(); }
-		// the view: a footfall on each beat, the recoil's kick, a shudder while the muzzle burns
+		if ((fr & 1) == 0 || muzzle_t > -0.05 || beat_light > 0.2 || escape || out) { light_up(); }
+		// the view: a footfall on each beat (each eighth on the run), the recoil's kick, a shudder
+		// while the muzzle burns, and the falling keep's tremor
 		float stride = cue != null ? cue.beat_phase(t) : travel * 0.83;
-		float bob = math::sin(stride * 3.1415927) * h * 0.014 * (last_bar ? 0.4 : 1.0);
+		if (escape) { stride = stride * 2.0 - math::floor(stride * 2.0); }
+		float bob = math::sin(stride * 3.1415927) * h * (escape ? 0.022 : 0.014) * (aftermath || out ? 0.4 : 1.0);
 		float kick = kick_t > 0.0 ? h * 0.05 * kick_t / 0.2 : 0.0;
 		float shud = muzzle_t > 0.0 ? ((fr * 7) % 3 - 1) * h * 0.012 : 0.0;
-		pitch = bob + kick + shud;
+		float tremor = escape ? math::sin(fr * 5.3) * h * (0.006 + kick_now * 0.02) : 0.0;
+		pitch = bob + kick + shud + tremor;
+	}
+
+	// the escape: on each snare stones shake loose from the vault ahead and fall
+	void falling_stone(float t) {
+		float sn = cue != null ? cue.snare_env(t) : 0.0;
+		bool onset = sn > last_snare + 0.25;
+		last_snare = sn;
+		if (!onset) { return; }
+		for (int k = 0; k < 14; ++k) {
+			int g = goo_next;
+			goo_next = (goo_next + 1) % ngoo;
+			float ahead = 1.2 + rng.nextf() * 3.2;
+			float across = (rng.nextf() - 0.5) * 1.6;
+			float sx = posx + dirx * ahead - diry * across;
+			float sy = posy + diry * ahead + dirx * across;
+			if (wmap[itrunc(sy) * mw + itrunc(sx)] != 0) { continue; }
+			gx[g] = sx;
+			gy[g] = sy;
+			gz[g] = 0.95;
+			gvx[g] = (rng.nextf() - 0.5) * 0.6;
+			gvy[g] = (rng.nextf() - 0.5) * 0.6;
+			gvz[g] = 0.0 - rng.nextf() * 1.5;
+			glife[g] = 1.4 + rng.nextf() * 0.8;
+			gtype[g] = 2;
+		}
+	}
+
+	// bar twelve: the east wall bursts, stone flies at the camera and daylight floods in
+	void blow_breach() {
+		callout = "KEEP CLEARED";
+		call_t = 2.6;
+		hot_t = 0.8;
+		for (int k = 0; k < 70; ++k) {
+			int g = goo_next;
+			goo_next = (goo_next + 1) % ngoo;
+			gx[g] = breach_x - 0.05;
+			gy[g] = breach_y + 0.1 + rng.nextf() * 0.8;
+			gz[g] = 0.1 + rng.nextf() * 0.8;
+			gvx[g] = 0.0 - (1.5 + rng.nextf() * 4.5);
+			gvy[g] = (rng.nextf() - 0.5) * 2.4;
+			gvz[g] = 0.5 + rng.nextf() * 2.5;
+			glife[g] = 1.8 + rng.nextf() * 1.2;
+			gtype[g] = 2;
+		}
+	}
+
+	// 0 a wall, rising to 1 as the cracks of the breach open through the escape, 2 blown open
+	float breach_state() {
+		if (tt >= MUSIC_BAR * 12.0) { return 2.0; }
+		float k = (tt - MUSIC_BAR * 10.0) / (MUSIC_BAR * 2.0);
+		return k < 0.0 ? 0.0 : k;
 	}
 
 	// bullet time: two beats after each big hit play at a fifth of the speed
 	float slow_mo(float t) {
 		float since = t - MUSIC_BAR * 5.0;
 		if (t >= MUSIC_BAR * 9.0) { since = t - MUSIC_BAR * 9.0; }
+		if (t >= MUSIC_BAR * 12.0) { since = t - MUSIC_BAR * 12.0; }
 		if (since < 0.0 || since > MUSIC_BEAT * 2.5) { return 1.0; }
 		float back = (since - MUSIC_BEAT * 2.0) / (MUSIC_BEAT * 0.5);
 		back = back < 0.0 ? 0.0 : (back > 1.0 ? 1.0 : back);
@@ -629,9 +742,13 @@ class GlobHunter : Scene {
 		int n = lres * lres;
 		int nt = tox.size();
 		array<float> flick = [];
+		float kick = cue != null ? cue.kick_env(tt) : 0.0;
+		// on the run the torches gutter low and the kick strobes them back up
+		bool run = tt >= MUSIC_BAR * 10.0 && tt < MUSIC_BAR * 12.0;
+		float gutter = run ? 0.4 + kick * 1.1 : 1.0;
 		for (int k = 0; k < nt; ++k) {
-			float beat_flare = cue != null ? 0.32 * cue.kick_env(tt) + 0.7 * cue.hit(tt) : 0.0;
-			flick.push(1.0 + 0.12 * math::sin(tt * 13.0 + k * 2.3) + 0.10 * math::sin(tt * 29.0 + k * 5.1) + beat_flare);
+			float beat_flare = cue != null ? 0.45 * kick + 0.7 * cue.hit(tt) : 0.0;
+			flick.push((1.0 + 0.12 * math::sin(tt * 13.0 + k * 2.3) + 0.10 * math::sin(tt * 29.0 + k * 5.1)) * gutter + beat_flare);
 		}
 		var& st = still;
 		var& ow = owner;
@@ -660,6 +777,25 @@ class GlobHunter : Scene {
 					int c3 = cy2 * lres + cx2;
 					int lv3 = lm[c3] + itrunc(power / (1.0 + dd * 0.5));
 					lm[c3] = lv3 > 5 ? 5 : lv3;
+				}
+			}
+		}
+		// daylight through the breach: a glow through its cracks, then a flood once it is open
+		float bs = breach_state();
+		if (bs > 0.0) {
+			float power = bs >= 2.0 ? 6.0 : bs * (2.0 + kick * 2.0);
+			int bx1 = breach_x * 2;
+			int by1 = breach_y * 2 + 1;
+			for (int dy3 = -12; dy3 <= 12; ++dy3) {
+				int cy3 = by1 + dy3;
+				if (cy3 < 0 || cy3 >= lres) { continue; }
+				for (int dx3 = -24; dx3 <= 0; ++dx3) {
+					int cx3 = bx1 + dx3;
+					if (cx3 < 0) { continue; }
+					float dd3 = (dx3 * dx3 + dy3 * dy3 * 2.0) * 0.25;
+					int c4 = cy3 * lres + cx3;
+					int lv4 = lm[c4] + itrunc(power / (1.0 + dd3 * 0.12));
+					lm[c4] = lv4 > 5 ? 5 : lv4;
 				}
 			}
 		}
@@ -910,7 +1046,9 @@ class GlobHunter : Scene {
 			float tstep = 16.0 / lineh;
 			float tpos = (y0 + 0.5 - topf) * tstep;
 			int gi = y0 * ww + x;
-			if (hitv == 4) {
+			if (hitv == 5) {
+				breach_slice(grid, x, y0, y1, tpos, tstep, tu, lv, side);
+			} else if (hitv == 4) {
 				int brow = bb + (side * 8 + lv) * 16;
 				// rainbow fire: ragged flame tongues per texel column, hue bands scroll up
 				int wave = (tu * 3 + tshift) % 12;
@@ -961,7 +1099,87 @@ class GlobHunter : Scene {
 			draw_blob(grid, pick);
 		}
 		draw_goo(grid, invdet);
+		daylight(grid);
 		draw_hud(grid);
+	}
+
+	// out through the breach: daylight blooms from the heart of the frame, its edge dithered gold
+	void daylight(var& grid) {
+		if (tt < MUSIC_BAR * 12.0) { return; }
+		float k = (tt - MUSIC_BAR * 12.0) / MUSIC_BAR;
+		k = k > 1.0 ? 1.0 : k;
+		// the blast whites out the frame for a moment, then the opening blooms
+		float r = k < 0.06 ? w * 1.2 : (0.12 + k * k * 0.6) * w;
+		float band = 7.0;
+		float cx = w * 0.5;
+		float cy = h * 0.5 + pitch;
+		int sb = sprite_base;
+		for (int y = 0; y < h; ++y) {
+			float dy = (y + 0.5 - cy) * 1.5;
+			float oo = r * r - dy * dy;
+			if (oo <= 0.0) { continue; }
+			// per row: the white heart, the warm white ring, the dithered gold edge
+			float xo = math::sqrt(oo);
+			float ri = r - band;
+			float ii = ri * ri - dy * dy;
+			float xi = ii > 0.0 ? math::sqrt(ii) : 0.0;
+			float hh = r * r * 0.36 - dy * dy;
+			float xh = hh > 0.0 ? math::sqrt(hh) : 0.0;
+			int row = y * w;
+			int x0 = itrunc(cx - xo);
+			int x1 = itrunc(cx + xo) + 1;
+			x0 = x0 < 0 ? 0 : x0;
+			x1 = x1 > w ? w : x1;
+			for (int x = x0; x < x1; ++x) {
+				float dx = x + 0.5 - cx;
+				float ax = dx < 0.0 ? -dx : dx;
+				if (ax < xh) {
+					grid[row + x] = sb + 24;
+				} else if (ax < xi) {
+					grid[row + x] = sb + 31;
+				} else {
+					float over = (r - math::sqrt(dx * dx + dy * dy)) / band;
+					if (over * 16.0 > BAYER4[(y & 3) * 4 + (x & 3)]) { grid[row + x] = sb + 32; }
+				}
+			}
+		}
+	}
+
+	// the breach: stone whose cracks glow hotter through the escape, then open daylight
+	void breach_slice(var& grid, int x, int y0, int y1, float tpos, float tstep, int tu, int lv, int side) {
+		float bs = breach_state();
+		int sb = sprite_base;
+		int gi = y0 * w + x;
+		if (bs >= 2.0) {
+			// open: white at the heart of the opening, gold toward its edges, rays rippling up it
+			int shimmer = itrunc(tt * 9.0);
+			for (int y = y0; y < y1; ++y) {
+				int tv = tpos;
+				int ev = tv < 8 ? tv : 15 - tv;
+				int eu = tu < 8 ? tu : 15 - tu;
+				int edge = ev < eu ? ev : eu;
+				int ray = ((tu * 5 + (tv >> 1) + shimmer) & 7) == 0 ? 1 : 0;
+				grid[gi] = edge > 3 ? sb + 24 : (edge > 1 - ray ? sb + 31 : sb + 32);
+				tpos += tstep;
+				gi += w;
+			}
+			return;
+		}
+		float kick = cue != null ? cue.kick_env(tt) : 0.0;
+		int heat = itrunc((bs + kick * 0.35) * 14.0);
+		int wrow = wall_base + (side * 8 + lv) * 8;
+		for (int y2 = y0; y2 < y1; ++y2) {
+			int tv2 = tpos;
+			int ti = (tv2 & 15) * 16 + tu;
+			int crack = (hash2(ti, 77) & 15);
+			int c = tex[ti];
+			// mortar lines and a hashed web of cracks catch fire from the light behind
+			int pix = wrow + c;
+			if ((c == 0 && crack < heat) || crack + 6 < heat - 8) { pix = crack < heat - 6 ? sb + 31 : (crack < heat - 3 ? sb + 32 : sb + 33); }
+			grid[gi] = pix;
+			tpos += tstep;
+			gi += w;
+		}
 	}
 
 	// the goo in flight and on the floor: blobs sized by distance, lit by the map
@@ -978,10 +1196,12 @@ class GlobHunter : Scene {
 			int scx = itrunc(w * 0.5 * (1.0 + txx / tyy));
 			if (scx < 0 || scx >= w || tyy >= zcol[scx]) { continue; }
 			int scy = itrunc(hc + (0.5 - gz[g]) * h / tyy);
-			int rad = itrunc(h * 0.04 / tyy * (life < 0.6 ? life / 0.6 : 1.0));
+			int rad = itrunc(h * (gtype[g] == 2 ? 0.024 : 0.04) / tyy * (life < 0.6 ? life / 0.6 : 1.0));
 			int flat = gz[g] <= 0.0 ? 1 : 0;
 			float lk = 0.3 + light_at(gx[g], gy[g]) * 0.14;
-			int body = sprite_base + gtype[g] * 12 + itrunc(lk * 10.0);
+			int base = gtype[g] == 2 ? rubble_base : sprite_base + gtype[g] * 12;
+			int body = base + itrunc(lk * 10.0);
+			body = body > base + 11 ? base + 11 : body;
 			for (int dy = 0 - rad; dy <= rad; ++dy) {
 				int row = scy + (flat == 1 ? dy / 2 : dy);
 				if (row < 0 || row >= h) { continue; }
@@ -989,7 +1209,7 @@ class GlobHunter : Scene {
 					int col = scx + dx;
 					if (col < 0 || col >= w || tyy >= zcol[col]) { continue; }
 					if (dx * dx + dy * dy * (flat == 1 ? 4 : 1) > (rad + 1) * (rad + 1) * (flat == 1 ? 4 : 1)) { continue; }
-					grid[row * w + col] = dy < 0 && dx < 0 && flat == 0 ? sprite_base + 52 : (body > sprite_base + gtype[g] * 12 + 11 ? sprite_base + gtype[g] * 12 + 11 : body);
+					grid[row * w + col] = dy < 0 && dx < 0 && flat == 0 && gtype[g] != 2 ? sprite_base + 52 : body;
 				}
 			}
 		}

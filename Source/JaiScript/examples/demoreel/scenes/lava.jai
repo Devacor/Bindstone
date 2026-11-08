@@ -10,12 +10,15 @@
 // a studio glint and bends the ray a little; inside, the wax is a 3D metaball
 // field (seven blobs rising off the heater and sinking as they cool, a pool on the
 // base, a drip under the cap) marched along the bent ray, lit from the field's
-// gradient, the liquid between glowing with it; the floor takes a pool of each
-// lamp's light and everything fogs with distance. Every lamp takes one of three
-// blob simulations, turned to its own quarter, and its own colour family. The
-// wax swells with the kick, burns brighter with the section's energy, shifts hue
-// with the chord, flashes on the hits and runs a rainbow wave over the field after
-// the first. Rows run in parallel.
+// gradient, the liquid between glowing with it. The floor is black glass: it
+// mirrors the lamps (a second walk of the grid along the bounced ray) over a pool of
+// each lamp's light, and every lamp blooms into the haze around it, measured as the
+// ray passes. Everything fogs with distance. Every lamp takes one of three blob
+// simulations, turned to its own quarter, and its own colour family. The wax swells
+// with the kick, burns brighter with the section's energy, shifts hue with the
+// chord and runs a rainbow wave over the field after the first big hit; each big hit
+// sends a ring of white heat racing out across the field, lamp by lamp, and the
+// camera sways between the rows on the beat. Rows run in parallel.
 
 array<float> LV_BX = [];     // three blob sets of LV_N blobs, in lamp space
 array<float> LV_BY = [];
@@ -49,6 +52,10 @@ float LV_FLASH = 0.0;        // the hits' white
 float LV_HUE0 = 0.0;         // the chord's hue shift
 float LV_BURN = 0.0;         // the rainbow wave's strength and clock
 float LV_T = 0.0;
+float LV_RING_X = 0.0;       // the last big hit's ring of heat: its centre, radius and strength
+float LV_RING_Z = 0.0;
+float LV_RING_R = -9.0;
+float LV_RING_A = 0.0;
 
 // the vessel's radius at height y (lamp units: 0 the base's foot, 1 the cap's top)
 function lamp_width(float y) -> float {
@@ -113,8 +120,8 @@ function fog_level(int level, float dist) -> int {
 }
 
 // inside the glass: march the bent ray through the wax field; the wax lit from its gradient, or the liquid's glow
-function wax_shade(float x, float y, float z, float dx, float dy, float dz, int b0, int q, float hue_off, float dist) -> int {
-	if (q == 0) { return LV_GLOW + (itrunc(hue_off + 3.0) % 24) * 8 + fog_level(itrunc(0.12 * LV_GAIN * 7.99), dist); }
+function wax_shade(float x, float y, float z, float dx, float dy, float dz, int b0, int q, float hue_off, float dist, float boost) -> int {
+	if (q == 0) { return LV_GLOW + (itrunc(hue_off + 3.0) % 24) * 8 + fog_level(itrunc((0.12 + boost * 0.6) * LV_GAIN * 7.99), dist); }
 	float stepl = 0.032;
 	float fmax = 0.0;
 	float mx = x;
@@ -137,7 +144,7 @@ function wax_shade(float x, float y, float z, float dx, float dy, float dz, int 
 				float cx = (ax + bx) * 0.5; float cy = (ay + by) * 0.5; float cz = (az + bz) * 0.5;
 				if (wax_field(cx, cy, cz, b0, q) >= 1.0) { bx = cx; by = cy; bz = cz; } else { ax = cx; ay = cy; az = cz; }
 			}
-			return wax_lit(bx, by, bz, dx, dy, dz, b0, q, hue_off, dist);
+			return wax_lit(bx, by, bz, dx, dy, dz, b0, q, hue_off, dist, boost);
 		}
 		if (f > fmax) {
 			fmax = f;
@@ -146,12 +153,12 @@ function wax_shade(float x, float y, float z, float dx, float dy, float dz, int 
 		px = nx; py = ny; pz = nz;
 	}
 	int hq = itrunc(wax_hue(mx, my, mz, b0, q) + hue_off + 0.5) % 24;
-	int gl = itrunc((fmax * fmax * 0.85 + 0.12) * LV_GAIN * 7.99);
+	int gl = itrunc((fmax * fmax * 0.85 + 0.12 + boost * 0.5) * LV_GAIN * 7.99);
 	gl = fog_level(gl > 7 ? 7 : gl, dist);
 	return LV_GLOW + hq * 8 + gl;
 }
 
-function wax_lit(float x, float y, float z, float dx, float dy, float dz, int b0, int q, float hue_off, float dist) -> int {
+function wax_lit(float x, float y, float z, float dx, float dy, float dz, int b0, int q, float hue_off, float dist, float boost) -> int {
 	float e = 0.004;
 	float f0 = wax_field(x, y, z, b0, q);
 	float gx = wax_field(x + e, y, z, b0, q) - f0;
@@ -174,7 +181,7 @@ function wax_lit(float x, float y, float z, float dx, float dy, float dz, int b0
 	float s8 = s4 * s4;
 	float rim = 1.0 + rdot;
 	rim = rim < 0.0 ? 0.0 : rim;
-	int lv = itrunc((d * 0.62 * LV_GAIN + 0.14 + s8 * s8 * 0.5 + rim * rim * 0.25 + LV_FLASH * 0.3) * 15.99);
+	int lv = itrunc((d * 0.62 * LV_GAIN + 0.14 + s8 * s8 * 0.5 + rim * rim * 0.25 + LV_FLASH * 0.3 + boost * 0.55) * 15.99);
 	lv = fog_level(lv > 15 ? 15 : lv, dist);
 	int hq = itrunc(wax_hue(x, y, z, b0, q) + hue_off + 0.5) % 24;
 	return hq * 16 + lv;
@@ -242,11 +249,12 @@ function surface(int ci, int cj, float px, float py, float pz, float dx, float d
 		float az = math::atan2(rz, rx);
 		float band = 0.5 + 0.5 * math::cos(az * 3.0 + 0.8);
 		float up = ry < 0.0 ? 0.0 : ry;
-		int sl = itrunc((0.12 + band * band * 0.55 + up * up * 0.4 + LV_FLASH * 0.2) * 15.99);
+		int sl = itrunc((0.12 + band * band * 0.55 + up * up * 0.4 + LV_FLASH * 0.2 + ring_heat(ci, cj) * 0.4) * 15.99);
 		sl = fog_level(sl > 15 ? 15 : sl, dist);
 		return LV_STEEL + sl;
 	}
 	int id = ((ci * 7349 + cj * 1931) % 997 + 997) % 997;
+	float boost = ring_heat(ci, cj);
 	float cosv = 0.0 - rdot;
 	cosv = cosv < 0.0 ? 0.0 : cosv;
 	float fres = (1.0 - cosv) * (1.0 - cosv) * (1.0 - cosv);
@@ -273,7 +281,73 @@ function surface(int ci, int cj, float px, float py, float pz, float dx, float d
 	float qdz = quarter == 0 ? bz : (quarter == 1 ? 0.0 - bx : (quarter == 2 ? 0.0 - bz : bx));
 	int b0 = set * LV_N;
 	int mask = wax_mask(qx, py, qz, qdx, by, qdz, b0);
-	return wax_shade(qx, py, qz, qdx, by, qdz, b0, mask, hue_off, dist);
+	return wax_shade(qx, py, qz, qdx, by, qdz, b0, mask, hue_off, dist, boost);
+}
+
+// how hard the big hit's ring of heat is passing the lamp at (ci, cj) right now
+function ring_heat(int ci, int cj) -> float {
+	if (LV_RING_A <= 0.0) { return 0.0; }
+	float rx = ci - LV_RING_X;
+	float rz = cj - LV_RING_Z;
+	float off = math::sqrt(rx * rx + rz * rz) - LV_RING_R;
+	return LV_RING_A / (1.0 + off * off * 1.6);
+}
+
+// a palette index at a fraction of its brightness, staying in its own ramp
+function dimmed(int idx, float k) -> int {
+	if (idx < LV_GLOW) { return idx - idx % 16 + itrunc((idx % 16) * k); }
+	if (idx < LV_GLASS) {
+		int off = idx - LV_GLOW;
+		return LV_GLOW + off - off % 8 + itrunc((off % 8) * k);
+	}
+	if (idx < LV_STEEL) { return LV_GLASS + itrunc((idx - LV_GLASS) * k); }
+	if (idx < LV_ROOM) { return LV_STEEL + itrunc((idx - LV_STEEL) * k); }
+	int off2 = idx - LV_ROOM;
+	return LV_ROOM + off2 - off2 % 16 + itrunc((off2 % 16) * k);
+}
+
+// how bright an index is, 0..15, whatever its ramp
+function brightness(int idx) -> int {
+	if (idx < LV_GLOW) { return idx % 16; }
+	if (idx < LV_GLASS) { return ((idx - LV_GLOW) % 8) * 2; }
+	if (idx < LV_STEEL) { return (idx - LV_GLASS) * 2; }
+	if (idx < LV_ROOM) { return idx - LV_STEEL; }
+	return (idx - LV_ROOM) % 16;
+}
+
+// the lamps a ray meets, walking the grid; -1 when it reaches `far` or the cells run out
+function walk_lamps(float ox, float oy, float oz, float dx, float dy, float dz, float far, int cells) -> int {
+	int ci = math::ifloor(ox + 0.5);
+	int cj = math::ifloor(oz + 0.5);
+	int step_i = dx > 0.0 ? 1 : -1;
+	int step_j = dz > 0.0 ? 1 : -1;
+	float adx = dx < 0.0 ? 0.0 - dx : dx;
+	float adz = dz < 0.0 ? 0.0 - dz : dz;
+	float delta_i = adx > 0.000001 ? 1.0 / adx : 1000000.0;
+	float delta_j = adz > 0.000001 ? 1.0 / adz : 1000000.0;
+	float next_i = (dx > 0.0 ? ci + 0.5 - ox : ox - (ci - 0.5)) * delta_i;
+	float next_j = (dz > 0.0 ? cj + 0.5 - oz : oz - (cj - 0.5)) * delta_j;
+	float t_cell = 0.0;
+	float a = dx * dx + dz * dz;
+	for (int k = 0; k < cells && t_cell < far; ++k) {
+		float lx = ox - ci;
+		float lz = oz - cj;
+		float b = lx * dx + lz * dz;
+		if (b * b - a * (lx * lx + lz * lz - 0.027225) >= 0.0) {
+			int hit = lamp_hit(ci, cj, ox, oy, oz, dx, dy, dz);
+			if (hit >= 0) { return hit; }
+		}
+		if (next_i < next_j) {
+			t_cell = next_i;
+			next_i += delta_i;
+			ci += step_i;
+		} else {
+			t_cell = next_j;
+			next_j += delta_j;
+			cj += step_j;
+		}
+	}
+	return -1;
 }
 
 // the floor: a pool of light under each lamp near the point, in the brightest one's colour
@@ -297,8 +371,17 @@ function floor_shade(float px, float pz, float dist) -> int {
 	}
 	float hue_off = (best_id % 6) * 4.0 + LV_HUE0 + 3.0 + LV_BURN * LV_T * 9.0;
 	int hq = itrunc(hue_off) % 24;
-	int lv = itrunc(best * best * 1.5 * LV_GAIN * 15.99);
+	// the ring of heat runs across the floor as a line of light
+	float ring = 0.0;
+	if (LV_RING_A > 0.0) {
+		float rx = px - LV_RING_X;
+		float rz = pz - LV_RING_Z;
+		float off = math::sqrt(rx * rx + rz * rz) - LV_RING_R;
+		ring = LV_RING_A / (1.0 + off * off * 40.0);
+	}
+	int lv = itrunc((best * best * 1.5 * LV_GAIN + ring_heat(ci, cj) * best * 0.8 + ring * 0.9) * 15.99);
 	lv = fog_level(lv > 15 ? 15 : lv, dist);
+	if (ring > 0.35) { hq = (hq + 12) % 24; }
 	return LV_ROOM + hq * 16 + lv;
 }
 
@@ -320,6 +403,10 @@ function trace(float ox, float oy, float oz, float dx, float dy, float dz) -> in
 	float next_j = edge_j * delta_j;
 	float t_cell = 0.0;
 	float a = dx * dx + dz * dz;
+	// the bloom: how close the ray came to a lamp's glowing body, and which lamp
+	float glow = 0.0;
+	int glow_i = 0;
+	int glow_j = 0;
 	for (int k = 0; k < 28 && t_cell < far; ++k) {
 		float lx = ox - ci;
 		float lz = oz - cj;
@@ -328,6 +415,19 @@ function trace(float ox, float oy, float oz, float dx, float dy, float dz) -> in
 		if (disc >= 0.0) {
 			int hit = lamp_hit(ci, cj, ox, oy, oz, dx, dy, dz);
 			if (hit >= 0) { return hit; }
+		}
+		float tc = a > 0.000001 ? (0.0 - b) / a : 0.0;
+		if (tc > 0.0 && tc < far) {
+			float qx = lx + dx * tc;
+			float qz = lz + dz * tc;
+			float qy = oy + dy * tc;
+			float side = qy < 0.25 ? 0.25 - qy : (qy > 0.8 ? qy - 0.8 : 0.0);
+			float g = 1.0 / (1.0 + (qx * qx + qz * qz + side * side) * 55.0) / (1.0 + tc * 0.12);
+			if (g > glow) {
+				glow = g;
+				glow_i = ci;
+				glow_j = cj;
+			}
 		}
 		if (next_i < next_j) {
 			t_cell = next_i;
@@ -339,8 +439,24 @@ function trace(float ox, float oy, float oz, float dx, float dy, float dz) -> in
 			cj += step_j;
 		}
 	}
-	if (t_floor < 13.0) { return floor_shade(ox + dx * t_floor, oz + dz * t_floor, t_floor); }
-	// the haze above the horizon, faintly lit near it
+	int halo = itrunc((glow - 0.08) * 14.0 * LV_GAIN);
+	int glow_id = ((glow_i * 7349 + glow_j * 1931) % 997 + 997) % 997;
+	int glow_ink = LV_ROOM + (itrunc((glow_id % 6) * 4.0 + LV_HUE0 + 3.0 + LV_BURN * LV_T * 9.0) % 24) * 16;
+	if (t_floor < 13.0) {
+		float px = ox + dx * t_floor;
+		float pz = oz + dz * t_floor;
+		int result = floor_shade(px, pz, t_floor);
+		// the black-glass floor: the lamps it mirrors, darker, over its pool of light
+		int seen = t_floor < 5.0 ? walk_lamps(px, 0.0005, pz, dx, 0.0 - dy, dz, 4.0, 6) : -1;
+		if (seen >= 0) {
+			int mirrored = dimmed(seen, 0.5 - t_floor * 0.08);
+			if (brightness(mirrored) > brightness(result)) { result = mirrored; }
+		}
+		if (halo > brightness(result)) { result = glow_ink + (halo > 15 ? 15 : halo); }
+		return result;
+	}
+	// the haze above the horizon, faintly lit near it, glowing round the lamps
+	if (halo > 2) { return glow_ink + (halo > 15 ? 15 : halo); }
 	return LV_ROOM + 17 * 16 + (dy > 0.18 ? 0 : (dy > 0.06 ? 1 : 2));
 }
 
@@ -384,7 +500,7 @@ class Lava : Scene {
 	array<float> key_roll = [0.0, 0.12, -0.28, 0.42, -0.62, 1.2, 2.3];
 
 	// the budget is set before setup, which is when the reel reads it
-	Lava() { pixel_budget = 30000; }
+	Lava() { pixel_budget = 17000; }
 
 	array<float> hit_times() override { return [MUSIC_BAR * 2.0, MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 5.0]; }
 	array<int> hit_levels() override { return [1, 2, 1, 2]; }
@@ -509,6 +625,10 @@ class Lava : Scene {
 		float ex = track(key_ex, t);
 		float ey = track(key_ey, t);
 		float ez = track(key_ez, t);
+		// between the rows the camera sways on the beat, harder as the energy climbs
+		float beat_ph = cue == null ? 0.0 : cue.beat_phase(t);
+		float sway = math::sin(beat_ph * 6.2831853) * (0.04 + energy * 0.08) * smooth(MUSIC_BAR, MUSIC_BAR * 1.5, t);
+		ex += sway;
 		float fx = track(key_lx, t) - ex;
 		float fy = track(key_ly, t) - ey;
 		float fz = track(key_lz, t) - ez;
@@ -536,6 +656,18 @@ class Lava : Scene {
 		LV_HUE0 = chord * 2.0;
 		LV_BURN = smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.0 + 0.4, t) * (1.0 - smooth(MUSIC_BAR * 4.0 - 0.3, MUSIC_BAR * 4.0 + 0.3, t));
 		LV_T = t;
+		// the ring of heat: it leaves the point the camera looked at on each big hit and races outward
+		LV_RING_A = 0.0;
+		var times = hit_times();
+		var levels = hit_levels();
+		for (int k = 0; k < times.size(); ++k) {
+			float since = t - times[k];
+			if (levels[k] < 2 || since < 0.0 || since > 2.6) { continue; }
+			LV_RING_X = track(key_lx, times[k]);
+			LV_RING_Z = track(key_lz, times[k]);
+			LV_RING_R = since * 5.5;
+			LV_RING_A = 1.5 * (1.0 - since / 2.6);
+		}
 		LV_BX = bx;
 		LV_BY = by;
 		LV_BZ = bz;

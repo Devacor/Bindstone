@@ -32,7 +32,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li class="current"><a href="../guide/08-coroutines.html" aria-current="page">Coroutines</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li><li><a href="../guide/16-parallel.html">Parallel Loops</a></li><li><a href="../guide/17-web.html">The web:: Library</a></li><li><a href="../guide/18-random.html">Random Numbers &amp; Crypto</a></li><li><a href="../guide/19-templates.html">HTML Templates</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Guide</summary><ol class="chapter-list"><li><a href="../guide/01-hello.html">Hello &amp; Basics</a></li><li><a href="../guide/02-type-ladder.html">The Type Ladder: typed, auto, var</a></li><li><a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a></li><li><a href="../guide/04-operators.html">Operators &amp; Arithmetic</a></li><li><a href="../guide/05-control-flow.html">Control Flow</a></li><li><a href="../guide/06-functions.html">Functions &amp; Lambdas</a></li><li><a href="../guide/07-classes.html">Classes</a></li><li class="current"><a href="../guide/08-coroutines.html" aria-current="page">Coroutines</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></li><li><a href="../guide/10-modules.html">Modules: include vs import</a></li><li><a href="../guide/11-kitchen-sink.html">Enums, Namespaces, Destructuring &amp; Friends</a></li><li><a href="../guide/12-reflection.html">Reflection: reflect::</a></li><li><a href="../guide/13-strict-checking.html">Types That Fail Early: strict checking</a></li><li><a href="../guide/14-time.html">Time: Clocks, Stopwatches &amp; Dates</a></li><li><a href="../guide/15-math.html">Math: Vectors &amp; Colors</a></li><li><a href="../guide/16-parallel.html">Parallel Loops</a></li><li><a href="../guide/17-web.html">The web:: Library</a></li><li><a href="../guide/18-random.html">Random Numbers &amp; Crypto</a></li><li><a href="../guide/19-templates.html">HTML Templates</a></li><li><a href="../guide/20-terminal-games.html">A Terminal Game in One File</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Guide</a><span class="sep" aria-hidden="true">/</span>08</nav>
 <article class="chapter"><h1 id="coroutines">Coroutines<a class="hlink" href="#coroutines" aria-label="link">&#8203;</a></h1>
 <p>Coroutines turn stateful multi-frame behavior (AI, cutscenes, staged animations) into straight-line code that pauses where it yields. Declare one with the <code>coroutine</code> keyword. Calling it returns a <strong>coroutine handle</strong> instead of running the body, and nothing in the body runs until the first step. There are three ways to take steps:</p>
@@ -216,6 +216,47 @@ h.done();</code></pre></div>
 99
 == result: false</code></pre></div>
 <p>The handle keeps the instance alive for as long as the coroutine is suspended.</p>
+<h2 id="a-behaviour-in-a-field">A behaviour in a field<a class="hlink" href="#a-behaviour-in-a-field" aria-label="link">&#8203;</a></h2>
+<p>A game object keeps its behaviour as a handle in a field and advances it once a frame. A handle has no type name of its own: the field is declared <code>auto</code> from the call that makes the handle, or <code>var</code> when the behaviour starts later. The call runs none of the body, so a field initializer can make it: the body starts at the first <code>next()</code>, and each instance gets its own coroutine over its own fields.</p>
+<p>Without a <code>yield from</code>, one coroutine runs another step by step with a range-for that yields what it yields. That makes small behaviours reusable: a <code>wait</code> that idles for some frames, a <code>charge</code> that one boss phase runs, chained in order inside the coroutine the field holds:</p>
+<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string wait(int frames) {
+    for (int i = 0; i &lt; frames; ++i) { yield "waiting"; }
+}
+
+class Boss {
+    int hp = 30;
+    string phase = "";
+    coroutine string charge() {
+        phase = "charge";
+        for (int i = 0; i &lt; 2; ++i) { yield "charging"; }
+        yield "slam";
+    }
+    coroutine string fight() {
+        while (hp &gt; 20) { phase = "volley"; yield "fires a volley"; hp -= 5; }
+        for (auto step : wait(2)) { yield step; }        // a pause between phases
+        for (auto step : charge()) { yield step; }       // a whole sub-behaviour, step by step
+        phase = "enraged";
+        yield "roars";
+    }
+    auto brain = fight();
+    void think() {
+        if (brain.done()) { return; }
+        var said = brain.next();
+        if (!brain.done()) { print(`${phase}: ${said}`); }
+    }
+}
+
+Boss boss;
+for (int frame = 0; frame &lt; 12; ++frame) { boss.think(); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">volley: fires a volley
+volley: fires a volley
+volley: waiting
+volley: waiting
+charge: charging
+charge: charging
+charge: slam
+enraged: roars</code></pre></div>
+<ul><li><code>for (auto step : wait(2)) { yield step; }</code> is the idiom: the inner coroutine runs to its end, one outer step per inner step. A free function, a method of the same object and a method of another object all nest this way.</li><li>Phases are sequential code: the boss leaves its volley when its <code>hp</code> drops, then pauses, then charges, then enrages. A branch or a loop around the nested calls picks or repeats phases.</li><li><code>think</code> checks <code>done()</code> before it advances, since <code>next()</code> on a finished coroutine raises <code>Cannot resume a completed coroutine</code>.</li><li>A copy of the object shares the handle, and the shared coroutine keeps changing the original&#x27;s fields (<a href="03-value-semantics.html#copies-share-a-coroutine">Value Semantics</a>). A copy that needs a behaviour of its own assigns its field a new call.</li></ul>
 <h2 id="rules-and-edges">Rules and edges<a class="hlink" href="#rules-and-edges" aria-label="link">&#8203;</a></h2>
 <ul><li><strong>Handles are reference-semantic.</strong> Copying a handle (into a field, an array/map element, a by-value parameter, another variable) shares the ONE live coroutine. Every alias sees the same <code>next()</code>/<code>advance()</code>/<code>done()</code>/<code>result()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). This is what lets an AI park its behavior coroutine in a field of its own game object and advance it every tick.</li><li><strong>A handle of an instance&#x27;s own method is a deliberate strong cycle.</strong> When an instance&#x27;s field holds a handle of its <em>own</em> method, the handle pins the receiver. Break it by re-assigning/nulling the field, exactly like any shared structure. <code>static</code> coroutine methods work the same way; the handle just carries no receiver. <code>type_of</code> names a handle <code>"coroutine_handle"</code>, as its error texts do.</li><li>Handles advance correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame.</li><li><strong>A value cannot be sent into a running coroutine.</strong> <code>next()</code> takes only its optional count, <code>advance()</code> only the variable it stores into, and <code>done()</code> and <code>result()</code> take no arguments:<ul><li><code>h.advance()</code> raises <code>advance() takes 1 argument (the variable that receives the yielded value)</code>.</li><li><code>h.next("go")</code> raises <code>next() count must be an integer</code>.</li><li><code>h.next(0)</code> raises <code>next() count must be at least 1</code>.</li></ul>Give it its inputs as parameters when it is created, or let it read state it shares with the caller: a field of its instance for a method coroutine, or a program-scope variable.</li><li>A failed <code>next()</code> marks only that handle done. Calling <code>next()</code> on a finished coroutine raises the catchable <code>Cannot resume a completed coroutine</code>. A <code>next(n)</code> that reaches the end before its last step runs the steps before the end, then raises the same text.</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (the old handle keeps the old body), and method coroutines survive field-changing reloads of their class.</li><li>The execution budget still applies during <code>next()</code>, and budget errors skip catches inside coroutines too.</li><li><strong>The checker stays out of the body&#x27;s way.</strong> Yield and return values are not checked statically, and what <code>next()</code> returns is unknown, so everything downstream of it is lenient. <code>result()</code> has the declared type, as a lenient type: a body that falls off its end gives <code>null</code>. The handle itself is typed: a member other than <code>next</code>, <code>advance</code>, <code>done</code> or <code>result</code> is a load error (<code>h.resume()</code> reports <code>no member 'resume' on 'coroutine_handle' (did you mean 'next'?)</code>).</li></ul>
 <p>A <code>yield e</code> hands out a value as a <code>return e</code> would. An existing object (a global, the coroutine&#x27;s own local, an element) is copied, so the receiver never shares it, and the coroutine keeps its locals as they were.</p>

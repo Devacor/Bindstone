@@ -1,4 +1,4 @@
-// DONUT — a product shot. The torus homage, grown up: sphere-traced per pixel,
+// DONUT — a product shot that drops in on the beat. The torus homage, grown up: sphere-traced per pixel,
 // rows across every core with parallel_transform, in a studio: a glossy walnut
 // table that reflects the donut and takes its soft shadow, a cyclorama backdrop
 // and drifting bokeh. The donut is a distance field in its own frame: the dough
@@ -7,9 +7,12 @@
 // in the torus's (phi, theta) coordinates, so they ride the surface as it turns.
 // Normals come from the field, so the sprinkles catch the light; a short march
 // toward the key light shadows the icing under them, and a sample along the normal
-// darkens their footing. The shot is choreographed: a dark open where a sweeping
-// glint and a rim light reveal the silhouette, the key light coming up as the
-// camera dollies in, an orbit, a push in on the sprinkles and a pull back.
+// darkens their footing. The shot is scored: the title bar is dark, a glint tracing
+// the silhouette over the riser; on the next downbeat the donut drops in from above
+// and lands on the table as the key light slams on; then it hops on every kick,
+// the sprinkles popping off the icing, the light pumping and the camera swinging
+// round on the bar lines, pushes in on the sprinkles, and spins out after the
+// last accent.
 
 float DN_M00 = 1.0; float DN_M01 = 0.0; float DN_M02 = 0.0;   // world -> donut rotation
 float DN_M10 = 0.0; float DN_M11 = 1.0; float DN_M12 = 0.0;
@@ -29,6 +32,7 @@ float DN_RIM = 0.0;          // rim light level
 float DN_STAGE = 1.0;        // the set's light level
 float DN_DRIFT = 0.0;        // bokeh drift
 float DN_FLOOR = -3.4;
+float DN_POP = 0.0;          // how far the sprinkles stand off the icing beyond their rest
 int DN_W = 0;
 int DN_H = 0;
 int DN_MAT = 0;
@@ -81,7 +85,7 @@ function donut_field(float px, float py, float pz, bool a_mat) -> float {
 			float sa = math::sin(ang);
 			float su = la * ca + lb * sa;
 			float sv = lb * ca - la * sa;
-			float c = rt - 1.0 - ice - 0.022;
+			float c = rt - 1.0 - ice - 0.022 - DN_POP;
 			float du = (su < 0.0 ? -su : su) - 0.068;
 			du = du > 0.0 ? du : 0.0;
 			float ds = math::sqrt(du * du + sv * sv + c * c) - 0.031;
@@ -313,6 +317,12 @@ class Donut : Scene {
 	int mat0 = 0;
 	float tt = 0.0;
 
+	// the reel picks the grid before build runs, so the budget is set at construction
+	Donut() { pixel_budget = 26000; }
+
+	array<float> hit_times() override { return [MUSIC_BAR, MUSIC_BAR * 4.0]; }
+	array<int> hit_levels() override { return [2, 1]; }
+
 	void build() override {
 		name = "DONUT";
 		handle = "a product shot . by strong_ptr";
@@ -377,26 +387,55 @@ class Donut : Scene {
 		return k * k * (3.0 - 2.0 * k);
 	}
 
+	// 0 at the start of a bar's swing, easing to 1 over its first beat: the camera's moves land on the bar lines
+	float on_bars(float t, float a, float b) {
+		if (t < a) { return 0.0; }
+		float bars = (t - a) / MUSIC_BAR;
+		int whole = math::ifloor(bars);
+		float k = (bars - whole) * 4.0;
+		k = k > 1.0 ? 1.0 : k;
+		float result = whole + k * k * (3.0 - 2.0 * k);
+		float most = (b - a) / MUSIC_BAR;
+		return result > most ? most : result;
+	}
+
 	void render(var& grid) override {
 		float t = tt;
-		// the donut: tipped toward the camera, spinning on its own axis, bobbing
-		float tilt = 0.82 + 0.2 * math::sin(t * 0.55);
-		float spin = t * 0.62 + 0.4;
+		float land = MUSIC_BAR;
+		float kick = cue.kick_env(t);
+		float snare = cue.snare_env(t);
+		float energy = cue.energy(t);
+		float hitv = cue.hit(t);
+		bool landed = t >= land;
+		// the donut: tipped toward the camera, spinning on its own axis, faster with the energy
+		float tilt = 0.82 + 0.2 * math::sin(t * 0.55) + (landed ? 0.0 : (land - t) * 0.6);
+		float spin = t * (0.5 + energy * 0.35) + 0.4 + smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, t) * 4.0;
 		float ct = math::cos(tilt); float st = math::sin(tilt);
 		float cs = math::cos(spin); float ss = math::sin(spin);
 		// world-from-donut R = Rx(tilt) * Ry(spin); the field wants its transpose
 		DN_M00 = cs;        DN_M01 = 0.0 - ss * st;     DN_M02 = 0.0 - ss * ct;
 		DN_M10 = 0.0;       DN_M11 = ct;                DN_M12 = 0.0 - st;
 		DN_M20 = ss;        DN_M21 = cs * st;           DN_M22 = cs * ct;
-		DN_BOB = 0.18 * math::sin(t * 1.3);
-		// the camera: a dolly in from the dark, an orbit, a push in on the sprinkles, a pull back
-		float dist = 15.0 - 7.6 * smooth(0.0, 3.6, t) - 2.4 * smooth(6.2, 8.4, t) + 2.0 * smooth(8.9, 10.8, t);
-		float az = -0.75 + t * 0.21;
-		float el = 0.17 + 0.08 * math::sin(t * 0.45) + 0.12 * smooth(6.2, 8.4, t) - 0.12 * smooth(8.9, 10.8, t);
+		// the drop: falling through the title bar, landing on the downbeat with a bounce,
+		// then a hop on every kick
+		float after = t - land;
+		float bounce = landed ? math::abs(math::sin(after * 9.0)) * 0.9 * math::pow(2.718281828, 0.0 - after * 3.5) : 0.0;
+		float fall = landed ? 0.0 : 9.0 * (1.0 - (t / land) * (t / land));
+		DN_BOB = fall + bounce + (landed ? kick * 0.32 : 0.0);
+		DN_POP = landed ? kick * 0.045 + hitv * 0.05 : 0.0;
+		// the camera: close from the start, swinging round on each bar line, a push in on the
+		// sprinkles, a pull back as it spins out, a shake on the landing
+		float swing = on_bars(t, land, MUSIC_BAR * 6.0);
+		float dist = 11.0 - 1.4 * smooth(land, land + 0.4, t) - 3.2 * smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.5, t)
+			+ 4.0 * smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 5.6, t);
+		dist -= kick * 0.25;
+		float az = -0.75 + swing * 0.62 + t * 0.04;
+		float el = 0.2 + 0.06 * math::sin(t * 0.45) + 0.14 * smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.5, t) - 0.1 * smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 5.6, t);
 		DN_CX = dist * math::cos(el) * math::sin(az);
 		DN_CY = dist * math::sin(el);
 		DN_CZ = 0.0 - dist * math::cos(el) * math::cos(az);
-		float tx = 0.0; float ty = -0.25 + 0.5 * smooth(6.2, 8.4, t) - 0.5 * smooth(8.9, 10.8, t); float tz = 0.0;
+		float shake = landed ? math::sin(after * 41.0) * 0.18 * math::pow(2.718281828, 0.0 - after * 6.0) : 0.0;
+		float tx = shake; float ty = -0.25 + DN_BOB * 0.35 + 0.45 * smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.5, t) - 0.45 * smooth(MUSIC_BAR * 4.0, MUSIC_BAR * 5.6, t); float tz = 0.0;
 		float fx = tx - DN_CX; float fy = ty - DN_CY; float fz = tz - DN_CZ;
 		float fl = 1.0 / math::sqrt(fx * fx + fy * fy + fz * fz);
 		fx *= fl; fy *= fl; fz *= fl;
@@ -406,14 +445,15 @@ class Donut : Scene {
 		DN_FX = fx; DN_FY = fy; DN_FZ = fz;
 		DN_RX = rx; DN_RY = 0.0; DN_RZ = rz;
 		DN_UX = rz * fy; DN_UY = rx * fz - rz * fx; DN_UZ = 0.0 - rx * fy;
-		DN_ZOOM = 1.0;
-		// the lights: the key rises with the reveal, a glint sweeps across the dark open
-		// and again on the push in, the rim light outlines it until the key takes over
-		DN_KEY = 0.06 + 0.94 * smooth(2.2, 4.2, t);
-		DN_STAGE = 0.15 + 0.85 * smooth(2.0, 4.6, t);
-		DN_RIM = 0.95 - 0.6 * smooth(3.0, 5.0, t);
-		float sweep1 = (t - 1.2) / 2.6;
-		float sweep2 = (t - 6.4) / 2.2;
+		DN_ZOOM = 1.0 + kick * 0.04;
+		// the lights: dark through the title bar with a glint tracing the silhouette, the key
+		// slamming on at the landing with a flash, then pumping with the kick
+		float flash = landed ? math::pow(2.718281828, 0.0 - after * 5.0) : 0.0;
+		DN_KEY = landed ? 0.82 + kick * 0.22 + flash * 0.6 + hitv * 0.2 : 0.05;
+		DN_STAGE = landed ? 0.8 + snare * 0.25 + flash * 0.5 : 0.12;
+		DN_RIM = landed ? 0.4 + 0.5 * flash : 0.95;
+		float sweep1 = (t - 0.15) / (land - 0.2);
+		float sweep2 = (t - MUSIC_BAR * 4.0) / MUSIC_BAR;
 		float sw = sweep1 >= 0.0 && sweep1 <= 1.0 ? sweep1 : (sweep2 >= 0.0 && sweep2 <= 1.0 ? sweep2 : -1.0);
 		DN_GLINT = sw < 0.0 ? 0.0 : math::sin(sw * 3.1415927) * 1.2;
 		float sa = -1.4 + 2.8 * (sw < 0.0 ? 0.0 : sw);

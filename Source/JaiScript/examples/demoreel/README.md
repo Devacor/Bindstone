@@ -165,7 +165,7 @@ main screen and (on Linux and macOS) the terminal's input mode come back.
 
 | # | scene | what it is |
 | - | ----- | ---------- |
-| 1 | DONUT | a product shot: the donut sphere-traced per pixel as a distance field in its own frame (the dough torus, an icing layer with real thickness, a beaded lip, a wavy edge and drips hanging off it, and sprinkles raised off the icing as capsules on a hashed grid in the torus's (phi, theta) coordinates, so they ride the surface as it turns), normals taken from the field so the sprinkles catch the light, a short march toward the key light shadowing the icing under them and a sample along the normal darkening their footing, a pale fried band round the dough; a studio set: a glossy walnut table carrying the donut's soft shadow and its reflection, a cyclorama lit from behind and soft bokeh in three tints; choreographed as a reveal (a dark open where a sweeping glint and a rim light draw the silhouette, the key light coming up as the camera dollies in, an orbit, a push in on the sprinkles, a pull back); rows across every core with parallel_transform |
+| 1 | DONUT | a product shot that drops in on the beat: the donut sphere-traced per pixel as a distance field in its own frame (the dough torus, an icing layer with real thickness, a beaded lip, a wavy edge and drips, and sprinkles raised off it as capsules on a hashed grid in the torus's coordinates, catching the light and shadowing the icing), over a glossy walnut table that reflects it and takes its soft shadow, before a cyclorama with drifting bokeh; scored to its cue: the title bar is dark with a glint tracing the silhouette over the riser, on the next downbeat the donut drops in and lands as the key light slams on with a flash and a shake, then it hops on every kick with its sprinkles popping off the icing, the light pumps, the camera swings round on the bar lines and pushes in on the sprinkles before the spin-out; it renders within a 26,000-pixel budget and scales up |
 | 2 | JULIA | the Julia set as a landscape flown low: every frame a 200x200 height field of a morphing c (orbiting the cardioid) is iterated across all cores, the smooth escape count raising ridges along the set's boundary and the inside a low lake the orbit trap ripples; each screen column is cast voxelspace-style across it (bilinear heights, slope light, fog to the horizon, a sky) from a camera that keeps clear of the ground; scored to driving sixteenths: kicks punch the terrain up and widen the lens, snares flash the sky, the chord turns the palette, the energy sets the speed; the riser climbs high over the set and the drop plunges into a canyon run between crystal ridges as c jumps to a new set, and the camera pulls up into the sky at the end |
 | 3 | LAVALAMP | metaballs in a lamp: the shot opens in macro on the wax and pulls back to show a rounded glass vessel on a steel base under a steel cap in a dark room; seven blobs rise off the heater and sink as they cool over a pool that never leaves the base, stretched into taffy by their speed; one loop per pixel sums the inverse-square field, its gradient and a contribution-weighted hue, so merging blobs blend their colours into a bridge, and the wax is lit from a normal built out of the gradient (diffuse + a sharp specular); between blobs the violet liquid glows with the wax's light, the glass carries a fresnel edge and a highlight stripe, the steel a studio reflection, the wall and the table a halo of the lamp's colour; on the beat the light pulses and the wax burns through the rainbow, painting the room, before the camera pushes back into the glass; rows run in parallel |
 | 4 | PIPEDREAM | the 3D Pipes screensaver homage on a synthwave set: six chrome pipes grow one segment per tick through a 16x12x16 voxel volume, never intersecting; every tube is a chain of lit sphere impostors a quarter voxel apart (per-pixel normal reflecting the set, so each tube carries the horizon's bright band; specular, fog, depth nudge so crossings intersect), glossy elbow balls at every turn, over a striped sun and a floor grid rushing in; the persistent splat image is read through a slow push-in and drift, a glint sweeps every pipe and the frame flashes when a generation fills, then a CRT beam wipes back to the set and the next generation grows from a new angle; ~2% of elbows spawn the jackodile's rainbow eye |
@@ -404,49 +404,49 @@ bursts around it, the pistol at the bottom):
 -----------:::-------------:::::---%%%%%%%%--++++++++--%%%%%%%%--------------------::::::----------=
 ```
 
-DONUT (`shot 1 at 4` — the product shot: the iced torus over the walnut table, its reflection below):
+DONUT (`shot 1 at 4` — the product shot: the iced torus hopping over the walnut table, its reflection below):
 
 ```
-:::::::::::::::----------------------------------------------------------------------:::::::::::::::
-----------------------------------------------------------------------------------------------------
-----------------------------------------------------------------------------------------------------
-----------------=----------------------=+++----------=+***+-----------------------------------------
-------------=*#***#*+-----------------******+--------*******----------------------------------------
-------------#########*---------------+*******=-------******+----------------------------------------
-------------##########+--------------=*******--------++**++-----------------------------------------
-------------+#########+----------------+%*##*#%*####%#+#+*=*-+--------------------------------------
---------------++++++++---------------*+#%######*%###*########%=**-----------------------------------
---------------------------------==*%###+####*######%#+*##*+##*#**##==-------------------------------
-----------------------------===*%%#####*%#***+****+++=#####**#####%##**=----------------------------
-----------------------------=*###%%%*##*=**=+=**+#+*****+*#%%####*****+#----------------------------
----------------------------*%#%#%%*##**=***+++++++*****#%+*###*###*###*#++--------------------------
----------------------:-::-##%%%@#*#****++++++++++++++******%+*%%%####*****#::-::--------------------
-.......:.:.:.........:.:.+#%#%@@#+==+*++++=========++++******#%%#%%*+#*#***#:.........:...:.:.......
-..:.:..:.:.:............**%+%@##****++++===-------===++******#+#@###**********.:....:.....:.:......:
-.....:.....:::.:..:..:.=%%#%@#***=*#+++==----:-::.+:::-*****###*%@####@**=****.::::.::.::.:..:....:.
-.::.::..:::::.:::::.:::%###%@@#++=+*++==----=::::::::::::######*%@#%%****+****-:::.::.:::.:.:::::.::
-::::::::::::::::::::::%####@#*#***+++++===::::::::::::::::######*@@%%*#********:::::::::::::::::::::
-::::::::::::::::::::::#*#**@@##*-****+++==::---::--:---::-%#####%##%%*******+++:::::::::::::::::::::
-:::::::::::::::-:-:---%**+#%@%#*+=*#**++++-----------:----%%###%@#%%##%**+*****=---:::::::::::::::::
-::::::-:-:-:--:-----:-%%###%@@%#**********+--------------*%%###%%@%%##**+**+***=----:-:---::::-:::::
-:------:--------------%%###=%%%+#*%+*******#*==========*%%%##*%%*#%*#**********---------:---------::
-----------------------***##*#%%*%#*+********##*******%%%####%%@%%#*#*******++*+---------------------
---------------=----===*%###*###%%%###**#*+*################%%%%%##*+******++**-----==---------------
------------============*########%%%%##***####++#####+####*%%#%###*****+**++++----::--===------------
--------===============++*###+###*###%#%%%####*#*#**#=#@#%%%####**+**=++*++++-::---:-::--====---==---
----=================+++++##**#*+***##*#%%%#%#%######%####+%##*****+**++=++++--:::-----:--======--===
-=================+++++++++*##=*#***#+*****##*######**%#******#-****#=++=+*-------:---::---==========
-===============++++++++++++++************************#****++***+**+++==+=----------:-------=========
-=============++++++++++++**++**#****++*++******++*++*#******++*=+++++=-------------------===========
-=====++====+++++++++++++*********#*##**=**********+++******+=-+++++=--------------------====+=======
-====+====+++++++++++++******+*******#**-****+=*+++*+**+++++=+=++**--------------------===+++=++=====
-++=====++++++++++++++******+***********+****+++*+=+#*==+++++====------------------===+++++++++=++===
-=====+++++++++++++++**+***+*************+=--+-++==+++++-+-=---==------------=--===+++++++++++++==++=
-===+++++++++++++++**+++**+*****************+===---=====--------==------=====++++++++++++++++++++++++
-=++++++++++++++++**+++*++**********+++++------------------==========+++++*+****++++++++++++++++++++=
-++++++++++++++++*+++++++********+---:::::-:::::::::::::::::---==+***************++++++++++++++++++++
-+++++++++++++++++++++++*******+=-::::::::-:::::::::::::::::::::::--+*******+*****+++++++++++++++++++
-+++++++++++++++++++++++*****+-----:::--=:--::::::--::::::::::::::::--+***+**+****++++++++++++++++++=
+:::::::::::::::::::::::::--------------------------------------------------:::::::::::::::::::::::::
+::::::::::::::------------------------------------------------------------------------::::::::::::::
+------------------------------------------------------------=---------------------------------------
+-------------------==---------------------=====----------+****+-------------------------------------
+----------------=*******+----------------++++++*=-------*******=------------------------------------
+----------------*****####+---------------+++++++*-------+******-------------------------------------
+----------------##########---------------++++++++--------+++++--------------------------------------
+----------------+#########----------------=+++++----------------------------------------------------
+------------------+++++++------------------------#-#------------------------------------------------
+----------------------------------------=+*-**#:####+#**#+**----------------------------------------
+-----------------------------------===**#**##**%###*#******%*=--=-----------------------------------
+-----------------------------------=+###%#+##**###%**#*#*+**#***=*----------------------------------
+----------------------------------***#%%***+*+=+******=#####******#*--------------------------------
+--------------------------------*###%***++-==+==++++**+**#%%#*+**+*+*=------------------------------
+::::::::::::...:.:..........:.*:**%%%#*=++=+======++++***+*#*%#*******:........:........::::::::::::
+...............:.:...........:+*#%#***==++===-----===++****%#*@#+***+=+-.:.:.:.:...........:...:....
+....:.............:....:..:.:+##%%#*==+++==---::..:.:-+******%@%***+**+=.......:.........:.:..:.....
+..:.....:..:..:....::.::.:::-**#%@#*+*++==--:::::::::.::*###+#%%*#****=*=...:::....:.:..:..:..:..:..
+::.:..:::.:::::::::::.:::::::+++%@#*-*+++===::::::::::::+###*%#%++*=**++=:::.::::::.::::.::.::.::...
+::::::::::::::::::::::::::::%%##%#%*+++++++=:::::::-::::%##*#%@#***+*=+++:::::::::::::::::::::::::::
+.:::::::::::::::::::::::::::%####@%+******++=----------*####%*%*+****==++:::::::::::::::::::::::::::
+::::::::::::::::::-:----:---***#+%%*#=*******++-----**###+#=@%******++=--::---:::--:::-:::::::::::::
+:::::::-:-:-:---:----:------**+*#+#%%%*=+++****##########%%%%+***+++++-=--------------:---::::::::::
+:::---:-:--------------------*#++*%##%*%******+*##+####*###***+*=+++===----------------------:-:--::
+-----------------------====-==*+****+*++#####*#####%*##%#*+***+++=====-::::-::----------------------
+---------------------====-======%*#+*+***+#**#####%#*+****+=*+=+=====----:::::::::-=----------------
+-------------====-============++=*%+****+**+***:+**-*****+++++=-====------::::-:::::-=--------------
+----------=============+====++++++++=*=*+*+*****++*+*++=-+=++=====---:-----::::-::::--===-----------
+-------==============+++++++++++++++++**++++++=++=++++=+======--------:-----::::------======---=----
+----===============+++++=++++++++++******++++===+-=+==-=====-----------:-----::----===========---==-
+-================+++++++++++++++++********===-========--------------------------================---=
+================+++++=+++++++++++**********+===--:-------------------------==++++=================--
+==============+++++=++++++++++++*+**++********++++===----=-==-----====++++++++++++==================
+===============++==+++++++++++++++*+++****+======*****++++++*++++++++++++++++++++++=================
+==================++++++++++++++++++==-:::::::::::::::::===***++++++++++++++++++++++================
+=================+++++++++++++++++-:::::::-::::::::::::::::::-=+++++++++++++++++++++================
+=================++++++++++++++++:=----:---::-:-::-::::-:::::::::=++++++++++++++++++================
+================++++++==++++++++:-----------------::::-:::::::::---=++++++++++++=++++===============
+==============+++++++==+++++++++=:-==-=-----------------::::::::::--=+=+++++++++==++++==============
+=============++++=====++++++++++=====-=-=-==----------------::-::----+++++++++=====+++==============
 ```
 
 FINALE afterglow (`shot 11 at 84.8 ascii 1`: the fire is out, the word glows in neon and the credits roll):

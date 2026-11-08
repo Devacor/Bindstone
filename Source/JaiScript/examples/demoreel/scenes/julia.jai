@@ -11,7 +11,11 @@
 // mirrors the ridges and the sky (ripples wobbling the mirror on the kick), a moon
 // lays a glitter path across it, stars turn overhead, the crystal ridge tops spark
 // in the light, and the land banks into the flight's turns (the horizon tilts across
-// the columns as they are cast).
+// the columns as they are cast). After the climb out the ridges grow and the flight
+// sinks toward them over a second riser as the set turns into the Douady rabbit; on
+// the big hit it slams into a canyon run where the land snaps to a new Julia set on
+// every beat (a flash, a punch and a palette turn each), and the last accent pulls it
+// up into a climb, the stars thickening and streaming past.
 
 float JU_CA = 0.0;
 float JU_CB = 0.0;
@@ -200,10 +204,14 @@ class Julia : Scene {
 	int stars = 0;
 	float moon_az = 0.6;     // the moon's bearing in the world
 
-	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
-	array<int> hit_levels() override { return [2, 1]; }
-	// seven bars: the climb out over the set ends on bar 6 and the high view holds a bar
-	int length_bars() override { return 7; }
+	// the run's sets, a c each (re, im): the riser glides to the first, each beat of the run snaps to the next
+	array<float> snap_c = [-0.1226, 0.7449, -0.8, 0.156, -1.0, 0.0, -0.7269, 0.1889, -0.391, -0.587, 0.355, 0.355, -0.4, 0.6];
+
+	// the drop, the climb's accent, the run of snapping sets (a big hit) and the climb into the stars
+	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0, MUSIC_BAR * 8.0, MUSIC_BAR * 9.0]; }
+	array<int> hit_levels() override { return [2, 1, 2, 1]; }
+	// ten bars: the ridges grow over bar 7, the land snaps on the beat through bar 8, the climb out is bar 9
+	int length_bars() override { return 10; }
 
 	void build() override {
 		name = "JULIA";
@@ -267,22 +275,49 @@ class Julia : Scene {
 		return k * k * (3.0 - 2.0 * k);
 	}
 
+	// 1 at the moment a_at, dying away at a_rate per second
+	float decay(float t, float a_at, float a_rate) { return t < a_at ? 0.0 : math::pow(2.718281828, 0.0 - (t - a_at) * a_rate); }
+
 	void update(float t, float dt) override {
 		tt = t;
 	}
 
 	void render(var& grid) override {
 		float t = tt;
+		float bar = MUSIC_BAR;
 		float kick = cue.kick_env(t);
 		float snare = cue.snare_env(t);
 		float energy = cue.energy(t);
 		float riser = cue.riser(t);
 		float hitv = cue.hit(t);
 		bool dropped = t >= drop_t;
-		// c orbits the cardioid; on the drop it jumps to a new set and moves faster
+		// the last act: the ridges grow and the flight sinks toward them over bar 7's riser, then
+		// from bar 8's hit the land snaps to a new Julia set on every beat through a canyon run,
+		// and bar 9's accent pulls up out of it and climbs into the stars
+		float run_t = bar * 8.0;
+		float growing = t >= bar * 7.0 && t < run_t ? riser : 0.0;
+		float morph = smooth(bar * 7.0, run_t, t);
+		float plunge = smooth(run_t, run_t + 0.3, t);
+		float climb = smooth(bar * 9.0, bar * 9.0 + 1.4, t);
+		// c orbits the cardioid; on the drop it jumps to a new set and moves faster; then it
+		// glides to the first of the snapped sets and steps through them a beat at a time
 		float ot = dropped ? t * 0.55 + 2.4 : t * 0.25;
-		JU_CA = 0.7885 * math::cos(ot + 2.0);
-		JU_CB = 0.7885 * math::sin(ot * 0.8 + 2.0);
+		float ca = 0.7885 * math::cos(ot + 2.0);
+		float cb = 0.7885 * math::sin(ot * 0.8 + 2.0);
+		JU_CA = ca + (snap_c[0] - ca) * morph;
+		JU_CB = cb + (snap_c[1] - cb) * morph;
+		int snap = 0;
+		if (t >= run_t) {
+			float beats = (t - run_t) / MUSIC_BEAT;
+			snap = math::ifloor(beats) + 1;
+			int last = snap_c.size() / 2 - 1;
+			snap = snap > last ? last : snap;
+			float k = smooth(0.0, 0.3, beats - math::floor(beats));
+			if (snap == last && beats > last) { k = 1.0; }
+			JU_CA = snap_c[snap * 2 - 2] + (snap_c[snap * 2] - snap_c[snap * 2 - 2]) * k;
+			JU_CB = snap_c[snap * 2 - 1] + (snap_c[snap * 2 + 1] - snap_c[snap * 2 - 1]) * k;
+		}
+		float snapped = t >= run_t ? decay(t, run_t + (snap - 1) * MUSIC_BEAT, 6.0) : 0.0;
 		// the flight: a loop round the set, faster with the energy and racing after the drop
 		float speed = 0.18 + energy * 0.25 + (dropped ? 0.35 : 0.0);
 		float path = t * speed + (dropped ? 1.7 : 0.0);
@@ -294,17 +329,20 @@ class Julia : Scene {
 		JU_CAMX = px;
 		JU_CAMY = py;
 		JU_HEAD = math::atan2(ny, nx) + 0.25 * math::sin(t * 0.7);
-		// altitude: cruising, climbing high on the riser, skimming the canyon after the drop
+		// altitude: cruising, climbing high on the riser, skimming the canyon after the drop;
+		// sinking toward the growing ridges, slammed low into the run and climbing out of it
 		float cruise = 0.32 + 0.06 * math::sin(t * 1.1);
 		float alt = dropped ? 0.22 + 0.05 * math::sin(t * 3.0) : cruise + riser * riser * 0.9;
-		alt += smooth(MUSIC_BAR * 5.0, MUSIC_BAR * 6.0, t) * 0.42;
+		alt += smooth(bar * 5.0, bar * 6.0, t) * 0.42 - 0.3 * morph;
+		alt += (0.17 + 0.03 * math::sin(t * 5.0) - alt) * plunge + climb * 0.6;
 		JU_ALT = alt;
-		JU_HSCALE = 0.18 * (1.0 + kick * 0.45 + hitv * 0.5);
-		JU_HORIZON = h * (0.34 + riser * 0.22) - kick * h * 0.015 + 0.04 * h * math::sin(t * 0.9);
-		JU_FOV = 1.05 + kick * 0.08 + hitv * 0.25;
-		JU_LIFT = kick * 0.16 + snare * 0.06 + hitv * 0.08 - 0.05;
-		JU_PHASE = itrunc(t * 3.0) + cue.chord(t) * 3 + (dropped && hitv > 0.75 ? itrunc(t * 24.0) : 0);
-		JU_SKYLIFT = itrunc(snare * 2.0 + hitv * 3.5);
+		JU_HSCALE = 0.18 * (1.0 + kick * (0.45 + plunge * 0.2) + hitv * 0.5 + snapped * 0.35 + growing * 0.7 * (1.0 - plunge));
+		float nose = (riser - growing) * 0.22 - growing * 0.12 + climb * 0.42;
+		JU_HORIZON = h * (0.34 + nose) - kick * h * 0.02 + 0.04 * h * math::sin(t * 0.9);
+		JU_FOV = 1.05 + kick * 0.1 + hitv * 0.25 + snapped * 0.08;
+		JU_LIFT = kick * 0.18 + snare * 0.09 + hitv * 0.08 - 0.05 + snapped * 0.2 + growing * 0.1;
+		JU_PHASE = itrunc(t * 3.0) + cue.chord(t) * 3 + snap * 5 + (dropped && hitv > 0.75 ? itrunc(t * 24.0) : 0);
+		JU_SKYLIFT = itrunc(snare * 2.4 + hitv * 3.5 + snapped * 1.5);
 		JU_ZFAR = 2.2 + energy * 0.6;
 		// the height field covers the box the camera can see
 		JU_GX0 = px - 1.6;
@@ -351,7 +389,7 @@ class Julia : Scene {
 		JU_T = t;
 		JU_RIPPLE = kick;
 		// the bank: the frame rolls into the flight's turn, harder after the drop
-		float bank = 0.0 - 0.12 * math::cos(t * 0.7) - (dropped ? 0.18 * math::sin(t * 1.3) : 0.0) + snare * 0.03;
+		float bank = 0.0 - 0.12 * math::cos(t * 0.7) - (dropped ? 0.18 * math::sin(t * 1.3) : 0.0) + snare * 0.05 + snapped * 0.06 * (snap % 2 == 0 ? 1.0 : -1.0);
 		JU_BANK = math::sin(bank) / math::cos(bank);
 		var cols = parallel_transform(JU_COLS, julia_col);
 		int sky = JU_SKY + (JU_SKYLIFT > 3 ? 3 : JU_SKYLIFT) * 24;
@@ -360,7 +398,10 @@ class Julia : Scene {
 		float rel = 0.22 * math::sin(t * 0.35) - 0.12;
 		float mx = w * 0.5 + rel / JU_FOV * w;
 		float my = hz0 * 0.4 + (mx - w * 0.5) * JU_BANK;
-		float mr = h * 0.1;
+		float mr = h * (0.1 + 0.05 * climb);
+		// climbing, the stars thicken and stream down past the frame
+		int scroll = itrunc(climb * h * 0.8 + (t - MUSIC_BAR * 9.0) * climb * h * 0.6);
+		int star_odds = 3 + itrunc(climb * 7.0);
 		for (int x = 0; x < w; ++x) {
 			var& col = cols[x];
 			float ddx = x - mx;
@@ -380,8 +421,8 @@ class Julia : Scene {
 					} else if (md < mr * mr * 2.6) {
 						c = sky + (s > 4 ? s - 4 : 0);
 					} else if (up > 0.25) {
-						int hs = ((x * 73856093 + y * 19349663) & 1048575) * 1274126177;
-						if (((hs >> 12) & 255) < 3) {
+						int hs = ((x * 73856093 + (y - scroll) * 19349663) & 1048575) * 1274126177;
+						if (((hs >> 12) & 255) < star_odds) {
 							float twk = 0.5 + 0.5 * math::sin(t * 3.0 + (hs >> 20));
 							c = stars + itrunc(twk * 3.99);
 						}

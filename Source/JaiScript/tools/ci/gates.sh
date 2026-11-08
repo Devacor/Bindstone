@@ -164,6 +164,10 @@ gloom_shim() {
 	run_logged "$BIN/jaiscript" gloom.jai -- --smoke --ticks 300 --look showcase --truecolor
 	want "gloom shim: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \\| STATE_HASH: $GLOOM_STATE\$"
 	want "gloom shim: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"
+	if hash_on interp; then
+		run_logged "$BIN/jaiscript" --backend=interp gloom.jai -- --smoke --ticks 300 --look showcase --truecolor
+		want "gloom shim interp: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \\| STATE_HASH: $GLOOM_STATE\$"
+	fi
 	local scratch
 	scratch="$(mktemp -d)"
 	cp -r "$ROOT/examples/gloom/gloom.jai" "$ROOT/examples/gloom/scripts" "$scratch/"

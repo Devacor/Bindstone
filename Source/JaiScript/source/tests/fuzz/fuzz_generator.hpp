@@ -17,6 +17,7 @@
 #include "fuzz_regex_band.hpp"
 #include "fuzz_callargs_band.hpp"
 #include "fuzz_return_band.hpp"
+#include "fuzz_store_band.hpp"
 #include "fuzz_block_band.hpp"
 #include "fuzz_local_alias_band.hpp"
 
@@ -418,6 +419,9 @@ namespace jai::fuzz {
 			end_statements(stmt_begin, "zbmain", expr(random_value_type(), max_depth_));
 			element_arg_band band(seed_);
 			if (band.wanted(band_)) { p.segments.push_back(band.emit()); p.labels.push_back("element"); }
+			global_store_band sband(seed_);   // a global stored through a computed index: under the element band's switch
+			const bool store_roll = sband.roll();
+			if (band_ == band_mode::always || (band_ == band_mode::sometimes && store_roll)) { p.segments.push_back(sband.emit()); p.labels.push_back("global-store"); }
 			math_band mband(seed_);
 			const bool math_roll = mband.roll();
 			if (math_ == band_mode::always || (math_ == band_mode::sometimes && math_roll)) {

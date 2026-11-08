@@ -407,6 +407,14 @@ namespace jai::vm {
         }
         const script_value* worker_block_constants_for(const chunk& code);
         environment* worker_root_env_ = nullptr;   // slot root env (identity stable per slot)
+        // ::name's scope: the program's; a parallel worker's is the root of its own chain, which holds its copies of the program's
+        // names (KEEP BYTE-PARALLEL with interpreter::program_scope)
+        environment* program_scope() const noexcept {
+            if (!parallel_worker_) { return engine_->get_global_environment().get(); }
+            environment* result = environment_.get();
+            while (result->parent_raw()) { result = result->parent_raw(); }
+            return result;
+        }
 
         // Compile a per-worker function copy's body on the MAIN thread at the region
         // barrier (compilation interns; workers must only ever hit) and pin the chunk on

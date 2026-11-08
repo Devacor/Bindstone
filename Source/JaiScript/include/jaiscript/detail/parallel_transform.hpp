@@ -170,6 +170,8 @@ namespace jai::detail {
             bool borrow_eligible = true;   // every touch was a subscript read root
             const ast_node* bare_use = nullptr;   // a use of the value itself (not a member chain or a method receiver)
             const ast_node* member_use = nullptr;   // a member chain rooted at it: only a captured object has members
+            const ast_node* qualified_use = nullptr;   // a ::name use: the program's variable, never the enclosing function's local
+            bool unqualified_use = false;
         };
         // A method called on a chain rooted at a captured name (cam.len(), cam.inner.len()): the barrier refuses one that writes
         // its object, and a container's mutating builtin

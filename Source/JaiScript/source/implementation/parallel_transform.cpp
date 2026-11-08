@@ -611,7 +611,7 @@ namespace {
 			if (!proof_mode || !target) { return; }
 			if (target->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(target);
-				if (is_element_symbol(n->symbol_id)) { note_death(root_type); return; }
+				if (is_element_symbol(n)) { note_death(root_type); return; }
 				if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) {
 					if (!l->primitive) { note_death(l->type); }
 					return;
@@ -660,14 +660,14 @@ namespace {
 			if (!e) { return nullptr; }
 			if (e->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(e);
-				if (is_element_symbol(n->symbol_id)) { return root_type; }
+				if (is_element_symbol(n)) { return root_type; }
 				if (!n->global_qualified) {
 					if (const local_info* l = local(n->symbol_id)) {
 						if (!declared) { return l->type; }
 						const type_info_ptr t = l->reference ? l->referent : l->type;
 						return declared_type(t) ? t : nullptr;
 					}
-					if (self_field(n->symbol_id)) { return nullptr; }
+					if (self_field(n)) { return nullptr; }
 				}
 				auto global = engine_access::get_global_environment(*eng)->get(n->symbol_id);
 				if (!global) { return nullptr; }
@@ -762,7 +762,7 @@ namespace {
 			type_info_ptr t;
 			if (e && e->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<const identifier_expr*>(e.get());
-				if (is_element_symbol(n->symbol_id)) { t = root_type; }
+				if (is_element_symbol(n)) { t = root_type; }
 				else if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { t = l->reference ? l->referent : l->type; }
 				else { t = proof_chain_type(e.get(), true); }
 			} else if (e && chain_root_is_element(e)) {
@@ -805,10 +805,10 @@ namespace {
 				return false;
 			case node_type::identifier_expr: {
 				auto* n = static_cast<const identifier_expr*>(e.get());
-				if (is_element_symbol(n->symbol_id)) { return true; }
+				if (is_element_symbol(n)) { return true; }
 				if (!n->global_qualified) {
 					if (const local_info* l = local(n->symbol_id)) { return !l->primitive; }
-					if (self_field(n->symbol_id)) { return true; }
+					if (self_field(n)) { return true; }
 				}
 				auto global = engine_access::get_global_environment(*eng)->get(n->symbol_id);
 				return !(global && primitive_or_string(global.value().get_type_info()));
@@ -884,7 +884,7 @@ namespace {
 			uint64_t field = UINT64_MAX;
 			if (method_class && target && target->get_type() == node_type::identifier_expr) {
 				auto* n = static_cast<identifier_expr*>(target);
-				if (!n->global_qualified && !local(n->symbol_id) && self_field(n->symbol_id)) { field = n->symbol_id; }
+				if (!n->global_qualified && !local(n->symbol_id) && self_field(n)) { field = n->symbol_id; }
 			} else if (method_class && target && target->get_type() == node_type::member_expr) {
 				auto* m = static_cast<member_expr*>(target);
 				if (m->object && m->object->get_type() == node_type::this_expr) {
@@ -958,7 +958,7 @@ namespace {
 			switch (target->get_type()) {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<const identifier_expr*>(target.get());
-				if (is_element_symbol(n->symbol_id)) { return !compound && local_store_may_run_code(typed_local(root_type), value); }
+				if (is_element_symbol(n)) { return !compound && local_store_may_run_code(typed_local(root_type), value); }
 				if (const local_info* l = n->global_qualified ? nullptr : local(n->symbol_id)) { return !compound && local_store_may_run_code(*l, value); }
 				return false;   // enclosing state: the walk rejects the store
 			}
@@ -994,7 +994,7 @@ namespace {
 		// A member/subscript chain rooted at program state (a name neither a local nor the walked method's field)
 		bool global_rooted(const expression* e) const {
 			const identifier_expr* root = chain_root_identifier(e);
-			return root && (root->global_qualified || (!is_local(root->symbol_id) && !self_field(root->symbol_id)));
+			return root && (root->global_qualified || (!is_local(root) && !self_field(root)));
 		}
 		// A storage kind whose value is its own (no handle): a store into it lands in the holder's value tree
 		static bool by_value_kind(const type_info_ptr& t) {
@@ -1075,7 +1075,7 @@ namespace {
 		void check_param_write(const expression* target) {
 			if (fn_depth != 1 || !param_ref_aliases) { return; }   // a callee's reference parameter defers to its call sites
 			identifier_expr* root = chain_root_identifier(target);
-			if (!root || is_element_symbol(root->symbol_id)) { return; }
+			if (!root || is_element_symbol(root)) { return; }
 			const local_info* l = root->global_qualified ? nullptr : local(root->symbol_id);
 			if (!l || !l->reference) { return; }
 			type_info_ptr referent = l->type;
@@ -1089,7 +1089,7 @@ namespace {
 			identifier_expr* root = chain_root_identifier(target);
 			if (!root) { root_escaped = true; return; }
 			const bool bare = target == root;
-			if (is_element_symbol(root->symbol_id)) {
+			if (is_element_symbol(root)) {
 				if (bare) { root_escaped = true; }   // the declaration's own slot: a store may assign into the referent
 				return;   // through it: the root rules (element_mutated, escapes)
 			}
@@ -1118,6 +1118,8 @@ namespace {
 			} else if (!subscript_root) {
 				adm.captures[it->second].borrow_eligible = false;
 			}
+			auto& entry = adm.captures[capture_index[n->symbol_id]];
+			if (!n->global_qualified) { entry.unqualified_use = true; } else if (!entry.qualified_use) { entry.qualified_use = n; }
 			capture_touches.push_back({ n->symbol_id, loop_variable_position(index), n });
 		}
 		// A use of the captured value itself: a captured handle refuses it (a worker reads its own copy of the object)
@@ -1275,7 +1277,7 @@ namespace {
 			if (!root && !rooted_at_self) {
 				return fail(m, std::string(what) + " must root at a local variable in a parallel body");
 			}
-			if (root && !is_local(root->symbol_id) && !self_field(root->symbol_id)) {
+			if (root && !is_local(root) && !self_field(root)) {
 				// a captured object reads through its fields; the barrier proves what it holds and gives each worker its own view
 				if (proof_mode || std::string_view(what) != "member access") {
 					return fail(m, std::string(what) + " reaches captured state '" + std::string(root->name) + "' (captured reads are read-only)");
@@ -1371,6 +1373,10 @@ namespace {
 		}
 
 		void declare(uint64_t id, local_info info = {}) { scopes.back()[id] = std::move(info); }
+		// a ::name is the program's, never a local, an own field or the element
+		bool is_local(const identifier_expr* n) const { return !n->global_qualified && is_local(n->symbol_id); }
+		bool self_field(const identifier_expr* n) const { return !n->global_qualified && self_field(n->symbol_id); }
+		bool is_element_symbol(const identifier_expr* n) const { return !n->global_qualified && is_element_symbol(n->symbol_id); }
 		bool is_local(uint64_t id) const {
 			for (const auto& s : scopes) {
 				if (s.count(id)) { return true; }
@@ -2274,10 +2280,10 @@ namespace {
 				return true;
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(e.get());
-				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode) { root_escaped = true; } }
-				if (is_local(n->symbol_id)) { note_const_ref_whole(n->symbol_id); return true; }
-				if (self_field(n->symbol_id)) { return true; }   // element-rooted field read
-				if (method_class && method_class->defines_method(n->symbol_id)) {
+				if (is_element_symbol(n)) { note_element_whole(); if (proof_mode) { root_escaped = true; } }
+				if (is_local(n)) { note_const_ref_whole(n->symbol_id); return true; }
+				if (self_field(n)) { return true; }   // element-rooted field read
+				if (method_class && !n->global_qualified && method_class->defines_method(n->symbol_id)) {
 					return fail(n, "method '" + std::string(n->name) + "' cannot be captured as a value in a parallel body");
 				}
 				// Captured read (whole-value use): the barrier classifies and provisions
@@ -2300,7 +2306,7 @@ namespace {
 					// capture shape (raw element reads through the region borrow)
 					if (n->left && n->left->get_type() == node_type::identifier_expr) {
 						auto* root = static_cast<identifier_expr*>(n->left.get());
-						if (!is_local(root->symbol_id)) {
+						if (!is_local(root)) {
 							touch_capture(root, true, n->right.get());
 							return walk_expr(n->right);
 						}
@@ -2340,14 +2346,14 @@ namespace {
 				if (m->is_static && m->object && m->object->get_type() == node_type::identifier_expr) {
 					// an enum's value (E::v): a constant the body reads through the enum's map, provisioned per worker as a captured read
 					auto* root = static_cast<identifier_expr*>(m->object.get());
-					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id) && engine_access::is_enum_name(*eng, root->symbol_id)) {
+					if (root->symbol_id != UINT64_MAX && !is_local(root) && engine_access::is_enum_name(*eng, root->symbol_id)) {
 						if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 						(void)sym->get_class_var_id_with_view(root->symbol_id);   // the static read asks for a class of the name first
 						touch_capture(root, false);
 						return true;
 					}
 					// a class constant (C::K, a const static of a primitive value): pinned per worker at the barrier
-					if (root->symbol_id != UINT64_MAX && !is_local(root->symbol_id)) {
+					if (root->symbol_id != UINT64_MAX && !is_local(root)) {
 						if (m->member_id == UINT64_MAX) { m->member_id = sym->intern(m->member); }
 						if (class_constant(root->symbol_id, m->member_id)) {
 							(void)sym->get_class_var_id_with_view(root->symbol_id);
@@ -2434,10 +2440,10 @@ namespace {
 			switch (t->get_type()) {
 			case node_type::identifier_expr: {
 				auto* n = static_cast<identifier_expr*>(t.get());
-				if (is_element_symbol(n->symbol_id)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
+				if (is_element_symbol(n)) { note_element_whole(); if (proof_mode && aliasing) { root_escaped = true; } }   // replaced: the old element releases every handle
 				if (loop_variable_position(n) != SIZE_MAX) { note_loop_variable_write(n); }   // the body's own: a callee's local of the same name is its own
-				if (is_local(n->symbol_id)) { note_const_ref_whole(n->symbol_id); return true; }
-				if (!aliasing && self_field(n->symbol_id)) { return true; }   // element field store (chunk-exclusive)
+				if (is_local(n)) { note_const_ref_whole(n->symbol_id); return true; }
+				if (!aliasing && self_field(n)) { return true; }   // element field store (chunk-exclusive)
 				if (aliasing) {
 					return fail(n, std::string(what) + " would alias enclosing state '" + std::string(n->name) +
 					               "' (captured reads are read-only)");
@@ -2451,7 +2457,7 @@ namespace {
 					const size_t index_param = aliasing ? SIZE_MAX : loop_variable_position(n->right.get());
 					if (index_param != SIZE_MAX && n->left && n->left->get_type() == node_type::identifier_expr) {
 						auto* root = static_cast<identifier_expr*>(n->left.get());
-						if (!is_local(root->symbol_id) && !is_element_symbol(root->symbol_id) && !self_field(root->symbol_id)) {
+						if (!is_local(root) && !is_element_symbol(root) && !self_field(root)) {
 							touch_capture(root, false, n->right.get());
 							adm.index_writes.push_back({ root->symbol_id, root->name, index_param, t.get() });
 							return true;
@@ -2468,7 +2474,7 @@ namespace {
 				if (aliasing && proof_mode) { return fail(t.get(), "a reference to a member escapes the proof"); }
 				if (aliasing) {
 					const identifier_expr* root = chain_root_identifier(t.get());
-					if (root && !is_local(root->symbol_id) && !self_field(root->symbol_id)) {
+					if (root && !is_local(root) && !self_field(root)) {
 						return fail(root, std::string(what) + " would alias enclosing state '" + std::string(root->name) + "' (captured reads are read-only)");
 					}
 				}
@@ -2592,7 +2598,7 @@ namespace {
 					// class-method admission (the receiver's class is a runtime fact; names
 					// no element class defines are builtins and simply never match)
 					identifier_expr* chain_root = proof_mode ? nullptr : chain_root_identifier(m->object.get());
-					if (chain_root && !is_local(chain_root->symbol_id) && !self_field(chain_root->symbol_id) && !is_element_symbol(chain_root->symbol_id) &&
+					if (chain_root && !is_local(chain_root) && !self_field(chain_root) && !is_element_symbol(chain_root) &&
 					    !parallel_readonly_method(m->member)) {
 						note_captured_method_call(chain_root, m, call);   // a method of an object a captured one holds
 					} else {
@@ -2628,12 +2634,12 @@ namespace {
 			}
 			auto* callee = static_cast<identifier_expr*>(call->callee.get());
 			const std::string callee_name(callee->name);
-			if (is_local(callee->symbol_id)) {
+			if (is_local(callee)) {
 				return fail(callee, "call target '" + callee_name + "' is not statically resolvable in a parallel body");
 			}
 			// A bare sibling call of a script method is this.name(): the barrier pins the method for every class the receiver can
 			// be, and a worker parks it through the pin. A C++ base method stays on the 'this.' spelling
-			if (method_class && method_class->defines_method(callee->symbol_id)) {
+			if (method_class && !callee->global_qualified && method_class->defines_method(callee->symbol_id)) {
 				const script_value* bound = method_class->method_ptr(callee->symbol_id);
 				if (!bound || !bound->is_function() || !bound->as_function().target<script_method_dispatch>()) {
 					return fail(callee, "method '" + callee_name + "' must be called as 'this." + callee_name +
@@ -5281,7 +5287,14 @@ struct region_run {
 				if (sym == entry.name_id) { frame_local = (*plan.frame_slot)(slot); break; }
 			}
 		}
-		auto global = frame_local ? checked_result<script_value>(*frame_local)
+		const script_value* nearer = frame_local ? frame_local
+		                           : (plan.capture_env && !method_scope) ? plan.capture_env->get_value_ptr(entry.name_id) : nullptr;
+		if (entry.qualified_use && entry.unqualified_use && nearer && nearer != engine_access::get_global_environment(eng)->get_value_ptr(entry.name_id)) {
+			return usage("'::" + std::string(entry.name) + "' names the program's '" + std::string(entry.name) + "' and the body also reads a nearer '" +
+			             std::string(entry.name) + "' (a worker holds one variable of a name: rename one)");
+		}
+		auto global = entry.qualified_use ? engine_access::get_global_environment(eng)->get(entry.name_id)
+		            : frame_local ? checked_result<script_value>(*frame_local)
 		            : (plan.capture_env && !method_scope) ? plan.capture_env->get(entry.name_id)
 		                                                   : engine_access::get_global_environment(eng)->get(entry.name_id);
 		if (!global) {

@@ -924,6 +924,9 @@ public:
 			expect_error("var& r = g;", "reference declaration would alias enclosing state 'g'");
 			expect_error("helper_ref(g[0]);", "argument passes enclosing state 'g' to reference parameter 'a' of 'helper_ref' (captured reads are read-only; 'helper_ref' only reads it: declare it const int& a)");
 			expect_error("for (auto& v : g) { }", "cannot iterate captured state 'g' by reference");
+			// ::g is the program's g whatever a local of the name says
+			expect_error("var g = 0; ::g = [9];", "body writes enclosing state 'g'");
+			expect_error("var g = [0]; ::g[0] = 5;", "body writes enclosing state 'g'");
 		});
 
 		test("captured_reads_deterministic_1_2_8", [this]() {
@@ -949,6 +952,29 @@ public:
 			auto r8 = e->execute(src);
 			check_true(arrays_equal(r1, r2));
 			check_true(arrays_equal(r1, r8));
+			// a ::name reads the worker's copy of the program's variable or function, a local of the name notwithstanding
+			const std::string qualified = R"(
+				array<int> grid = [3, 5, 7];
+				int sq(int v) { return v * v; }
+				int K = 100;
+				class W { int v = 0; int K = 1; void m() { v = ::K + K; } }
+				array<W> ws = [W(), W()];
+				array<int> idx = [];
+				for (int i = 0; i < 64; ++i) { idx.push(i); }
+				array<int> out = idx;
+				parallel_for (int i : idx) { int sq = 1; int grid = 2; out[i] = ::sq(i) + ::grid[i % 3] + sq + grid; }
+				parallel_for (auto& w : ws) { w.m(); }
+				int scoped() { int K = 2; array<int> local = [0, 0]; parallel_for (int i : [0, 1]) { local[i] = ::K + i; } return local[0] + local[1]; }
+				return to_json(out[0]) + " " + to_json(out[63]) + " " + to_json(ws[1].v) + " " + to_json(scoped());
+			)";
+			auto q = make_engine();
+			jai::stdlib::register_all(*q);
+			for (size_t workers : {size_t(1), size_t(2), size_t(8)}) {
+				q->parallel_thread_count(workers);
+				check_eq(std::string("6 3975 101 201"), q->execute(qualified).as<std::string>(), "::name reads, workers " + std::to_string(workers));
+			}
+			auto conflict = q->execute("int K = 5; array<int> out = [0, 0]; var f() { int K = 2; try { parallel_for (int i : [0, 1]) { out[i] = ::K + K; } } catch (e) { return e; } return \"no-error\"; } f();");
+			check_true(conflict.as<std::string>().rfind("parallel_for: '::K' names the program's 'K' and the body also reads a nearer 'K'", 0) == 0, conflict.as<std::string>());
 		});
 
 		test("captured_snapshot_equals_barrier_content", [this]() {

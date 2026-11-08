@@ -2003,7 +2003,7 @@ void vm_backend::exec_map(frame& f, const vm_instruction& ins) {
 
 script_value* vm_backend::string_receiver_cell(frame& f, const call_site& site, const identifier_expr* ident) {
 	if (ident->global_qualified) {
-		return engine_->get_global_environment()->get_value_ptr(site.receiver_symbol);
+		return program_scope()->get_value_ptr(site.receiver_symbol);
 	}
 	return resolve_local_or_env(f, site.receiver_slot, site.receiver_symbol);
 }
@@ -2020,7 +2020,7 @@ script_value vm_backend::string_element_pin(frame& f, script_value& base_raw, ui
 	if (sub->left->get_type() == node_type::identifier_expr) {
 		const auto* ident = static_cast<const identifier_expr*>(sub->left.get());
 		const uint64_t symbol_id = f.code->symbols[site.base_symbol];
-		script_value* cell = ident->global_qualified ? engine_->get_global_environment()->get_value_ptr(symbol_id)
+		script_value* cell = ident->global_qualified ? program_scope()->get_value_ptr(symbol_id)
 		                                             : resolve_local_or_env(f, site.base_slot, symbol_id);
 		return cell ? share_env_ref(*cell) : make_null();
 	}
@@ -3191,7 +3191,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 	script_value* store_target = nullptr;
 	if (ins.c & store_flag_global_only) {
 		// ::name store - GLOBAL env only; a miss is an error, never a member/implicit define
-		store_target = engine_->get_global_environment()->get_env_var_ptr(sym);
+		store_target = program_scope()->get_env_var_ptr(sym);
 		if (!store_target) {
 			return raise_(make_error_code(runtime_error_code::undefined_variable),
 				environment_->undefined_text(sym), sym);
@@ -3427,7 +3427,7 @@ JAI_NOINLINE op_status vm_backend::exec_compound_store_full(frame& f, const vm_i
 	stack_.pop_back();
 
 	script_value* varPtr = (ins.c & compound_flag_global_only)
-		? engine_->get_global_environment()->get_value_ptr(sym)
+		? program_scope()->get_value_ptr(sym)
 		: variable_cell(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
 		uint8_t declared_kind = 0;
@@ -3918,7 +3918,7 @@ op_status vm_backend::exec_incdec(frame& f, const vm_instruction& ins) {
 		}
 	}
 	script_value* varPtr = (ins.c & incdec_flag_global_only)
-		? engine_->get_global_environment()->get_value_ptr(sym)
+		? program_scope()->get_value_ptr(sym)
 		: variable_cell(f, ins.b, sym, f.ip * 3 + 2);
 	if (varPtr) {
 		// a scratch-backed reference (a typed element, a C++ property) commits what the step wrote into its scratch
@@ -4173,7 +4173,7 @@ const script_value* vm_backend::fused_ident_value(frame& f, const fused_operand&
 	const uint64_t sym = f.code->symbols[operand.symbol];
 	if (operand.load_flags & load_flag_global_only) {
 		// ::name - GLOBAL env only (KEEP BYTE-PARALLEL with exec_load's door)
-		if (script_value* g = engine_->get_global_environment()->get_value_ptr(sym)) {
+		if (script_value* g = program_scope()->get_value_ptr(sym)) {
 			return &binding_value(*g, observed);
 		}
 		(void)raise_(make_error_code(runtime_error_code::undefined_variable), environment_->undefined_text(sym), sym);
@@ -11627,7 +11627,7 @@ op_status vm_backend::exec_decl_ref_ident(frame& f, const vm_instruction& ins) {
 		global_only = target_ident->global_qualified;
 		if (global_only) {
 			// ::name - GLOBAL env only (resolve_local_or_env's door in the interpreter)
-			targetPtr = engine_->get_global_environment()->get_value_ptr(target_sym);
+			targetPtr = program_scope()->get_value_ptr(target_sym);
 		} else if (target_ident->slot_index != SIZE_MAX && has_slots(f)) {
 			targetPtr = frame_slot(f, target_ident->slot_index);
 		}
@@ -19757,7 +19757,7 @@ op_status vm_backend::exec_ref_return_bind(frame& f, const vm_instruction& ins) 
 	const uint64_t symbol_id = f.code->symbols[ins.b];
 	if (ins.c & load_flag_global_only) {
 		// ::name - GLOBAL env only (slots, captures, member scope all skipped)
-		if (script_value* g = engine_->get_global_environment()->get_value_ptr(symbol_id)) {
+		if (script_value* g = program_scope()->get_value_ptr(symbol_id)) {
 			stack_.push_back(share_env_ref(*g));
 			return {};
 		}
@@ -19921,7 +19921,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 			const bool global_only = target_ident->global_qualified;
 			if (global_only) {
 				// ::name - GLOBAL env only (resolve_local_or_env's door in the interpreter)
-				targetPtr = engine_->get_global_environment()->get_value_ptr(target_sym);
+				targetPtr = program_scope()->get_value_ptr(target_sym);
 			} else if (target_ident->slot_index != SIZE_MAX && has_slots(f)) {
 				targetPtr = frame_slot(f, target_ident->slot_index);
 			}

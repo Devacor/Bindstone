@@ -1627,7 +1627,9 @@ var from_call = function(int n) { int acc = 0; for (int i = 0; i < n; ++i) { REM
 		test("element_store_values_are_values", [this]() {
 			// draw_seg's `clipsn[x] = cn + 1`: an element store whose value is a value binary lands the binary in a compiler temp and
 			// stores the temp; the store's typed lane and the block hold; a lifted tree, a float value, a value that raises (the
-			// kernel's text first), an int array fed a float value (the checked conversion), a map container and a var& container
+			// kernel's text first), an int array fed a float value (the checked conversion), a map container and a var& container; a global
+			// stored through a computed index, in an arm the first call never takes (the general store parks its container in the value's
+			// lookup role: the value reads through a role the index leaves free, or the store refuses when the index takes both)
 			const char* defs = R"JAI(
 array<int> G = [0, 0, 0, 0, 0, 0]; array<float> F = [0.0, 0.0, 0.0, 0.0]; var M = {1: 0, 2: 0}; var V = [0, 0, 0, 0];
 var fill = function(int n, var& a) { int acc = 0; for (int x = 0; x < n; ++x) { int v = a[x]; a[x] = v + x * 2 + 1; acc = acc + a[x]; } return acc; };
@@ -1637,10 +1639,16 @@ var raises = function(int n) { int d = 0; try { for (int i = 0; i < n; ++i) { G[
 var narrow = function(int n) { try { for (int i = 0; i < n; ++i) { G[i] = i * 1.5; } } catch (e) { return e; } return to_string(G); };
 var keyed = function(int n) { for (int i = 1; i <= n; ++i) { M[i] = i * 10 + 1; } return to_string(M); };
 var mixed = function(int n) { for (int i = 0; i < n; ++i) { V[i] = i + 0.5; } return to_string(V); };
+int W = 99; int K = 1;
+var flash = function(int s, int mode) { for (int x = 0; x < 4; ++x) { if (mode == 1) { G[x + s] = W; } else { G[x + s] = 5; } } return to_string(G); };
+var flashadd = function(int s, int mode) { for (int x = 0; x < 4; ++x) { if (mode == 1) { G[x + s] += W; } else { G[x + s] += 1; } } return to_string(G); };
+var flashk = function(int mode) { for (int x = 0; x < 4; ++x) { if (mode == 1) { G[x + K] = W; } else { G[K + x] = 5; } } return to_string(G); };
+var flashkk = function(int mode) { for (int x = 0; x < 4; ++x) { if (mode == 1) { G[K + K] = W; } else { G[x] = 5; } } return to_string(G); };
 )JAI";
 			struct probe { const char* call; const char* expected; };
 			const probe probes[] = {
 				{ "to_string(fill(4, G));", "16" }, { "tree(4);", "" }, { "floats(4);", "" }, { "raises(3);", "" }, { "narrow(3);", "" }, { "keyed(2);", "" }, { "mixed(3);", "" },
+				{ "flash(1, 0) + flash(1, 1);", "" }, { "flashadd(2, 0) + flashadd(2, 1);", "" }, { "flashk(0) + flashk(1);", "" }, { "flashkk(0) + flashkk(1);", "" },
 			};
 			for (const probe& p : probes) {
 				both(std::string(defs) + " " + p.call, p.expected, p.call);

@@ -4461,6 +4461,19 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			return true;
 		};
 		// the index of a load or store: a value or the fold over values; every operand an int
+		// a stored value's lookup-cache role: the general store reads its value through role 2, but with a computed index it parks its
+		// container there and reads the value uncached, so an environment value takes a role the index's operands leave unused (slots
+		// and constants never touch the cache); k_invalid_u32: none is free
+		auto store_value_slot = [&](const fused_index_proto& fp, size_t ip) -> uint32_t {
+			if (fp.index_binary == k_invalid_u32) return static_cast<uint32_t>(ip * 3 + 2);
+			if (fp.index_binary >= c.fused_binary_protos.size()) return k_invalid_u32;
+			auto quiet = [](const fused_operand& o) { return o.const_index != k_invalid_u32 || (o.slot != k_invalid_u32 && !o.is_subscript() && o.member_node == k_invalid_u32 && !o.this_slot); };
+			const fused_binary_proto& bp = c.fused_binary_protos[fp.index_binary];
+			if (quiet(bp.left)) return static_cast<uint32_t>(ip * 3);
+			bool right_free = quiet(bp.right);
+			for (const uint32_t step : fp.index_chain_ext) { if (step >= c.fused_binary_protos.size() || !quiet(c.fused_binary_protos[step].right)) { right_free = false; } }
+			return right_free ? static_cast<uint32_t>(ip * 3 + 1) : k_invalid_u32;
+		};
 		auto index_values = [&](ir_op& op, const fused_index_proto& fp, size_t ip) -> bool {
 			uint32_t sink;
 			if (fp.index_binary == k_invalid_u32) return value(op, fp.index, kint, static_cast<uint32_t>(ip * 3 + 1), ip, sink);   // the general read's index role: ip * 3 is its container's
@@ -5026,7 +5039,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (st.c == 0) { refuse(chunk::cell_refusal_translation, ip); break; }   // an element store whose value is used
 				uint32_t sink;
-				if (!index_values(op, fp, ip) || (fp.store_value.const_index == k_invalid_u32 && !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink))) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const uint32_t vslot = store_value_slot(fp, ip);
+				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!index_values(op, fp, ip) || (fp.store_value.const_index == k_invalid_u32 && !value(op, fp.store_value, 0, vslot, ip, sink))) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.proto = st.a;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_index_compound_operand && st.a < c.fused_index_protos.size()) {
@@ -5036,7 +5051,9 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				if (!array_target(fp)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				if (!fp.compound || compound_kind_bitwise(fp.compound_kind) || (fp.store_value.const_index == k_invalid_u32 && fp.store_value.symbol == k_invalid_u32)) { refuse(chunk::cell_refusal_translation, ip); break; }
 				uint32_t sink;
-				if (!index_values(op, fp, ip) || !value(op, fp.store_value, 0, static_cast<uint32_t>(ip * 3 + 2), ip, sink)) { refuse(chunk::cell_refusal_representation, ip); break; }
+				const uint32_t vslot = store_value_slot(fp, ip);
+				if (fp.store_value.const_index == k_invalid_u32 && fp.store_value.slot == k_invalid_u32 && vslot == k_invalid_u32) { refuse(chunk::cell_refusal_representation, ip); break; }
+				if (!index_values(op, fp, ip) || !value(op, fp.store_value, 0, vslot, ip, sink)) { refuse(chunk::cell_refusal_representation, ip); break; }
 				op.kind = ir::store; op.proto = st.a;
 				op.container = fp.container.slot != k_invalid_u32 && fp.container.slot < k_typed_slot_mask ? fp.container.slot : k_invalid_u32;
 			} else if (st.op == opcode::op_unary_temp && st.a != k_invalid_u32 && st.a < c.fused_binary_protos.size() && st.b < k_typed_slot_mask) {

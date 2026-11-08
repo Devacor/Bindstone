@@ -201,6 +201,7 @@ namespace jai::detail {
             uint64_t enclosing_arguments = 0;   // the argument positions any call of the name passes enclosing state at
             const ast_node* enclosing_site = nullptr;
             std::vector<std::pair<size_t, size_t>> loop_variable_arguments;   // (argument position, loop variable position)
+            size_t fewest_arguments = SIZE_MAX;   // a call passing fewer binds the defaults past it
         };
         // Host static methods the bodies call, by the class name as written (Name::method(...)): pinned per worker
         struct static_call {

@@ -1947,6 +1947,32 @@ public:
 			check_true(method_arm.rfind("parallel_for: argument passes enclosing state 'grid' to reference parameter 'g' of 'W::m', which writes it", 0) == 0, method_arm);
 			const std::string cast = error_of(e, prelude + "parallel_for (int i : idx) { out[i] = cast<int&>(grid[i]); }");
 			check_true(cast.rfind("parallel_for: cast<T&> is not allowed in a parallel body at 7:", 0) == 0, cast);
+			// a member of captured state is that state's storage: a writing T& bound to it, by an argument or a default, refuses
+			const std::string objects = prelude + "int ga = 1; int gb = 2; class C { int f = 1; array<int> a = [1]; C(int& x = ga) {} } C gc;"
+			                                      " void setf(int& x) { x = 9; } void setd(int& x = ga) { x = 9; } int readd(int& x = ga) { return x; }"
+			                                      " class D { int v = 0; void m(int& x = gc.f) { x = 9; } } array<D> ds = [D(), D()];";
+			const std::string member = error_of(e, objects + " parallel_for (int i : idx) { setf(gc.f); }");
+			check_true(member.rfind("parallel_for: argument passes enclosing state 'gc' to reference parameter 'x' of 'setf', which writes it", 0) == 0, member);
+			const std::string member_element = error_of(e, objects + " parallel_for (int i : idx) { setf(gc.a[0]); }");
+			check_true(member_element.rfind("parallel_for: argument passes enclosing state 'gc' to reference parameter 'x' of 'setf', which writes it", 0) == 0, member_element);
+			const std::string member_method = error_of(e, objects + " parallel_for (auto& w : ws) { w.m(gc.a); }");
+			check_true(member_method.rfind("parallel_for: argument passes enclosing state 'gc' to reference parameter 'g' of 'W::m', which writes it", 0) == 0, member_method);
+			const std::string nested = error_of(e, objects + " void outer() { setf(gc.f); } parallel_for (int i : idx) { outer(); }");
+			check_true(nested.rfind("parallel_for: argument passes enclosing state 'gc' to reference parameter 'x' of 'setf', which writes it", 0) == 0, nested);
+			const std::string defaulted = error_of(e, objects + " parallel_for (int i : idx) { setd(); }");
+			check_true(defaulted.rfind("parallel_for: reference parameter 'x' of 'setd' defaults to enclosing state 'ga', which writes it", 0) == 0, defaulted);
+			const std::string default_read = error_of(e, objects + " parallel_for (int i : idx) { out[i] = readd(); }");
+			check_true(default_read.rfind("parallel_for: reference parameter 'x' of 'readd' defaults to enclosing state 'ga' (captured reads are read-only;"
+			                              " 'readd' only reads it: declare it const int& x)", 0) == 0, default_read);
+			const std::string default_member = error_of(e, objects + " parallel_for (auto& d : ds) { d.m(); }");
+			check_true(default_member.rfind("parallel_for: reference parameter 'x' of 'D::m' defaults to enclosing state 'gc', which writes it", 0) == 0, default_member);
+			const std::string default_arm = error_of(e, objects + " bool pick = true; void setc(int& x = pick ? ga : gb) { x = 9; } parallel_for (int i : idx) { setc(); }");
+			check_true(default_arm.rfind("parallel_for: reference parameter 'x' of 'setc' defaults to enclosing state 'ga', which writes it", 0) == 0, default_arm);
+			const std::string default_ctor = error_of(e, objects + " parallel_for (int i : idx) { C made(); }");
+			check_true(default_ctor.rfind("parallel_for: reference parameter 'x' of 'C' defaults to enclosing state 'ga'", 0) == 0, default_ctor);
+			// a default a call overrides binds nothing, and a const T& default is a read
+			check_eq(std::string("[1,1,1]"), e->execute(objects + " int keepd(const int& x = ga) { return x; }"
+			                                            " parallel_for (int i : idx) { int mine = 0; setd(mine); out[i] = mine / 9 * keepd(); } return to_json(out);").as<std::string>());
 		});
 
 		test("a_loop_variable_a_reference_parameter_writes_is_written", [this]() {

@@ -1185,7 +1185,7 @@ namespace {
 			const ast_node* enclosing_site = nullptr;
 			std::vector<std::pair<size_t, size_t>> loop_variables;
 			for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
-				if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+				if (identifier_expr* root = enclosing_reference_root(call->arguments[i])) {
 					enclosing |= uint64_t(1) << i;
 					if (!enclosing_site) { enclosing_site = root; }
 				}
@@ -1198,9 +1198,10 @@ namespace {
 				if (!rec.enclosing_site) { rec.enclosing_site = enclosing_site; }
 				rec.enclosing_arguments |= enclosing;
 				rec.loop_variable_arguments.insert(rec.loop_variable_arguments.end(), loop_variables.begin(), loop_variables.end());
+				rec.fewest_arguments = std::min(rec.fewest_arguments, call->arguments.size());
 				return;
 			}
-			adm.element_method_calls.push_back({ name_id, name, site, enclosing, enclosing_site, std::move(loop_variables) });
+			adm.element_method_calls.push_back({ name_id, name, site, enclosing, enclosing_site, std::move(loop_variables), call->arguments.size() });
 		}
 
 		// In-place mode member access (read or store position): admitted iff the chain
@@ -1309,22 +1310,35 @@ namespace {
 		identifier_expr* enclosing_root(const expression_ptr& e) const {
 			identifier_expr* result = nullptr;
 			for_each_bound_arm(e, [&](const expression_ptr& arm) {
-				if (!result) { result = enclosing_storage_root(arm); }
+				if (!result) { result = enclosing_storage_root(arm, false); }
 			});
 			return result;
 		}
 
-		identifier_expr* enclosing_storage_root(const expression_ptr& e) const {
+		// Where a reference parameter binds: a member of captured state is that state's storage too (setf(cfg.f) writes cfg)
+		identifier_expr* enclosing_reference_root(const expression_ptr& e) const {
+			identifier_expr* result = nullptr;
+			for_each_bound_arm(e, [&](const expression_ptr& arm) {
+				if (!result) { result = enclosing_storage_root(arm, !proof_mode); }
+			});
+			return result;
+		}
+
+		identifier_expr* enclosing_storage_root(const expression_ptr& e, bool through_members) const {
 			const expression* cur = e.get();
 			while (cur) {
 				if (cur->get_type() == node_type::identifier_expr) {
 					auto* ident = static_cast<identifier_expr*>(const_cast<expression*>(cur));
 					// Self fields are element-rooted, never enclosing state
-					return (is_local(ident->symbol_id) || self_field(ident->symbol_id)) ? nullptr : ident;
+					return (!ident->global_qualified && (is_local(ident->symbol_id) || self_field(ident->symbol_id))) ? nullptr : ident;
 				}
 				if (cur->get_type() == node_type::binary_expr &&
 				    static_cast<const binary_expr*>(cur)->op.type == token_type::left_bracket) {
 					cur = static_cast<const binary_expr*>(cur)->left.get();
+					continue;
+				}
+				if (through_members && cur->get_type() == node_type::member_expr && !static_cast<const member_expr*>(cur)->is_static) {
+					cur = static_cast<const member_expr*>(cur)->object.get();
 					continue;
 				}
 				return nullptr;
@@ -1407,9 +1421,11 @@ namespace {
 		}
 		// The refusal of enclosing state passed to a script callee's non-const reference parameter, with the fix when the
 		// callee never writes through it
-		std::string reference_argument_refusal(const identifier_expr* root, const parameter& p, std::string_view callee, bool callee_reads_only) {
-			std::string result = "argument passes enclosing state '" + std::string(root->name) + "' to reference parameter '" + p.name +
-			                     "' of '" + std::string(callee) + "'";
+		std::string reference_argument_refusal(const identifier_expr* root, const parameter& p, std::string_view callee, bool callee_reads_only,
+		                                       bool from_default = false) {
+			std::string result = from_default
+				? "reference parameter '" + p.name + "' of '" + std::string(callee) + "' defaults to enclosing state '" + std::string(root->name) + "'"
+				: "argument passes enclosing state '" + std::string(root->name) + "' to reference parameter '" + p.name + "' of '" + std::string(callee) + "'";
 			if (callee_reads_only) {
 				const type_info_ptr referent = referent_type(p.type);
 				result += " (captured reads are read-only; '" + std::string(callee) + "' only reads it: declare it const " +
@@ -1418,6 +1434,24 @@ namespace {
 				result += ", which writes it (captured reads are read-only; pass a copy, or take it as const T& where it is only read)";
 			}
 			return result;
+		}
+
+		// A call that names fewer arguments binds the defaults past them: a writing reference parameter's default is held to the
+		// argument's rules
+		bool admit_reference_defaults(const std::vector<parameter>& a_params, size_t a_given, const statement* a_body, std::string_view a_callee) {
+			for (size_t i = a_given; i < a_params.size(); ++i) {
+				const parameter& p = a_params[i];
+				if (!p.default_value || !p.is_reference || p.is_const) { continue; }
+				const bool reads_only = ref_parameter_takes_temporary(*eng, a_params, a_body, i, true);
+				if (proof_mode) {
+					if (!reads_only && (!chain_root_identifier(p.default_value.get()) || global_rooted(p.default_value.get()))) {
+						return fail(p.default_value.get(), "a reference parameter's default names state the proof does not own");
+					}
+				} else if (identifier_expr* root = enclosing_reference_root(p.default_value)) {
+					return fail(root, reference_argument_refusal(root, p, a_callee, reads_only, true));
+				}
+			}
+			return true;
 		}
 
 		// Root-parameter contract for the region's entry body: transform requires a
@@ -1589,6 +1623,7 @@ namespace {
 			for (const auto& m : admitted_methods) {
 				if (m.cls != cls || m.name_id != callrec.name_id || !m.decl) { continue; }
 				const auto& params = m.decl->parameters;
+				if (!admit_reference_defaults(params, callrec.fewest_arguments, m.decl->body.get(), cls->get_name() + "::" + std::string(callrec.name))) { return false; }
 				for (size_t i = 0; i < params.size() && i < 64; ++i) {
 					if (!((callrec.enclosing_arguments >> i) & 1) || !params[i].is_reference || params[i].is_const) { continue; }
 					const auto* root = static_cast<const identifier_expr*>(callrec.enclosing_site);
@@ -1632,7 +1667,7 @@ namespace {
 					if (!admit_class_method(cls, callrec.name_id, callrec.name, callrec.site)) {
 						return false;
 					}
-					if ((callrec.enclosing_arguments || !callrec.loop_variable_arguments.empty()) && !admit_method_reference_arguments(cls, callrec)) { return false; }
+					if (!admit_method_reference_arguments(cls, callrec)) { return false; }
 				}
 				if (!admit_host_methods(callrec.name_id, callrec)) { return false; }
 			}
@@ -1801,6 +1836,7 @@ namespace {
 			}
 			for (const auto& ctor : ctors) {
 				if (argc != SIZE_MAX && !arity_accepts(ctor->parameters, argc)) { continue; }
+				if (!admit_reference_defaults(ctor->parameters, argc == SIZE_MAX ? 0 : argc, ctor->body.get(), cls->get_name())) { return false; }
 				if (!admit_constructor(script_cls, ctor, site)) { return false; }
 			}
 			return true;
@@ -2497,7 +2533,7 @@ namespace {
 							for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 								if (!writes || !((writes->mask >> i) & 1)) { continue; }
 								note_loop_variable_reference_argument(call->arguments[i]);
-								if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+								if (identifier_expr* root = enclosing_reference_root(call->arguments[i])) {
 									return fail(root, "argument passes enclosing state '" + std::string(root->name) +
 									                  "' by reference (captured reads are read-only)");
 								}
@@ -2639,6 +2675,7 @@ namespace {
 					// A non-const by-ref parameter receiving captured state is a write channel (the callee may store through it):
 					// refused statically. A const T& one is a captured read, a subscript read when the callee only subscripts it
 					const auto& params = callee_fn->parameters();
+					if (!admit_reference_defaults(params, call->arguments.size(), callee_fn->body.get(), callee_name)) { return false; }
 					for (size_t i = 0; i < call->arguments.size() && i < params.size(); ++i) {
 						if (proof_mode && !params[i].is_reference && conversion_may_run_code(params[i].type, call->arguments[i])) { root_escaped = true; }
 						if (!params[i].is_reference) { note_converting_construction(params[i].type, call->arguments[i], call->arguments[i].get()); }
@@ -2648,7 +2685,7 @@ namespace {
 						if (!proof_mode && !params[i].is_const && !ref_parameter_takes_temporary(*eng, params, callee_fn->body.get(), i, true)) {
 							note_loop_variable_reference_argument(call->arguments[i]);
 						}
-						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+						if (identifier_expr* root = enclosing_reference_root(call->arguments[i])) {
 							if (!const_ref) {
 								const bool reads_only = !proof_mode && ref_parameter_takes_temporary(*eng, params, callee_fn->body.get(), i, true);
 								return fail(root, proof_mode ? "argument passes enclosing state '" + std::string(root->name) + "' by reference (captured reads are read-only)"
@@ -2686,7 +2723,7 @@ namespace {
 					for (size_t i = 0; i < call->arguments.size() && i < 64; ++i) {
 						if (!((writeback >> i) & 1)) { continue; }
 						note_loop_variable_reference_argument(call->arguments[i]);
-						if (identifier_expr* root = enclosing_root(call->arguments[i])) {
+						if (identifier_expr* root = enclosing_reference_root(call->arguments[i])) {
 							return fail(root, "argument passes enclosing state '" + std::string(root->name) +
 							                  "' by reference (captured reads are read-only)");
 						}

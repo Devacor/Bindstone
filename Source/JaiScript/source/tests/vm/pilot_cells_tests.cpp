@@ -6047,8 +6047,9 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			}
 		});
 		// a loop-free function too big to graft is a frame program by its own work: a loop enters it raw (its globals read at the entry, as
-		// they stand after the program scope rewrites them), the program scope enters it generally, a call it makes to a function with a loop
-		// is a door, its ternary return and its compound over a quotient stay cells
+		// they stand after the program scope rewrites them; arguments that are lifted trees; its result compounded into the sum), the program
+		// scope enters it generally, a straight region of a function with a loop calls it raw, a call it makes to a function with a loop is a
+		// door, its ternary return and its compound over a quotient stay cells
 		test("big_leaves_are_raw_frame_programs", [this]() {
 			std::string big = "function big(float x, float y, bool m) -> float {\n";
 			for (int k = 0; k < 100; ++k) { big += "  float a" + std::to_string(k) + " = " + (k ? "a" + std::to_string(k - 1) : std::string("x")) + " * 0.5 + " + (k % 3 ? "x" : "G") + ";\n"; }
@@ -6059,9 +6060,11 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			for (int k = 0; k < 80; ++k) { slow += " s = (s * 3 + k - " + std::to_string(k) + ") % 1000;"; }
 			slow += " return s % 1000; }\n";
 			const std::string src = "[[warn_mode]]\nfloat G = 0.25; float V = 3.0;\n" + slow + big +
-				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { float y = (i & 3) * 0.1; bool m = (i & 7) == 0; float v = big(i * 0.01, y, m); t += v; } return t; }\n"
-				"string out = to_string(run(40)) + \",\" + to_string(big(0.5, 0.3, true)) + \",\" + to_string(big(0.5, 0.3, false));\n"
-				"V = 2.5; G = -1.0;\nout += \",\" + to_string(run(40)) + \",\" + to_string(big(0.5, 0.1, false));\nout;";
+				"function run(int n) -> float { float t = 0.0; for (int i = 0; i < n; ++i) { t += big(i * 0.01, (i & 3) * 0.1 - (i % 5) * 0.05, (i & 7) == 0); } return t; }\n"
+				"function shade(float x) -> float { float p = x * 1.5 + G; float q = p * p - x; float a = big(p, 0.3, false); float b = big(q + 0.1, 0.3, false) * 2.0;\n"
+				"  float c = a * b + p * q - a; float d = c * 0.5 + b * 0.25 - q; float e = d * d + c; float s = 0.0; for (int k = 0; k < 3; ++k) { s += e * k; } return s + d; }\n"
+				"string out = to_string(run(40)) + \",\" + to_string(big(0.5, 0.3, true)) + \",\" + to_string(big(0.5, 0.3, false)) + \",\" + to_string(shade(0.4));\n"
+				"V = 2.5; G = -1.0;\nout += \",\" + to_string(run(40)) + \",\" + to_string(big(0.5, 0.1, false)) + \",\" + to_string(shade(0.4));\nout;";
 			both(src, "", "big leaves");
 			both(src, "", "big leaves, proofs off", false);
 			check_true(run_on(true, src).find("throw:") == std::string::npos, "runs: " + run_on(true, src));
@@ -6069,6 +6072,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			auto section = [&](const char* fn) { const size_t fb = l.find(fn); return fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb); };
 			check_true(section("== big ").find("(raw entry)") != std::string::npos, "big is a raw-enterable frame program: " + section("== big "));
 			check_true(section("== run ").find("raw 1") != std::string::npos, "run's loop calls it raw: " + section("== run "));
+			check_true(section("== shade ").find("-- cell region") != std::string::npos && section("== shade ").find("raw 2") != std::string::npos, "shade's straight region calls it raw: " + section("== shade "));
 			if (!engine::miss_injection_available()) { return; }
 			const std::string oracle = run_on(false, src);
 			for (uint32_t every = 1; every <= 5; ++every) {

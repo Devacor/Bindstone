@@ -638,6 +638,24 @@ void vm_compiler::emit_compound_store(uint32_t symbol_index, uint32_t slot, uint
 				fuse = true;
 			}
 			break;
+		case node_type::call_expr:
+			if (typed_lowering_ && temps_active_ && chunk_->is_function_body && (code.back().op == opcode::op_call_from_scratch || code.back().op == opcode::op_call_typed) &&
+			    (kind_flags & compound_flag_no_result) && !(kind_flags & (compound_flag_old_result | compound_flag_incdec))) {
+				// the call's result lands in a temp and the compound reads the temp: a block takes the call by its temp consumer, where a
+				// compound over a pushed value stays general
+				const uint32_t t0 = static_cast<uint32_t>(temp_next_);
+				++temp_next_;
+				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+				emit(opcode::op_call_temp, t0);
+				note_landing(rhs);
+				cp.rhs_proto = k_invalid_u32;
+				cp.rhs.slot = t0; cp.rhs.symbol = temp_symbol_index(); cp.rhs.direct = true;
+				cp.symbol = symbol_index; cp.slot = slot; cp.kind_flags = kind_flags; cp.typed_class = typed_class;
+				chunk_->compound_fused_protos.push_back(cp);
+				emit(opcode::op_compound_fused, static_cast<uint32_t>(chunk_->compound_fused_protos.size() - 1), 0, 0);
+				return;
+			}
+			break;
 		case node_type::member_expr:
 			member_tail_into_temp(rhs);
 			if (code.back().op == opcode::op_load && code.size() >= 2 && code[code.size() - 2].op == opcode::op_member_temp) {
@@ -4117,9 +4135,11 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	};
 	std::vector<uint8_t> excluded;   // an instruction a straight region never covers: a closed loop's general form
 	std::vector<uint32_t> fallback_join;   // a graft's fallback ip: its join (the copy never runs the fallback)
+	std::vector<uint8_t> raw_call_op;      // the probe and the call of a call that can be raw: a span takes it (raw, it costs a frame program's entry)
 	auto boundary = [&](size_t at) { return at == 0 || caller_stmt(at) != caller_stmt(at - 1); };
-	// a region is scalar work only: an entry resolves no container site and the copy makes no call, so a region entered once per call pays
-	// only its cells' guards and its declarations' flush (a site's resolution or a call's landing belongs to loops, which amortize them)
+	// a region is scalar work and raw calls only (raw_call_op): an entry resolves no container site and the copy makes no door call, so a
+	// region entered once per call pays only its cells' guards and its declarations' flush (a site's resolution or a door call's landing
+	// belongs to loops, which amortize them)
 	auto straight_op = [](opcode o) {
 		if (o >= opcode::op_t_add_ii && o <= opcode::op_t_mod_ff) return true;
 		if (o >= opcode::op_t_jlt_ii && o <= opcode::op_t_jne_ff) return true;
@@ -4183,12 +4203,12 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 	auto add_spans = [&](size_t lo, size_t hi) {
 		size_t at = lo;
 		while (at < hi) {
-			while (at < hi && (!boundary(at) || excluded[at] || !straight_op(code[at].op) || !entry_op(code[at]))) { ++at; }
+			while (at < hi && (!boundary(at) || excluded[at] || !(straight_op(code[at].op) || raw_call_op[at]) || !entry_op(code[at]))) { ++at; }
 			if (at >= hi) break;
 			size_t end = at, last_boundary = at, work = 0, work_at_boundary = 0;
 			for (; end < hi && !excluded[end]; ++end) {
 				if (fallback_join[end] > end && fallback_join[end] <= hi) { end = fallback_join[end] - 1; continue; }
-				if (!straight_op(code[end].op)) break;
+				if (!straight_op(code[end].op) && !raw_call_op[end]) break;
 				if (end > at && boundary(end)) { last_boundary = end; work_at_boundary = work; }
 				if (work_op(code[end].op)) { ++work; }
 			}
@@ -4227,6 +4247,17 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 				excluded.assign(original_size + 1, 0);
 				fallback_join.assign(original_size + 1, 0);
 				for (const chunk::inline_site& s : c.inline_sites) { if (s.fallback_ip < original_size && s.join_ip > s.fallback_ip) { fallback_join[s.fallback_ip] = s.join_ip; } }
+				raw_call_op.assign(original_size + 1, 0);
+				for (size_t ip = 0; ip + 1 < original_size; ++ip) {
+					if (code[ip].op != opcode::op_probe_callee || code[ip].a >= c.call_sites.size() || c.call_sites[code[ip].a].call_node >= c.nodes.size()) continue;
+					const auto* ce = static_cast<const call_expr*>(c.nodes[c.call_sites[code[ip].a].call_node].get());
+					const auto decl = ce->proven_callee_decl.lock();
+					if (!decl || !raw_signature(decl.get()) || ce->arguments.size() != decl->parameters.size() || !raw_call_reaches_program(decl.get(), callable_body_, stack_)) continue;
+					size_t call_ip = ip + 1;
+					for (const auto& z : c.call_arg_zones) { if (z.first == ip + 1) { call_ip = z.second; break; } }
+					if (call_ip >= original_size || (code[call_ip].op != opcode::op_call_from_scratch && code[call_ip].op != opcode::op_call_typed) || code[call_ip].c != 0) continue;
+					raw_call_op[ip] = 1; raw_call_op[call_ip] = 1;
+				}
 				for (const auto& cl : c.cell_loops) {
 					const size_t hi = cl.counted != k_invalid_u32 && cl.counted < c.counted_for_protos.size() ? c.counted_for_protos[cl.counted].exit_ip : cl.back + 1;
 					for (size_t k = cl.head; k < hi && k < excluded.size(); ++k) { excluded[k] = 1; }
@@ -5362,6 +5393,28 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						use_slot(t, arg_cmp ? kbool : tk, true, k_typed_dst_temp, nullptr, a);
 						ao.kind = arg_cmp ? ir::cmpval : ir::arith; ao.tok = bp.op; ao.a = t; ao.writes = t;
 						cc.args.push_back(chunk::cell_loop::call_arg{ 0, t, static_cast<uint32_t>(a) });
+						seq.push_back(ao);
+					} else if (ai.op >= opcode::op_t_add_ii && ai.op <= opcode::op_t_mod_ff && static_cast<uint8_t>(ai.a >> k_typed_dst_shift) == k_typed_dst_temp) {
+						// an inner node of a lifted argument tree: arith into its compiler temp, which the argument's own operation reads after it
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }
+						const uint8_t kind = ai.op <= opcode::op_t_shr_ii ? kint : kflt;
+						auto row_operand = [&](uint32_t v, uint32_t side) -> uint32_t {
+							if (!(v & k_typed_env_bit)) { use_slot(v, kind, false, 0, nullptr, a); slot_read(ao, v); return v; }
+							return k_ir_env_bit | env_cell(c.typed_env_operands[v & k_typed_slot_mask], kind, static_cast<uint32_t>(a * 3 + side), a);
+						};
+						ao.b = row_operand(ai.b, 0); ao.c = row_operand(ai.c, 1);
+						use_slot(ai.a & k_typed_slot_mask, kind, true, k_typed_dst_temp, nullptr, a);
+						ao.kind = ir::arith; ao.fast = ai.op; ao.a = ai.a & k_typed_slot_mask; ao.writes = ao.a;
+						seq.push_back(ao);
+					} else if (ai.op == opcode::op_binary_fused_temp && ai.a < c.fused_binary_protos.size() && ai.b < k_typed_slot_mask) {
+						// the same node the typed lowering left general: kinds at run time, into its compiler temp
+						if (effect_seen) { refuse(chunk::cell_refusal_effect, a); break; }
+						const fused_binary_proto& bp = c.fused_binary_protos[ai.a];
+						const bool is_cmp = cmp_tok(bp.op);
+						if (!arith_tok(bp.op) && !is_cmp) { refuse(chunk::cell_refusal_translation, a); break; }
+						if (!value(ao, bp.left, 0, static_cast<uint32_t>(a * 3), a, ao.b) || !value(ao, bp.right, 0, static_cast<uint32_t>(a * 3 + 1), a, ao.c)) { refuse(chunk::cell_refusal_representation, a); break; }
+						use_slot(ai.b, is_cmp ? kbool : 0, true, k_typed_dst_temp, nullptr, a);
+						ao.kind = is_cmp ? ir::cmpval : ir::arith; ao.tok = bp.op; ao.a = ai.b; ao.writes = ai.b;
 						seq.push_back(ao);
 					} else if (ai.op == opcode::op_index_fused && ai.a < c.fused_index_protos.size()) {
 						// an element read as an argument: the load into an argument value (the copy's own site row)

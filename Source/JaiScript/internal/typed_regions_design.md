@@ -646,8 +646,9 @@ owned receiver values across getters and callbacks. The fast form adds no object
 A span of scalar statements outside every closed loop runs as a cell block of its own, a region with no back edge. The span
 holds typed arithmetic and compares, fused binaries, typed declarations and stores, unaries, math intrinsics and stdlib
 aliases, branches (an if, a ternary, a return inside one) and grafts (the fallback's instructions are skipped, as the copy
-never runs them); an element or member site, a push or a call ends the span, since a region is entered once per pass and a
-site's resolution or a call's landing costs about what the general form's instruction does. A span starts and ends at a
+never runs them), and calls that can be raw (a callee that forms a frame program, "Raw typed frames"), which enter their callee
+raw from the region; an element or member site, a push or any other call ends the span, since a region is entered once per pass
+and a site's resolution or a door call's landing costs about what the general form's instruction does. A span starts and ends at a
 caller's statement boundary (a graft's statements and a recompiled return are the caller's statement), starts on an
 instruction whose general form looks at nothing after it, and forms a region only with at least sixteen operations
 (`vm_compiler::k_region_min_work`): an entry's guards and unboxing and its flush of the declarations cost about ten. The

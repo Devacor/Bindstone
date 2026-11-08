@@ -32,6 +32,9 @@ class Scene {
 	// 2 an impact with a riser into it, 1 an accent; the composer scores them
 	array<float> hit_times() { return []; }
 	array<int> hit_levels() { return []; }
+	// how many bars the scene needs for its showpiece to land in full, its last image held;
+	// 0 takes the reel's default. The reel and the scene's music both run this long.
+	int length_bars() { return 0; }
 }
 
 // one HUD row: styled segments clipped to the row's width, with a second line's
@@ -144,6 +147,7 @@ class Reel {
 		seed_slots = [3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 16, 21];
 		for (int i = 0; i <= intro_idx; ++i) {
 			var probe = make_scene(i);
+			if (probe.length_bars() > 0) { bars[i] = probe.length_bars(); }
 			cues.push(Cue(bars[i], music_mood(i), seed + i * 101, probe.hit_times(), probe.hit_levels()));
 		}
 		start_scene(intro_idx, 0.0);

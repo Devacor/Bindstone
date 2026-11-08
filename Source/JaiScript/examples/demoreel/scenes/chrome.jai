@@ -20,6 +20,11 @@
 // as one on the downbeat of bar five, then pull back high; star sparkles bloom on
 // the brightest glints, flaring on the hits and twinkling on the snare.
 //
+// A ring of six small chrome satellites orbits the big sphere, spinning up with the
+// music and flung wide on each hit (one bounding sphere skips the six for rays that
+// miss the ring), a sun hangs low in the sky so every mirror carries it, and each
+// hit sends a glowing shockwave racing across the checkerboard from under the spheres.
+//
 // The row function reads its frame through captured globals (scalars copy
 // into each worker, the index array borrows), calls nothing but script and
 // sqrt, and writes only its own row: parallel_transform's contract. The
@@ -41,7 +46,48 @@ int CH_BALL = 0;
 int CH_NBASE = 0;
 int CH_GLINT = 0;
 int CH_MIRROR = 0;           // the polished tiles' copy of the class table
+int CH_RING = 0;             // classes: the shockwave's glow by fog level, the satellites' shades, the sun
+int CH_SAT = 0;
+int CH_SUN = 0;
+array<float> CH_SX = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];   // the satellites
+array<float> CH_SY = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+array<float> CH_SZ = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+float CH_SR = 0.2;
+float CH_BX = 0.0; float CH_BY = 0.0; float CH_BZ = 0.0; float CH_BR = 0.0;   // the ring's bounding sphere
+float CH_WX = 0.0; float CH_WZ = 0.0; float CH_WR = -1.0; float CH_WW = 0.3;  // the shockwave: centre, radius, width
 array<int> CH_ROWS = [];
+
+// the distance to the nearest satellite a ray hits, or `best` when it hits none nearer
+function ch_sat_t(float ox, float oy, float oz, float dx, float dy, float dz, float best, int skip) -> float {
+	float qx = ox - CH_BX; float qy = oy - CH_BY; float qz = oz - CH_BZ;
+	float b = qx * dx + qy * dy + qz * dz;
+	float c = qx * qx + qy * qy + qz * qz - CH_BR * CH_BR;
+	if (c > 0.0 && (b > 0.0 || b * b - c < 0.0)) { return best; }
+	float r2 = CH_SR * CH_SR;
+	for (int k = 0; k < 6; ++k) {
+		if (k + 3 == skip) { continue; }
+		float sx = ox - CH_SX[k]; float sy = oy - CH_SY[k]; float sz = oz - CH_SZ[k];
+		float sb = sx * dx + sy * dy + sz * dz;
+		float disc = sb * sb - (sx * sx + sy * sy + sz * sz - r2);
+		if (disc <= 0.0) { continue; }
+		float t = 0.0 - sb - math::sqrt(disc);
+		if (t > 0.001 && t < best) { best = t; }
+	}
+	return best;
+}
+
+// which satellite a ray met at distance t (only asked when one was)
+function ch_sat_at(float ox, float oy, float oz, float dx, float dy, float dz, float t) -> int {
+	float px = ox + dx * t; float py = oy + dy * t; float pz = oz + dz * t;
+	int result = 0;
+	float bestd = 1000000.0;
+	for (int k = 0; k < 6; ++k) {
+		float ex = px - CH_SX[k]; float ey = py - CH_SY[k]; float ez = pz - CH_SZ[k];
+		float d = ex * ex + ey * ey + ez * ez;
+		if (d < bestd) { bestd = d; result = k; }
+	}
+	return result;
+}
 
 // what a ray from (ox,oy,oz) along unit (dx,dy,dz) sees, as a class index;
 // `skip` is the sphere it left
@@ -77,11 +123,19 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 			if (t2 > 0.001 && t2 < best) { best = t2; hit = 2; hr = CH_R2; hx = CH_X2; hy = CH_Y2; hz = CH_Z2; }
 		}
 	}
+	float st = ch_sat_t(ox, oy, oz, dx, dy, dz, best, skip);
+	if (st < best) {
+		best = st;
+		int sat = ch_sat_at(ox, oy, oz, dx, dy, dz, st);
+		hit = 3;
+		hr = CH_SR;
+		hx = CH_SX[sat]; hy = CH_SY[sat]; hz = CH_SZ[sat];
+	}
 	if (hit >= 0) {
 		float d = ((ox + dx * best - hx) * CH_LX + (oy + dy * best - hy) * CH_LY + (oz + dz * best - hz) * CH_LZ) / hr;
 		d = d < 0.0 ? 0.0 : d;
 		int lv = (0.2 + 0.8 * d) * 7.99;
-		return CH_BALL + hit * 8 + lv;
+		return hit == 3 ? CH_SAT + lv : CH_BALL + hit * 8 + lv;
 	}
 	if (dy < -0.0005) {
 		float tf = (0.0 - oy) / dy;
@@ -102,8 +156,15 @@ function ch_trace(float ox, float oy, float oz, float dx, float dy, float dz, in
 		float sx2 = fx - CH_X2; float sz2 = fz - CH_Z2;
 		float sb2 = sx2 * CH_LX - CH_Y2 * CH_LY + sz2 * CH_LZ;
 		if (sb2 < 0.0 && sb2 * sb2 - (sx2 * sx2 + CH_Y2 * CH_Y2 + sz2 * sz2 - CH_R2 * CH_R2) > 0.0) { shade = 1; }
+		if (CH_WR > 0.0) {
+			float wx = fx - CH_WX;
+			float wz = fz - CH_WZ;
+			float off = math::sqrt(wx * wx + wz * wz) - CH_WR;
+			if (off < CH_WW && off > 0.0 - CH_WW) { return CH_RING + fog; }
+		}
 		return CH_FLOOR + (((ix + iz) & 1) * 2 + shade) * 12 + fog;
 	}
+	if (dx * CH_LX + dy * CH_LY + dz * CH_LZ > 0.993) { return CH_SUN + (dx * CH_LX + dy * CH_LY + dz * CH_LZ > 0.998 ? 1 : 0); }
 	int s = dy * 30.0;
 	return s < 0 ? 0 : (s > 23 ? 23 : s);
 }
@@ -147,6 +208,14 @@ function ch_row(int y) -> array<int> {
 		if (disc2 > 0.0) {
 			float t2 = 0.0 - b2 - math::sqrt(disc2);
 			if (t2 > 0.001 && t2 < best) { best = t2; hit = 2; cx = CH_X2; cy = CH_Y2; cz = CH_Z2; cr = CH_R2; }
+		}
+		float st = ch_sat_t(ex, ey, ez, dx, dy, dz, best, -1);
+		int sat = 0;
+		if (st < best) {
+			best = st;
+			sat = ch_sat_at(ex, ey, ez, dx, dy, dz, st) + 1;
+			hit = 3;
+			cx = CH_SX[sat - 1]; cy = CH_SY[sat - 1]; cz = CH_SZ[sat - 1]; cr = CH_SR;
 		}
 		if (hit < 0) {
 			int seen = ch_trace(ex, ey, ez, dx, dy, dz, -1);
@@ -200,6 +269,8 @@ function ch_row(int y) -> array<int> {
 			} else {
 				out.push(CH_NBASE * 2 + ch_trace(hx, hy, hz, mx, my, mz, 1));
 			}
+		} else if (hit == 3) {
+			out.push(ch_trace(hx, hy, hz, mx, my, mz, 2 + sat));
 		} else {
 			out.push(CH_NBASE * (hit + 1) + ch_trace(hx, hy, hz, mx, my, mz, hit));
 		}
@@ -218,6 +289,15 @@ class Chrome : Scene {
 	int ball0 = 0;           // 3 spheres x 8 lit shades (as seen in a reflection)
 	int nbase = 0;
 	int glint = 0;
+	int ring0 = 0;
+	int sat0 = 0;
+	int sun0 = 0;
+	array<float> sat_x = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+	array<float> sat_y = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+	array<float> sat_z = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+	float ring_spin = 0.0;
+	float wave_r = -1.0;
+	float wave_w = 0.3;
 	float ex = 0.0;
 	float ey = 1.6;
 	float ez = 5.0;
@@ -279,6 +359,20 @@ class Chrome : Scene {
 				pal.add(bc[0] * k2 * tr, bc[1] * k2 * tg, bc[2] * k2 * tb);
 			}
 		}
+		// the shockwave's glow, cyan to white through the fog; the satellites' cool chrome; the sun
+		if (ring0 == 0) { ring0 = pal.size(); }
+		for (int f3 = 0; f3 < nfog; ++f3) {
+			float k3 = f3 / (nfog - 1.0);
+			pal.add((250.0 * (1.0 - k3) + 150.0 * k3) * tr, (200.0 * (1.0 - k3) + 255.0 * k3) * tg, (170.0 * (1.0 - k3) + 255.0 * k3) * tb);
+		}
+		if (sat0 == 0) { sat0 = pal.size(); }
+		for (int lv2 = 0; lv2 < 8; ++lv2) {
+			float k4 = 0.2 + 0.8 * lv2 / 7.0;
+			pal.add(225.0 * k4 * tr, 235.0 * k4 * tg, 255.0 * k4 * tb);
+		}
+		if (sun0 == 0) { sun0 = pal.size(); }
+		pal.add(255.0 * tr, 214.0 * tg, 150.0 * tb);
+		pal.add(255.0 * tr, 250.0 * tg, 225.0 * tb);
 	}
 
 	array<float> hit_times() override { return [MUSIC_BAR * 3.0, MUSIC_BAR * 5.0]; }
@@ -308,6 +402,29 @@ class Chrome : Scene {
 			bx[i] = math::cos(a) * 1.45;
 			bz[i] = math::sin(a) * 1.45;
 			by[i] = rad[i] + bounce * (1.15 - i * 0.2);
+		}
+		// the satellites orbit the big sphere, spun up by the energy and the kick, flung wide on hits
+		float energy = cue != null ? cue.energy(t) : 0.6;
+		float kick = cue != null ? cue.kick_env(t) : 0.0;
+		float fling = cue != null ? cue.hit(t) : 0.0;
+		ring_spin += dt * (1.2 + energy * 2.6 + kick * 2.0);
+		float orbit = rad[0] + 0.55 + fling * 0.9 + kick * 0.12;
+		for (int k = 0; k < 6; ++k) {
+			float a2 = ring_spin + k * 1.0471976;
+			float tilt = math::sin(a2 * 2.0 + t) * 0.25;
+			sat_x[k] = bx[0] + math::cos(a2) * orbit;
+			sat_z[k] = bz[0] + math::sin(a2) * orbit;
+			sat_y[k] = by[0] + tilt + math::sin(a2) * 0.3;
+		}
+		// the shockwave: out from under the spheres from each hit, fading as it widens
+		wave_r = -1.0;
+		var hits = hit_times();
+		for (int h2 = 0; h2 < hits.size(); ++h2) {
+			float since = t - hits[h2];
+			if (since >= 0.0 && since < 2.2) {
+				wave_r = since * 7.5;
+				wave_w = 0.18 + since * 0.35;
+			}
 		}
 		// the camera: a low dolly that cranes up, rides the riser in, whips around on the
 		// bar-three hit and pulls back high through the last bars
@@ -354,6 +471,25 @@ class Chrome : Scene {
 		CH_NBASE = nbase;
 		CH_GLINT = glint;
 		CH_MIRROR = nbase * 4;
+		CH_RING = ring0;
+		CH_SAT = sat0;
+		CH_SUN = sun0;
+		float bcx = 0.0; float bcy = 0.0; float bcz = 0.0;
+		for (int k = 0; k < 6; ++k) {
+			CH_SX[k] = sat_x[k]; CH_SY[k] = sat_y[k]; CH_SZ[k] = sat_z[k];
+			bcx += sat_x[k] / 6.0; bcy += sat_y[k] / 6.0; bcz += sat_z[k] / 6.0;
+		}
+		float br = 0.0;
+		for (int k2 = 0; k2 < 6; ++k2) {
+			float ddx = sat_x[k2] - bcx; float ddy = sat_y[k2] - bcy; float ddz = sat_z[k2] - bcz;
+			float dd = math::sqrt(ddx * ddx + ddy * ddy + ddz * ddz);
+			br = dd > br ? dd : br;
+		}
+		CH_BX = bcx; CH_BY = bcy; CH_BZ = bcz; CH_BR = br + CH_SR + 0.01;
+		CH_WX = (bx[0] + bx[1] + bx[2]) / 3.0;
+		CH_WZ = (bz[0] + bz[1] + bz[2]) / 3.0;
+		CH_WR = wave_r;
+		CH_WW = wave_w;
 		if (CH_ROWS.size() != h) {
 			CH_ROWS = [];
 			for (int r = 0; r < h; ++r) { CH_ROWS.push(r); }

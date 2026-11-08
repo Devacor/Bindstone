@@ -15,7 +15,9 @@
 // The river mirrors the sky about each column's horizon, broken by ripples, with
 // the sun's glint running down it; the sky above is a perspective cloud deck
 // lit by the setting sun. The camera skims the river between the walls, banks
-// hard through the bends, climbs out over the rim for the reveal and dives back in.
+// hard through the bends, climbs out over the rim through bar three to the reveal
+// on bar four's downbeat (the sun flaring with the hit) and dives back in from bar
+// six, nodding on the kick and leaning on the snare all the way.
 
 int CR_N = 512;
 array<int> CR_H = [];       // heights, shared with the parallel light bake
@@ -400,15 +402,18 @@ class CanyonRun : Scene {
 		}
 	}
 
-	// the drone's altitude plan: skim the river, climb out over the rim for the
-	// reveal, dive back into the gorge, skim again
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
+	array<int> hit_levels() override { return [2, 1]; }
+
+	// the drone's altitude plan: skim the river, climb out over the rim through bar
+	// three for the reveal on bar four, dive back into the gorge from bar six, skim again
 	float plan_alt(float t) {
 		float lo = 72.0 + 8.0 * math::sin(t * 1.3);
 		float hi = 330.0;
-		float up = (t - 4.4) / 2.4;
+		float up = (t - MUSIC_BAR * 3.0) / MUSIC_BAR;
 		up = up < 0.0 ? 0.0 : (up > 1.0 ? 1.0 : up);
 		up = up * up * (3.0 - 2.0 * up);
-		float down = (t - 8.3) / 1.9;
+		float down = (t - MUSIC_BAR * 6.0) / MUSIC_BAR;
 		down = down < 0.0 ? 0.0 : (down > 1.0 ? 1.0 : down);
 		down = down * down * (3.0 - 2.0 * down);
 		return lo + (hi - lo) * up * (1.0 - down);
@@ -440,6 +445,8 @@ class CanyonRun : Scene {
 			float rt = cr * 1.5;
 			rt = rt > 0.55 ? 0.55 : rt;
 			rt = rt < -0.55 ? -0.55 : rt;
+			// a lean on the snare, to the left one bar and the right the next
+			if (cue != null) { rt += cue.snare_env(t) * 0.06 * ((math::ifloor(t / MUSIC_BAR) & 1) == 0 ? 1.0 : -1.0); }
 			float mixr = dt * 3.6;
 			mixr = mixr > 1.0 ? 1.0 : mixr;
 			roll += (rt - roll) * mixr;
@@ -468,7 +475,8 @@ class CanyonRun : Scene {
 		float pit = climb * 0.0019;
 		pit = pit > 0.16 ? 0.16 : pit;
 		pit = pit < -0.24 ? -0.24 : pit;
-		horizon = itrunc(h * (0.36 + pit));
+		float nod = cue != null ? cue.kick_env(t) * 0.014 : 0.0;
+		horizon = itrunc(h * (0.36 + pit + nod));
 	}
 
 	// field access resolves through the environment chain per hit — ~2x the cost
@@ -609,7 +617,9 @@ class CanyonRun : Scene {
 		float cz = hh * 0.085 * 260.0 * 0.25;
 		float cu0 = posx * 0.25 + tt * 1.6;
 		float cv0 = posy * 0.25 + tt * 0.7;
-		float sr = hh * 0.065;
+		float flare = cue != null ? cue.hit(tt) : 0.0;
+		float sr = hh * 0.065 * (1.0 + flare * 0.8);
+		float halo = 5.5 + flare * 9.0;
 		float syf = horiz - hh * 0.10;
 		float sxf = scol;
 		for (int x3 = 0; x3 < ww; ++x3) {
@@ -635,8 +645,8 @@ class CanyonRun : Scene {
 						float ddy = yy2 + 0.5 - syf;
 						float dd = (ddx * ddx + ddy * ddy) / (sr * sr);
 						if (dd < 1.0) { pix2 = sunb + 5; }
-						else if (dd < 5.5) {
-							int gl = itrunc((5.5 - dd) * 1.1);
+						else if (dd < halo) {
+							int gl = itrunc((halo - dd) * 1.1);
 							if (gl > 0) { pix2 = sunb + (gl > 4 ? 4 : gl - 1); }
 						}
 					}

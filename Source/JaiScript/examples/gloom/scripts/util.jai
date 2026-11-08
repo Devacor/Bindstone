@@ -29,6 +29,7 @@ map<int, int> PAL_KEYS = {}; // r<<16|g<<8|b -> index
 array<string> PAL_FG = [];      // foreground escape per index
 array<string> PAL_BG = [];      // background escape per index
 array<int> PAL_LUM = [];     // 2r+3g+b per index
+array<int> PAL_RGB = [];     // r<<16|g<<8|b per index
 array<string> PAL_ASCII = [];   // --ascii: background, foreground and density character per index
 array<string> PAL_ASCII_CHAR = [];  // --ascii: the density character alone
 
@@ -43,6 +44,7 @@ function rgb_idx(int r, int g, int b) -> int {
 	PAL_FG.push(sgr_color(38, r, g, b));
 	PAL_BG.push(sgr_color(48, r, g, b));
 	PAL_LUM.push(r * 2 + g * 3 + b);
+	PAL_RGB.push(key);
 	if (HOST_ASCII) {
 		string density = " .:-=+*#%@";
 		string ch = density.substr((r * 2 + g * 3 + b) * 10 / 1536, 1);

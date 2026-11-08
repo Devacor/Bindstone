@@ -42,7 +42,12 @@ esac
 # The reference hashes each example prints for its deterministic headless run.
 GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
-GLOOM_SHOWCASE_FRAME=6559224cca20d1f0
+GLOOM_SHOWCASE_FRAME=1b6efa4fcae4e573
+GLOOM_SHOWCASE_SEXT=858885a335d69102
+GLOOM_SHOWCASE_HALF=e1e62cb65c9774fe
+GLOOM_SHOWCASE_ASCII=d8e16c271412bf5d
+GLOOM_SOUND="24 effects, 136535 bytes, bank 4270573572, 25 cues 1838541177"
+GLOOM_SHIM_FRAMES=20918499
 DEMOREEL_STREAM=c63907befa4adff0
 CRAWLER_STATE=2459230215
 CRAWLER_GOD_STATE=4133945146
@@ -139,23 +144,46 @@ gate_fuzz_order() {
 
 vm_only() { hash_on vm || { echo "$1: its one backend is the VM, which HASH_BACKENDS leaves out; skipped"; return 1; }; }
 
-# gloom_hashes <ticks> <workers> <frame hash> <STATE_HASH> [look]: the reference look draws the frames the ports reproduce,
-# the showcase look the game as played; both run the same simulation, so STATE_HASH is one number.
+# gloom_hashes <ticks> <workers> <frame hash> <STATE_HASH> [look [flags...]]: the reference look draws the frames the ports
+# reproduce, the showcase look the game as played; both run the same simulation, so STATE_HASH is one number. The showcase
+# look also builds its sound bank and counts the cues it would play, reported as GLOOM_SOUND.
 gloom_hashes() {
 	vm_only gloom || return 0
 	cd "$ROOT/examples/gloom"
-	local look="${5:-reference}"
-	run_logged "$BIN/jai_gloom" --smoke --ticks "$1" --seed 666 --workers "$2" --look "$look" --scripts "$ROOT/examples/gloom/scripts"
-	want "gloom vm ($1 ticks, $2 workers, $look look): expected frame hash $3 and STATE_HASH $4" "^vm +\\|.*\\| $3 +\\| $4\$"
+	local ticks="$1" workers="$2" frame="$3" state="$4" look="${5:-reference}"
+	shift $(($# < 5 ? $# : 5))
+	run_logged "$BIN/jai_gloom" --smoke --ticks "$ticks" --seed 666 --workers "$workers" --look "$look" --scripts "$ROOT/examples/gloom/scripts" "$@"
+	want "gloom vm ($ticks ticks, $workers workers, $look look $*): expected frame hash $frame and STATE_HASH $state" "^vm +\\|.*\\| $frame +\\| $state\$"
+	if [ "$look" = showcase ]; then want "gloom showcase: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"; fi
+}
+
+# the drag-drop shim on the runner, as played: its frames, its sound bank, and the --dev hot-reload self-test in a scratch copy
+gloom_shim() {
+	vm_only gloom || return 0
+	cd "$ROOT/examples/gloom"
+	run_logged "$BIN/jaiscript" gloom.jai -- --smoke --ticks 300 --look showcase --truecolor
+	want "gloom shim: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \\| STATE_HASH: $GLOOM_STATE\$"
+	want "gloom shim: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"
+	local scratch
+	scratch="$(mktemp -d)"
+	cp -r "$ROOT/examples/gloom/gloom.jai" "$ROOT/examples/gloom/scripts" "$scratch/"
+	(cd "$scratch" && run_logged "$BIN/jaiscript" gloom.jai -- --reload-test)
+	rm -rf "$scratch"
+	want "gloom shim: expected the hot-reload self-test to pass" "^RELOAD TEST: PASS"
 }
 
 gate_gloom() {
 	gloom_hashes 300 0 "$GLOOM_FRAME" "$GLOOM_STATE"
 	gloom_hashes 300 0 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase
+	gloom_hashes 300 0 "$GLOOM_SHOWCASE_SEXT" "$GLOOM_STATE" showcase --pix sext
+	gloom_hashes 300 0 "$GLOOM_SHOWCASE_HALF" "$GLOOM_STATE" showcase --pix half
+	gloom_hashes 300 0 "$GLOOM_SHOWCASE_ASCII" "$GLOOM_STATE" showcase --ascii
+	gloom_shim
 }
 gate_gloom_workers() {
 	gloom_hashes 300 8 "$GLOOM_FRAME" "$GLOOM_STATE"
 	gloom_hashes 300 8 "$GLOOM_SHOWCASE_FRAME" "$GLOOM_STATE" showcase
+	gloom_hashes 300 8 "$GLOOM_SHOWCASE_SEXT" "$GLOOM_STATE" showcase --pix sext
 }
 gate_gloom_long() { gloom_hashes 600 0 "$GLOOM_LONG_FRAME" "$GLOOM_LONG_STATE"; }
 

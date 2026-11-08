@@ -50,6 +50,7 @@ public:
 	}
 
 	string frame(float fps, float ms_sim, float ms_draw) {
+		G.feel.frame();
 		if (G.mode == 0) { return title_page().join("\n"); }
 		if (G.mode == 2) { return tally_page().join("\n"); }
 		if (G.mode == 3) { return dead_page().join("\n"); }
@@ -148,6 +149,7 @@ private:
 		int arms_w = w - x_arms - 1;
 		if (arms_w >= 11) {
 			c.text(x_arms + 1, 1, "ARMS", dim);
+			if (HOST_DEV && arms_w >= 26) { c.text(x_arms + 7, 1, "DEV: edit tune.jai", rgb_idx(110, 230, 230)); }
 			for (int slot = 0; slot < 3; ++slot) {
 				int sx = x_arms + 1 + slot * 4;
 				bool owned = G.player.have[slot] == 1;
@@ -160,7 +162,10 @@ private:
 			key_chip(c, x_arms + 1, 3, "RED", G.player.key_r, rgb_idx(200, 40, 34));
 			key_chip(c, x_arms + 7, 3, "BLUE", G.player.key_b, rgb_idx(44, 90, 210));
 			if (G.autopilot) { c.text(x_arms + 1, 5, "AUTOPILOT", rgb_idx(110, 230, 230)); }
-			else if (fps > 0.0) { c.text(x_arms + 1, 5, `${fps:.0f} fps ${ms_sim + ms_draw:.1f} ms`, dim); }
+			else if (fps > 0.0) {
+				string cores = HOST_WORKERS > 0 ? `  ${HOST_WORKERS} cores` : "";
+				c.text(x_arms + 1, 5, `${fps:.0f} fps ${ms_sim + ms_draw:.1f} ms${cores}`, dim);
+			}
 		}
 		return c.rows(0, 6);
 	}
@@ -189,6 +194,63 @@ private:
 
 	// -------------------------------------------------------------- pages ----
 	int ember(int i, int salt) { return mix32(mix32(i * 2654435 + 7, salt), 99991); }
+
+	// the title's fire: each cell takes the average of the cells under it, a little
+	// cooler, over a bottom row of flickering embers; one step a tick, the flicker a
+	// hash of the tick, so every run burns alike
+	array<int> heat = [];
+	array<int> fire_colors = [];
+	int fire_tick = -1;
+
+	void draw_fire(Canvas& c, int rows) {
+		int w = c.w;
+		int height = c.h * 2;
+		if (fire_colors.size() == 0) {
+			array<math::color> stops = [rgb(0, 0, 0), rgb(40, 6, 6), rgb(120, 16, 8), rgb(196, 48, 10), rgb(236, 110, 20),
+				rgb(250, 176, 50), rgb(255, 228, 120), rgb(255, 250, 220)];
+			for (int i = 0; i < 36; ++i) {
+				float t = i / 35.0 * (stops.size() - 1);
+				int k = math::itrunc(t);
+				int k2 = imin(stops.size() - 1, k + 1);
+				fire_colors.push(color_idx(math::mix_rgb(stops[k], stops[k2], t - k)));
+			}
+		}
+		if (heat.size() != w * (rows + 2)) {
+			heat = [];
+			for (int i = 0; i < w * (rows + 2); ++i) { heat.push(0); }
+			fire_tick = -1;
+		}
+		int steps = fire_tick < 0 ? rows * 2 : imin(4, G.tick - fire_tick);
+		for (int s = 0; s < steps; ++s) { fire_step(w, rows + 2, (fire_tick < 0 ? 0 : fire_tick) + s); }
+		fire_tick = G.tick;
+		int top = height - rows;
+		for (int y = 0; y < rows; ++y) {
+			for (int x = 0; x < w; ++x) {
+				int h = heat[y * w + x] * 35 / 255;
+				if (h > 2) { c.px[(top + y) * w + x] = fire_colors[h]; }
+			}
+		}
+	}
+
+	void fire_step(int w, int rows, int tick) {
+		for (int r = rows - 2; r < rows; ++r) {
+			for (int x = 0; x < w; ++x) {
+				int n = (mix32(mix32(tick, x), 17 + r) >> 9) & 255;
+				heat[r * w + x] = n < 90 ? 60 : 255;
+			}
+		}
+		int cool = 2 + 230 / imax(1, rows);
+		for (int y = 0; y < rows - 2; ++y) {
+			int row = y * w;
+			for (int x = 0; x < w; ++x) {
+				int below = row + w + x;
+				int left = x > 0 ? heat[below - 1] : heat[below];
+				int right = x < w - 1 ? heat[below + 1] : heat[below];
+				int h = (left + heat[below] + right + heat[below + w]) / 4 - cool;
+				heat[row + x] = h < 0 ? 0 : h;
+			}
+		}
+	}
 
 	// sparks rising from the bottom of the page
 	void draw_embers(Canvas& c, int count, math::color hot, math::color cool) {
@@ -268,6 +330,7 @@ private:
 		int glow_at = height * 3 / 5;
 		c.gradient(0, glow_at, rgb(6, 5, 9), rgb(22, 8, 12));
 		c.gradient(glow_at, height, rgb(22, 8, 12), rgb(84, 26, 12));
+		if (!HOST_ASCII) { draw_fire(c, height * 2 / 5); }
 		draw_embers(c, c.w / 2, rgb(255, 214, 120), rgb(110, 30, 16));
 
 		bool flicker = ember(G.tick / 3, 5) % 9 == 0;

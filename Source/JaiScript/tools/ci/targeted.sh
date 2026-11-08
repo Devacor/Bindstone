@@ -170,7 +170,7 @@ if [ "$BUILD" = 1 ]; then
 		case "$check" in
 			debug-suites) debug_targets="$debug_targets jaiscript_tests" ;;
 			fuzz | fuzz-vm-reference | fuzz-order) release_targets="$release_targets jaiscript_fuzz" ;;
-			gloom) release_targets="$release_targets jai_gloom" ;;
+			gloom) release_targets="$release_targets jai_gloom jaiscript_runner" ;;
 			demoreel) release_targets="$release_targets jai_demoreel jaiscript_runner" ;;
 			crawler) release_targets="$release_targets jai_crawler jaiscript_runner" ;;
 			gatorquest | timedemo) release_targets="$release_targets jaiscript_runner" ;;

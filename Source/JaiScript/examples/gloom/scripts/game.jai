@@ -43,6 +43,7 @@ public:
 	shared_ptr<Renderer> renderer = null;
 	shared_ptr<Hud> hud = null;
 	shared_ptr<Pilot> pilot = null;
+	shared_ptr<Feel> feel = null;      // the showcase look's eyes on all of the above
 
 	// what is on the floor
 	array<shared_ptr<Enemy>> enemies = [];
@@ -75,6 +76,7 @@ public:
 		renderer = new Renderer(w_, h_);
 		hud = new Hud();
 		pilot = new Pilot();
+		feel = new Feel();
 	}
 
 	// ------------------------------------------------------ episode flow ----

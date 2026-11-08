@@ -12,10 +12,15 @@ import "particles.jai";
 import "enemies.jai";
 import "combat.jai";
 import "sim.jai";
+import "tune.jai";
 import "look.jai";
+import "lights.jai";
 import "viewmodel.jai";
 import "render.jai";
 import "canvas.jai";
+import "feel.jai";
+import "sound.jai";
+import "dev.jai";
 import "screens.jai";
 import "hud.jai";
 import "game.jai";
@@ -38,11 +43,14 @@ function gloom_boot(int w, int h) -> void {
 	G.renderer.init();
 	G.hud.init();
 	G.autopilot = HOST_SMOKE || FORCE_PILOT;
+	sound_boot();
+	if (HOST_DEV && SHOWCASE) { dev_start(); }
 }
 
 // dt accumulates into fixed TICKs (smoke feeds exactly TICK: one tick/frame).
 // The edge key is consumed by the first tick of the frame.
 function gloom_frame(float dt, string key, float fps, float ms_sim, float ms_draw) -> string {
+	if (HOST_DEV && SHOWCASE) { dev_frame(); }
 	G.frame_key = key;
 	G.accum += dt;
 	int steps = 0;
@@ -53,7 +61,9 @@ function gloom_frame(float dt, string key, float fps, float ms_sim, float ms_dra
 		steps = steps + 1;
 	}
 	if (steps == 3) { G.accum = 0.0; }   // stall recovery: never spiral
-	return G.hud.frame(fps, ms_sim, ms_draw);
+	string text = G.hud.frame(fps, ms_sim, ms_draw);
+	if (SHOWCASE) { sound_frame(); }
+	return text;
 }
 
 function gloom_state_hash() -> int { return G.hash; }
@@ -70,4 +80,5 @@ function gloom_summary() -> void {
 	host_log(`episode kills: ${G.ep_kills}/${G.ep_kill_total}  secrets: ${G.ep_secrets}/${G.ep_secret_total}`);
 	host_log(`warden down: ${G.warden_down}`);
 	host_log(`STATE_HASH: ${G.hash}`);
+	if (SHOWCASE && HOST_SMOKE) { host_log(`sound: ${SFX_NAMES.size()} effects, ${SFX_BANK_BYTES} bytes, bank ${SFX_BANK_HASH}, ${CUE_COUNT} cues ${CUE_HASH}`); }
 }

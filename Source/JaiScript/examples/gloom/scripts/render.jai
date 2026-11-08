@@ -8,8 +8,9 @@
 //   sext  (--pix sext): 2x3 px/cell, sextant glyphs (needs a Unicode-13 font)
 //   ascii (--ascii):    1x1 px/cell, a density character over a dimmed background
 //
-// The tables come from the reference look (build_reference_tables) or the
-// showcase look (look.jai); the per-pixel work is the same for both. The
+// The reference look casts a ray per cell column over a prebaked floor and
+// ceiling (reference_view); the showcase look casts one per pixel column and
+// textures and lights every pixel (showcase_view, tables from look.jai). The
 // parallel row body reads its inputs as captured globals, and captured reads
 // admit only globals, so the pixel grid and the glyph tables live outside the
 // class.
@@ -133,14 +134,18 @@ public:
 	float size = 0.0;
 	float zlift = 0.0;
 	int flash = 0;
+	float wx = 0.0;
+	float wy = 0.0;
 
-	Billboard(float depth_, int scx_, string art_, float size_, float zlift_, int flash_) {
+	Billboard(float depth_, int scx_, string art_, float size_, float zlift_, int flash_, float wx_, float wy_) {
 		depth = depth_;
 		scx = scx_;
 		art = art_;
 		size = size_;
 		zlift = zlift_;
 		flash = flash_;
+		wx = wx_;
+		wy = wy_;
 	}
 }
 
@@ -151,6 +156,8 @@ public:
 	bool automap = false;
 	array<float> zbuf = [];
 	array<string> rowparts = [];
+	int horizon = 0;              // the pixel row the eye looks along: view_h / 2, moved by bob and shake
+	shared_ptr<LightGrid> lights = null;
 
 	Renderer(int w, int h) {
 		view_w = w * PIXW;
@@ -162,6 +169,8 @@ public:
 		ROWIDX = [];
 		for (int r = 0; r < view_h / PIXH; ++r) { ROWIDX.push(r); }
 		for (int i = 0; i < view_w; ++i) { zbuf.push(99.0); }
+		horizon = view_h / 2;
+		lights = new LightGrid();
 	}
 
 	// glyph tables and fixed colors; palette index 0 is black, the grid's clear value
@@ -200,12 +209,12 @@ public:
 
 	// per-map tone tables, the prebaked ceiling/floor background, fresh caches
 	void build_tables(int mi) {
+		lutc = {};
 		if (SHOWCASE) {
-			wallt = showcase_wall_tones(mi);
-			showcase_backdrop(mi, view_h, ceilp, floorp);
-		} else {
-			build_reference_tables(mi);
+			build_showcase_tables(mi);
+			return;
 		}
+		build_reference_tables(mi);
 		// one deep-copy assignment per frame replaces the per-pixel ceiling/floor loops
 		int half = view_h / 2;
 		bg = [];
@@ -222,7 +231,6 @@ public:
 			strips.push([]);
 			strip_set.push(false);
 		}
-		lutc = {};
 	}
 
 	// ---------------------------------------------------------- the view ----
@@ -231,11 +239,272 @@ public:
 		int vh = view_h;
 		float px = G.player.px;
 		float py = G.player.py;
-		float dirx = math::cos(G.player.pang);
-		float diry = math::sin(G.player.pang);
+		float pang = SHOWCASE ? G.player.pang + G.feel.yaw : G.player.pang;
+		float dirx = math::cos(pang);
+		float diry = math::sin(pang);
 		float planex = 0.0 - diry * 0.78;
 		float planey = dirx * 0.78;
+		if (SHOWCASE) {
+			showcase_view(px, py, dirx, diry, planex, planey);
+		} else {
+			reference_view(px, py, dirx, diry, planex, planey);
+		}
 
+		// --- 3. billboards: enemies, pickups, projectiles, far to near
+		float det = planex * diry - dirx * planey;
+		if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
+		float inv = 1.0 / det;
+		array<shared_ptr<Billboard>> sprites = [];
+		for (auto& e : G.enemies) {
+			collect(sprites, e.x, e.y, e.art_name(), ENEMY_DEFS[e.kind].size, 0.0,
+				e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
+		}
+		for (auto& it : G.items) {
+			if (it.taken) { continue; }
+			auto& def = ITEM_DEFS[it.kind];
+			collect(sprites, it.x, it.y, def.art, def.size, 0.0, 0, inv, dirx, diry, planex, planey);
+		}
+		array<string> shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
+		for (auto& s : G.shots) {
+			collect(sprites, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
+		}
+		for (int i = 1; i < sprites.size(); ++i) {   // insertion sort, stable, far first
+			shared_ptr<Billboard> rec = sprites[i];
+			int j = i - 1;
+			while (j >= 0 && sprites[j].depth < rec.depth) {
+				sprites[j + 1] = sprites[j];
+				j = j - 1;
+			}
+			sprites[j + 1] = rec;
+		}
+		for (auto& rec : sprites) { draw_billboard(rec); }
+
+		// --- 4. particles, the gun in hand, overlays
+		draw_particles(inv, dirx, diry, planex, planey, px, py);
+		if (SHOWCASE) {
+			draw_viewmodel();
+			G.feel.overlay(view_w, view_h);
+		}
+		if (automap) { draw_automap(); }
+		if (!SHOWCASE && G.player.hurt_flash > 0) { draw_hurt_border(); }
+
+		// --- 5. pixel grid -> glyph rows
+		if (HOST_ASCII) { return rows_ascii(); }
+		if (PIXH == 3) { return rows_sext(); }
+		if (PIXW == 2) { return rows_quad(); }
+		return rows_half();
+	}
+
+	// the showcase look's view: a ray per pixel column, then each column top to
+	// bottom: textured ceiling, the lit wall slice, textured floor with its
+	// stains. Every surface reads its light texel and a lit table.
+	void showcase_view(float px, float py, float dirx, float diry, float planex, float planey) {
+		int vw = view_w;
+		int vh = view_h;
+		horizon = vh / 2 + G.feel.pitch;
+		if (ws_mapgen != G.world.mapgen) {
+			build_wall_ws(vw);
+			ws_mapgen = G.world.mapgen;
+		}
+		for (auto& t : wall_ws) {
+			t.posx = px;
+			t.posy = py;
+			t.dirx = dirx;
+			t.diry = diry;
+			t.planex = planex;
+			t.planey = planey;
+		}
+		if (HOST_WORKERS <= 0) {
+			for (auto& t : wall_ws) { gloom_ray_chunk_step(t); }
+		} else {
+			parallel_for (auto& t : wall_ws) { gloom_ray_chunk_step(t); }
+		}
+		lights.frame(G.feel.sources);
+
+		// the floor or ceiling distance and shade of every pixel row
+		float hz = horizon;
+		for (int y = 0; y < vh; ++y) {
+			float k = y + 0.5 - hz;
+			if (k < 0.0) { k = 0.0 - k; }
+			float d = k > 0.3 ? vh / (2.0 * k) : 60.0;
+			rowd[y] = d;
+			int shade = 15 - math::itrunc(d * 1.55);
+			rows_shade[y] = shade < 0 ? 0 : shade;
+			rows_far[y] = d > FAR_TEXTURE ? 1 : 0;
+		}
+
+		auto& pix = PIX;
+		auto& zb = zbuf;
+		auto& lg = lights.grid;
+		int gw = lights.gw;
+		int mw = G.world.mw;
+		auto& walls = lwall;
+		auto& floors = lfloor;
+		auto& ceilings = lceil;
+		auto& wtex = walltex;
+		auto& ftex = floortex;
+		auto& ctex = ceiltex;
+		auto& fvar = floor_var;
+		auto& cvar = ceil_var;
+		auto& stain = stains;
+		float xstep = 2.0 / (vw - 1.0);
+		int x = 0;
+		for (auto& ch : wall_ws) {
+			int cols = ch.x1 - ch.x0;
+			for (int ci = 0; ci < cols; ++ci) {
+				float camx = x * xstep - 1.0;
+				float rdx = dirx + planex * camx;
+				float rdy = diry + planey * camx;
+				float dist = ch.odist[ci];
+				int side = ch.oside[ci];
+				int kind = ch.okind[ci];
+				int tx = ch.otex[ci] >> 1;
+				zb[x] = dist;
+				// the wall's rows are those whose centers lie within half of the horizon,
+				// so every ceiling and floor pixel is strictly nearer than the wall
+				float half = 0.5 * vh / dist;
+				float ytop = hz - half;
+				int y0 = 0 - math::itrunc(math::floor(0.5 - ytop));
+				int y1 = math::itrunc(math::floor(hz - 0.5 + half)) + 1;
+				int cy0 = y0 < 0 ? 0 : (y0 > vh ? vh : y0);
+				int cy1 = y1 > vh ? vh : (y1 < cy0 ? cy0 : y1);
+
+				// ceiling
+				int gi = x;
+				for (int y = 0; y < cy0; ++y) {
+					float d = rowd[y];
+					float fx = px + rdx * d;
+					float fy = py + rdy * d;
+					int ix = fx;
+					int iy = fy;
+					int u = (fx - ix) * 16.0;
+					int v = (fy - iy) * 16.0;
+					int lx = fx * 4.0;
+					int ly = fy * 4.0;
+					int tone = ctex[rows_far[y] * 512 + cvar[iy * mw + ix] + v * 16 + u];
+					pix[gi] = ceilings[(lg[ly * gw + lx] * 16 + rows_shade[y]) * 8 + tone];
+					gi += vw;
+				}
+
+				// wall
+				int shade = 15 - math::itrunc(dist * 1.55);
+				shade = shade < 0 ? 0 : (shade > 15 ? 15 : shade);
+				float back = dist - 0.03;
+				int wlx = (px + rdx * back) * 4.0;
+				int wly = (py + rdy * back) * 4.0;
+				int light = lg[wly * gw + wlx];
+				int wbase = kind * WALL_TABLE_STRIDE + ((light * 2 + side) * 16 + shade) * 8;
+				int tbase = (dist > FAR_TEXTURE ? 9216 : 0) + kind * 1024 + tx;
+				float tscale = 65536.0 / (2.0 * half);
+				int tstep = tscale;
+				int tacc = (cy0 + 0.5 - ytop) * tscale;
+				gi = cy0 * vw + x;
+				for (int y = cy0; y < cy1; ++y) {
+					pix[gi] = walls[wbase + wtex[tbase + ((tacc >> 11) & 31) * 32]];
+					tacc += tstep;
+					gi += vw;
+				}
+
+				// floor
+				for (int y = cy1; y < vh; ++y) {
+					float d = rowd[y];
+					float fx = px + rdx * d;
+					float fy = py + rdy * d;
+					int ix = fx;
+					int iy = fy;
+					int u = (fx - ix) * 16.0;
+					int v = (fy - iy) * 16.0;
+					int lx = fx * 4.0;
+					int ly = fy * 4.0;
+					int ti = iy * mw + ix;
+					int tone = stain[ti * 64 + (v >> 1) * 8 + (u >> 1)];
+					if (tone == 0) { tone = ftex[rows_far[y] * 1024 + fvar[ti] + v * 16 + u]; }
+					pix[gi] = floors[(lg[ly * gw + lx] * 16 + rows_shade[y]) * FLOOR_TONES + tone];
+					gi += vw;
+				}
+				x = x + 1;
+			}
+		}
+	}
+
+	// a --dev reload: the look's tables and lamps again, the floor's stains kept
+	void rebuild_look(int mi) {
+		array<int> kept = stains;
+		build_showcase_tables(mi);
+		stains = kept;
+		lutc = {};
+		G.fx.build_colors();
+	}
+
+	// the showcase look's lit tables, textures and lamps for floor mi
+	void build_showcase_tables(int mi) {
+		lwall = showcase_lit_wall_tones(mi);
+		lfloor = showcase_floor_tones(mi);
+		lceil = showcase_ceiling_tones(mi);
+		walltex = showcase_wall_texture();
+		floortex = showcase_floor_texture(mi);
+		ceiltex = showcase_ceiling_texture();
+		lights.load();
+		auto& world = G.world;
+		floor_var = [];
+		ceil_var = [];
+		stains = [];
+		for (int ty = 0; ty < world.mh; ++ty) {
+			for (int tx = 0; tx < world.mw; ++tx) {
+				floor_var.push((texel_noise(31, tx, ty) & 3) * 256);
+				ceil_var.push(lights.lamps[ty * world.mw + tx] ? 256 : 0);
+			}
+		}
+		for (int i = 0; i < world.mw * world.mh * 64; ++i) { stains.push(0); }
+		rowd = [];
+		rows_shade = [];
+		rows_far = [];
+		for (int y = 0; y < view_h; ++y) {
+			rowd.push(0.0);
+			rows_shade.push(0);
+			rows_far.push(0);
+		}
+	}
+
+	// a decal on the floor: tone over the texels within radius of (x, y), each kept with chance keep/256
+	void stain_floor(float x, float y, float radius, int tone, int keep) {
+		auto& world = G.world;
+		int mw = world.mw;
+		int x0 = math::itrunc((x - radius) * 8.0);
+		int x1 = math::itrunc((x + radius) * 8.0);
+		int y0 = math::itrunc((y - radius) * 8.0);
+		int y1 = math::itrunc((y + radius) * 8.0);
+		float r2 = radius * radius * 64.0;
+		for (int sy = imax(0, y0); sy <= imin(world.mh * 8 - 1, y1); ++sy) {
+			for (int sx = imax(0, x0); sx <= imin(mw * 8 - 1, x1); ++sx) {
+				float dx = sx + 0.5 - x * 8.0;
+				float dy = sy + 0.5 - y * 8.0;
+				if (dx * dx + dy * dy > r2) { continue; }
+				if ((texel_noise(41, sx, sy) & 255) >= keep) { continue; }
+				int tile = (sy >> 3) * mw + (sx >> 3);
+				if (world.tiles[tile] != 0) { continue; }
+				int i = tile * 64 + (sy & 7) * 8 + (sx & 7);
+				int old = stains[i];
+				if (tone == TONE_BLOOD && old == TONE_SCORCH) { continue; }
+				stains[i] = tone;
+			}
+		}
+	}
+
+	// old blood dries: one pass a second darkens a slice of the stains
+	void dry_stains(int tick) {
+		int n = stains.size();
+		int slice = n / 30 + 1;
+		int start = (tick % 30) * slice;
+		for (int i = start; i < imin(n, start + slice); ++i) {
+			if (stains[i] == TONE_BLOOD && (texel_noise(43, i, tick / 30) & 7) == 0) { stains[i] = TONE_BLOOD_DRY; }
+		}
+	}
+
+	// the reference look's rays and columns: one ray per cell column, the prebaked background, cached texture strips
+	void reference_view(float px, float py, float dirx, float diry, float planex, float planey) {
+		int vw = view_w;
+		int vh = view_h;
 		// --- 1. the rays: one per cell column, over persistent column chunks
 		int pxw = PIXW;
 		int ncols = vw / pxw;
@@ -313,47 +582,6 @@ public:
 				x = x + 1;
 			}
 		}
-
-		// --- 3. billboards: enemies, pickups, projectiles, far to near
-		float det = planex * diry - dirx * planey;
-		if (det < 0.0001 && det > -0.0001) { det = 0.0001; }
-		float inv = 1.0 / det;
-		array<shared_ptr<Billboard>> sprites = [];
-		for (auto& e : G.enemies) {
-			collect(sprites, e.x, e.y, e.art_name(), ENEMY_DEFS[e.kind].size, 0.0,
-				e.flash > 0 ? 1 : 0, inv, dirx, diry, planex, planey);
-		}
-		for (auto& it : G.items) {
-			if (it.taken) { continue; }
-			auto& def = ITEM_DEFS[it.kind];
-			collect(sprites, it.x, it.y, def.art, def.size, 0.0, 0, inv, dirx, diry, planex, planey);
-		}
-		array<string> shot_art = ["", "pr_spit", "pr_fire", "pr_hex"];
-		for (auto& s : G.shots) {
-			collect(sprites, s.x, s.y, shot_art[s.kind], 0.16, 0.35, 0, inv, dirx, diry, planex, planey);
-		}
-		for (int i = 1; i < sprites.size(); ++i) {   // insertion sort, stable, far first
-			shared_ptr<Billboard> rec = sprites[i];
-			int j = i - 1;
-			while (j >= 0 && sprites[j].depth < rec.depth) {
-				sprites[j + 1] = sprites[j];
-				j = j - 1;
-			}
-			sprites[j + 1] = rec;
-		}
-		for (auto& rec : sprites) { draw_billboard(rec); }
-
-		// --- 4. particles, the gun in hand, overlays
-		draw_particles(inv, dirx, diry, planex, planey, px, py);
-		if (SHOWCASE) { draw_viewmodel(); }
-		if (automap) { draw_automap(); }
-		if (G.player.hurt_flash > 0) { draw_hurt_border(); }
-
-		// --- 5. pixel grid -> glyph rows
-		if (HOST_ASCII) { return rows_ascii(); }
-		if (PIXH == 3) { return rows_sext(); }
-		if (PIXW == 2) { return rows_quad(); }
-		return rows_half();
 	}
 
 private:
@@ -376,6 +604,18 @@ private:
 	int am_head = 0;
 	int hurt_red = 0;
 	array<float> band_lum = [1.0, 0.88, 0.76, 0.64, 0.52, 0.42, 0.32, 0.24];
+	array<int> lwall = [];        // showcase: [kind][variant][side][shade][tone]
+	array<int> lfloor = [];       // showcase: [variant][shade][tone]
+	array<int> lceil = [];
+	array<int> walltex = [];      // showcase: wall tones [kind][ty][tx]
+	array<int> floortex = [];     // showcase: floor tones [variant][v][u]
+	array<int> ceiltex = [];
+	array<int> floor_var = [];    // per tile: which floor variant, times 256
+	array<int> ceil_var = [];     // per tile: 256 under a lamp
+	array<int> stains = [];       // per tile 8x8 decal tones, 0 none
+	array<float> rowd = [];       // per pixel row: floor or ceiling distance
+	array<int> rows_shade = [];
+	array<int> rows_far = [];     // per pixel row: 1 past FAR_TEXTURE
 
 	void build_wall_ws(int ncols) {
 		wall_ws = [];
@@ -478,24 +718,19 @@ private:
 
 	array<int> build_strip(int kind, int side, int shade, int tx) {
 		array<int> strip = [];
-		if (SHOWCASE) {
-			int base = ((kind * 2 + side) * 16 + shade) * TONES;
-			for (int ty = 0; ty < 32; ++ty) { strip.push(wallt[base + showcase_tone(kind, tx, ty)]); }
-		} else {
-			int base = ((kind * 2 + side) * 16 + shade) * 3;
-			for (int ty = 0; ty < 32; ++ty) { strip.push(wallt[base + tex_tone(kind, tx, ty)]); }
-		}
+		int base = ((kind * 2 + side) * 16 + shade) * 3;
+		for (int ty = 0; ty < 32; ++ty) { strip.push(wallt[base + tex_tone(kind, tx, ty)]); }
 		strip.push(strip[31]);        // fixed-point overshoot guard
 		return strip;
 	}
 
 	// palette code -> palette index for an art at a shade band, flashing or not; cached
-	array<int> sprite_lut(string name, int band, int flash) {
-		string key = `${name}:${band}:${flash}`;
+	array<int> sprite_lut(string name, int band, int flash, int variant) {
+		string key = `${name}:${band}:${flash}:${variant}`;
 		if (lutc.has(key)) { return lutc[key]; }
 		array<int> lut = [0];
 		if (SHOWCASE) {
-			lut = showcase_sprite_lut(name, band, flash);
+			lut = showcase_sprite_lut(name, band, flash, variant);
 		} else {
 			shared_ptr<Art> art = ARTS[name];
 			float lum = band_lum[band];
@@ -526,7 +761,7 @@ private:
 		float ttx = inv * (diry * rx - dirx * ry);
 		int scx = (view_w / 2.0) * (1.0 + ttx / depth);
 		if (scx < -view_w || scx > view_w * 2) { return; }
-		sprites.push(new Billboard(depth, scx, art, size, zlift, flash));
+		sprites.push(new Billboard(depth, scx, art, size, zlift, flash, wx, wy));
 	}
 
 	void draw_billboard(shared_ptr<Billboard> rec) {
@@ -540,8 +775,8 @@ private:
 		// pixel aspect: a cell is ~1:2 (w:h) split into PIXW x PIXH
 		int pw = imax(2, ph * aw * 2 * PIXW / (ah * PIXH));
 		int band = iclamp(math::itrunc(depth * 0.85) - (G.player.muzzle > 0 ? 1 : 0), 0, 7);
-		array<int> lut = sprite_lut(rec.art, band, rec.flash);
-		int bottom = vh / 2 + span * 0.5 - rec.zlift * span;
+		array<int> lut = sprite_lut(rec.art, band, rec.flash, SHOWCASE ? lights.at(rec.wx, rec.wy) : 0);
+		int bottom = horizon + span * 0.5 - rec.zlift * span;
 		int top = bottom - ph;
 		int x0 = rec.scx - pw / 2;
 		int cx0 = imax(0, x0);
@@ -568,7 +803,7 @@ private:
 		auto& colors = G.fx.colors;
 		int vw = view_w;
 		int vh = view_h;
-		int half = vh / 2;
+		int half = horizon;
 		int pxw = PIXW;
 		int pxh = PIXH;
 		for (auto& p : G.fx.pool) {
@@ -607,7 +842,7 @@ private:
 		string name = VIEWMODEL_NAMES[player.weapon];
 		if (firing && player.muzzle > 0) { name = `${name}_fire`; }
 		shared_ptr<Art> art = VIEWMODELS[name];
-		array<int> lut = viewmodel_lut(name, player.muzzle > 0);
+		array<int> lut = viewmodel_lut(name, player.muzzle > 0, lights.at(player.px, player.py));
 		int vw = view_w;
 		int vh = view_h;
 		// art pixels are square: a view pixel is PIXW x PIXH of a 1:2 cell
@@ -617,7 +852,7 @@ private:
 		int sway = math::itrunc(math::sin(player.bob * 0.5) * vw * 0.025);
 		int lift = math::itrunc(math::abs(math::cos(player.bob * 0.5)) * scale * 1.5) + player.gun_kick * math::itrunc(scale * 0.9);
 		int x0 = vw / 2 - pw / 2 + sway;
-		int y0 = vh - ph + lift;
+		int y0 = vh - ph + lift + (horizon - vh / 2) / 2;
 		int cx0 = imax(0, x0);
 		int cx1 = imin(vw, x0 + pw);
 		int cy1 = imin(vh, y0 + ph);
@@ -633,12 +868,12 @@ private:
 	}
 
 	// palette code -> index for a gun under this floor's light, brighter in its own flash
-	array<int> viewmodel_lut(string name, bool flashing) {
-		string key = `${name}:${flashing}`;
+	array<int> viewmodel_lut(string name, bool flashing, int variant) {
+		string key = `${name}:${flashing}:${variant}`;
 		if (lutc.has(key)) { return lutc[key]; }
 		auto& mood = MOODS[G.map_i];
 		shared_ptr<Art> art = VIEWMODELS[name];
-		math::color light = math::mix_rgb(mood.light, rgb(255, 255, 255), 0.4) * (flashing ? 1.25 : 0.85);
+		math::color light = math::mix_rgb(mood.light, rgb(255, 255, 255), 0.4) * (flashing ? 1.25 : 0.7) + sprite_light(mood, variant) * 0.8;
 		array<int> lut = [0];
 		for (int c = 1; c < art.rgb.size(); ++c) {
 			math::color color = rgb(art.rgb[c][0], art.rgb[c][1], art.rgb[c][2]);

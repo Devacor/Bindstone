@@ -60,7 +60,7 @@ class Shot:
 
 
 def gloom(name, tick):
-    return Shot(name, "gloom", ["gloom.jai", "--", "--smoke", "--look", "showcase", "--ticks", str(tick + 1),
+    return Shot(name, "gloom", ["gloom.jai", "--", "--smoke", "--look", "showcase", "--truecolor", "--ticks", str(tick + 1),
                                 "--dump-frame", str(tick)], "gloom_frame_shim.txt")
 
 
@@ -78,8 +78,8 @@ CRAWLER = ["scripts/crawler.jai", "--", "screen", "135x37"]
 GATORQUEST_TOUR = ["scripts/gatorquest.jai", "--", "tour", "screen", "150x44", "out", "{out}"]
 
 SHOTS = [
-    gloom("gloom-title", 1),
-    gloom("gloom-fight", 680),
+    gloom("gloom-title", 5),
+    gloom("gloom-fight", 252),
     gloom("gloom-tally", 3065),
     Shot("grubwell-title", "crawler", CRAWLER + ["input", "n"], "-", 0, (135, 37)),
     Shot("grubwell-fight", "crawler", CRAWLER + ["smoke", "seed", "6", "turns", "300", "anim", "dump", "{out}/run"],

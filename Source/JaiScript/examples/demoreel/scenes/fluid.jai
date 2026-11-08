@@ -40,12 +40,78 @@ int MS_CW = 0;
 int MS_CH = 0;
 int MS_INK = 0;
 int MS_BG = 0;               // 16 water tones x 4 caustic levels
+array<int> MS_COLS = [];     // the screen's columns, for the column cast
 array<float> MS_COS = [];    // a 256-entry cosine table for the caustics
 array<float> MS_CCOL = [];   // per column: this frame's caustic phase
 array<int> MS_VIG = [];      // per pixel: how far the vignette darkens it
 float MS_T = 0.0;
 float MS_RUN = 0.0;          // a frame's step, in pixels per (cell per second)
 float MS_FADE = 1.0;
+array<int> MS_IMG = [];      // the tank lit from above, per pixel: the texture the camera flies over
+float MS_CX = 0.0;           // the camera over the tank: where it stands, in tank pixels,
+float MS_CY = 0.0;
+float MS_FX = 0.0;           // the way it faces and its right, on the water's plane,
+float MS_FY = -1.0;
+float MS_RX = 1.0;
+float MS_RY = 0.0;
+float MS_HC = 60.0;          // its height, the horizon's row and its focal length,
+float MS_HOR = 0.0;
+float MS_FOC = 100.0;
+float MS_PEAK = 10.0;        // how tall the thickest ink stands
+float MS_ZMAX = 200.0;
+
+// one screen column of the tank in perspective, on a parallel_transform worker: the
+// ray walks the water's plane from near to far and each step raises the ink by its
+// density, drawing the column upward from the last height it reached, so nearer ink
+// hides the ink behind it (VoxelSpace's column cast over the lit dye); -1 where the
+// column sees past the tank
+function maelstrom_column(int x) -> array<int> {
+	int hh = MS_H;
+	int ww = MS_W;
+	array<int> col = [];
+	for (int y = 0; y < hh; ++y) { col.push(-1); }
+	float u = (x + 0.5 - ww * 0.5) / MS_FOC;
+	float dx = MS_FX + MS_RX * u;
+	float dy = MS_FY + MS_RY * u;
+	float cx = MS_CX;
+	float cy = MS_CY;
+	float hc = MS_HC;
+	float hor = MS_HOR;
+	float foc = MS_FOC;
+	float peak = MS_PEAK;
+	float zmax = MS_ZMAX;
+	int ink = MS_INK;
+	int ybuf = hh;
+	float z = 2.0;
+	while (z < zmax && ybuf > 0) {
+		float px = cx + dx * z;
+		float py = cy + dy * z;
+		if (px >= 1.0 && px < ww - 1.0 && py >= 1.0 && py < hh - 1.0) {
+			int i = itrunc(py) * ww + itrunc(px);
+			float d = MS_D[i];
+			float rise = d / (d + 0.35) * peak;
+			int sy = itrunc(hor + (hc - rise) * foc / z);
+			if (sy < ybuf) {
+				int c = MS_IMG[i];
+				int top = sy < 0 ? 0 : sy;
+				// below its lit top the ink's side faces the camera: a few shades darker
+				int lv = c - ink;
+				int side = lv >= 0 && lv < 500 ? lv % 20 : -1;
+				for (int yy = top; yy < ybuf; ++yy) {
+					if (side >= 0 && yy > top + 1) {
+						int dark = side > 15 ? 12 : side - 4;
+						col[yy] = c - side + (dark < 0 ? 0 : dark);
+					} else {
+						col[yy] = c;
+					}
+				}
+				ybuf = top;
+			}
+		}
+		z += 0.45 + z * 0.006;
+	}
+	return col;
+}
 
 // one row of ink, on a parallel_transform worker: each pixel takes the flow at
 // its centre (bilinear over the half-size grid), traces back one step and blends
@@ -175,7 +241,6 @@ class Maelstrom : Scene {
 	int mote = 0;
 	int sor_iters = 20;
 	float beat = 0.48387097;   // the soundtrack's 124 bpm
-	array<int> col_of = [];    // the push-in: which column each screen column reads
 	float vorticity = 14.0;
 	float tt = 0.0;
 
@@ -236,10 +301,9 @@ class Maelstrom : Scene {
 				float ex = (vx + 0.5) / w * 2.0 - 1.0;
 				float ey = (vy + 0.5) / h * 2.0 - 1.0;
 				float r = ex * ex + ey * ey;
-				MS_VIG[vy * w + vx] = r < 0.55 ? 0 : (r < 0.95 ? 1 : (r < 1.4 ? 2 : 3));
+				MS_VIG[vy * w + vx] = r < 1.4 ? 0 : 1;
 			}
 		}
-		col_of = gfx.make_grid(w);
 		mote = pal.add(92, 116, 160);
 		for (int k2 = 0; k2 < motes; ++k2) {
 			mx.push(2.0 + rng.nextf() * (w - 4));
@@ -264,6 +328,9 @@ class Maelstrom : Scene {
 			default: return [255.0, lo, dn];
 		}
 	}
+
+	// long enough for the showpiece to land and its last image to hold a bar
+	int length_bars() override { return 9; }
 
 	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
 	array<int> hit_levels() override { return [2, 2]; }
@@ -588,6 +655,32 @@ class Maelstrom : Scene {
 		}
 	}
 
+	// the camera circles the tank, tilted down at it: it sways through the opening, swings
+	// round after the starburst, rides the kick a little, and over the last bars dives
+	// low and close over the whirlpool
+	void place_camera() {
+		float t = tt;
+		float kick = cue == null ? 0.0 : cue.kick_env(t);
+		float swing = t > MUSIC_BAR * 4.0 ? (t - MUSIC_BAR * 4.0) * 0.32 : 0.0;
+		float ang = 0.32 * math::sin(t * 0.42) + swing;
+		float fx = math::sin(ang);
+		float fy = 0.0 - math::cos(ang);
+		float dive = t > 11.977 ? (t - 11.977) / 3.2 : 0.0;
+		dive = dive > 1.0 ? 1.0 : dive * dive * (3.0 - 2.0 * dive);
+		float back = h * (0.82 - dive * 0.34);
+		MS_FX = fx;
+		MS_FY = fy;
+		MS_RX = 0.0 - fy;
+		MS_RY = fx;
+		MS_CX = w * 0.5 - fx * back;
+		MS_CY = h * 0.5 - fy * back;
+		MS_HC = h * (0.62 - dive * 0.26) * (1.0 - kick * 0.05);
+		MS_FOC = w * 0.6;
+		MS_HOR = 0.0 - h * (0.25 - dive * 0.12);
+		MS_PEAK = h * (0.085 + kick * 0.03);
+		MS_ZMAX = back + h * 1.2;
+	}
+
 	void render(var& grid) override {
 		MS_W = w;
 		MS_H = h;
@@ -601,28 +694,44 @@ class Maelstrom : Scene {
 		var& cc = MS_CCOL;
 		for (int c = 0; c < w; ++c) { cc[c] = 2.0 * math::sin(c * 0.13 - tt * 0.9); }
 		var rows = parallel_transform(MS_ALL, maelstrom_row);
-		// the push-in on the whirlpool over the last seconds
-		float push = tt > 11.977 ? (tt - 11.977) / 3.2 : 0.0;
-		push = push > 1.0 ? 1.0 : push * push * (3.0 - 2.0 * push);
-		float zoom = 1.0 + push * 0.45;
 		int ww = w;
-		var& cols = col_of;
-		for (int x0 = 0; x0 < ww; ++x0) {
-			int sx = itrunc(ww * 0.5 + (x0 + 0.5 - ww * 0.5) / zoom);
-			cols[x0] = sx < 0 ? 0 : (sx >= ww ? ww - 1 : sx);
-		}
-		int idx = 0;
-		for (int y = 0; y < h; ++y) {
-			int sy = itrunc(h * 0.5 + (y + 0.5 - h * 0.5) / zoom);
-			var& row = rows[sy < 0 ? 0 : (sy >= h ? h - 1 : sy)];
-			for (int x = 0; x < ww; ++x) {
-				grid[idx] = row[cols[x]];
-				++idx;
+		var& img = MS_IMG;
+		if (img.size() != w * h) { img = gfx.make_grid(w * h); }
+		int k0 = 0;
+		for (int y0 = 0; y0 < h; ++y0) {
+			var& row0 = rows[y0];
+			for (int x0 = 0; x0 < ww; ++x0) {
+				img[k0] = row0[x0];
+				++k0;
 			}
 		}
+		place_camera();
+		if (MS_COLS.size() != w) {
+			MS_COLS = [];
+			for (int c2 = 0; c2 < w; ++c2) { MS_COLS.push(c2); }
+		}
+		var cols = parallel_transform(MS_COLS, maelstrom_column);
+		// past the tank: the deep water's gradient, darkest at the top
+		for (int x = 0; x < ww; ++x) {
+			var& col = cols[x];
+			for (int y = 0; y < h; ++y) {
+				int c = col[y];
+				if (c < 0) {
+					int tone = 15 - y * 10 / h;
+					c = bg + (tone < 0 ? 0 : tone) * 4;
+				}
+				grid[y * ww + x] = c;
+			}
+		}
+		// the motes ride the water's surface in perspective
 		for (int k = 0; k < motes; ++k) {
-			int px = itrunc(ww * 0.5 + (mx[k] - ww * 0.5) * zoom);
-			int py = itrunc(h * 0.5 + (my[k] - h * 0.5) * zoom);
+			float rx = mx[k] - MS_CX;
+			float ry = my[k] - MS_CY;
+			float z = rx * MS_FX + ry * MS_FY;
+			if (z < 4.0) { continue; }
+			float side = rx * MS_RX + ry * MS_RY;
+			int px = itrunc(ww * 0.5 + side * MS_FOC / z);
+			int py = itrunc(MS_HOR + MS_HC * MS_FOC / z);
 			if (px >= 0 && px < ww && py >= 0 && py < h) { grid[py * ww + px] = mote; }
 		}
 	}

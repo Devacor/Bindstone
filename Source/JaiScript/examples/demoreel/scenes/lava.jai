@@ -18,7 +18,11 @@
 // with the kick, burns brighter with the section's energy, shifts hue with the
 // chord and runs a rainbow wave over the field after the first big hit; each big hit
 // sends a ring of white heat racing out across the field, lamp by lamp, and the
-// camera sways between the rows on the beat. Rows run in parallel.
+// camera sways between the rows on the beat. The close-up holds through a riser, the
+// wax swelling; the third big hit blasts the camera back out of the wax in a corkscrew
+// up over the field, a lesser ring leaving that lamp on every kick under a rainbow
+// wave, then it swoops down into a lane and races along it between the lamps. Rows
+// run in parallel.
 
 array<float> LV_BX = [];     // three blob sets of LV_N blobs, in lamp space
 array<float> LV_BY = [];
@@ -56,6 +60,10 @@ float LV_RING_X = 0.0;       // the last big hit's ring of heat: its centre, rad
 float LV_RING_Z = 0.0;
 float LV_RING_R = -9.0;
 float LV_RING_A = 0.0;
+float LV_PULSE_X = 0.0;      // after the burst, a lesser ring on every kick from the lamp the camera left
+float LV_PULSE_Z = 0.0;
+float LV_PULSE_R = -9.0;
+float LV_PULSE_A = 0.0;
 
 // the vessel's radius at height y (lamp units: 0 the base's foot, 1 the cap's top)
 function lamp_width(float y) -> float {
@@ -286,11 +294,21 @@ function surface(int ci, int cj, float px, float py, float pz, float dx, float d
 
 // how hard the big hit's ring of heat is passing the lamp at (ci, cj) right now
 function ring_heat(int ci, int cj) -> float {
-	if (LV_RING_A <= 0.0) { return 0.0; }
-	float rx = ci - LV_RING_X;
-	float rz = cj - LV_RING_Z;
-	float off = math::sqrt(rx * rx + rz * rz) - LV_RING_R;
-	return LV_RING_A / (1.0 + off * off * 1.6);
+	float result = 0.0;
+	if (LV_RING_A > 0.0) {
+		float rx = ci - LV_RING_X;
+		float rz = cj - LV_RING_Z;
+		float off = math::sqrt(rx * rx + rz * rz) - LV_RING_R;
+		result = LV_RING_A / (1.0 + off * off * 1.6);
+	}
+	if (LV_PULSE_A > 0.0) {
+		float qx = ci - LV_PULSE_X;
+		float qz = cj - LV_PULSE_Z;
+		float off2 = math::sqrt(qx * qx + qz * qz) - LV_PULSE_R;
+		float pulse = LV_PULSE_A / (1.0 + off2 * off2 * 1.6);
+		result = pulse > result ? pulse : result;
+	}
+	return result;
 }
 
 // a palette index at a fraction of its brightness, staying in its own ramp
@@ -378,6 +396,13 @@ function floor_shade(float px, float pz, float dist) -> int {
 		float rz = pz - LV_RING_Z;
 		float off = math::sqrt(rx * rx + rz * rz) - LV_RING_R;
 		ring = LV_RING_A / (1.0 + off * off * 40.0);
+	}
+	if (LV_PULSE_A > 0.0) {
+		float qx = px - LV_PULSE_X;
+		float qz = pz - LV_PULSE_Z;
+		float off2 = math::sqrt(qx * qx + qz * qz) - LV_PULSE_R;
+		float pulse = LV_PULSE_A / (1.0 + off2 * off2 * 40.0);
+		ring = pulse > ring ? pulse : ring;
 	}
 	int lv = itrunc((best * best * 1.5 * LV_GAIN + ring_heat(ci, cj) * best * 0.8 + ring * 0.9) * 15.99);
 	lv = fog_level(lv > 15 ? 15 : lv, dist);
@@ -492,23 +517,26 @@ class Lava : Scene {
 
 	// the camera's marks, one on every bar line: eye, the point it looks at, roll; the
 	// skim between the rows takes two bars, the dive lands on bar 7 and its close-up
-	// holds through the last bar
-	array<float> key_ex = [0.0, 0.07, 0.62, 2.6, 3.5, 3.5, 3.48, 3.96, 3.98];
-	array<float> key_ey = [0.52, 0.56, 0.72, 3.3, 0.36, 0.42, 0.62, 0.5, 0.5];
-	array<float> key_ez = [-0.22, -0.34, -1.45, -3.1, 0.45, 1.9, 3.25, 3.81, 3.84];
-	array<float> key_lx = [0.0, 0.0, 0.0, 1.2, 3.5, 3.8, 4.0, 4.0, 4.0];
-	array<float> key_ly = [0.5, 0.5, 0.45, 0.25, 0.5, 0.5, 0.5, 0.5, 0.5];
-	array<float> key_lz = [0.2, 0.0, 0.0, 1.6, 4.0, 4.0, 4.0, 4.2, 4.2];
-	array<float> key_roll = [0.0, 0.12, -0.28, 0.42, -0.62, 0.2, 1.2, 2.3, 2.4];
+	// holds through the riser, bar 8's hit blasts the camera up out of the wax in a
+	// corkscrew over the field, bar 9 swoops it down into a lane and bar 10 races along it
+	array<float> key_ex = [0.0, 0.07, 0.62, 2.6, 3.5, 3.5, 3.48, 3.96, 3.98, 3.0, 6.5, 6.5];
+	array<float> key_ey = [0.52, 0.56, 0.72, 3.3, 0.36, 0.42, 0.62, 0.5, 0.5, 2.7, 0.42, 0.4];
+	array<float> key_ez = [-0.22, -0.34, -1.45, -3.1, 0.45, 1.9, 3.25, 3.81, 3.84, 2.3, 5.6, 9.2];
+	array<float> key_lx = [0.0, 0.0, 0.0, 1.2, 3.5, 3.8, 4.0, 4.0, 4.0, 4.5, 6.5, 6.5];
+	array<float> key_ly = [0.5, 0.5, 0.45, 0.25, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0, 0.42, 0.4];
+	array<float> key_lz = [0.2, 0.0, 0.0, 1.6, 4.0, 4.0, 4.0, 4.2, 4.2, 4.9, 9.0, 12.6];
+	array<float> key_roll = [0.0, 0.12, -0.28, 0.42, -0.62, 0.2, 1.2, 2.3, 2.4, 6.28, 6.0, 6.28];
 
 	// the budget is set before setup, which is when the reel reads it
 	Lava() { pixel_budget = 17000; }
 
-	// eight bars: the dive completes on bar 7 and the close-up holds a whole bar
-	int length_bars() override { return 8; }
+	// eleven bars: the dive completes on bar 7, the burst out is bar 8, the swoop bar 9, the lane bar 10
+	int length_bars() override { return 11; }
 
-	array<float> hit_times() override { return [MUSIC_BAR * 2.0, MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 6.0]; }
-	array<int> hit_levels() override { return [1, 2, 1, 2]; }
+	array<float> hit_times() override {
+		return [MUSIC_BAR * 2.0, MUSIC_BAR * 3.0, MUSIC_BAR * 4.0, MUSIC_BAR * 6.0, MUSIC_BAR * 8.0, MUSIC_BAR * 9.0, MUSIC_BAR * 10.0];
+	}
+	array<int> hit_levels() override { return [1, 2, 1, 2, 2, 1, 1]; }
 
 	void build() override {
 		name = "LAVALAMP";
@@ -585,7 +613,8 @@ class Lava : Scene {
 	}
 
 	// a Catmull-Rom spline through one track of marks, one mark a bar, so the
-	// camera flows through its marks and lands each on a bar line
+	// camera flows through its marks and lands each on a bar line; the close-up eases
+	// still into bar 8 and the burst leaves it at full speed, slowing to the next mark
 	float track(var& keys, float t) {
 		int last = keys.size() - 1;
 		float u = t / MUSIC_BAR;
@@ -596,6 +625,11 @@ class Lava : Scene {
 		float p0 = keys[k > 0 ? k - 1 : 0];
 		float p1 = keys[k];
 		float p2 = keys[k + 1];
+		if (k == 7) { return p1 + (p2 - p1) * f * f * (3.0 - 2.0 * f); }
+		if (k == 8) {
+			float g = 1.0 - f;
+			return p1 + (p2 - p1) * (1.0 - g * g * g);
+		}
 		float p3 = keys[k + 2 <= last ? k + 2 : last];
 		float f2 = f * f;
 		float f3 = f2 * f;
@@ -624,6 +658,8 @@ class Lava : Scene {
 	void render(var& grid) override {
 		float t = tt;
 		float kick = cue == null ? 0.0 : cue.kick_env(t);
+		float snare = cue == null ? 0.0 : cue.snare_env(t);
+		float riser = cue == null ? 0.0 : cue.riser(t);
 		float energy = cue == null ? 0.6 : cue.energy(t);
 		float hit = cue == null ? 0.0 : cue.hit(t);
 		int chord = cue == null ? 0 : cue.chord(t);
@@ -647,19 +683,21 @@ class Lava : Scene {
 		float ux = fy * rz;
 		float uy = fz * rx - fx * rz;
 		float uz = 0.0 - fy * rx;
-		float roll = track(key_roll, t) + hit * 0.06 * math::sin(t * 41.0);
+		float roll = track(key_roll, t) + hit * 0.06 * math::sin(t * 41.0) + riser * 0.03 * math::sin(t * 57.0);
 		float cr = math::cos(roll);
 		float sr = math::sin(roll);
 		LV_RX = rx * cr + ux * sr; LV_RY = uy * sr; LV_RZ = rz * cr + uz * sr;
 		LV_UX = ux * cr - rx * sr; LV_UY = uy * cr; LV_UZ = uz * cr - rz * sr;
 		LV_FX = fx; LV_FY = fy; LV_FZ = fz;
 		LV_EX = ex; LV_EY = ey; LV_EZ = ez;
-		// the lens breathes on the kick and punches in on the hits
-		LV_FOCAL = 1.45 * (1.0 + kick * 0.05 + hit * 0.12);
-		LV_GAIN = 0.62 + energy * 0.3 + kick * 0.3 + hit * 0.45;
-		LV_FLASH = hit;
+		// the lens breathes on the kick and punches in on the hits, creeping in on the riser;
+		// the wax swells with the riser and the snare flashes the glass
+		LV_FOCAL = 1.45 * (1.0 + kick * 0.07 + hit * 0.12 + riser * 0.1);
+		LV_GAIN = 0.62 + energy * 0.3 + kick * 0.3 + hit * 0.45 + riser * riser * 0.4 + smooth(MUSIC_BAR * 8.0, MUSIC_BAR * 9.0, t) * 0.2;
+		LV_FLASH = hit + snare * 0.25;
 		LV_HUE0 = chord * 2.0;
-		LV_BURN = smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.0 + 0.4, t) * (1.0 - smooth(MUSIC_BAR * 4.0 - 0.3, MUSIC_BAR * 4.0 + 0.3, t));
+		LV_BURN = smooth(MUSIC_BAR * 3.0, MUSIC_BAR * 3.0 + 0.4, t) * (1.0 - smooth(MUSIC_BAR * 4.0 - 0.3, MUSIC_BAR * 4.0 + 0.3, t))
+			+ smooth(MUSIC_BAR * 8.0, MUSIC_BAR * 8.0 + 0.4, t);
 		LV_T = t;
 		// the ring of heat: it leaves the point the camera looked at on each big hit and races outward
 		LV_RING_A = 0.0;
@@ -672,6 +710,16 @@ class Lava : Scene {
 			LV_RING_Z = track(key_lz, times[k]);
 			LV_RING_R = since * 5.5;
 			LV_RING_A = 1.5 * (1.0 - since / 2.6);
+		}
+		LV_PULSE_A = 0.0;
+		float pulse_from = MUSIC_BAR * 8.0 + MUSIC_BEAT;
+		if (t >= pulse_from) {
+			float beats = (t - pulse_from) / MUSIC_BEAT;
+			LV_PULSE_X = track(key_lx, MUSIC_BAR * 8.0);
+			LV_PULSE_Z = track(key_lz, MUSIC_BAR * 8.0);
+			float frac = beats - math::floor(beats);
+			LV_PULSE_R = frac * MUSIC_BEAT * 7.0;
+			LV_PULSE_A = 1.1 * (1.0 - frac * 0.85) + kick * 0.3;
 		}
 		LV_BX = bx;
 		LV_BY = by;

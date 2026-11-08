@@ -18,6 +18,12 @@
 // (the flock squeezes into a ball, a flash and a lens flare land on impact); the
 // second comes at full speed with the frame shaking; and at the end the whole
 // murmuration sweeps in low and close, a vast veil drawn across the sun.
+//
+// Scored to its cue: the slow-motion strike lands on the downbeat of bar 4 and the
+// second stoop on beat 3 of bar 5, both hits, and the veil fills the last bar; the
+// kick swells the sun's rays and darkens the flock a touch, the snare sets the
+// lake's glitter sparking, the bass breathes through the sky, and the bar before
+// the strike draws the light in like a held breath.
 
 // Globals on purpose: the parallel steering reads them (arrays borrow zero-copy).
 array<float> BD_X = [];
@@ -223,6 +229,9 @@ class Boids : Scene {
 	array<int> col_of = [];     // and the column each screen column reads
 	float sun_x = 0.0;
 	float sun_y = 0.0;
+	float cen_x = 0.0;          // the flock's centre: the falcon dives through it
+	float cen_y = 40.0;
+	float cen_z = 0.0;
 
 	void build() override {
 		name = "BOIDS";
@@ -351,12 +360,16 @@ class Boids : Scene {
 	}
 
 	// the first strike in slow motion: the flock's clock eases down to a third
+	// (the flock's clock reaches the strike at 7.015 s just as the scene's reaches bar 4)
 	float slowmo(float st) {
-		if (st < 5.35 || st > 6.15) { return 1.0; }
-		if (st < 5.55) { return 1.0 - (st - 5.35) / 0.2 * 0.7; }
-		if (st > 5.95) { return 0.3 + (st - 5.95) / 0.2 * 0.7; }
+		if (st < 6.565 || st > 7.365) { return 1.0; }
+		if (st < 6.765) { return 1.0 - (st - 6.565) / 0.2 * 0.7; }
+		if (st > 7.165) { return 0.3 + (st - 7.165) / 0.2 * 0.7; }
 		return 0.3;
 	}
+
+	array<float> hit_times() override { return [MUSIC_BAR * 4.0, MUSIC_BAR * 5.5]; }
+	array<int> hit_levels() override { return [2, 1]; }
 
 	void update(float t, float dt) override {
 		tt = t;
@@ -364,7 +377,7 @@ class Boids : Scene {
 		if (dt <= 0.0) { return; }
 		float sdt = dt * slowmo(sim_t);
 		sim_t += sdt;
-		if (strike_t < 0.0 && sim_t >= 5.8) { strike_t = t; }
+		if (strike_t < 0.0 && sim_t >= 7.015) { strike_t = MUSIC_BAR * 4.0; }
 		float st = sim_t;
 		float step = sdt > 0.05 ? 0.05 : sdt;
 		BD_TX = 40.0 * math::sin(st * 0.33);
@@ -372,12 +385,12 @@ class Boids : Scene {
 		BD_TZ = 30.0 * math::sin(st * 0.47 + 1.3);
 		// the finale: the murmuration sweeps in low and close, a vast veil across the sun
 		float veil = 0.0;
-		if (t > 10.6) {
-			veil = (t - 10.6) / 2.2;
+		if (t > 9.9) {
+			veil = (t - 9.9) / 2.6;
 			veil = veil > 1.0 ? 1.0 : veil * veil * (3.0 - 2.0 * veil);
-			BD_TX += (cam_x * 0.12 - BD_TX) * veil;
-			BD_TY += (12.0 - BD_TY) * veil;
-			BD_TZ += (cam_z * 0.12 - BD_TZ) * veil;
+			BD_TX += (cam_x * 0.06 + (sun_x - w * 0.5) * 0.2 - BD_TX) * veil;
+			BD_TY += (20.0 - BD_TY) * veil;
+			BD_TZ += (cam_z * 0.06 - BD_TZ) * veil;
 		}
 		BD_FLOOR = 18.0 - veil * 10.0;
 		shape_sheet(st);
@@ -447,7 +460,7 @@ class Boids : Scene {
 		BD_LEN = 40.0 + 12.0 * math::sin(t * 0.37);
 		BD_WID = 18.0 - 5.0 * math::sin(t * 0.37);
 		// as the falcon stoops the flock squeezes into a dense ball
-		float squeeze = ball(t, 4.6) + ball(t, 8.6);
+		float squeeze = ball(t, 5.815) + ball(t, 8.324);
 		BD_LEN *= 1.0 - squeeze * 0.62;
 		BD_WID *= 1.0 - squeeze * 0.4;
 		BD_FOLD = 6.0 + 4.0 * math::sin(t * 0.61 + 2.0);
@@ -461,11 +474,16 @@ class Boids : Scene {
 
 	void follow_flock(float step) {
 		float sx = 0.0;
+		float sy = 0.0;
 		float sz = 0.0;
 		for (int i = 0; i < nb; ++i) {
 			sx += BD_X[i];
+			sy += BD_Y[i];
 			sz += BD_Z[i];
 		}
+		cen_x = sx / nb;
+		cen_y = sy / nb;
+		cen_z = sz / nb;
 		float k = step * 3.0;
 		look_x += (sx / nb - look_x) * k;
 		look_z += (sz / nb - look_z) * k;
@@ -492,23 +510,27 @@ class Boids : Scene {
 		float hy = BD_TY + 42.0;
 		float hz = BD_TZ + 70.0 * math::sin(ca);
 		float dive = -1.0;
-		if (t > 5.0 && t < 6.6) { dive = (t - 5.0) / 1.6; }
-		if (t > 9.0 && t < 10.6) { dive = (t - 9.0) / 1.6; }
+		if (t > 6.215 && t < 7.815) { dive = (t - 6.215) / 1.6; }
+		if (t > 8.724 && t < 10.324) { dive = (t - 8.724) / 1.6; }
 		if (dive < 0.0) {
 			BD_FX = hx;
 			BD_FY = hy;
 			BD_FZ = hz;
 			return;
 		}
-		float ex = BD_TX - (hx - BD_TX);
-		float ey = BD_TY - 30.0;
-		float ez = BD_TZ - (hz - BD_TZ);
+		// the curve's control point is set so it passes through the flock's centre halfway
+		float ex = cen_x - (hx - cen_x);
+		float ey = cen_y - 30.0;
+		float ez = cen_z - (hz - cen_z);
 		float a = (1.0 - dive) * (1.0 - dive);
 		float b = 2.0 * dive * (1.0 - dive);
 		float c = dive * dive;
-		BD_FX = hx * a + BD_TX * b + ex * c;
-		BD_FY = hy * a + (BD_TY - 6.0) * b + ey * c;
-		BD_FZ = hz * a + BD_TZ * b + ez * c;
+		float mx = 2.0 * cen_x - 0.5 * (hx + ex);
+		float my = 2.0 * cen_y - 0.5 * (hy + ey);
+		float mz = 2.0 * cen_z - 0.5 * (hz + ez);
+		BD_FX = hx * a + mx * b + ex * c;
+		BD_FY = hy * a + my * b + ey * c;
+		BD_FZ = hz * a + mz * b + ez * c;
 	}
 
 	// on the shore, turning slowly to follow the flock; the pitch stays fixed so
@@ -536,11 +558,11 @@ class Boids : Scene {
 
 	void render(var& grid) override {
 		float push = 0.0;
-		if (sim_t > 5.2 && sim_t < 6.3) {
-			float u = sim_t < 5.45 ? (sim_t - 5.2) / 0.25 : (sim_t > 6.05 ? (6.3 - sim_t) / 0.25 : 1.0);
+		if (sim_t > 6.415 && sim_t < 7.515) {
+			float u = sim_t < 6.665 ? (sim_t - 6.415) / 0.25 : (sim_t > 7.265 ? (7.515 - sim_t) / 0.25 : 1.0);
 			push = u * u * (3.0 - 2.0 * u);
 		}
-		float shake = sim_t > 9.7 && sim_t < 10.3 ? (10.3 - sim_t) * 5.0 : 0.0;
+		float shake = sim_t > 9.424 && sim_t < 10.024 ? (10.024 - sim_t) * 5.0 : 0.0;
 		if (push == 0.0 && shake == 0.0 && flash_level() == 0) {
 			compose(grid);
 			focus_x = fsx;
@@ -562,6 +584,11 @@ class Boids : Scene {
 		float oy = math::cos(tt * 47.0) * shake * 0.6;
 		float fx = focus_x * push + w * 0.5 * (1.0 - push);
 		float fy = focus_y * push + h * 0.5 * (1.0 - push);
+		// the zoomed window stays inside the frame
+		float mxw = w * 0.5 / zoom;
+		float myh = h * 0.5 / zoom;
+		fx = fx < mxw ? mxw : (fx > w - mxw ? w - mxw : fx);
+		fy = fy < myh ? myh : (fy > h - myh ? h - myh : fy);
 		int flash = flash_level();
 		var& cols = col_of;
 		for (int x0 = 0; x0 < w; ++x0) {
@@ -673,9 +700,17 @@ class Boids : Scene {
 		var& sk = sky;
 		var& gl = glint;
 		var& ry = rays;
-		int glit_on = itrunc(tt * 9.0);
-		// the rays swell and the light sinks toward dusk as the scene runs
-		int shine = itrunc((0.45 + 0.55 * math::sin(tt * 0.45) * math::sin(tt * 0.45)) * 16.0);
+		float kick = cue == null ? 0.0 : cue.kick_env(tt);
+		float snare = cue == null ? 0.0 : cue.snare_env(tt);
+		float bass = cue == null ? 0.0 : cue.bass_env(tt);
+		float breath = cue == null ? 0.0 : cue.riser(tt);
+		int glit_on = itrunc(tt * 9.0) + itrunc(snare * 6.0);
+		float glit_cut = 0.8 - snare * 0.25;
+		float flock_gain = 1.8 * (1.0 + kick * 0.18);
+		// the rays swell with the kick and the bass, draw in before the strike, and the
+		// light sinks toward dusk as the scene runs
+		float swell = 0.45 + 0.55 * math::sin(tt * 0.45) * math::sin(tt * 0.45) + kick * 0.35 + bass * 0.15;
+		int shine = itrunc(swell * (1.0 - breath * 0.7) * 16.0);
 		int dusk = itrunc(tt * 0.22);
 		for (int y = 0; y < h; ++y) {
 			int row = y * w;
@@ -685,7 +720,7 @@ class Boids : Scene {
 					int tone = s / 8;
 					int lifted = tone + ((ry[row + x] * shine) >> 8) - (tone < 27 ? dusk : 0);
 					lifted = lifted < 0 ? 0 : (lifted > 31 ? 31 : lifted);
-					int lv = dn[row + x] * 1.8;
+					int lv = dn[row + x] * flock_gain;
 					int dk = s % 8 + lv;
 					grid[row + x] = lifted * 8 + (dk > 7 ? 7 : dk);
 				}
@@ -701,7 +736,7 @@ class Boids : Scene {
 				int dk2 = s2 % 8 + lv2;
 				int tone = s2 - s2 % 8;
 				float ph = gl[row + x2];
-				if (ph >= 0.0 && math::sin(ph + glit_on * 0.7) > 0.8) { tone = 30 * 8; dk2 = lv2; }
+				if (ph >= 0.0 && math::sin(ph + glit_on * 0.7) > glit_cut) { tone = 30 * 8; dk2 = lv2; }
 				grid[row + x2] = tone + (dk2 > 7 ? 7 : dk2);
 			}
 		}

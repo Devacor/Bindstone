@@ -10,8 +10,9 @@
 2. Every frame goes through capture_examples.py's VT screen and renderer (8x16 cells, sextants drawn as geometry),
    across all cores, and the raw RGB streams into ffmpeg.
 3. The soundtrack is the reel's own score: the cue files back to back in reel order (cue i starts where scene i
-   starts and lasts as long), played by a small numpy synthesizer (drums, a filtered-saw bass, a detuned pad, a
-   square arpeggio, a vibrato lead, brass stabs), with a few echo taps for room and a soft clip.
+   starts and lasts as long), played by a small numpy synthesizer (each cue's drum kit, a filtered-saw bass, a
+   detuned pad and a square arpeggio pumped by the score's sidechain expression, a vibrato lead, brass stabs, an
+   orchestra hit, a reverse cymbal), with a few echo taps for room and a soft clip.
 4. ffmpeg muxes the frames with the audio into an H.264 MP4 and a VP9 WebM, at the renderer's own size (960x640 for
    the default 120x40 cells) or scaled by nearest neighbour to --width, so the pixels stay crisp; the native size
    keeps the full reel near 25-30 MB, a 1280 px upscale roughly doubles it.
@@ -75,7 +76,8 @@ def read_vlq(data, i):
 
 
 def parse_midi(path):
-    """The cue's notes as (start s, length s, channel, note, velocity) and its length in seconds."""
+    """The cue's notes as (start s, length s, channel, note, velocity), its length in seconds, its drum kit (channel
+    10's program) and each channel's expression changes as (time s, 0..1)."""
     data = pathlib.Path(path).read_bytes()
     division = struct.unpack(">H", data[12:14])[0]
     length = struct.unpack(">I", data[18:22])[0]
@@ -83,6 +85,8 @@ def parse_midi(path):
     tick = 0
     tempo = 500000
     volume = [100] * 16
+    program = [0] * 16
+    expression = {}
     open_notes = {}
     notes = []
     status = 0
@@ -105,6 +109,8 @@ def parse_midi(path):
             i += 2
             if kind == 0xB0 and a == 7:
                 volume[ch] = b
+            elif kind == 0xB0 and a == 11:
+                expression.setdefault(ch, []).append((tick, b / 127.0))
             elif kind == 0x90 and b > 0:
                 open_notes.setdefault((ch, a), []).append((tick, b * volume[ch] / 127.0))
             elif kind == 0x80 or (kind == 0x90 and b == 0):
@@ -113,10 +119,13 @@ def parse_midi(path):
                     start, vel = stack.pop(0)
                     notes.append((start, tick - start, ch, a, vel))
         else:
+            if kind == 0xC0:
+                program[ch] = data[i]
             i += 1
     seconds_per_tick = tempo / 1e6 / division
     out = [(s * seconds_per_tick, max(l * seconds_per_tick, 0.02), ch, n, v) for s, l, ch, n, v in notes]
-    return out, tick * seconds_per_tick
+    expr = {ch: [(t * seconds_per_tick, v) for t, v in ev] for ch, ev in expression.items()}
+    return out, tick * seconds_per_tick, program[9], expr
 
 
 # ------------------------------------------------------------------------------------------------ synth ---
@@ -159,21 +168,30 @@ def highpass(x, amount=0.9):
     return y
 
 
-def voice(ch, note, vel, length):
+KIT_POWER, KIT_ELECTRONIC, KIT_808 = 16, 24, 25
+
+
+def voice(ch, note, vel, length, kit=0):
     """One note's samples (mono) and its channel's pan."""
     if ch == 9:
         if note in (35, 36):
-            n = int(0.45 * RATE)
+            boom = kit == KIT_808 or note == 35
+            n = int((0.7 if boom else 0.45) * RATE)
             t = np.arange(n) / RATE
-            sweep = 45.0 + 110.0 * np.exp(-t / 0.035)
+            sweep = (42.0 if boom else 45.0) + (130.0 if boom else 110.0) * np.exp(-t / 0.035)
             phase = 2.0 * np.pi * np.cumsum(sweep) / RATE
-            s = np.sin(phase) * np.exp(-t / 0.16) + 0.25 * noise(n) * np.exp(-t / 0.004)
-            return s * vel * 1.3, 0.0
+            s = np.sin(phase) * np.exp(-t / (0.32 if boom else 0.16)) + 0.25 * noise(n) * np.exp(-t / 0.004)
+            return np.tanh(s * 1.6) * vel * 1.2, 0.0
         if note in (38, 40):
-            n = int(0.3 * RATE)
+            # the eighties snare: a crack, a tone, and a big room cut off by a gate
+            n = int(0.34 * RATE)
             t = np.arange(n) / RATE
-            s = highpass(noise(n), 0.6) * np.exp(-t / 0.07) * 0.7 + np.sin(2 * np.pi * 185.0 * t) * np.exp(-t / 0.05) * 0.5
-            return s * vel * 0.8, 0.05
+            gate = np.where(t < 0.2, 1.0, np.exp(-(t - 0.2) / 0.012))
+            room = highpass(noise(n), 0.5) * (0.35 + 0.65 * np.exp(-t / 0.05)) * gate
+            tone = 200.0 if kit == KIT_ELECTRONIC else 185.0
+            body = np.sin(2 * np.pi * tone * t) * np.exp(-t / (0.09 if kit == KIT_ELECTRONIC else 0.05))
+            s = room * (0.75 if kit == KIT_POWER else 0.55) + body * 0.5
+            return s * vel * 0.85, 0.05
         if note == 39:
             # a clap: three quick bursts of filtered noise and a short tail
             n = int(0.25 * RATE)
@@ -190,7 +208,7 @@ def voice(ch, note, vel, length):
             phase = 2.0 * np.pi * np.cumsum(sweep) / RATE
             s = np.sin(phase) * np.exp(-t / 0.22) + 0.15 * noise(n) * np.exp(-t / 0.01)
             return s * vel * 0.75, (note - 46) * 0.06
-        if note == 49:
+        if note in (49, 57):
             n = int(1.8 * RATE)
             t = np.arange(n) / RATE
             return highpass(noise(n), 0.95) * np.exp(-t / 0.55) * vel * 0.45, -0.25
@@ -222,6 +240,18 @@ def voice(ch, note, vel, length):
         phase_t = np.cumsum(vib) / RATE
         s = additive(f, phase_t, 10, tilt=1.2) * env_adsr(n, 0.02, 0.3, 0.7, 0.15, hold)
         return s * vel * 0.3, -0.3
+    if ch == 5:
+        # a reverse cymbal: noise swelling to the end of its note and stopping dead
+        n = int(hold * RATE)
+        t = np.arange(n) / RATE
+        return highpass(noise(n), 0.9) * (t / max(hold, 1e-3)) ** 2.6 * vel * 0.5, -0.15
+    if ch == 6:
+        # an orchestra hit: a bright stack and a burst of noise, gone in a third of a second
+        n = int(0.45 * RATE)
+        t = np.arange(n) / RATE
+        s = (additive(f, t, 14, tilt=0.9) + 0.6 * additive(f * 2.0, t, 8, tilt=1.0)) * np.exp(-t / 0.12)
+        s += highpass(noise(n), 0.7) * np.exp(-t / 0.03) * 0.6
+        return s * vel * 0.32, 0.0
     n = int((hold + 0.4) * RATE)
     t = np.arange(n) / RATE
     s = (additive(f, t, 4, tilt=1.0) + 0.4 * additive(f, t, 12, tilt=1.0) * np.exp(-t / 0.08)) * env_adsr(n, 0.01, 0.25, 0.35, 0.2, hold)
@@ -231,29 +261,47 @@ def voice(ch, note, vel, length):
 def synthesize(cue_paths, seconds_limit=None):
     """The cues back to back as a stereo float array."""
     cues = [parse_midi(p) for p in cue_paths]
-    total = sum(length for _, length in cues)
+    total = sum(cue[1] for cue in cues)
     if seconds_limit is not None:
         total = min(total, seconds_limit)
     n_total = int(total * RATE) + RATE * 2
     left = np.zeros(n_total)
     right = np.zeros(n_total)
+    # the channels the score's expression pumps get buses of their own, gained after the notes are laid down
+    pumped = {1: (np.zeros(n_total), np.zeros(n_total)), 2: (np.zeros(n_total), np.zeros(n_total))}
+    gain = {ch: np.ones(n_total) for ch in pumped}
     offset = 0.0
     cache = {}
-    for notes, length in cues:
+    for notes, length, kit, expr in cues:
         if seconds_limit is not None and offset >= seconds_limit:
             break
         for start, dur, ch, note, vel in notes:
             at = int((offset + start) * RATE)
             if at >= n_total:
                 continue
-            key = (ch, note, round(vel * 32), round(dur * 50))
+            key = (ch, note, round(vel * 32), round(dur * 50), kit if ch == 9 else 0)
             if key not in cache:
-                cache[key] = voice(ch, note, vel, dur)
+                cache[key] = voice(ch, note, vel, dur, kit)
             s, pan = cache[key]
             n = min(len(s), n_total - at)
-            left[at:at + n] += s[:n] * (1.0 - pan) * 0.5
-            right[at:at + n] += s[:n] * (1.0 + pan) * 0.5
+            bus_l, bus_r = pumped.get(ch, (left, right))
+            bus_l[at:at + n] += s[:n] * (1.0 - pan) * 0.5
+            bus_r[at:at + n] += s[:n] * (1.0 + pan) * 0.5
+        cue_end = min(int((offset + length) * RATE), n_total)
+        for ch, events in expr.items():
+            if ch not in gain:
+                continue
+            for k, (t, v) in enumerate(events):
+                a = int((offset + t) * RATE)
+                b = int((offset + events[k + 1][0]) * RATE) if k + 1 < len(events) else cue_end
+                gain[ch][max(a, 0):min(b, n_total)] = v
         offset += length
+    # a few milliseconds of smoothing so the pump never clicks
+    window = np.ones(int(0.008 * RATE)) / int(0.008 * RATE)
+    for ch, (bus_l, bus_r) in pumped.items():
+        smooth = np.convolve(gain[ch], window, mode="same")
+        left += bus_l * smooth
+        right += bus_r * smooth
     # room: a few echo taps, darker and quieter as they go
     wet_l = np.zeros(n_total)
     wet_r = np.zeros(n_total)

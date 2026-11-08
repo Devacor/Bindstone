@@ -103,13 +103,20 @@ jaiscript demoreel.jai -- music 0            # the reel, silent
 jaiscript demoreel.jai -- frames 90 w 120 scene 10 workers 1   # headless with rows drawn in parallel (the reel's default from 100 columns)
 ```
 
-The soundtrack is procedural and the scenes hear it (`scenes/music.jai`). At boot
-the script composes one cue per scene at 124 bpm: each scene has a mood (a scale
-and chord progression, a drum style, General MIDI instruments for bass, pad,
-arpeggio and lead, a level of energy), the energy builds into each of the
-scene's declared hits and drops on it, the lead sings a two-bar motif from the
-reel's seed over each chord, the toms fill into every fourth bar, and each hit
-lands a crash, a low boom and a brass stab with a snare riser into the big ones.
+The soundtrack is procedural synthwave and the scenes hear it (`scenes/music.jai`).
+At boot the script composes one cue per scene at 124 bpm: each scene has a mood (a
+key and a progression of seventh and added-ninth chords, the keys travelling so no
+two neighbours share one; a drum style on the power, electronic or 808 kit; General
+MIDI instruments for bass, pad, arpeggio and lead; a level of energy). The bass
+pumps in octaves, the gated snare and a clap hit two and four, every kick ducks the
+pad and the arpeggio and they swell back over the beat (a sidechain written as MIDI
+expression), the arpeggio and the lead echo on the dotted eighth, the lead sings a
+two-bar motif from the reel's seed over each chord's tones, and electronic toms fill
+into every fourth bar. The energy builds into each of the scene's declared hits and
+drops on it: a reverse cymbal swells over the bar before a big hit, a snare roll
+climbs through its last half bar, the band falls silent for the last beat, and the
+hit lands a crash, a low boom, an orchestra hit and brass on the chord with the bass
+dropping under it. Every cut lands with a crash.
 The same score is data the scenes query every frame (`cue.kick_env(t)`,
 `snare_env`, `hat_env`, `bass_env`, `chord`, `energy`, `hit`, `riser`), so the
 pictures move with exactly the music being played, deterministically and with no
@@ -120,9 +127,10 @@ switches the frame a scene's transition starts.
 `docs/site_tools/render_reel_video.py` turns the reel into a video with that
 soundtrack, an H.264 MP4 and a VP9 WebM: it runs the `video` mode, renders every
 kept frame through the examples page's terminal renderer across all cores, plays
-the cues back to back through a small numpy synthesizer (drums, toms and claps,
-a filtered-saw bass, a detuned pad, a square arpeggio, a vibrato lead, brass
-stabs), and hands both to ffmpeg, scaling by nearest neighbour so the pixels
+the cues back to back through a small numpy synthesizer (each cue's drum kit with
+a gated snare, toms and claps, a filtered-saw bass, a detuned pad and a square
+arpeggio pumped by the score's sidechain, a vibrato lead, brass stabs, an
+orchestra hit, a reverse cymbal), and hands both to ffmpeg, scaling by nearest neighbour so the pixels
 stay crisp (`--seconds N` for a short cut, `--frames DIR` to reuse a dump).
 
 Verified: the 1700-frame smoke reel produces the same stream hash and

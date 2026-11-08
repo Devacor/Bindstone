@@ -44,7 +44,10 @@ GLOOM_FRAME=7fecc09815bb64e0
 GLOOM_STATE=3580805725
 GLOOM_SHOWCASE_FRAME=6559224cca20d1f0
 DEMOREEL_STREAM=c63907befa4adff0
-CRAWLER_STATE=1743191104
+CRAWLER_STATE=938196497
+CRAWLER_FRAMES=c5e07f67e283c2a54ec1a6503d1a52a642c3063cfbe26d569a31503e1dea779d
+CRAWLER_SMALL_FRAMES=6603814f43ca70b55e24cd901d97d94f709cc9f3b7c5d444f77cf9e2bb83ec2a
+CRAWLER_WIDE_FRAMES=aa849fd242eeaeaf5a808184e13be3cfaaac7863bba5c6c1e92f3e0a6e936e9a
 GATORQUEST_STATE=3218840367
 GLOOM_LONG_FRAME=dfd969ed5a336dca
 GLOOM_LONG_STATE=1503537018
@@ -209,9 +212,33 @@ gate_demoreel() {
 }
 
 gate_crawler() {
-	vm_only crawler || return 0
-	run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500
-	want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
+	if vm_only crawler; then
+		run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500
+		want "crawler vm: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
+		# hot reload keeps the run: the pilot re-runs every script each 100 turns (its first try, of a missing file, is
+		# refused) and must play the same game, every animation frame built through the reloads, laid out for a 135x37
+		# console as a player would see them
+		run_logged "$BIN/jai_crawler" --smoke --seed 6 --turns 1500 --reload-every 100 --anim --screen 135x37
+		want "crawler vm --reload-every: the reloads did not run" "hot reloads: [1-9][0-9]* kept the run, 1 refused"
+		want "crawler vm --reload-every: a reload changed the run (expected STATE_HASH $CRAWLER_STATE)" "STATE_HASH: $CRAWLER_STATE\$"
+	fi
+	# the runner shim draws every frame, the animations' in-between frames too: the cockpit at 135x37 through the floor 1
+	# welcome, fights, spells, a level, the stairs and the reload sweep; the forward view alone at 80x24 in the 256-colour
+	# cube with ASCII glyphs; and the cockpit at 200x60, whose rows build in parallel. Each backend draws the same streams.
+	local work
+	work="$(mktemp -d)"
+	cd "$ROOT/examples/crawler"
+	for backend in vm interp; do
+		hash_on "$backend" || continue
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 135x37 smoke seed 6 turns 200 anim reload-every 60 dump "$work/cockpit"
+		want "crawler $backend cockpit frames: expected FRAME_HASH $CRAWLER_FRAMES" "FRAME_HASH: $CRAWLER_FRAMES "
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 80x24 colors 256 ascii smoke seed 6 turns 80 anim dump "$work/small"
+		want "crawler $backend small frames: expected FRAME_HASH $CRAWLER_SMALL_FRAMES" "FRAME_HASH: $CRAWLER_SMALL_FRAMES "
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 200x60 smoke seed 6 turns 60 anim dump "$work/wide"
+		want "crawler $backend wide frames: the rows did not build in parallel" "rows parallel\$"
+		want "crawler $backend wide frames: expected FRAME_HASH $CRAWLER_WIDE_FRAMES" "FRAME_HASH: $CRAWLER_WIDE_FRAMES "
+	done
+	rm -rf "$work"
 }
 
 lsp_test() {

@@ -349,7 +349,7 @@ void award_frag() { frags += 1; }</code></pre></div>
 <h2 id="which-one-do-i-want-the-real-world-idiom">Which one do I want? (the real-world idiom)<a class="hlink" href="#which-one-do-i-want-the-real-world-idiom" aria-label="link">&#8203;</a></h2>
 <p>A program declares its module graph with <code>import</code> lines at program scope, and reloads by reaching those imports again. The dungeon crawler&#x27;s entry point (examples/crawler/scripts/main.jai, abridged) is one import per module:</p>
 <div class="codeblock cb-jai" data-host="excerpt of examples/crawler/scripts/main.jai"><span class="cb-label">jaiscript &middot; excerpt</span><pre><code class="lang-jai">// GRUBWELL entry point. The host executes: import "main.jai"; crawler_main();
-import "state.jai";     // the persistent globals; the dev reload leaves this file out
+import "state.jai";     // the persistent globals; the live reload leaves this file out
 import "util.jai";
 import "data.jai";
 // ... one import per module ...</code></pre></div>

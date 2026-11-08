@@ -90,6 +90,40 @@ map<string, Breed> BESTIARY = {
 		"The wyrm who swallowed Devacor's rainbow fire and choked all the color out of it."}
 };
 
+// What each breed says the first time it sees you (a line starting with * is a deed, not words),
+// and the line its death gets in the log.
+map<string, array<string>> BARKS = {
+	"grublin": ["Oi! Dinner's walkin'!", "Mine! Whatever you got, mine!", "It's got a TORCH. Get it!"],
+	"slinger": ["Got a rock with your name on it!", "Hold still, I'm aiming!", "Fetch this, cousin!"],
+	"gloop": ["*turns, jiggling. It has seen you.*", "*blorps hungrily.*", "*oozes your way with intent.*"],
+	"snarlbat": ["SKREEEE!", "Skree skree SKREE!", "*flaps closer, all wing and no plan.*"],
+	"scrappit": ["Get 'im, lads!", "Three of us, one of you. Maths!", "Scrap 'im! Scrap 'im!"],
+	"rattlekin": ["*rattles disapprovingly.*", "Posture, intruder. POSTURE.", "*clacks its jaw: you'll do.*"],
+	"grinnest": ["SURPRISE.", "*smiles with a hundred teeth.*"],
+	"orglis": ["ORGLIS SMASH!", "Orglis spell good. Orglis hit better.", "You smell worse than Orglis. Respect."],
+	"hexmoth": ["*dusts your name onto the air, in cursive.*", "Doom. D-O-O-M. Doom.", "*flutters, and the air curdles.*"],
+	"marrowmaw": ["*growls, low and full of bones.*", "*licks its teeth. All of them.*", "*lopes toward you, ribs first.*"],
+	"cinderwisp": ["Fwoosh! FWOOSH!", "Burn, burn, everything burns!", "*giggles like a lit fuse.*"],
+	"drakelet": ["For the Hollow-Flame!", "Mother says you're dinner.", "*drips gray sparks from its jaws.*"],
+	"vexadrach": ["Another color-thief. Come closer, little torch.", "I swallowed a rainbow. You are a snack."]
+};
+
+map<string, string> DEATH_LINES = {
+	"grublin": "The Grublin goes down clutching something regrettable.",
+	"slinger": "The Grublin Slinger drops its last pebble.",
+	"gloop": "The Gloop un-jiggles, forever.",
+	"snarlbat": "The Snarlbat flaps its last bad idea.",
+	"scrappit": "The Scrappit is scrapped.",
+	"rattlekin": "The Rattlekin collapses into a tidy pile of grudges.",
+	"grinnest": "The Grinnest's last grin snaps shut.",
+	"orglis": "The Orglis falls like a badly spelled tree.",
+	"hexmoth": "The Hexmoth's dust spells 'oops'.",
+	"marrowmaw": "The Marrowmaw's appetite finally ends.",
+	"cinderwisp": "The Cinderwisp gutters out with a hiss.",
+	"drakelet": "The Drakelet's gray fire sputters out.",
+	"vexadrach": "Vexadrach the Hollow-Flame comes apart at the seams of his stolen fire!"
+};
+
 // the breeds a floor spawns and their weights, in the bestiary's key order
 class SpawnTable { array<string> kinds; array<int> weights; }
 

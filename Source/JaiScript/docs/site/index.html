@@ -272,7 +272,7 @@ Migrations</a> map each library&#x27;s calls to JaiScript&#x27;s and convert rea
     permissively, and new fields take their initializers. Migration never fails.</p>
     <p>A source that does not parse or check simply does not load, and the old class keeps running. Code already
     running when the reload lands, a suspended coroutine included, finishes on the version it started with. The
-    dungeon crawler reloads its own scripts mid-game on a keypress.</p>
+    dungeon crawler reloads its own scripts mid-game the moment you save one, and keeps the run.</p>
     <p><a href="embedding/07-hot-reload.html">Hot Reload →</a></p></div>
   <div class="pillar"><h3><span class="pnum">06</span>Safe at the boundary, by construction</h3>
     <p>Beyond the core builtins, a script can only touch what the host registered: the

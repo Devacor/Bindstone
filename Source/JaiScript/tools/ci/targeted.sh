@@ -97,7 +97,7 @@ classify() {
 		tools/jai_spider/*) pick spider "the web host ($p)" ;;
 		examples/gloom/*) pick gloom "the GLOOM example ($p)" ;;
 		examples/demoreel/*) pick demoreel "the demoreel ($p)" ;;
-		examples/crawler/*) pick crawler "the crawler ($p)" ;;
+		examples/crawler/*) pick crawler "the crawler ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
 		examples/gatorquest/*) pick gatorquest "Gator Quest ($p)"; pick lsp "the language server checks Gator Quest ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
 		examples/embed_quickstart/*) pick embed-quickstart "the embedding quickstart ($p)" ;;
 		examples/jaidoom/*) pick timedemo "JaiDOOM ($p)"; interp_tier "an example's script runs on both backends ($p)" ;;
@@ -172,7 +172,7 @@ if [ "$BUILD" = 1 ]; then
 			fuzz | fuzz-vm-reference | fuzz-order) release_targets="$release_targets jaiscript_fuzz" ;;
 			gloom) release_targets="$release_targets jai_gloom" ;;
 			demoreel) release_targets="$release_targets jai_demoreel jaiscript_runner" ;;
-			crawler) release_targets="$release_targets jai_crawler" ;;
+			crawler) release_targets="$release_targets jai_crawler jaiscript_runner" ;;
 			gatorquest | timedemo) release_targets="$release_targets jaiscript_runner" ;;
 			site) release_targets="$release_targets jaiscript_runner jaiscript_tests" ;;
 			selftest) release_targets="$release_targets jaiscript_runner" ;;

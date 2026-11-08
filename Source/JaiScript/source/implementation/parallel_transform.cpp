@@ -2575,9 +2575,11 @@ namespace {
 					const bool callback_find = m->member == "find" &&
 					    (builtin_runs_script(m->member, proof_chain_type(m->object.get())) ||
 					     std::any_of(call->arguments.begin(), call->arguments.end(), [](const expression_ptr& a) { return a && a->get_type() == node_type::lambda_expr; }));
-					if (!proof_mode && !callback_find && m->object->get_type() == node_type::identifier_expr && !parallel_readonly_method(m->member)) {
-						// a method of a captured object (or a container's mutator): the barrier judges it against the captured value
-						touch_capture(root, false);
+					const bool named_receiver = m->object->get_type() == node_type::identifier_expr;
+					if (!proof_mode && !callback_find && !(named_receiver && parallel_readonly_method(m->member) && borrow_count_call(m, call))) {
+						// a method of a captured object, of an object a captured container holds, or a container's builtin: the barrier
+						// judges it against the captured value (a class's method of a builtin's name included)
+						if (named_receiver) { touch_capture(root, false); } else if (!walk_expr(m->object)) { return false; }
 						note_captured_method_call(root, m, call);
 						for (const auto& a : call->arguments) {
 							if (!walk_expr(a)) { return false; }
@@ -4404,6 +4406,50 @@ namespace {
 		});
 		return result;
 	}
+	const char* captured_container_object_refusal(const script_value& v, captured_object_shape& shape) {
+		const auto& holder = v.unchecked_object_handle();
+		if (!holder) { return nullptr; }
+		if (v.is_shared_ptr_type()) { return "a shared_ptr in a container"; }
+		if (holder->is_instance() && holder->unchecked_instance()->get_class_definition() &&
+		    holder->unchecked_instance()->get_class_definition()->is_cpp_class()) {
+			return "a C++ object in a container";
+		}
+		return captured_object_refusal(v, shape, false);
+	}
+	// A captured array or map's objects: flat value-class instances a worker's detached copy owns; a C++ object or a handle in a
+	// container is shared state no copy can part
+	const char* captured_container_refusal(const script_value& container, captured_object_shape& shape) {
+		std::vector<const script_value*> work{ &container.deref() };
+		while (!work.empty()) {
+			const script_value& v = *work.back();
+			work.pop_back();
+			switch (v.raw_storage_index()) {
+			case script_value::TYPEID_ARRAY: {
+				const script_array& a = *v.unchecked_array_node();
+				if (a.kind() == script_array::kind_t::obj) {
+					for (size_t i = 0; i < a.size(); ++i) {
+						const script_value element = a.get(i, v.payload_engine());
+						if (const char* refusal = captured_container_object_refusal(element, shape)) { return refusal; }
+					}
+				} else if (!a.is_typed()) {
+					for (const auto& element : a.values()) { work.push_back(&element.deref()); }
+				}
+				break;
+			}
+			case script_value::TYPEID_MAP:
+				for (const auto& [key, value] : v.unchecked_as_map()) { work.push_back(&key); work.push_back(&value.deref()); }
+				break;
+			case script_value::TYPEID_OBJECT:
+				if (const char* refusal = captured_container_object_refusal(v, shape)) { return refusal; }
+				break;
+			case script_value::TYPEID_WEAK_PTR:
+				return "a weak_ptr in a container";
+			default:
+				break;
+			}
+		}
+		return nullptr;
+	}
 	// A worker's view of a captured object: a detached copy of a script value (its strings and containers its own), or a new
 	// instance sharing the C++ object, so no handle a worker copies is another thread's
 	script_value captured_object_view(const script_value& source, bool host, engine& eng, std::vector<type_info*>& types) {
@@ -5355,6 +5401,18 @@ struct region_run {
 				             "' is the container being mutated (reads through it would race the element writes)");
 			}
 			cap.kind = borrowable ? parallel_capture_kind::borrow : parallel_capture_kind::snapshot;
+			if (!borrowable) {
+				// a container of value-class objects: each worker reads a detached copy, as of a captured object
+				captured_object_shape shape;
+				if (const char* refusal = captured_container_refusal(*cap.source, shape)) {
+					return usage("captured name '" + std::string(entry.name) + "' is not value-semantic (" + refusal + ")");
+				}
+				if (!shape.objects.empty()) {
+					cap.kind = parallel_capture_kind::object;
+					cap.classes = std::move(shape.classes);
+					for (const void* object : shape.objects) { captured_objects.emplace_back(object, entry.name); }
+				}
+			}
 			break;
 		}
 		case script_value::TYPEID_FUNCTION:

@@ -3076,8 +3076,8 @@ public:
 		test("conversions_reach_every_class_a_body_can_hold", [this, parallel_matches_serial, parallel_error]() {
 			// a body converts an instance it reaches by any road: a captured object, a captured var holding one, a captured
 			// subclass instance, a field of a field of the element (a condition too), a value an admitted function returns and an element of a var
-			// array mixing classes; each converts as the serial loop does. A captured container of instances and an element whose
-			// var field holds one are refused before any element runs
+			// array mixing classes, and an instance a captured array or map holds; each converts as the serial loop does. An element
+			// whose var field holds one is refused before any element runs
 			const std::string classes = R"(
 				class Num {
 					int v = 3;
@@ -3113,12 +3113,20 @@ public:
 				for (auto& m : mixed) { total += m.v; }
 				to_string(total);
 			)", "conversion roads");
+			parallel_matches_serial(classes + R"(
+				array<Num> caps = [Num(5), Num(6)];
+				map<string, Num> named = {"a": Num(7)};
+				parallel_for (int x : xs) { int k = caps[x % 2]; int j = named["a"]; out[x] = k + j + caps[1].v + named["a"].to_int(); }
+				int total = 0;
+				for (int v : out) { total += v; }
+				to_string(total);
+			)", "captured containers of instances");
 			struct refusal { const char* name; const char* source; const char* text; };
 			const refusal refusals[] = {
-				{ "captured array", "array<Num> caps = [Num(5)]; parallel_for (int x, auto& o : xs, out) { int k = caps[0]; o = k; }",
-				  "parallel_for: captured name 'caps': value is not value-semantic (object)" },
-				{ "captured map", "map<string, Num> caps = {\"a\": Num(7)}; parallel_for (int x, auto& o : xs, out) { int k = caps[\"a\"]; o = k; }",
-				  "parallel_for: captured name 'caps': value is not value-semantic (object)" },
+				{ "captured handles", "array<shared_ptr<Num>> hs = [make_shared<Num>(1)]; parallel_for (int x : xs) { out[x] = hs[0].v; }",
+				  "parallel_for: captured name 'hs' is not value-semantic (a shared_ptr in a container)" },
+				{ "captured table store", "array<Num> caps = [Num(5)]; parallel_for (int x : xs) { caps[0].v = x; }",
+				  "parallel_for: member store reaches captured state 'caps' (captured reads are read-only)" },
 				{ "var field", "class Holder { var f = 0; } array<Holder> hs; for (int i = 0; i < 8; ++i) { Holder h; h.f = Num(i); hs.push(h); } parallel_for (auto& h : hs) { int k = h.f; h.f = k; }",
 				  "parallel_for: element 0 cannot be proven exclusive" },
 			};

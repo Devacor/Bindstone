@@ -7,7 +7,10 @@
 //   use/open: E or space     fire: ctrl or F
 //   weapons: 1 fist, 2 pistol, 3 shotgun, 4 chaingun, 5 rocket launcher
 //   automap: tab (or M), zoom -/=, B drops a numbered mark, C clears marks
-//   quicksave: Z   quickload: X   menu: esc (resume/new/multiplayer/demos/save/load/quit)
+//   quicksave: Z   quickload: X   menu: esc (resume/new/multiplayer/demos/options/save/load/quit)
+//   gamma: G (DOOM's five levels)   smooth motion: U (60 fps eased between the 35 Hz tics, or DOOM's own 35)
+//   J: the JaiScript panel (each stage's time and history, the parallel blit; P runs it serially to compare)
+//   tune.jai: field of view and the title fire, reloaded while the game runs: edit and save it mid-game
 //   skills: I'M TOO YOUNG..ULTRA-VIOLENCE + NIGHTMARE! (fast monsters, corpses respawn)
 //   demos: menu DEMOS -> RECORD NEW GAME (tape writes at level exit or quit; REC shows
 //          top-right) / PLAY DEMO (filename entry, esc stops playback back to the title);
@@ -19,7 +22,8 @@
 // First run: with no WAD in wads/ the game fetches Freedoom and (if you say yes) the DOOM
 //            shareware episode itself, verified by SHA-256, and decodes the audio (boot.jai).
 //            Headless: jaiscript jaidoom.jai -- bootstrap [--no-shareware] [--no-audio]
-//           jaiscript jaidoom.jai -- uncapped    (no frame cap: the camera eases between 35 Hz tics; U toggles in game)
+//           jaiscript jaidoom.jai -- uncapped    (smooth motion with no frame cap: every frame the machine allows)
+//           jaiscript jaidoom.jai -- --mute      (no music or sound)
 //           jaiscript jaidoom.jai -- --pix half  (1x2 half blocks every terminal font draws, for a font without the
 //              default 2x3 sextants; the menu's OPTIONS -> HIGH DETAIL sets either for later runs, and a --pix
 //              on the command line wins for its run)
@@ -54,10 +58,14 @@ import "netplay.jai";
 import "boot.jai";
 
 float TICK_MS = 1000.0 / 35.0;
-bool UNCAPPED = false;       // u / -- uncapped: render every frame the machine allows, the camera eased between tics
+bool SMOOTH = true;          // U / OPTIONS: frames at up to 60 Hz, the camera and every mobj eased between the 35 Hz tics
+bool UNCAPPED = false;       // -- uncapped: smooth with no frame cap, every frame the machine allows
+float SMOOTH_MS = 1000.0 / 60.0;
+bool MUTE = false;           // -- --mute: no music or sound
 string PIX_MODE = "";        // --pix half|sext, else the OPTIONS choice; "" = sextants within the pixel budget
 string PIX_SETTING = "";     // the OPTIONS render mode, saved with the config; "" until it is changed
 float IP_X = 0.0; float IP_Y = 0.0; float IP_ANG = 0.0; float IP_Z = 41.0;   // the view at the previous tic
+float IP_BOBX = 0.0; float IP_BOBY = 0.0;                                     // and the weapon's bob
 bool RUN_TOGGLE = false;
 
 int GSTATE = 0;               // 0 title, 1 menu, 2 game, 3 intermission, 4 episode end
@@ -144,7 +152,7 @@ function attract_end(bool to_menu) -> void {
 	TITLE_MS = 0.0;
 	GSTATE = 0;
 	if (to_menu) { menu_open(); }
-	else { wipe_begin(); }
+	else { wipe_begin(); FIRE_W = 0; }               // back on the title: the fire lights again from cold
 }
 
 function read_input() -> void {
@@ -247,6 +255,8 @@ function menu_build() -> void {
 	}
 	if (MENU_MODE == 7) {
 		MENU_ITEMS.push(SEXTANTS ? "HIGH DETAIL: ON" : "HIGH DETAIL: OFF");
+		MENU_ITEMS.push(SMOOTH ? "SMOOTH MOTION: ON" : "SMOOTH MOTION: OFF");
+		MENU_ITEMS.push(`BRIGHTNESS: ${math::itrunc(GAMMA)}`);
 		MENU_ITEMS.push("BACK");
 		return;
 	}
@@ -280,6 +290,7 @@ function menu_draw_window(var& entries, int sel, int rows, string title) -> void
 }
 
 function menu_open() -> void {
+	if (GSTATE == 2 && MID_GAME && VW > 0) { backdrop_take(); } else { BACKDROP = []; }
 	GSTATE = 1;
 	MENU_MODE = 0;
 	MENU_SEL = 0;
@@ -309,7 +320,8 @@ string DEMO_LAST_NAME = "demo.json"; // record target + play prefill: zero-typin
 bool DEMO_MENU_ARMED = false; // skill-pick esc disarms a DEMOS-armed tape
 
 function cfg_save() -> void {
-	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME, "pix": PIX_SETTING}));
+	write_file(data_path(NET_CFG), to_json({"addr": NP_LAST_ADDR, "demo": DEMO_LAST_NAME, "pix": PIX_SETTING, "gamma": GAMMA,
+		"smooth": SMOOTH}));
 }
 
 function addr_save() -> void {
@@ -324,6 +336,8 @@ function addr_load() -> void {
 	if (cfg.has("addr")) { NP_LAST_ADDR = "" + cfg["addr"]; }
 	if (cfg.has("demo")) { DEMO_LAST_NAME = "" + cfg["demo"]; }
 	if (cfg.has("pix")) { PIX_SETTING = "" + cfg["pix"]; }
+	if (cfg.has("gamma")) { GAMMA = cfg["gamma"] + 0.0; }
+	if (cfg.has("smooth")) { SMOOTH = cfg["smooth"] == true; }
 	if (PIX_MODE == "") { PIX_MODE = PIX_SETTING; }   // --pix on the command line wins for its run
 }
 
@@ -337,6 +351,34 @@ function render_mode_toggle() -> void {
 		print(ESC + "[2J", skip_newline);
 	}
 	menu_build();
+}
+
+// G / OPTIONS: DOOM's five gamma levels, kept for later runs
+function gamma_cycle() -> void {
+	vid_set_gamma(GAMMA >= 4.0 ? 0.0 : math::itrunc(GAMMA) + 1.0);
+	set_msg(`gamma correction level ${math::itrunc(GAMMA)}`);
+	cfg_save();
+}
+
+function smooth_toggle() -> void {
+	SMOOTH = !SMOOTH;
+	set_msg(SMOOTH ? "smooth motion: on (60 fps)" : "smooth motion: off (35 fps, as doom drew it)");
+	cfg_save();
+}
+
+// the frame's reach of tune.jai's import: an edited file re-runs, a broken one raises here and the old values stay
+function tune_poll() -> void {
+	try {
+		if (import("tune.jai")) {
+			TUNE_RELOADS += 1;
+			TUNE_NOTE = "";
+			set_msg(`tune.jai reloaded: fov ${FOV:.0}`);
+		}
+	} catch (e) {
+		array<string> el = to_string(e).lines();
+		TUNE_NOTE = el.size() > 0 ? "FAILED: " + el[0] : "FAILED";
+		set_msg("tune.jai: reload failed, values kept");
+	}
 }
 
 // "host", "host:port" or bare port after ':' -> starts the join lobby
@@ -424,7 +466,10 @@ function menu_key(string k) -> bool {
 				DEMO_NAME_EDIT = DEMO_LAST_NAME;
 			}
 		} else if (MENU_MODE == 7) {
-			if (MENU_ITEMS[MENU_SEL] == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+			var osel = MENU_ITEMS[MENU_SEL];
+			if (osel == "BACK") { MENU_MODE = 0; MENU_SEL = 0; menu_build(); }
+			else if (osel.starts_with("SMOOTH")) { smooth_toggle(); menu_build(); }
+			else if (osel.starts_with("BRIGHTNESS")) { gamma_cycle(); menu_build(); }
 			else { render_mode_toggle(); }
 		} else if (MENU_MODE == 6) {
 			var lsel = MENU_ITEMS[MENU_SEL];
@@ -560,10 +605,8 @@ function game_key(string k) -> void {
 		RUN_TOGGLE = !RUN_TOGGLE;
 		set_msg(RUN_TOGGLE ? "run: on" : "run: off");
 	}
-	else if (k == "u") {
-		UNCAPPED = !UNCAPPED;
-		set_msg(UNCAPPED ? "frame rate: uncapped" : "frame rate: 35");
-	}
+	else if (k == "u") { smooth_toggle(); }
+	else if (k == "g") { gamma_cycle(); }
 	else if (k == "1") { weapon_select(1); }
 	else if (k == "2") { weapon_select(2); }
 	else if (k == "3" && HAVE_SHOTGUN) { weapon_select(3); }
@@ -610,9 +653,13 @@ bool NP_WI_HOLD = false;      // client intermission menu: quit yes, gameplay no
 
 // render and blit grow with the pixel count: 640x240 (320x80 sextant cells) takes ~13 ms of DOOM's 28.5 ms tic
 int PIXEL_BUDGET = 160000;
+bool BLIT_SERIAL_PICK = false; // P in the J panel: the blit runs serially until P again
 int SCREEN_COLS = 0;
 int SCREEN_ROWS = 0;
 string VIEW_HOME = "";
+int VIEW_TOP = 1;             // the view's top-left cell, 1-based
+int VIEW_LEFT = 1;
+float FIRE_ACC = 0.0;
 
 // the view fills the console: sextants where they fit the budget, half blocks otherwise (or by choice), and a
 // screen too large for even those gets the largest view inside the budget, centered
@@ -630,12 +677,14 @@ function screen_fit() -> void {
 	}
 	if (VW == 0) { vid_init_cells(cols, rows); }     // BEFORE map start: vid_init resets the palette intern
 	else { vid_resize(cols * cell_w(), rows * cell_h()); }
-	BLIT_WORKERS = cols >= 160 ? 1 : 0;              // parallel rows pay off once the barrier amortizes
+	BLIT_WORKERS = cols >= 80 && BLIT_SERIAL_PICK == false ? 1 : 0;   // parallel rows pay off once the barrier amortizes
 	hud_layout();
 	int left = (SCREEN_COLS - cols) / 2;
 	int top = (SCREEN_ROWS - 1 - rows) / 2;
 	VID_INDENT = left > 0 ? `${ESC}[${left}C` : "";
-	VIEW_HOME = `${ESC}[${top > 0 ? top + 1 : 1};1H`;
+	VIEW_TOP = top > 0 ? top + 1 : 1;
+	VIEW_LEFT = left > 0 ? left + 1 : 1;
+	VIEW_HOME = `${ESC}[${VIEW_TOP};1H`;
 }
 
 function play(string mapname) -> int {
@@ -643,7 +692,7 @@ function play(string mapname) -> int {
 	screen_fit();
 	hud_init();                                      // after the palette reset vid_init makes
 
-	SND_ON = true;                                   // only real play makes noise; gates stay silent
+	SND_ON = !MUTE;                                  // only real play makes noise; gates stay silent
 	print(ESC + "[?1049h" + ESC + "[?25l" + ESC + "[2J", skip_newline);   // alt screen, no cursor
 	float accum = 0.0;
 	time::stopwatch frame;
@@ -657,9 +706,11 @@ function play(string mapname) -> int {
 		}
 		NP_QUEUE_MODE = "";
 	}
+	time::stopwatch stage;
 	while (!quit) {
 		float dt = frame.elapsed() * 1000;
 		frame.start();
+		stage.start();
 		if (term_cols() != SCREEN_COLS || term_rows() != SCREEN_ROWS) {
 			screen_fit();
 			print(ESC + "[2J", skip_newline);
@@ -670,6 +721,8 @@ function play(string mapname) -> int {
 			if (accum > 120.0) { accum = 120.0; }    // stall recovery, GLOOM-style
 			while (accum >= TICK_MS) {
 				IP_X = P_X; IP_Y = P_Y; IP_ANG = P_ANG; IP_Z = P_VIEWZ;
+				IP_BOBX = WBOB_X; IP_BOBY = WBOB_Y;
+				lerp_snapshot();
 				read_input();
 				game_tic();
 				accum = accum - TICK_MS;
@@ -681,10 +734,22 @@ function play(string mapname) -> int {
 			TITLE_MS = TITLE_MS + dt;
 			if (TITLE_MS >= ATTRACT_WAIT_MS && !ATTRACT_OFF) { attract_start(); }
 		} else if (!ATTRACT) { TITLE_MS = 0.0; }
+		if (GSTATE == 0 || (GSTATE == 1 && BACKDROP.empty())) {   // the fire burns behind the title and its menu
+			FIRE_ACC = FIRE_ACC + dt;
+			if (FIRE_ACC > 120.0) { FIRE_ACC = 120.0; }
+			while (FIRE_ACC >= TICK_MS) { fire_tic(); FIRE_ACC = FIRE_ACC - TICK_MS; }
+		}
+		float sim_ms = stage.elapsed() * 1000;
 
 		var edge = read_key();                       // drain ALL pending edges each frame
 		while (edge != "") {
-			if (ATTRACT) { attract_end(true); }
+			bool typing = GSTATE == 1 && (MENU_MODE == 3 || MENU_MODE == 5);
+			if (!typing && edge == "j") { PANEL_ON = !PANEL_ON; print(ESC + "[2J", skip_newline); }
+			else if (!typing && edge == "p" && PANEL_ON) {
+				BLIT_SERIAL_PICK = !BLIT_SERIAL_PICK;
+				BLIT_WORKERS = BLIT_SERIAL_PICK ? 0 : 1;
+			}
+			else if (ATTRACT) { attract_end(true); }
 			else if (GSTATE == 0) { menu_open(); }
 			else if (GSTATE == 1) { if (menu_key(edge)) { quit = true; } }
 			else if (GSTATE == 5) {                  // net lobby: esc backs out,
@@ -764,6 +829,8 @@ function play(string mapname) -> int {
 		if (GSTATE == 0 || GSTATE == 1) { music_want(MUS_TITLE); }
 		else if (GSTATE == 3 || GSTATE == 4) { music_want(MUS_INTER); }
 
+		tune_poll();
+		stage.start();
 		if (GSTATE == 2) {
 			// palette flash: pain/berserk reds beat pickup golds beat the radsuit green
 			int bank = 0;
@@ -776,7 +843,8 @@ function play(string mapname) -> int {
 			else {
 				EXTRA_LIGHT = P_GOGGLES > 0 ? 32 : (FLASH_TICS > 0 ? 1 : 0);
 				float vx = P_X; float vy = P_Y; float va = P_ANG; EYE_Z = P_VIEWZ;
-				if (UNCAPPED) {
+				LERP_F = SMOOTH ? accum / TICK_MS : 1.0;
+				if (SMOOTH) {
 					// the camera between the last two tics (the playsim stays at 35 Hz); a teleport snaps
 					float f = accum / TICK_MS;
 					float jx = P_X - IP_X; float jy = P_Y - IP_Y;
@@ -790,9 +858,13 @@ function play(string mapname) -> int {
 				}
 				render_view(vx, vy, va);
 				if (P_HP > 0) {
+					float bx = WBOB_X; float by = WBOB_Y;
+					WBOB_X = IP_BOBX + (bx - IP_BOBX) * LERP_F;
+					WBOB_Y = IP_BOBY + (by - IP_BOBY) * LERP_F;
 					var w = WEAPONS[CUR_WEAPON];
 					draw_weapon(w.spr, w.view_frame());
 					if (FLASH_TICS > 0) { draw_weapon_flash(w.flash, "A"); }
+					WBOB_X = bx; WBOB_Y = by;
 				}
 			}
 			hud_draw();
@@ -827,10 +899,19 @@ function play(string mapname) -> int {
 			wipe_overlay();
 			if (wipe_tic()) { WIPE_TICS = 0; }
 		}
-		print(VIEW_HOME + vid_blit(), skip_newline);
+		float view_ms = stage.elapsed() * 1000;
+		stage.start();
+		string panel = PANEL_ON && SCREEN_COLS >= 60 ? panel_text(VIEW_TOP, VIEW_LEFT) : "";
+		if (panel == "") { vid_skip(0, 0); } else { vid_skip(PANEL_H, PANEL_W); }   // the frame leaves the panel's cells be
+		string shown = VIEW_HOME + vid_blit() + panel;
+		float blit_ms = stage.elapsed() * 1000;
+		stage.start();
+		print(shown, skip_newline);
+		stat_note(sim_ms, view_ms, blit_ms, stage.elapsed() * 1000, dt);
 
-		float rest = math::itrunc(TICK_MS) - frame.elapsed() * 1000;
-		if (rest > 0 && !UNCAPPED) { sleep(rest / 1000.0); }
+		float cap = !SMOOTH ? math::itrunc(TICK_MS) : (UNCAPPED ? 0.0 : SMOOTH_MS);
+		float rest = cap - frame.elapsed() * 1000;
+		if (rest > 0) { sleep(rest / 1000.0); }
 	}
 	demo_finish();                                   // quitting mid-level still writes the tape
 	music_stop();
@@ -933,6 +1014,8 @@ function selftest() -> int {
 
 // headless walk of the whole presentation flow: title -> menu -> skill ->
 // game -> intermission -> next map -> episode end -> title, every screen drawn
+int FIRE_PIN = 120978818;     // the title fire's hash after flowtest's 90 tics at 320x200, seed 4242: both backends
+
 function flowtest() -> int {
 	int fails = 0;
 	int mload = file_exists(data_path(SAVE_PATH)) ? 1 : 0;      // a real save adds LOAD GAME
@@ -1361,6 +1444,92 @@ function flowtest() -> int {
 	if (wr1b != wr1 || wr2b != wr2) { fails = fails + 1; print("FAIL wipe leaked into the sim RNG stream"); }
 	WIPE_TICS = 0;
 
+	// ---- presentation: the mean sextant fit, gamma, the title fire, the menu backdrop, the J panel, tune.jai, easing ----
+	bool was_tc = HOST_TRUECOLOR;
+	HOST_TRUECOLOR = true;
+	SEXTANTS = true;
+	vid_resize(2, 3);
+	int cw = rgb_idx(255, 255, 255);
+	int ca = rgb_idx(100, 0, 0);
+	int cb = rgb_idx(60, 0, 0);
+	PIX = [cw, cw, ca, cb, ca, cb];                  // white over two reds: the white glyph on the reds' mean
+	int mr = (GAMMA_LUT[100] * 2 + GAMMA_LUT[60] * 2) / 4;
+	string want_cell = BG24 + to_string(mr) + ";0;0m" + PAL_FG[cw] + SEXTG[3] + RESET;
+	if (vid_row_sext_mean(0) != want_cell) { fails = fails + 1; print("FAIL mean sextant fit"); }
+	SEXTANTS = false;
+	vid_resize(4, 2);
+	PIX = [cw, cw, cw, cw, cb, cb, cb, cb];
+	vid_skip(1, 3);                                  // the J panel's cells: the row starts past them
+	if (vid_row_half(0) != SKIP_MOVE + PAL_FG[cw] + PAL_BG[cb] + HALFG + RESET || SKIP_MOVE != ESC + "[3C") {
+		fails = fails + 1;
+		print("FAIL view rows skip the panel's cells");
+	}
+	vid_skip(0, 0);
+	vid_resize(320, 200);
+	float g0 = GAMMA;
+	vid_set_gamma(0.0);
+	if (PAL_FG[ca] != sgr_color(38, 100, 0, 0)) { fails = fails + 1; print("FAIL gamma 0 leaves colors as drawn"); }
+	vid_set_gamma(2.0);
+	if (PAL_CR[ca] <= GAMMA_LUT[60] || PAL_CR[ca] <= 100) { fails = fails + 1; print("FAIL gamma 2 brightens"); }
+	vid_set_gamma(g0);
+	HOST_TRUECOLOR = was_tc;
+
+	fire_start(4242);
+	for (int ft = 0; ft < 90; ++ft) { fire_tic(); }
+	int flame_top = VH;
+	for (int fy = VH - 1; fy >= 0; --fy) {
+		for (int fx2 = 0; fx2 < VW; ++fx2) { if (FIRE[fy * VW + fx2] > 0) { flame_top = fy; } }
+	}
+	if (flame_top > VH * 3 / 4 || flame_top < VH / 4) { fails = fails + 1; print(`FAIL title fire reach (top row ${flame_top} of ${VH})`); }
+	if (fire_hash() != FIRE_PIN) { fails = fails + 1; print(`FAIL title fire stream (hash ${fire_hash()}, pinned ${FIRE_PIN})`); }
+	else { print(`title fire pinned: 90 tics to hash ${FIRE_PIN}, flames up to row ${flame_top} of ${VH}`); }
+	title_draw();
+	if (PIX[(VH - 1) * VW + VW / 2] != FIRE_PAL[36]) { fails = fails + 1; print("FAIL title fire not drawn over TITLEPIC"); }
+
+	GSTATE = 2;
+	MID_GAME = true;
+	pix_clear(cw);
+	menu_open();
+	if (BACKDROP.size() != VW * VH || PAL_R[BACKDROP[0]] != math::itrunc(255 * BACKDROP_DIM)) { fails = fails + 1; print("FAIL menu backdrop"); }
+	menu_draw(MENU_ITEMS, MENU_SEL, "");
+	if (PIX[0] != BACKDROP[0]) { fails = fails + 1; print("FAIL menu over the dimmed game"); }
+	MID_GAME = false;
+	GSTATE = 0;
+	menu_open();
+	if (!BACKDROP.empty()) { fails = fails + 1; print("FAIL title menu kept a game backdrop"); }
+	GSTATE = 0;
+
+	for (int sn = 0; sn < 30; ++sn) { stat_note(0.1, 2.5 + sn % 3, 0.8, 1.5, 16.7); }
+	string ptext = panel_text(1, 1);
+	if (!ptext.contains("JAISCRIPT") || !ptext.contains(" rows") || !ptext.contains("tune.jai") || ST_VIEW.size() != PANEL_SPAN) {
+		fails = fails + 1;
+		print("FAIL J panel text");
+	}
+
+	float fov_live = FOV;
+	FOV = 123.0;
+	string tune_src = read_file(game_root() + "/scripts/tune.jai");
+	write_file(game_root() + "/scripts/tune.jai", tune_src);   // the same text, saved again: the next frame reloads it
+	float recheck = import_recheck_interval();
+	import_recheck_interval(0.0);                    // imports look at their files every 200 ms; now, for the test
+	tune_poll();
+	import_recheck_interval(recheck);
+	if (FOV != fov_live || TUNE_RELOADS != 1) { fails = fails + 1; print(`FAIL tune.jai reload (fov ${FOV}, ${TUNE_RELOADS} reloads)`); }
+	else { print("tune.jai reloaded in place"); }
+
+	if (MO_X.size() > 0) {
+		lerp_snapshot();
+		LERP_MOX[0] = MO_X[0] - 10.0;
+		LERP_F = 0.5;
+		lerp_mobjs();
+		bool eased = DRAW_X[0] == MO_X[0] - 5.0;
+		LERP_MOX[0] = MO_X[0] - 100.0;
+		lerp_mobjs();
+		bool snapped = DRAW_X[0] == MO_X[0];
+		LERP_F = 1.0;
+		if (!eased || !snapped) { fails = fails + 1; print("FAIL mobj easing between tics"); }
+	}
+
 	print(fails == 0 ? "FLOWTEST: ALL GREEN" : `FLOWTEST: ${fails} FAILURES`);
 	return fails;
 }
@@ -1381,7 +1550,8 @@ function main() -> int {
 		else if (ARGS[i] == "bootstrap") { bootstrap = true; }
 		else if (ARGS[i] == "--no-shareware") { want_shareware = false; }
 		else if (ARGS[i] == "--no-audio") { want_audio = false; }
-		else if (ARGS[i] == "uncapped") { UNCAPPED = true; }
+		else if (ARGS[i] == "--mute") { MUTE = true; }
+		else if (ARGS[i] == "uncapped") { UNCAPPED = true; SMOOTH = true; }
 		else if (ARGS[i] == "--truecolor") { HOST_TRUECOLOR = true; }
 		else if (ARGS[i] == "--256color") { HOST_TRUECOLOR = false; }
 		else if (ARGS[i] == "--pix" && i + 1 < ARGS.size()) {

@@ -9,6 +9,7 @@ import "map.jai";
 import "vid.jai";
 import "tex.jai";
 import "things.jai";
+import "fx.jai";
 
 // netplay.jai mirror behind NET_GAME: extern-declared so programs that never import netplay.jai still check
 extern NET_FRAGS_MINE;
@@ -56,6 +57,24 @@ function draw_patch(int lump, int x0, int y0, int w, int h) -> void {
 			if (py < 0 || py >= VH) { continue; }
 			int texel = tp[base + sy * ph / h];
 			if (texel >= 0) { pix[py * VW + px] = palcm[texel]; }
+		}
+	}
+}
+
+// the patch's opaque texels in one color: a text shadow
+function draw_patch_solid(int lump, int x0, int y0, int w, int h, int color) -> void {
+	sprite_prepare(lump);
+	int pw = SPR_W[lump];
+	int ph = SPR_H[lump];
+	if (w < 1 || h < 1 || pw < 1 || ph < 1) { return; }
+	var& tp = SPR_PIX[lump];
+	for (int sx = 0; sx < w; ++sx) {
+		int px = x0 + sx;
+		if (px < 0 || px >= VW) { continue; }
+		int base = (sx * pw / w) * ph;
+		for (int sy = 0; sy < h; ++sy) {
+			int py = y0 + sy;
+			if (py >= 0 && py < VH && tp[base + sy * ph / h] >= 0) { PIX[py * VW + px] = color; }
 		}
 	}
 }
@@ -236,8 +255,14 @@ function text_width(string s, float fs) -> int {
 	return math::itrunc(w);
 }
 
+int TEXT_SHADOW = -1;          // a palette color: draw_text lays each glyph over its shadow, a scaled pixel down-right
+
 function draw_text(string s, int x, int y, float fs) -> void {
 	float fx = x;
+	int sdx = math::itrunc(fs + 0.5);
+	int sdy = pixel_rows(fs + 0.5);
+	if (sdx < 1) { sdx = 1; }
+	if (sdy < 1) { sdy = 1; }
 	for (int i = 0; i < s.size(); ++i) {
 		int lu = stcfn_lump(s[i] + 0);
 		if (lu < 0) { fx = fx + 4.0 * fs; continue; }
@@ -248,6 +273,7 @@ function draw_text(string s, int x, int y, float fs) -> void {
 		int ph = math::itrunc(chh * fs * PIXEL_Y);
 		if (pw < 1) { pw = 1; }
 		if (ph < 1) { ph = 1; }
+		if (TEXT_SHADOW >= 0) { draw_patch_solid(lu, math::itrunc(fx) + sdx, y + sdy, pw, ph, TEXT_SHADOW); }
 		draw_patch(lu, math::itrunc(fx), y, pw, ph);
 		fx = fx + (cw + 1) * fs;
 	}
@@ -265,7 +291,10 @@ function menu_scale() -> float {
 }
 
 function msg_draw() -> void {
-	if (MSG_TIMER > 0) { draw_text(GAME_MSG, 2, 2, text_scale()); }
+	if (MSG_TIMER <= 0) { return; }
+	TEXT_SHADOW = rgb_idx(0, 0, 0);
+	draw_text(GAME_MSG, 2, 2, text_scale());
+	TEXT_SHADOW = -1;
 }
 
 // frame-time EMA -> FPS in the top-right corner
@@ -319,9 +348,19 @@ function big_pct(int val, int rx, int y, float fs) -> void {
 
 // ----------------------------------------------------------------- screens ---
 
+// TITLEPIC with the fire climbing over it, and PRESS ANY KEY blinking on its shadow
+int TITLE_BLINK = 0;          // frames the title has shown
+
 function title_draw() -> void {
 	if (!draw_patch_name("TITLEPIC", 0, 0, VW, VH)) { pix_clear(0); }
-	draw_text_center("PRESS ANY KEY", VH - pixel_rows(12.0 * text_scale()), text_scale());
+	fire_draw(FIRE_SHOW);
+	TITLE_BLINK += 1;
+	if ((TITLE_BLINK / 20) % 4 != 3) {
+		float fs = fit_scale("PRESS ANY KEY", text_scale());
+		TEXT_SHADOW = rgb_idx(0, 0, 0);
+		draw_text_center("PRESS ANY KEY", VH - pixel_rows(12.0 * fs), fs);
+		TEXT_SHADOW = -1;
+	}
 }
 
 // the real menu art where the WAD has it (M_JKILL and friends are ~2x the
@@ -430,7 +469,7 @@ function menu_entry_draw(string label, int x, int y, float ms) -> int {
 }
 
 function menu_draw(var& entries, int sel, string title) -> void {
-	pix_clear(0);
+	backdrop_draw();
 	int mlu = title == "" ? lump_num("M_DOOM") : -1;
 	float head = 20.0;                               // the heading's height in 320-wide units
 	if (mlu >= 0) {

@@ -52,6 +52,9 @@ GATORQUEST_STATE=3218840367
 GLOOM_LONG_FRAME=dfd969ed5a336dca
 GLOOM_LONG_STATE=1503537018
 TIMEDEMO_STATE=1746772898
+TIMEDEMO_FRAME=667628107
+TIMEDEMO_SEXT_FRAME=319676015
+TIMEDEMO_SEXT_STATE=1790055606
 
 # Deep-recursion tests outgrow Linux's 8 MB main-thread stack in Debug builds; the
 # Windows binaries link a 128 MB stack, so match it where the shell allows.
@@ -155,7 +158,8 @@ gate_gloom_workers() {
 }
 gate_gloom_long() { gloom_hashes 600 0 "$GLOOM_LONG_FRAME" "$GLOOM_LONG_STATE"; }
 
-# JaiDOOM's timedemo and the game's own headless selftest (which loads jaidoom.jai, the entry point), where the checkout carries the example (it is optional)
+# JaiDOOM's timedemo in half blocks and (its first 700 tics) in sextants, the game's own headless selftest (which loads
+# jaidoom.jai, the entry point) and its presentation flowtest, where the checkout carries the example (it is optional)
 gate_timedemo() {
 	local dir="$ROOT/examples/jaidoom/scripts"
 	[ -f "$dir/p10_timedemo.jai" ] || { echo "timedemo: examples/jaidoom is not in this checkout, skipped"; return 0; }
@@ -165,9 +169,17 @@ gate_timedemo() {
 		rm -rf ./.cache
 		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" p10_timedemo.jai -- 120x78
 		want "timedemo $backend: expected STATE_HASH $TIMEDEMO_STATE" "STATE_HASH: $TIMEDEMO_STATE\\b"
+		want "timedemo $backend: expected FRAME_HASH $TIMEDEMO_FRAME" "FRAME_HASH: $TIMEDEMO_FRAME\\b"
+		rm -rf ./.cache
+		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" p10_timedemo.jai -- 120x78 sext tics 700
+		want "timedemo sext $backend: expected STATE_HASH $TIMEDEMO_SEXT_STATE" "STATE_HASH: $TIMEDEMO_SEXT_STATE\\b"
+		want "timedemo sext $backend: expected FRAME_HASH $TIMEDEMO_SEXT_FRAME" "FRAME_HASH: $TIMEDEMO_SEXT_FRAME\\b"
 		rm -rf ./.cache
 		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" jaidoom.jai -- selftest
 		want "jaidoom selftest $backend: expected ALL GREEN" "SELFTEST: ALL GREEN"
+		rm -rf ./.cache
+		run_logged "$BIN/jaiscript" --no-pause --backend="$backend" jaidoom.jai -- flowtest
+		want "jaidoom flowtest $backend: expected ALL GREEN" "FLOWTEST: ALL GREEN"
 	done
 	rm -rf ./.cache
 }

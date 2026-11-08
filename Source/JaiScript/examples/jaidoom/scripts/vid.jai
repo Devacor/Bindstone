@@ -2,7 +2,8 @@
 // PIX is a flat palette-index grid; colors intern once through rgb_idx; the
 // blitter packs each cell's pixels (1x2 through the upper half block, or 2x3
 // through the Unicode 13 sextants) into one glyph with fg/bg colors, emitting
-// escapes only on change. Byte output (utf8, BMP) mints through to_char — no
+// escapes only on change (in 24-bit sextants, each side of a cell in its pixels'
+// mean color, through GAMMA). Byte output (utf8, BMP) mints through to_char — no
 // dependency on any load-time table.
 
 import "wad.jai";
@@ -28,14 +29,21 @@ array<int> PIX = [];
 int VW = 0;
 int VH = 0;
 int VIEWH = 0;                // rows the 3D view may touch (hud bar reserves the rest)
-// 0 = serial blit; nonzero = parallel_transform rows (GLOOM pattern).
-// Measured on the post-region-kill VM: 120x78 still favors serial on the
-// whole frame (blit is ~8% of it), 200x140 wins outright (blit 2.6 -> 1.1ms,
-// total ~21 -> ~20.7). play() auto-enables at >= 160 cols; gates and the
-// bench set this explicitly.
+// 0 = serial blit; nonzero = parallel_transform rows (GLOOM pattern). 120x39 sextant cells with the mean fit: 3.1 ms
+// serial, 0.9 ms on 8 threads; play() turns it on from 80 columns, gates and the bench set it explicitly.
 int BLIT_WORKERS = 0;
 array<int> ROWIDX = [];       // parallel_transform input, one element per glyph row
 string VID_INDENT = "";       // starts every glyph row: the cursor move that centers a view narrower than the screen
+int SKIP_ROWS = 0;            // the top glyph rows leave their first SKIP_CELLS cells alone: text drawn over the view
+int SKIP_CELLS = 0;           // there stays put instead of being painted over every frame
+string SKIP_MOVE = "";
+
+function vid_skip(int rows, int cells) -> void {
+	int vcols = VW / cell_w();
+	SKIP_CELLS = cells < vcols ? cells : vcols;
+	SKIP_ROWS = rows;
+	SKIP_MOVE = SKIP_CELLS > 0 ? `${ESC}[${SKIP_CELLS}C` : "";
+}
 
 map<int, int> PAL_KEYS = {};
 array<string> PAL_FG = [];
@@ -45,6 +53,19 @@ array<int> PAL_R = [];
 array<int> PAL_G = [];
 array<int> PAL_B = [];
 array<string> PAL_BGR3 = [];  // 3-byte BGR string per index (BMP fast path)
+array<int> PAL_CR = [];       // the color as the terminal gets it, through GAMMA
+array<int> PAL_CG = [];
+array<int> PAL_CB = [];
+array<int> PAL_CK = [];       // PAL_CR/CG/CB packed: the mean fit's last-color test
+string FG24 = "";
+string BG24 = "";
+array<string> DEC = [];       // "0".."255", and each after a ';'
+array<string> DEC_SEMI = [];
+int SEXT_FIT = 1;             // 1 = mean colors where the terminal takes 24-bit, 0 = the two extreme pixels
+
+// DOOM's gamma levels 0 (as drawn) to 4 (brightest), fractions between; the terminal's colors only, never the sim
+float GAMMA = 1.0;
+array<int> GAMMA_LUT = [];
 
 function utf8(int cp) -> string {
 	if (cp < 128) { return "" + to_char(cp); }
@@ -77,6 +98,16 @@ function vid_init(int w, int h) -> void {
 	PAL_G = [];
 	PAL_B = [];
 	PAL_BGR3 = [];
+	PAL_CR = [];
+	PAL_CG = [];
+	PAL_CB = [];
+	PAL_CK = [];
+	FG24 = ESC + "[38;2;";
+	BG24 = ESC + "[48;2;";
+	DEC = [];
+	DEC_SEMI = [];
+	for (int v = 0; v < 256; ++v) { DEC.push(to_string(v)); DEC_SEMI.push(";" + to_string(v)); }
+	gamma_table();
 	rgb_idx(0, 0, 0);
 }
 
@@ -108,14 +139,44 @@ function rgb_idx(int r, int g, int b) -> int {
 	if (PAL_KEYS.has(key)) { return PAL_KEYS[key]; }
 	int idx = PAL_FG.size();
 	PAL_KEYS[key] = idx;
-	PAL_FG.push(sgr_color(38, r, g, b));
-	PAL_BG.push(sgr_color(48, r, g, b));
+	int cr = GAMMA_LUT[r];
+	int cg = GAMMA_LUT[g];
+	int cb = GAMMA_LUT[b];
+	PAL_CR.push(cr);
+	PAL_CG.push(cg);
+	PAL_CB.push(cb);
+	PAL_CK.push((cr << 16) | (cg << 8) | cb);
+	PAL_FG.push(sgr_color(38, cr, cg, cb));
+	PAL_BG.push(sgr_color(48, cr, cg, cb));
 	PAL_LUM.push(r * 2 + g * 3 + b);
 	PAL_R.push(r);
 	PAL_G.push(g);
 	PAL_B.push(b);
 	PAL_BGR3.push(`${to_char(b)}${to_char(g)}${to_char(r)}`);
 	return idx;
+}
+
+function gamma_table() -> void {
+	GAMMA_LUT = [];
+	float e = 1.0 / (1.0 + 0.25 * GAMMA);
+	for (int v = 0; v < 256; ++v) { GAMMA_LUT.push(math::itrunc(255.0 * math::pow(v / 255.0, e) + 0.5)); }
+}
+
+// a new gamma for every color interned so far; the indices stay
+function vid_set_gamma(float g) -> void {
+	GAMMA = g < 0.0 ? 0.0 : (g > 4.0 ? 4.0 : g);
+	gamma_table();
+	for (int i = 0; i < PAL_FG.size(); ++i) {
+		int cr = GAMMA_LUT[PAL_R[i]];
+		int cg = GAMMA_LUT[PAL_G[i]];
+		int cb = GAMMA_LUT[PAL_B[i]];
+		PAL_CR[i] = cr;
+		PAL_CG[i] = cg;
+		PAL_CB[i] = cb;
+		PAL_CK[i] = (cr << 16) | (cg << 8) | cb;
+		PAL_FG[i] = sgr_color(38, cr, cg, cb);
+		PAL_BG[i] = sgr_color(48, cr, cg, cb);
+	}
 }
 
 function sgr_color(int layer, int r, int g, int b) -> string {
@@ -275,13 +336,13 @@ function draw_line(int x0, int y0, int x1, int y1, int c) -> void {
 // scalar copies. No var& aliases of captured names — subscript the globals
 // directly. The SAME function runs the serial loop when BLIT_WORKERS == 0.
 function vid_row_half(int cy) -> string {
-	string row = "";
+	string row = cy < SKIP_ROWS ? SKIP_MOVE : "";
 	int vw = VW;
 	int fg = -1;
 	int bg = -1;
 	int ti = cy * 2 * vw;
 	int bi = ti + vw;
-	for (int x = 0; x < vw; ++x) {
+	for (int x = cy < SKIP_ROWS ? SKIP_CELLS : 0; x < vw; ++x) {
 		int top = PIX[ti + x];
 		int bot = PIX[bi + x];
 		if (top != fg) { row += PAL_FG[top]; fg = top; }
@@ -294,14 +355,14 @@ function vid_row_half(int cy) -> string {
 // sext mode: 2x3 px per cell, GLOOM's cell fit: the brightest pixel is fg, the darkest bg, and each pixel takes the one
 // nearer in luminance. The same capture rules as vid_row_half.
 function vid_row_sext(int cy) -> string {
-	string row = "";
+	string row = cy < SKIP_ROWS ? SKIP_MOVE : "";
 	int vw = VW;
 	int fg = -1;
 	int bg = -1;
 	int r0 = cy * 3 * vw;
 	int r1 = r0 + vw;
 	int r2 = r1 + vw;
-	for (int x = 0; x < vw; x += 2) {
+	for (int x = cy < SKIP_ROWS ? SKIP_CELLS * 2 : 0; x < vw; x += 2) {
 		int p0 = PIX[r0 + x];
 		int p1 = PIX[r0 + x + 1];
 		int p2 = PIX[r1 + x];
@@ -348,18 +409,128 @@ function vid_row_sext(int cy) -> string {
 	return row + RESET;
 }
 
+// sext mode, 24-bit: the same luminance split, each side drawn in the mean color of its pixels, the cell's average
+// tone instead of its two extremes. A side of one palette color takes that color's interned escape.
+function vid_row_sext_mean(int cy) -> string {
+	string row = cy < SKIP_ROWS ? SKIP_MOVE : "";
+	int vw = VW;
+	int fgk = -1;
+	int bgk = -1;
+	int r0 = cy * 3 * vw;
+	int r1 = r0 + vw;
+	int r2 = r1 + vw;
+	for (int x = cy < SKIP_ROWS ? SKIP_CELLS * 2 : 0; x < vw; x += 2) {
+		int p0 = PIX[r0 + x];
+		int p1 = PIX[r0 + x + 1];
+		int p2 = PIX[r1 + x];
+		int p3 = PIX[r1 + x + 1];
+		int p4 = PIX[r2 + x];
+		int p5 = PIX[r2 + x + 1];
+		if (p0 == p1 && p0 == p2 && p0 == p3 && p0 == p4 && p0 == p5) {
+			int k = PAL_CK[p0];
+			if (k != bgk) { row += PAL_BG[p0]; bgk = k; }
+			row += " ";
+			continue;
+		}
+		int l0 = PAL_LUM[p0];
+		int l1 = PAL_LUM[p1];
+		int l2 = PAL_LUM[p2];
+		int l3 = PAL_LUM[p3];
+		int l4 = PAL_LUM[p4];
+		int l5 = PAL_LUM[p5];
+		int lmin = l0;
+		int lmax = l0;
+		if (l1 < lmin) { lmin = l1; } else if (l1 > lmax) { lmax = l1; }
+		if (l2 < lmin) { lmin = l2; } else if (l2 > lmax) { lmax = l2; }
+		if (l3 < lmin) { lmin = l3; } else if (l3 > lmax) { lmax = l3; }
+		if (l4 < lmin) { lmin = l4; } else if (l4 > lmax) { lmax = l4; }
+		if (l5 < lmin) { lmin = l5; } else if (l5 > lmax) { lmax = l5; }
+		int thr = lmin == lmax ? lmax + 1 : (lmin + lmax + 1) / 2;
+		int bits = 0;
+		int fr = 0; int fg = 0; int fb = 0; int fn = 0; int fi = -1; bool fmix = false;
+		int br = 0; int bg = 0; int bb = 0; int bi = -1; bool bmix = false;
+		if (l0 >= thr) {
+			bits += 1;
+			fr += PAL_CR[p0]; fg += PAL_CG[p0]; fb += PAL_CB[p0]; fn += 1;
+			if (fi < 0) { fi = p0; } else if (fi != p0) { fmix = true; }
+		} else {
+			br += PAL_CR[p0]; bg += PAL_CG[p0]; bb += PAL_CB[p0];
+			if (bi < 0) { bi = p0; } else if (bi != p0) { bmix = true; }
+		}
+		if (l1 >= thr) {
+			bits += 2;
+			fr += PAL_CR[p1]; fg += PAL_CG[p1]; fb += PAL_CB[p1]; fn += 1;
+			if (fi < 0) { fi = p1; } else if (fi != p1) { fmix = true; }
+		} else {
+			br += PAL_CR[p1]; bg += PAL_CG[p1]; bb += PAL_CB[p1];
+			if (bi < 0) { bi = p1; } else if (bi != p1) { bmix = true; }
+		}
+		if (l2 >= thr) {
+			bits += 4;
+			fr += PAL_CR[p2]; fg += PAL_CG[p2]; fb += PAL_CB[p2]; fn += 1;
+			if (fi < 0) { fi = p2; } else if (fi != p2) { fmix = true; }
+		} else {
+			br += PAL_CR[p2]; bg += PAL_CG[p2]; bb += PAL_CB[p2];
+			if (bi < 0) { bi = p2; } else if (bi != p2) { bmix = true; }
+		}
+		if (l3 >= thr) {
+			bits += 8;
+			fr += PAL_CR[p3]; fg += PAL_CG[p3]; fb += PAL_CB[p3]; fn += 1;
+			if (fi < 0) { fi = p3; } else if (fi != p3) { fmix = true; }
+		} else {
+			br += PAL_CR[p3]; bg += PAL_CG[p3]; bb += PAL_CB[p3];
+			if (bi < 0) { bi = p3; } else if (bi != p3) { bmix = true; }
+		}
+		if (l4 >= thr) {
+			bits += 16;
+			fr += PAL_CR[p4]; fg += PAL_CG[p4]; fb += PAL_CB[p4]; fn += 1;
+			if (fi < 0) { fi = p4; } else if (fi != p4) { fmix = true; }
+		} else {
+			br += PAL_CR[p4]; bg += PAL_CG[p4]; bb += PAL_CB[p4];
+			if (bi < 0) { bi = p4; } else if (bi != p4) { bmix = true; }
+		}
+		if (l5 >= thr) {
+			bits += 32;
+			fr += PAL_CR[p5]; fg += PAL_CG[p5]; fb += PAL_CB[p5]; fn += 1;
+			if (fi < 0) { fi = p5; } else if (fi != p5) { fmix = true; }
+		} else {
+			br += PAL_CR[p5]; bg += PAL_CG[p5]; bb += PAL_CB[p5];
+			if (bi < 0) { bi = p5; } else if (bi != p5) { bmix = true; }
+		}
+		if (bi >= 0) {
+			if (!bmix) {
+				int k = PAL_CK[bi];
+				if (k != bgk) { row += PAL_BG[bi]; bgk = k; }
+			} else {
+				int bn = 6 - fn;
+				int mr = br / bn; int mg = bg / bn; int mb = bb / bn;
+				int k = (mr << 16) | (mg << 8) | mb;
+				if (k != bgk) { row += BG24; row += DEC[mr]; row += DEC_SEMI[mg]; row += DEC_SEMI[mb]; row += "m"; bgk = k; }
+			}
+		}
+		if (fi < 0) {
+		} else if (!fmix) {
+			int k = PAL_CK[fi];
+			if (k != fgk) { row += PAL_FG[fi]; fgk = k; }
+		} else {
+			int mr = fr / fn; int mg = fg / fn; int mb = fb / fn;
+			int k = (mr << 16) | (mg << 8) | mb;
+			if (k != fgk) { row += FG24; row += DEC[mr]; row += DEC_SEMI[mg]; row += DEC_SEMI[mb]; row += "m"; fgk = k; }
+		}
+		row += SEXTG[bits];
+	}
+	return row + RESET;
+}
+
 // the frame as terminal text, one line per glyph row
 function vid_blit() -> string {
+	var row_fn = SEXTANTS ? (SEXT_FIT == 1 && HOST_TRUECOLOR ? vid_row_sext_mean : vid_row_sext) : vid_row_half;
 	if (BLIT_WORKERS != 0) {
-		var rows = SEXTANTS ? parallel_transform(ROWIDX, vid_row_sext) : parallel_transform(ROWIDX, vid_row_half);
+		var rows = parallel_transform(ROWIDX, row_fn);
 		return VID_INDENT + rows.join("\n" + VID_INDENT) + "\n";
 	}
 	string out = "";
 	int vrows = ROWIDX.size();
-	if (SEXTANTS) {
-		for (int cy = 0; cy < vrows; ++cy) { out += VID_INDENT + vid_row_sext(cy) + "\n"; }
-	} else {
-		for (int cy = 0; cy < vrows; ++cy) { out += VID_INDENT + vid_row_half(cy) + "\n"; }
-	}
+	for (int cy = 0; cy < vrows; ++cy) { out += VID_INDENT + row_fn(cy) + "\n"; }
 	return out;
 }

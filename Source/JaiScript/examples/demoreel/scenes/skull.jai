@@ -866,6 +866,9 @@ function sk_project(float& x, float& y, float& z) -> void {
 }
 
 class Ossuary : Scene {
+	// the web, the shafts and the dust draw per pixel too: past 16,000 pixels the whole scene renders smaller
+	Ossuary() { pixel_budget = 16000; }
+
 	float bx = 0.4; float by = 0.3; float bz = 0.2;
 	float fx = 0.0; float fy = 0.0; float fz = 1.0;
 	float ux = 0.0; float uy = 1.0; float uz = 0.0;
@@ -1709,12 +1712,12 @@ class Ossuary : Scene {
 
 	void render(var& grid) override {
 		set_world(tt);
-		// the rays trace at most about 5,200 pixels (a sextant grid is 2.25 times a half-block
+		// the rays trace at most about 4,600 pixels (a sextant grid is 2.25 times a half-block
 		// one) and the picture scales up to the grid; the web, the moth's dust and the
 		// particles draw over it at full size
 		// from the strike through the wrap the creature fills the frame and every ray is dear, so fewer are traced
 		float close = smooth((tt - t_impact + 0.6) / 0.5) * (1.0 - smooth((tt - t_wrap1 - 0.3) / 1.2));
-		float trace_k = math::sqrt((5200.0 - close * 2500.0) * (1.0 - SK_PUNCH * 0.25) / (w * h));
+		float trace_k = math::sqrt((4600.0 - close * 2100.0) * (1.0 - SK_PUNCH * 0.25) / (w * h));
 		trace_k = trace_k > 1.0 ? 1.0 : trace_k;
 		int tw = itrunc(w * trace_k);
 		int th = itrunc(h * trace_k);

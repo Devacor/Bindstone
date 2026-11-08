@@ -7729,23 +7729,37 @@ bool vm_compiler::lift_partners_ok(const binary_expr* b) {
 	         (lift_temp_only(b->right.get()) && !quiet_partner(b->left.get()) && !lifted_partner(b->left.get()) && !env_identifier(b->left.get())));   // an environment name on the left reads into a temp first (sequence_left)
 }
 
-// Whole-tree classification: operands and pure value-op binaries all the way down. Returns the binary-node
-// count (the conservative temp bound), -1 = not fusible or more than `budget` binaries (no lift takes over 16, so a long chain
-// stops the walk there). literal-op-literal nodes stay UNFUSED, mirroring binary_shape's refusal: the interpreter's fast paths
-// never fire for them (fuzz seed 115)
-int vm_compiler::lift_fusible_nodes(const expression* e, int budget) {
-	if (lift_operand_shape(e)) { return 0; }
-	if (e->get_type() != node_type::binary_expr) { return -1; }
-	const auto* b = static_cast<const binary_expr*>(e);
-	if (b->op.type == token_type::left_bracket || b->op.joins_text) { return -1; }   // a template string's own `+` joins as an append chain
-	if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
-	if (b->left->get_type() == node_type::literal_expr && b->right->get_type() == node_type::literal_expr) { return -1; }
-	if (!lift_partners_ok(b) || budget <= 0) { return -1; }
-	const int l = lift_fusible_nodes(b->left.get(), budget - 1);
-	if (l < 0) { return -1; }
-	const int r = lift_fusible_nodes(b->right.get(), budget - 1 - l);
-	if (r < 0) { return -1; }
-	return l + r + 1;
+// Whole-tree classification: operands and pure value-op binaries all the way down. Returns the most temps the lift's emission
+// holds at once for the tree as an operand (a binary lands in a temp; its left side's value stays held while its right side
+// computes), -1 = not fusible or over a_limit. The left spine is walked in a loop, so a left-deep chain of any length needs one
+// temp and no stack; only right operands recurse, each a temp deeper. literal-op-literal nodes stay UNFUSED, mirroring
+// binary_shape's refusal: the interpreter's fast paths never fire for them (fuzz seed 115)
+int vm_compiler::lift_temp_peak(const expression* e, int a_limit) {
+	int result = 0;
+	while (!lift_operand_shape(e)) {
+		if (e->get_type() != node_type::binary_expr || a_limit < 1) { return -1; }
+		const auto* b = static_cast<const binary_expr*>(e);
+		if (b->op.type == token_type::left_bracket || b->op.joins_text) { return -1; }   // a template string's own `+` joins as an append chain
+		if (!detail::transient_read_marker::is_value_binary_op(b->op.type)) { return -1; }
+		if (b->left->get_type() == node_type::literal_expr && b->right->get_type() == node_type::literal_expr) { return -1; }
+		if (!lift_partners_ok(b)) { return -1; }
+		const int r = lift_temp_peak(b->right.get(), a_limit - 1);
+		if (r < 0) { return -1; }
+		result = std::max(result, 1 + r);
+		e = b->left.get();
+	}
+	const bool leaf_temp = e->get_type() != node_type::identifier_expr && e->get_type() != node_type::literal_expr;   // a hoisted read, intrinsic or member lands in a temp
+	result = std::max(result, leaf_temp ? 1 : 0);
+	return result <= a_limit ? result : -1;
+}
+
+// the lift takes b when its whole tree is fusible, at least one side is a binary to lift (an operand pair is the flat fuse's,
+// which declined it) and the tree fits the temp limit with the left side held across the right
+bool vm_compiler::lift_takes(const binary_expr* b) {
+	if (!lift_partners_ok(b) || (lift_operand_shape(b->left.get()) && lift_operand_shape(b->right.get()))) { return false; }
+	const int l = lift_temp_peak(b->left.get(), k_lift_temp_limit);
+	const int r = l >= 0 ? lift_temp_peak(b->right.get(), k_lift_temp_limit - 1) : -1;
+	return l >= 0 && r >= 0;
 }
 
 // A value binary compile_binary emits as one fused binary last (the flat pre-step, the flat fuse or the lift), so
@@ -7792,9 +7806,7 @@ bool vm_compiler::binary_lands_fused(binary_expr* b) {
 	if ((lsub && (rsub || plain(b->right.get()))) || (rsub && (lsub || plain(b->left.get())))) return true;
 	if (!lsub && call_temp_operand(b->right.get()) && numeric_value_binary(b->left.get())) return true;   // a value binary ahead of a call lands in a temp first
 	if (binary_shape(b) != binary_shape_none) return true;
-	const int ln = lift_fusible_nodes(b->left.get());
-	const int rn = ln >= 0 ? lift_fusible_nodes(b->right.get()) : -1;
-	return lift_partners_ok(b) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16;
+	return lift_takes(b);
 }
 
 // The storage a T& producer (a `-> T&` return, a reference parameter's default) binds when its operand names it: a variable shares
@@ -8088,18 +8100,9 @@ JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binar
 		// a subscript only a temp can carry (not a chain operand) needs a partner that cannot raise first;
 		// the rule holds at every node of the lifted tree, the outer one included
 		auto temp_only = [this](const expression* c) { return lift_temp_only(c); };
-		auto partners_ok = [this](const binary_expr* b) { return lift_partners_ok(b); };
-		// Whole-tree classification: operands and pure value-op binaries all the way
-		// down. Returns the binary-node count (the conservative temp bound), -1 = not
-		// fusible. Capped so a pathological expression can't bloat the window every call.
-		auto fusible_nodes = [this](const expression* e) -> int { return lift_fusible_nodes(e); };
-		const int ln = fusible_nodes(expr->left.get());
-		const int rn = ln >= 0 ? fusible_nodes(expr->right.get()) : -1;
-		// At least one side must actually LIFT (ln+rn >= 1): a zero-lift arrival means
-		// the flat fuse above DECLINED this shape (e.g. literal-op-literal), and
-		// re-emitting it fused would re-pair the error spellings the decline preserves.
-		// Cap total temps at 16 so pathological expressions can't bloat the window.
-		if (partners_ok(expr.get()) && ln >= 0 && rn >= 0 && ln + rn >= 1 && ln + rn <= 16) {
+		// a zero-lift arrival (two operands) means the flat fuse above DECLINED this shape (e.g. literal-op-literal), and
+		// re-emitting it fused would re-pair the error spellings the decline preserves (lift_takes refuses it)
+		if (lift_takes(expr.get())) {
 			// Depth-first emission: children compute into temps before their parent,
 			// left subtree before right (subtree evaluation order preserved; the temp
 			// dst may alias a released child slot — the kernel resolves both operands
@@ -8139,26 +8142,33 @@ JAI_NOINLINE bool vm_compiler::compile_binary_shaped(const std::shared_ptr<binar
 			std::function<fused_operand(const expression_ptr&)> side = [&](const expression_ptr& e) -> fused_operand {
 				if (member_temp_operand(e.get())) { fused_operand o; compile_member_into_temp(e, o); return o; }   // a member leaf of a lifted subtree: its temp
 				if (operand_shape(e.get())) { return make_fused_operand(e); }
-				const auto* b = static_cast<const binary_expr*>(e.get());
-				fused_binary_proto p;
-				p.op = static_cast<uint8_t>(b->op.type);
+				// the left spine innermost first, in a loop: each binary's temp is its parent's left operand, and every level's
+				// result lands at the same mark once its children die into it
+				std::vector<const binary_expr*> spine;
+				for (const expression* at = e.get(); !operand_shape(at); at = static_cast<const binary_expr*>(at)->left.get()) { spine.push_back(static_cast<const binary_expr*>(at)); }
 				const size_t mark = temp_next_;
-				p.left = operand_shape(b->left.get()) ? operand_of(b, b->left, b->right.get()) : side(b->left);
-				sequence_left(p.left, b->left.get(), b->right.get());
-				p.right = operand_shape(b->right.get()) ? operand_of(b, b->right, b->left.get()) : side(b->right);
-				stamp_typed_class(p, b);
-				chunk_->fused_binary_protos.push_back(p);
-				const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
-				temp_next_ = mark;   // children die into this op
-				const uint32_t t = static_cast<uint32_t>(temp_next_);
-				++temp_next_;
-				if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
-				emit(opcode::op_binary_fused_temp, idx, t);
-				note_landing(b);
 				fused_operand out;
-				out.slot = t;
-				out.symbol = temp_symbol_index();
-				out.direct = true;
+				for (auto it = spine.rbegin(); it != spine.rend(); ++it) {
+					const binary_expr* b = *it;
+					fused_binary_proto p;
+					p.op = static_cast<uint8_t>(b->op.type);
+					p.left = it == spine.rbegin() ? operand_of(b, b->left, b->right.get()) : out;
+					sequence_left(p.left, b->left.get(), b->right.get());
+					p.right = operand_shape(b->right.get()) ? operand_of(b, b->right, b->left.get()) : side(b->right);
+					stamp_typed_class(p, b);
+					chunk_->fused_binary_protos.push_back(p);
+					const uint32_t idx = static_cast<uint32_t>(chunk_->fused_binary_protos.size() - 1);
+					temp_next_ = mark;   // children die into this op
+					const uint32_t t = static_cast<uint32_t>(temp_next_);
+					++temp_next_;
+					if (temp_next_ > temp_high_) { temp_high_ = temp_next_; }
+					emit(opcode::op_binary_fused_temp, idx, t);
+					note_landing(b);
+					out = fused_operand{};
+					out.slot = t;
+					out.symbol = temp_symbol_index();
+					out.direct = true;
+				}
 				return out;
 			};
 			const size_t temp_mark = temp_next_;

@@ -6046,6 +6046,44 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 				check_eq(oracle, got, "a miss at every " + std::to_string(every));
 			}
 		});
+		// a left-deep chain holds one temp however long it is, so the lift takes it whole and the loop around it closes (a sum of 40 locals,
+		// an int chain that overflows, products on the right); a right-deep tree past the temp limit stays the stack form and agrees
+		test("long_chains_lift_by_their_temp_peak", [this]() {
+			std::string src = "[[warn_mode]]\nfunction run(int n) -> string { float t = 0.0; int s = 0;\n  for (int i = 0; i < n; ++i) { float x = i * 0.25;";
+			for (int k = 0; k < 40; ++k) { src += " float a" + std::to_string(k) + " = x * " + std::to_string(k + 1) + ".5 - " + std::to_string(k % 7) + ".0;"; }
+			src += "\n    t += a0";
+			for (int k = 1; k < 40; ++k) { src += (k % 3 == 0 ? " - a" : " + a") + std::to_string(k) + (k % 5 == 0 ? " * x" : ""); }
+			src += ";\n    s += i";
+			for (int k = 1; k < 30; ++k) { src += " + i * " + std::to_string(k); }
+			src += "; }\n  return to_string(t) + \" \" + to_string(s); }\n"
+				"function deep(float x) -> float { return x";
+			for (int k = 0; k < 20; ++k) { src += " - (x * 0." + std::to_string(k + 1) + " + (x"; }
+			src += std::string(40, ')') + "; }\n"
+				"function overflow(int n) -> int { int s = 0; for (int i = 0; i < n; ++i) { s = i";
+			for (int k = 1; k < 20; ++k) { src += " + i * 400000000000000000"; }
+			src += "; } return s; }\n";
+			const std::string fits = src + "run(30) + \",\" + to_string(deep(1.5)) + \",\" + to_string(overflow(2));";
+			const std::string overflows = src + "to_string(overflow(3));";
+			both(fits, "", "long chains");
+			both(fits, "", "long chains, proofs off", false);
+			check_true(run_on(true, fits).find("throw:") == std::string::npos, "runs: " + run_on(true, fits));
+			both(overflows, "", "a long int chain that overflows");
+			check_true(run_on(true, overflows).find("throw:") != std::string::npos, "the int chain overflows: " + run_on(true, overflows));
+			const std::string l = listing_run(src + "run(30);");
+			const size_t fb = l.find("== run ");
+			const std::string fl = fb == std::string::npos ? l : l.substr(fb, l.find("\n== ", fb + 1) - fb);
+			check_true(fl.find("open loop") == std::string::npos && fl.find("-- cell loop") != std::string::npos, "the loop closes: " + fl);
+			if (!engine::miss_injection_available()) { return; }
+			for (const std::string* s : { &fits, &overflows }) {
+				const std::string oracle = run_on(false, *s);
+				for (uint32_t every = 1; every <= 5; ++every) {
+					auto e = jai::foundry::make_default_engine(); e->set_backend(backend_type::vm); e->cells_miss_every(every); stdlib::register_all(*e); register_host_math_fixture(*e);
+					std::string got;
+					try { got = e->execute(*s).as_string(); } catch (const std::exception& ex) { got = std::string("throw:") + ex.what(); }
+					check_eq(oracle, got, "a miss at every " + std::to_string(every));
+				}
+			}
+		});
 		// an environment name ahead of a hoisted read (`q + A * host_sin(q * 1.3)`) reads into a temp first and the loop closes; a leaf whose
 		// return the checker cannot prove (`return host_sqrt(x) + 1.0`) grafts into a loop when its declared result is a scalar, the block landing it
 		// by that type

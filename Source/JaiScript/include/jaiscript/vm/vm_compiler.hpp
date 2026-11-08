@@ -215,7 +215,9 @@ namespace jai::vm {
         bool lift_operand_shape(const expression* e);
         bool lift_temp_only(const expression* e);
         bool lift_partners_ok(const binary_expr* b);
-        int lift_fusible_nodes(const expression* e, int budget = 16);
+        static constexpr int k_lift_temp_limit = 16;   // the most temps one lifted tree holds at once: the window a call pays for
+        int lift_temp_peak(const expression* e, int a_limit);
+        bool lift_takes(const binary_expr* b);
         bool binary_lands_fused(binary_expr* b);
         bool numeric_value_binary(expression* e);
         bool reference_slot_operand(const expression* e);

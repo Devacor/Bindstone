@@ -4531,6 +4531,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		// a bail inside a caller's statement (a graft's statement, or the rest of the statement after a graft's join): the compiler values the
 		// statement defined before it (its spills, the grafts' parameters and results) are the general continuation's, so the bail flushes them
 		std::vector<std::pair<uint32_t, std::vector<uint32_t>>> bail_held;
+		std::vector<std::pair<uint32_t, uint32_t>> exit_spans;   // [exit, end): an exit statement's instructions, which have no copy: a jump into one lands on its exit
 		std::vector<size_t> boundary_ops;   // the boundary operations' positions in ops
 		auto arm_end_of = [&](size_t at) -> uint32_t {   // the nearest target after `at` of a forward branch before it: the end of the innermost arm holding `at`, invalid on the main path
 			if (!line && counted == k_invalid_u32 && at <= cmp_ip) return k_invalid_u32;   // the head span and the head compare are the loop's own
@@ -4619,6 +4620,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 						if (!held.empty()) { bail_held.emplace_back(static_cast<uint32_t>(ip), std::move(held)); }
 						op.kind = ir::exit; op.target = static_cast<uint32_t>(is_break && end == ip + 1 ? code[ip].a : ip);   // a bare break lands on its target
 						ops.push_back(op);
+						exit_spans.emplace_back(static_cast<uint32_t>(ip), static_cast<uint32_t>(end));
 						for (size_t k = ip + 1; k < end; ++k) { ir_op sk; sk.kind = ir::skip; ops.push_back(sk); }
 						ip = end - 1;
 						continue;
@@ -5554,6 +5556,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (ok) {
 				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg; alias_slots.resize(snap_alias);
 				std::erase_if(bail_held, [&](const auto& h) { return h.first >= snap_ip; });
+				std::erase_if(exit_spans, [&](const auto& x) { return x.first >= snap_ip; });
 				ops.resize(snap_ip - first);
 				// the one primitive local the statements declare: the boundary defines its cell (the resume reads it back from the slot), so
 				// a read after the boundary is no adopted value the entry would guard
@@ -5601,6 +5604,7 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 			if (arm_end != k_invalid_u32 && refusal_ip < arm_end && last_ip < arm_end) {
 				cells = snap_cells; env_ops.resize(snap_env); defs.resize(snap_defs); calls.resize(snap_calls); arg_temp_next = snap_arg; alias_slots.resize(snap_alias);
 				std::erase_if(bail_held, [&](const auto& h) { return h.first >= snap_ip; });
+				std::erase_if(exit_spans, [&](const auto& x) { return x.first >= snap_ip; });
 				ops.resize(snap_ip - first);
 				size_t stmt_start = snap_ip;
 				while (stmt_start > first && caller_stmt_of(stmt_start - 1) == caller_stmt_of(snap_ip)) { --stmt_start; }
@@ -5622,6 +5626,18 @@ void vm_compiler::lower_typed_ops(chunk& c) {
 		break;
 		}
 		if (refusal == chunk::cell_refusal_none && cells.empty()) { refuse(chunk::cell_refusal_no_cells, back); }
+		// a jump into an exit statement past its first instruction (a graft's early return onto its caller's return) has no copy to land on:
+		// it lands on the exit when the exit's instruction is the jump to that same target (the graft's last path over its fallback), so the
+		// general form resumes there and reaches the target; any other shape refuses the region
+		for (ir_op& o : ops) {
+			if (refusal != chunk::cell_refusal_none) break;
+			if (!(o.kind == ir::jump || (o.kind == ir::cmp && !o.head) || (o.kind == ir::land && o.branch))) continue;
+			for (const auto& [x, e] : exit_spans) {
+				if (o.target <= x || o.target >= e) continue;
+				if (code[x].op == opcode::op_jump && code[x].a == o.target) { o.target = x; } else { refuse(chunk::cell_refusal_translation, x); }
+				break;
+			}
+		}
 		for (size_t k = 0; refusal == chunk::cell_refusal_none && k < ops.size(); ++k) {
 			// the cell forms read a comparison's left operand and a math argument as cells: a literal on the left mirrors at the emission, two
 			// literals or a literal argument have no encoding

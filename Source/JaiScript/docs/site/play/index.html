@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Play in the Browser — JaiScript docs</title>
+<meta name="description" content="GLOOM, GRUBWELL and the demo reel running in the page: the JaiScript engine compiled to WebAssembly runs the games' own scripts.">
+<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Play in the Browser — JaiScript docs">
+<meta property="og:description" content="GLOOM, GRUBWELL and the demo reel running in the page: the JaiScript engine compiled to WebAssembly runs the games' own scripts.">
+<meta name="twitter:card" content="summary">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
+<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../play/index.html" class="active" aria-current="page">Play</a><a href="../reference/index.html">Reference</a></nav>
+<div class="header-tools">
+<div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+
+<main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span>Play</nav>
+<article class="chapter play-page"><h1 id="play-in-the-browser">Play in the Browser<a class="hlink" href="#play-in-the-browser" aria-label="link">&#8203;</a></h1>
+<p>Three of the <a href="../examples/index.html">example games</a>, running in this page. The JaiScript engine is compiled to WebAssembly and runs the same scripts the standalone runner runs, so what you play here is the game the runner plays: same frames, same seeds, same state hashes.</p>
+<div class="play-picker" role="group" aria-label="Game">
+<button type="button" class="btn play-pick" data-game="gloom" aria-pressed="true">GLOOM</button>
+<button type="button" class="btn play-pick" data-game="grubwell" aria-pressed="false">GRUBWELL</button>
+<button type="button" class="btn play-pick" data-game="demoreel" aria-pressed="false">Demo reel</button>
+</div>
+<div class="play-stage"><div id="play-term" class="play-term" aria-label="Game screen: click it, then play with the keyboard"></div>
+<div id="play-cover" class="play-cover"><button type="button" id="play-run" class="btn btn-primary">Play GLOOM</button><p id="play-note" class="play-note"></p></div></div>
+<div class="play-bar"><span id="play-keys" class="play-keys"></span><button type="button" id="play-stop" class="btn">Stop</button></div>
+<p id="play-status" class="play-status"></p>
+
+<h2 id="what-runs-here">What runs here<a class="hlink" href="#what-runs-here" aria-label="link">&#8203;</a></h2>
+<p>The page downloads the engine (the library and the runner's console builtins, built with Emscripten) and the game's <code>.jai</code> files, then runs the game's drag-drop shim, the file you would drop onto the runner. The VM compiles the scripts in the page; nothing is precompiled and nothing runs on a server. A terminal emulator draws the game's escape codes, and your keys reach the script's <code>key_down</code> and <code>read_key</code>.</p>
+<p>The engine runs in a worker, where a script's <code>sleep()</code> sleeps as it does in the runner. A browser that cannot share memory with the worker runs it on the page's own thread instead, where every <code>sleep()</code> hands control back to the page; that build is slower. Sound stays off in the browser. WebAssembly runs the VM a few times slower than a native Release build: GLOOM and GRUBWELL keep their frame rate, and the demo reel, which draws every pixel of every scene, plays its heavier scenes slower than in a terminal.</p>
+<p>To run your own code, open the <a href="sandbox.html">sandbox</a>.</p>
+</article>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+<link rel="stylesheet" href="play.css">
+<script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.js"></script>
+<script src="play-host.js"></script>
+<script src="play.js"></script>
+</main>
+</div>
+<footer class="site-footer">
+<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/jaiscript/blob/main/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/jaiscript">source</a> &middot; <a href="https://github.com/Devacor/jaiscript/issues">report a docs bug</a></p>
+<p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>
+</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

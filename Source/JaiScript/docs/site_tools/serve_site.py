@@ -1,0 +1,44 @@
+"""Serves the site locally the way jaiscript.com serves it: the Play pages cross-origin isolated (as play/.htaccess makes
+them on Apache) and .wasm as application/wasm.
+
+    python docs/site_tools/serve_site.py [--port 8000] [--root docs/site] [--no-isolation]
+
+--no-isolation leaves the headers off, so the Play pages fall back to running the engine on the page's own thread.
+"""
+import argparse
+import functools
+import http.server
+import pathlib
+
+SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
+
+
+class SiteHandler(http.server.SimpleHTTPRequestHandler):
+    isolate = True
+
+    extensions_map = {**http.server.SimpleHTTPRequestHandler.extensions_map, ".wasm": "application/wasm",
+                      ".js": "text/javascript", ".json": "application/json"}
+
+    def end_headers(self):
+        if self.isolate and self.path.startswith("/play/"):
+            self.send_header("Cross-Origin-Opener-Policy", "same-origin")
+            self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
+        self.send_header("Cache-Control", "no-store")
+        super().end_headers()
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--port", type=int, default=8000)
+    parser.add_argument("--root", default=str(SITE))
+    parser.add_argument("--no-isolation", action="store_true")
+    args = parser.parse_args()
+    SiteHandler.isolate = not args.no_isolation
+    handler = functools.partial(SiteHandler, directory=args.root)
+    with http.server.ThreadingHTTPServer(("127.0.0.1", args.port), handler) as server:
+        print("serving %s on http://127.0.0.1:%d/" % (args.root, args.port), flush=True)
+        server.serve_forever()
+
+
+if __name__ == "__main__":
+    main()

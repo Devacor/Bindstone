@@ -162,6 +162,8 @@ SECTION_INDEX_DESC = {
         "Nineteen chapters on hosting JaiScript in a C++ engine: binding classes, choosing a backend, safety rails, hot reload, shipping, editor support, host math types, a thread pool for host work, and a web application host.",
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
+    "play/index.html":
+        "GLOOM, GRUBWELL and the demo reel running in the page: the JaiScript engine compiled to WebAssembly runs the games' own scripts.",
     "reference/index.html":
         "Quick-lookup tables distilled from the guide and embedding chapters: operators, types, conversions, the host API, and rules of thumb.",
     "index.html":
@@ -172,7 +174,7 @@ SECTION_INDEX_DESC = {
 
 SECTION_TITLE = {"tour": "The Ten-Minute Tour", "bridges": "Bridges",
                  "guide": "The Language Guide", "embedding": "Embedding &amp; Engine Guide",
-                 "examples": "The Example Games", "reference": "Reference"}
+                 "examples": "The Example Games", "play": "Play in the Browser", "reference": "Reference"}
 
 # ---------------------------------------------------------------- chrome parts
 
@@ -215,7 +217,7 @@ def header(section, root):
         '<span class="brand-sub">docs</span></a>' % root,
         '<nav class="site-nav" aria-label="Sections">'
         + nav("tour", "Tour") + nav("bridges", "Bridges") + nav("guide", "Guide") + nav("embedding", "Embedding")
-        + nav("examples", "Examples") + nav("reference", "Reference") + "</nav>",
+        + nav("examples", "Examples") + nav("play", "Play") + nav("reference", "Reference") + "</nav>",
         '<div class="header-tools">',
         '<div class="search" role="search"><input id="search-box" type="search" '
         'placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" '
@@ -280,7 +282,7 @@ def footer(root):
 
 
 SECTION_CRUMB = {"tour": "Tour", "bridges": "Bridges", "guide": "Guide", "embedding": "Embedding",
-                 "examples": "Examples", "reference": "Reference"}
+                 "examples": "Examples", "play": "Play", "reference": "Reference"}
 
 
 def crumbs(rel, section, root):
@@ -296,7 +298,7 @@ def crumbs(rel, section, root):
     else:
         parts.append('<a href="index.html">%s</a>' % SECTION_CRUMB[section])
         number = re.match(r"(\d+)-", name)
-        parts.append(number.group(1) if number else "API" if name == "api.html" else name)
+        parts.append(number.group(1) if number else "API" if name == "api.html" else "Sandbox" if name == "sandbox.html" else name)
     return ('<nav class="crumbs" aria-label="Breadcrumb">%s</nav>'
             % '<span class="sep" aria-hidden="true">/</span>'.join(parts))
 
@@ -372,6 +374,11 @@ def build_pages():
                             EMBEDDING[-1][1]),
                            ("../reference/index.html", "next &middot; reference",
                             SECTION_TITLE["reference"]))))
+
+    pages.append(("play/index.html", "play", "../", SECTION_INDEX_DESC["play/index.html"], "", ""))
+    pages.append(("play/sandbox.html", "play", "../",
+                  "Write JaiScript and run it in the page: the strict checker, the VM and the standard library, compiled to WebAssembly.",
+                  "", ""))
 
     pages.append(("reference/index.html", "reference", "../",
                   SECTION_INDEX_DESC["reference/index.html"], page_sidebar(True),

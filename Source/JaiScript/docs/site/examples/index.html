@@ -25,7 +25,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <a class="skip" href="#main">Skip to content</a>
 <header class="site-header">
 <a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
-<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html" class="active" aria-current="page">Examples</a><a href="../reference/index.html">Reference</a></nav>
+<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html" class="active" aria-current="page">Examples</a><a href="../play/index.html">Play</a><a href="../reference/index.html">Reference</a></nav>
 <div class="header-tools">
 <div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
 <button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
@@ -42,6 +42,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><strong>Gator Quest</strong>, a multiplayer terminal RPG</li>
 <li><strong>JaiDoom</strong>, DOOM itself rebuilt in pure JaiScript, which fetches its game data on first launch</li></ul>
 <p>Each one teaches something specific, and each one is genuinely fun to run. In the first three C++ is a deliberately thin shell (a VT console, key input, a seeded <code>Rng</code>, a clock, file IO), and <strong>everything you see is script</strong>.</p>
+<p>GLOOM, GRUBWELL and the demo reel also <a href="../play/index.html">play in your browser</a>, on the engine compiled to WebAssembly, and the <a href="../play/sandbox.html">sandbox</a> runs code you write.</p>
 <p>To start a game of your own, <a href="../guide/20-terminal-games.html">A Terminal Game in One File</a> builds a small one for the runner from nothing: keyboard polling, frame pacing, drawing with escape codes and sound.</p>
 <p>The first three double as determinism tests: each has a headless <code>--smoke</code> mode that checks a seeded run against the hashes it must produce.</p>
 <p>Every one also ships a <strong>drag-drop shim</strong>: a single <code>.jai</code> file that re-creates, in script, the few things the C++ shell provides (a seeded RNG, flags, logging, the console). Dropping it onto the <a href="../reference/index.html#command-line-runner">standalone runner</a> plays the game with no engine target built at all. The runner&#x27;s <code>--backend=interp</code> runs the same scripts on the tree-walking interpreter, so the shims are also where a game&#x27;s two backends are compared. The C++ hosts link the library without the interpreter and run the VM.</p>

@@ -1,0 +1,61 @@
+// The sandbox: the program in the editor runs on the engine in this page, its output in the terminal below
+"use strict";
+
+(() => {
+	const BUDGET_SECONDS = 20;
+	const SAMPLES = [
+		{ id: "hello", name: "Hello", source: "// Edit me, then press Run (or Ctrl+Enter)\nstring greet(string name) {\n\treturn `Hello, ${name}!`;\n}\n\narray<string> names = [\"gator\", \"cake\", \"world\"];\nfor (auto name : names) {\n\tprint(greet(name));\n}\nprint(`${names.size()} greetings, all checked before anything ran`);\n" },
+		{ id: "values", name: "Copies and references", source: "// Assignment copies, as in C++: a T& or a shared_ptr<T> shares\nclass Point {\n\tint x = 0;\n\tint y = 0;\n\tPoint(int x_, int y_) { x = x_; y = y_; }\n\tstring to_string() { return `(${x}, ${y})`; }\n}\n\nPoint a = Point(1, 2);\nPoint b = a;            // a copy\nb.x = 10;\nprint(`a ${a.to_string()}  b ${b.to_string()}`);\n\nPoint& alias = a;       // a reference\nalias.y = 20;\nprint(`a ${a.to_string()} after writing through the reference`);\n\nshared_ptr<Point> shared = new Point(3, 4);\nshared_ptr<Point> same = shared;\nsame.x = 30;\nprint(`shared ${shared.to_string()}: one object, two handles`);\n" },
+		{ id: "coroutines", name: "Coroutines", source: "// A coroutine yields values one at a time and keeps its place between them\ncoroutine int countdown(int from) {\n\tfor (int i = from; i > 0; --i) {\n\t\tyield i;\n\t}\n}\n\nfor (auto n : countdown(5)) {\n\tprint(\"{}...\", n);\n\tsleep(0.3);\n}\nprint(\"liftoff\");\n" },
+		{ id: "animate", name: "Escape codes and sleep", source: "// The terminal takes escape codes: draw, sleep, draw again\nstring ESC = \"\\x1b\";\nprint(ESC + \"[?25l\", skip_newline);\nfor (int frame = 0; frame < 60; ++frame) {\n\tstring line = \"\";\n\tfor (int x = 0; x < 48; ++x) {\n\t\tfloat wave = math::sin((x + frame) * 0.25);\n\t\tint shade = 90 + cast<int>((wave + 1.0) * 80.0);\n\t\tline += `${ESC}[48;2;20;${shade};${255 - shade}m `;\n\t}\n\tprint(ESC + \"[2;1H\" + line + ESC + \"[0m\", skip_newline);\n\tsleep(1.0 / 30.0);\n}\nprint(ESC + \"[?25h\");\nprint(\"done\");\n" },
+		{ id: "strict", name: "The strict checker", source: "// The checker reads the whole program before anything runs:\n// this one never prints, because line 6 cannot work\nprint(\"you will not see this\");\n\nint count = 3;\nstring label = count;   // int is not a string\nprint(label);\n" },
+	];
+	const editor = document.getElementById("sandbox-editor");
+	const picker = document.getElementById("sandbox-sample");
+	const run = document.getElementById("sandbox-run");
+	const stop = document.getElementById("sandbox-stop");
+	const status = document.getElementById("play-status");
+	const note = (text) => session.write("\r\n\x1b[2m[" + text + "]\x1b[0m\r\n");
+	const session = new JaiPlay.Session(document.getElementById("play-term"), {
+		cols: 100, rows: 18, scrollback: 2000, fitHeight: false,
+		onStatus: (text) => { status.textContent = text; },
+		onExit: (code) => {
+			note(code === 0 ? "finished" : "exit code " + code);
+			run.disabled = false;
+		},
+	});
+
+	for (const sample of SAMPLES) {
+		const option = document.createElement("option");
+		option.value = sample.id;
+		option.textContent = sample.name;
+		picker.appendChild(option);
+	}
+	function load(id) {
+		const sample = SAMPLES.find((s) => s.id === id) || SAMPLES[0];
+		editor.value = sample.source;
+	}
+	function start() {
+		run.disabled = true;
+		session.start({ source: editor.value, budget: BUDGET_SECONDS });
+		editor.focus();
+	}
+
+	picker.addEventListener("change", () => load(picker.value));
+	run.addEventListener("click", start);
+	stop.addEventListener("click", () => {
+		session.stop();
+		note("stopped");
+		run.disabled = false;
+	});
+	editor.addEventListener("keydown", (event) => {
+		if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+			event.preventDefault();
+			start();
+		} else if (event.key === "Tab" && !event.shiftKey) {
+			event.preventDefault();
+			editor.setRangeText("\t", editor.selectionStart, editor.selectionEnd, "end");
+		}
+	});
+	load(SAMPLES[0].id);
+})();

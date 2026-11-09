@@ -38,7 +38,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>Write JaiScript and run it in this page. The engine is the one the <a href="index.html">games</a> run on: the strict checker reads the whole program first, then the VM runs it. The standard library is here, with a file system that lasts until the page closes and the runner's console builtins (<code>key_down</code>, <code>read_key</code>, <code>term_cols</code>, <code>term_rows</code>). A program gets 20 seconds of script time, and Stop ends it at once.</p>
 <div class="sandbox-tools"><label for="sandbox-sample">Start from</label> <select id="sandbox-sample"></select>
 <button type="button" id="sandbox-run" class="btn btn-primary">Run</button><button type="button" id="sandbox-stop" class="btn">Stop</button>
-<span class="play-keys">Ctrl+Enter runs</span></div>
+<span class="play-keys">Ctrl+Enter runs</span><span id="play-audio" class="play-audio"></span></div>
 <textarea id="sandbox-editor" class="sandbox-editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="JaiScript program"></textarea>
 <div class="play-stage sandbox-output"><div id="play-term" class="play-term" aria-label="Program output"></div></div>
 <p id="play-status" class="play-status"></p>
@@ -48,6 +48,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <link rel="stylesheet" href="play.css">
 <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-webgl@0.18.0/lib/addon-webgl.js"></script>
+<script src="play-audio.js"></script>
 <script src="play-host.js"></script>
 <script src="sandbox.js"></script>
 </main>

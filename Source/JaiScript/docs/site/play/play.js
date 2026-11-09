@@ -52,5 +52,6 @@
 		session.stop();
 		showCover("Stopped.");
 	});
+	JaiAudio.controls(document.getElementById("play-audio"));
 	pick(game);
 })();

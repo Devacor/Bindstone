@@ -4,7 +4,7 @@
 //     [0] the word sleep() waits on, [1] columns, [2] rows, [3] key events written, [16 + n % RING] event n (code | down << 16)
 // - otherwise: the Asyncify build runs one step per timer, every sleep() returns to this worker's event loop, and keys and
 //   sizes arrive as messages between steps.
-// Output goes back to the page as UTF-8 chunks; {exit} ends the run.
+// Output goes back to the page as UTF-8 chunks and sound commands as {sound, bytes} (play-audio.js); {exit} ends the run.
 "use strict";
 
 const RING = 1024;
@@ -23,6 +23,7 @@ async function loadBundle(jai, game) {
 }
 
 const write = (bytes) => self.postMessage({ out: bytes }, [bytes.buffer]);
+const sound = (op, id, bytes, value) => self.postMessage({ sound: [op, id, value], bytes }, bytes ? [bytes.buffer] : []);
 
 async function runShared({ shared, game, source, budget }) {
 	importScripts("engine/jaiscript_web_worker.js");
@@ -33,6 +34,7 @@ async function runShared({ shared, game, source, budget }) {
 	const jai = await createJaiScript({
 		locateFile: (path) => "engine/" + path,
 		jaiwebWrite: write,
+		jaiwebSound: sound,
 		jaiwebSleep: (ms) => { Atomics.wait(words, 0, 0, ms); },
 		jaiwebPump: () => {
 			const written = Atomics.load(words, 3);
@@ -60,7 +62,7 @@ async function runShared({ shared, game, source, budget }) {
 
 async function runStepped({ game, source, budget, cols, rows }) {
 	importScripts("engine/jaiscript_web.js");
-	const jai = await createJaiScript({ locateFile: (path) => "engine/" + path, jaiwebWrite: write });
+	const jai = await createJaiScript({ locateFile: (path) => "engine/" + path, jaiwebWrite: write, jaiwebSound: sound });
 	self.onmessage = (message) => {
 		const data = message.data;
 		if (data.key !== undefined) { jai._jaiweb_key(data.key, data.down ? 1 : 0); }

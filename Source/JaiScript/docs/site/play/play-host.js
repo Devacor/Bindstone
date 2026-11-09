@@ -89,6 +89,7 @@ const JaiPlay = (() => {
 		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds
 		start({ game, source, budget = 0 }) {
 			this.stop();
+			JaiAudio.unlock();
 			this.terminal.reset();
 			this.running = true;
 			this.element.focus();
@@ -97,6 +98,7 @@ const JaiPlay = (() => {
 			this.worker.onmessage = (message) => {
 				const data = message.data;
 				if (data.out) { this.write(data.out); }
+				if (data.sound) { JaiAudio.handle(data.sound[0], data.sound[1], data.bytes, data.sound[2]); }
 				if (data.exit !== undefined) { this.finished(data.exit); }
 				if (data.failed !== undefined) { this.write("\r\n" + data.failed + "\r\n"); this.finished(1); }
 			};
@@ -112,6 +114,7 @@ const JaiPlay = (() => {
 
 		stop() {
 			if (this.worker) { this.worker.terminate(); this.worker = null; }
+			JaiAudio.reset();
 			this.words = null;
 			this.held.clear();
 			this.running = false;

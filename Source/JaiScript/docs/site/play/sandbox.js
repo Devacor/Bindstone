@@ -57,5 +57,6 @@
 			editor.setRangeText("\t", editor.selectionStart, editor.selectionEnd, "end");
 		}
 	});
+	JaiAudio.controls(document.getElementById("play-audio"));
 	load(SAMPLES[0].id);
 })();

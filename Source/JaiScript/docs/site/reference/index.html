@@ -988,7 +988,7 @@ print(to_json({"a": [1, 2]}, 2));</code></pre></div>
 <li>A Sound loaded once and played again is the way to fire an effect many times, since loading a file costs more than playing it.</li>
 <li>A loaded Sound closes when the last variable holding it lets go (a copy of a Sound is the same sound).</li>
 <li>No call waits on the audio device: one audio thread opens and drives the devices, so a frame loop never stalls on a sound.</li>
-<li>Sound plays on Windows. Elsewhere <code>load_sound</code> and <code>play_sound</code> return <code>null</code>, so a script that checks for <code>null</code>, as it does for a missing file, runs unchanged, silent.</li>
+<li>Sound plays on Windows and on the site's Play and Sandbox pages. Elsewhere <code>load_sound</code> and <code>play_sound</code> return <code>null</code>, so a script that checks for <code>null</code>, as it does for a missing file, runs unchanged, silent.</li>
 </ul>
 <div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var music = load_sound("theme.mid");
 var hit = load_sound("hit.wav");

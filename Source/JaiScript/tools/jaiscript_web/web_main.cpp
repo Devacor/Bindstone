@@ -73,6 +73,118 @@ private:
 	char storage[1 << 16];
 };
 
+// Sound commands to the page, which plays them with Web Audio: a load carries the file's bytes and its format
+enum class sound_op { load = 0, play = 1, stop = 2, volume = 3, release = 4, stop_all = 5 };
+
+EM_JS(void, jaiweb_js_sound, (int a_op, int a_id, const char* a_bytes, int a_size, double a_value), {
+	if (Module.jaiwebSound) { Module.jaiwebSound(a_op, a_id, a_size > 0 ? HEAPU8.slice(a_bytes, a_bytes + a_size) : null, a_value); }
+});
+
+void send_sound(sound_op a_op, int a_id, double a_value = 0.0) { jaiweb_js_sound(static_cast<int>(a_op), a_id, nullptr, 0, a_value); }
+
+// A WAV's length from its header (byte rate and data chunk), 0 when the header does not say
+double wav_seconds(const std::string& a_bytes) {
+	auto u32 = [&](size_t a_at) -> uint32_t {
+		if (a_at + 4 > a_bytes.size()) { return 0; }
+		const auto* p = reinterpret_cast<const unsigned char*>(a_bytes.data() + a_at);
+		return p[0] | (p[1] << 8) | (p[2] << 16) | (static_cast<uint32_t>(p[3]) << 24);
+	};
+	uint32_t byte_rate = 0;
+	for (size_t at = 12; at + 8 <= a_bytes.size();) {
+		const uint32_t size = u32(at + 4);
+		if (a_bytes.compare(at, 4, "fmt ") == 0) { byte_rate = u32(at + 16); }
+		if (a_bytes.compare(at, 4, "data") == 0) { return byte_rate ? static_cast<double>(size) / byte_rate : 0.0; }
+		at += 8 + size + (size & 1);
+	}
+	return 0.0;
+}
+
+// The page plays one voice a sound; the device goes when the last Sound naming it does (a copy names the same one)
+struct page_sound_device {
+	int id = 0;
+	jai_runner::sound_format format = jai_runner::sound_format::none;
+	double seconds = 0.0;          // 0: unknown (MIDI, MP3), so a one-shot counts as playing until stopped
+	bool looping = false;
+	bool stopped = true;
+	bool finish_when_dropped = false;   // play_sound's: its last voice plays out after the Sound is gone
+	std::chrono::steady_clock::time_point started;
+	~page_sound_device() { send_sound(sound_op::release, id, finish_when_dropped ? 1.0 : 0.0); }
+};
+
+class page_sound {
+public:
+	explicit page_sound(std::shared_ptr<page_sound_device> a_device) : device(std::move(a_device)) {}
+
+	void finish_when_dropped() { device->finish_when_dropped = true; }
+
+	bool play() { return play_looped(false); }
+	bool play_looped(bool a_loop) {
+		device->looping = a_loop;
+		device->stopped = false;
+		device->started = std::chrono::steady_clock::now();
+		send_sound(sound_op::play, device->id, a_loop ? 1.0 : 0.0);
+		return true;
+	}
+	void stop() {
+		device->stopped = true;
+		send_sound(sound_op::stop, device->id);
+	}
+	bool playing() const {
+		if (device->stopped) { return false; }
+		if (device->looping || device->seconds <= 0.0) { return true; }
+		return std::chrono::duration<double>(std::chrono::steady_clock::now() - device->started).count() < device->seconds;
+	}
+	void volume(double a_level) { send_sound(sound_op::volume, device->id, std::clamp(a_level, 0.0, 1.0)); }
+	std::string format() const { return jai_runner::sound_format_name(device->format); }
+
+private:
+	std::shared_ptr<page_sound_device> device;
+};
+
+int g_next_sound_id = 1;
+
+std::shared_ptr<page_sound> load_page_sound(const std::string& a_path) {
+	const jai_runner::sound_format format = jai_runner::sniff_sound_format(a_path);
+	if (format == jai_runner::sound_format::none) { return nullptr; }
+	const std::string bytes = jai_runner::read_file_or_raise(a_path);
+	auto device = std::make_shared<page_sound_device>();
+	device->id = g_next_sound_id++;
+	device->format = format;
+	device->seconds = format == jai_runner::sound_format::wav ? wav_seconds(bytes) : 0.0;
+	jaiweb_js_sound(static_cast<int>(sound_op::load), device->id, bytes.data(), static_cast<int>(bytes.size()), static_cast<double>(format));
+	return std::make_shared<page_sound>(std::move(device));
+}
+
+// The runner's sound builtins by the same names and shapes, played by the page
+void register_page_sound(jai::engine& eng) {
+	jai::dynamic_binder<page_sound>(eng, "Sound")
+		.method("play", &page_sound::play)
+		.method("play", &page_sound::play_looped)
+		.method("stop", &page_sound::stop)
+		.method("playing", &page_sound::playing)
+		.method("volume", &page_sound::volume)
+		.method("format", &page_sound::format)
+		.build();
+	eng.add_function("load_sound", [](const std::string& path) { return load_page_sound(path); }, jai::filesystem);
+	eng.add_function("play_sound", [](const std::string& path) {
+		auto result = load_page_sound(path);
+		if (result) {
+			result->finish_when_dropped();
+			result->play();
+		}
+		return result;
+	}, jai::filesystem);
+	eng.add_function("play_sound", [](const std::string& path, bool loop) {
+		auto result = load_page_sound(path);
+		if (result) {
+			result->finish_when_dropped();
+			result->play_looped(loop);
+		}
+		return result;
+	}, jai::filesystem);
+	eng.add_function("stop_sounds", []() { send_sound(sound_op::stop_all, 0); });
+}
+
 // Key codes the page sends: a printable ASCII character is its own code (letters lowercased), named keys follow
 const char* const NAMED_KEYS[] {"space", "left", "right", "up", "down", "shift", "ctrl", "alt", "esc", "enter", "tab", "backspace"};
 constexpr int FIRST_NAMED_KEY = 128;
@@ -169,7 +281,7 @@ web_session& new_session(const char* a_args, double a_budget, bool a_blocking_sl
 	jai::stdlib::register_all(eng);
 	jai::stdlib::register_web(eng);
 	jai_runner::register_file_io(*eng);
-	jai_runner::register_sound(*eng);
+	register_page_sound(*eng);
 	register_page_console(*eng);
 	jai::script_value args = jai::script_value::make_array(nullptr, eng.get());
 	for (const auto& arg : split_lines(a_args)) { args.as_array().emplace_back(arg, eng.get()); }

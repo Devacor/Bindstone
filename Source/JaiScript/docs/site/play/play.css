@@ -12,6 +12,11 @@
 .play-note { margin: 0; color: #c9c6d8; }
 .play-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .6rem; flex-wrap: wrap; }
 .play-keys { font-size: .9rem; opacity: .85; }
+.play-tools { display: flex; align-items: center; gap: .75rem; }
+.play-audio { display: inline-flex; align-items: center; gap: .4rem; }
+.play-mute { display: inline-flex; align-items: center; padding: .35rem .5rem; }
+.play-mute[aria-pressed="true"] { opacity: .7; }
+.play-volume { width: 6.5rem; accent-color: var(--accent, #ffce6e); }
 .play-status { font-size: .8rem; opacity: .65; margin-top: .25rem; }
 .sandbox-editor { width: 100%; min-height: 18rem; box-sizing: border-box; resize: vertical; padding: .75rem; border-radius: 8px;
 	font-family: "JetBrains Mono", Menlo, Consolas, monospace; font-size: .9rem; line-height: 1.45; tab-size: 4;

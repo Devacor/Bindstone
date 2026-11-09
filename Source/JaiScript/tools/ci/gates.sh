@@ -16,6 +16,11 @@
 # under ANDROID_HOME, ANDROID_SDK_ROOT or the SDK's default home); ANDROID_ABIS the ABIs (default arm64-v8a armeabi-v7a);
 # ANDROID_BUILD_DIR the build tree (default build-android, one directory per ABI; relative to the repository root).
 #
+# The wasm gate builds the engine as WebAssembly (tools/jaiscript_web, the site's Play pages) with Emscripten, a 32-bit
+# libc++ target that runs, and plays GLOOM's, the crawler's and the demoreel's shims headless under Node
+# (tools/jaiscript_web/run_node.mjs) to the hashes the native gates expect. It skips with a message when no Emscripten SDK
+# (EMSDK, else em++ on PATH) or no node is found. WASM_BUILD_DIR names the tree (default build-wasm).
+#
 # The two differentials: `fuzz` runs each program on the interpreter and the optimized VM, `fuzz-vm-reference` on the
 # optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
 # bug of an optimized lane. `fuzz-order` runs the ordering band with call arguments. tests-vm-reference runs the suite with
@@ -49,6 +54,7 @@ GLOOM_SHOWCASE_ASCII=d8e16c271412bf5d
 GLOOM_SOUND="24 effects, 136535 bytes, bank 4270573572, 25 cues 1838541177"
 GLOOM_SHIM_FRAMES=20918499
 DEMOREEL_STREAM=c0086107f2b4bac1
+DEMOREEL_JULIA_STREAM=2427049989
 CRAWLER_STATE=2459230215
 CRAWLER_GOD_STATE=4133945146
 CRAWLER_FRAMES=a36b9a559cf181a17c6d5d20ea7eadf7e0f6ae4c4c4682b70576dc1dd84916d1
@@ -380,6 +386,49 @@ gate_android() {
 	done
 }
 
+emscripten_root() {
+	if [ -n "${EMSDK:-}" ] && [ -f "$EMSDK/upstream/emscripten/cmake/Modules/Platform/Emscripten.cmake" ]; then
+		echo "$EMSDK/upstream/emscripten"
+		return 0
+	fi
+	local emxx
+	emxx="$(command -v em++ 2> /dev/null)" || return 1
+	emxx="$(cd "$(dirname "$emxx")" && pwd)"
+	[ -f "$emxx/cmake/Modules/Platform/Emscripten.cmake" ] && echo "$emxx"
+}
+
+gate_wasm() {
+	local emscripten node_bin build engine runner work
+	emscripten="$(emscripten_root)" || { echo "wasm: no Emscripten SDK found (set EMSDK), skipped"; return 0; }
+	if [ -n "${EMSDK:-}" ]; then
+		export EM_CONFIG="$EMSDK/.emscripten"
+		for node_bin in "$EMSDK"/node/*/bin; do [ -d "$node_bin" ] && PATH="$node_bin:$PATH"; done
+		PATH="$emscripten:$PATH"
+	fi
+	command -v node > /dev/null 2>&1 || { echo "wasm: no node found, skipped"; return 0; }
+	build="${WASM_BUILD_DIR:-build-wasm}"
+	case "$build" in /* | [A-Za-z]:*) ;; *) build="$ROOT/$build" ;; esac
+	echo "wasm: Emscripten $emscripten"
+	run cmake -Wno-deprecated -S "$ROOT" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+		"-DCMAKE_TOOLCHAIN_FILE=$emscripten/cmake/Modules/Platform/Emscripten.cmake" -DJAISCRIPT_BUILD_TESTS=OFF \
+		-DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_SPIDER=OFF -DJAISCRIPT_BUILD_LSP=OFF \
+		-DJAISCRIPT_INTERPRETER=OFF -DJAISCRIPT_INSTALL=OFF > /dev/null
+	run cmake --build "$build" --target jaiscript_web_worker
+	engine="$build/bin/jaiscript_web_worker.js"
+	runner="$ROOT/tools/jaiscript_web/run_node.mjs"
+	cd "$ROOT/examples/gloom"
+	run_logged node "$runner" "$engine" gloom.jai --smoke --ticks 300 --look showcase --truecolor
+	want "wasm gloom: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \| STATE_HASH: $GLOOM_STATE\$"
+	want "wasm gloom: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"
+	cd "$ROOT/examples/crawler"
+	run_logged node "$runner" "$engine" scripts/crawler.jai smoke seed 6 turns 1500
+	want "wasm crawler: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"
+	# JULIA's columns run through parallel_transform, whose borrows tag container pointers
+	cd "$ROOT/examples/demoreel"
+	run_logged node "$runner" "$engine" demoreel.jai scene 1 frames 20 pix sext
+	want "wasm demoreel: expected JULIA's stream hash $DEMOREEL_JULIA_STREAM" "stream hash $DEMOREEL_JULIA_STREAM \|"
+}
+
 # The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each
 # compile alone, the pages whose samples build a whole program compile with the includes they show
 # (docs/site_tools/check_sample_includes.py), and tools/ci/host_warnings.cpp, a host file over the headers the embedding pages name, builds under
@@ -509,7 +558,7 @@ gate_asan() {
 
 ALL=(tests-interp tests-vm tests-vm-reference fuzz fuzz-vm-reference fuzz-order gloom demoreel crawler gatorquest embed-quickstart lsp lsp-latency spider selftest site)
 MILESTONE=(gloom-workers gloom-long timedemo amalgamation)
-CROSS=(android headers)
+CROSS=(android headers wasm)
 SANITIZER=(asan)
 
 [ "$#" -gt 0 ] || { echo "usage: $0 <gate>... (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2; }
@@ -518,7 +567,7 @@ SANITIZER=(asan)
 for gate in "$@"; do
 	case "$gate" in
 		tests-interp | tests-vm | tests-vm-reference | fuzz | fuzz-vm-reference | fuzz-order | gloom | demoreel | crawler | gatorquest | embed-quickstart | lsp | lsp-latency | spider | selftest | site) ;;
-		gloom-workers | gloom-long | timedemo | amalgamation | android | asan | headers) ;;
+		gloom-workers | gloom-long | timedemo | amalgamation | android | asan | headers | wasm) ;;
 		*) echo "unknown gate: $gate (${ALL[*]} all; milestone: ${MILESTONE[*]}; cross: ${CROSS[*]}; sanitizer: ${SANITIZER[*]})" >&2; exit 2 ;;
 	esac
 	echo "== gate: $gate"

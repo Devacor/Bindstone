@@ -182,6 +182,12 @@ if(JAISCRIPT_BUILD_LSP)
 endif()
 # --- end jaiscript_lsp ---
 
+# --- jaiscript_web (tools/jaiscript_web): the engine and the console builtins as WebAssembly, for the site's play and sandbox pages ---
+if(EMSCRIPTEN)
+    add_subdirectory(tools/jaiscript_web)
+endif()
+# --- end jaiscript_web ---
+
 # --- jai_gate_run (tools/ci): the watchdog tools/ci/ci_lib.sh runs every gate under; it links nothing of the library ---
 if(JAISCRIPT_IS_TOP_LEVEL)
     add_executable(jai_gate_run tools/ci/jai_gate_run.cpp)

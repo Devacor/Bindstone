@@ -354,8 +354,9 @@ private:
         uintptr_t bits = 0;
     };
     // The slot table in one word: the trailing cells' count, low bit set, while implicit (slot i sits a fixed distance past the
-    // instance's end, which is this word's end), else a heap table (size, capacity, one cell pointer per slot)
-    class field_table {
+    // instance's end, which is this word's end), else a heap table (size, capacity, one cell pointer per slot). Aligned as a cell, so
+    // the word's end is the instance's end on 32-bit hosts too, where the word alone would leave tail padding after it
+    class alignas(alignof(script_value)) field_table {
     public:
         field_table() = default;
         field_table(const field_table&) = delete;
@@ -1342,7 +1343,7 @@ private:
     };
     struct overload_cache_hash {
         size_t operator()(const overload_cache_key& k) const noexcept {
-            return std::hash<uint64_t>{}(k.name_id) ^ (std::hash<size_t>{}(k.arity) << 32);
+            return std::hash<uint64_t>{}(k.name_id ^ (static_cast<uint64_t>(k.arity) << 32));
         }
     };
     mutable std::unordered_map<overload_cache_key, std::shared_ptr<function_decl>, overload_cache_hash> overload_resolution_cache_;

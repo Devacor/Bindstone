@@ -23,6 +23,7 @@
 #include <chrono>
 #include <memory>
 #include <deque>
+#include <exception>
 #include <new>
 #include <optional>
 #include <unordered_map>

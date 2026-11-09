@@ -2049,6 +2049,9 @@ script_value script_value::parallel_detached_level(engine* eng, std::vector<type
 
 // === Parallel captured-read borrow (see value.hpp) ===
 
+static_assert(alignof(script_array) >= 8 && alignof(script_map) >= 8 && alignof(detail::object_borrow_record) >= 8,
+              "a borrow's kind bits sit in the low three bits of the borrowed pointer");
+
 script_value script_value::make_parallel_borrow(const script_value& source, engine* eng, bool sliced) {
     const script_value& v = source.deref();
     script_value result(std::monostate{}, eng);

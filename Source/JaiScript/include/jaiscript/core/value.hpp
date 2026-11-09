@@ -2297,7 +2297,7 @@ namespace detail {
         // pointer to an engine-owned container that a parallel region proved read-only.
         // Trivially copyable ON PURPOSE - copying a borrow must never touch a refcount
         // (see make_parallel_borrow). Low bit = kind (0 array, 1 map), the next = sliced, the third = a shared object's
-        // instance; container and instance allocations are 8+ aligned so the bits are free.
+        // instance; the borrowed types are alignas(8) (value.cpp checks it), so the bits are free on 32-bit hosts too.
         // Inside a region no worker touches a shared instance's count: every read through an object borrow yields a borrow
         // or a worker-local copy, never the instance's handle.
         struct parallel_borrow_tag {

@@ -71,7 +71,7 @@ namespace jai {
     // change). Defined in value.hpp where script_value::object_holder is complete.
     struct obj_slot;
 
-    class script_array {
+    class alignas(8) script_array {
     public:
         // Live references pinned into this array's elements (make_element_reference /
         // ~reference_holder). Zero lets a parallel fork prove exclusivity of a value-semantic

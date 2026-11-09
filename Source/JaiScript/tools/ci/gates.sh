@@ -300,7 +300,7 @@ gate_crawler() {
 		want "crawler $backend cockpit frames: expected FRAME_HASH $CRAWLER_FRAMES" "FRAME_HASH: $CRAWLER_FRAMES "
 		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 80x24 colors 256 ascii smoke seed 6 turns 80 anim dump "$work/small"
 		want "crawler $backend small frames: expected FRAME_HASH $CRAWLER_SMALL_FRAMES" "FRAME_HASH: $CRAWLER_SMALL_FRAMES "
-		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 200x60 smoke seed 6 turns 60 anim dump "$work/wide"
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 200x60 colors 24 smoke seed 6 turns 60 anim dump "$work/wide"
 		want "crawler $backend wide frames: the rows did not build in parallel" "rows parallel\$"
 		want "crawler $backend wide frames: expected FRAME_HASH $CRAWLER_WIDE_FRAMES" "FRAME_HASH: $CRAWLER_WIDE_FRAMES "
 	done

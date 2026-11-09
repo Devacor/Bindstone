@@ -1,5 +1,6 @@
 // The engine's worker: runs one game or one sandbox program to its end, off the page's thread in either mode.
-// - shared (the page is cross-origin isolated): the worker build blocks in its run; sleep() waits in Atomics.wait, and the
+// - shared (the page is cross-origin isolated and this worker can start the engine's threads, workers of its own): the
+//   threaded worker build blocks in its run; sleep() waits in Atomics.wait, and the
 //   page writes keys and the terminal size into an Int32Array they share:
 //     [0] the word sleep() waits on, [1] columns, [2] rows, [3] key events written, [16 + n % RING] event n (code | down << 16)
 // - otherwise: the Asyncify build runs one step per timer, every sleep() returns to this worker's event loop, and keys and
@@ -86,11 +87,32 @@ async function runStepped({ game, source, budget, cols, rows }) {
 	});
 }
 
-self.onmessage = async (message) => {
+// Whether this worker can start workers of its own, which the engine's threads are: answers {threads}
+function probeThreads() {
 	try {
-		const code = message.data.shared ? await runShared(message.data) : await runStepped(message.data);
-		self.postMessage({ exit: code });
+		const inner = new Worker(self.location.href, { name: "jai-probe" });
+		const answer = (ok) => { inner.terminate(); self.postMessage({ threads: ok }); };
+		const timer = setTimeout(() => answer(false), 1500);
+		inner.onmessage = () => { clearTimeout(timer); answer(true); };
+		inner.onerror = () => { clearTimeout(timer); answer(false); };
 	} catch (error) {
-		self.postMessage({ failed: String(error && error.message || error) });
+		self.postMessage({ threads: false });
 	}
-};
+}
+
+if (self.name === "em-pthread") {
+	// the engine's threads start from the script of the worker that made them, this one: each runs the engine's thread
+	importScripts("engine/jaiscript_web_worker.js");
+} else if (self.name === "jai-probe") {
+	self.postMessage("alive");
+} else {
+	self.onmessage = async (message) => {
+		if (message.data.probe) { probeThreads(); return; }
+		try {
+			const code = message.data.shared ? await runShared(message.data) : await runStepped(message.data);
+			self.postMessage({ exit: code });
+		} catch (error) {
+			self.postMessage({ failed: String(error && error.message || error) });
+		}
+	};
+}

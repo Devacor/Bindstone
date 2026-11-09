@@ -3,8 +3,8 @@ with Emscripten) and one bundle per example game (its .jai files and arguments a
 
     python docs/site_tools/build_play.py [--emsdk DIR] [--site DIR] [--build DIR] [--games-only]
 
---emsdk defaults to $EMSDK, --site to docs/site, --build to out/build/wasm-site. Writes <site>/play/engine/ and
-<site>/play/games/.
+--emsdk defaults to $EMSDK, --site to docs/site, --build to out/build/wasm-site (the threaded worker builds in
+<build>-threads). Writes <site>/play/engine/ and <site>/play/games/.
 """
 import argparse
 import glob
@@ -16,7 +16,6 @@ import subprocess
 import sys
 
 PACKAGE = pathlib.Path(__file__).resolve().parent.parent.parent
-ENGINE_TARGETS = ["jaiscript_web_worker", "jaiscript_web"]
 
 # id: (folder under examples/, entry script relative to it, globs of the files it loads, its ARGS)
 GAMES = {
@@ -41,18 +40,20 @@ def emscripten_environment(emsdk):
 
 
 def build_engine(emsdk, build, engine_dir):
+    """The worker engine on threads (JAISCRIPT_WASM_THREADS) and the Asyncify fallback without, each in its own tree."""
     env, toolchain = emscripten_environment(emsdk)
-    configure = ["cmake", "-S", str(PACKAGE), "-B", str(build), "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
-                 "-DCMAKE_TOOLCHAIN_FILE=%s" % toolchain]
-    for option in ["TESTS", "EXAMPLES", "RUNNER", "SPIDER", "LSP"]:
-        configure.append("-DJAISCRIPT_BUILD_%s=OFF" % option)
-    configure += ["-DJAISCRIPT_INTERPRETER=OFF", "-DJAISCRIPT_INSTALL=OFF"]
-    subprocess.run(configure, check=True, env=env, stdout=subprocess.DEVNULL)
-    subprocess.run(["cmake", "--build", str(build), "--target"] + ENGINE_TARGETS, check=True, env=env)
     engine_dir.mkdir(parents=True, exist_ok=True)
-    for target in ENGINE_TARGETS:
+    for tree, threads, target in [(build.with_name(build.name + "-threads"), "ON", "jaiscript_web_worker"),
+                                  (build, "OFF", "jaiscript_web")]:
+        configure = ["cmake", "-S", str(PACKAGE), "-B", str(tree), "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                     "-DCMAKE_TOOLCHAIN_FILE=%s" % toolchain, "-DJAISCRIPT_WASM_THREADS=%s" % threads]
+        for option in ["TESTS", "EXAMPLES", "RUNNER", "SPIDER", "LSP"]:
+            configure.append("-DJAISCRIPT_BUILD_%s=OFF" % option)
+        configure += ["-DJAISCRIPT_INTERPRETER=OFF", "-DJAISCRIPT_INSTALL=OFF"]
+        subprocess.run(configure, check=True, env=env, stdout=subprocess.DEVNULL)
+        subprocess.run(["cmake", "--build", str(tree), "--target", target], check=True, env=env)
         for suffix in (".js", ".wasm"):
-            shutil.copy2(build / "bin" / (target + suffix), engine_dir / (target + suffix))
+            shutil.copy2(tree / "bin" / (target + suffix), engine_dir / (target + suffix))
 
 
 def bundle_games(games_dir):

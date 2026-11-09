@@ -17,7 +17,8 @@
 # ANDROID_BUILD_DIR the build tree (default build-android, one directory per ABI; relative to the repository root).
 #
 # The wasm gate builds the engine as WebAssembly (tools/jaiscript_web, the site's Play pages) with Emscripten, a 32-bit
-# libc++ target that runs, and plays GLOOM's, the crawler's and the demoreel's shims headless under Node
+# libc++ target that runs, on WebAssembly threads (JAISCRIPT_WASM_THREADS), and plays GLOOM's (serial and on four workers),
+# the crawler's and the demoreel's shims headless under Node
 # (tools/jaiscript_web/run_node.mjs) to the hashes the native gates expect. It skips with a message when no Emscripten SDK
 # (EMSDK, else em++ on PATH) or no node is found. WASM_BUILD_DIR names the tree (default build-wasm).
 #
@@ -412,7 +413,7 @@ gate_wasm() {
 	run cmake -Wno-deprecated -S "$ROOT" -B "$build" -G Ninja -DCMAKE_BUILD_TYPE=Release \
 		"-DCMAKE_TOOLCHAIN_FILE=$emscripten/cmake/Modules/Platform/Emscripten.cmake" -DJAISCRIPT_BUILD_TESTS=OFF \
 		-DJAISCRIPT_BUILD_EXAMPLES=OFF -DJAISCRIPT_BUILD_RUNNER=OFF -DJAISCRIPT_BUILD_SPIDER=OFF -DJAISCRIPT_BUILD_LSP=OFF \
-		-DJAISCRIPT_INTERPRETER=OFF -DJAISCRIPT_INSTALL=OFF > /dev/null
+		-DJAISCRIPT_INTERPRETER=OFF -DJAISCRIPT_INSTALL=OFF -DJAISCRIPT_WASM_THREADS=ON > /dev/null
 	run cmake --build "$build" --target jaiscript_web_worker
 	engine="$build/bin/jaiscript_web_worker.js"
 	runner="$ROOT/tools/jaiscript_web/run_node.mjs"
@@ -420,6 +421,8 @@ gate_wasm() {
 	run_logged node "$runner" "$engine" gloom.jai --smoke --ticks 300 --look showcase --truecolor
 	want "wasm gloom: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \| STATE_HASH: $GLOOM_STATE\$"
 	want "wasm gloom: expected sound: $GLOOM_SOUND" "^sound: $GLOOM_SOUND\$"
+	run_logged node "$runner" "$engine" gloom.jai --smoke --ticks 300 --look showcase --truecolor --workers 4
+	want "wasm gloom --workers 4: expected frames $GLOOM_SHIM_FRAMES and STATE_HASH $GLOOM_STATE" "frames $GLOOM_SHIM_FRAMES \| STATE_HASH: $GLOOM_STATE\$"
 	cd "$ROOT/examples/crawler"
 	run_logged node "$runner" "$engine" scripts/crawler.jai smoke seed 6 turns 1500
 	want "wasm crawler: expected STATE_HASH $CRAWLER_STATE" "STATE_HASH: $CRAWLER_STATE\$"

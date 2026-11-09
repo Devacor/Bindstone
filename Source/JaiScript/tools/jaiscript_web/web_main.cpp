@@ -16,6 +16,7 @@
 #include "../jaiscript/sound.hpp"
 
 #include <emscripten/emscripten.h>
+#include <emscripten/threading.h>
 
 #include <algorithm>
 #include <chrono>
@@ -272,6 +273,11 @@ web_session& new_session(const char* a_args, double a_budget, bool a_blocking_sl
 	web_session& session = *g_session;
 	auto eng = jai::engine::make();
 	eng->execution_budget(a_budget);
+#ifdef JAISCRIPT_WEB_THREAD_POOL
+	// a blocked worker cannot start a thread, so the engine stays within the threads its pool started with
+	const int cores = emscripten_num_logical_cores();
+	eng->parallel_thread_count(static_cast<size_t>(std::clamp(cores - 1, 1, JAISCRIPT_WEB_THREAD_POOL - 1)));
+#endif
 	eng->set_output_stream(std::shared_ptr<std::ostream>(&session.out, [](std::ostream*) {}));
 	if (a_blocking_sleep) {
 		eng->time().source({}, {}, [](std::chrono::nanoseconds a_duration) {

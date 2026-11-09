@@ -1,8 +1,8 @@
 // Runs JaiScript programs on a page: a screen (play-screen.js's canvas for the games, xterm.js for the sandbox's scrolling
-// text) plus the engine as WebAssembly in a worker (play-worker.js), so a
-// slow frame never stalls the page. Where the page is cross-origin isolated the worker shares memory with it and sleeps for
-// real; elsewhere it runs the Asyncify build, which returns to the worker's event loop at every sleep. Output's bare
-// newlines become CRLF, as a tty's output processing makes them.
+// text) plus the engine as WebAssembly in a worker (play-worker.js), so a slow frame never stalls the page. Where the page is
+// cross-origin isolated and its worker can start workers of its own, the threaded engine shares memory with the page and
+// sleeps for real; elsewhere the worker runs the Asyncify build, which returns to the worker's event loop at every sleep.
+// Output's bare newlines become CRLF, as a tty's output processing makes them.
 "use strict";
 
 const JaiPlay = (() => {
@@ -11,6 +11,15 @@ const JaiPlay = (() => {
 		Alt: 135, Escape: 136, Enter: 137, Tab: 138, Backspace: 139 };
 	const GAME_KEYS = new Set([" ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Tab", "Backspace", "Enter"]);
 	const isolated = typeof SharedArrayBuffer !== "undefined" && self.crossOriginIsolated === true;
+	// the threaded engine also needs its worker to start workers of its own; asked once, before the first run
+	const threaded = !isolated ? Promise.resolve(false) : new Promise((resolve) => {
+		const probe = new Worker("play-worker.js");
+		const done = (ok) => { probe.terminate(); resolve(ok); };
+		const timer = setTimeout(() => done(false), 3000);
+		probe.onmessage = (message) => { if (message.data.threads !== undefined) { clearTimeout(timer); done(message.data.threads); } };
+		probe.onerror = () => { clearTimeout(timer); done(false); };
+		probe.postMessage({ probe: true });
+	});
 
 	function keyCode(event) {
 		if (event.key in NAMED) { return NAMED[event.key]; }
@@ -46,7 +55,9 @@ const JaiPlay = (() => {
 			element.addEventListener("keydown", (event) => this.key(event, true), true);
 			element.addEventListener("keyup", (event) => this.key(event, false), true);
 			element.addEventListener("blur", () => this.releaseKeys());
-			this.status(isolated ? "engine: worker" : "engine: worker, stepped (slower: this page is not cross-origin isolated)");
+			threaded.then((ok) => this.status(ok ? "engine: worker, threads"
+				: isolated ? "engine: worker, stepped (slower: this browser cannot start the engine's threads)"
+				: "engine: worker, stepped (slower: this page is not cross-origin isolated)"));
 		}
 
 		status(text) { if (this.options.onStatus) { this.options.onStatus(text); } }
@@ -94,7 +105,8 @@ const JaiPlay = (() => {
 		}
 
 		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds
-		start({ game, source, budget = 0 }) {
+		async start({ game, source, budget = 0 }) {
+			const useThreads = await threaded;
 			this.stop();
 			JaiAudio.unlock();
 			(this.screen || this.terminal).reset();
@@ -109,7 +121,7 @@ const JaiPlay = (() => {
 				if (data.exit !== undefined) { this.finished(data.exit); }
 				if (data.failed !== undefined) { this.write("\r\n" + data.failed + "\r\n"); this.finished(1); }
 			};
-			if (isolated) {
+			if (useThreads) {
 				this.words = new Int32Array(new SharedArrayBuffer(4 * (16 + RING)));
 				this.words[1] = cols;
 				this.words[2] = rows;

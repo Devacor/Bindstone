@@ -1,5 +1,5 @@
-# jaiscript_web (Emscripten only): the engine and the runner's console builtins as WebAssembly for the site's play and
-# sandbox pages. jaiscript_web_worker runs a script to its end in a Web Worker; jaiscript_web (Asyncify) runs it in steps,
+# jaiscript_web (Emscripten only): the engine and the runner's console builtins as WebAssembly for the site's Play page
+# and landing page. jaiscript_web_worker runs a script to its end in a Web Worker; jaiscript_web (Asyncify) runs it in steps,
 # returning at every sleep, where the page cannot share memory with a worker. Each builds <name>.js, which loads <name>.wasm.
 # Configured with JAISCRIPT_WASM_THREADS, the tree builds the worker alone, on threads: Asyncify does not mix with them.
 set(JAISCRIPT_WEB_THREAD_POOL 8)

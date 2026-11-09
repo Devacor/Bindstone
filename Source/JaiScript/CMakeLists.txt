@@ -187,7 +187,7 @@ if(JAISCRIPT_BUILD_LSP)
 endif()
 # --- end jaiscript_lsp ---
 
-# --- jaiscript_web (tools/jaiscript_web): the engine and the console builtins as WebAssembly, for the site's play and sandbox pages ---
+# --- jaiscript_web (tools/jaiscript_web): the engine and the console builtins as WebAssembly, for the site's Play page and landing page ---
 if(EMSCRIPTEN)
     add_subdirectory(tools/jaiscript_web)
 endif()

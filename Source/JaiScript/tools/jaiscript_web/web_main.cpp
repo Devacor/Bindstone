@@ -1,4 +1,4 @@
-// jaiscript_web: the engine and the runner's console builtins compiled to WebAssembly, for the site's play and sandbox pages.
+// jaiscript_web: the engine and the runner's console builtins compiled to WebAssembly, for the site's Play page and landing page.
 // Scripts see the runner's console builtins by the same names. Two builds share this file:
 // - jaiscript_web_worker (no Asyncify) runs a script to its end inside a Web Worker: jaiweb_run_file / jaiweb_run_source block
 //   the worker, sleep() waits in Atomics.wait, and the page's keys and terminal size arrive through shared memory that
@@ -7,6 +7,8 @@
 //   jaiweb_start_source begin a suspendable run and the host calls jaiweb_tick when its sleep is due; a sleep hands control back. A call that switches fibers returns
 //   the value it had when Asyncify unwound it, so these return nothing and the page asks jaiweb_running afterwards.
 // Output goes to Module.jaiwebWrite as UTF-8 bytes either way.
+// Either build also keeps a live engine across calls for the landing page's scene (jaiweb_live_file, jaiweb_live_eval):
+// running a file again by its path hot-reloads it.
 #include <jaiscript/jaiscript.hpp>
 #include <jaiscript/core/engine_time.hpp>
 #include <jaiscript/core/script_run.hpp>
@@ -215,6 +217,33 @@ struct web_session {
 
 page_input g_input;
 std::unique_ptr<web_session> g_session;
+
+// The landing page's scene: one engine that outlives its calls, so running a file again by its path hot-reloads it
+struct live_engine {
+	std::shared_ptr<jai::engine> eng;
+	std::string reply;
+	bool failed = false;
+};
+live_engine g_live;
+
+jai::engine& live_engine_instance() {
+	if (!g_live.eng) {
+		g_live.eng = jai::engine::make();
+		jai::stdlib::register_all(g_live.eng);
+	}
+	return *g_live.eng;
+}
+
+const char* live_reply(const std::function<std::string(jai::engine&)>& a_body) {
+	try {
+		g_live.reply = a_body(live_engine_instance());
+		g_live.failed = false;
+	} catch (const std::exception& ex) {
+		g_live.reply = ex.what();
+		g_live.failed = true;
+	}
+	return g_live.reply.c_str();
+}
 
 void register_page_console(jai::engine& eng) {
 	eng.add_function("key_down", [](const std::string& name) -> bool {
@@ -427,6 +456,23 @@ EMSCRIPTEN_KEEPALIVE void jaiweb_resize(int a_cols, int a_rows) {
 	g_input.cols = std::max(1, a_cols);
 	g_input.rows = std::max(1, a_rows);
 }
+
+// Any build: runs a file in the live engine, where running the same path again reloads it in place. Returns "" or the error.
+EMSCRIPTEN_KEEPALIVE const char* jaiweb_live_file(const char* a_path) {
+	const std::string path = a_path ? a_path : "";
+	return live_reply([&path](jai::engine& eng) {
+		eng.execute_file_source(path, jai_runner::read_file_or_raise(path));
+		return std::string();
+	});
+}
+
+// Any build: evaluates source text in the live engine and returns its value as text (the error's text when it fails)
+EMSCRIPTEN_KEEPALIVE const char* jaiweb_live_eval(const char* a_source) {
+	const std::string source = a_source ? a_source : "";
+	return live_reply([&source](jai::engine& eng) { return eng.execute(source).to_string(); });
+}
+
+EMSCRIPTEN_KEEPALIVE int jaiweb_live_failed() { return g_live.failed ? 1 : 0; }
 
 EMSCRIPTEN_KEEPALIVE const char* jaiweb_version() {
 	static const std::string version = jai::version();

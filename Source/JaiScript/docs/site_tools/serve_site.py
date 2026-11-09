@@ -3,7 +3,7 @@ them on Apache) and .wasm as application/wasm.
 
     python docs/site_tools/serve_site.py [--port 8000] [--root docs/site] [--no-isolation]
 
---no-isolation leaves the headers off, so the Play pages fall back to running the engine on the page's own thread.
+--no-isolation leaves the headers off, so the Play pages fall back to the stepped engine.
 """
 import argparse
 import functools

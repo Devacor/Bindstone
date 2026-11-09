@@ -145,6 +145,11 @@ main:focus { outline: none; }
   border-radius: 6px; cursor: pointer; font-size: 1rem; line-height: 1; padding: 0;
 }
 #theme-toggle:hover { border-color: var(--accent); color: var(--head); }
+.gh-link {
+  display: inline-flex; align-items: center; gap: .4rem; height: 2.15rem; padding: 0 .65rem; flex: none;
+  border: 1px solid var(--border-strong); border-radius: 6px; color: var(--head); font: 600 .88rem var(--display);
+}
+.gh-link:hover { border-color: var(--accent); background: var(--mark); color: var(--head); text-decoration: none; }
 
 /* ---------- search ---------- */
 .search { position: relative; }
@@ -482,6 +487,13 @@ tr:last-child td { border-bottom: none; }
 .btn:hover { background: var(--mark); border-color: var(--accent); color: var(--head); text-decoration: none; }
 .btn-primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); box-shadow: 0 0 26px var(--glow); }
 .btn-primary:hover { background: var(--accent); color: var(--on-accent); filter: brightness(1.08); }
+@keyframes rainbow-edge { from { background-position: 0 0, 0 0; } to { background-position: 0 0, -200% 0; } }
+.btn-rainbow {
+  border: 2px solid transparent; padding: calc(.65rem - 1px) calc(1.15rem - 1px);
+  background: linear-gradient(var(--bg), var(--bg)) padding-box, var(--rainbow) border-box;
+  background-size: 100% 100%, 200% 100%; animation: rainbow-edge 6s linear infinite; box-shadow: 0 0 22px -6px var(--r3);
+}
+.btn-rainbow:hover { border-color: transparent; filter: brightness(1.15); box-shadow: 0 0 26px -4px var(--r3); }
 
 /* ---------- landing ---------- */
 .hero {
@@ -538,6 +550,8 @@ tr:last-child td { border-bottom: none; }
 .demo-say span { display: block; padding: .22rem .7rem; }
 .demo-say input:checked + span { background: var(--accent); color: var(--on-accent); }
 .demo-say input:focus-visible + span { outline: 2px solid var(--link); outline-offset: -2px; }
+.demo-engine { margin: 0; padding: .5rem .9rem; border-top: 1px solid var(--border); font: .74rem/1.5 var(--mono); color: var(--fg-dim); }
+.demo-engine code { font-size: inherit; }
 .demo-live { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .scene {
   position: relative; border-top: 1px solid var(--border);
@@ -631,6 +645,7 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
   h1[id], h2[id], h3[id] { scroll-margin-top: 1rem; }
 }
 @media (max-width: 600px) {
+  .gh-link span { display: none; }
   body { font-size: 1rem; }
   .shots { grid-template-columns: minmax(0, 1fr); }
   .site-nav { gap: .1rem .85rem; }
@@ -663,7 +678,7 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
 
 /* ---------- motion ---------- */
 @media (prefers-reduced-motion: reduce) {
-  .rainbow, .site-header::before { animation: none; }
+  .rainbow, .site-header::before, .btn-rainbow { animation: none; }
   html { scroll-behavior: auto; }
   .demo .edit, .demo .val, .prevnext a, .toc > li, .pillar { transition: none; }
 }

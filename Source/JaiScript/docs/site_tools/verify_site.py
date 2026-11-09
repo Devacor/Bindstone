@@ -40,7 +40,8 @@ def main():
     print("== scripts")
     node = shutil.which("node")
     if node:
-        bad = [js.name for js in sorted((HERE.parent / "site" / "assets").glob("*.js"))
+        site = HERE.parent / "site"
+        bad = [js.name for js in sorted(site.glob("assets/*.js")) + sorted(site.glob("play/*.js"))
                if subprocess.call([node, "--check", str(js)]) != 0]
         print("-- scripts: %s" % ("FAILED (%s)" % ", ".join(bad) if bad else "ok"))
         if bad:

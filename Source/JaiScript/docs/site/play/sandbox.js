@@ -1,7 +1,7 @@
-// The sandbox: the program in the editor runs on the engine in this page, its output in the terminal below
+// The Play page's sandbox tab: the program in the editor runs on the engine in this page, its output in the terminal below
 "use strict";
 
-(() => {
+const JaiSandbox = (() => {
 	const BUDGET_SECONDS = 20;
 	const SAMPLES = [
 		{ id: "hello", name: "Hello", source: "// Edit me, then press Run (or Ctrl+Enter)\nstring greet(string name) {\n\treturn `Hello, ${name}!`;\n}\n\narray<string> names = [\"gator\", \"cake\", \"world\"];\nfor (auto name : names) {\n\tprint(greet(name));\n}\nprint(`${names.size()} greetings, all checked before anything ran`);\n" },
@@ -13,17 +13,9 @@
 	const editor = document.getElementById("sandbox-editor");
 	const picker = document.getElementById("sandbox-sample");
 	const run = document.getElementById("sandbox-run");
-	const stop = document.getElementById("sandbox-stop");
-	const status = document.getElementById("play-status");
+	let session = null;
+	let onStatus = () => {};
 	const note = (text) => session.write("\r\n\x1b[2m[" + text + "]\x1b[0m\r\n");
-	const session = new JaiPlay.Session(document.getElementById("play-term"), {
-		cols: 100, rows: 18, scrollback: 2000, fitHeight: false,
-		onStatus: (text) => { status.textContent = text; },
-		onExit: (code) => {
-			note(code === 0 ? "finished" : "exit code " + code);
-			run.disabled = false;
-		},
-	});
 
 	for (const sample of SAMPLES) {
 		const option = document.createElement("option");
@@ -35,19 +27,33 @@
 		const sample = SAMPLES.find((s) => s.id === id) || SAMPLES[0];
 		editor.value = sample.source;
 	}
+	// xterm.js measures its cells when it opens, so the terminal opens the first time the tab shows
+	function open(a_onStatus) {
+		onStatus = a_onStatus;
+		if (session) { return; }
+		session = new JaiPlay.Session(document.getElementById("sandbox-term"), {
+			cols: 100, rows: 18, scrollback: 2000, fitHeight: false,
+			onStatus: (text) => onStatus(text),
+			onExit: (code) => {
+				note(code === 0 ? "finished" : "exit code " + code);
+				run.disabled = false;
+			},
+		});
+	}
 	function start() {
 		run.disabled = true;
 		session.start({ source: editor.value, budget: BUDGET_SECONDS });
 		editor.focus();
 	}
+	function stop(reason) {
+		if (!session || !session.running) { return; }
+		session.stop();
+		note(reason);
+		run.disabled = false;
+	}
 
 	picker.addEventListener("change", () => load(picker.value));
 	run.addEventListener("click", start);
-	stop.addEventListener("click", () => {
-		session.stop();
-		note("stopped");
-		run.disabled = false;
-	});
 	editor.addEventListener("keydown", (event) => {
 		if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
 			event.preventDefault();
@@ -57,6 +63,6 @@
 			editor.setRangeText("\t", editor.selectionStart, editor.selectionEnd, "end");
 		}
 	});
-	JaiAudio.controls(document.getElementById("play-audio"));
 	load(SAMPLES[0].id);
+	return { open, stop, keys: "Ctrl+Enter runs" };
 })();

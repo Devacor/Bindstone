@@ -1,1 +1,8 @@
-AddType "text/plain; charset=utf-8" .sh .ps1 .cmd
+AddType "text/plain; charset=utf-8" .sh .ps1 .cmd .jai
+AddType application/wasm .wasm
+# The server already compresses pages; the engine's WebAssembly and the game bundles compress to about a third
+<IfModule mod_deflate.c>
+<IfModule mod_filter.c>
+AddOutputFilterByType DEFLATE application/wasm application/json
+</IfModule>
+</IfModule>

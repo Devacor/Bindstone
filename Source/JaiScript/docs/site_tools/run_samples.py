@@ -24,6 +24,7 @@ the page's output block the runner did not print). Exit code 1 on failures, dive
 """
 
 import argparse
+import html
 import pathlib
 import re
 import shutil
@@ -228,6 +229,35 @@ def compare_expected(expected, stdout, stderr):
     return missing
 
 
+HERO_RE = re.compile(r'<div class="demo" id="hero-demo".*?<pre>(.*?)</pre>', re.S)
+HERO_MAIN = """include "world.jai";
+include "gator.jai";
+include "stage.jai";
+for (int i = 0; i < 1200; ++i) { frame(); }
+print(state());
+"""
+
+
+def check_hero(runner, out, timeout):
+    """The landing page's gator.jai is the text its scene runs, on world.jai and stage.jai: it must load and eat cake."""
+    found = HERO_RE.search((SITE / "index.html").read_text(encoding="utf-8"))
+    if not found:
+        return ["index.html: no hero gator.jai"]
+    hero = out / "hero"
+    hero.mkdir()
+    (hero / "gator.jai").write_text(html.unescape(re.sub(r"<[^>]+>", "", found.group(1))) + "\n", encoding="utf-8", newline="\n")
+    for name in ("world.jai", "stage.jai"):
+        shutil.copy2(SITE / "assets" / "gator" / name, hero / name)
+    (hero / "main.jai").write_text(HERO_MAIN, encoding="utf-8", newline="\n")
+    printed = {}
+    for be in ("vm", "interp"):
+        rc, so, se = run(runner, be, hero / "main.jai", None, timeout)
+        if rc != 0 or "Nom." not in so:
+            return ["hero gator.jai [%s]: exit %s, printed %r %r" % (be, rc, so.strip(), se.strip()[:400])]
+        printed[be] = so
+    return [] if printed["vm"] == printed["interp"] else ["hero gator.jai: vm printed %r, interp %r" % (printed["vm"], printed["interp"])]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--runner", default=str(DEFAULT_RUNNER))
@@ -314,6 +344,7 @@ def main():
                 if missing:
                     drift.append((tag + (" [--warnings]" if s["expected_warnings"] else ""), missing, so_c, se_c))
 
+    hero_failures = check_hero(runner, out, args.timeout) if not args.page or args.page in "index.html" else []
     print("\n%d samples on %d pages: %d skipped (data-host), %d intentional-error samples matched"
           % (total, len(pages), skipped, len(error_ok)))
     for n in notes_all:
@@ -364,9 +395,14 @@ def main():
             for l in (so + ("\n" + se if se else "")).split("\n")[:8]:
                 print("      got      | " + l)
 
+    if hero_failures:
+        print("\nLANDING PAGE SCENE:")
+        for line in hero_failures:
+            print("  " + line)
+
     if not args.keep:
         shutil.rmtree(out, ignore_errors=True)
-    return 1 if (hard or diverge or (drift and not args.allow_drift)) else 0
+    return 1 if (hard or diverge or hero_failures or (drift and not args.allow_drift)) else 0
 
 
 if __name__ == "__main__":

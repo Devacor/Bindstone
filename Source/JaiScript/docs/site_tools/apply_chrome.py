@@ -163,7 +163,7 @@ SECTION_INDEX_DESC = {
     "examples/index.html":
         "Complete, playable programs written in JaiScript - a raycast shooter, a dungeon crawler, a demoscene reel, an online RPG and a DOOM port - and what each one proves.",
     "play/index.html":
-        "GLOOM, GRUBWELL and the demo reel running in the page: the JaiScript engine compiled to WebAssembly runs the games' own scripts.",
+        "Write JaiScript and run it in the page, or play GLOOM, GRUBWELL and the demo reel: the JaiScript engine compiled to WebAssembly runs the scripts.",
     "reference/index.html":
         "Quick-lookup tables distilled from the guide and embedding chapters: operators, types, conversions, the host API, and rules of thumb.",
     "index.html":
@@ -223,6 +223,13 @@ def header(section, root):
         'placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" '
         'aria-controls="search-results" aria-expanded="false" aria-autocomplete="list">'
         '<div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>',
+        '<a class="gh-link" href="https://github.com/Devacor/jaiscript" title="JaiScript on GitHub" aria-label="JaiScript on GitHub">'
+        '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 '
+        '3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28'
+        '-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31'
+        '-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44'
+        ' 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46'
+        '.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg><span>GitHub</span></a>',
         '<button id="theme-toggle" type="button" aria-label="Switch to light theme" '
         'title="Switch to light theme">&#9681;</button>',
         "</div>",
@@ -298,7 +305,7 @@ def crumbs(rel, section, root):
     else:
         parts.append('<a href="index.html">%s</a>' % SECTION_CRUMB[section])
         number = re.match(r"(\d+)-", name)
-        parts.append(number.group(1) if number else "API" if name == "api.html" else "Sandbox" if name == "sandbox.html" else name)
+        parts.append(number.group(1) if number else "API" if name == "api.html" else name)
     return ('<nav class="crumbs" aria-label="Breadcrumb">%s</nav>'
             % '<span class="sep" aria-hidden="true">/</span>'.join(parts))
 
@@ -376,9 +383,6 @@ def build_pages():
                             SECTION_TITLE["reference"]))))
 
     pages.append(("play/index.html", "play", "../", SECTION_INDEX_DESC["play/index.html"], "", ""))
-    pages.append(("play/sandbox.html", "play", "../",
-                  "Write JaiScript and run it in the page: the strict checker, the VM and the standard library, compiled to WebAssembly.",
-                  "", ""))
 
     pages.append(("reference/index.html", "reference", "../",
                   SECTION_INDEX_DESC["reference/index.html"], page_sidebar(True),

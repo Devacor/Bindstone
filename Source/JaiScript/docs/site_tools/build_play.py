@@ -4,7 +4,7 @@ with Emscripten) and one bundle per example game (its .jai files and arguments a
     python docs/site_tools/build_play.py [--emsdk DIR] [--site DIR] [--build DIR] [--games-only]
 
 --emsdk defaults to $EMSDK, --site to docs/site, --build to out/build/wasm-site (the threaded worker builds in
-<build>-threads). Writes <site>/play/engine/ and <site>/play/games/.
+<build>-threads). Writes <site>/play/engine/ (the landing page's scene loads engine/plain/) and <site>/play/games/.
 """
 import argparse
 import glob
@@ -40,11 +40,13 @@ def emscripten_environment(emsdk):
 
 
 def build_engine(emsdk, build, engine_dir):
-    """The worker engine on threads (JAISCRIPT_WASM_THREADS) and the Asyncify fallback without, each in its own tree."""
+    """The worker engine on threads (JAISCRIPT_WASM_THREADS), and in a tree without them the Asyncify fallback and the
+    plain worker build the landing page runs on its main thread."""
     env, toolchain = emscripten_environment(emsdk)
-    engine_dir.mkdir(parents=True, exist_ok=True)
-    for tree, threads, target in [(build.with_name(build.name + "-threads"), "ON", "jaiscript_web_worker"),
-                                  (build, "OFF", "jaiscript_web")]:
+    threaded = build.with_name(build.name + "-threads")
+    for tree, threads, target, folder in [(threaded, "ON", "jaiscript_web_worker", engine_dir),
+                                          (build, "OFF", "jaiscript_web", engine_dir),
+                                          (build, "OFF", "jaiscript_web_worker", engine_dir / "plain")]:
         configure = ["cmake", "-S", str(PACKAGE), "-B", str(tree), "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
                      "-DCMAKE_TOOLCHAIN_FILE=%s" % toolchain, "-DJAISCRIPT_WASM_THREADS=%s" % threads]
         for option in ["TESTS", "EXAMPLES", "RUNNER", "SPIDER", "LSP"]:
@@ -52,8 +54,9 @@ def build_engine(emsdk, build, engine_dir):
         configure += ["-DJAISCRIPT_INTERPRETER=OFF", "-DJAISCRIPT_INSTALL=OFF"]
         subprocess.run(configure, check=True, env=env, stdout=subprocess.DEVNULL)
         subprocess.run(["cmake", "--build", str(tree), "--target", target], check=True, env=env)
+        folder.mkdir(parents=True, exist_ok=True)
         for suffix in (".js", ".wasm"):
-            shutil.copy2(tree / "bin" / (target + suffix), engine_dir / (target + suffix))
+            shutil.copy2(tree / "bin" / (target + suffix), folder / (target + suffix))
 
 
 def bundle_games(games_dir):

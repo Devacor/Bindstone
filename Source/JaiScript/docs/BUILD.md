@@ -131,7 +131,7 @@ Note that the runner's CMake target is `jaiscript_runner` (the library already o
 ## WebAssembly
 
 Configured with Emscripten's toolchain file, the tree builds the library and `tools/jaiscript_web`, the
-engine the site's Play and Sandbox pages run, with the runner's console builtins (`key_down`,
+engine the site's Play page and landing page run, with the runner's console builtins (`key_down`,
 `read_key`, `term_cols`, `term_rows`, `env_var`), file IO and the standard library:
 
 ```bash

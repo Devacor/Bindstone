@@ -1,4 +1,4 @@
-/* The Play and Sandbox pages: a terminal stage, the controls around it and the sandbox's editor */
+/* The Play page: a terminal stage, the controls around it and the sandbox tab's editor */
 .play-picker { display: flex; flex-wrap: wrap; gap: .5rem; margin: 1rem 0 .75rem; }
 .play-pick[aria-pressed="true"] { border-color: var(--accent, #ffce6e); color: var(--accent, #ffce6e); }
 .play-stage { position: relative; isolation: isolate; background: #05060a; border-radius: 8px; padding: 8px; overflow: hidden; }
@@ -26,3 +26,4 @@
 .sandbox-tools select { padding: .35rem .5rem; border-radius: 6px; background: var(--code-bg, #0f1119); color: inherit;
 	border: 1px solid var(--border, #2a2d3a); }
 .sandbox-output .play-term { justify-content: flex-start; }
+.sandbox-intro { margin: 0 0 .25rem; }

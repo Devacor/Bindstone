@@ -43,7 +43,7 @@ the next <code>yield</code>, <code>next(n)</code> advances <code>n</code> yields
 an environment and replays an AST continuation, the VM parks a fiber
 (<code>include/jaiscript/core/coroutine.hpp</code>). Nothing you write has to know which.</p>
 <h2 id="script-surface">Script surface<a class="hlink" href="#script-surface" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int countdown(int from) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int countdown(int from) {
     for (int i = from; i &gt; 0; --i) { yield i; }
     return 0;
 }
@@ -66,7 +66,7 @@ return value never lands in <code>seen</code>.</p>
 <h3 id="how-to-spell-one">How to spell one<a class="hlink" href="#how-to-spell-one" aria-label="link">&#8203;</a></h3>
 <p><code>coroutine</code> is a prefix on the function spellings you already have, so a script you ship can
 declare one however the rest of the file reads:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int ticks()                { yield 1; return 0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int ticks()                { yield 1; return 0; }
 coroutine function names() -&gt; string { yield "a"; return ""; }
 coroutine function guess() -&gt; auto   { yield 2.5; return 0.0; }
 coroutine function plain()           { yield true; }
@@ -82,7 +82,7 @@ included, and inside a namespace body. Coroutines cannot return references (a pa
 the guide&#x27;s <a href="../guide/08-coroutines.html">Coroutines</a> chapter, covering independent instances per call, receiver pinning (a method coroutine keeps its object alive while suspended) and the edges. Hosts moving from Lua coroutines or a C++20 scheduler have a mapping in
 <a href="../bridges/12-from-coroutines.html">From Lua Coroutines and C++20 Schedulers</a>.</p>
 <p>Coroutine <strong>methods</strong> work too. The handle pins the receiver alive across suspension, <code>this</code> stays bound, and mutations through the receiver are visible to the outside world while the coroutine is parked (<code>examples/crawler</code>&#x27;s boss is built this way):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Boss {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Boss {
     int phase = 0;
     coroutine int fight() { phase = 1; yield 10; phase = 2; yield 20; return 99; }
 }

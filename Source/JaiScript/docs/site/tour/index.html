@@ -39,7 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p class="lead">One small game, built a piece at a time. Every block of code on this page was run through two independent engines, a tree-walking interpreter and a bytecode VM, and the output under it is what both of them printed.</p>
 <h2 id="reads-like-cpp">It reads like the C++ you already write<a class="hlink" href="#reads-like-cpp" aria-label="link">&#8203;</a></h2>
 <p>Classes with typed fields, constructors, methods, operator overloading. Strings that splice values in and format them on the way. If you have written a game in C++, you can read this without a manual.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 {
     float x = 0.0; float y = 0.0;
     Vec2(float px, float py) { x = px; y = py; }
     Vec2 operator+(Vec2 o) { return Vec2(x + o.x, y + o.y); }
@@ -56,7 +56,7 @@ print(`ship is ${ship.length():.1f} from home, heading for (${next.x}, ${next.y}
 <h2 id="a-copy-is-a-copy">A copy is a copy<a class="hlink" href="#a-copy-is-a-copy" aria-label="link">&#8203;</a></h2>
 <div class="callout cpp"><p>Value semantics as in C++: <code>b = a</code> copies an object, <code>T&amp;</code> names the same one, and <code>shared_ptr&lt;T&gt;</code> shares it.</p></div>
 <p>This is the one idea that makes JaiScript feel different from Lua, Python or JavaScript: <strong>objects are values</strong>, exactly as in C++. Assigning a ship gives you a second ship. When you want two names for one ship, you ask for a reference.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 0.0; float y = 0.0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 { float x = 0.0; float y = 0.0; }
 
 Vec2 a;           // a Vec2, default-constructed
 Vec2 b = a;        // a copy, like C++: two ships, not one
@@ -70,7 +70,7 @@ print("a = ({}, {})   b = ({}, {})", a.x, a.y, b.x, b.y);</code></pre></div>
 <p>That is the whole spooky-action-at-a-distance category of bug, gone. A function you hand an enemy to cannot quietly teleport yours; if it should, its parameter says <code>Enemy&amp;</code> and everyone can see it.</p>
 <h2 id="mistakes-die-early">Mistakes die before the program runs<a class="hlink" href="#mistakes-die-early" aria-label="link">&#8203;</a></h2>
 <p>Types are not decoration. The checker walks the whole program before the first statement executes, and a typed mistake stops the load:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ship { int hull = 100; string name = "Wanderer"; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Ship { int hull = 100; string name = "Wanderer"; }
 
 Ship s = Ship();
 s.hull = "full";   // a string into an int field: caught before anything runs</code></pre></div>
@@ -80,7 +80,7 @@ s.hull = "full";   // a string into an int field: caught before anything runs</c
 <p>Nothing ran. No half-initialized level, no bug report three hours into a playtest. When you genuinely want a dynamic value, <code>var</code> is the escape hatch, and the checker lets it through. The types you do write also make the code faster: the runtime trusts what the checker proved.</p>
 <h2 id="a-swarm">A swarm in twenty lines<a class="hlink" href="#a-swarm" aria-label="link">&#8203;</a></h2>
 <p>Arrays of class instances, loops that edit them in place through <code>auto&amp;</code>, methods, and nothing you have to free.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy {
     string kind = ""; float x = 0.0; int hp = 0;
     Enemy(string k, float px, int h) { kind = k; x = px; hp = h; }
     void hit(int dmg) { hp -= dmg; }
@@ -101,7 +101,7 @@ wave 3: 0 standing</code></pre></div>
 <p><code>array&lt;Enemy&gt;</code> holds enemies by value: copy the array and you have a second swarm. On the VM a typed loop like this compiles into a register block that runs without leaving it.</p>
 <h2 id="behavior-that-waits">Behavior that waits<a class="hlink" href="#behavior-that-waits" aria-label="link">&#8203;</a></h2>
 <p>Game logic is full of things that happen <em>over time</em>: patrols, cutscenes, attack wind-ups. A coroutine lets you write them top to bottom, and <code>yield</code> pauses right where you are until the next frame asks for more.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string patrol(int laps) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string patrol(int laps) {
     for (int lap = 1; lap &lt;= laps; ++lap) {
         yield `lap ${lap}: walk east`;
         yield `lap ${lap}: scan`;
@@ -120,18 +120,18 @@ lap 2: walk west</code></pre></div>
 <h2 id="change-the-code-keep-the-world">Change the code, keep the world<a class="hlink" href="#change-the-code-keep-the-world" aria-label="link">&#8203;</a></h2>
 <p>Hot reload is not a file watcher bolted on the side. Running a class declaration again <em>is</em> the reload: every live instance keeps its data and picks up the new methods. Here is the turret as it ships,</p>
 <p>with <code>turret_v1.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; turret_v1.jai</span><pre><code class="lang-jai">class Turret {
+<div class="codeblock cb-jai" data-file="turret_v1.jai"><span class="cb-label">jaiscript &middot; turret_v1.jai</span><pre><code class="lang-jai">class Turret {
     int shots = 0;
     string fire() { shots += 1; return `pew (shot ${shots})`; }
 }</code></pre></div>
 <p>and the edit a designer makes mid-playtest,</p>
 <p>with <code>turret_v2.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; turret_v2.jai</span><pre><code class="lang-jai">class Turret {
+<div class="codeblock cb-jai" data-file="turret_v2.jai"><span class="cb-label">jaiscript &middot; turret_v2.jai</span><pre><code class="lang-jai">class Turret {
     int shots = 0;
     string fire() { shots += 3; return `BRRRT x3 (shot ${shots})`; }
 }</code></pre></div>
 <p>The game keeps running across the change:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include "turret_v1.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include "turret_v1.jai";
 var t = Turret();
 print(t.fire());
 print(t.fire());
@@ -154,7 +154,7 @@ while (running) {
 <p>Fix the file and save again, and the loop picks it up within about 0.2 seconds. The world never restarts. <a href="../guide/10-modules.html#reloading-from-a-running-program">Reloading from a running program</a> has the whole story.</p>
 <h2 id="every-core">Every core, one loop<a class="hlink" href="#every-core" aria-label="link">&#8203;</a></h2>
 <p>Most scripting languages give you one thread and a lecture. <code>parallel_for</code> spreads a loop over every core, and the result is byte-identical to running it serially, at any thread count.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Particle { float x = 0.0; float vx = 0.0; float life = 1.0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Particle { float x = 0.0; float vx = 0.0; float life = 1.0; }
 
 array&lt;Particle&gt; sparks = [];
 for (int i = 0; i &lt; 100000; ++i) { Particle p = Particle(); p.vx = (i % 7) - 3.0; sparks.push(p); }

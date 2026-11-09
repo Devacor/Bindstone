@@ -51,7 +51,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><code>shuffle(values)</code> shuffles an array in place.</li>
 <li><code>next_bytes(n)</code> returns a string of n bytes.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random dice;                          // seeded by the operating system: new numbers every run
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random dice;                          // seeded by the operating system: new numbers every run
 int roll = dice.next_int(1, 6);
 print(roll &gt;= 1 &amp;&amp; roll &lt;= 6);
 
@@ -78,7 +78,7 @@ queen jack king ace / king / 4 bytes</code></pre></div>
 <p>A seed fixes the stream. <code>random r(seed);</code>, <code>random r = random(seed);</code> and <code>r.seed(seed)</code> all start the same stream. A float seed converts as every <code>int</code> parameter of a bound function does: toward zero, saturating at the <code>int</code> range, NaN as 0.</p>
 <p>A <code>random</code> is a value like <code>int</code>: a copy holds the same state and replays the same draws, in a variable, a parameter, a field, an array or a map. So a snapshot is an assignment and a rollback is another.</p>
 <p><strong>Arrays of generators.</strong> An array or map literal shares a C++-backed object it names, as it does every bound object, so <code>[r, r]</code> holds <code>r</code> twice. Build an array of generators from calls, <code>[random(1), random(2)]</code>, or with <code>push</code>, which copies.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random a(7);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random a(7);
 random b = random(7);
 random c(1);
 c.seed(7);                            // restarts c as random(7) would
@@ -116,7 +116,7 @@ random true true
 <p>So the loop gives the same numbers on any number of cores, and afterwards the captured generator has moved exactly one draw for each statement that captured it. The numbers are not the serial loop&#x27;s: a serial loop draws in element order and a parallel one has no order.</p>
 <p><strong>A generator the element owns.</strong> A <code>random</code> an element owns (an <code>array&lt;random&gt;</code> zipped beside the data, or a field of the element&#x27;s class) or one the body makes draws its own stream as usual. So a field drawn in a parallel loop gives the serial loop&#x27;s numbers.</p>
 <p>Each element must own its generator: two elements holding one object are refused before any element runs, with <code>parallel_for: elements 1 and 2 share one &#x27;random&#x27; in field &#x27;brain&#x27; (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random loot(5);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random loot(5);
 array&lt;int&gt; drops = [0, 0, 0, 0, 0, 0, 0, 0];
 parallel_for (auto&amp; d : drops) { d = loot.next_int(1, 100); }   // the same drops on any number of cores
 print(drops.join(&quot; &quot;));
@@ -156,7 +156,7 @@ parallel_for: random::seed cannot be called on captured &#x27;loot&#x27; in a pa
 <li><code>crypto::hmac_sha256(key, message)</code> and <code>crypto::hmac_sha512</code> are RFC 2104 HMACs (hex, with <code>_bytes</code> twins).</li>
 <li><code>crypto::equals(a, b)</code> compares two strings in time that depends only on their length, the comparison a MAC or token check needs.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(crypto::sha256(&quot;abc&quot;));
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(crypto::sha256(&quot;abc&quot;));
 print(crypto::sha512(&quot;abc&quot;).size(), &quot; &quot;, crypto::md5(&quot;abc&quot;), &quot; &quot;, crypto::sha256_bytes(&quot;abc&quot;).size());
 string signature = crypto::hmac_sha256(&quot;server secret&quot;, &quot;user=7&amp;expires=1700000000&quot;);
 print(signature);

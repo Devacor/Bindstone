@@ -254,7 +254,7 @@ int 3 / string x / true</code></pre></div>
 </tbody></table></div>
 <h3 id="tables-are-values">Arrays and maps are values<a class="hlink" href="#tables-are-values" aria-label="link">&#8203;</a></h3>
 <p>In Lua, <code>b = a</code> makes a second name for one table. In JaiScript, assignment copies an array or a map, as passing one by value does; a reference declaration (<code>auto&amp;</code>), a reference parameter or a <code>shared_ptr</code> shares one:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
 array&lt;int&gt; b = a;                  // a copy, where Lua's b = a shares the table
 b[0] = 99;
 map&lt;string, int&gt; stats = {"hp": 10};
@@ -266,7 +266,7 @@ print(a[0], " ", b[0], " ", stats["hp"], " ", copy["hp"]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 99 15 0</code></pre></div>
 <h3 id="indexes-start-at-0">Indexes start at 0<a class="hlink" href="#indexes-start-at-0" aria-label="link">&#8203;</a></h3>
 <p>The first element is <code>[0]</code> and the last is <code>[size() - 1]</code>. Reading past the end is an error, where Lua returns <code>nil</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; names = ["ana", "bo", "cy"];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; names = ["ana", "bo", "cy"];
 print(names[0], " ", names[names.size() - 1], " ", names.size());
 for (int i = 0; i &lt; names.size(); ++i) { print(i, " ", names[i]); }
 try { print(names[3]); } catch (e) { print("caught: ", e); }</code></pre></div>
@@ -277,11 +277,11 @@ try { print(names[3]); } catch (e) { print("caught: ", e); }</code></pre></div>
 caught: Array index 3 out of bounds for array of size 3</code></pre></div>
 <h3 id="division">Division follows the operand types<a class="hlink" href="#division" aria-label="link">&#8203;</a></h3>
 <p>Lua's <code>/</code> always produces a float (<code>7 / 2</code> is <code>3.5</code>) and <code>//</code> floors. In JaiScript, <code>/</code> between two integers is integer division truncating toward zero, as in C++, and a float operand makes it float division. <code>%</code> takes the sign of the left operand, where Lua's takes the sign of the right (<code>-7 % 2</code> is <code>1</code> in Lua):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(7 / 2, " ", 7.0 / 2, " ", -7 / 2, " ", -7 % 2, " ", cast&lt;float&gt;(7) / 2);</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(7 / 2, " ", 7.0 / 2, " ", -7 / 2, " ", -7 % 2, " ", cast&lt;float&gt;(7) / 2);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">3 3.5 -3 -1 3.5</code></pre></div>
 <h3 id="zero-is-false">0 and the empty string are false<a class="hlink" href="#zero-is-false" aria-label="link">&#8203;</a></h3>
 <p>Lua treats every value but <code>nil</code> and <code>false</code> as true. JaiScript tests a value the C++ way: <code>0</code>, the empty string and <code>null</code> are false, so <code>if (count)</code> skips an empty count.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var zero = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var zero = 0;
 var empty = "";
 print(zero ? "0 is true" : "0 is false", ", ", empty ? "\"\" is true" : "\"\" is false");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0 is false, "" is false</code></pre></div>
@@ -289,12 +289,12 @@ print(zero ? "0 is true" : "0 is false", ", ", empty ? "\"\" is true" : "\"\" is
 <p>A Lua assignment to an unknown name creates a global, and a misspelled read is <code>nil</code>. JaiScript declares every name; a program-scope declaration is the global, and the strict checker rejects an undeclared name, a wrong argument count or a mismatched typed value before the first statement runs (<a href="../guide/13-strict-checking.html">Strict checking</a>). Names the host registers before the script loads are visible to the checker.</p>
 <h3 id="integers-do-not-wrap">Integers do not wrap<a class="hlink" href="#integers-do-not-wrap" aria-label="link">&#8203;</a></h3>
 <p>Lua 5.4 integers wrap around (<code>math.maxinteger + 1 == math.mininteger</code>). A JaiScript <code>int</code> is the same 64 bits, but an operation that overflows it raises an error (<a href="../guide/04-operators.html#checked-overflow-raises-never-wraps-never-ub">Checked overflow</a>); <code>math::wrap_add</code> and its siblings wrap on purpose:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 9223372036854775807;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 9223372036854775807;
 try { big += 1; } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in '+='</code></pre></div>
 <h3 id="several-results">Several results come back as one value<a class="hlink" href="#several-results" aria-label="link">&#8203;</a></h3>
 <p>A function returns one value. Return an array and destructure it (<a href="../guide/11-kitchen-sink.html#destructuring">Destructuring</a>), or return a class instance:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function minmax(array&lt;int&gt; xs) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function minmax(array&lt;int&gt; xs) {
     int lo = xs[0];
     int hi = xs[0];
     for (auto x : xs) {
@@ -308,7 +308,7 @@ print(lo, " ", hi);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 9</code></pre></div>
 <h3 id="maps-iterate-in-key-order">Maps iterate in key order<a class="hlink" href="#maps-iterate-in-key-order" aria-label="link">&#8203;</a></h3>
 <p><code>pairs</code> visits a table in no promised order. A JaiScript map iterates in key order, every run, so a loop over one is deterministic:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; loot = {"zinc": 3, "amber": 1, "moss": 2};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; loot = {"zinc": 3, "amber": 1, "moss": 2};
 for (auto [name, count] : loot) { print(name, " ", count); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">amber 1
 moss 2

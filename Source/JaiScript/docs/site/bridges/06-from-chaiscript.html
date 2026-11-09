@@ -293,7 +293,7 @@ eng-&gt;execute(R"(try { load_level(""); } catch (e) { print("script caught: ", 
 <p>The two languages look alike: braces, <code>var</code>, <code>for (x : xs)</code>, <code>+</code> on strings. Where a ChaiScript habit gives another result, the cause is usually JaiScript's C++ semantics; <a href="02-from-cpp.html">From C++</a> lists them all, and <a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a> is the chapter to read first.</p>
 <h3 id="assignment-copies-containers">Assignment copies a container<a class="hlink" href="#assignment-copies-containers" aria-label="link">&#8203;</a></h3>
 <p>In ChaiScript, <code>var b = a;</code> of a <code>Vector</code> leaves both names on one vector, and writing through <code>b</code> changes <code>a</code>. A JaiScript array or map is a value: assignment copies it. ChaiScript's reference assignment <code>:=</code> is a reference declaration, <code>auto&amp;</code>. <code>push_back</code> is <code>push</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
 array&lt;int&gt; b = a;          // a copy
 b[0] = 99;
 b.push(4);
@@ -303,35 +303,35 @@ print(a[0], " ", a.size(), " / ", b[0], " ", b.size());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">42 3 / 99 4</code></pre></div>
 <h3 id="interpolation-uses-backticks">Interpolation uses backticks<a class="hlink" href="#interpolation-uses-backticks" aria-label="link">&#8203;</a></h3>
 <p>ChaiScript interpolates <code>${...}</code> inside double quotes. In JaiScript a double-quoted string is literal text, and a backtick string interpolates (<a href="../guide/09-containers-strings.html#template-strings-format-specs">Template strings</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hp = 7;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hp = 7;
 print("plain: hp is ${hp}");
 print(`template: hp is ${hp}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">plain: hp is ${hp}
 template: hp is 7</code></pre></div>
 <h3 id="names-are-declared">Names are declared before they are used<a class="hlink" href="#names-are-declared" aria-label="link">&#8203;</a></h3>
 <p>ChaiScript finds names when a statement runs: a function that assigns an undeclared <code>score</code> loads, then fails when called (<code>Can not find object: score</code>), and <code>global score = 10;</code> inside a function creates a global when it runs. In JaiScript a program-scope declaration is the global, functions read and write it, and an undeclared name stops the load with <code>use of undeclared identifier 'score'</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 0;
 function setup() { score = 10; }
 setup();
 print(score);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10</code></pre></div>
 <h3 id="integers-are-64-bit">Integers are 64-bit, and overflow is an error<a class="hlink" href="#integers-are-64-bit" aria-label="link">&#8203;</a></h3>
 <p>A ChaiScript integer literal is a C++ <code>int</code>, so <code>2147483647 + 1</code> wraps to <code>-2147483648</code>. A JaiScript <code>int</code> is 64-bit, and an operation that overflows it raises an error a <code>catch</code> sees (<a href="../guide/04-operators.html#checked-overflow-raises-never-wraps-never-ub">Checked overflow</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(2147483647 + 1);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(2147483647 + 1);
 int big = 9223372036854775807;
 try { big = big + 1; } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2147483648
 caught: Integer overflow in '+'</code></pre></div>
 <h3 id="conditions-test-values">Conditions test values<a class="hlink" href="#conditions-test-values" aria-label="link">&#8203;</a></h3>
 <p>ChaiScript requires a <code>bool</code> condition and stops with <code>Condition not boolean</code> on <code>if (0)</code>. JaiScript tests a value the C++ way: <code>0</code>, the empty string and <code>null</code> are false.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var zero = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var zero = 0;
 var empty = "";
 var nothing = null;
 print(zero ? "0 is true" : "0 is false", ", ", empty ? "\"\" is true" : "\"\" is false", ", ", nothing ? "null is true" : "null is false");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">0 is false, "" is false, null is false</code></pre></div>
 <h3 id="classes-declare-their-fields">Classes declare their fields<a class="hlink" href="#classes-declare-their-fields" aria-label="link">&#8203;</a></h3>
 <p>A ChaiScript class declares <code>var x;</code> and a constructor <code>def Point(px, py) { this.x = px; }</code>, and methods reach fields through <code>this</code>. A JaiScript class types its fields, names the constructor like C++, and reads fields without <code>this</code>. An instance is a value, and assignment copies it (<a href="../guide/07-classes.html">Classes</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     float x;
     float y;
     Point(float px, float py) { x = px; y = py; }

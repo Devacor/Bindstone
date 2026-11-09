@@ -43,7 +43,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <h2 id="ask-what-shape-is-this">Ask: what shape is this?<a class="hlink" href="#ask-what-shape-is-this" aria-label="link">&#8203;</a></h2>
 <p><code>reflect::type_name(v)</code> is the precise sibling of <code>type_of</code>: both name a class instance by the class it actually holds. Elsewhere <code>type_name</code> is the sharper of the two: a typed container answers its canonical tag (<code>"array&lt;int&gt;"</code>) where <code>type_of</code> answers <code>"array"</code>. References answer what they refer to, and every other value answers its kind (<code>"int"</code>, <code>"string"</code>, <code>"null"</code>, &hellip;).</p>
 <p><code>reflect::fields(v)</code> (on an instance or a class name) returns one entry per field as a map with <code>name</code>, <code>type</code>, <code>kind</code>, <code>access</code>, <code>static</code>, and <code>from</code> (the declaring class). Order is a contract: base class fields first, then own, each in <strong>declaration order</strong>, never hash order, identical across engines and backends. Non-class values return an empty array, so a property grid can call it on anything.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature { int hp = 10; private: string name = "grim"; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature { int hp = 10; private: string name = "grim"; }
 class Goblin : Creature { float speed = 1.5; }
 
 for (auto f : reflect::fields(Goblin())) {
@@ -54,7 +54,7 @@ for (auto f : reflect::fields(Goblin())) {
 [public] float speed (from Goblin)</code></pre></div>
 <p>Static fields ride the same list with <code>"static": true</code>, after the instance fields of the class that declares them. For C++-bound classes the entries come from the host&#x27;s property schema, and <code>kind</code> distinguishes plain fields from <code>"signal"</code> and <code>"observable"</code> members.</p>
 <p><code>reflect::methods(v)</code> enumerates callable members the same way: one entry <strong>per overload</strong> with <code>name</code>, <code>arity</code>, <code>static</code>, <code>access</code>, <code>from</code>, and <code>params</code> (an array of <code>{name, type, default}</code> maps), sorted by name then arity. Property accessors and constructors are not in the list. They are the <code>fields()</code> and <code>construct()</code> surfaces respectively.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Soldier {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Soldier {
     int hp = 10;
     int wound(int amount) { hp = hp - amount; return hp; }
     private: int covert() { return hp; }
@@ -65,7 +65,7 @@ for (auto m : reflect::methods("Soldier")) {
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">covert arity 0 (private)
 wound arity 1 (public)</code></pre></div>
 <p>For quick existence checks there are <code>reflect::has_field(v, "name")</code> and <code>reflect::has_method(v, "name")</code>. Both walk the inheritance chain. And to drive a call dynamically, <code>reflect::method_arguments(v, "name")</code> and <code>reflect::function_arguments("name")</code> return the parameter lists: one param-array <strong>per overload</strong>, because overloads make any single-signature answer ambiguous:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(string who, int times = 1) -&gt; string { return who; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(string who, int times = 1) -&gt; string { return who; }
 
 for (auto p : reflect::function_arguments("greet")[0]) {
     print("{}: {} (default? {})", p["name"], p["type"], p["default"]);
@@ -75,7 +75,7 @@ times: int (default? true)</code></pre></div>
 <p>Host-registered functions are type-erased on the C++ side, so they answer an empty overload list rather than a fabricated signature.</p>
 <h2 id="act-read-write-call-construct">Act: read, write, call, construct<a class="hlink" href="#act-read-write-call-construct" aria-label="link">&#8203;</a></h2>
 <p><code>reflect::get</code>, <code>reflect::set</code> and <code>reflect::invoke</code> are <code>s.hp</code>, <code>s.hp = 42</code> and <code>s.wound(5)</code> with the name as a string:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Soldier {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Soldier {
     int hp = 10;
     int wound(int amount) { hp = hp - amount; return hp; }
 }
@@ -94,7 +94,7 @@ wound(5) -&gt; 37</code></pre></div>
 <li>and engine capabilities such as file access are never reachable.</li>
 </ul>
 <p>A load follows the same idea: <code>from_json</code> and <code>from_binary</code> reconstitute the saved state, private fields and classes with private constructors included.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vault { private: int gold = 100; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vault { private: int gold = 100; }
 var v = Vault();
 
 try { v.gold = 0; } catch (e) { print("direct syntax: {}", e); }
@@ -103,7 +103,7 @@ print("through reflection: {}", reflect::get(v, "gold"));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">direct syntax: Cannot access private member &#x27;gold&#x27; of class &#x27;Vault&#x27;
 through reflection: 7</code></pre></div>
 <p><code>reflect::bind(obj, "name")</code> hands back the method as a callable bound to <code>obj</code>. It holds the object and keeps it alive, so calling it later is <code>obj.name(…)</code> on the object it was taken from, even after the variable that held it is reassigned. It is the one spelling of a method taken as a value (<code>obj.name</code> without a call is an error, see <a href="07-classes.html#methods-as-values">Classes</a>). A string, array or map is a value, so <code>reflect::bind</code> refuses one and points to a lambda: <code>[&amp;]() { s.to_upper(); }</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; void bump() { n += 1; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; void bump() { n += 1; } }
 Counter c;
 var bump = reflect::bind(c, "bump");
 bump();
@@ -111,7 +111,7 @@ bump();
 print("{}", c.n);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2</code></pre></div>
 <p><code>reflect::call("name", args…)</code> is the free-function twin: it resolves a global or namespace-qualified name and calls it. <code>reflect::construct("Class", args…)</code> and <code>reflect::construct_shared("Class", args…)</code> are spawn-by-name. The first is <code>Class(args)</code> (a value: copies are independent). The second is <code>new Class(args)</code> (a shared handle: copies alias one object; see <a href="03-value-semantics.html">Value Semantics</a>).</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function raise(auto x) -&gt; auto { return x + 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function raise(auto x) -&gt; auto { return x + 1; }
 namespace tools { function twice(auto x) -&gt; auto { return x * 2; } }
 
 print("{} {}", reflect::call("raise", 41), reflect::call("tools::twice", 21));
@@ -136,7 +136,7 @@ value a.x = 1, shared sp.x = 9</code></pre></div>
 <li><code>reflect::is_enabled(requirements...)</code> asks whether the host granted privileges (<code>reflect::is_enabled("filesystem")</code>, <code>jai::filesystem</code>, a custom permission name): true only when all are enabled, false for a name the engine does not know (see <a href="10-modules.html#where-files-are">Where files are</a>).</li>
 </ul>
 <p><code>reflect::instances("Class")</code> returns the <em>live</em> instances of a class in this engine in creation order, the walk a debugger or an editor&#x27;s scene panel wants, without keeping its own registry:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tracked { int n = 0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tracked { int n = 0; }
 var a = new Tracked(); var b = new Tracked(); a.n = 7;
 
 var total = 0;
@@ -145,7 +145,7 @@ print("{} live, n-sum {}", reflect::instances("Tracked").size(), total);</code><
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 live, n-sum 7</code></pre></div>
 <h2 id="hot-reload-ask-again">Hot reload: ask again<a class="hlink" href="#hot-reload-ask-again" aria-label="link">&#8203;</a></h2>
 <p>Because every query is live, recapture after a reload is just re-asking. <code>reflect::generation("Class")</code> is the cheap poll for tools: it bumps whenever the class is redefined, so a property grid re-reads <code>fields()</code> only when the number moved.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Evolver { int a = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Evolver { int a = 1; }
 auto g0 = reflect::generation("Evolver");
 print("has b? {}", reflect::has_field("Evolver", "b"));
 
@@ -158,7 +158,7 @@ generation moved: true
 has b? true</code></pre></div>
 <h2 id="the-namespace-is-reserved">The namespace is reserved<a class="hlink" href="#the-namespace-is-reserved" aria-label="link">&#8203;</a></h2>
 <p>Reflection answers are engine truth, so the spelling cannot be impersonated: declaring into <code>reflect::</code> is an error at declaration time on both backends.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace reflect { function evil() { return 1; } }</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace reflect { function evil() { return 1; } }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== error: Namespace &#x27;reflect&#x27; is reserved for the engine (reflect:: is C++-registered only)</code></pre></div>
 <p>This is deliberately the opposite of <code>math::</code>, which scripts extend freely: script-contributed math is legitimate math; a script <code>reflect::fields</code> would be a lie about the engine.</p>
 <h2 id="where-to-next">Where to next<a class="hlink" href="#where-to-next" aria-label="link">&#8203;</a></h2>

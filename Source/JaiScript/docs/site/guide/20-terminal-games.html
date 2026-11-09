@@ -116,7 +116,7 @@ print(`You dodged ${score} rocks.`);</code></pre></div>
 <p>A POSIX terminal sends no key releases. There a key reads as held for half a second after its last press or auto-repeat, and <code>"shift"</code>, <code>"ctrl"</code> and <code>"alt"</code> never read as held. On Windows the console reports releases, so a key reads as held exactly while it is down, and <code>read_key</code> also returns <code>"shift"</code>, <code>"ctrl"</code> and <code>"alt"</code>.</p>
 <h2 id="frame-pacing">Frame pacing<a class="hlink" href="#frame-pacing" aria-label="link">&#8203;</a></h2>
 <p>A stopwatch measures how long the frame took, and <code>sleep</code> waits out the rest of its time slot. The world moves by a fixed <code>step</code> each frame, so its speed does not depend on how fast the machine is:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::stopwatch clock;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::stopwatch clock;
 clock.start();
 float step = 1.0 / 30.0;
 for (int frame = 0; frame &lt; 6; ++frame) {
@@ -130,7 +130,7 @@ print(`six frames took at least ${6 * step:.2f} s: ${clock.elapsed() &gt;= 5.5 *
 <p><code>sleep(seconds)</code> takes a float, and zero or less returns at once. A frame that runs long simply skips its sleep. A game that must keep its world speed even when frames run long moves the world by the frame&#x27;s measured time, <code>clock.delta()</code>, instead of the fixed step.</p>
 <h2 id="drawing-a-frame">Drawing a frame<a class="hlink" href="#drawing-a-frame" aria-label="link">&#8203;</a></h2>
 <p>A terminal draws what it is sent, and escape sequences move the cursor and change colours. A game builds each frame as one string and prints it once with <code>skip_newline</code>, which writes the string, adds no newline and flushes, so the frame appears whole. Starting the string with the cursor-home sequence makes each frame overwrite the last, without clearing the screen and flickering:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string ESC = "\x1b";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string ESC = "\x1b";
 string frame_of(array&lt;string&gt; grid, int score) {
     string result = ESC + "[H";                  // cursor home
     for (auto&amp; row : grid) { result += row + "\n"; }

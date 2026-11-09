@@ -138,7 +138,7 @@ re-classed one afterwards, so keep using <code>kin</code> rather than binding th
 <h3 id="try-it-without-a-host">Try it without a host<a class="hlink" href="#try-it-without-a-host" aria-label="link">&#8203;</a></h3>
 <p>Nothing above needs C++. Script classes re-derive under the same rule, so you can watch
 <code>extend</code> work in the standalone runner:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pt  { int x = 1; string what() { return "Pt"; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Pt  { int x = 1; string what() { return "Pt"; } }
 class Pt2 : Pt  { int y = 2; string what() override { return "Pt2"; } }
 class Pt3 : Pt2 { int z = 3; string what() override { return "Pt3"; } }
 

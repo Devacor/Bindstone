@@ -52,7 +52,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li>numeric references, <code>&amp;#233;</code> or <code>&amp;#xE9;</code> with the <code>;</code> optional, written out as UTF-8.</li>
 </ul>
 <p>A reference to 0, a surrogate or a value past U+10FFFF becomes U+FFFD, and 0x80 to 0x9F read as their windows-1252 characters (<code>&amp;#150;</code> is <code>&#x2013;</code>), as in a browser. An unknown name, a <code>&amp;</code> that starts no reference and anything else stay exactly as written, so <code>web::html_unescape(web::html_escape(s)) == s</code> for every <code>s</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string name = &quot;Tom &amp; Jerry&#x27;s &lt;b&gt;show&lt;/b&gt;&quot;;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string name = &quot;Tom &amp; Jerry&#x27;s &lt;b&gt;show&lt;/b&gt;&quot;;
 print(`&lt;p title=&quot;${web::html_escape(name)}&quot;&gt;${web::html_escape(name)}&lt;/p&gt;`);
 print(web::html_unescape(&quot;caf&amp;eacute; &amp;copy 2026 &amp;#x1F642; &amp;#150; &amp;#0; &amp;bogus; AT&amp;T&quot;));
 print(web::html_unescape(web::html_escape(name)) == name);
@@ -71,7 +71,7 @@ utf8_string</code></pre></div>
 <tr><td><code>web::form_decode</code></td><td>does that and reads <code>+</code> as a space</td></tr>
 </tbody></table></div>
 <p>A <code>%</code> that is not followed by two hex digits is kept as written, as a browser keeps it, so decoding never fails. The result is the decoded bytes, which need not be valid UTF-8.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string title = &quot;Snap Jaw/Social? 50% off &amp; more&quot;;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string title = &quot;Snap Jaw/Social? 50% off &amp; more&quot;;
 print(web::url_encode(title));
 print(web::url_decode(web::url_encode(title)) == title);
 print(web::url_decode(&quot;100%25 sure, 100% sure&quot;));
@@ -100,7 +100,7 @@ a+b a b</code></pre></div>
 <li>a null value leaves its key out;</li>
 <li>any other value raises <code>web::build_query: the value of &#x27;m&#x27; is a map</code> (or <code>... is not text, a number, a bool or an array of them</code>).</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, string&gt; q = web::parse_query(&quot;?page=2&amp;sort=new+first&amp;tag=a&amp;tag=b&amp;draft&quot;);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, string&gt; q = web::parse_query(&quot;?page=2&amp;sort=new+first&amp;tag=a&amp;tag=b&amp;draft&quot;);
 print(to_json(q));
 map&lt;string, var&gt; all = web::parse_query_all(&quot;tag=a&amp;tag=b&amp;tag=c+d&quot;);
 print(to_json(all));
@@ -118,7 +118,7 @@ draft=false&amp;page=2&amp;q=jai+script&amp;tags=a&amp;tags=b+c
 <li>A port that is not a number from 0 to 65535, or a bracket that does not close, raises <code>web::parse_url: &#x27;http://example.org:99999/&#x27; has a malformed host or port</code>.</li>
 </ul>
 <p>A <code>web::url</code> is a value: change its fields and <code>to_string()</code> joins them back. It writes <code>//</code> and the authority only when there is a host, a user or a port, and <code>?</code> and <code>#</code> only before a non-empty query and fragment. It writes the parts as they are: encode a path segment with <code>web::url_encode</code> and a query with <code>web::build_query</code> first.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">web::url u = web::parse_url(&quot;https://ada:pw@snapjaw.example:8443/posts/7?sort=new#comments&quot;);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">web::url u = web::parse_url(&quot;https://ada:pw@snapjaw.example:8443/posts/7?sort=new#comments&quot;);
 print(u.scheme, &quot; | &quot;, u.user, &quot; | &quot;, u.password, &quot; | &quot;, u.host, &quot; | &quot;, u.port, &quot; | &quot;, u.path, &quot; | &quot;, u.query, &quot; | &quot;, u.fragment);
 u.path = &quot;/posts/8&quot;;
 u.query = web::build_query({&quot;sort&quot;: &quot;old&quot;, &quot;page&quot;: 2});
@@ -208,7 +208,7 @@ spider::Response gone = spider::catch(&quot;https://api.example.org/scores/7&quo
 <p>A call blocks the script until its answer arrives, inside a coroutine too; a host that must not wait gives the script a short <code>timeout</code>. A parallel body cannot call <code>spider::</code> (each call touches the network the host shares).</p>
 <h2 id="parallel">In parallel bodies<a class="hlink" href="#parallel" aria-label="link">&#8203;</a></h2>
 <p>Every <code>web::</code> function is pure: it reads its argument and returns a new value. They all run in <a href="16-parallel.html">parallel bodies</a>, each worker calling its own copy, and give the same results as the serial loop.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; titles = [&quot;one &amp; two&quot;, &quot;&lt;three&gt;&quot;, &quot;four five&quot;];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;string&gt; titles = [&quot;one &amp; two&quot;, &quot;&lt;three&gt;&quot;, &quot;four five&quot;];
 array&lt;string&gt; slugs = parallel_transform(titles, [](string t) { return web::url_encode(web::html_escape(t)); });
 print(to_json(slugs));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[&quot;one%20%26amp%3B%20two&quot;,&quot;%26lt%3Bthree%26gt%3B&quot;,&quot;four%20five&quot;]</code></pre></div>

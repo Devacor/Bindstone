@@ -56,7 +56,7 @@ async function runShared({ shared, game, source, budget }) {
 	if (game) {
 		const { entry, args } = await loadBundle(jai, game);
 		jai._jaiweb_resize(Atomics.load(words, 1), Atomics.load(words, 2));
-		return jai.ccall("jaiweb_run_file", "number", ["string", "string"], [entry, args]);
+		return jai.ccall("jaiweb_run_file", "number", ["string", "string", "number", "number"], [entry, args, 0, 0]);
 	}
 	return jai.ccall("jaiweb_run_source", "number", ["string", "number"], [source, budget]);
 }
@@ -69,17 +69,36 @@ async function runStepped({ game, source, budget, cols, rows }) {
 		if (data.key !== undefined) { jai._jaiweb_key(data.key, data.down ? 1 : 0); }
 		if (data.cols !== undefined) { jai._jaiweb_resize(data.cols, data.rows); }
 	};
+	// Asyncify cannot carry a C++ exception back across a fiber switch, so a failed run reaches here as the exception itself
+	const failed = (error) => {
+		let text = String(error && error.message || error);
+		if (error instanceof WebAssembly.Exception) {
+			text = jai.getExceptionMessage(error)[1];
+			jai.decrementExceptionRefcount(error);
+		}
+		write(new TextEncoder().encode("\x1b[0m\x1b[31m" + text.trimEnd() + "\x1b[0m\n"));
+		return 1;
+	};
 	jai._jaiweb_resize(cols, rows);
-	if (game) {
-		const { entry, args } = await loadBundle(jai, game);
-		jai.ccall("jaiweb_start_file", null, ["string", "string"], [entry, args]);
-	} else {
-		jai.ccall("jaiweb_start_source", null, ["string", "number"], [source, budget]);
+	try {
+		if (game) {
+			const { entry, args } = await loadBundle(jai, game);
+			jai.ccall("jaiweb_start_file", null, ["string", "string"], [entry, args]);
+		} else {
+			jai.ccall("jaiweb_start_source", null, ["string", "number"], [source, budget]);
+		}
+	} catch (error) {
+		return failed(error);
 	}
 	// a call that switches fibers returns early under Asyncify: ask whether the run goes on after it
 	return new Promise((resolve) => {
 		const step = () => {
-			if (jai._jaiweb_running()) { jai._jaiweb_tick(); }
+			try {
+				if (jai._jaiweb_running()) { jai._jaiweb_tick(); }
+			} catch (error) {
+				resolve(failed(error));
+				return;
+			}
 			if (!jai._jaiweb_running()) { resolve(jai._jaiweb_exit_code()); return; }
 			setTimeout(step, Math.max(0, jai._jaiweb_wait_ms()));
 		};

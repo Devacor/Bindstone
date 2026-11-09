@@ -45,7 +45,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <h2 id="include-runs-every-single-time">include: runs every single time<a class="hlink" href="#include-runs-every-single-time" aria-label="link">&#8203;</a></h2>
 <div class="callout cpp"><p><code>include</code> is <code>#include</code>: the file's text runs where it is written, in that scope, every time. <code>import</code> is the module: it runs once at program scope and again only when its file changes.</p></div>
 <p><code>include "file.jai"</code> (or <code>include &lt;file.jai&gt;</code>) executes the file&#x27;s contents <strong>in the current scope, every time it is evaluated</strong>. Definitions land in your scope; side effects repeat on every include:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include "mod_math.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">include "mod_math.jai";
 print("mod_add(2, 3) = {}", mod_add(2, 3));
 print("MOD_PI = {}", MOD_PI);
 auto load_count = 0;
@@ -54,10 +54,10 @@ include "mod_count.jai";
 include "mod_count.jai";
 print("include runs EVERY time: load_count = {}", load_count);</code></pre></div>
 <p>with <code>mod_math.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function mod_add(int a, int b) -&gt; int { return a + b; }
+<div class="codeblock cb-jai" data-file="mod_math.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function mod_add(int a, int b) -&gt; int { return a + b; }
 auto MOD_PI = 3.14159;</code></pre></div>
 <p>and <code>mod_count.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">load_count = load_count + 1;</code></pre></div>
+<div class="codeblock cb-jai" data-file="mod_count.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">load_count = load_count + 1;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">mod_add(2, 3) = 5
 MOD_PI = 3.14159
 include runs EVERY time: load_count = 3</code></pre></div>
@@ -73,7 +73,7 @@ include runs EVERY time: load_count = 3</code></pre></div>
 <h2 id="dynamic-paths">Dynamic paths<a class="hlink" href="#dynamic-paths" aria-label="link">&#8203;</a></h2>
 <p>Both may appear wherever a statement may: in a function or lambda body, a block, a loop, a conditional, a coroutine. An <code>include</code> runs where it is written (its declarations are that scope&#x27;s). An <code>import</code> takes no scope: wherever it stands, the module&#x27;s declarations are program-scope declarations. Directly in a class or a namespace body an import is a parse error, since there it would read as scoped.</p>
 <p>The two differ in where the declarations land. An include is text pasted where it stands, so it runs in the current scope under the current file: inside a function its names are that function&#x27;s and end with it. An import is a file of its own, one unit however many places import it, so its names are the program&#x27;s wherever the statement stands:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void load_rules() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void load_rules() {
     include "tuning.jai";     // textual: SPEED is a local of load_rules
     print("inside load_rules: SPEED = {}", SPEED);
 }
@@ -85,9 +85,9 @@ void load_physics() {
 load_physics();
 print("after load_physics: gravity() = {}", gravity());</code></pre></div>
 <p>with <code>tuning.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int SPEED = 3;</code></pre></div>
+<div class="codeblock cb-jai" data-file="tuning.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int SPEED = 3;</code></pre></div>
 <p>and <code>physics.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float gravity() { return 9.81; }</code></pre></div>
+<div class="codeblock cb-jai" data-file="physics.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float gravity() { return 9.81; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">inside load_rules: SPEED = 3
 after load_physics: gravity() = 9.81</code></pre></div>
 <p><strong>An include inside a function body is that function&#x27;s own text.</strong> A literal path is pasted in when the function is parsed, the way C++ pastes an <code>#include</code>. So:</p>
@@ -99,20 +99,20 @@ after load_physics: gravity() = 9.81</code></pre></div>
 </ul>
 <p>To replace program-scope functions and classes from inside a function, import the file: an import is program scope wherever it stands.</p>
 <p>The call form takes any string expression, both for include and import:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto libname = "mod_" + "math" + ".jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto libname = "mod_" + "math" + ".jai";
 include(libname);
 mod_add(20, 22);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">== result: 42</code></pre></div>
 <h2 id="import-cached-module-declaration">import: cached module declaration<a class="hlink" href="#import-cached-module-declaration" aria-label="link">&#8203;</a></h2>
 <p><code>import "file.jai"</code> executes the file <strong>at most once</strong> per engine (subject to the mode below). Repeating the import is free:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto load_count = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto load_count = 0;
 import "mod_count.jai"
 import "mod_count.jai"
 import "mod_count.jai"
 print("import caches (default: re-run only if the file changed): load_count = {}", load_count);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">import caches (default: re-run only if the file changed): load_count = 1</code></pre></div>
 <p>The statement form yields nothing (<code>auto x = import "mod_math.jai";</code> does not parse). The call form <code>import("file.jai")</code> is an expression: <code>true</code> when the module, or a module it imports, ran on this reach, <code>false</code> when it had nothing to do:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">bool first = import("mod_math.jai");
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">bool first = import("mod_math.jai");
 bool again = import("mod_math.jai");
 print("first reach ran it: {}, the next one: {}", first, again);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">first reach ran it: true, the next one: false</code></pre></div>
@@ -131,7 +131,7 @@ void tick() {
     step_world();
 }</code></pre></div>
 <p>An import re-checks its file each time it is reached, so a running program reloads the modules it is working on by reaching their imports again. A game loop that keeps its module list in one file includes that list where the reload should happen:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &mdash; modules.jai</span><pre><code class="lang-jai">import "rules.jai";
+<div class="codeblock cb-jai" data-file="modules.jai"><span class="cb-label">jaiscript &mdash; modules.jai</span><pre><code class="lang-jai">import "rules.jai";
 import "monsters.jai";</code></pre></div>
 <div class="codeblock cb-jai" data-host="the game&#x27;s loop (DEV_MODE, step_world)"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void tick() {
     if (DEV_MODE) {
@@ -193,7 +193,7 @@ import "monsters.jai";</code></pre></div>
 <li>It never runs on a first load.</li>
 </ul>
 <p>This is how a reload converts data whose shape changed:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; scores.jai, edited while running</span><pre><code class="lang-jai">map&lt;string, int&gt; scores = {};             // was: array&lt;int&gt; scores = [12, 40, 7];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript &middot; scores.jai, edited while running</span><pre><code class="lang-jai">map&lt;string, int&gt; scores = {};             // was: array&lt;int&gt; scores = [12, 40, 7];
 
 void hot_reload_migrate(map&lt;string, var&gt; previous) {
     array&lt;int&gt; old = previous["scores"];  // the array the last run left
@@ -241,7 +241,7 @@ eng-&gt;get_imported_files();                // list</code></pre></div>
 <li><strong><code>{ }</code> blocks scope as in C++, at program scope too.</strong> A declaration inside a bare block, an <code>if</code>, a loop body or a <code>try</code> shadows the outer name for the block and vanishes at its end. A function called from inside the block still sees the binding of the scope it was declared in. Only a declaration at the unit's own top level binds the name for the unit.</li>
 </ul>
 <p>An include is textual, so what it declares is the includer's own; an import is a unit of its own. Here <code>rival.jai</code> is imported, so its <code>G</code> is a second cell:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int G = 1;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int G = 1;
 int main_g() { return G; }
 import "rival.jai";           // another unit: its G is a cell of its own
 print(main_g(), " ", rival_g(), " ", G);
@@ -255,7 +255,7 @@ void show() { print("show: {}", hp); }
 }
 print("after: {}", hp);</code></pre></div>
 <p>with <code>rival.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int G = 5;
+<div class="codeblock cb-jai" data-file="rival.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int G = 5;
 int rival_g() { return G; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 5 1
 block: 99
@@ -299,13 +299,13 @@ after: 10</code></pre></div>
 <p>Two consequences follow.</p>
 <p>When filesystem access is disabled, the checker skips discovery on disk. It still checks the source supplied in memory, but cannot gather declarations from those files; an attempted runtime <code>include</code> or <code>import</code> raises the privilege error. Neither a filename label for an in-memory program nor an <code>extern</code> declaration grants file access.</p>
 <p>First, <strong>import order does not matter for names</strong>. A function in one file may use a global another file declares, even a file imported after it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "rules.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "rules.jai";
 import "config.jai";        // imported AFTER rules.jai, which reads its names
 print("damage = {}", damage(3));</code></pre></div>
 <p>with <code>rules.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function damage(int hits) -&gt; int { return hits * BASE_DAMAGE; }</code></pre></div>
+<div class="codeblock cb-jai" data-file="rules.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function damage(int hits) -&gt; int { return hits * BASE_DAMAGE; }</code></pre></div>
 <p>and <code>config.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int BASE_DAMAGE = 7;</code></pre></div>
+<div class="codeblock cb-jai" data-file="config.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int BASE_DAMAGE = 7;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">damage = 21</code></pre></div>
 <p><code>rules.jai</code> reads <code>BASE_DAMAGE</code>, which is declared in a file imported <em>after</em> it. The checker knew the name from the pool. The runtime finds the value because <code>damage()</code> is not called until both imports have run. (Execution order still matters for <em>values</em>: a top-level statement in <code>rules.jai</code> that read <code>BASE_DAMAGE</code> would find it undefined at run time. The checker is a superset by design: it never fails a program that runs clean, and it cannot see the clock.)</p>
 <p>Second, <strong>a mistake anywhere fails the root</strong>. Misspell the name in <code>rules.jai</code> and the root&#x27;s load fails before any unit runs, with the listing named by the file&#x27;s resolved path (shortened here):</p>
@@ -327,24 +327,24 @@ scripts/rules.jai:1:50: error: use of undeclared identifier &#x27;BASE_DAMGE&#x2
 The program&#x27;s pool carries it to every unit. At run time it declares nothing: the name resolves when it is used. A name nothing has defined by then raises <code>'net_relay' is declared extern but never defined</code> (for a variable, with <code>(an 'inline' declaration creates it)</code> after it). This is also how a shared leaf calls into a module only some programs import: in a program that does import it, the <code>extern</code> is inert and the real definition wins.</li>
 <li><strong><code>[[warn_mode]]</code> at the top of a unit.</strong> The whole file is checked but reported as warnings, and a warn-mode leaf never fails its program. Coarser than <code>extern</code>; reach for it when a file is deliberately dynamic.</li></ul>
 <p>The <code>extern</code> shape, in a leaf that waits for a host-registered function:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "leaf.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "leaf.jai";
 print("loaded; on_packet waits for the host: {}", leaf_value());</code></pre></div>
 <p>with <code>leaf.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function net_relay;          // registered by the host before any packet arrives
+<div class="codeblock cb-jai" data-file="leaf.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function net_relay;          // registered by the host before any packet arrives
 function leaf_value() -&gt; int { return 1; }
 function on_packet(var p) { return net_relay(p); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">loaded; on_packet waits for the host: 1</code></pre></div>
 <p>A variable that several files declare, each wanting it to exist whichever of them a program imports, is an <code>inline</code> variable, as in C++17. The first <code>inline</code> declaration to run creates it (from its initializer, or its type&#x27;s default), and every later one adopts it without running its initializer. A plain declaration and an <code>inline</code> one of the same name never mix: the checker reports <code>'frags' is already defined inline; declare it 'inline int frags;' to share it</code> at load when it sees both.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "hud.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">import "hud.jai";
 import "netplay.jai";
 award_frag();
 award_frag();
 print("frags = {}", frags);</code></pre></div>
 <p>with <code>hud.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags;                   // exists whether or not netplay.jai is imported
+<div class="codeblock cb-jai" data-file="hud.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags;                   // exists whether or not netplay.jai is imported
 void award_frag() { frags += 1; }</code></pre></div>
 <p>and <code>netplay.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags = 100;             // adopts hud.jai's variable: this initializer does not run</code></pre></div>
+<div class="codeblock cb-jai" data-file="netplay.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags = 100;             // adopts hud.jai's variable: this initializer does not run</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">frags = 2</code></pre></div>
 <p>All three, plus <code>inline</code>, <code>[[strict_mode]]</code> and the diagnostic format, are covered in <a href="13-strict-checking.html">Types That Fail Early</a>.</p>
 <h2 id="which-one-do-i-want-the-real-world-idiom">Which one do I want? (the real-world idiom)<a class="hlink" href="#which-one-do-i-want-the-real-world-idiom" aria-label="link">&#8203;</a></h2>

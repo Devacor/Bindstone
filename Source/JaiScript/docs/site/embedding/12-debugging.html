@@ -50,7 +50,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li>When it stops: step over, into and out, continue, walk the Call Stack, and read each frame&#x27;s locals and the globals in the Variables pane.</li></ol>
 <h3 id="without-a-debugger">Without a debugger<a class="hlink" href="#without-a-debugger" aria-label="link">&#8203;</a></h3>
 <p>Most mistakes never reach run time: the strict checker lists every typed mistake and undeclared name in a file before anything runs (<a href="06-static-checking.html">Static Checking</a>). For the rest, a caught error knows where it came from: <code>e.message</code>, <code>e.line</code>, <code>e.column</code> and <code>e.stack</code> (each frame <code>file:line</code>, innermost first, the innermost 64 kept):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function load_level(int n) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function load_level(int n) {
     array&lt;int&gt; sizes = [8, 16];
     return sizes[n];
 }

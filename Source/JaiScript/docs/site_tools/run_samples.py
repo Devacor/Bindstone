@@ -110,10 +110,10 @@ class Extractor(HTMLParser):
             self._p.append(data)
 
 
-def plan_page(page):
-    """Return (samples, pool, notes). samples: dicts to run; pool: name -> support code."""
+def page_blocks(text):
+    """Every codeblock in document order; a jaiscript or template block carries name and support (a file samples load)."""
     ex = Extractor()
-    ex.feed(page.read_text(encoding="utf-8"))
+    ex.feed(text)
     ex.close()
     blocks = ex.blocks
     jai = [b for b in blocks if b["kind"] in ("cb-jai", "cb-spider")]   # a cb-spider block is a template file, never a sample
@@ -132,7 +132,13 @@ def plan_page(page):
         if m:
             b["name"] = m.group(1)
             b["support"] = m.group(1) in referenced
+    return blocks
 
+
+def plan_page(page):
+    """Return (samples, pool, notes). samples: dicts to run; pool: name -> support code."""
+    blocks = page_blocks(page.read_text(encoding="utf-8"))
+    jai = [b for b in blocks if b["kind"] in ("cb-jai", "cb-spider")]
     pool, notes = {}, []
     for b in jai:
         if b["support"]:

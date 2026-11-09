@@ -50,7 +50,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>Function values such as <code>auto root = math::sqrt;</code> call the same math kernel. Random numbers are not here: they come from a <code>random</code> object you own (<a href="18-random.html">Random Numbers &amp; Crypto</a>).</p>
 <h2 id="making-vectors">Making vectors<a class="hlink" href="#making-vectors" aria-label="link">&#8203;</a></h2>
 <p>Call the type with up to one argument per component; missing components are 0. A declaration without an initializer holds the default, and the C++ initializer spellings work: <code>T v(args)</code> and <code>T v{args}</code>. A narrower vector followed by scalars that complete the count builds a wider one, and a vector of the same dimensions converts between the float and int families (float to int truncates toward zero). A color takes <code>(r, g, b)</code> with alpha 1, <code>(r, g, b, a)</code>, nothing (opaque white) or another color.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2.5, 3);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2.5, 3);
 math::vec3 b = math::vec3(1, 2);              // missing components are 0
 math::vec3 zero;                              // a declaration default-constructs
 math::ivec2 cell(3, 4);                       // direct initialization
@@ -74,7 +74,7 @@ print(math::color(), " ", math::color(1, 0, 0), " ", math::color(0.2, 0.4, 0.6, 
 <li>An int component outside the 32-bit range raises <code>Integer overflow: the value does not fit an int32 component</code>.</li>
 </ul>
 <p><code>using</code> brings the names into a file so they read without the prefix (<a href="11-kitchen-sink.html">Namespaces</a>); <code>type_of</code> still reports the full name:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec3, math::ivec2;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec3, math::ivec2;
 
 vec3 up = vec3(0, 1, 0);
 ivec2 tile = ivec2(5, 9);
@@ -82,7 +82,7 @@ print(up, " ", tile, " ", type_of(up));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(0.0, 1.0, 0.0) (5, 9) math::vec3</code></pre></div>
 <h2 id="components">Components<a class="hlink" href="#components" aria-label="link">&#8203;</a></h2>
 <p>Components read and store by name, with compound assignment and <code>++</code>/<code>--</code>. A vector's components are <code>float</code> (an ivec's are <code>int</code>); <code>width</code>, <code>height</code> and <code>depth</code> are second names for <code>x</code>, <code>y</code> and <code>z</code>. A color's channels are <code>r g b a</code> only. The components are stored as 32-bit floats, so a component reads back the nearest 32-bit value, widened exactly:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 2, 3);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 2, 3);
 v.x = 5;
 v.y += 2.5;
 v.z *= 2;
@@ -104,7 +104,7 @@ print(tiny.x, " ", tiny.x == 0.1);            // components are 32-bit floats</c
 (0.25, 0.5, 0.75, 0.5) 1.5
 0.10000000149011612 false</code></pre></div>
 <p>A store into an int component checks the 32-bit range. A store into a float component rounds to 32 bits (a value beyond that range becomes infinity, as in C++). A name the type does not have, or a value that is not a number, raises:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::ivec2 p;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::ivec2 p;
 try { p.x = 3000000000; } catch (e) { print(e); }
 try { var w = math::vec2(); w.z = 1; } catch (e) { print(e); }
 try { var v = math::vec3(); var s = "a"; v.x = s; } catch (e) { print(e); }
@@ -123,7 +123,7 @@ Cannot store a non-numeric value in a math::vec3 component
 <li>An ivec divides like an int (truncating) and has <code>%</code>. Float vectors have no <code>%</code>.</li>
 <li>Compound assignment works on any vector lvalue, and a vector concatenates into a string as its text.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
 math::vec3 b = math::vec3(0.5, 0.5, 0.5);
 print(a + b, " ", a - b, " ", -a);
 print(a * 2, " ", 2 * a, " ", a / 2, " ", 6 / math::vec2(3, 6));
@@ -140,7 +140,7 @@ print("at " + math::ivec2(1, 2));</code></pre></div>
 (3.0, 5.0, 7.0)
 at (1, 2)</code></pre></div>
 <p><code>==</code> and <code>!=</code> compare every component; a vec equals an ivec holding the same values, and vectors of different dimensions, or a color and a vec4, are never equal. A vector is true when any component is nonzero. Vectors and colors compare lexicographically by component with &lt;=&gt; and relational operators; colors compare only with colors. Mixing kinds or dimensions in arithmetic, a float scalar with an ivec, and a zero divisor component raise the scalar operators' errors, and ivec arithmetic follows the integer overflow policy (<a href="04-operators.html">Operators</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(math::vec3(1, 2, 3) == math::vec3(1, 2, 3), " ", math::vec3(1, 2, 3) == math::ivec3(1, 2, 3), " ", math::vec2(1, 2) == math::vec3(1, 2, 0));
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(math::vec3(1, 2, 3) == math::vec3(1, 2, 3), " ", math::vec3(1, 2, 3) == math::ivec3(1, 2, 3), " ", math::vec2(1, 2) == math::vec3(1, 2, 0));
 print(math::color() == math::color(1, 1, 1, 1), " ", math::color() == math::vec4(1, 1, 1, 1));
 if (math::vec2(0, 0)) { print("zero is true"); } else { print("zero is false"); }
 if (math::ivec2(0, 1)) { print("any nonzero component is true"); }
@@ -164,7 +164,7 @@ Modulo by zero
 Integer overflow in &#x27;+&#x27;</code></pre></div>
 <h2 id="values-and-references">Values and references<a class="hlink" href="#values-and-references" aria-label="link">&#8203;</a></h2>
 <p>A vector is a value everywhere: assignment, a by-value parameter, an array element and a field each hold their own copy, exactly like a C++ struct. A <code>&amp;</code> parameter is the caller's vector. A <code>parallel_for</code> over vectors, or over objects holding them, writes each element in place, and a captured vector reads as a value (<a href="16-parallel.html#parallel-for">Parallel Loops</a>). A field's components store through the object:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 a = math::vec3(1, 2, 3);
 math::vec3 b = a;                      // a copy
 b.x = 9;
 array&lt;math::vec3&gt; pts = [a, a];
@@ -188,7 +188,7 @@ print(body.pos);</code></pre></div>
 (1.0, 102.0, 3.0)
 (5.0, 1.0, 1.0)</code></pre></div>
 <p>A component is an lvalue wherever a reference binds, as a struct member is in C++: it passes to a <code>float&amp;</code> parameter, binds <code>auto&amp;</code> and <code>cast&lt;float&amp;&gt;</code>, and returns from a <code>float&amp;</code> function or method. A reference to a component keeps naming that component of the variable even after the whole vector is assigned again:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; c) { c *= 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; c) { c *= 10; }
 
 math::vec3 v = math::vec3(1, 2, 3);
 scale(v.y);                            // the component itself binds float&amp;
@@ -216,7 +216,7 @@ print(tint);</code></pre></div>
 (1.0, 1.0, 1.0, 10.0)</code></pre></div>
 <h2 id="typed-slots">Typed slots<a class="hlink" href="#typed-slots" aria-label="link">&#8203;</a></h2>
 <p>A declared vector slot (a variable, a parameter, a return, a field, an array element) converts between the float and int families of the same dimensions. A <code>string</code> slot takes text only, so <code>to_string(v)</code> gives it a vector's text. Anything else is rejected with the typed-slot text. A color never converts to or from a <code>vec4</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::ivec3(1, 2, 3);            // an ivec into a vec slot
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::ivec3(1, 2, 3);            // an ivec into a vec slot
 math::ivec2 p = math::vec2(1.5, -2.5);          // a vec into an ivec slot truncates
 string s = to_string(math::vec2(1, 2));         // a string slot takes the text
 math::ivec2 snap(math::vec2 at) { return at; }  // returns convert too
@@ -240,7 +240,7 @@ Cannot initialize &#x27;bad&#x27; (declared math::vec4) with math::color</code><
 <tr><td><code>math::mix_in</code>, <code>math::mix_out</code>, <code>math::mix_in_out</code>, <code>math::mix_out_in</code> <code>(a, b, t, strength)</code></td><td>eased mixes</td></tr>
 <tr><td><code>math::unmix_in</code>, <code>math::unmix_out</code>, <code>math::unmix_in_out</code>, <code>math::unmix_out_in</code> <code>(a, b, v, strength)</code></td><td>their inverses</td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec2 a = math::vec2(0, 10);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec2 a = math::vec2(0, 10);
 math::vec2 b = math::vec2(10, 20);
 print(math::mix(a, b, 0.25), " ", math::lerp(a, b, math::vec2(0.5, 1)));   // a float or a per-component t
 print(math::unmix(a, b, math::vec2(5, 20)));                              // where a value sits between a and b
@@ -276,7 +276,7 @@ math::mix expects vectors of the same dimensions</code></pre></div>
 <tr><td><code>math::perpendicular(v)</code></td><td></td><td>a vec2 or ivec2 turned a quarter counterclockwise</td></tr>
 <tr><td><code>math::rotate(v, angle)</code>, <code>math::rotate(v, axis, angle)</code></td><td><code>v.rotated(angle)</code>, <code>v.rotated(axis, angle)</code></td><td>a vec2 by an angle, a vec3 about an axis (radians)</td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(3, 4, 0);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(3, 4, 0);
 math::vec3 x = math::vec3(1, 0, 0);
 math::vec3 y = math::vec3(0, 1, 0);
 print(math::dot(v, x), " ", v.dot(y), " ", math::cross(x, y), " ", x.cross(y));
@@ -300,7 +300,7 @@ math::cross expects two vec2 or two vec3 vectors</code></pre></div>
 <p>The methods are the free functions with the receiver first; a color has none of them. Dimensions must agree, and the errors name the shape they expected (<code>math::dot expects two vectors of the same dimensions</code>, <code>math::rotate expects (vec2, angle) or (vec3, axis, angle)</code>).</p>
 <h2 id="colors">Colors<a class="hlink" href="#colors" aria-label="link">&#8203;</a></h2>
 <p>A color's channels are straight (not premultiplied) alpha. Arithmetic, <code>math::clamp</code>, <code>math::min</code>, <code>math::max</code> and the rounding functions work on all four channels. A color combines only with colors and scalars, never with a <code>vec4</code>. <code>math::mix</code> and <code>math::lerp</code> blend colors in the OKLab perceptual space, so a blend keeps its brightness instead of dipping through gray. <code>math::mix_rgb</code> blends each channel directly and <code>math::mix_hsv</code> travels the shorter way around the hue wheel. Alpha always blends linearly, and the eased mixes ease the same perceptual blend.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::color red = math::color(1, 0, 0);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::color red = math::color(1, 0, 0);
 math::color blue = math::color(0, 0, 1);
 print(math::mix(red, blue, 0.5));             // perceptual (OKLab)
 print(math::mix_rgb(red, blue, 0.5));         // per channel
@@ -316,7 +316,7 @@ try { var q = math::color() + math::vec4(1, 1, 1, 1); } catch (e) { print(e); }<
 Invalid operands for + operator</code></pre></div>
 <h2 id="arrays-and-maps-of-vectors">Arrays and maps of vectors<a class="hlink" href="#arrays-and-maps-of-vectors" aria-label="link">&#8203;</a></h2>
 <p><code>array&lt;math::vec3&gt;</code> (and the same for every math type) is a packed typed buffer: the components sit side by side. An element reads as a copy, element components store in place, and the element boundary converts the other family of the same dimensions. Converting a whole array between the families copies element by element. An ivec makes a natural map key.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;math::vec3&gt; pts = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;math::vec3&gt; pts = [math::vec3(1, 2, 3), math::vec3(4, 5, 6)];
 pts.push(math::ivec3(7, 8, 9));                 // the element boundary converts
 pts[0].x += 10;
 for (auto&amp; p : pts) { p.z = 0; }
@@ -337,7 +337,7 @@ door
 Cannot push &#x27;math::vec2&#x27; to array&lt;math::vec3&gt;</code></pre></div>
 <h2 id="text-and-json">Text and JSON<a class="hlink" href="#text-and-json" aria-label="link">&#8203;</a></h2>
 <p><code>to_string</code>, <code>print</code> and string concatenation write a vector as its components in parentheses, floats in the shortest text that reads back the same 32-bit value. An array of vectors prints its elements, <code>[(1.0, 2.0), (3.0, 4.0)]</code>. <code>to_json</code> writes the type and the named components, and <code>from_json</code> rebuilds the same type; the binary archive (<code>to_base64</code> / <code>from_base64</code>) keeps the exact bits.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 0.5, -2);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = math::vec3(1, 0.5, -2);
 print(to_string(v), " ", "v = " + v, " ", math::vec2(0.1, 1e30));
 string j = to_json(v);
 print(j);
@@ -353,7 +353,7 @@ print(restored, " ", type_of(restored));</code></pre></div>
 (-7, 3) math::ivec2</code></pre></div>
 <h2 id="what-the-checker-catches">What the checker catches<a class="hlink" href="#what-the-checker-catches" aria-label="link">&#8203;</a></h2>
 <p>Under strict checking (<a href="13-strict-checking.html">Types That Fail Early</a>) the checker knows every math type, its components and methods and the library's result types, so these fail the load before anything runs:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = 5;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 v = 5;
 math::vec2 flat;
 flat.z = 1;
 math::color tint;

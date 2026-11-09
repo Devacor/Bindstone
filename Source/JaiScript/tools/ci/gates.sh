@@ -19,7 +19,8 @@
 # The wasm gate builds the engine as WebAssembly (tools/jaiscript_web, the site's Play pages) with Emscripten, a 32-bit
 # libc++ target that runs, on WebAssembly threads (JAISCRIPT_WASM_THREADS), and plays GLOOM's (serial and on four workers),
 # the crawler's and the demoreel's shims headless under Node
-# (tools/jaiscript_web/run_node.mjs) to the hashes the native gates expect. It skips with a message when no Emscripten SDK
+# (tools/jaiscript_web/run_node.mjs) to the hashes the native gates expect, then runs tools/jaiscript_web/catches.jai, which
+# needs the library's own catches and the browser's entropy. It skips with a message when no Emscripten SDK
 # (EMSDK, else em++ on PATH) or no node is found. WASM_BUILD_DIR names the tree (default build-wasm).
 #
 # The two differentials: `fuzz` runs each program on the interpreter and the optimized VM, `fuzz-vm-reference` on the
@@ -430,6 +431,9 @@ gate_wasm() {
 	cd "$ROOT/examples/demoreel"
 	run_logged node "$runner" "$engine" demoreel.jai scene 1 frames 20 pix sext
 	want "wasm demoreel: expected JULIA's stream hash $DEMOREEL_JULIA_STREAM" "stream hash $DEMOREEL_JULIA_STREAM \|"
+	cd "$ROOT/tools/jaiscript_web"
+	run_logged node "$runner" "$engine" catches.jai
+	want "wasm catches: expected the library's own catches and an entropy-seeded random" "^-1 42 caught true\$"
 }
 
 # The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each

@@ -134,7 +134,7 @@ SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);</code></pre></div>
 
 <h2 id="json-in-script">JSON in script<a class="hlink" href="#json-in-script" aria-label="link">&#8203;</a></h2>
 <p>Where a host uses <code>json</code> as a loose document (configuration, a web response, tuning data), JaiScript keeps it in script. <code>from_json</code> parses text into maps, arrays, numbers, strings, <code>bool</code> and <code>null</code>; <code>to_json</code> writes any script value back as plain JSON, with map keys in order so the same data always writes the same text (<a href="../guide/09-containers-strings.html#json">JSON</a> in the guide):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {"name": "orc", "hp": [10, 20], "pos": {"x": 1.5}};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {"name": "orc", "hp": [10, 20], "pos": {"x": 1.5}};
 string text = to_json(save);
 var back = from_json(text);
 print(text);
@@ -150,7 +150,7 @@ print(to_json([1, 2.5, "three", true, null], 2));</code></pre></div>
   null
 ]</code></pre></div>
 <p>A script class instance round-trips with its class name:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "Vex"; int hp = 30; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "Vex"; int hp = 30; }
 Hero h;
 h.hp = 12;
 string text = to_json(h);

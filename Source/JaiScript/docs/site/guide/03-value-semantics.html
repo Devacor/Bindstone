@@ -39,7 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p><strong>If you read only one chapter of this guide, read this one.</strong> The single most common ambush for a newcomer lives here: <em>JaiScript copies by default, everywhere.</em> Assignment copies. Function arguments copy. Even <strong>class instances copy</strong>. If you mutate a copy, the original never hears about it, and nothing warns you.</p>
 <h2 id="the-ambush-mutations-on-copies-vanish-silently">The ambush: mutations on copies vanish silently<a class="hlink" href="#the-ambush-mutations-on-copies-vanish-silently" aria-label="link">&#8203;</a></h2>
 <div class="callout cpp"><p>Classes, arrays and maps are values, as a C++ struct or <code>std::vector</code> is: <code>b = a</code> copies, a by-value parameter receives a copy, and a change to the copy never reaches the original. <code>&amp;</code> parameters, <code>auto&amp;</code> and <code>shared_ptr&lt;T&gt;</code> are how two names share one object, with their C++ meanings.</p></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto a = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto a = [1, 2, 3];
 auto b = a;          // assignment COPIES the array
 b[0] = 99;
 print("a[0] = {}  (the original is untouched)", a[0]);
@@ -55,7 +55,7 @@ print("after double_all(nums): nums[0] = {}  &lt;- mutation vanished!", nums[0])
 b[0] = 99
 after double_all(nums): nums[0] = 1  &lt;- mutation vanished!</code></pre></div>
 <p><strong>This applies to class instances too</strong>. Unlike Python/JS/Lua/C#, objects are values:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
     void set(int v) { x = v; }             // methods mutate their own instance
 }
@@ -82,7 +82,7 @@ after p.set(42):    p.x = 42</code></pre></div>
 <li>An element that is a temporary (a call result, a construction, a nested literal, a number or a string) goes in without a copy, because nothing else can see it.</li>
 <li>A <code>shared_ptr</code> element copies the handle, so the elements share its object:</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { int hp = 10; }
 Hero h = Hero();
 auto party = [h, h];          // two copies of h
 party[0].hp = 1;
@@ -95,7 +95,7 @@ print("{} {}", s.hp, links[1].hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10 1 10
 3 3</code></pre></div>
 <p>Returns follow the same rule. A function that returns by value hands back a value that aliases nothing the function could name. A global, a field or an element it returns is copied (a local or a parameter simply moves out), so changing the result never reaches the callee&#x27;s storage. A <code>-&gt; T&amp;</code> or <code>T&amp; name()</code> return is the alias:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; stock = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; stock = [1, 2, 3];
 array&lt;int&gt; get_stock() { return stock; }          // by value: the caller gets a copy
 array&lt;int&gt;&amp; stock_ref() { return stock; }         // by reference: the caller names stock
 get_stock().push(4);
@@ -111,7 +111,7 @@ after stock_ref().push(4): 4</code></pre></div>
 <li>Its target is a by-value range-for variable, parameter or local, or a field or element of one.</li>
 <li>No path from the write reads that variable again before it dies:</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
 array&lt;Enemy&gt; enemies = [Enemy(), Enemy()];
 for (auto e : enemies) {
     e.hp -= 1;
@@ -122,7 +122,7 @@ for (auto e : enemies) {
         ^</code></pre></div>
 <p>The fix is the reference the code meant: <code>for (auto&amp; e : enemies)</code>, <code>void hurt(Enemy&amp; e)</code>, <code>auto&amp; first = enemies[0];</code>. For a parameter the text says <code>take 'string&amp; s' to change the caller's value</code>. For a local it says <code>declare 'auto&amp; x' to change the original</code>.</p>
 <p>To change a copy on purpose, make the copy and read it after the write. A later read keeps the code legal:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Enemy { int hp = 10; }
 array&lt;Enemy&gt; enemies = [Enemy(), Enemy()];
 for (auto e : enemies) {
     auto preview = e;            // the copy this loop works on
@@ -137,7 +137,7 @@ still 10</code></pre></div>
 <ul><li>The judged types are scalars, strings, math values, typed containers of them, and script classes held by value. An <code>auto</code> copy of an element or a field (<code>auto e = enemies[0];</code>) is judged as the spelled type (<code>Enemy e = enemies[0];</code>) is. A <code>var</code> or untyped variable, a <code>shared_ptr</code>, an <code>auto</code> made from a handle and a by-value class parameter are not judged, since they may share an object (a by-value parameter shares a handle argument&#x27;s object).</li><li>A variable a reference binds (<code>auto&amp; r = e;</code>, <code>for (auto&amp; x : e.items)</code>, <code>cast&lt;T&amp;&gt;(e)</code>, a reference return) is never judged: the reference may read it later.</li><li>A copy that holds class instances is read by any code that can run before it dies, since <code>reflect::instances</code> sees every live instance: a call, an operator on a class, a construction, a destructor at a scope&#x27;s exit. So <code>for (auto e : enemies) { e.hp -= 1; log_hit(); }</code> loads.</li><li>A class whose instances run code of their own when written or destroyed (a destructor, a user accessor, an <code>operator=</code>, a host base, any of these in a subclass or a field&#x27;s class) is not judged at all. A copy a lambda names, or a call takes as its receiver or as an argument, is treated the same way from then on.</li><li>A write that can raise by itself is observable through the raise, so it is not judged. That covers an array element or a character store (its index may be out of range), a store whose value needs a conversion that can fail (a <code>var</code> into an <code>int</code>, an <code>int</code> into a <code>uint8</code> element), and a builtin method that takes a count or an index (<code>repeat</code>, <code>pad_left</code>, <code>insert</code>, <code>erase</code>, <code>pop</code>).</li><li>The memory cap and the execution budget are resource rails, not observations: a write that can fail only by exhausting them is judged.</li><li>A write inside a <code>try</code> is read by its <code>catch</code> when the handler reads the variable, and a write before a loop&#x27;s next iteration by the iteration that reads it.</li></ul>
 <h2 id="copies-share-a-coroutine">A copy shares its coroutine<a class="hlink" href="#copies-share-a-coroutine" aria-label="link">&#8203;</a></h2>
 <p>A coroutine handle is the one exception to copying by value: a copy of a handle is the same running coroutine, and so is the handle field of a copied object. A method coroutine also keeps the object it started on, so advancing a copy&#x27;s handle changes the <em>original&#x27;s</em> fields, not the copy&#x27;s:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Walker {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Walker {
     int steps = 0;
     coroutine int walk() { while (true) { steps += 1; yield steps; } }
     auto legs = walk();
@@ -154,7 +154,7 @@ copy 1, original 2</code></pre></div>
 <p>Each new <code>Walker</code> makes its own coroutine in its field initializer, so <code>a</code> and <code>b</code> walk apart. The copy made by <code>Walker copy = a;</code> holds <code>a</code>&#x27;s handle: its <code>next()</code> moved <code>a.steps</code> and left <code>copy.steps</code> where the copy began. A copy that needs a behaviour of its own assigns its field a new call: <code>copy.legs = copy.walk();</code> (<a href="08-coroutines.html#a-behaviour-in-a-field">Coroutines</a>).</p>
 <h2 id="escape-hatch-1-reference-parameters">Escape hatch 1: <code>&amp;</code> reference parameters<a class="hlink" href="#escape-hatch-1-reference-parameters" aria-label="link">&#8203;</a></h2>
 <p>Declare a parameter with <code>&amp;</code> and the callee binds the <em>caller&#x27;s</em> variable. Works with explicit types (<code>int&amp; x</code>) and with <code>auto&amp;</code> (any type):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }         // typed by-ref parameter
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }         // typed by-ref parameter
 auto n = 41;
 bump(n);
 print("after bump(n): {}", n);
@@ -175,7 +175,7 @@ h.hp = 15</code></pre></div>
 <p>Reference parameters survive pass-through chains, block and loop scopes, methods, globals, and recursion. The aliasing follows the value wherever the call takes it.</p>
 <p>A field or element argument binds when the argument is evaluated, as in C++. Its receiver and its index are fixed at that point, so a later argument that reassigns them does not change the storage the parameter names (<a href="04-operators.html#evaluation-order-is-a-contract">Evaluation order is a contract</a>).</p>
 <p><strong>A <code>string&amp;</code> parameter takes any string.</strong> A string variable binds its storage, so writes reach the caller. A literal or a computed string binds a temporary for the call, writable, whose writes stay inside the call. Its characters are shared until the first write. Lambdas take string temporaries the same way, and a lambda that captures the parameter, or a reference return, keeps the temporary alive:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string upper(string&amp; name) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string upper(string&amp; name) {
     name.to_upper();
     return name;
 }
@@ -187,7 +187,7 @@ print(upper("bob"));</code></pre></div>
 ALICE
 BOB</code></pre></div>
 <p><strong>Any other reference parameter takes a literal when the function only reads it.</strong> For every other <code>&amp;</code> parameter of a declared function or method, the checker works out whether the body can write through it. One that is only read behaves like C++&#x27;s <code>const T&amp;</code> without the keyword. A literal or a temporary binds a temporary copy for the call, and a variable still binds with no copy:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function total(array&lt;int&gt;&amp; xs) {          // reads xs, never writes through it
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function total(array&lt;int&gt;&amp; xs) {          // reads xs, never writes through it
     int sum = 0;
     for (auto x : xs) { sum += x; }
     return sum;
@@ -207,7 +207,7 @@ total(scores) = 9</code></pre></div>
 <li>Returning it by reference.</li>
 </ul>
 <p>For a method, a write in any override in a class derived from the receiver&#x27;s class counts too.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int first(array&lt;int&gt;&amp; xs) { return xs[0]; }   // only reads xs
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int first(array&lt;int&gt;&amp; xs) { return xs[0]; }   // only reads xs
 void grow(array&lt;int&gt;&amp; xs) { xs.push(0); }      // push writes xs
 print(first([7, 8]));                          // a literal binds a temporary
 array&lt;int&gt; held = [1];
@@ -221,7 +221,7 @@ print(held.size());
 <p>The body becomes part of the interface. Adding a write to a function that callers pass literals to breaks those calls loudly, at the next load or hot reload (which checks them again), instead of letting the write vanish into a temporary. A <code>string&amp;</code> is the exception, because a string temporary is written on purpose: a function that edits a name in place serves a variable and a literal alike.</p>
 <h2 id="escape-hatch-2-field-and-element-lvalues-as-ref-arguments">Escape hatch 2: field and element lvalues as ref arguments<a class="hlink" href="#escape-hatch-2-field-and-element-lvalues-as-ref-arguments" aria-label="link">&#8203;</a></h2>
 <p>You can pass <code>obj.field</code> or <code>arr[i]</code> straight into a <code>&amp;</code> parameter. Element references re-resolve <strong>through the container</strong>, so they stay correct even if the array reallocates its storage:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; x) { x += 1; }
 class Hero { int hp = 10; }
 auto h = Hero();
 bump(h.hp);                 // field lvalue passes by reference
@@ -238,7 +238,7 @@ arr[1] = 7
 arr[1] after realloc = 8</code></pre></div>
 <p>Shrinking the array out from under an element reference stops the script with <code>Reference to a removed array element</code> rather than corrupting memory, on both backends. The error is catchable, and the store it interrupted writes nothing.</p>
 <p>A vector or color component (<a href="15-math.html">Math</a>) is an lvalue too, as a struct member is in C++. All of these bind it: <code>f(v.x)</code> with <code>void f(float&amp; a)</code>, <code>auto&amp; r = pos.y;</code>, <code>cast&lt;float&amp;&gt;(v.x)</code> and a <code>-&gt; float&amp;</code> return of a component. Writes land in the vector the component belongs to (a local, a field, an element of an <code>array&lt;math::vec2&gt;</code>, a C++ property through its setter), with the same narrowing as <code>v.x = value</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; a) { a *= 2.0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">void scale(float&amp; a) { a *= 2.0; }
 math::vec2 v = math::vec2(1.5, 2.0);
 scale(v.x);            // the component binds float&amp;
 auto&amp; r = v.y;         // and an auto&amp; declaration
@@ -247,7 +247,7 @@ print(v);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(3.0, 9.0)</code></pre></div>
 <h2 id="escape-hatch-3-reference-declarations-auto">Escape hatch 3: reference declarations (<code>auto&amp;</code>)<a class="hlink" href="#escape-hatch-3-reference-declarations-auto" aria-label="link">&#8203;</a></h2>
 <p><code>auto&amp; r = x;</code> declares an alias. References chain, and element references survive reallocation just like ref params:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 1;
 auto&amp; g = v;         // reference declaration: g aliases v
 auto&amp; h = g;         // references chain
 h = h + 3;
@@ -261,7 +261,7 @@ print("arr[1] = {}", arr[1]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">v = 4
 arr[1] = 42</code></pre></div>
 <p>References respect the type system, and builtin methods work through them. A write through an <code>auto&amp;</code> bound to a typed array&#x27;s element converts when compatible and rejects when not, exactly like writing to the element directly. Calling a string/array/map method through a reference mutates the referent in place:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 auto&amp; e = nums[0];
 e = 9.7;                       // converts to the element type, like any typed write
 print("after e = 9.7: {}", to_json(nums));
@@ -288,7 +288,7 @@ caught: Cannot assign &#x27;string&#x27; to element of type &#x27;int&#x27;
 <p>A key with no entry names no storage, since reading a map never inserts: <code>int&amp; e = m["absent"];</code> raises instead of adding the key.</p>
 <p>A <code>const T&amp;</code> also binds a temporary, as in C++. <code>const Lamp&amp; hall = make("hall");</code> holds the made object itself, with no copy. The object lives as long as <code>hall</code>, dying when its scope ends among the other locals, the last declared first. A value of another type that a <code>T</code> declaration takes binds a <code>T</code> made from it.</p>
 <p>A reference that is not <code>const</code> binds only an lvalue, so <code>Lamp&amp; attic = make("attic");</code> raises <code>Cannot take reference of non-lvalue expression (...)</code> and the made lamp dies with the statement:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Lamp {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Lamp {
     string name;
     Lamp(string n) { name = n; print("lit {}", name); }
     ~Lamp() { print("out {}", name); }
@@ -321,7 +321,7 @@ caught: true</code></pre></div>
 <li>A float never binds an <code>int&amp;</code>. The checker rejects one it can see at load (<code>argument 1 of 'bump': cannot bind 'float' to 'n' declared 'int&amp;'</code>), and a <code>var</code> holding the wrong kind raises when the call binds it.</li>
 </ul>
 <p>The other direction holds too: a store through any reference obeys the declared type of the variable it names, so <code>var&amp; r = hp;</code> over an <code>int hp</code> stores ints:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; n) { n += 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function bump(int&amp; n) { n += 1; }
 var count = 4;                 // a var holding an int binds an int&amp;
 bump(count);
 print("count = {}", count);
@@ -338,7 +338,7 @@ caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;bump&#x27; (decla
 hp = 7
 caught: Cannot assign string to &#x27;r&#x27; (declared int&amp;)</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
 for (auto x : nums) { x *= 2; }       // copies: original unchanged
 print("after value loop: {}", nums[0]);
 for (auto&amp; x : nums) { x *= 2; }      // references: mutates in place
@@ -347,7 +347,7 @@ print("after ref loop:   {}", nums[0]);</code></pre></div>
 after ref loop:   2</code></pre></div>
 <h2 id="escape-hatch-5-shared-ptr-opt-in-reference-semantics">Escape hatch 5: <code>shared_ptr&lt;T&gt;</code> (opt-in reference semantics)<a class="hlink" href="#escape-hatch-5-shared-ptr-opt-in-reference-semantics" aria-label="link">&#8203;</a></h2>
 <p>When you <em>want</em> an object shared by handle (entity registries, cross-references), declare it <code>shared_ptr&lt;T&gt;</code>. Copies of the handle alias the same object:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
 auto alias = sp;
 alias.x = 99;
@@ -360,7 +360,7 @@ after poke: 42</code></pre></div>
 <p><code>new P()</code> is the direct spelling for a handle (<code>shared_ptr&lt;P&gt; sp = P();</code> wraps a value the same way), and every copy of the handle shares the object. <code>make_shared&lt;P&gt;(args)</code> is the same expression as <code>new P(args)</code>: the same handle, constructor choice, checked type and errors. A bare <code>make_shared</code> not followed by <code>&lt;</code> is an ordinary name, so a function of that name stays callable.</p>
 <p>A handle on the right of <code>=</code> points the variable at another object (<code>sp = new P();</code>). A value on the right assigns into the object it shares (<code>sp = P();</code>, every alias sees it).</p>
 <p><code>sp.reset(h)</code> is the explicit repoint, C++&#x27;s <code>sp.reset(new P())</code>: <code>sp</code> takes <code>h</code>&#x27;s object, the object it held stays with its other owners, and nothing writes through it or runs <code>operator=</code>. <code>h</code> is a handle of a class <code>sp</code> admits as an assignment would: <code>new P()</code>, <code>make_shared&lt;P&gt;()</code> or another <code>shared_ptr</code>. A null one empties <code>sp</code>, and a value or a primitive raises. <code>sp.reset()</code> empties it.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = new P();
 shared_ptr&lt;P&gt; alias = sp;
 sp.reset(new P());        // sp names a new object; alias keeps the old one
@@ -368,7 +368,7 @@ sp.x = 7;
 print("{} {} {}", sp.x, alias.x, same_object(sp, alias));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">7 3 false</code></pre></div>
 <p><code>weak_ptr&lt;T&gt;</code> observes a handle without owning it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 3; }
 shared_ptr&lt;P&gt; sp = P();
 weak_ptr&lt;P&gt; w = sp;
 print("expired: {}", w.expired());
@@ -378,7 +378,7 @@ l.x;</code></pre></div>
 == result: 3</code></pre></div>
 <p>Note the guard rail: only a <code>shared_ptr</code> (or <code>new P()</code>) can seed a <code>weak_ptr</code>, because a value has no shared owner to observe. So <code>P p = P(); weak_ptr&lt;P&gt; w = p;</code> is rejected: a load error when the checker sees the value, a catchable run-time error otherwise. A <code>weak_ptr&lt;P&gt;</code> field or static takes a shared handle the same way a declaration does.</p>
 <p>The handle keeps sharing inside a copy, exactly as a <code>std::shared_ptr</code> member does in C++. Copying a class instance, an array or a map copies every value member and element and shares every <code>shared_ptr</code> and <code>weak_ptr</code> one:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
 class Holder { shared_ptr&lt;Node&gt; link; Node own; Holder() { link = new Node(); own = Node(); } }
 Holder a = Holder();
 Holder b = a;          // b.own is a copy; b.link is the same Node as a.link
@@ -396,7 +396,7 @@ print(to_string(a.link.v) + " " + to_string(a.own.v) + " " + to_string(same_obje
 <li>A handle holding an unrelated class never enters.</li>
 </ul>
 <p>The rule is the same at every slot (a declaration, an assignment, a field, a namespace variable, a parameter, a return value, a container element). The strict checker reports a downcast or an unrelated class it can see at load.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
 class Derived : Base { int t = 9; }
 
 shared_ptr&lt;Derived&gt; d = new Derived();
@@ -414,7 +414,7 @@ shared_ptr&lt;Derived&gt; fromVar = v;                     // a var source: its 
 <li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code> is a <strong>handle</strong> sharing it.</li>
 </ul>
 <p>The reference form earns its place here as the strict-mode fix for a classic situation: a base-typed variable holding a derived object, and you need a member only the derived class declares.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Base { int a = 1; }
 class Derived : Base { int t = 9; }
 
 Base h = Derived();          // a Base-typed slot; the object inside is still a Derived
@@ -442,7 +442,7 @@ original:     77  copy: 0</code></pre></div>
 </ul>
 <p>Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>. So is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, or <code>(useA ? xs : ys)[0] = 1</code>.</p>
 <p>Such a call also binds a reference parameter: <code>bump(holder.child())</code> writes the object a host method returning <code>T&amp;</code> names, while a call returning by value stays a temporary.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; slots = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; slots = [1, 2, 3];
 int&amp; first() { return slots[0]; }
 int a = 1;
 int b = 2;
@@ -557,7 +557,7 @@ Cannot copy C++ object of type 'atomic&lt;int&gt;': the type is not copy-constru
 </ul>
 <p>A const value is read-only all the way down: its elements, its fields, and the methods that write their receiver are off limits through it. A const <em>handle</em> only stops the handle from rebinding, and the object it points at stays writable. Copies are ordinary values, so <code>auto copy = LIMIT_TABLE;</code> can change freely.</p>
 <p>A <code>const</code> in a class body is a class constant: one value for every instance, read as <code>Hero::MAX_HP</code> or as a bare <code>MAX_HP</code> in the class&#x27;s methods. A <code>const T&amp;</code> parameter binds literals and temporaries as well as variables, and <code>const</code> is never part of a signature, so <code>f(const T&amp;)</code> and <code>f(T&amp;)</code> are one function.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero {
     const int MAX_HP = 100;          // a class constant, shared by every Hero
     int hp = 40;
     void heal() { hp = MAX_HP; }
@@ -611,7 +611,7 @@ caught: Cannot assign to &#x27;table[0]&#x27;: it is read-only (&#x27;table&#x27
 <li><code>auto q = p;</code> takes the static type of <code>p</code>, which is <code>var</code>, so <code>q</code> is a <code>var</code> too (it shares the handle); spell <code>shared_ptr&lt;Foo&gt; q = p;</code> to lock it.</li>
 </ul>
 <p>The same four moves, in order, with <code>alias</code> watching. <code>same_as</code> asks whether two handles point at one object. The general form is <code>same_object(x, y)</code>, which answers identity for handles, references, containers and instances alike, because <code>==</code> compares values memberwise (see <a href="../guide/04-operators.html#equality">Equality</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { int x = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Foo { int x = 1; }
 class Bar { int y = 2; }
 var p = new Foo();
 var alias = p;            // a var copy of a handle shares the handle, as in C++
@@ -631,7 +631,7 @@ alias.x = 77  p.x = 5
 p.y = 2  alias.x = 77</code></pre></div>
 <p><strong>A <code>var</code> holding an object.</strong> A <code>var</code> holding an instance by value asks the instance&#x27;s class first. When the class has an <code>operator=</code> with an overload that takes the right-hand value, the assignment runs it and the variable keeps its object. Otherwise the variable takes the new value, whatever its type. A handle or <code>null</code> on the right never runs it.</p>
 <p>These rules, and the handle rules above, hold wherever a <code>var</code> lives: a local, a parameter, a loop variable, a global, a captured variable, a field, an element of an <code>array&lt;var&gt;</code> and a value of a <code>map&lt;K, var&gt;</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Celsius { int deg = 0; void operator=(int d) { deg = d; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Celsius { int deg = 0; void operator=(int d) { deg = d; } }
 var t = Celsius();
 t = 21;                   // operator=(int) takes an int: t keeps its Celsius
 print(type_of(t), " ", t.deg);
@@ -640,7 +640,7 @@ print(type_of(t), " ", t);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Celsius 21
 string warm</code></pre></div>
 <p><strong>Assignment runs <code>operator=</code>.</strong> A variable, field, static, element or map value declared a class answers the same way, as C++ does. An <code>=</code> into an existing object runs the class&#x27;s <code>operator=</code> when one of its overloads takes the right-hand value, and the implicit memberwise copy only when none does. A class&#x27;s implicit copy assignment runs each member&#x27;s <code>operator=</code> in turn. Initialization is copy construction: a declaration, a by-value parameter and a return copy the object and never run the operator.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gauge { int v = 0; int writes = 0; void operator=(Gauge o) { v = o.v; writes += 1; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gauge { int v = 0; int writes = 0; void operator=(Gauge o) { v = o.v; writes += 1; } }
 Gauge a = Gauge();
 Gauge b = Gauge();
 b.v = 7;

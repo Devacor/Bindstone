@@ -32,6 +32,8 @@
 #endif
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
 #include <stdlib.h>
+#elif defined(__EMSCRIPTEN__)
+#include <unistd.h>
 #elif defined(__linux__)
 #include <fcntl.h>
 #include <sys/syscall.h>
@@ -53,6 +55,15 @@ namespace detail {
 		return true;
 #elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__) || defined(__DragonFly__)
 		arc4random_buf(out, a_size);
+		return true;
+#elif defined(__EMSCRIPTEN__)
+		// getentropy reads the browser's crypto.getRandomValues (or Node's crypto), at most 256 bytes a call
+		while (a_size > 0) {
+			const size_t take = std::min<size_t>(a_size, 256);
+			if (getentropy(out, take) != 0) { return false; }
+			out += take;
+			a_size -= take;
+		}
 		return true;
 #elif defined(__linux__)
 #if defined(SYS_getrandom)

@@ -258,13 +258,13 @@ try {
 <tr><td><code>raise</code>, <code>try</code> / <code>except</code></td><td><code>throw</code>, <code>try</code> / <code>catch (e)</code></td></tr>
 <tr><td><code>yield</code> in a function makes a generator</td><td>a <code>coroutine</code> function (<a href="12-from-coroutines.html">From Lua Coroutines</a>)</td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; scores = [3, 7];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; scores = [3, 7];
 auto copy = scores;                // a copy, where Python's copy = scores shares the list
 copy.push(9);
 float hp = 72.456;
 print(scores.size(), " ", copy.size(), " ", 7 / 2, " ", 7.0 / 2, " ", `hp ${hp:.1f}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 3 3 3.5 hp 72.5</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter {
     int count = 0;
     void bump() { count += 1; }    // no self: fields and methods are in scope
 }

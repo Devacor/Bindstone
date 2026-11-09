@@ -50,7 +50,7 @@ eng-&gt;execute(&quot;2 + 2&quot;);                          // in-memory code s
 <tr><td>Source strings, in-memory jaibite bytes, already-loaded script and host-supplied data</td><td>Still usable. A filename supplied for diagnostics is a label, not permission to read it.</td></tr>
 </tbody></table></div>
 <p>A refused operation raises the catchable script error <code>Insufficient privilege: filesystem.</code> on both backends. If uncaught, the error leaves <code>execute()</code> and reaches the host. A script can query permission, but cannot enable it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled(jai::filesystem));</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled(jai::filesystem));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output &middot; default engine</span><pre><code class="lang-output">true</code></pre></div>
 <p><code>reflect::is_enabled(requirements...)</code> returns true only when <em>all</em> supplied requirements are enabled.</p>
 <ul><li>It accepts built-in integer flags and permission-name strings, including a mixture, and requires at least one argument.</li><li>Unknown names return false without registering or interning them.</li><li>Invalid bits or argument types raise an error.</li></ul>
@@ -86,7 +86,7 @@ eng-&gt;disable(&quot;savegame.write&quot;);                           // later 
 <p><strong>Engines and cost.</strong> Permission names are reusable across engines, but registration and grants are independent in each engine. Names live in the engine&#x27;s string interner, and binding resolves requirements once into engine-local slot IDs: invocation checks do not look up names or allocate. Registration and binding may allocate. There is no extra global registry or synchronization.</p>
 <p>A registered but disabled permission produces <code>Insufficient privilege: savegame.write.</code> in this example. Multiple requirements report a missing built-in first, then the first missing custom permission in registration order, independent of the supplied list order. Defining a name does not intercept any API automatically: attach it to each callable it protects or check it inside the host implementation.</p>
 <p>Scripts query custom permissions by name. On a fresh engine with no host-defined <code>savegame.write</code> permission:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled("filesystem"));
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::is_enabled("filesystem"));
 print(reflect::is_enabled(jai::filesystem, "savegame.write"));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">true
 false</code></pre></div>
@@ -142,7 +142,7 @@ catch (err) { a = []; }     // err == "Script memory cap exceeded (262144 bytes)
 <ul><li><strong><code>JAISCRIPT_CHECKED_OVERFLOW</code> (the default: &quot;safe by default&quot;)</strong>: overflowing <code>+ - *</code>, unary <code>-</code>, and <code>INT64_MIN / -1</code> raise a <strong>catchable</strong> runtime error.</li><li><strong><code>JAISCRIPT_WRAP_ON_OVERFLOW</code></strong>: silent two&#x27;s-complement wraparound (max speed).</li></ul>
 <p>Either way arithmetic is never undefined behavior (computed in unsigned). The policy is applied consistently everywhere: interpreter fast paths, VM opcodes, counted-loop updates, <code>++</code>/<code>--</code>, and even the parser&#x27;s constant folder (which <em>declines to fold</em> rather than wrap). Hosts can introspect the build&#x27;s policy:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">eng-&gt;throw_on_overflow();     // true in the default build</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var x = 9223372036854775807;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var x = 9223372036854775807;
 try { x = x + 1; } catch (e) { print(e); }
 print(x);                          // untouched: the overflowing store never happened</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Integer overflow in &#x27;+&#x27;
@@ -180,7 +180,7 @@ auto untrusted = eng-&gt;scoped_template_output_limit();</code></pre></div>
 <ul><li><code>args</code> (its own copy of the map);</li><li>the built-in methods of built-in values;</li><li>the engine&#x27;s <code>string::</code>, <code>array::</code> and <code>map::</code> functions, which act on copies.</li></ul>
 <p>Its <code>x =&gt; expr</code> lambdas follow the same rule. No global, no other function, no host binding and no class&#x27;s code runs. Anything else is refused with its own text (<code>a scoped template calls only built-in methods and the string::, array:: and map:: functions: &#x27;leak(...)&#x27; is not allowed</code> for a call; <a href="../reference/index.html#errors-templates">the reference</a> lists the rest).</p>
 <p>They are rails like the privileges above: the host sets them for its engine, and a script reads them but cannot raise them:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::template_output_limit(), " ", reflect::scoped_template_output_limit());</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print(reflect::template_output_limit(), " ", reflect::scoped_template_output_limit());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output &middot; default engine</span><pre><code class="lang-output">10485760 1048576</code></pre></div>
 <p>A change follows the privilege rules:</p>
 <ul><li>It happens while the engine is idle or on its execution thread, a C++ callback included.</li><li>An active parallel region refuses it.</li><li>A render already started keeps the limit it started with, and the next render sees the change.</li></ul>

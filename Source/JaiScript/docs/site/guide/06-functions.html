@@ -47,7 +47,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <li><strong>Methods and statics</strong> take every spelling above, with <code>static</code> in front.</li>
 <li><strong>Coroutines</strong> take every spelling with <code>coroutine</code> in front: <code>coroutine int g()</code>, <code>coroutine g() -&gt; int</code>, <code>coroutine function g()</code>.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// C++ shape: return type first
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// C++ shape: return type first
 int twice(int v) { return v * 2; }
 auto mul(int a, int b) { return a * b; }
 auto mul2(a, b) -&gt; int { return a * b; }
@@ -118,19 +118,19 @@ hi!
 <p>A function is a value: assign it, pass it, return it, store it in a container. Calling one resolves the callee before any argument is evaluated, and arguments go left to right; see <a href="04-operators.html#evaluation-order-is-a-contract">Evaluation order is a contract</a>.</p>
 <h2 id="return-type-rules">Return-type rules<a class="hlink" href="#return-type-rules" aria-label="link">&#8203;</a></h2>
 <p>A leading return type and a trailing <code>-&gt; type</code> may both be written only when they <strong>match</strong> (redundant but legal: <code>int f() -&gt; int</code>). A contradictory pair is a parse error. An arrow with no type before the <code>{</code> adds no information. It keeps the leading type if one was given, otherwise means auto:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() -&gt; string { return "s"; }</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() -&gt; string { return "s"; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
 &lt;script&gt;:1:12: error: conflicting return types 'int' and 'string' (leading and trailing '-&gt;' types must match)
     int f() -&gt; string { return "s"; }
                ^</code></pre></div>
 <p>A declared return type is a typed slot like any other, and it runs the <a href="../guide/02-type-ladder.html#conversion-table-typed-locked-auto-targets">one conversion table</a>: <code>int f()</code> returning <code>2.9</code> yields <code>2</code>. Return a string literal from it and the checker stops the load before anything runs:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function f() -&gt; int { return "s"; }</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function f() -&gt; int { return "s"; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:1:23: error: cannot return &#x27;string&#x27; from &#x27;f&#x27; declared to return &#x27;int&#x27; (declared at 1:10)
     function f() -&gt; int { return &quot;s&quot;; }
                           ^</code></pre></div>
 <p>A value the checker cannot type (anything that came through a <code>var</code>) is converted <strong>at the <code>return</code> statement</strong>, inside the returning function, exactly as in C++. So a <code>try</code> around the <code>return</code> catches the failure in the callee; without one, the error surfaces in the caller with the callee as the top frame of the stack trace:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function parse_level(var raw) -&gt; int {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function parse_level(var raw) -&gt; int {
     try {
         return raw;                 // the conversion runs here, inside parse_level
     } catch (e) {
@@ -156,7 +156,7 @@ caught by the caller: Cannot return string from &#x27;strict_level&#x27; (declar
 <p>The rule is the strict checker&#x27;s (<a href="13-strict-checking.html">Chapter 13</a>): it runs at load and adds nothing at run time. Coroutines are the exception to all of this: calling one yields a handle, and their yield and return types are not checked (see <a href="../guide/08-coroutines.html#rules-and-edges">Coroutines</a>).</p>
 <h2 id="nodiscard">[[nodiscard]]: a result the caller must use<a class="hlink" href="#nodiscard" aria-label="link">&#8203;</a></h2>
 <p><code>[[nodiscard]]</code> before a function or a method declares, as in C++, that calling it only for its effects is a mistake. An expression statement that drops the result of a call to one fails the load, and so does either arm of a conditional written as a statement. Use the result, or keep it in the placeholder <code>_</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
 class Wallet {
     int gold = 3;
     [[nodiscard]] bool spend(int n) {
@@ -171,7 +171,7 @@ auto _ = w.spend(1);             // dropped on purpose
 auto _ = w.spend(1);             // _ is declared again freely
 print("{} {} {}", checked_add(2, 3), paid, w.gold);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">5 false 1</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[nodiscard]] int checked_add(int a, int b) { return a + b; }
 checked_add(2, 3);               // the sum goes nowhere
 print("never printed");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
@@ -215,7 +215,7 @@ print("never printed");</code></pre></div>
 <li>the auto shorthand <code>:x</code>, an auto-like parameter, the same as writing <code>auto x</code>.</li>
 </ul>
 <p>The shorthands exist for terse lambdas; <code>int x</code> and bare <code>x</code> are what you will write most. Defaults may follow any of them (once a parameter has a default, all later ones need one too):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = "hello") {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function greet(name, string greeting = "hello") {
     return greeting + " " + name;
 }
 print(greet("world"));
@@ -256,7 +256,7 @@ passthrough
 <p>To write into the caller&#x27;s object, take it by reference: <code>void heal(var&amp; c)</code>, <code>void heal(Creature&amp; c)</code>.</p>
 <h2 id="what-the-checker-sees-about-calls">What the checker sees about calls<a class="hlink" href="#what-the-checker-sees-about-calls" aria-label="link">&#8203;</a></h2>
 <p>When the callee is a function the same program declares, the checker resolves it and checks the call at load time: the argument count (defaults included) and each argument against its parameter. A wrong count or a literal that cannot convert is a load error, and every such error in the file is listed at once:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 print(fib(10, 2));
 print(fib("ten"));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
@@ -267,7 +267,7 @@ print(fib("ten"));</code></pre></div>
     print(fib(&quot;ten&quot;));
                    ^</code></pre></div>
 <p>A callable held in a variable is opaque to the checker (it could be anything by the time the call runs), so the same mistakes through a variable are run-time errors, and catchable:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int fib(int n) { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 var f = fib;                       // a callable in a variable: the checker cannot see through it
 try { f(10, 2); } catch (e) { print("caught: {}", e); }
 try { f("ten"); } catch (e) { print("caught: {}", e); }
@@ -283,7 +283,7 @@ caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;fib&#x27; (declar
 </ul>
 <p>Host (C++) functions are checked for arity and for the certain cases only. See <a href="../embedding/06-static-checking.html">Static Checking</a> in the Embedding docs, and <a href="13-strict-checking.html#what-the-checker-sees">Chapter 13</a> for the whole list of what the checker sees.</p>
 <p>Once a call is admitted, its evaluation order is a contract on both backends: the <strong>callee expression is evaluated first</strong>, then the arguments <strong>left to right</strong>, as in C++17. So a call whose argument swaps the callee out from under it still calls the callee that was bound before the arguments ran:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var f = [](x) { return "old lambda got " + to_string(x); };
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var f = [](x) { return "old lambda got " + to_string(x); };
 function swap() { f = [](x) { return "new lambda got " + to_string(x); }; return 1; }
 print(f(swap()));
 print(f(2));</code></pre></div>
@@ -296,7 +296,7 @@ new lambda got 2</code></pre></div>
 <li>A coroutine takes its arguments at the call and binds them at its first <code>next()</code>.</li>
 </ul>
 <p>A reference parameter binds the caller&#x27;s storage instead, so it sees every write made before the body runs:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var queue = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var queue = [1, 2, 3];
 function drain() { queue.push(4); return 0; }
 function count(q, extra) { return q.size() + extra; }
 function count_ref(var&amp; q, extra) { return q.size() + extra; }
@@ -314,7 +314,7 @@ print(h.next());</code></pre></div>
 <p>The <a href="../guide/04-operators.html">Operators chapter</a> covers evaluation order in general. Every call entry is also a point where the <a href="../guide/05-control-flow.html#terminal-errors-execution-budget-memory-cap-are-uncatchable-by-design">execution budget</a> is checked.</p>
 <h2 id="initializer-lists-are-constructor-only">Initializer lists are constructor-only<a class="hlink" href="#initializer-lists-are-constructor-only" aria-label="link">&#8203;</a></h2>
 <p><code>: super(…)</code> / <code>: this(…)</code> delegation belongs to constructors (see <a href="../guide/07-classes.html#constructor-overloading-and-this-delegation">Classes</a>). On a free function, method, or destructor it is a parse error rather than a silent no-op:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function setup() : super(1) { return 3; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: parse failed:
 &lt;script&gt;:1:18: error: constructor initializer lists (': super(...)' / ': this(...)') are only allowed on constructors
     function setup() : super(1) { return 3; }
@@ -326,7 +326,7 @@ print(h.next());</code></pre></div>
 <li>A value it cannot see raises at the store: <code>Cannot assign int to 'cb' (declared function)</code>.</li>
 </ul>
 <p>Both work at top level, inside function bodies, in namespaces, and as class fields:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function scale = [](int v) { return v * 10; };
 print(scale(4));
 
 function cb;
@@ -345,7 +345,7 @@ clicked!</code></pre></div>
 <h2 id="lambdas-and-captures">Lambdas and captures<a class="hlink" href="#lambdas-and-captures" aria-label="link">&#8203;</a></h2>
 <div class="callout cpp"><p>Capture lists mean what they mean in C++: <code>[]</code> captures nothing, <code>[x]</code> copies, <code>[&amp;x]</code> shares, and naming a local the list does not admit is an error. One difference: a program-scope variable is never captured; the lambda reads it when it runs, unless the list copies it (<code>[g]</code>).</p></div>
 <p>C++11-style lambdas with explicit captures: <code>[x]</code> copies, <code>[&amp;x]</code> references, <code>[=]</code> copies everything used, <code>[&amp;]</code> references everything used:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto add = [](int a, int b) -&gt; int { return a + b; };
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto add = [](int a, int b) -&gt; int { return a + b; };
 print("add(5, 3) = {}", add(5, 3));
 
 int multiplier = 10;
@@ -371,7 +371,7 @@ scale(4) = 40
 counter = 3
 a = 100, sum_all() = 5 (captured before set_a)</code></pre></div>
 <p><strong>Where the variable lives</strong> decides what a lambda sees, and there are exactly two cases. A program-scope (global) variable is never captured: every lambda, <code>[]</code> included, reads it when it runs. A function&#x27;s local reaches a lambda only through the capture list:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 5;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto n = 5;
 auto f = []() { return n; };
 n = 6;
 print("top-level n is a global: f() = {}", f());
@@ -386,7 +386,7 @@ print("function-local m is snapshot: g() = {}", g());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">top-level n is a global: f() = 6
 function-local m is snapshot: g() = 5</code></pre></div>
 <p>A capture list is exhaustive. <code>[]</code> captures nothing, <code>[x]</code> captures <code>x</code> and nothing else, and a lambda that names an enclosing local its list does not admit is a parse error that names the local:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function counter() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function counter() {
     int n = 0;
     auto bump = []() { n += 1; };
     bump();
@@ -404,7 +404,7 @@ function-local m is snapshot: g() = 5</code></pre></div>
 </ul>
 <p>A copied capture belongs to the lambda: its body may write it, and the value it leaves is the one the next call sees, as in a C++ <code>mutable</code> lambda. So there is no <code>mutable</code> to write (<code>A lambda takes no &#x27;mutable&#x27;: its copied captures are already its own, writable and kept between calls</code>).</p>
 <p>A global or namespace variable is a live program binding, read when the lambda runs, unless the list copies it: <code>[g]</code> takes the global&#x27;s value at creation.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int level = 1;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int level = 1;
 auto live = []() { return level; };          // a global: read when the lambda runs
 auto pinned = [level]() { return level; };   // [g] copies the global now
 auto scaled = [k = level * 10]() { return k; };   // init-capture: k is the lambda's own
@@ -430,7 +430,7 @@ hits = 2, misses = 1</code></pre></div>
 <li>A bound C++ object held by value copies the same way, through its class&#x27;s copy constructor. A class without one cannot be captured by copy: <code>[&amp;c]</code> shares it.</li>
 <li>A handle copies the handle, so the lambda and the variable share one object: <code>new T()</code>, a <code>shared_ptr&lt;T&gt;</code> variable, and a host function that returns a <code>std::shared_ptr&lt;T&gt;</code>.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Counter { int n = 0; }
 
 string snapshot() {
     Counter value = Counter();
@@ -448,7 +448,7 @@ print(snapshot());</code></pre></div>
 <li>A closure that escaped the frame (returned, stored in a global or a field) keeps its shared locals for as long as anything holds it. Once nothing does, the engine reclaims the cycle in a later sweep, at the latest when the engine is destroyed.</li>
 </ul>
 <p><strong>The JavaScript closure.</strong> An anonymous <code>function(...)</code> expression has no capture list: it closes over its scope by reference, as <code>[&amp;]</code> does. So it sees writes made after it was created, nests and curries, and keeps the shared locals alive after the creating frame returns:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_account(int opening) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_account(int opening) {
     int balance = opening;
     var deposit = function(int amount) { balance += amount; return balance; };
     var peek = function() { return balance; };
@@ -465,7 +465,7 @@ print(add(2)(3));</code></pre></div>
 5</code></pre></div>
 <div class="callout warn"><p>The global case has a consequence for callbacks that outlive the file that made them: a stored hook, a <a href="../embedding/10-signals-properties.html">signal receiver</a>. Such a closure reads a global when it <em>fires</em>, and on an engine that re-runs files, a later file (or the host) may have rebound that global by then. Hand context to the hook as a parameter and let the capture pin it; never read injected globals from a deferred closure.</p></div>
 <p><strong>Nested lambdas</strong> see the enclosing function&#x27;s locals through every lambda between them. The lambda created in the declaring frame captures the variable, the ones in between carry it, and the innermost reads it: by value with <code>[=]</code> or a named value capture, write-through with <code>[&amp;]</code>. Every intervening lambda must admit the name through a default or named capture, even if it does not read the name directly:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_adder(int base) -&gt; var {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function make_adder(int base) -&gt; var {
     return [=](int step) -&gt; var {
         return [=]() -&gt; int { return base + step; };
     };
@@ -477,7 +477,7 @@ print("plus() = {}", plus());</code></pre></div>
 <p>A lambda, an anonymous <code>function(...)</code> expression or an arrow function is the spelling for a helper that reads the enclosing frame. A coroutine declared in a function body follows the same rule: it takes what it needs as parameters.</p>
 <h2 id="arrow-functions">Arrow functions<a class="hlink" href="#arrow-functions" aria-label="link">&#8203;</a></h2>
 <p><code>(params) =&gt; expr</code> and <code>(params) =&gt; { body }</code> are function expressions, JavaScript's and C#'s arrow functions. The expression form returns its value. One untyped parameter may drop its parentheses (<code>x =&gt; x * 2</code>), and parameters may be typed (<code>(int a, int b) =&gt; a + b</code>, <code>(Unit&amp; u) =&gt; ...</code>). An arrow function closes over its scope by reference, as <code>function(...)</code> does: it is a <code>[&amp;]</code> lambda, so it reads and writes the locals around it and they outlive the function that made it.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto twice = (x) =&gt; x * 2;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto twice = (x) =&gt; x * 2;
 auto add = (int a, int b) =&gt; a + b;
 auto shout = name =&gt; string::to_upper(name) + "!";
 function make_counter() {
@@ -493,7 +493,7 @@ print(to_json(array::filter([3, 1, 2], x =&gt; x &gt; 1)));</code></pre></div>
 <p>A parenthesized expression stays one: <code>(a + b) * 2</code> is arithmetic, because only a <code>)</code> followed by <code>=&gt;</code> makes the group a parameter list. An arrow function declares no return type. Spell a lambda (<code>[&amp;](int x) -&gt; int { ... }</code>) when the type matters, for instance to make <code>map</code> return an <code>array&lt;int&gt;</code>.</p>
 <h2 id="functions-are-values-closures-outlive-their-frame">Functions are values; closures outlive their frame<a class="hlink" href="#functions-are-values-closures-outlive-their-frame" aria-label="link">&#8203;</a></h2>
 <p>Functions and lambdas can be stored in variables, arrays, and maps, passed as arguments, and returned. A method is not read as a value by writing <code>obj.method</code>: that is an error, and <code>reflect::bind(obj, "method")</code> or a lambda is the spelling (see <a href="07-classes.html#methods-as-values">Classes</a>). A by-reference capture keeps the captured local alive after the declaring function returns. The classic counter factory works:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function apply_twice(f, x) { return f(f(x)); }
 print(apply_twice([](v) { return v * 3; }, 2));
 
 function make_counter() {
@@ -518,7 +518,7 @@ ops map: 49</code></pre></div>
 <li>fewer defaults filled in;</li>
 <li>the nearest base class.</li>
 </ol>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage(int a) { return a; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage(int a) { return a; }
 int damage(int a, int b) { return a + b; }
 string damage(string who) { return who + " is hit"; }
 class Pawn { } class Gator : Pawn { } class BigGator : Gator { }
@@ -537,7 +537,7 @@ print(damage(2), " ", damage(2, 3), " ", damage("gator"), " ", kind(BigGator()))
 <p>Another unit's definition of the same signature replaces it, which is how hot reload swaps a function. A unit that runs again replaces or drops only the overloads it declared itself: an overload its new text no longer declares is gone, another unit's stays.</p>
 <p>A coroutine does not overload. A function and a coroutine of one name in one file with different parameter lists replace each other, and the checker notes it as a warning (<code>duplicate definition of function 'f' replaces the earlier one (a coroutine does not overload)</code>). With the same parameter list the second is the redefinition error (<code>'f' is already defined (declared at 1:15)</code>).</p>
 <h2 id="recursion">Recursion<a class="hlink" href="#recursion" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int {
     if (n &lt; 2) { return n; }
     return fib(n - 1) + fib(n - 2);
 }

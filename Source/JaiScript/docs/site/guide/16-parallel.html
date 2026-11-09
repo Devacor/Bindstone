@@ -77,7 +77,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </tbody></table></div>
 <h2 id="parallel-for"><code>parallel_for</code> and <code>parallel_transform</code><a class="hlink" href="#parallel-for" aria-label="link">&#8203;</a></h2>
 <p><code>parallel_for</code> runs a loop body over the elements of an array on every core. The loop variable is the element, so <code>auto&amp;</code> mutates it in place. <code>parallel_transform(arr, fn)</code> returns a <strong>new</strong> array with <code>out[i] = fn(arr[i])</code>. It is the same loop in a different spelling, as <a href="#parallel-transform">below</a> shows. <code>thread_count()</code> reports the worker count: the count the host set, else the machine&#x27;s performance cores, at most one fewer than its hardware threads. Results never depend on it.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var nums = [1, 2, 3, 4, 5, 6, 7, 8];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var nums = [1, 2, 3, 4, 5, 6, 7, 8];
 parallel_for (auto&amp; x : nums) {
     x = x * x;                    // each element mutated in place, across workers
 }
@@ -88,7 +88,7 @@ print("mapped:  {}", to_json(parallel_transform(nums, inc)));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">squares: [1,4,9,16,25,36,49,64]
 mapped:  [2,5,10,17,26,37,50,65]</code></pre></div>
 <p>Math vectors are values here as everywhere (<a href="15-math.html#values-and-references">Math</a>): an array of them, a class holding them and a captured vector all qualify, even when every element started as a copy of one vector.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec2;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">using math::vec2;
 class Particle { vec2 pos; vec2 vel = vec2(0.0, 2.0); }
 vec2 gravity = vec2(0.0, -0.5);
 array&lt;Particle&gt; sparks;
@@ -121,7 +121,7 @@ print(pts);</code></pre></div>
 <li>never written by the body.</li>
 </ul>
 <p>Any other shape is refused when the script loads. A step that would never end the serial loop, or a last step that would overflow, is refused when the statement is reached.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int n = 8;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int n = 8;
 array&lt;int&gt; squares = [0, 0, 0, 0, 0, 0, 0, 0];
 parallel_for (int i = 0; i &lt; n; i++) { squares[i] = i * i; }   // each index once, split across the workers
 array&lt;int&gt; marks = [0, 0, 0, 0, 0, 0, 0, 0];
@@ -133,7 +133,7 @@ try { parallel_for (int i = 0; i &lt; n; i += none) { } } catch (e) { print(e); 
 parallel_for: a counted loop&#x27;s step of 0 never reaches its bound (the serial loop would not end)</code></pre></div>
 <h2 id="the-zip-form">The zip form<a class="hlink" href="#the-zip-form" aria-label="link">&#8203;</a></h2>
 <p>The zip form walks several arrays of the same length in lockstep, one loop variable per array. Worker <em>n</em> owns segment <em>n</em> of every array, so a pre-allocated array of output structs is written in place: no construction per element, no result marshalling. This is the emitter shape, one input array and one output array of the same length, and the preferred way to produce several values per element.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
 class Sample { float pos = 0.0; bool moving = false; }
 array&lt;Body&gt; bodies = [];
 array&lt;Sample&gt; samples = [];
@@ -160,7 +160,7 @@ for (auto&amp; s : samples) { print(`${s.pos:.1f} ${s.moving}`); }</code></pre><
 <h2 id="parallel-transform"><code>parallel_transform</code> is that zip<a class="hlink" href="#parallel-transform" aria-label="link">&#8203;</a></h2>
 <p><code>parallel_transform(xs, fn)</code> is <code>parallel_for (auto&amp; x, auto&amp; o : xs, out) { o = fn(x); }</code> over a fresh output of <code>xs.size()</code> slots. It costs exactly that loop plus the output.</p>
 <p>When <code>fn</code> only reads its parameter, its body runs inlined in the loop with the parameter bound to the element in place, so there is no call and no copy per element. A <code>fn</code> that mutates its parameter works on a private copy, so the source array is never touched either way. Any result type works, objects included: the returned array holds copies that alias nothing.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Body { float x = 0.0; float vx = 0.0; Body() {} Body(float px, float v) { x = px; vx = v; } }
 array&lt;Body&gt; bodies = [];
 for (int i = 0; i &lt; 4; i++) { bodies.push(Body(i * 10.0, 1.0)); }
 
@@ -172,7 +172,7 @@ var moved = parallel_transform(bodies, stepped);
 print(`${to_json(xs)} moved ${moved[3].x:.1f} source ${bodies[3].x:.1f}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[1.0,11.0,21.0,31.0] moved 31.0 source 30.0</code></pre></div>
 <p>An optional third argument, <code>parallel_transform(arr, fn, weight_fn)</code>, balances chunks by per-element effort (e.g. weigh strings by length):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var texts = ["7", "42", "1999", "3", "250"];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var texts = ["7", "42", "1999", "3", "250"];
 int parse_one(string s) {                            // digits -&gt; int, no host calls
     var n = 0;
     for (var i = 0; i &lt; s.size(); i++) { n = n * 10 + (s[i] - '0'); }
@@ -184,7 +184,7 @@ print("parsed: {}", to_json(parsed));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">parsed: [7,42,1999,3,250]</code></pre></div>
 <h2 id="control-flow">Control flow in the body<a class="hlink" href="#control-flow" aria-label="link">&#8203;</a></h2>
 <p>The body is the loop&#x27;s body: <code>continue</code> moves to the next element, and so does a <code>return</code> written at the body&#x27;s top level (iterations are independent, there is nothing to return to). A loop-level <code>break</code> is a parse error, <code>'break' is not allowed in a parallel_for body: iterations are independent; use 'continue' for the next element</code>. Inside a nested loop or <code>switch</code>, <code>break</code> and <code>continue</code> keep their usual meaning.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var words = ["keep", "", "skip", "keep", "", "keep"];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var words = ["keep", "", "skip", "keep", "", "keep"];
 array&lt;int&gt; kept = [0, 0, 0, 0, 0, 0];
 parallel_for (auto&amp; w, auto&amp; k : words, kept) {
     if (w == "") { continue; }        // next element
@@ -201,7 +201,7 @@ print("{}", to_json(kept));</code></pre></div>
 <li>Anything else (nested containers, iterated or whole-value reads) is copied once per worker at the barrier and charged to <code>memory_cap</code>.</li>
 </ul>
 <p>This is what makes the &quot;shared read-only grid&quot; and &quot;shared palette&quot; renderer shapes cheap:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var gw = 4;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var gw = 4;
 var grid = [];                       // the shared input: three rows of gw cells
 for (var i = 0; i &lt; gw * 3; i++) { grid.push(i); }
 int row_sum(int row) {
@@ -215,7 +215,7 @@ print("row sums: {}", to_json(sums));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">row sums: [6,22,38]</code></pre></div>
 <p>A function or method the body calls may take enclosing state through a <code>const T&amp;</code> parameter. That is a captured read, provisioned by the same tiers, so a helper that only subscripts its parameter (directly or by handing it on to another <code>const T&amp;</code>) reads the shared storage in place. A lambda&#x27;s captures given to <code>parallel_transform</code> or <code>parallel_reduce</code> follow the same tiers.</p>
 <p>A plain <code>T&amp;</code> parameter could write the argument, so it is refused. When the function never writes through it, the error names the <code>const T&amp;</code> to declare instead:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; heights = [3, 9, 4, 7, 1, 8];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; heights = [3, 9, 4, 7, 1, 8];
 int peak(const array&lt;int&gt;&amp; h, int i) {      // reads its argument in place: no copy
     int best = h[i];
     if (i &gt; 0 &amp;&amp; h[i - 1] &gt; best) { best = h[i - 1]; }
@@ -240,7 +240,7 @@ parallel_for: argument passes enclosing state 'heights' to reference parameter '
 <li><strong>Elements.</strong> The statement refuses a range whose elements reach a captured object, since an element&#x27;s lane may write it while the others read their views.</li>
 <li><strong>Refused.</strong> A captured object holding a handle, a function, a <code>var</code> field or a C++ object, one whose class runs a destructor, and a <code>weak_ptr</code>, stay refused.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec3 {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec3 {
     float x = 0.0; float y = 0.0; float z = 0.0;
     Vec3(float a, float b, float c) { x = a; y = b; z = c; }
     float dot(Vec3 o) { return x * o.x + y * o.y + z * o.z; }   // writes nothing of its object
@@ -272,7 +272,7 @@ parallel_for: method 'scale' of 'Vec3' writes its object, and captured 'sun' is 
 <li>The body may touch <code>out</code> only as <code>out[i]</code>, since reading another slot would race the writes (<code>parallel_for: body touches 'out' beyond the slot it writes, out[i] at 4:20</code>).</li>
 </ul>
 <p>Each worker writes a private copy of <code>out</code>, and the statement copies every element&#x27;s slot back in element order, up to the first failing element: exactly the stores the serial loop makes.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; order = [3, 0, 2, 1];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; order = [3, 0, 2, 1];
 array&lt;int&gt; placed = [0, 0, 0, 0];
 parallel_for (int slot : order) {
     placed[slot] = slot * 10;          // each element writes the slot its value names
@@ -289,7 +289,7 @@ print("{}", to_json(placed));</code></pre></div>
 <li>the destructor of every class whose instance can die in the body: an object the body makes, an element it replaces, and whatever their fields hold.</li>
 </ul>
 <p>Class code may call script functions, methods on the object, and the same pure host functions a body may.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string PREFIX = "hit-";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string PREFIX = "hit-";
 class Vec { float x = 0.0; float y = 0.0; Vec() {} Vec(float a, float b) { x = a; y = b; } }
 class Hit {
     int ray = -1;
@@ -306,7 +306,7 @@ parallel_for (int r : rays) {
 print("{} {} {}", hits[3].tag, hits[3].at.y, hits[0].ray);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hit-3 3.0 0</code></pre></div>
 <p>Construction code that writes state the body does not own refuses the statement, and the error names where that code sits: a constructor, a field initializer or a destructor.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int next_id = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int next_id = 0;
 int deaths = 0;
 class Tick { int id = 0; Tick() { id = next_id; next_id++; } }
 class Tag { int id = next_id++; }
@@ -344,7 +344,7 @@ parallel_for: body writes enclosing state 'deaths' in the destructor of 'Res' at
 <p>So the loop gives the same numbers on any number of cores, and the generator after it is the same too: it has moved one draw for each statement that captured it. The numbers are not the ones the serial loop would draw, since a serial loop takes its draws in the order its elements run and a parallel one has no such order.</p>
 <p>A <code>random</code> an element owns (an <code>array&lt;random&gt;</code> zipped beside the data, or a field of the element&#x27;s class) or one the body makes draws as it would anywhere. The statement proves each element&#x27;s generator its own object, as it does every C++ value an element holds, and refuses two elements holding one generator with <code>parallel_for: elements 1 and 2 share one &#x27;random&#x27; in field &#x27;brain&#x27; (an element owns the C++ values it holds: give each element its own, or capture one from outside the loop)</code>.</p>
 <p>Reseeding a captured generator in a body is refused before any element runs. Seed before the loop (<a href="18-random.html#in-parallel-loops">Random Numbers &amp; Crypto</a> has the exact rule).</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random loot(5);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">random loot(5);
 array&lt;int&gt; drops = [0, 0, 0, 0, 0, 0, 0, 0];
 parallel_for (auto&amp; d : drops) { d = loot.next_int(1, 100); }   // the same drops on any number of cores
 print(drops.join(&quot; &quot;));
@@ -384,7 +384,7 @@ parallel_for: random::seed cannot be called on captured &#x27;loot&#x27; in a pa
 <li><code>step</code>&#x27;s body runs grafted into the chunk loop, so no call is paid per element. A <code>step</code> that takes its accumulator by reference (<code>void step(T&amp; acc, x)</code>, or <code>-&gt; T&amp;</code> returning <code>acc</code>) folds the chunk&#x27;s accumulator in place with no copy in or out, the form for a container or object accumulator. The by-value form <code>T step(T acc, x)</code> suits a scalar. The element <code>x</code> is taken by value.</li>
 <li>The input may hold class instances: <code>step</code> reads their fields and runs their methods and operators under the body rules. Every element must be its own object, as a zipped array&#x27;s are, so an input holding one <code>shared_ptr</code> twice is refused with <code>parallel_reduce: input elements 0 and 1 hold the same object (an object the step reaches through a handle element belongs to one element)</code>.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
 float add(float a, float b) { return a + b; }
 class Span { float lo = 1000000.0; float hi = -1000000.0; }
 void widen(Span&amp; r, float x) { if (x &lt; r.lo) { r.lo = x; } if (x &gt; r.hi) { r.hi = x; } }   // folds in place
@@ -396,7 +396,7 @@ print(`span ${r.lo:.2f}..${r.hi:.2f} big ${big:.2f}`);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">total 36.25
 span 3.00..12.00 big 28.75</code></pre></div>
 <p>The long form is the same loop written out: a zipped array of per-chunk accumulators and their chunk numbers, each chunk folding its slice in place, then a serial fold of the partial results. A body that adds into a captured total instead raises the enclosing-state error.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; prices = [4.5, 12.0, 7.25, 3.0, 9.5];
 int size = 2;
 array&lt;float&gt; partial = [0.0, 0.0, 0.0];   // one accumulator per chunk of `size` elements
 array&lt;int&gt; chunk_ids = [0, 1, 2];

@@ -39,7 +39,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>The kitchen sink. This chapter collects the smaller conveniences, the things you reach for daily that don&#x27;t need a chapter of their own: enums, namespaces, destructuring, the ternary operator, and null-safe access. Each behaves the way a C++ developer would guess, with the differences called out.</p>
 <h2 id="enums">Enums<a class="hlink" href="#enums" aria-label="link">&#8203;</a></h2>
 <p><code>enum Name { a, b, c }</code> declares integer constants, counted from 0 as in C++. They compare naturally and work as <code>switch</code> cases:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 print("east = {}", Direction.east);
 auto d = Direction.south;
 print("d == south: {}", d == Direction.south);
@@ -54,7 +54,7 @@ d == south: true
 going down
 == result: 3</code></pre></div>
 <p>Enum members are plain ints at runtime (<code>Direction.east</code> prints <code>2</code>). Membership, though, is checked at load: <code>Direction.zzz</code> is not a run-time lookup that returns null, it fails the load before anything runs:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 print("{}", Direction.zzz);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
@@ -62,7 +62,7 @@ print("{}", Direction.zzz);</code></pre></div>
                           ^</code></pre></div>
 <p>Members are reached with a dot (<code>Direction.east</code>) or, as in C++, with <code>::</code> (<code>Direction::east</code>); both name the same constant.</p>
 <p>The enum&#x27;s name alone is its value table: a <code>map&lt;string,int&gt;</code> from each value&#x27;s name to its number, which is how a script reflects over an enum. A <code>var</code>, an <code>auto</code> or a <code>map&lt;string,int&gt;</code> takes it, and a range-<code>for</code> walks it in key order:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 var table = Direction;                       // the enum&#x27;s value table, a map&lt;string,int&gt;
 print("{} values; west = {}", table.size(), table["west"]);
 for (auto [name, n] : Direction) { print("{} = {}", name, n); }</code></pre></div>
@@ -72,7 +72,7 @@ north = 0
 south = 1
 west = 3</code></pre></div>
 <p>A slot that cannot hold that map refuses it at load, as it refuses any map: an <code>int</code> wants one of the values.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 int d = Direction;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:2:5: error: cannot initialize &#x27;d&#x27; declared &#x27;int&#x27; with &#x27;enum Direction&#x27;: an enum&#x27;s name is its value table, a map&lt;string,int&gt;; name one of its values (Direction.north)
@@ -85,7 +85,7 @@ int d = Direction;</code></pre></div>
 <li>and the integer operators (<code>+ - * / % &amp; | ^ &lt;&lt; &gt;&gt; ~</code>).</li>
 </ul>
 <p>The load computes every value. A name that is not an earlier value, a shift outside 0 to 63 or an overflow fails it (<code>enum value 'b' names 'c', which is not an earlier value of 'F'</code>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Flag { none, read = 1 &lt;&lt; 0, write = 1 &lt;&lt; 1, exec = 1 &lt;&lt; 2, all = read | write | exec, next }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Flag { none, read = 1 &lt;&lt; 0, write = 1 &lt;&lt; 1, exec = 1 &lt;&lt; 2, all = read | write | exec, next }
 enum Level { low = -2, mid, high = Level::mid + 10 }
 print("{} {} {} {}", Flag.write, Flag.all, Flag.next, Flag.all &amp; Flag.exec);
 print("{} {} {}", Level.low, Level.mid, Level.high);</code></pre></div>
@@ -94,7 +94,7 @@ print("{} {} {}", Level.low, Level.mid, Level.high);</code></pre></div>
 <p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its values</code>).</p>
 <h2 id="namespaces">Namespaces<a class="hlink" href="#namespaces" aria-label="link">&#8203;</a></h2>
 <p>Namespaces group functions, variables, and classes behind <code>::</code>. They are <strong>flat</strong>. <code>namespace my::nested::deep { }</code> is a single namespace whose name contains <code>::</code>, and &quot;nesting&quot; blocks composes the same way; its code still searches each enclosing namespace for a bare name (<a href="#bare-names-in-a-namespace">below</a>). Functions overload by parameter types and count, by the rules in <a href="06-functions.html#redefinition-and-the-duplicate-warning">Functions</a>; redefining an existing signature requires the <code>override</code> keyword (mirrors hot-reload discipline):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace utils {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace utils {
     auto add(a, b) { return a + b; }
     auto add(a, b, c) { return a + b + c; }    // overload by arity
     auto VERSION = 3;
@@ -130,7 +130,7 @@ len2 = 25
 </ul>
 <p>The namespace&#x27;s top-level code runs in order, as a file&#x27;s does. A bare name it declares only further down is not its member yet, so the name reaches an enclosing namespace&#x27;s member or the global of that name. With neither, the load fails with the <a href="../reference/index.html#rule-top-level-order">top-level order</a> error (<code>'f' is called before its declaration (line 3): top-level code runs in order, so declare it above the call or make the call after it</code>).</p>
 <p>The host&#x27;s namespace entries (<code>string::to_lower</code>, <code>time::now</code>) are read-only from script:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 100;                      // a global of the same name stays separate
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int hits = 100;                      // a global of the same name stays separate
 namespace stats {
     int hits = 0;
     int base = 10;
@@ -156,7 +156,7 @@ caught: Cannot assign to &#x27;to_lower&#x27;: it is read-only</code></pre></div
 <li>then the globals.</li>
 </ol>
 <p>A member hides a global of the same name, and <code>::name</code> reaches the global. Lookup happens when the code runs. So a function declared later in the namespace, in a reopening or by another unit, is found, and a reload that replaces a namespace function is what its siblings call next:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int limit = 100;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int limit = 100;
 int clamp_to(int v) { return v; }
 namespace game {
     int limit = 10;
@@ -178,7 +178,7 @@ print(&quot;{} {} {}&quot;, game::scale(7), game::ai::think(2), game::global_lim
 <li>After a dot, <code>?.</code>, <code>::</code> or <code>-&gt;</code> the name is a member name and stays as written.</li>
 <li>The name cannot be declared again in that file: a variable, parameter, member, function, class or enum of that name, or a second using of it, is a parse error.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace geo {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">namespace geo {
     float scale = 2.0;
     float twice(float v) { return v * scale; }
     class Pt { int x = 1; int y = 2; }
@@ -189,7 +189,7 @@ print("{} {}", twice(3.0), p.x + p.y);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">6.0 3</code></pre></div>
 <h2 id="destructuring">Destructuring<a class="hlink" href="#destructuring" aria-label="link">&#8203;</a></h2>
 <p><code>auto [a, b, c] = array;</code> unpacks positionally. Extra elements are ignored; missing ones bind <code>null</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto [x, y, z] = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto [x, y, z] = [1, 2, 3];
 print("{} {} {}", x, y, z);
 auto [a, b] = [10, 20, 30];       // extras ignored
 print("{} {}", a, b);
@@ -204,7 +204,7 @@ px + py;</code></pre></div>
 == result: 11</code></pre></div>
 <h2 id="ternary">Ternary<a class="hlink" href="#ternary" aria-label="link">&#8203;</a></h2>
 <p>Right-associative, so the classic cascade reads top-down without parentheses:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto health = 40;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto health = 40;
 auto status = health &gt; 0 ? "alive" : "dead";
 auto level = health &gt; 75 ? "healthy" :
              health &gt; 25 ? "wounded" : "critical";
@@ -214,7 +214,7 @@ health &gt; 50 ? 1 : 0;</code></pre></div>
 == result: 0</code></pre></div>
 <h2 id="null-safe-access">Null-safe access: <code>?.</code><a class="hlink" href="#null-safe-access" aria-label="link">&#8203;</a></h2>
 <p><code>x?.member</code> and <code>x?.method(...)</code> evaluate to <code>null</code> when <code>x</code> is null instead of erroring; the call&#x27;s arguments are not evaluated then. On a non-null <code>x</code> it is the ordinary member access, a store included (<code>x?.hp = 5</code>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto obj = null;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto obj = null;
 auto a = obj?.length();          // null-safe: short-circuits to null
 print("obj?.length() = {}", a == null ? "null" : to_string(a));
 auto s = "hello";
@@ -222,7 +222,7 @@ print("s?.length() = {}", s?.length());</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">obj?.length() = null
 s?.length() = 5</code></pre></div>
 <p>A null in front of a <code>?.</code> skips the rest of the chain, as in JavaScript and C#: <code>a?.b.c</code>, <code>a?.items[0]</code> and <code>a?.f().g()</code> are null when <code>a</code> is. Only the value in front of the <code>?.</code> is tested, so <code>a?.b.c</code> still raises when <code>a</code> is not null and <code>b</code> is. Put a <code>?.</code> on every link that may be null. <code>??</code> supplies the default (<a href="04-operators.html#null-chains-and-defaults">Operators</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 3; shared_ptr&lt;Node&gt; next; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 3; shared_ptr&lt;Node&gt; next; }
 auto head = new Node();
 print("{} {}", head?.v, head?.next?.v);      // next is null: the second ?. yields null
 shared_ptr&lt;Node&gt; none;

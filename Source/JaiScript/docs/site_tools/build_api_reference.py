@@ -16,6 +16,8 @@ import sys
 SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 PROJECT = SITE.parents[1]
 CATALOG = SITE / 'reference/api-catalog.json'
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
+from mark_runnable import marked  # noqa: E402
 
 def escape(value):
 	return html.escape(str(value), quote=True)
@@ -144,7 +146,7 @@ def main():
 	args=ap.parse_args()
 	data=json.loads(CATALOG.read_text(encoding='utf-8'))
 	assert data['entries'] and data['fields']
-	outputs={SITE/'reference/api.html':page(data),PROJECT/'include/jaiscript/detail/builtin_api_arities.hpp':generated_header(data['entries'])}
+	outputs={SITE/'reference/api.html':marked(page(data)),PROJECT/'include/jaiscript/detail/builtin_api_arities.hpp':generated_header(data['entries'])}
 	stale=[]
 	for target, content in outputs.items():
 		current=target.read_text(encoding='utf-8') if target.exists() else ''

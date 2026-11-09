@@ -394,6 +394,24 @@ article.chapter details p { margin: .45rem 0; }
 .codeblock:not(:has(> .cb-label)):hover .cb-copy,
 .codeblock:not(:has(> .cb-label)):focus-within .cb-copy { opacity: 1; }
 @media (hover: none) { .codeblock:not(:has(> .cb-label)) .cb-copy { opacity: 1; } }
+/* a runnable sample (samples.js): reset, run and copy share the strip's right end, and its code edits in place */
+.cb-tools { position: absolute; top: 0; right: 0; display: flex; }
+.cb-tools .cb-copy { position: static; }
+.cb-tool {
+  height: 2.1rem; padding: 0 .8rem; font: 600 .68rem/1 var(--mono); letter-spacing: .12em; text-transform: uppercase;
+  color: var(--link); background: none; border: 0; cursor: pointer; white-space: nowrap;
+}
+.cb-tool:hover { color: var(--head); background: var(--mark); }
+.cb-tool:focus-visible { outline-offset: -3px; }
+.cb-run { color: var(--accent); }
+.cb-reset { display: none; color: var(--fg-dim); }
+.cb-edited .cb-reset, .cb-touched .cb-reset { display: inline-block; }
+.codeblock[data-run] > .cb-label { padding-right: 15rem; }
+.codeblock:not(:has(> .cb-label)) .cb-tools .cb-copy { opacity: 1; }
+.codeblock[data-run] pre > code, .codeblock[data-file] pre > code { outline: none; cursor: text; }
+.codeblock[data-run]:focus-within, .codeblock[data-file]:focus-within { border-color: var(--accent); }
+.cb-output.cb-ran > .cb-label { color: var(--accent); }
+.run-error { color: var(--kw); }
 
 /* code + output side by side: site.js wraps a sample and its output in .pair and sets
    --code-ch / --out-ch to their longest lines, so the panes sit beside each other only

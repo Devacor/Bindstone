@@ -52,7 +52,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <tr><td><code>time::unix_ms()</code></td><td>whole milliseconds (int) since the Unix epoch</td></tr>
 <tr><td><code>time::date_now(template)</code></td><td>the current local date and time as a string, <a href="#formatting">formatted by a template</a></td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float t0 = time::now();
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float t0 = time::now();
 sleep(0.02);
 float waited = time::now() - t0;
 print("waited at least 20 ms: {}", waited &gt;= 0.02);
@@ -78,7 +78,7 @@ unix_ms reads the same clock, in milliseconds: true</code></pre></div>
 <tr><td><code>is_running()</code> / <code>is_paused()</code></td><td>its state</td></tr>
 </tbody></table></div>
 <p>Time spent paused never counts toward <code>elapsed()</code> or <code>delta()</code>. A stopwatch is a value, like every JaiScript value: a copy is a separate stopwatch from then on, and a stopwatch field copies with its object.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::stopwatch frame;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::stopwatch frame;
 frame.delta();                      // the first delta starts the stopwatch and returns 0.0
 sleep(0.01);
 float dt = frame.delta();           // seconds since the previous delta
@@ -109,7 +109,7 @@ copy running: false, original running: true</code></pre></div>
 <p>Dates run from year 1 to year 9999. Arithmetic, comparison and formatting work in both zones; converting a local date to or from an instant is limited to the range the platform&#x27;s local-time support covers.</p>
 <h3 id="fields">Fields<a class="hlink" href="#fields" aria-label="link">&#8203;</a></h3>
 <p><code>year</code>, <code>month</code> (1-12), <code>day</code>, <code>hour</code> (0-23), <code>minute</code>, <code>second</code> and <code>millisecond</code> read and write through ordinary member access. Every store is checked: a value out of its range, or a store that would leave the day past the end of its month, raises a catchable error and leaves the date unchanged. To move 2024-03-31 to April, set the day first. <code>weekday</code> (0 = Sunday through 6 = Saturday), <code>yearday</code> (1 = January 1) and <code>utc</code> are read-only.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date d = time::utc_date(2024, 2, 29);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date d = time::utc_date(2024, 2, 29);
 print("{}-{}-{} is weekday {} and day {} of the year", d.year, d.month, d.day, d.weekday, d.yearday);
 d.day = 1;
 d.month = 3;
@@ -129,7 +129,7 @@ time::date: day 31 does not exist in 2024-04
 </ul>
 <p>In UTC the two kinds agree. In the local zone they differ across a daylight-saving change: <code>add_days(1)</code> is the same time tomorrow, <code>add_hours(24)</code> is twenty-four hours later.</p>
 <p>Dates compare as instants with <code>&lt;</code>, <code>&lt;=</code>, <code>==</code>, <code>!=</code>, <code>&gt;</code> and <code>&gt;=</code>, so a local date and a UTC date of the same moment are equal. <code>a - b</code> is the difference in float seconds, and <code>d.between(a, b)</code> asks whether <code>d</code> lies in the inclusive range between two dates given in either order.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date launch = time::utc_date(2024, 1, 31, 9, 30);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date launch = time::utc_date(2024, 1, 31, 9, 30);
 print(launch.to_string());
 print(launch.add_months(1).to_string());       // Feb 31 does not exist: the day clamps to Feb 29
 print(launch.add_days(30).format("${weekday_name}, ${month_name} ${day}"));
@@ -145,7 +145,7 @@ Friday, March 1
 true true true</code></pre></div>
 <h3 id="zones-and-unix-time">Zones and Unix time<a class="hlink" href="#zones-and-unix-time" aria-label="link">&#8203;</a></h3>
 <p><code>d.unix()</code> is the date&#x27;s instant in float seconds since the Unix epoch and <code>d.unix_ms()</code> in whole milliseconds. <code>to_utc()</code> and <code>to_local()</code> return the same instant in the other zone.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date u = time::date_from_unix(1700000000, true);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date u = time::date_from_unix(1700000000, true);
 time::date l = u.to_local();
 print(u.to_string());
 print("same instant: {}, local is UTC: {}", u == l, l.utc);
@@ -165,7 +165,7 @@ now, both ways: true</code></pre></div>
 <tr><td><code>minutes</code>, <code>seconds</code>, <code>milliseconds</code></td><td>ints</td></tr>
 <tr><td><code>am_pm</code></td><td><code>AM</code> or <code>PM</code></td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date d = time::utc_date(2026, 9, 27, 14, 3, 5, 7);
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">time::date d = time::utc_date(2026, 9, 27, 14, 3, 5, 7);
 print(d.format("${weekday_short} ${day:02} ${month_short} ${year} ${hours}:${minutes:02} ${am_pm}"));
 print(d.format("${year}-${month:02}-${day:02}T${military_hours:02}:${minutes:02}:${seconds:02}.${milliseconds:03}"));
 print(d.format("[${month_name:&gt;10}] [${weekday_name:*^11}]"));
@@ -179,7 +179,7 @@ true</code></pre></div>
 <p>An unknown placeholder, an unterminated <code>${</code>, a spec outside the template-string subset and a spec that does not fit the value (<code>${month_name:05}</code>) all raise a catchable error that names the problem. <code>date_now</code> formats the local time; for UTC, format <code>time::utc_now()</code>.</p>
 <h2 id="the-types-by-their-names">The types by their names<a class="hlink" href="#the-types-by-their-names" aria-label="link">&#8203;</a></h2>
 <p><code>time::date</code> and <code>time::stopwatch</code> are spelled with their namespace everywhere a class name goes: declarations, parameters and returns, fields, container element types, <code>cast&lt;time::date&gt;(x)</code>, <code>shared_ptr&lt;time::date&gt;</code> and <code>new time::date()</code>. <code>time::date()</code> and <code>time::stopwatch()</code> construct them as expressions.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Session {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Session {
     time::date started = time::utc_date(2026, 1, 1, 8);
     time::stopwatch clock;
 }
@@ -194,7 +194,7 @@ time::stopwatch false</code></pre></div>
 <p>The strict checker knows the namespace. A <code>time::</code> call with the wrong number of arguments (<code>'time::now' expects 0 argument(s), got 1</code>) or an argument it cannot take (<code>time::date_from_unix("soon")</code>) fails the load, and results carry their types. A member neither type has (<code>no member 'nope' in class 'time::date'</code>) is a load error like any class&#x27;s.</p>
 <h2 id="time-and-parallel-loops">Time and parallel loops<a class="hlink" href="#time-and-parallel-loops" aria-label="link">&#8203;</a></h2>
 <p>A <code>parallel_for</code> gives the same result at every worker count. A clock read cannot keep that promise (the answer would depend on scheduling), so a parallel body that calls <code>time::</code> is rejected before any worker starts, with the usual catchable explanation:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; stamps = [0.0, 0.0, 0.0];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;float&gt; stamps = [0.0, 0.0, 0.0];
 try {
     parallel_for (auto&amp; s : stamps) { s = time::now(); }
 } catch (e) {

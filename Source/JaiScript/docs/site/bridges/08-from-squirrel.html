@@ -210,7 +210,7 @@ std::string out = result.value().as_string();</code></pre></div>
 </tbody></table></div>
 <h3 id="assignment-copies">Assignment copies an instance, an array and a table<a class="hlink" href="#assignment-copies" aria-label="link">&#8203;</a></h3>
 <p>In Squirrel, <code>local q = p;</code> makes a second name for one instance, and the same holds for arrays and tables. In JaiScript a class instance, an array and a map are values: assignment copies them. <code>new</code> makes a <code>shared_ptr</code> handle, which shares:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Point {
     int x = 0;
     int y = 0;
     Point(int px, int py) { x = px; y = py; }
@@ -224,7 +224,7 @@ auto h2 = h;
 h2.x = 10;
 print(p.x, " ", q.sum(), " / ", h.x);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 12 / 10</code></pre></div>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; a = [1, 2, 3];
 array&lt;int&gt; b = a;
 b[0] = 99;
 map&lt;string, int&gt; t = {"hp": 10};
@@ -234,24 +234,24 @@ print(a[0], " ", b[0], " ", t["hp"]);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 99 10</code></pre></div>
 <h3 id="the-empty-string-is-false">The empty string is false<a class="hlink" href="#the-empty-string-is-false" aria-label="link">&#8203;</a></h3>
 <p>Squirrel treats <code>null</code>, <code>0</code>, <code>0.0</code> and <code>false</code> as false and every string as true. JaiScript agrees on the first four and also treats the empty string as false:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var empty = "";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var empty = "";
 print(empty ? "\"\" is true" : "\"\" is false");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">"" is false</code></pre></div>
 <h3 id="names-are-declared">Names are declared, and checked before anything runs<a class="hlink" href="#names-are-declared" aria-label="link">&#8203;</a></h3>
 <p>A Squirrel function that assigns a name nobody created loads, then fails when it runs (<code>the index 'score' does not exist</code>); <code>&lt;-</code> creates the slot. A JaiScript program-scope declaration is the global, functions read and write it, and an undeclared name stops the load with <code>use of undeclared identifier 'score'</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 0;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 0;
 function setup() { score = 10; }
 setup();
 print(score);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">10</code></pre></div>
 <h3 id="integers-do-not-wrap">Integers do not wrap<a class="hlink" href="#integers-do-not-wrap" aria-label="link">&#8203;</a></h3>
 <p>A 64-bit Squirrel build wraps <code>9223372036854775807 + 1</code> to the most negative integer. A JaiScript <code>int</code> is the same 64 bits, and an operation that overflows it raises an error (<a href="../guide/04-operators.html#checked-overflow-raises-never-wraps-never-ub">Checked overflow</a>):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 9223372036854775807;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int big = 9223372036854775807;
 try { big = big + 1; } catch (e) { print("caught: ", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Integer overflow in '+'</code></pre></div>
 <h3 id="generators-are-coroutines">Generators are coroutines<a class="hlink" href="#generators-are-coroutines" aria-label="link">&#8203;</a></h3>
 <p>A Squirrel function that contains <code>yield</code> is a generator: calling it makes a suspended generator, <code>resume g</code> runs it to the next <code>yield</code>, and <code>g.getstatus()</code> reports <code>"dead"</code> when it has returned. JaiScript marks the function <code>coroutine</code>; calling it returns a handle, <code>next()</code> advances it and <code>done()</code> reports completion. The last <code>next()</code> hands back the <code>return</code> value, as the last <code>resume</code> does:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int gen() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int gen() {
     yield 1;
     yield 2;
     return 3;

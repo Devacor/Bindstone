@@ -50,6 +50,11 @@ option(JAISCRIPT_LTCG "Whole-program optimization for MSVC Release builds (/GL, 
 option(JAISCRIPT_ENABLE_BENCHMARKS "Enable performance benchmark tests" OFF)
 option(JAISCRIPT_NATIVE_ARCH "Tune Release builds for this machine's CPU (-march=native; non-portable binaries)" OFF)
 option(JAISCRIPT_WASM_THREADS "Emscripten: build everything with -pthread, so parallel_for and parallel_transform run on WebAssembly threads (needs a cross-origin isolated page)" OFF)
+# the library catches what it throws (to_int's fallback, a script's catch around a failing builtin): every unit needs it
+if(EMSCRIPTEN)
+    add_compile_options(-fwasm-exceptions)
+    add_link_options(-fwasm-exceptions)
+endif()
 if(EMSCRIPTEN AND JAISCRIPT_WASM_THREADS)
     add_compile_options(-pthread)
     add_link_options(-pthread)

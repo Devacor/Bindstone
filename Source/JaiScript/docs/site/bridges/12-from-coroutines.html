@@ -139,7 +139,7 @@ for frame = 1, 3 do
 end
 print(guards[1].x .. " " .. guards[2].x)</code></pre></div>
 <p>JaiScript makes the behaviour a method coroutine and the scheduler a loop over handles:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Guard {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Guard {
     string name;
     int x = 0;
     Guard(string n) { name = n; }
@@ -166,7 +166,7 @@ south turns at 2
 <h2 id="advancing">Advancing a handle<a class="hlink" href="#advancing" aria-label="link">&#8203;</a></h2>
 <h3 id="next-and-done">next() and done()<a class="hlink" href="#next-and-done" aria-label="link">&#8203;</a></h3>
 <p><code>next()</code> runs to the next <code>yield</code> and returns its value; the <code>next()</code> that finishes the body returns the <code>return</code> value, and <code>done()</code> asks without advancing. A cutscene is a coroutine whose yields are frame boundaries:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine function cutscene() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine function cutscene() {
     print("door opens");
     yield;
     print("hero walks in");
@@ -183,7 +183,7 @@ door closes
 -- frame</code></pre></div>
 <h3 id="next-n">next(n)<a class="hlink" href="#next-n" aria-label="link">&#8203;</a></h3>
 <p><code>next(n)</code> advances <code>n</code> yields in one call and returns the last one's value, the way a loop of <code>coroutine.resume</code> would. A count that runs past the end raises as <code>next()</code> at the end does:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int waves() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int waves() {
     yield 1;
     yield 2;
     yield 3;

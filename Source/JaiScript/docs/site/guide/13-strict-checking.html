@@ -44,7 +44,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>The one-sentence version: <strong>the checker is always on, and strict</strong>. A typed mistake it can see fails the load, before a single statement runs. A mistake it cannot see raises at run time, where <code>try</code>/<code>catch</code> sees it. Nothing is opt-in; <code>var</code> is the opt-out.</p>
 <h2 id="two-kinds-of-mistake">Two kinds of mistake<a class="hlink" href="#two-kinds-of-mistake" aria-label="link">&#8203;</a></h2>
 <p>Start with the smallest possible program that gets a type wrong:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
 print("before");
 x = "oops";
 print("after");</code></pre></div>
@@ -54,7 +54,7 @@ print("after");</code></pre></div>
       ^</code></pre></div>
 <p>Nothing ran. <code>before</code> never printed. The checker saw a string literal flowing into a slot declared <code>int</code>, and under strict that is a <strong>load error</strong>: the load fails, the whole listing is the error text, and the engine is untouched. On the C++ side <code>execute()</code> throws <code>jai::static_check_error</code>; the standalone runner prints the listing and exits 1.</p>
 <p>Now the same mistake, hidden behind <code>var</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
 var v = "oops";                    // var: the checker has no idea what this holds
 try { x = v; } catch (e) { print("caught: {}", e); }
 print("x is still {}", x);</code></pre></div>
@@ -75,7 +75,7 @@ x is still 5</code></pre></div>
 <li>The message, in the checker&#x27;s voice: lower-case, names quoted, types bare, and <code>(declared at L:C)</code> pointing at the declaration it is holding you to.</li>
 <li>The source line and a caret under the column.</li></ul>
 <p>Several problems come out together, sorted by location and deduplicated, so you fix a file in one pass rather than one error per attempt. An erroring expression assumes its declared type from then on, so one bad line produces one diagnostic, not a cascade. The listing caps at 100. Here is one with both severities in it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Creature {
     int hp = 3;
     int poke() { int hp = 1; return hp; }   // shadows the field: a warning
 }
@@ -93,21 +93,21 @@ c.hp = "full";                              // a type error: this one gates the 
 <p>The rules, in the order you are likely to trip over them. Each is a load error under strict.</p>
 <div class="tablewrap"><table><thead><tr><th>Site</th><th>Checked</th><th>Example message</th></tr></thead><tbody><tr><td>Declarations and <code>=</code></td><td>the value against the declared type, through the <a href="02-type-ladder.html">one conversion table</a>; compound assigns as <code>x = T(x op rhs)</code></td><td><code>cannot assign 'string' to 'x' declared 'int'</code></td></tr><tr><td>Field and static stores</td><td>against the field&#x27;s declared type, from outside (<code>c.hp = v</code>) and inside (bare <code>hp = v</code>)</td><td><code>cannot assign 'string' to field 'hp' declared 'int'</code></td></tr><tr><td>Calls to same-program functions, methods and constructors</td><td>arity (defaults counted) and each argument&#x27;s assignability; with overloads, an error only when none fits, among every declaration of the name the program holds (the unit&#x27;s own, the program&#x27;s other files&#x27; and an earlier execute&#x27;s)</td><td><code>'fib' expects 1 argument(s), got 2</code></td></tr><tr><td>Returns</td><td>the value against the declared return type; a value from a <code>void</code> function; a function declared to return a primitive, a <code>string</code> or a reference that can reach the end of its body without a <code>return</code></td><td><code>cannot return 'string' from 'label' declared to return 'int'</code>, <code>'sign' declared to return 'int' may reach the end of its body without returning</code></td></tr><tr><td>Reference bindings</td><td>a <code>T&amp;</code> declaration or parameter binds only a <code>T</code> lvalue; a literal or temporary reaches a <code>T&amp;</code> parameter only when the function never writes through it</td><td><code>argument 1 of 'bump': cannot bind 'float' to 'n' declared 'int&amp;'</code>, <code>'bump' writes through parameter 'n' (line 1); pass a variable</code></td></tr><tr><td>Assignment targets</td><td>the left side of <code>=</code>, <code>op=</code>, <code>++</code> and <code>--</code> must name storage; a read-only property and a map key seen through a range-for pair are not assignable</td><td><code>cannot assign to a call result: 'f' returns by value</code>, <code>cannot assign to read-only property 'weekday'</code>, <code>cannot mutate 'kv.first': map keys are read-only</code></td></tr><tr><td>Members on a known class</td><td>reads and writes of a member the class does not declare, including a member only a subtype declares, through a value, a handle or a reference (<code>T&amp;</code>, <code>const T&amp;</code>, an <code>auto&amp;</code> of a known class, a range-<code>for</code> variable over class elements) and the fields and elements reached through one. Through a reference, field stores, method arity and arguments are checked as on a value</td><td><code>no member 'range' in class 'Unit'</code></td></tr><tr><td>Identifiers</td><td>every name must be declared where the use can see it: an enclosing scope, the class (in a method, also a class derived from it), the file&#x27;s top level (a function body may name a later declaration, while top-level code sees only what is declared above it, a namespace&#x27;s top-level code included: <a href="../reference/index.html#rule-top-level-order">top-level order</a>), the program, <code>extern</code>, or the host&#x27;s registrations. Another function&#x27;s locals and another class&#x27;s members are undeclared. A namespace&#x27;s name alone is no value</td><td><code>use of undeclared identifier 'totl'</code>, <code>'math' is a namespace, not a value; name one of its members (math::name)</code></td></tr><tr><td>Field initializers</td><td>an instance field&#x27;s initializer reads only the fields declared above it (fields initialize in declaration order), bare or through <code>this</code>; a lambda it creates may name any field</td><td><code>field initializer of 'spd' reads 'slices' before its initialization: fields initialize in declaration order; declare 'slices' above 'spd'</code></td></tr><tr><td>Unary operators</td><td><code>-</code>, <code>+</code> and <code>~</code> over a declared type no row takes (a bool, a string, a container, a function, null; a float under <code>~</code>; a class without the operator), with the run time&#x27;s text</td><td><code>Unary minus requires numeric operand</code></td></tr><tr><td>Methods and statics</td><td>a method read without a call; a static reached with a dot</td><td><code>'heal' is a method of P; call it with p.heal() or bind it with reflect::bind(p, "heal")</code>, <code>'P' is a class; use P::n</code></td></tr><tr><td>Comparisons</td><td><code>== != &lt; &lt;= &gt; &gt;= &lt;=&gt;</code> between two declared types with no comparison: no conversion relates them (int, float and char compare as numbers; string and utf8_string as text) and neither side&#x27;s class declares a comparison operator, either way round; <code>null</code> against a typed slot that never holds it</td><td><code>cannot compare &#x27;int&#x27; with &#x27;string&#x27; using &#x27;==&#x27;: the types have no comparison (it is always false); convert one operand</code></td></tr><tr><td>Arithmetic and bitwise operators</td><td><code>+ - * / %</code>, <code>&amp; | ^ &lt;&lt; &gt;&gt;</code>, their compounds and <code>++</code>/<code>--</code> between declared types no builtin row takes (numbers and chars do arithmetic, a string on either side joins under <code>+</code>, ints and chars do bitwise) when the left operand&#x27;s class declares no such operator, with the run time&#x27;s text; <code>++</code> on a slot declared <code>char</code>, which the int it steps to does not fit</td><td><code>cannot apply &#x27;*&#x27; to &#x27;string&#x27; and &#x27;int&#x27; (it raises &#x27;Invalid operands for * operator&#x27;); convert one operand</code></td></tr><tr><td>Enum values</td><td>membership; the enum&#x27;s name as a value is its value table, a <code>map&lt;string,int&gt;</code>, which a slot that cannot hold that map refuses</td><td><code>no value 'zzz' in enum 'Direction'</code>, <code>cannot initialize 'd' declared 'int' with 'enum Direction': an enum's name is its value table, a map&lt;string,int&gt;; name one of its values (Direction.north)</code></td></tr><tr><td>Members of builtin values</td><td>a method a declared array, map, string or utf8_string lacks, and any member of a known int, float, bool or char but <code>same_as</code> (the builtin registry gives those types none), with the run time&#x27;s text for the scalars</td><td><code>no member 'pusj' on 'array&lt;int&gt;' (did you mean 'push'?)</code>, <code>int has no member 'abs'</code></td></tr><tr><td>Map subscripts</td><td>the key of <code>m[k]</code>, read or written, against a map&#x27;s declared scalar key type: the kinds must match, except that a char and its one-character string are one key; with the run time&#x27;s text</td><td><code>Cannot use 'string' as a key of type 'int'</code>, <code>Cannot convert 'string' to 'char': a char takes a string of exactly one character</code></td></tr><tr><td>Host (C++) functions</td><td>arity across overloads, and an argument only when the mismatch is certain (a string into a numeric parameter); a bound static method's arity</td><td><code>'to_char' expects 1 argument(s), got 2</code>, <code>no overload of 'to_char' accepts these argument types</code>, <code>'Gate::twice' expects 1 argument(s), got 0</code></td></tr><tr><td>Declared types</td><td>every type a declaration spells names a class, enum or type the program or the host declares: a variable, a field, a parameter, a return, a range-<code>for</code> variable, and the element, key, value or pointee inside a container or handle type. A bare math name gets a hint</td><td><code>unknown type &#x27;Nope&#x27;</code>, <code>unknown type &#x27;vec2&#x27;; did you mean &#x27;math::vec2&#x27; (using math::vec2;)?</code></td></tr><tr><td>Qualified names</td><td>a name through a namespace (<code>math::</code>, <code>string::</code>, <code>reflect::</code>, a script namespace, a nested path) names something a declaration of that namespace declares, in any unit, an earlier run or the host</td><td><code>no member &#x27;sqroot&#x27; in namespace &#x27;math&#x27;</code></td></tr><tr><td>Casts</td><td><code>T</code> must name a type; the operand is never checked against it (that is the runtime&#x27;s verdict)</td><td><code>unknown type in cast: 'Nope'</code></td></tr></tbody></table></div>
 <p>Two of these deserve a closer look, because the fix is not obvious the first time. A call with the wrong shape:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 print("{}", fib(10, 2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:2:22: error: &#x27;fib&#x27; expects 1 argument(s), got 2 (declared at 1:10)
     print(&quot;{}&quot;, fib(10, 2));
                          ^</code></pre></div>
 <p>The checker knows <code>fib</code>&#x27;s signature because <code>fib</code> is defined in the same program. Put the function in a variable and the knowledge is gone. A callable held in a variable is unchecked, and the same two mistakes become run-time errors:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function fib(int n) -&gt; int { return n &lt; 2 ? n : fib(n - 1) + fib(n - 2); }
 var f = fib;                                   // a callable in a variable: unchecked
 try { f(10, 2); } catch (e) { print("caught: {}", e); }
 try { f("ten"); } catch (e) { print("caught: {}", e); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: &#x27;fib&#x27; expects 1 argument, got 2
 caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;fib&#x27; (declared int)</code></pre></div>
 <p>And a member that only a subtype declares, read through a base-typed receiver:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 class Archer : Unit { int range = 6; }
 Unit u = Archer();
 print("{}", u.range);</code></pre></div>
@@ -116,7 +116,7 @@ print("{}", u.range);</code></pre></div>
     print(&quot;{}&quot;, u.range);
                   ^</code></pre></div>
 <p>This is C++&#x27;s rule too: <code>u</code> is declared <code>Unit</code>, and a <code>Unit</code> has no <code>range</code>, whatever it holds tonight. There are two fixes. <code>cast&lt;Archer&amp;&gt;(u)</code> is a reference to the same object, seen as an <code>Archer</code>, and reads and writes go through it; a <code>var</code> receiver drops the question to run time:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 class Archer : Unit { int range = 6; }
 Unit u = Archer();
 print("range = {}", cast&lt;Archer&amp;&gt;(u).range);   // a reference to the same object, as an Archer
@@ -134,7 +134,7 @@ range = 9</code></pre></div>
 <li>a range-<code>for</code> variable over class elements;</li>
 <li>the fields and elements reached through any of them.</li></ul>
 <p>The texts are the ones a value receiver draws:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Wheel { int spokes = 32; void true_up(int tension) {} }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Wheel { int spokes = 32; void true_up(int tension) {} }
 void service(Wheel&amp; w) {
     w.spokes = "many";
     w.true_up();
@@ -159,7 +159,7 @@ for (auto&amp; w : rack) { w.spoke = 36; }</code></pre></div>
 <li>Two class values and anything <code>var</code> are left to the run time (<a href="04-operators.html#equality">Operators</a>).</li></ul>
 <p><code>null</code> compares the way <code>nullptr</code> does in C++. It compares with what can hold it: a class value, a handle, a <code>function</code>, a <code>var</code>, a call whose class or container result can fall off its body. It never compares with a typed <code>int</code>, <code>float</code>, <code>char</code>, <code>bool</code>, <code>string</code>, array, map or math value, which a store of <code>null</code> raises or converts on (<code>cannot compare &#x27;int&#x27; with null using &#x27;==&#x27;: &#x27;int&#x27; is never null (it is always false); ...</code>).</p>
 <p>An <code>auto</code> holds the type it inferred, so it counts as declared:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int lives = 3;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int lives = 3;
 string typed = "3";
 if (lives == typed) { print("match"); }        // always false
 if (lives == typed.to_int()) { print("match"); }</code></pre></div>
@@ -174,7 +174,7 @@ if (lives == typed.to_int()) { print("match"); }</code></pre></div>
 <li><code>&amp; | ^ &lt;&lt; &gt;&gt;</code> take ints and chars.</li></ul>
 <p>Past the rows only an operator of the left operand&#x27;s class answers, as in C++, so a class&#x27;s operator never runs with the class on the right. Two declared types that meet none of them raise at run time, and the checker reports them at load with the run time&#x27;s text.</p>
 <p>Compounds (<code>x *= y</code>) and <code>++</code>/<code>--</code> follow the same rows. A slot declared <code>char</code> refuses the int that <code>++</code> steps it to. <code>var</code>, math values and C++ classes, which a binding may answer for, are left to the run time:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Coin { int value = 5; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Coin { int value = 5; }
 Coin c = Coin();
 int total = c * 3;                 // Coin declares no operator*
 int fixed = c.value * 3;</code></pre></div>
@@ -190,7 +190,7 @@ int fixed = c.value * 3;</code></pre></div>
 <li><code>void</code>, <code>var</code> and untyped functions are exempt.</li>
 <li>A class, handle or container return that can fall off the end draws a warning instead (<code>'pick' declared to return 'array&lt;int&gt;' may reach the end of its body without returning (returns null)</code>).</li></ul>
 <p>The check is a load verdict only: in a <code>[[warn_mode]]</code> region a call that falls off the end yields <code>null</code>.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int sign(int n) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int sign(int n) {
     if (n &gt; 0) { return 1; }
     if (n &lt; 0) { return -1; }
 }                                            // n == 0 falls off the end
@@ -204,7 +204,7 @@ int fail(int k) { throw "no"; }             // a throw ends its path</code></pre
         ^</code></pre></div>
 <h3 id="assignment-targets">Assignment targets<a class="hlink" href="#assignment-targets" aria-label="link">&#8203;</a></h3>
 <p>Every C++ lvalue is assignable: a variable, a field, a static, an element, a map value, a call that returns <code>T&amp;</code>, a conditional whose arms are both lvalues, <code>(a = b)</code>, <code>cast&lt;T&amp;&gt;(e)</code>. Anything else names no storage, and the checker says what it is instead, with the text the runtime raises for the same mistake (lower-cased):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() { return 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int f() { return 1; }
 int x = 1;
 bool c = true;
 f() = 3;                      // a call that returns by value
@@ -250,7 +250,7 @@ x++ = 4;                      // postfix yields the old value
 <li>The checker additionally enforces the declared weak-handle, reference and callable constraints even where an unchecked store would succeed.</li>
 <li>A chained conversion (<code>obj.to_int()</code> and then <code>C(int)</code>) is never implicit in either place.</li></ul>
 <p>When the mistake does reach run time, the error names the slot it failed at. Two shapes worth recognizing: a return that fails <em>at the return statement</em>, and an argument that fails at the parameter:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function label(int n) -&gt; int {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">function label(int n) -&gt; int {
     var v = "n=" + to_string(n);               // var: the checker cannot see this string
     return v;                                  // so the conversion runs at the return statement
 }
@@ -278,7 +278,7 @@ caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;twice&#x27; (decl
 <ul><li><code>cast&lt;int&gt;(c)</code> and <code>cast&lt;float&gt;(c)</code> are the code point (0&ndash;255).</li>
 <li><code>cast&lt;string&gt;(c)</code> is the one-character string.</li>
 <li><code>cast&lt;char&gt;(e)</code> takes an int in range or a one-character string.</li></ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("{} {} {}", cast&lt;int&gt;(2.7), cast&lt;string&gt;(5) + "!", cast&lt;float&gt;(3));
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("{} {} {}", cast&lt;int&gt;(2.7), cast&lt;string&gt;(5) + "!", cast&lt;float&gt;(3));
 print("{} {} {}", cast&lt;int&gt;('a'), cast&lt;char&gt;(97), cast&lt;string&gt;('a') + "b");
 class Unit { int hp = 10; }
 class Archer : Unit { int range = 6; }
@@ -305,7 +305,7 @@ caught: Cannot cast &#x27;null&#x27; to &#x27;Archer&amp;&#x27;
 null passes the value form: true</code></pre></div>
 <p>A class mismatch raises the catchable <code>Cannot cast 'X' to 'T'</code>, where <code>X</code> is the object&#x27;s actual class. Null passes the value and handle forms (you get a typed null) and fails the reference form (there is nothing to refer to). Upcasts always pass. The operand is never checked statically against <code>T</code>. The cast <em>is</em> the boundary, and the verdict is the runtime&#x27;s.</p>
 <p>One warning to know about. The value form on a handle is legal, but it copies, and that is rarely what you meant when you had a <code>shared_ptr</code> in your hand. The checker says so: a warning, never a gate. The file simply loads; this is the runner with <code>--warnings</code>, which prints what the checker collected:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Archer { int range = 6; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Archer { int range = 6; }
 shared_ptr&lt;Archer&gt; h = new Archer();
 Archer c = cast&lt;Archer&gt;(h);                   // legal, but it copies: the checker warns
 c.range = 1;
@@ -320,14 +320,14 @@ copy 1 handle 6</code></pre></div>
 <p>Two spellings tell the checker about what it cannot see, or should not gate on, without loosening anything else.</p>
 <h3 id="extern"><code>extern</code>: declare a name you do not define<a class="hlink" href="#extern" aria-label="link">&#8203;</a></h3>
 <p>Some names are real but not in your program: a global the host binds after load, a function the running instance registers, a value injected at run time. Without help the checker calls them undeclared. <code>extern</code> declares them, in three strengths:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function net_relay;          // a callable of unknown signature: calls are unchecked
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function net_relay;          // a callable of unknown signature: calls are unchecked
 extern int tick_rate;               // typed: every use is checked as an int
 extern config;                      // untyped: behaves like var
 function on_packet(var p) { return net_relay(p, tick_rate, config); }
 print("loaded; on_packet waits for the host to register net_relay");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">loaded; on_packet waits for the host to register net_relay</code></pre></div>
 <p>Each form counts as a declaration, and the program&#x27;s pool carries it to every file. The typed form gives the name that type for real: member checks, stores and everything downstream are checked as for a declared variable, so this is a load error:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern int tick_rate;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern int tick_rate;
 tick_rate = "fast";</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
 &lt;script&gt;:2:11: error: cannot assign &#x27;string&#x27; to &#x27;tick_rate&#x27; declared &#x27;int&#x27; (declared at 1:1)
@@ -337,7 +337,7 @@ tick_rate = "fast";</code></pre></div>
 <p>A use while nothing defines the name raises <code>'tick_rate' is declared extern but never defined (an 'inline' declaration creates it)</code> (for <code>extern function</code>: <code>'net_relay' is declared extern but never defined</code>), a catchable error.</p>
 <p>If the same program does define the name, the definition wins. That makes <code>extern</code> the right spelling for a shared file that calls into a module only some programs import (<a href="10-modules.html#three-escape-valves">Modules</a> has that shape).</p>
 <p>A qualified name must name something its namespace declares, so a namespace member the host registers after load needs the same declaration: <code>extern ns::name;</code> (any depth, <code>extern a::b::c;</code>) in each strength. Inside a namespace an <code>extern</code> names the namespace&#x27;s member, read bare by the namespace&#x27;s own blocks:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function physics::raycast;   // the host registers physics:: after the script loads
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">extern function physics::raycast;   // the host registers physics:: after the script loads
 namespace ai { extern int depth; int budget() { return depth * 2; } }
 function probe() -> var { return physics::raycast(0, 0); }
 try { probe(); } catch (e) { print(e); }
@@ -346,7 +346,7 @@ try { ai::budget(); } catch (e) { print(e); }</code></pre></div>
 'depth' is declared extern but never defined (an 'inline' declaration creates it)</code></pre></div>
 <h3 id="inline"><code>inline</code>: one variable every file shares<a class="hlink" href="#inline" aria-label="link">&#8203;</a></h3>
 <p><code>inline</code> on a variable means what it means in C++17: one variable shared by every file that declares it. The first declaration to run creates it, from its initializer or its type&#x27;s default (<code>int</code> 0, <code>string</code> &quot;&quot;, a class default-constructed, <code>var</code> null). Every later one, in any file or a re-run of the same file, adopts the existing variable and runs no initializer. It is allowed at program scope and in a namespace, and the checker sees an ordinary declaration of that type:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags;                   // hud.jai: exists whether or not netplay.jai runs
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">inline int frags;                   // hud.jai: exists whether or not netplay.jai runs
 inline int frags = 10;              // netplay.jai: adopts it, the initializer does not run
 frags += 1;
 print("frags {}", frags);</code></pre></div>
@@ -365,7 +365,7 @@ print("frags {}", frags);</code></pre></div>
 <li><strong>A block.</strong> As the first statement of a block (a function, method or lambda body, a loop body, a bare <code>{ }</code>), it covers the whole block, nested bodies included.</li>
 <li><strong>A unit.</strong> As the first declaration of a file (a leading comment is fine, the trailing <code>;</code> optional) it covers the whole file.</li></ul>
 <p>Statement position, with the revert made visible:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
 [[warn_mode]] y = 5;               // covers this one statement: 'y' is a warning
 z = 5;                             // the mode reverted: this one is an error</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
@@ -376,12 +376,12 @@ z = 5;                             // the mode reverted: this one is an error</c
     z = 5;                             // the mode reverted: this one is an error
     ^</code></pre></div>
 <p>Unit position, for a file whose hooks reach host names the checker cannot see. The load succeeds, the function waits for the host:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];                     // first declaration: the whole file reports warnings
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];                     // first declaration: the whole file reports warnings
 function on_debug_key() { return debug_overlay(1); }    // a host name the checker cannot see
 print("loaded; on_debug_key waits for the host");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">loaded; on_debug_key waits for the host</code></pre></div>
 <p>And <code>[[strict_mode]]</code> re-arming inside that same warn-mode unit. The block gates the load even though the file around it would not:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">[[warn_mode]];
 function on_debug_key() { return debug_overlay(1); }
 [[strict_mode]] { int n = 1; n = "one"; }   // re-armed strict inside a warn unit: gates the load</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:

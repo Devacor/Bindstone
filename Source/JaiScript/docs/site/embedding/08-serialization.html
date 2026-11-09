@@ -49,7 +49,7 @@ make it archivable by itself.</strong> The C++ archives need what the class decl
 class&#x27;s name for the script-value path. A <code>jai::registrar</code> around the same chain gives the
 identity polymorphic saves need (below).</p>
 <h2 id="script-side-to-json-from-json">Script side: <code>to_json</code> / <code>from_json</code><a class="hlink" href="#script-side-to-json-from-json" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player {
     int hp = 0;
     float speed = 0.0;
     string name = "";
@@ -79,7 +79,7 @@ declared <code>int</code>, so the load converted it (through the very same table
 and you got <code>7</code>. Nothing about a save file is trusted more than an assignment is.</p>
 <p>A second argument pretty-prints: <code>to_json(v, n)</code> indents <code>n</code> spaces per level, and
 <code>to_json(v)</code> (or <code>n = 0</code>) writes one line.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player { int hp = 42; string name = "hero"; array&lt;int&gt; bag = [1, 2]; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Player { int hp = 42; string name = "hero"; array&lt;int&gt; bag = [1, 2]; }
 print(to_json(Player(), 2));</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">{
   &quot;$type&quot;: &quot;Player&quot;,
@@ -110,7 +110,7 @@ print(to_json(Player(), 2));</code></pre></div>
 </ul></li><li>Floats round-trip at <strong>full precision</strong> (<code>std::to_chars</code> shortest-round-trip; <code>-0.0</code> keeps its sign). JSON has no spelling for an infinity or a NaN, so <code>to_json</code> writes <code>null</code> for them; <code>to_base64</code> / <code>from_base64</code> keep the exact bits.</li><li>A payload nests as deep as memory allows. Parsing, rebuilding and writing walk values on work lists, so a save that loaded on one machine loads on another whatever its depth. A host record type's own recursion stops at the host thread's stack or <code>JAI_MAX_HOST_RECORD_DEPTH</code> = 1024 records. Hostile-text hardening: trailing garbage rejected, invalid unicode escapes are serialization errors, lone surrogates become replacement chars.</li></ul>
 <h3 id="saving-game-state-to-a-file">Saving game state to a file<a class="hlink" href="#saving-game-state-to-a-file" aria-label="link">&#8203;</a></h3>
 <p>A save is <code>to_json</code> written to a file, and a load is the file read back through <code>from_json</code>. File access belongs to the host. The standalone runner provides <code>write_file</code>, <code>read_file</code> and <code>file_exists</code>, and an embedding host registers its own (they run through its virtual filesystem, its save folder, its cloud sync). <code>app_data_dir(name)</code> answers the platform's per-user data folder.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "ada"; int gold = 0; array&lt;string&gt; bag = []; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero { string name = "ada"; int gold = 0; array&lt;string&gt; bag = []; }
 class SaveGame { int version = 1; Hero hero; map&lt;string, bool&gt; flags; }
 
 SaveGame game;
@@ -287,7 +287,7 @@ void load(Archive&amp; ar) {
 <tr><td>a class name the engine does not know</td><td>the object loads as a plain map</td><td>the load throws <code>Unknown polymorphic type: Name</code></td></tr>
 </tbody></table></div>
 <p>The same object graph in each. A script class holding two handles to one <code>Node</code> and a weak handle to it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 1; }
 class Link { shared_ptr&lt;Node&gt; a; shared_ptr&lt;Node&gt; b; weak_ptr&lt;Node&gt; w; }
 Link link;
 link.a = new Node();

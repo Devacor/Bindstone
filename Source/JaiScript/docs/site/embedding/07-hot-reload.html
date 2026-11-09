@@ -74,12 +74,12 @@ speed: Player has no member &#x27;speed&#x27;</code></pre></div>
 <h2 id="the-hot-reload-migrate-hook">The <code>hot_reload_migrate</code> hook<a class="hlink" href="#the-hot-reload-migrate-hook" aria-label="link">&#8203;</a></h2>
 <p>If the <strong>new</strong> class defines <code>void hot_reload_migrate()</code>, it runs once per live instance during a reload that changes the class&#x27;s fields (adds, removes or retypes one), <em>after</em> field migration. A reload that changes only method bodies or initializers migrates nothing and runs no hook. Inside the hook the old removed fields are still readable, which is what makes real data conversions possible.</p>
 <p>Start with the shipped class:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; config_v1.jai</span><pre><code class="lang-jai">class Config {
+<div class="codeblock cb-jai" data-file="config_v1.jai"><span class="cb-label">jaiscript &middot; config_v1.jai</span><pre><code class="lang-jai">class Config {
     int version = 1;
     int flags = 42;
 }</code></pre></div>
 <p>Now the edited one. <code>flags</code> is gone from the declaration, but the hook still reads it. That is the whole point:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; config_v2.jai</span><pre><code class="lang-jai">class Config {
+<div class="codeblock cb-jai" data-file="config_v2.jai"><span class="cb-label">jaiscript &middot; config_v2.jai</span><pre><code class="lang-jai">class Config {
     int version = 2;
     var settings = {};                    // new field
     // flags removed
@@ -92,7 +92,7 @@ speed: Player has no member &#x27;speed&#x27;</code></pre></div>
     }
 }</code></pre></div>
 <p>And the reload itself, a second execute on the same engine, which is all <code>include</code> is:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; main.jai</span><pre><code class="lang-jai">include "config_v1.jai";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript &middot; main.jai</span><pre><code class="lang-jai">include "config_v1.jai";
 var c = Config();
 
 include "config_v2.jai";                  // the reload: c migrates in place
@@ -148,7 +148,7 @@ run time. (See <a href="06-static-checking.html#escape-hatches">Escape hatches</
 <li><em>the new definition persists</em>.</li>
 </ul>
 <p>Here is a function that swaps <em>itself</em> out mid-call by importing a file that redefines it, then calls itself once more before returning:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; live.jai</span><pre><code class="lang-jai">function damage(int x) -&gt; int {
+<div class="codeblock cb-jai" data-run="live.jai"><span class="cb-label">jaiscript &middot; live.jai</span><pre><code class="lang-jai">function damage(int x) -&gt; int {
     print("v1 body: damage({})", x);
     import "damage_v2.jai";            // program scope: swaps the global binding while this frame is live
     if (x &gt; 1) { print("recursive call, new body: {}", damage(1)); }
@@ -157,7 +157,7 @@ run time. (See <a href="06-static-checking.html#escape-hatches">Escape hatches</
 print("outer call, old body: {}", damage(10));
 print("later call, new body: {}", damage(10));</code></pre></div>
 <p>with <code>damage_v2.jai</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript &middot; damage_v2.jai</span><pre><code class="lang-jai">function damage(int x) -&gt; int { return x * 3; }</code></pre></div>
+<div class="codeblock cb-jai" data-file="damage_v2.jai"><span class="cb-label">jaiscript &middot; damage_v2.jai</span><pre><code class="lang-jai">function damage(int x) -&gt; int { return x * 3; }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">v1 body: damage(10)
 recursive call, new body: 3
 outer call, old body: 10

@@ -41,7 +41,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p>The interpreter implements coroutines by continuation replay, the VM by fibers. Behavior is identical.</p>
 <h2 id="range-for-drives-a-coroutine">Range-for drives a coroutine<a class="hlink" href="#range-for-drives-a-coroutine" aria-label="link">&#8203;</a></h2>
 <p>This is the way to consume a coroutine. A range-based <code>for</code> over a handle (or a handle-producing call) advances it until done, iterating the yielded values (never the final <code>return</code> value). A handle already advanced with <code>next()</code> continues from where it stands:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int squares(int n) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int squares(int n) {
     for (int i = 1; i &lt;= n; ++i) { yield i * i; }
 }
 auto total = 0;
@@ -60,7 +60,7 @@ got 25
 <p>When the steps cannot sit in one loop (one step per frame, a handle parked in a field), <code>h.advance(v)</code> takes one step. It is shaped like a C++ <code>bool advance(T&amp; v)</code> and resumes the body once:</p>
 <ul><li>When the body yielded, it returns <code>true</code>, with the yielded value stored into <code>v</code>.</li><li>When the body ran to its end, or had already ended, it returns <code>false</code> and leaves <code>v</code> as it was.</li></ul>
 <p>The answer never depends on the value, so a coroutine that yields <code>null</code> is driven like any other:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine scan() { yield "wall"; yield null; yield "door"; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine scan() { yield "wall"; yield null; yield "door"; }
 auto h = scan();
 var seen;
 while (h.advance(seen)) { print("saw {}", seen); }
@@ -72,7 +72,7 @@ again: false, seen: door</code></pre></div>
 <p><code>v</code> binds as a <code>T&amp;</code> parameter does: a variable, a field or an element, bound at the call before the body runs.</p>
 <ul><li>A temporary fails the load when the checker sees it (<code>advance() writes the yielded value through its argument; pass a variable</code>). Otherwise it raises <code>Cannot pass non-lvalue to reference parameter</code> without resuming.</li><li>A <code>const</code> fails the load.</li><li>The yielded value converts to <code>v</code>&#x27;s declared type as an assignment would. When the checker knows the coroutine&#x27;s declared type and <code>v</code>&#x27;s, a pair no assignment accepts fails the load (<code>advance() cannot store the yielded 'string' into 'int'</code>).</li></ul>
 <p>The <code>advance</code> that finishes the body returns <code>false</code>. The body&#x27;s <code>return</code> value is then <code>h.result()</code>:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int forage(int patches) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int forage(int patches) {
     int total = 0;
     for (int i = 1; i &lt;= patches; ++i) {
         total += i * 3;
@@ -94,7 +94,7 @@ too early: Coroutine has not finished: result() is available once done() is true
 <ul><li>It answers however the body was driven (by <code>advance</code>, <code>next()</code> or a range-for), as often as it is asked, each time a copy.</li><li>A body that returns nothing gives <code>null</code>, and so does one that failed (its throw reached the step that ran it).</li><li>Before the body finishes it raises <code>Coroutine has not finished: result() is available once done() is true</code>.</li><li>The checker types it as the coroutine&#x27;s declared type.</li></ul>
 <h2 id="yield-next-done">yield / next / done<a class="hlink" href="#yield-next-done" aria-label="link">&#8203;</a></h2>
 <p><code>handle.next()</code> runs to the next <code>yield</code> and returns the yielded value. The call that finishes the body returns the final <code>return</code> value. <code>handle.done()</code> reports completion:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int counter() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int counter() {
     yield 1;
     yield 2;
     return 3;
@@ -111,7 +111,7 @@ done? false
 next: 3
 done? true</code></pre></div>
 <p><code>done()</code> only asks: it never starts or advances the body. <code>next(n)</code> advances <code>n</code> yields and returns the value of the last one, the same as <code>n</code> calls to <code>next()</code> in a row. The count is an <code>int</code> of at least 1. A loop on <code>done()</code> runs a coroutine to the end and sees the final value too:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int steps() {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int steps() {
     for (int i = 1; i &lt;= 5; ++i) { yield i * 10; }
     return -1;
 }
@@ -129,7 +129,7 @@ then: -1</code></pre></div>
 <p>From then on <code>result()</code> holds the final value whichever form took the step. For <code>counter()</code> above, each row one step taken with either call:</p>
 <div class="tablewrap"><table><thead><tr><th>Step</th><th>The body runs</th><th><code>c.next()</code> returns</th><th><code>c.advance(v)</code> returns</th><th><code>done()</code> afterwards</th><th><code>c.result()</code> afterwards</th></tr></thead><tbody><tr><td><code>auto c = counter();</code></td><td>nothing</td><td>(the call returns the handle)</td><td></td><td><code>false</code></td><td>raises</td></tr><tr><td>1st</td><td>to <code>yield 1</code></td><td><code>1</code></td><td><code>true</code>, <code>v</code> is <code>1</code></td><td><code>false</code></td><td>raises</td></tr><tr><td>2nd</td><td>to <code>yield 2</code></td><td><code>2</code></td><td><code>true</code>, <code>v</code> is <code>2</code></td><td><code>false</code></td><td>raises</td></tr><tr><td>3rd</td><td>to the end</td><td><code>3</code> (<code>null</code> for a body with no <code>return</code> value)</td><td><code>false</code>, <code>v</code> unchanged</td><td><code>true</code></td><td><code>3</code></td></tr><tr><td>4th</td><td>nothing</td><td>raises <code>Cannot resume a completed coroutine</code></td><td><code>false</code>, <code>v</code> unchanged</td><td><code>true</code></td><td><code>3</code></td></tr></tbody></table></div>
 <p>So the three loops below see the same yields. The <code>next()</code> loop, which asks <code>done()</code> <em>before</em> each step, also hands out the final value. After any of them <code>result()</code> holds it:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int waves() { yield 1; yield 2; return 3; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int waves() { yield 1; yield 2; return 3; }
 for (auto v : waves()) { print("for got {}", v); }
 auto a = waves();
 int v = 0;
@@ -148,7 +148,7 @@ next gave 3</code></pre></div>
 <p>Coroutines take parameters like any function. Each argument takes its value at the call, and the first <code>next()</code> moves it into its parameter, so a by-value parameter is one object that lives as long as the body's frame. <code>yield</code> works inside loops and conditionals. Side effects in a yield expression run exactly once, however the suspension is implemented underneath.</p>
 <h2 id="spellings">Spellings<a class="hlink" href="#spellings" aria-label="link">&#8203;</a></h2>
 <p><code>coroutine</code> is a prefix, and it goes in front of <em>every</em> function spelling from the <a href="../guide/06-functions.html#declaration-forms">Functions chapter</a>: return-type-first, trailing arrow, the <code>function</code> keyword, or nothing at all. Methods take the same forms, <code>static</code> ones included:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int a() { yield 1; }                 // return-type-first
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int a() { yield 1; }                 // return-type-first
 coroutine b() -&gt; int { yield 2; }              // trailing arrow
 coroutine function c() -&gt; auto { yield 3; }    // function keyword + arrow
 coroutine function d() { yield 4; }            // function keyword, inferred
@@ -178,7 +178,7 @@ wave 12
 <ul><li>There is no coroutine lambda, and a coroutine cannot return a reference. Both are parse errors.</li><li>Nor can it take a parameter by reference (<code>T&amp;</code>, <code>const T&amp;</code>, <code>auto&amp;</code>, <code>var&amp;</code>): it runs on after the call returns, past the argument&#x27;s lifetime. So <code>coroutine int count_up(int&amp; n)</code> is the parse error <code>coroutine 'count_up' cannot take 'n' by reference: it runs on after the call returns, past the argument's lifetime; take it by value (int n), or pass a shared_ptr to share an object</code>.</li><li>A <code>shared_ptr&lt;T&gt;</code> parameter is the spelling for an object the coroutine and its caller both change.</li></ul>
 <p>A <code>namespace</code> body declares coroutines like any other function (<code>namespace ns { coroutine int g() { ... } }</code>, called as <code>ns::g()</code>).</p>
 <h2 id="each-call-is-an-independent-instance">Each call is an independent instance<a class="hlink" href="#each-call-is-an-independent-instance" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int letters() { yield 1; yield 2; yield 3; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int letters() { yield 1; yield 2; yield 3; }
 auto x = letters();
 auto y = letters();
 print("{} {} {} {}", x.next(), x.next(), y.next(), x.next());
@@ -187,7 +187,7 @@ y.done();</code></pre></div>
 == result: false</code></pre></div>
 <h2 id="method-coroutines">Method coroutines<a class="hlink" href="#method-coroutines" aria-label="link">&#8203;</a></h2>
 <p>Class methods can be coroutines. The suspended body sees <code>this</code>. Fields read/write normally across suspensions, and every instance gets independent generators:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gen {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Gen {
     int id = 0;
     Gen(int i) { id = i; }
     coroutine int gen() { yield id; yield id * 2; }
@@ -201,7 +201,7 @@ print("{} {} {} {}", ga.next(), gb.next(), ga.next(), gb.next());</code></pre></
 <p>Range-for drives method coroutines too, and inherited method coroutines work on derived classes.</p>
 <h2 id="receiver-pinning">Receiver pinning<a class="hlink" href="#receiver-pinning" aria-label="link">&#8203;</a></h2>
 <p>The handle <strong>pins the receiver alive</strong>. Even if the only strong reference to the instance dies with the frame that created it, resuming still sees the fields:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class D {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class D {
     int v = 7;
     coroutine int g() { yield v; v = 99; yield v; }
 }
@@ -220,7 +220,7 @@ h.done();</code></pre></div>
 <h2 id="a-behaviour-in-a-field">A behaviour in a field<a class="hlink" href="#a-behaviour-in-a-field" aria-label="link">&#8203;</a></h2>
 <p>A game object keeps its behaviour as a handle in a field and advances it once a frame. A handle has no type name of its own: the field is declared <code>auto</code> from the call that makes the handle, or <code>var</code> when the behaviour starts later. The call runs none of the body, so a field initializer can make it: the body starts at the first <code>next()</code>, and each instance gets its own coroutine over its own fields.</p>
 <p>Without a <code>yield from</code>, one coroutine runs another step by step with a range-for that yields what it yields. That makes small behaviours reusable: a <code>wait</code> that idles for some frames, a <code>charge</code> that one boss phase runs, chained in order inside the coroutine the field holds:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string wait(int frames) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine string wait(int frames) {
     for (int i = 0; i &lt; frames; ++i) { yield "waiting"; }
 }
 
@@ -262,7 +262,7 @@ enraged: roars</code></pre></div>
 <ul><li><strong>Handles are reference-semantic.</strong> Copying a handle (into a field, an array/map element, a by-value parameter, another variable) shares the ONE live coroutine. Every alias sees the same <code>next()</code>/<code>advance()</code>/<code>done()</code>/<code>result()</code> state. Even deep-copying an instance shares its handle field (a handle references a <em>running computation</em>; there is no meaningful deep copy). This is what lets an AI park its behavior coroutine in a field of its own game object and advance it every tick.</li><li><strong>A handle of an instance&#x27;s own method is a deliberate strong cycle.</strong> When an instance&#x27;s field holds a handle of its <em>own</em> method, the handle pins the receiver. Break it by re-assigning/nulling the field, exactly like any shared structure. <code>static</code> coroutine methods work the same way; the handle just carries no receiver. <code>type_of</code> names a handle <code>"coroutine_handle"</code>, as its error texts do.</li><li>Handles advance correctly across separate <code>execute()</code> calls, through by-ref helper params, and from inside running functions without disturbing the caller&#x27;s frame.</li><li><strong>A value cannot be sent into a running coroutine.</strong> <code>next()</code> takes only its optional count, <code>advance()</code> only the variable it stores into, and <code>done()</code> and <code>result()</code> take no arguments:<ul><li><code>h.advance()</code> raises <code>advance() takes 1 argument (the variable that receives the yielded value)</code>.</li><li><code>h.next("go")</code> raises <code>next() count must be an integer</code>.</li><li><code>h.next(0)</code> raises <code>next() count must be at least 1</code>.</li></ul>Give it its inputs as parameters when it is created, or let it read state it shares with the caller: a field of its instance for a method coroutine, or a program-scope variable.</li><li>A failed <code>next()</code> marks only that handle done. Calling <code>next()</code> on a finished coroutine raises the catchable <code>Cannot resume a completed coroutine</code>. A <code>next(n)</code> that reaches the end before its last step runs the steps before the end, then raises the same text.</li><li>Hot reload: a free coroutine can be redefined while one of its handles is suspended (the old handle keeps the old body), and method coroutines survive field-changing reloads of their class.</li><li>The execution budget still applies during <code>next()</code>, and budget errors skip catches inside coroutines too.</li><li><strong>The checker stays out of the body&#x27;s way.</strong> Yield and return values are not checked statically, and what <code>next()</code> returns is unknown, so everything downstream of it is lenient. <code>result()</code> has the declared type, as a lenient type: a body that falls off its end gives <code>null</code>. The handle itself is typed: a member other than <code>next</code>, <code>advance</code>, <code>done</code> or <code>result</code> is a load error (<code>h.resume()</code> reports <code>no member 'resume' on 'coroutine_handle' (did you mean 'next'?)</code>).</li></ul>
 <p>A <code>yield e</code> hands out a value as a <code>return e</code> would. An existing object (a global, the coroutine&#x27;s own local, an element) is copied, so the receiver never shares it, and the coroutine keeps its locals as they were.</p>
 <p>The declared type still does its work at run time. A <code>yield e</code> converts like a <code>return</code> of the same type, and a value the type cannot take raises at the yield, catchable around the <code>next()</code>. A failed <code>next()</code> finishes the coroutine. A bare <code>yield;</code> hands out nothing and is not converted:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int g() { yield 2.9; yield "three"; return 4; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int g() { yield 2.9; yield "three"; return 4; }
 auto h = g();
 print(h.next());
 try { h.next(); } catch (e) { print("caught: ", e); }
@@ -275,7 +275,7 @@ true</code></pre></div>
 <ul><li>A float or an int is a number of seconds, and anything else raises <code>sleep expects a number of seconds</code>.</li><li>Zero or less returns at once and never suspends a run (it is not a yield).</li><li><code>sleep(0)</code> is the debugger&#x27;s sync point, where an attach, a breakpoint edit or a pause the debugger made while the program runs takes effect. So a loop the host drives calls it once per frame (<a href="../embedding/12-debugging.html">Debugging</a>).</li></ul>
 <p>What waiting does depends on how the host runs the program. The program is the same either way:</p>
 <ul><li>A host that starts it as a <strong>run</strong> (<code>engine::start</code>, <a href="../embedding/17-host-api.html#suspendable-runs">Suspendable runs</a>) gets control back at every <code>sleep</code>. The whole run suspends with every frame and local where it is, and the host goes on with its own work. It resumes the run once the time has passed, which continues right after the <code>sleep</code>. The standalone runner runs every file this way.</li><li>A plain <code>execute()</code> never suspends: there <code>sleep</code> blocks the thread for that long.</li></ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int countdown(int from) {
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int countdown(int from) {
     for (int n = from; n &gt; 0; --n) { sleep(0.01); yield n; }
 }
 float start = time::now();

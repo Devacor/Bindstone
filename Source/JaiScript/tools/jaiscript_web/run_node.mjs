@@ -25,17 +25,35 @@ const name = path.basename(script);
 const args = scriptArgs.join("\n");
 const finish = code => process.stdout.write("", () => process.exit(code));
 
+// Asyncify cannot carry a C++ exception back across a fiber switch: a failed stepped run throws the exception itself
+const failed = error => {
+	const text = error instanceof WebAssembly.Exception ? jai.getExceptionMessage(error)[1] : String(error);
+	process.stderr.write(text.trimEnd() + "\n");
+	finish(1);
+};
+
 if (path.basename(moduleJs).includes("worker")) {
-	finish(jai.ccall("jaiweb_run_file", "number", ["string", "string"], [name, args]));
+	finish(jai.ccall("jaiweb_run_file", "number", ["string", "string", "number", "number"], [name, args, 0, 0]));
 } else {
-	jai.ccall("jaiweb_start_file", null, ["string", "string"], [name, args]);
+	let started = true;
+	try {
+		jai.ccall("jaiweb_start_file", null, ["string", "string"], [name, args]);
+	} catch (error) {
+		started = false;
+		failed(error);
+	}
 	const tick = () => {
-		if (jai._jaiweb_running()) { jai._jaiweb_tick(); }
+		try {
+			if (jai._jaiweb_running()) { jai._jaiweb_tick(); }
+		} catch (error) {
+			failed(error);
+			return;
+		}
 		if (!jai._jaiweb_running()) {
 			finish(jai.ccall("jaiweb_exit_code", "number", [], []));
 			return;
 		}
 		setTimeout(tick, jai.ccall("jaiweb_wait_ms", "number", [], []));
 	};
-	tick();
+	if (started) { tick(); }
 }

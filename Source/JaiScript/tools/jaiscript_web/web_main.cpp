@@ -333,6 +333,13 @@ std::string read_script(jai::engine& a_eng, const char* a_path, std::filesystem:
 	return result;
 }
 
+void print_check_warnings(jai::engine& a_eng, const std::string& a_content, const std::string& a_name) {
+	const jai::check_report report = a_eng.check(a_content);
+	if (report.diagnostics.empty() || report.has_errors()) { return; }
+	g_session->out << "static check warnings:\n" << report.format(a_content, a_name);
+	g_session->out.flush();
+}
+
 int exit_code_of(const jai::script_value& a_value) {
 	return a_value.is_int() ? static_cast<int>(static_cast<uint64_t>(a_value.as_int()) & 0xFF) : 0;
 }
@@ -364,11 +371,14 @@ void begin_run(const char* a_args, double a_budget, const std::function<jai::scr
 
 extern "C" {
 
-// Worker build: runs a script file to its end; args holds the script's ARGS, one per line. Returns the exit code.
-EMSCRIPTEN_KEEPALIVE int jaiweb_run_file(const char* a_path, const char* a_args) {
-	return run_to_end(a_args, 0.0, [a_path](jai::engine& eng) {
+// Worker build: runs a script file to its end under an execution budget (seconds; 0 is unlimited); args holds the script's
+// ARGS, one per line. With warnings set, a clean load first lists the checker's warnings, as the runner's --warnings does.
+// Returns the exit code.
+EMSCRIPTEN_KEEPALIVE int jaiweb_run_file(const char* a_path, const char* a_args, double a_budget, int a_warnings) {
+	return run_to_end(a_args, a_budget, [a_path, a_warnings](jai::engine& eng) {
 		std::filesystem::path resolved;
 		const std::string content = read_script(eng, a_path, resolved);
+		if (a_warnings) { print_check_warnings(eng, content, resolved.filename().string()); }
 		return eng.execute_file_source(resolved.string(), content);
 	});
 }

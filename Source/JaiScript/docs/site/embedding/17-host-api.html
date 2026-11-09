@@ -194,7 +194,7 @@ eng-&gt;execute(&quot;temp&quot;);                                    // raises:
 </ul>
 <h2 id="calling-script-from-c">Calling script from C++<a class="hlink" href="#calling-script-from-c" aria-label="link">&#8203;</a></h2>
 <p>A script function is a value. Look it up by name and call it with a vector of arguments; the result is a <code>checked_result</code>, not an exception:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage_for(int level) { return level * 3; }</code></pre></div>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int damage_for(int level) { return level * 3; }</code></pre></div>
 <div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">// examples/embed_quickstart makes these calls
 jai::script_value fn = eng-&gt;get_variable(&quot;damage_for&quot;);
 jai::checked_result&lt;jai::script_value&gt; r = fn.as_function()({eng-&gt;make_value(int64_t{4})});
@@ -228,7 +228,7 @@ int64_t dmg = r.value().as_int();                                  // 12</code><
 <li>an outlived held value throws <code>Value outlived its engine.</code></li>
 </ul>
 <p><code>get_variable(name)</code> reads a global; <code>as&lt;T&gt;()</code> converts it. How a container comes out follows its declared type: <code>array&lt;int&gt;</code>, <code>array&lt;string&gt;</code> and the other typed arrays are raw buffers that copy out as a <code>std::vector</code>, and only <code>array&lt;var&gt;</code> has a <code>script_value</code> vector to view:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 7;
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int score = 7;
 array&lt;string&gt; log = ["spawned", "hit"];
 map&lt;string, int&gt; kills = {"orc": 3, "troll": 1};
 array&lt;var&gt; loot = [12, "rope", 2.5];</code></pre></div>

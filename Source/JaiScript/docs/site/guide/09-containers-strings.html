@@ -44,7 +44,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <p><strong>String methods (56):</strong> <code>length</code> <code>size</code> <code>byte_size</code> <code>empty</code> <code>at</code> <code>front</code> <code>back</code> <code>substr</code> <code>find</code> <code>rfind</code> <code>find_first_of</code> <code>find_last_of</code> <code>find_first_not_of</code> <code>find_last_not_of</code> <code>contains</code> <code>starts_with</code> <code>ends_with</code> <code>count</code> <code>compare</code> <code>to_int</code> <code>to_float</code> <code>split</code> <code>explode</code> <code>lines</code> <code>partition</code> <code>is_digit</code> <code>is_alpha</code> <code>is_alnum</code> <code>is_space</code> <code>is_upper</code> <code>is_lower</code> <code>utf8_chars</code> <code>utf8_length</code> <code>is_valid_utf8</code> <code>code</code> <code>to_utf8</code> <code>to_bytes</code> <code>reader</code>, and the <strong>in-place mutators</strong> <code>append</code> <code>to_lower</code> <code>to_upper</code> <code>trim</code> <code>trim_left</code> <code>trim_right</code> <code>pad_left</code> <code>pad_right</code> <code>pad_center</code> <code>replace</code> <code>replace_first</code> <code>replace_last</code> <code>insert</code> <code>erase</code> <code>remove_prefix</code> <code>remove_suffix</code> <code>reverse</code> <code>repeat</code></p>
 <p><strong>weak_ptr methods (4):</strong> <code>lock</code> <code>expired</code> <code>reset</code> <code>same_as</code> <strong>shared_ptr methods (5):</strong> <code>reset</code> <code>use_count</code> <code>cpp_ref_count</code> <code>unique</code> <code>same_as</code></p>
 <h2 id="arrays">Arrays<a class="hlink" href="#arrays" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [4, 1, 3, 2];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [4, 1, 3, 2];
 print("size={} front={} back={}", nums.size(), nums.front(), nums.back());
 nums.push(5);
 print("after push(5): {}", nums);
@@ -99,7 +99,7 @@ after remove_if(&gt;2): [2, 1]
 <li><code>array::resize</code> and <code>array::fill</code> return the changed copy and leave their argument alone.</li>
 </ul>
 <p>An element that stays is assigned as <code>xs[i] = v</code> assigns, through its class's <code>operator=</code> when it declares one. A new element is a copy, through its copy constructor. A size is a non-negative <code>int</code>: <code>array size cannot be negative</code> otherwise.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto grid = array&lt;int&gt;(4);             // [0, 0, 0, 0]
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto grid = array&lt;int&gt;(4);             // [0, 0, 0, 0]
 array&lt;string&gt; names(2, "?");          // ["?", "?"]
 print(grid, " ", names, " ", array&lt;int&gt;{4});
 grid.resize(6, 1);                      // grows with copies of 1
@@ -131,7 +131,7 @@ print(scores.size());</code></pre></div>
 <li>a handle's <code>reset</code>.</li>
 </ul>
 <p>A class's own method of one of these names is the class's, and returns what it declares.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var xs = [5, 2, 8, 1];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var xs = [5, 2, 8, 1];
 auto big = array::filter(xs, x =&gt; x &gt; 2);    // a copy
 xs.sort();                                     // in place
 print(big, " ", xs);
@@ -144,7 +144,7 @@ try {
 filter changes xs in place and returns nothing; array::filter(xs, f) returns a filtered copy</code></pre></div>
 <h3 id="array-helpers">Callbacks: map, reduce, find and friends<a class="hlink" href="#array-helpers" aria-label="link">&#8203;</a></h3>
 <p>The callback helpers take a function, a lambda or an arrow function (<a href="06-functions.html#arrow-functions">Functions</a>) and call it with the element, or with the element and its index when the callback declares two parameters. A predicate counts only when it answers <code>true</code>, as <code>filter</code>'s does:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto scores = [72, 95, 40, 88];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto scores = [72, 95, 40, 88];
 print(array::map(scores, (x) =&gt; x + 5));
 print(scores.reduce((sum, x) =&gt; sum + x, 0), " ", scores.find(x =&gt; x &gt; 90), " ", scores.find_index(x =&gt; x &lt; 50));
 print(scores.some(x =&gt; x &lt; 50), " ", scores.every(x =&gt; x &gt; 30));
@@ -167,7 +167,7 @@ true true
 <div class="tablewrap"><table><thead><tr><th>method</th><th>returns</th></tr></thead><tbody><tr><td><code>array::map(values, f)</code></td><td>a new array of <code>f(x)</code>: an <code>array&lt;T&gt;</code> when <code>f</code> declares its return type <code>T</code> (<code>[](int x) -&gt; int { ... }</code>, <code>int twice(int x)</code>), an <code>array&lt;var&gt;</code> otherwise</td></tr><tr><td><code>reduce(f, init)</code></td><td><code>f(accumulator, x)</code> folded left to right from <code>init</code>; <code>reduce(f)</code> starts from the first element and raises on an empty array</td></tr><tr><td><code>for_each(f)</code></td><td>nothing; calls <code>f</code> on each element in order</td></tr><tr><td><code>find(f)</code></td><td>a copy of the first element <code>f</code> answers <code>true</code> for, or <code>null</code></td></tr><tr><td><code>find_index(f)</code></td><td>its index, or <code>-1</code></td></tr><tr><td><code>some(f)</code> / <code>every(f)</code></td><td>whether any / every element answers <code>true</code>; they stop at the first element that decides (<code>some</code> of an empty array is false, <code>every</code> is true)</td></tr><tr><td><code>array::concat(values, other)</code></td><td>a new array: this one's elements, then copies of <code>other</code>'s, with this array's element type</td></tr><tr><td><code>insert(i, v)</code></td><td>nothing; puts <code>v</code> at index <code>i</code> (0 to <code>size()</code>) and moves the rest up; another index raises</td></tr></tbody></table></div>
 <p>A callback element parameter declared <code>T&amp;</code> names the element in the array, so a write through it changes the array, as <code>std::for_each</code> does in C++; a by-value parameter gets a copy. The helpers walk the elements the array has when they start: a callback that grows the array does not see the new elements, and one that shrinks it ends the walk early. A <code>throw</code> in a callback ends the call and propagates.</p>
 <h2 id="maps">Maps<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto inventory = {"sword": 1, "potion": 3};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto inventory = {"sword": 1, "potion": 3};
 inventory["gold"] = 250;
 print("size = {}", inventory.size());
 print("has(potion) = {}, has(shield) = {}", inventory.has("potion"), inventory.has("shield"));
@@ -206,7 +206,7 @@ missing key read: Key &quot;nothing&quot; not found in map
 <li>The loop walks key order live: a key the body inserts after the current one is visited later in the same loop, one inserted before it is not.</li>
 </ul>
 <p>A <code>for (auto kv : m)</code> pair is a value like any other, so <code>var p = kv</code> holds copies of both halves:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto stock = {"arrow": 20, "potion": 3};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto stock = {"arrow": 20, "potion": 3};
 for (auto [item, count] : stock) { print(item, " x", count); }
 for (auto&amp; [item, count] : stock) { count *= 2; }   // auto&amp; makes count the entry's value
 print(stock);</code></pre></div>
@@ -217,7 +217,7 @@ potion x3
 <p><code>array&lt;T&gt;</code> and <code>map&lt;K,V&gt;</code> enforce their element types. A push or a store converts when the value is compatible (int to float, say) and rejects otherwise, with an error that names the container (the sample below).</p>
 <p>Elements and map values convert between <code>bool</code> and <code>int</code>: false becomes 0, true becomes 1, and an int becomes false only when it is zero. Int/float conversion also applies. Int-to-string requires an explicit <code>to_string(value)</code> or <code>cast&lt;string&gt;(value)</code>; float/bool conversion stays rejected. Map keys never coerce.</p>
 <p><code>shared_ptr&lt;T&gt;</code> and <code>weak_ptr&lt;T&gt;</code> elements admit <code>null</code>. A shared-handle element also takes a live instance of T or a subclass and checks the class of a shared handle. Class values, primitive values and nested containers remain non-nullable.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 nums.push(4.9);          // converts to the element type
 print("pushed 4.9 -&gt; {}", nums);
 var bad = "nope"; // a var-sourced value: the checker cannot see it
@@ -243,7 +243,7 @@ grid[1][0] + ages[bo] = 47</code></pre></div>
 <li><code>array&lt;var&gt;</code>, and a literal without a spelled element type, is the one form that holds a vector of dynamic values.</li>
 </ul>
 <p>Moving between a typed array and the dynamic form is an explicit assignment, and a typed array keeps its constraint when a push is rejected. Copying it into <code>array&lt;var&gt;</code> explicitly creates a dynamic copy. A <code>var</code> holding a copy keeps the typed array (<code>var v = ints; v.push("s")</code> raises like <code>ints.push("s")</code>) while the variable itself stays a <code>var</code> (<code>v = "hello"</code> is fine).</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];         // a raw int buffer
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];         // a raw int buffer
 array&lt;var&gt; copy = nums;              // the explicit step to the dynamic form: a copy
 copy.push(4);
 print("copy: {}  nums: {}", copy, nums);
@@ -272,7 +272,7 @@ loose: [1, 2, 3, &quot;s&quot;]</code></pre></div>
 <li><code>array&lt;int&gt; x = bytes;</code> and <code>array&lt;uint8&gt; b = ints;</code> convert by value (the second checks every element), and <code>array&lt;var&gt; v = bytes;</code> is the dynamic copy.</li>
 <li><code>uint8</code> and <code>int8</code> name array elements only: a single byte is an <code>int</code>, so <code>uint8 x = 5;</code> is a parse error that says so.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;uint8&gt; pixels = [0, 128, 255];   // three bytes
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;uint8&gt; pixels = [0, 128, 255];   // three bytes
 pixels[1] += 100;
 array&lt;int&gt; wide = pixels;              // by value: a raw int buffer
 int v = pixels[2] + 1;
@@ -282,7 +282,7 @@ print("pixels: {}  wide: {}", pixels, wide);</code></pre></div>
 pixels: [0, 228, 255]  wide: [0, 228, 255]</code></pre></div>
 <h3 id="class-typed-arrays-admit-subclasses">Class-typed arrays admit subclasses<a class="hlink" href="#class-typed-arrays-admit-subclasses" aria-label="link">&#8203;</a></h3>
 <p><code>array&lt;Base&gt;</code> holds a <code>Base</code> or anything derived from it, and each slot keeps its own class, so a derived element keeps its extra fields inside the base-typed array. <code>array&lt;Derived&gt;</code> converts to <code>array&lt;Base&gt;</code> by value. An unrelated class raises:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 class Archer : Unit { int range = 6; }
 class Rock { int mass = 3; }
 array&lt;Unit&gt; squad = [Unit(), Archer()];    // a subclass in a Base slot keeps its class
@@ -307,7 +307,7 @@ caught: Cannot push &#x27;Rock&#x27; to array&lt;Unit&gt;</code></pre></div>
 <li>A mixed literal raises <code>Map 'auto' requires homogeneous keys</code> (or <code>values</code>).</li>
 <li>An empty literal leaves the <code>auto</code> side dynamic: <code>map&lt;auto, int&gt; m = {};</code> takes keys of any type.</li>
 </ul>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; ages = {"ana": 31};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; ages = {"ana": 31};
 var key = 5;
 try { ages[key] = 1; } catch (e) { print("caught: {}", e); }   // keys never coerce
 map&lt;var, int&gt; anything = {};                                   // any key
@@ -341,7 +341,7 @@ after assigning a literal: {&quot;x&quot;: 1}</code></pre></div>
 <p>Class keys iterate grouped by class name, ahead of handles. An operator that throws or fails inside a lookup or insert raises from that statement and leaves the map unchanged.</p>
 <p>Keep a key unchanged while it is in the map. A key changed through another name leaves the map's order stale, as a key mutated in place breaks a C++ map, so erase it and insert the changed value.</p>
 <p>In a <code>parallel_for</code> body, a map that holds class values cannot be captured (it is not value-semantic). A map the body builds itself raises the parallel operator verdict at its first class key whose class orders or hashes.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tile { int x = 0; int y = 0; Tile(int a, int b) { x = a; y = b; } int operator&lt;=&gt;(Tile o) { return x != o.x ? x - o.x : y - o.y; } }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tile { int x = 0; int y = 0; Tile(int a, int b) { x = a; y = b; } int operator&lt;=&gt;(Tile o) { return x != o.x ? x - o.x : y - o.y; } }
 var seen = {};
 seen[Tile(2, 1)] = "b";
 seen[Tile(1, 5)] = "a";
@@ -353,7 +353,7 @@ print("size {} has {}", seen.size(), seen.contains(Tile(1, 5)));</code></pre></d
 size 2 has true</code></pre></div>
 <p>Every typed declaration without an initializer takes its type&#x27;s default: containers start empty, numbers at zero, strings empty, and a class type default-constructs (<a href="02-type-ladder.html#declarations-without-an-initializer">the Type Ladder</a> has the table).</p>
 <p>A compound assignment reads its target first, so on a missing key it raises the read&#x27;s error. <code>m[k] += 1</code>, <code>m[k]++</code> and <code>m[k] ??= v</code> need the key to be there, on a typed map and a <code>var</code> map alike, and no default is made up for the value type. A reference binds only to an entry that exists: <code>var&amp; r = m[k]</code> on a missing key raises too, because binding a reference reads the entry, where C++&#x27;s <code>operator[]</code> would insert one. Count with <code>get</code>&#x27;s fallback:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; hits = {};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; hits = {};
 for (auto name : ["orc", "elf", "orc"]) { hits[name] = hits.get(name, 0) + 1; }
 map&lt;string, string&gt; log = {"turn1": "moved"};
 log["turn1"] += " north";                                      // the key is there: appends
@@ -370,7 +370,7 @@ false 0</code></pre></div>
 <p>Every value has one display text, and <code>print</code>, <code>to_string</code>, <code>string + x</code> for an object or a container, a template splice <code>${x}</code>, <code>format</code>&rsquo;s <code>{}</code>, <code>join</code>, a <code>string</code> parameter or variable and a <code>throw</code>&rsquo;s message all use it:</p>
 <ul><li>A string at the top level is its bytes. Inside a container a string or <code>utf8_string</code> is written as a literal in double quotes and a <code>char</code> in single quotes, with <code>\n</code>, <code>\r</code>, <code>\t</code>, <code>\\</code> and the quote escaped and other control bytes as <code>\xNN</code>.</li><li>Numbers, <code>bool</code>, <code>null</code> and vectors print as they do alone: <code>2.0</code>, <code>true</code>, <code>(1.0, 2.0)</code>.</li><li>An array lists its elements, <code>[1, 2, 3]</code>; a map its entries in key order, <code>{"x": 1, "y": [2]}</code>.</li><li>An instance whose class or a base declares <code>string to_string()</code> shows that text. Any other instance shows its class name and its fields in declaration order, a base&rsquo;s fields first: <code>P{x: 1, name: "hi"}</code>.</li><li>A <code>shared_ptr</code> or <code>weak_ptr</code> shows the object it points to, an expired <code>weak_ptr</code> <code>null</code>. An object met again while it is still being shown prints <code>&lt;cycle P&gt;</code>; one object held twice side by side prints twice.</li><li>A function prints <code>&lt;function&gt;</code>, a coroutine handle <code>&lt;coroutine&gt;</code>, a host object whose type binds no <code>to_string</code> its type name, <code>&lt;Sprite&gt;</code>.</li></ul>
 <p>A value prints in full however large or deeply nested it is. A container or an instance given to <code>print</code> or <code>format</code> first is never read as a format string. A <code>to_string()</code> that throws or fails is the error of the call that asked for the text.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 1; string name = "hi"; }
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class P { int x = 1; string name = "hi"; }
 class Q : P { array&lt;int&gt; hits = [2, 3]; }
 class Tag { string to_string() { return "&lt;tag&gt;"; } }
 class Link { int id = 0; shared_ptr&lt;Link&gt; next; }
@@ -403,7 +403,7 @@ stock: {&quot;arrow&quot;: 20} [P{x: 1, name: &quot;hi&quot;}, P{x: 1, name: &qu
 <p><strong>Handles.</strong> A <code>shared_ptr</code> or <code>weak_ptr</code> handle writes its object once, at its first handle, as <code>{"$id": 1, "$type": "Hero", "$val": {...}}</code> (<code>$ref</code> in place of <code>$id</code> for a weak one). Every later handle writes as the id alone, and an expired weak handle as <code>null</code>.</p>
 <p>So handles that shared one object share it again after <code>from_json</code> (and after <code>to_binary</code> / <code>from_binary</code>, which keeps the same identities), through cycles too: a handle back into an object still being written is that object. An id whose object the text never wrote raises <code>Invalid shared_ptr ID: 4</code>.</p>
 <p>No depth limit applies: a value nests as deep as memory allows, through <code>to_json</code>, <code>from_json</code>, the binary pair and a copy alike.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {"name": "orc", "hp": [10, 20], "pos": {"x": 1.5}};
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var save = {"name": "orc", "hp": [10, 20], "pos": {"x": 1.5}};
 print(to_json(save));
 print(to_json(save, 2));
 map&lt;int, string&gt; slots = {1: "sword", 2: "rope"};
@@ -433,7 +433,7 @@ caught: Expected &#x27;&quot;&#x27; in JSON</code></pre></div>
 <p>Map keys come out in key order (maps are ordered), so the same data always writes the same text. The C++ side (JSON and binary archives for host objects) is in <a href="../embedding/08-serialization.html">Serialization</a>.</p>
 <h2 id="strings-observers-vs-mutators">Strings: observers vs mutators<a class="hlink" href="#strings-observers-vs-mutators" aria-label="link">&#8203;</a></h2>
 <p>JaiScript string methods split into two camps: observers return information and leave the string alone, and mutators <strong>change the receiver in place and return nothing</strong>, as C++&#x27;s <code>void</code> members do:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// OBSERVERS return information and leave the string alone:
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// OBSERVERS return information and leave the string alone:
 auto s = "The Quick Fox";
 print("length={} find(Quick)={} count(o)={}", s.length(), s.find("Quick"), s.count("o"));
 print("contains/starts/ends: {} {} {}", s.contains("Fox"), s.starts_with("The"), s.ends_with("Fox"));
@@ -490,7 +490,7 @@ padded: 007
 <h2 id="bytes-and-chars">Bytes and chars: <code>s[i]</code>, <code>\xNN</code>, <code>cast&lt;char&gt;</code><a class="hlink" href="#bytes-and-chars" aria-label="link">&#8203;</a></h2>
 <p><code>s[i]</code> reads a <code>char</code>, and chars promote to integers (<strong>0–255, always unsigned</strong>) in arithmetic, bitwise, and comparison contexts, so a single byte is plain arithmetic (whole records read through <a href="#binary-data">binary data</a>). <code>s.at(i)</code> returns the same char, and a negative <code>i</code> counts from the end (<code>s.at(-1)</code> is the last byte); <code>cast&lt;string&gt;(s[i])</code> is the byte as a one-character string.</p>
 <p>Range-<code>for</code> walks a string the same way: <code>for (auto c : s)</code> binds each char by value, in order (<code>auto&amp;</code> raises, since a char is a read, not a cell). Going the other way: <code>\xNN</code> escapes (exactly two hex digits) put literal bytes in source, and <code>cast&lt;char&gt;(n)</code> mints a char from an int, range-checked to 0–255:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = "Jai\x21";                 // \xNN: exactly two hex digits
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var s = "Jai\x21";                 // \xNN: exactly two hex digits
 print("s = {}", s);
 print("s[0] = {} ({})", s[0], type_of(s[0]));
 print("byte value: {}", s[0] + 0);            // char + int promotes: 0..255, unsigned
@@ -572,7 +572,7 @@ written: Jai!!</code></pre></div>
 <li><code>r.read(Class, layout)</code> makes a default-constructed instance and fills its fields in declaration order, base class fields first; the field count and each field's kind (int, float, string for text, array for bytes) must match the widths.</li>
 </ul>
 <p>The order always comes from the arguments, never from a map: maps iterate in key order. The strict checker knows the library: the types, every method's signature and result, an odd name/width pairing or a non-width where a width belongs, and a <code>read(Class, layout)</code> whose class and layout it can see, all reported at load.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var ENTRY = binary::layout("pos", binary::int32, "size", binary::int32, "name", binary::text(8));
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var ENTRY = binary::layout("pos", binary::int32, "size", binary::int32, "name", binary::text(8));
 
 binary::writer w;                            // a tiny WAD: header, one lump, a directory
 w.bytes("PWAD").int32(1).int32(0);           // id, lump count, directory offset (patched below)
@@ -606,7 +606,7 @@ caught: Cannot write 256 as uint8 (0 to 255)</code></pre></div>
 <p><strong>Files.</strong> <code>write_file(path, string::from_bytes(b))</code> and <code>read_file(path).to_bytes()</code> round-trip any bytes exactly: every value 0–255, embedded NULs, <code>\r\n</code> untouched. <code>read_file</code> raises a catchable error for a file that is missing or cannot be read (<code>Cannot read file 'saves/world.dat': not found</code>, <code>...: not a file</code>, <code>...: permission denied</code>); an existing empty file reads as <code>""</code>. Ask first when absence is expected: <code>file_exists(path) ? read_file(path) : ""</code> (<a href="10-modules.html#where-files-are">Where files are</a>).</p>
 <h2 id="utf-8-text">UTF-8 text<a class="hlink" href="#utf-8-text" aria-label="link">&#8203;</a></h2>
 <p>A string is bytes, as in C++: <code>size()</code>, <code>s[i]</code> and <code>substr</code> count bytes, which is O(1) and what binary formats and renderers want. Text in UTF-8 has its own methods, named so they never blur with <code>char</code> (a byte):</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = "héllo 🙂";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string s = "héllo 🙂";
 print("{} bytes, {} characters", s.size(), s.utf8_length());
 for (string ch : s.utf8_chars()) { print("[{}]", ch); }   // each UTF-8 character, as a string
 print("{} {}", "é".code(), string::from_code(233));    // Python ord / chr
@@ -624,7 +624,7 @@ true</code></pre></div>
 <p><code>utf8_chars()</code> never loses text: a byte that starts no valid sequence comes back as its own one-byte element. <code>is_valid_utf8()</code> (or <code>string::is_valid_utf8(s)</code>) checks first. <code>code()</code> needs a string of exactly one UTF-8 character; <code>string::from_code(n)</code> raises for a surrogate or a value past U+10FFFF.</p>
 <h3 id="utf8-string">utf8_string: text by character<a class="hlink" href="#utf8-string" aria-label="link">&#8203;</a></h3>
 <p><code>utf8_string</code> holds the same bytes as a string and has the same library, but every position is a character: <code>size()</code>, <code>length()</code>, <code>u[i]</code>, <code>at</code>, <code>substr</code>, <code>find</code>, <code>insert</code>, <code>erase</code>, the pads, <code>reverse</code>, <code>split("")</code> and range-<code>for</code> count and return characters. A character comes back as a one-character <code>utf8_string</code>; <code>byte_size()</code> still counts bytes. A byte that starts no valid sequence is one character of its own, in <code>utf8_length()</code>, <code>utf8_chars()</code> and every <code>utf8_string</code> position alike, and keeps its byte (a terminal draws it as U+FFFD): <code>"a\xFFb"</code> is three characters.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">utf8_string name = "Zoë 🙂";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">utf8_string name = "Zoë 🙂";
 print(name.size());                 // 5: characters
 print(name[2]);                     // ë
 for (auto c : name) { print(c); }   // Z, o, ë, space, 🙂
@@ -673,7 +673,7 @@ true</code></pre></div>
 <li><code>_</code> groups <code>x</code>, <code>X</code> and <code>b</code> digits in fours.</li>
 </ul>
 <p>This kills the to_string-then-pad dance in HUD code:</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var name = "Vex";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var name = "Vex";
 var hp = 73.5;
 var gold = 1234;
 print(`${name:&lt;8}|${gold:8}|`);                // strings left-align, numbers right-align
@@ -709,7 +709,7 @@ caught: format spec &#x27;:.2f&#x27; does not apply to string value
 <p>Splices desugar to the engine-core builtin <code>format_value(value, "spec")</code>, available on every engine, one shared implementation, so <strong>both backends produce byte-identical output and error text</strong>.</p>
 <h2 id="regular-expressions">Regular expressions<a class="hlink" href="#regular-expressions" aria-label="link">&#8203;</a></h2>
 <p><code>regex(pattern)</code> and <code>regex(pattern, flags)</code> make a <code>regex</code>, a value that searches text. Write a pattern as a raw string, <code>R"(\d+)"</code> (<a href="01-hello.html">Hello &amp; Basics</a>), so its backslashes stay backslashes; in a plain string every one doubles (<code>"\\d+"</code>). Matching runs in linear time: no pattern backtracks, so no pattern and text can stall a search, and a hostile pattern from a request is as safe to run as a known one.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">regex date = regex(R"((?&lt;year&gt;\d{4})-(?&lt;month&gt;\d\d)-(?&lt;day&gt;\d\d))");
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">regex date = regex(R"((?&lt;year&gt;\d{4})-(?&lt;month&gt;\d\d)-(?&lt;day&gt;\d\d))");
 var m = date.search("due 2026-10-21, paid 2026-11-02");
 print(m.text(), " at ", m.start(), "..", m.end());
 print(m[1], " / ", m["month"], " / ", m["day"], " (", m.size(), " slots)");
@@ -757,7 +757,7 @@ true
 </ul>
 <p>A group that took no part is empty, and a reference to a group the pattern lacks, or a <code>$</code> before anything else, raises. A function replacement takes the <code>regex::match</code> and returns the text, once per match, in order.</p>
 <p>Empty matches follow ECMAScript: after an empty match the next search starts one character on. So <code>find_all</code>, <code>replace</code> and <code>split</code> see a match between every character a pattern can match empty there, and <code>split</code> splits nothing at a piece's start or at the end of the text.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string out = "";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string out = "";
 for (var m : regex("a*").find_all("baaab")) { out += "[" + m.text() + "]@" + to_string(m.start()) + " "; }
 print(out);
 print(regex("x*").replace("abc", "-"));
@@ -777,7 +777,7 @@ caught: regex: the replacement names group 2 at position 0, but the pattern has 
 <li>On a <code>utf8_string</code> a character is a code point: <code>.</code> and classes take whole characters, positions count characters, an empty match moves on by a whole character, and the texts come back as <code>utf8_string</code>.</li>
 </ul>
 <p>A class that holds a multi-byte character would hold part of a character on a string, so using it on one raises (match the <code>utf8_string</code>, or write the bytes with <code>\xNN</code>). A byte of a <code>utf8_string</code> that starts no valid sequence is matched by nothing, and counts as one character in a position.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string bytes = "café 🙂";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string bytes = "café 🙂";
 utf8_string text = bytes;
 print(regex("^.{4}").search(bytes).text().size(), " bytes, ", regex("^.{4}").search(text).text(), " as characters");
 var m = regex("é.(.)").search(text);
@@ -810,7 +810,7 @@ caught: regex: the class at position 0 holds 'à', a character of more than one 
 <li>recursion (<code>(?R)</code>).</li>
 </ul>
 <p>Patterns whose program grows past the engine's limit (a deeply nested count, <code>(a{1000}){1000}</code>) raise too.</p>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string pattern = R"((\w+)\1)";
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">string pattern = R"((\w+)\1)";
 try { regex(pattern); } catch (e) { print("caught: ", e); }
 string open = "(a|b";
 try { regex(open); } catch (e) { print("caught: ", e); }

@@ -82,7 +82,7 @@ intrinsics (not division), the execution-budget clock samples every 1024 ticks, 
 debugger hook is one predictable branch per statement. None of them is measurable in hot loops.</li>
 </ul>
 <h2 id="what-idiomatic-fast-code-looks-like">What idiomatic-fast code looks like<a class="hlink" href="#what-idiomatic-fast-code-looks-like" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// The fast shape: typed locals, typed arrays, &amp; params, compound element stores.
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">// The fast shape: typed locals, typed arrays, &amp; params, compound element stores.
 array&lt;int&gt; pix = [];
 for (int i = 0; i &lt; 64; ++i) { pix.push(0); }
 

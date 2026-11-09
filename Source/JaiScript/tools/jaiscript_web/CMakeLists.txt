@@ -7,9 +7,7 @@ set(JAISCRIPT_WEB_THREAD_POOL 8)
 function(jaiscript_web_target name)
 	add_executable(${name} web_main.cpp)
 	target_link_libraries(${name} PRIVATE jaiscript)
-	target_compile_options(${name} PRIVATE -fwasm-exceptions)
 	target_link_options(${name} PRIVATE
-		-fwasm-exceptions
 		-sSTACK_SIZE=8388608
 		-sALLOW_MEMORY_GROWTH
 		-sINITIAL_MEMORY=67108864
@@ -17,7 +15,7 @@ function(jaiscript_web_target name)
 		-sEXPORT_NAME=createJaiScript
 		-sENVIRONMENT=web,worker,node
 		-sFORCE_FILESYSTEM
-		-sEXPORTED_RUNTIME_METHODS=FS,NODEFS,ccall,cwrap,UTF8ToString
+		-sEXPORTED_RUNTIME_METHODS=FS,NODEFS,ccall,cwrap,UTF8ToString,getExceptionMessage,decrementExceptionRefcount
 		-lnodefs.js
 		${ARGN}
 	)

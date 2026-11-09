@@ -133,6 +133,7 @@
     var isJai = el.className.indexOf("lang-jai") >= 0;
     el.innerHTML = highlight(el.textContent, isJai ? JAI_KW : CPP_KW, isJai ? JAI_TYPES : {});
   }
+  window.JaiDocs = { highlight: function (text) { return highlight(text, JAI_KW, JAI_TYPES); } };
 
   /* ---------------- line-number gutters ---------------- */
   // Every code snippet gets a line gutter; the numbers live outside the selection
@@ -405,4 +406,14 @@
       ev.preventDefault(); box.focus(); box.select();
     });
   }
+
+  /* ---------------- runnable samples ---------------- */
+  // A page with samples loads samples.js, which adds their Run buttons; the engine itself loads on the first run
+  (function () {
+    var me = document.querySelector('script[src$="assets/site.js"]');
+    if (!me || !document.querySelector(".codeblock[data-run]")) return;
+    var runner = document.createElement("script");
+    runner.src = me.src.replace(/site\.js$/, "samples.js");
+    document.body.appendChild(runner);
+  }());
 }());

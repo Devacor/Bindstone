@@ -145,8 +145,8 @@ node tools/jaiscript_web/run_node.mjs build-wasm/bin/jaiscript_web_worker.js exa
 `jaiscript_web_worker` runs a script to its end inside a Web Worker: `sleep()` blocks in
 `Atomics.wait`, and keys and the terminal size arrive through memory the page shares with it, which a
 browser allows only on a cross-origin isolated page. `jaiscript_web` is the fallback for a page that
-is not: it runs on the page's thread under Asyncify and hands control back to the page at every
-`sleep()`, at about half the speed. `parallel_for` and `parallel_transform` run serially in either.
+is not: it runs in steps under Asyncify, in a worker too, and hands control back to the worker's event
+loop at every `sleep()`, at about half the speed. `parallel_for` and `parallel_transform` run serially in either.
 `run_node.mjs` drives either build under Node with the script's folder as its file system.
 
 `python docs/site_tools/build_play.py --emsdk <dir>` builds both into `docs/site/play/engine/` and

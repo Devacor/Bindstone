@@ -3,8 +3,8 @@
 // - jaiscript_web_worker (no Asyncify) runs a script to its end inside a Web Worker: jaiweb_run_file / jaiweb_run_source block
 //   the worker, sleep() waits in Atomics.wait, and the page's keys and terminal size arrive through shared memory that
 //   Module.jaiwebPump drains before each console read.
-// - jaiscript_web (Asyncify) runs on the page's own thread: jaiweb_start_file / jaiweb_start_source begin a suspendable run and
-//   the page calls jaiweb_tick every animation frame; a sleep hands control back to it. A call that switches fibers returns
+// - jaiscript_web (Asyncify) runs in steps where the page cannot share memory with a worker: jaiweb_start_file /
+//   jaiweb_start_source begin a suspendable run and the host calls jaiweb_tick when its sleep is due; a sleep hands control back. A call that switches fibers returns
 //   the value it had when Asyncify unwound it, so these return nothing and the page asks jaiweb_running afterwards.
 // Output goes to Module.jaiwebWrite as UTF-8 bytes either way.
 #include <jaiscript/jaiscript.hpp>

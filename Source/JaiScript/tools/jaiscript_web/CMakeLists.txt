@@ -1,6 +1,6 @@
 # jaiscript_web (Emscripten only): the engine and the runner's console builtins as WebAssembly for the site's play and
-# sandbox pages. jaiscript_web_worker runs a script to its end in a Web Worker; jaiscript_web (Asyncify) runs on the page's
-# own thread where the page cannot share memory with a worker. Each builds <name>.js, which loads <name>.wasm.
+# sandbox pages. jaiscript_web_worker runs a script to its end in a Web Worker; jaiscript_web (Asyncify) runs it in steps,
+# returning at every sleep, where the page cannot share memory with a worker. Each builds <name>.js, which loads <name>.wasm.
 function(jaiscript_web_target name)
 	add_executable(${name} web_main.cpp)
 	target_link_libraries(${name} PRIVATE jaiscript)

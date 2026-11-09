@@ -4,8 +4,8 @@ Header set Cross-Origin-Opener-Policy "same-origin"
 Header set Cross-Origin-Embedder-Policy "require-corp"
 </IfModule>
 AddType application/wasm .wasm
-# The sandbox has its own tab on the Play page now
+# The sandbox is a tab of the Play page
 <IfModule mod_rewrite.c>
 RewriteEngine On
-RewriteRule ^sandbox\.html$ index.html#sandbox [NE,R=301,L]
+RewriteRule ^sandbox\.html$ /play/index.html#sandbox [NE,R=301,L]
 </IfModule>

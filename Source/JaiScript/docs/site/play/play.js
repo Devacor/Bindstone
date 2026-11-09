@@ -34,7 +34,7 @@
 		keys.textContent = GAMES[id].keys;
 		term.replaceChildren();
 		session = new JaiPlay.Session(term, {
-			cols: GAMES[id].cols, rows: GAMES[id].rows,
+			cols: GAMES[id].cols, rows: GAMES[id].rows, canvas: true,
 			onStatus: (text) => { status.textContent = text; },
 			onExit: (code) => showCover(code === 0 ? "" : "The game ended with exit code " + code + "."),
 		});

@@ -19,11 +19,10 @@ PACKAGE = pathlib.Path(__file__).resolve().parent.parent.parent
 ENGINE_TARGETS = ["jaiscript_web_worker", "jaiscript_web"]
 
 # id: (folder under examples/, entry script relative to it, globs of the files it loads, its ARGS)
-# The reel draws half blocks: the terminal emulator has no glyphs of its own for sextants.
 GAMES = {
     "gloom": ("gloom", "gloom.jai", ["gloom.jai", "scripts/*.jai"], []),
     "grubwell": ("crawler", "scripts/crawler.jai", ["scripts/*.jai"], []),
-    "demoreel": ("demoreel", "demoreel.jai", ["demoreel.jai", "scenes/**/*.jai"], ["pix", "half"]),
+    "demoreel": ("demoreel", "demoreel.jai", ["demoreel.jai", "scenes/**/*.jai"], []),
 }
 
 

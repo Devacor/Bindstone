@@ -9,6 +9,7 @@
 	gap: .75rem; background: rgba(5, 6, 10, .78); }
 .play-cover[hidden] { display: none; }
 .play-game .xterm-viewport { overflow-y: hidden; }
+.play-canvas { display: block; image-rendering: pixelated; }
 .play-note { margin: 0; color: #c9c6d8; }
 .play-bar { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .6rem; flex-wrap: wrap; }
 .play-keys { font-size: .9rem; opacity: .85; }

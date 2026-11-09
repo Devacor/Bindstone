@@ -1,4 +1,5 @@
-// Runs JaiScript programs on a page: a terminal (xterm.js) plus the engine as WebAssembly in a worker (play-worker.js), so a
+// Runs JaiScript programs on a page: a screen (play-screen.js's canvas for the games, xterm.js for the sandbox's scrolling
+// text) plus the engine as WebAssembly in a worker (play-worker.js), so a
 // slow frame never stalls the page. Where the page is cross-origin isolated the worker shares memory with it and sleeps for
 // real; elsewhere it runs the Asyncify build, which returns to the worker's event loop at every sleep. Output's bare
 // newlines become CRLF, as a tty's output processing makes them.
@@ -21,19 +22,24 @@ const JaiPlay = (() => {
 	}
 
 	class Session {
-		// options: cols, rows, scrollback, fitHeight, onExit(code), onStatus(text)
+		// options: cols, rows, canvas (a game screen), scrollback, fitHeight, onExit(code), onStatus(text)
 		constructor(element, options) {
 			this.element = element;
 			this.options = options;
 			this.held = new Map();
-			this.terminal = new Terminal({
-				cols: options.cols, rows: options.rows, scrollback: options.scrollback || 0, convertEol: true,
-				disableStdin: true, cursorBlink: false, fontFamily: '"JetBrains Mono", Menlo, Consolas, monospace',
-				fontSize: 14, theme: { background: "#05060a" },
-			});
-			this.terminal.open(element);
-			try { this.terminal.loadAddon(new WebglAddon.WebglAddon()); } catch (error) { /* the DOM renderer draws instead */ }
+			if (options.canvas) {
+				this.screen = new JaiScreen.Screen(element, options.cols, options.rows);
+			} else {
+				this.terminal = new Terminal({
+					cols: options.cols, rows: options.rows, scrollback: options.scrollback || 0, convertEol: true,
+					disableStdin: true, cursorBlink: false, fontFamily: '"JetBrains Mono", Menlo, Consolas, monospace',
+					fontSize: 14, theme: { background: "#05060a" },
+				});
+				this.terminal.open(element);
+				try { this.terminal.loadAddon(new WebglAddon.WebglAddon()); } catch (error) { /* the DOM renderer draws instead */ }
+			}
 			this.fit();
+			if (document.fonts) { document.fonts.ready.then(() => this.fit()); }
 			window.addEventListener("resize", () => this.fit());
 			element.tabIndex = 0;
 			// capture: xterm's own key handler stops the event before it bubbles
@@ -49,13 +55,14 @@ const JaiPlay = (() => {
 		fit() {
 			const width = this.element.parentElement.clientWidth - 16;
 			const height = window.innerHeight * 0.82;
+			if (this.screen) { this.screen.fit(width, height); return; }
 			const across = width / (this.options.cols * 0.6);
 			const down = this.options.fitHeight === false ? across : height / (this.options.rows * 1.2);
 			const size = Math.max(5, Math.min(18, Math.floor(Math.min(across, down))));
 			if (this.terminal.options.fontSize !== size) { this.terminal.options.fontSize = size; }
 		}
 
-		write(bytes) { this.terminal.write(bytes); }
+		write(bytes) { (this.screen || this.terminal).write(bytes); }
 
 		key(event, down) {
 			if (!this.running) { return; }
@@ -90,7 +97,7 @@ const JaiPlay = (() => {
 		start({ game, source, budget = 0 }) {
 			this.stop();
 			JaiAudio.unlock();
-			this.terminal.reset();
+			(this.screen || this.terminal).reset();
 			this.running = true;
 			this.element.focus();
 			const { cols, rows } = this.options;

@@ -57,7 +57,7 @@ CRAWLER_WIDE_FRAMES=aa849fd242eeaeaf5a808184e13be3cfaaac7863bba5c6c1e92f3e0a6e93
 GATORQUEST_STATE=3218840367
 GATORQUEST_TOUR_STATE=2752036546
 GATORQUEST_TOUR_FRAMES=3186012716
-GATORQUEST_TITLE_FRAMES=3110860618
+GATORQUEST_TITLE_FRAMES=4000157523
 GLOOM_LONG_FRAME=dfd969ed5a336dca
 GLOOM_LONG_STATE=1503537018
 TIMEDEMO_STATE=1746772898
@@ -296,7 +296,7 @@ gate_crawler() {
 	cd "$ROOT/examples/crawler"
 	for backend in vm interp; do
 		hash_on "$backend" || continue
-		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 135x37 smoke seed 6 turns 200 anim reload-every 60 dump "$work/cockpit"
+		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 135x37 colors 24 smoke seed 6 turns 200 anim reload-every 60 dump "$work/cockpit"
 		want "crawler $backend cockpit frames: expected FRAME_HASH $CRAWLER_FRAMES" "FRAME_HASH: $CRAWLER_FRAMES "
 		run_logged "$BIN/jaiscript" --backend="$backend" scripts/crawler.jai -- screen 80x24 colors 256 ascii smoke seed 6 turns 80 anim dump "$work/small"
 		want "crawler $backend small frames: expected FRAME_HASH $CRAWLER_SMALL_FRAMES" "FRAME_HASH: $CRAWLER_SMALL_FRAMES "

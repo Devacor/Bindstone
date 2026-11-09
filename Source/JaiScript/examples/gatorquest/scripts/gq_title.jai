@@ -557,6 +557,7 @@ int run_title_shots() {
 	array<string> pages = ["main", "host", "join", "connecting", "failed"];
 	for (int i = 0; i < pages.size(); ++i) {
 		tm_open(pages[i]);
+		if (pages[i] == "host") { TM_ADDRS = ["192.168.1.20"]; TM_HOSTNAME = "gatorbox"; }
 		if (pages[i] == "join") { TM_ADDR = "192.168.1.20"; TM_SEL = 3; }
 		if (pages[i] == "connecting") { TM_JOIN_ADDR = "192.168.1.20"; TM_JOIN_PORT = 28777; TM_JOIN_NAME = "Chomps"; TM_SAID = true; TM_T0 = NOW_MS - 2000; }
 		if (pages[i] == "failed") { TM_FAIL_TITLE = "NAME TAKEN"; TM_FAIL = "The host said: a gator named Chomps is already here. Type another name on the Connect row and try again."; }

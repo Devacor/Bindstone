@@ -615,7 +615,7 @@ int main(int argc, char** argv) {
 		if (ec) { return ""; }
 		const auto written = std::filesystem::last_write_time(path, ec);
 		if (ec) { return ""; }
-		return std::to_string(size) + ":" + std::to_string(written.time_since_epoch().count());
+		return std::to_string(size) + ":" + std::to_string(static_cast<long long>(written.time_since_epoch().count()));
 	});
 
 	jai::dynamic_binder<crawler_rng>(*eng, "Rng")

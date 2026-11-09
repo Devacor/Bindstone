@@ -267,7 +267,7 @@ def page_sidebar(with_h3):
 def footer(root):
     return "\n".join([
         '<footer class="site-footer">',
-        '<p>JaiScript %s &middot; <a href="%s/blob/master/LICENSE">MIT license</a> &middot; '
+        '<p>JaiScript %s &middot; <a href="%s/blob/main/LICENSE">MIT license</a> &middot; '
         '<a href="%s">source</a> &middot; <a href="%s/issues">report a docs bug</a></p>'
         % (VERSION, REPO, REPO, REPO),
         '<p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>',

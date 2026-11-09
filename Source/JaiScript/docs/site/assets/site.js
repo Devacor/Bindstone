@@ -328,10 +328,9 @@
   var box = document.getElementById("search-box");
   var results = document.getElementById("search-results");
   var index = window.SEARCH_INDEX || [];
-  // Compute path prefix back to site root from the stylesheet href.
-  var cssHref = (document.querySelector('link[rel="stylesheet"]') || {}).getAttribute
-    ? document.querySelector('link[rel="stylesheet"]').getAttribute("href") : "assets/style.css";
-  var rootPrefix = cssHref.replace(/assets\/style\.css$/, "");
+  // The path back to the site root, from the site's own stylesheet (the font stylesheet comes first)
+  var siteCss = document.querySelector('link[rel="stylesheet"][href$="assets/style.css"]');
+  var rootPrefix = (siteCss ? siteCss.getAttribute("href") : "assets/style.css").replace(/assets\/style\.css$/, "");
   var sel = -1;
 
   function expand(on) {

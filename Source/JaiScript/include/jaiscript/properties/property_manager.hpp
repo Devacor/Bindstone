@@ -402,7 +402,9 @@ namespace jai {
 		// Copies and moves, level by level. The new owner's property_mgr registers the properties Derived declares where
 		// they sit in the new object, and Derived's own copy or move constructs them there with their values. A copy has
 		// no receivers; a move takes the tracked ones, script receivers included, and leaves the source registered,
-		// destructible and assignable. Assignment leaves every registration alone: Derived's members assign the values.
+		// destructible and assignable. Assignment leaves every registration alone: Derived's members assign the values,
+		// and copy assignment first clones each property into its counterpart, which is all a hand-written Derived
+		// assignment that calls only this one gets.
 		using _jai_script_slot_base = std::conditional_t<detail::any_script_extensible_v<Bases...>, detail::no_script_slot<Derived>, script_extensible>;
 
 		property_owner(const property_owner& a_other) requires (detail::base_copy_constructible_v<Bases> && ...)
@@ -422,6 +424,7 @@ namespace jai {
 		property_owner& operator=(const property_owner& a_other) requires (std::is_copy_assignable_v<Bases> && ...) {
 			if (this != &a_other) {
 				(static_cast<void>(static_cast<Bases&>(*this) = static_cast<const Bases&>(a_other)), ...);
+				a_other.property_mgr.clone_to_target(property_mgr);
 			}
 			return *this;
 		}

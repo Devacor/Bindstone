@@ -513,7 +513,9 @@ public:
             static_assert(std::is_nothrow_move_constructible_v<relocated_save> && std::is_nothrow_move_assignable_v<relocated_save>);
             static_assert(std::is_copy_constructible_v<relocated_save> && std::is_copy_assignable_v<relocated_save>);
             static_assert(std::is_nothrow_move_constructible_v<relocated_both> && std::is_copy_constructible_v<relocated_both>);
-            static_assert(std::is_move_constructible_v<move_only_owner> && !std::is_copy_constructible_v<move_only_owner>);
+            static_assert(std::is_nothrow_move_constructible_v<move_only_owner> && std::is_nothrow_move_assignable_v<move_only_owner>);
+            static_assert(!std::is_copy_constructible_v<move_only_owner> && !std::is_copy_assignable_v<move_only_owner>, "an owner of a move-only property is move-only: a copy fails where it is written");
+            static_assert(!std::is_copy_constructible_v<property<std::unique_ptr<int>>> && std::is_move_constructible_v<property<std::unique_ptr<int>>>);
 
             auto eng = make_engine();
             std::vector<relocated_save> saves;
@@ -627,6 +629,14 @@ public:
             move_only_owner exclusiveTarget = std::move(exclusiveSource);
             check_eq(8, *exclusiveTarget.exclusive.get());
             check_true(registered_in_place(exclusiveTarget, "exclusive", exclusiveTarget.exclusive));
+            check_true(exclusiveSource.exclusive.get() == nullptr);
+            exclusiveSource = std::move(exclusiveTarget);
+            check_eq(8, *exclusiveSource.exclusive.get());
+            std::vector<move_only_owner> exclusives;
+            exclusives.push_back(std::move(exclusiveSource));
+            exclusives.resize(6);
+            check_eq(8, *exclusives.front().exclusive.get());
+            check_true(registered_in_place(exclusives.front(), "exclusive", exclusives.front().exclusive));
         });
 
         test("a_move_carries_connections_and_a_copy_starts_unconnected", [this]() {
@@ -699,7 +709,9 @@ public:
 
             assigned = copy;
             check_eq(80, assigned.health.get());
-            check_eq(4, healthChanges, "copy assignment keeps the target's receivers, and they see the change");
+            check_eq(3, healthChanges, "copy assignment keeps the target's receivers and clones the value in without a change signal");
+            assigned.health = 81;
+            check_eq(4, healthChanges);
             assigned.hear(1);
             check_eq(505, heard);
             check_eq(2, copyHeard);

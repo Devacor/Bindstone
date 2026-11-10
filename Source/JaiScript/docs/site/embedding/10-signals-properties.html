@@ -186,7 +186,7 @@ silent after disconnect: true</code></pre></div>
 <p>A <code>signal_emitter</code> neither copies nor moves. The emitter <code>JAI_SIGNAL_PROPERTY</code> declares (a <code>jai::member_signal_emitter</code>) and the one inside an <code>observable_property</code> follow the <code>property_owner</code> that holds them:</p>
 <ul>
 <li><strong>A move</strong> takes the receivers: they stay connected and run when the new object emits, and the moved-from object emits to nobody. Move assignment lets go of the target&#x27;s receivers first.</li>
-<li><strong>A copy</strong> keeps the script engine and parameter names and starts with no receivers. Copy assignment leaves the target&#x27;s receivers connected, and an observable property&#x27;s receivers see the new value.</li>
+<li><strong>A copy</strong> keeps the script engine and parameter names and starts with no receivers. Copy assignment leaves the target&#x27;s receivers connected and sends an observable property&#x27;s receivers no change.</li>
 <li>The receivers an owner holds through <code>track(...)</code>, and the script receivers its property manager keeps, move with it and are not copied.</li>
 <li>A receiver that captured the old object&#x27;s address still holds that address. Reconnect one that reaches back into its owner.</li>
 </ul>

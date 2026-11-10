@@ -154,7 +154,25 @@ namespace adl_detect {
 	// inside an archive class the member serialize(name, value) hides the free function from ADL
 	template<typename Archive, typename T>
 	void call_adl_serialize(Archive& archive, T& value) { serialize(archive, value); }
+
+	// the shapes an archive writes itself, ahead of any free function
+	template<typename T>
+	inline constexpr bool is_archive_shape_v =
+		std::is_arithmetic_v<T> || std::is_enum_v<T> || std::is_same_v<T, std::string> ||
+		serialization_traits::is_std_shared_ptr_v<T> || serialization_traits::is_std_weak_ptr_v<T> || serialization_traits::is_std_unique_ptr_v<T> ||
+		serialization_traits::is_std_pair_v<T> || serialization_traits::is_std_optional_v<T> || serialization_traits::is_std_variant_v<T> ||
+		serialization_traits::is_std_tuple_v<T> || serialization_traits::is_std_array_v<T> || serialization_traits::is_map_like_v<T> ||
+		serialization_traits::is_set_like_v<T> || serialization_traits::is_sequence_container_v<T> || serialization_traits::is_jai_property_v<T>;
 }
+
+// A type an archive writes or reads through its free serialize, save or load: a record of named values, as a type with the
+// member forms is
+template<typename Archive, typename T>
+inline constexpr bool writes_free_record_v = !adl_detect::is_archive_shape_v<T> &&
+	(adl_detect::has_adl_serialize<Archive, T>::value || adl_detect::has_adl_save<Archive, T>::value);
+template<typename Archive, typename T>
+inline constexpr bool reads_free_record_v = !adl_detect::is_archive_shape_v<T> &&
+	(adl_detect::has_adl_serialize<Archive, T>::value || adl_detect::has_adl_load<Archive, T>::value);
 
 // All serialization functions call I/O methods through self() for static dispatch.
 // Derived classes implement I/O methods as regular (non-virtual) methods.
@@ -1073,6 +1091,22 @@ public:
         read_scope scope(this);
         read_unscoped(value);
         scope.done();
+    }
+
+    // A record's named values from the object already open, as serialize_object_content writes them
+    template<typename T>
+    void read_object_content(T& value) {
+        if constexpr (has_load_method<T>::value || has_serialize_method<T>::value || has_property_mgr<T>::value) {
+            (*self())(value);
+        } else {
+            read_scope scope(this);
+            if constexpr (has_adl_serialize<T>::value) {
+                adl_detect::call_adl_serialize(*self(), value);
+            } else {
+                load(*self(), value);
+            }
+            scope.done();
+        }
     }
 
     template<typename T>

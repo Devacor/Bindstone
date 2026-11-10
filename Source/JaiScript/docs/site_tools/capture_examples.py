@@ -91,7 +91,7 @@ SHOTS = [
     Shot("grubwell-victory", "crawler", CRAWLER + ["smoke", "god", "seed", "5", "turns", "3000", "dump", "{out}/run"],
          "run_end.ans", -1, (135, 37), "erase"),
     demoreel("demoreel-chrome", 9, 11),
-    demoreel("demoreel-eight", 1, 34.0),
+    demoreel("demoreel-eight", 1, 32.0),
     demoreel("demoreel-finale", 12, 24),
     Shot("gatorquest-title", "gatorquest", ["scripts/gatorquest.jai", "--", "shot", "title", "out", "{out}"],
          "title_main.ans"),

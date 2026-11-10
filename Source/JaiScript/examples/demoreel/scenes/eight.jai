@@ -1,5 +1,5 @@
 // EIGHT — JaiScript in eight dimensions: the reel's opening number, a music video at
-// the soundtrack's 124 bpm. It names the language, counts a bar in, then counts the
+// the soundtrack's 124 bpm. It names itself over a one-bar count-in, then counts the
 // language in, ONE to EIGHT, a slide of four bars each (scenes/show.jai): a code card
 // types itself, a live demonstration plays beside it, captions run along the lower
 // third, and every slide opens one more axis of an 8-cube that turns in a window above
@@ -356,7 +356,7 @@ class Eight : Fire {
 
 	array<int> hit_levels() override { return [1, 1, 1, 1, 1, 1, 1, 1, 2, 1, 2]; }
 
-	int length_bars() override { return 41; }
+	int length_bars() override { return 40; }
 
 	void update(float t, float dt) override {
 		tt = t;

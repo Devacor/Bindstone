@@ -126,7 +126,7 @@ class Deck {
 	int hyper = 0;       // EIGHT's 8 axes x 12 levels
 	float beat = 0.48387097;
 	float bar = 1.93548388;
-	float first = 3.87096776;   // the first slide's downbeat: bar 2
+	float first = 1.93548388;   // the first slide's downbeat: bar 1
 	float span = 7.74193552;    // four bars a slide
 
 	// the layout, in cells and pixels, refreshed every frame
@@ -342,12 +342,12 @@ class Deck {
 		}
 	}
 
-	// before the first slide: the name in big letters with a shine across them, what
-	// the eight are about typed under it, and a count-in on the last bar's four beats
+	// before the first slide, one bar: the number's name in big letters with a shine
+	// across them, what the eight are typed under it, and a count-in on the four beats
 	void draw_intro(var& grid, float t) {
-		float lt = t - 0.25;
+		float lt = t - 0.08;
 		if (lt < 0.0) { return; }
-		string name = "JAISCRIPT";
+		string name = "EIGHT";
 		int sx = 1;
 		while (gfx.text_width(name, sx + 1) <= pw * 7 / 10 && sx < 6) { ++sx; }
 		int tw = gfx.text_width(name, sx);
@@ -358,7 +358,7 @@ class Deck {
 		if (leave > 0.0) {
 			int ramp = leave < 1.0 ? hyper + 7 * 12 + 2 : hyper + 6 * 12 + 4;
 			gfx.draw_text(grid, pw, ph, name, tx, ty, sx, sx, ramp, 8, ui + 16, shown);
-			int sweep = math::itrunc((lt - 0.7) * pw * 0.9);
+			int sweep = math::itrunc((lt - 0.45) * pw * 0.9);
 			for (int y = ty; y < ty + 7 * sx; ++y) {
 				int base = y * pw;
 				for (int x = tx; x < tx + tw; ++x) {
@@ -377,15 +377,11 @@ class Deck {
 				dot(grid, cx, cy, k <= beats ? 1.2 * sx : 0.5 * sx, k < beats ? axis_ink + 6 : (k == beats ? axis_ink + 11 : ui + 4));
 			}
 		}
-		string a = "a scripting language for c++";
-		string b = "in eight dimensions";
-		int shown_a = math::itrunc(lt * 30.0);
-		int shown_b = math::itrunc((lt - 1.2) * 24.0);
-		int r = rows / 2 + rows / 4 + 1;
-		float fade = (first - t) / 0.4;
+		string about = "jaiscript in eight dimensions";
+		int shown_about = math::itrunc((lt - 0.15) * 60.0);
+		float fade = (first - t) / 0.3;
 		fade = fade > 1.0 ? 1.0 : fade;
-		if (shown_a > 0) { txt_put((cols - a.size()) / 2, r, a.substr(0, shown_a > a.size() ? a.size() : shown_a), shade(rgb(214, 208, 255), fade)); }
-		if (shown_b > 0) { txt_put((cols - b.size()) / 2, r + 2, b.substr(0, shown_b > b.size() ? b.size() : shown_b), shade(rgb(255, 206, 110), fade)); }
+		if (shown_about > 0) { txt_put((cols - about.size()) / 2, rows / 2 + rows / 4 + 1, about.substr(0, shown_about > about.size() ? about.size() : shown_about), shade(rgb(255, 206, 110), fade)); }
 	}
 
 	// the checklist: eight pips across the header's right, lit as each slide ends

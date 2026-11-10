@@ -220,7 +220,7 @@ class Intro : Scene {
 
 	void tagline() {
 		if (tt < slam_t + 0.35 || tt > burst_t) { return; }
-		string a = "a demoreel written in a scripting language";
+		string a = "a scripting language for c++";
 		string b = "every pixel . every note . script";
 		int shown_a = math::itrunc((tt - slam_t - 0.35) * 34.0);
 		int shown_b = math::itrunc((tt - slam_t - 1.4) * 30.0);

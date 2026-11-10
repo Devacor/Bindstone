@@ -411,7 +411,7 @@ class Finale : Scene {
 		credit(3, "CANYONRUN", "a golden-hour voxelspace canyon");
 		credit(3, "CHROME", "chrome, glass and a polished floor");
 		credit(3, "OSSUARY", "a skull spider, a web, a moth");
-		credit(3, "MAELSTROM", "neon navier-stokes ink");
+		credit(3, "MAELSTROM", "neon ink in a wave tank");
 		credit(3, "FINALE", "fireworks over a neon skyline");
 		credit(0, "", "");
 		credit(3, "ONE", "scripting");

@@ -14979,7 +14979,7 @@ bool vm_backend::bare_host_read(frame& f, size_t cache_slot, script_value& out) 
 	if (!entry.hit.lane || !f.locals->scope_this) { return false; }
 	class_instance* inst = detail::host_this_instance(*f.locals->scope_this);
 	if (!inst || inst->get_class_definition() != entry.cd || entry.cd->method_epoch() != entry.epoch) { return false; }
-	void* address = detail::host_member_address(inst, entry.hit);
+	void* address = detail::host_member_hit_address(inst, entry.hit);
 	if (!address || !detail::host_member_serves(*entry.hit.lane, address)) { return false; }
 	out = entry.hit.lane->read(address, engine_);
 	return true;
@@ -14995,7 +14995,7 @@ JAI_NOINLINE bool vm_backend::bare_host_fill_read(frame& f, size_t cache_slot, u
 	entry.cd = cd;
 	entry.epoch = cd->method_epoch();
 	if (!detail::host_member_fill(cd, inst, sym, *f.locals->scope_this, engine_, entry.hit)) { return false; }
-	void* address = detail::host_member_address(inst, entry.hit);
+	void* address = detail::host_member_hit_address(inst, entry.hit);
 	if (!address || !detail::host_member_serves(*entry.hit.lane, address)) { return false; }
 	out = entry.hit.lane->read(address, engine_);
 	return true;
@@ -15156,7 +15156,7 @@ JAI_FORCEINLINE const script_value* vm_backend::site_field(const chunk& code, co
 	if (entry.cd == cd && entry.epoch == cd->method_epoch()) {
 		if (entry.slot != UINT32_MAX) { return inst->field_slot_value(entry.slot); }
 		if (entry.host.lane) {
-			if (void* address = detail::host_member_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
+			if (void* address = detail::host_member_hit_address(inst, entry.host); address && detail::host_member_serves(*entry.host.lane, address)) {
 				host_value = entry.host.lane->read(address, engine_);
 				return &host_value;
 			}
@@ -16117,7 +16117,7 @@ std::optional<op_status> vm_backend::member_field_write_fast(frame& f, size_t in
 						return op_status{};
 					}
 					if (entry.host.lane && entry.host.lane->write) {
-						if (void* address = detail::host_member_address(inst, entry.host); address && entry.host.lane->write(address, value)) {
+						if (void* address = detail::host_member_hit_address(inst, entry.host); address && entry.host.lane->write(address, value)) {
 							return op_status{};
 						}
 					}
@@ -16273,7 +16273,7 @@ JAI_NOINLINE std::optional<op_status> vm_backend::host_member_text_append(frame&
 	const class_definition* cd = inst->get_class_definition();
 	// a lane with `serves` reads a script_value member (dynamic_binder's make_host_member_lane)
 	if (!cd || entry.cd != cd || entry.epoch != cd->method_epoch() || entry.slot != UINT32_MAX || !entry.host.lane || !entry.host.lane->serves) return std::nullopt;
-	auto* member_value = static_cast<script_value*>(detail::host_member_address(inst, entry.host));
+	auto* member_value = static_cast<script_value*>(detail::host_member_hit_address(inst, entry.host));
 	if (!member_value || member_value->raw_storage_index() != script_value::TYPEID_REFERENCE) return std::nullopt;
 	bool retag = false;
 	script_value* target = text_store_referent(*member_value, retag);

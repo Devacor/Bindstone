@@ -36,9 +36,9 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Embedding</summary><ol class="chapter-list"><li><a href="../embedding/01-embedding-quickstart.html">Embedding Quickstart</a></li><li><a href="../embedding/02-dynamic-binder.html">dynamic_binder: Binding C++ Classes</a></li><li><a href="../embedding/03-backends.html">Backends: Interpreter vs VM</a></li><li><a href="../embedding/04-jaibite.html">jaibite: Parse Once, Ship Precompiled</a></li><li><a href="../embedding/05-safety-rails.html">Safety Rails</a></li><li><a href="../embedding/06-static-checking.html">Static Checking</a></li><li><a href="../embedding/07-hot-reload.html">Hot Reload</a></li><li><a href="../embedding/08-serialization.html">Serialization</a></li><li><a href="../embedding/09-coroutine-hosting.html">Coroutine Hosting</a></li><li><a href="../embedding/10-signals-properties.html">Signals &amp; Observable Properties</a></li><li><a href="../embedding/11-performance.html">Performance Notes</a></li><li><a href="../embedding/12-debugging.html">Debugging</a></li><li><a href="../embedding/13-script-extensible.html">Script-Extensible Objects: extend</a></li><li><a href="../embedding/14-language-server.html">Editor Support: the Language Server</a></li><li class="current"><a href="../embedding/15-math-adapters.html" aria-current="page">Math Adapters: Host Vector Types</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../embedding/16-thread-pool.html">Thread Pool for Host Work</a></li><li><a href="../embedding/17-host-api.html">Host API in Depth</a></li><li><a href="../embedding/18-build-integration.html">Building JaiScript into a Host</a></li><li><a href="../embedding/19-jai-spider.html">jai_spider: a Web Application Host</a></li></ol></details></aside>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Embedding</a><span class="sep" aria-hidden="true">/</span>15</nav>
 <article class="chapter"><h1 id="math-adapters">Math Adapters: Host Vector Types<a class="hlink" href="#math-adapters" aria-label="link">&#8203;</a></h1>
-<p>Every engine already has its own vector, point and color structs. A math adapter tells JaiScript that one of them <em>is</em> a <code>math::vec3</code> (or another of the language's <a href="../guide/15-math.html">math types</a>): from then on that C++ type crosses every binding as the script's math value, never as a class instance. A parameter, a return value, a bound member, a reflected property and a <code>std::vector</code> of it all exchange the native vector, so script code gets the operators, the <code>math::</code> library and value semantics, and the host keeps its own type.</p>
+<p>A math adapter declares that one of the host's own vector, point or color structs <em>is</em> a <code>math::vec3</code> (or another of the language's <a href="../guide/15-math.html">math types</a>). That C++ type then crosses every binding as the script's math value, never as a class instance: parameters, return values, bound members, reflected properties and <code>std::vector</code>s of it. Script gets the operators, the <code>math::</code> library and value semantics; the host keeps its type.</p>
 <h2 id="adapting-a-type">Adapting a type<a class="hlink" href="#adapting-a-type" aria-label="link">&#8203;</a></h2>
-<p>One line per type, in the header that defines it, so every translation unit that binds the type sees the adapter. The macro names the type (in parentheses, so a template argument list with commas passes through) and the members that hold its components, in order:</p>
+<p>One macro per type at global scope, in the header that defines the type, so every translation unit that binds it sees the adapter. It names the type (in parentheses, so template commas pass through) and the members that hold its components, in order:</p>
 <div class="codeblock cb-cpp" data-sample="math-types"><span class="cb-label">C++ (vec_types.h)</span><pre><code class="lang-cpp">#pragma once
 #include &lt;jaiscript/math/adapter.hpp&gt;
 
@@ -62,9 +62,9 @@ JAI_BIND_COLOR((game::Rgba), R, G, B, A)</code></pre></div>
 <tr><td><code>JAI_BIND_IVEC3(T, x, y, z)</code></td><td><code>math::ivec3</code></td><td>three, int32</td></tr>
 <tr><td><code>JAI_BIND_COLOR(T, r, g, b, a)</code></td><td><code>math::color</code></td><td>four channels, float</td></tr>
 </tbody></table></div>
-<p>The macros live in <code>&lt;jaiscript/math/adapter.hpp&gt;</code> and expand to a specialization of <code>jai::math_adapter</code>, so they go at global scope, after the type's definition. The member names are whatever the type uses (<code>col, row</code>; <code>R, G, B, A</code>), and each member converts with a <code>static_cast</code> to the component type and back, so a <code>double</code> or <code>int</code> member works too. JaiScript's own C++ structs, <code>jai::vec2</code> through <code>jai::color</code> in <code>&lt;jaiscript/math/types.hpp&gt;</code>, are adapted already.</p>
+<p>Member names are the type's own (<code>col, row</code>; <code>R, G, B, A</code>). Each converts with a <code>static_cast</code> to the component type and back, so a <code>double</code> or <code>int</code> member works. JaiScript's own structs, <code>jai::vec2</code> through <code>jai::color</code> in <code>&lt;jaiscript/math/types.hpp&gt;</code>, are adapted already.</p>
 <h2 id="functions">Functions<a class="hlink" href="#functions" aria-label="link">&#8203;</a></h2>
-<p>With the adapter in scope, an adapted type is an ordinary parameter and return type for <code>add_function</code>, <code>dynamic_binder</code> methods and constructors:</p>
+<p>An adapted type is an ordinary parameter and return type for <code>add_function</code> and for <code>dynamic_binder</code> methods and constructors:</p>
 <div class="codeblock cb-cpp" data-sample="math-host"><span class="cb-label">C++</span><pre><code class="lang-cpp">using game::Vec3;
 using game::Cell;
 using game::Rgba;
@@ -109,15 +109,16 @@ try { scale(5, 2); } catch (e) { print(e); }</code></pre></div>
 (0.0, 0.0, 1.0) (1.0, 2.0, 1.0) (2.0, 4.0, 1.0) math::vec3
 2
 No overload of 'scale' takes (int, int)</code></pre></div>
-<p>Read it back:</p>
-<ul>
-<li>A by-value or <code>const&amp;</code> parameter receives the script vector as the host type; a returned host value arrives as the math type (<code>type_of</code> says <code>math::vec3</code>).</li>
-<li>A non-const <code>T&amp;</code> parameter writes the callee's final value back into the script lvalue it was given (a variable, a field, an element, a bound C++ member), the same write-back every host <code>T&amp;</code> parameter makes (<a href="01-embedding-quickstart.html">Embedding Quickstart</a>). A temporary is passed as a copy.</li>
-<li>An argument goes through the typed-slot conversion of the parameter's math type: a <code>vec2</code> reaches an <code>ivec2</code> parameter truncated toward zero. A scalar or a vector of other dimensions finds no candidate.</li>
-<li>A <code>std::vector</code> of an adapted type converts from and to the packed <code>array&lt;math::vec3&gt;</code> buffer. Take it by value; a <code>const std::vector&lt;T&gt;&amp;</code> parameter is rejected at compile time (it would bind a converted copy), and a non-const <code>std::vector&lt;T&gt;&amp;</code> writes the callee's result back.</li>
-</ul>
+<div class="tablewrap"><table><thead><tr><th>C++ signature</th><th>what crosses</th></tr></thead><tbody>
+<tr><td><code>T</code>, <code>const T&amp;</code> parameter</td><td>the script vector, converted as a typed slot of that math type converts: a <code>vec2</code> reaches an <code>ivec2</code> parameter truncated toward zero. A scalar or a vector of other dimensions finds no overload.</td></tr>
+<tr><td><code>T&amp;</code> parameter</td><td>the callee's final value is written back into the script lvalue (a variable, a field, an element, a bound C++ member), as every host <code>T&amp;</code> does (<a href="01-embedding-quickstart.html">Embedding Quickstart</a>). A temporary is passed as a copy.</td></tr>
+<tr><td><code>T</code> return</td><td>arrives as the math type (<code>type_of</code> says <code>math::vec3</code>)</td></tr>
+<tr><td><code>std::vector&lt;T&gt;</code> by value or returned</td><td>converts from and to the packed <code>array&lt;math::vec3&gt;</code> buffer</td></tr>
+<tr><td><code>std::vector&lt;T&gt;&amp;</code></td><td>the callee's result is written back</td></tr>
+<tr><td><code>const std::vector&lt;T&gt;&amp;</code></td><td>rejected at compile time: it would bind a converted copy</td></tr>
+</tbody></table></div>
 <h2 id="bound-members">Bound members<a class="hlink" href="#bound-members" aria-label="link">&#8203;</a></h2>
-<p>A member of an adapted type bound with <code>.property</code> reads as the math value and stores through: a whole-vector store, a component store and a compound assignment all reach the C++ member. A read is a copy, like any member read of a value type:</p>
+<p>A member bound with <code>.property</code> reads as the math value. Whole-vector, component and compound stores all reach the C++ member; a read is a copy.</p>
 <div class="codeblock cb-cpp" data-sample="math-body"><span class="cb-label">C++</span><pre><code class="lang-cpp">struct Body {
     game::Vec3 pos;
     game::Rgba tint;
@@ -144,7 +145,7 @@ print(b.pos, " ", b.path.size());</code></pre></div>
 (5.0, 2.0, 3.0)
 (5.0, 1.0, 3.0) 2</code></pre></div>
 <h2 id="reflected-properties">Reflected properties<a class="hlink" href="#reflected-properties" aria-label="link">&#8203;</a></h2>
-<p>A <code>JAI_PROPERTY</code> of an adapted type (<a href="02-dynamic-binder.html">dynamic_binder</a>) surfaces in script as its math type with no per-property binding. Whole, component and compound stores assign through the property, so an observable property notifies on each store that changes the value:</p>
+<p>A <code>JAI_PROPERTY</code> of an adapted type (<a href="02-dynamic-binder.html">dynamic_binder</a>) surfaces as its math type with no per-property binding, and every kind of store assigns through the property:</p>
 <div class="codeblock cb-cpp" data-sample="math-marker-class"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/property_manager.hpp&gt;
 #include &lt;jaiscript/properties/observable_property.hpp&gt;
 #include &lt;jaiscript/properties/macros.hpp&gt;
@@ -176,9 +177,9 @@ std::cout &lt;&lt; &quot;velocity changes &quot; &lt;&lt; changes &lt;&lt; &quot
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">math::vec3 (1.0, 1.0, 1.0, 1.0)
 position 5 2 3
 velocity changes 2, tint alpha 0.5</code></pre></div>
-<p>Change detection compares the old and new value with the host type's <code>operator==</code>. That is why <code>Vec3</code> in <code>vec_types.h</code> declares one: an observable property of a type without <code>operator==</code> still stores, but silently, with no <code>on_change</code>. Here the component store <code>velocity.y = 2</code> and the whole store each changed the value, so the receiver ran twice.</p>
+<p>An observable property notifies on each store that changes the value, compared with the host type's <code>operator==</code> (the component store and the whole store above: two changes). A type without <code>operator==</code> still stores, but never raises <code>on_change</code>.</p>
 <h2 id="values-from-c">Values from C++<a class="hlink" href="#values-from-c" aria-label="link">&#8203;</a></h2>
-<p><code>make_value</code> turns a host value into the script math value, and <code>as&lt;T&gt;()</code> reads a math value back as the host type:</p>
+<p><code>make_value</code> makes the math value from a host value, and <code>as&lt;T&gt;()</code> reads one back:</p>
 <div class="codeblock cb-cpp" data-sample="math-value"><span class="cb-label">C++</span><pre><code class="lang-cpp">jai::script_value v = eng-&gt;make_value(game::Vec3{1, 2, 3});         // a math::vec3 value
 eng-&gt;add_global(&quot;spawn_point&quot;, v);
 game::Vec3 back = eng-&gt;execute(&quot;spawn_point * 2&quot;).as&lt;game::Vec3&gt;();  // and back to the host type

@@ -3911,6 +3911,45 @@ public:
                 "t([]() { return cast<Dir>(3); }) + \"|\" + t([]() { var s = \"east\"; return cast<Dir>(s); });").as_string());
         });
 
+        test("typed_slots_refuse_floats_nulls_and_ints_on_every_remaining_path", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            const std::string fix = ": cast<int>(x) truncates toward zero, math::ifloor(x) rounds down";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"int x = 10; x %= 4.5;", "cannot assign 'float' to 'x' declared 'int'" + fix},
+                {"array<int> xs = [1]; xs.insert(0, 1.5);", "cannot insert into 'array<int>': expected 'int', got 'float'" + fix},
+                {"array<float> fs = [1.5]; for (int v : fs) { }", "cannot initialize 'v' declared 'int' with 'float'" + fix},
+                {"coroutine int g() { yield 1.5; }", "cannot yield 'float' from 'g' declared to return 'int'" + fix},
+                {"coroutine int g() { yield 1; return 2.5; }", "cannot return 'float' from 'g' declared to return 'int'" + fix},
+                {"bool c = true; int t = c ? 1 : 2.5;", "cannot initialize 't' declared 'int' with 'float'" + fix},
+                {"function f(a, b = a * 2) { return b; }", "default value of 'b' names parameter 'a': a default cannot read a parameter"},
+                {"map<string,int> m = {}; m.hp = 5;", "cannot assign to member 'hp' of a map; store the key as [\"hp\"]"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+            }
+            const std::string clean =
+                "enum Dir { north, south } class P { int a = 0; }\n"
+                "bool c = true; float f = c ? 1 : 2.5; auto a = c ? 1 : 2.5; array<int> xs = [1]; float sum = 0.0; for (float w : xs) { sum += w; }\n"
+                "map<Dir, string> names = {Dir::south: \"S\", Dir::north: \"N\"};\n"
+                "string caught = \"\"; try { throw Dir::south; } catch (int e) { caught = \"int\"; } catch (Dir e) { caught = `${type_of(e)}:${e}`; }\n"
+                "`${type_of(a)} ${sum} ${names[Dir::south]}${names.size()} ${caught}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("float 1.0 S2 Dir:1"), e->execute(clean).as_string());
+            // a null a var hands a class value static or field, and a null literal under a warn region, is the store's run-time error
+            const auto refused = [](const std::string& body) {
+                auto fresh = make_engine();
+                try { fresh->execute("[[warn_mode]]\nclass P { int a = 0; } function nothing(var x) { return x; }\n" + body); } catch (const std::exception& ex) { return std::string(ex.what()); }
+                return std::string("stored");
+            };
+            check_true(refused("class C { static P none = nothing(null); }").find("Cannot assign null to static 'none' of C (declared P)") != std::string::npos);
+            check_true(refused("class D { P f = nothing(null); } D d;").find("Cannot assign null to field 'f' of D (declared P)") != std::string::npos);
+            check_true(refused("class E { P f = null; } E e;").find("Cannot assign null to field 'f' of E (declared P)") != std::string::npos);
+        });
+
         test("a_declared_bool_slot_refuses_text_and_containers_at_load", [this]() {
             auto e = make_engine();
             const std::string hint = ": write !x.empty() or an explicit comparison";

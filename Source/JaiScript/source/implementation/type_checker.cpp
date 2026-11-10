@@ -2614,6 +2614,7 @@ private:
     // References alias storage: conversions that create a value cannot bind T&.
     bool reference_type_compatible(const ctype& src, const ctype& dst) {
         if (src.is_unknown() || dst.is_unknown()) { return true; }
+        if (src.origin && mixed_ternaries_.count(src.origin)) { return true; }   // a conditional binds an arm, never its common type (its own diagnostic)
         if (src.kind != dst.kind) { return false; }
         if (src.ti && dst.ti) {
             if (src.ti->base_type != dst.ti->base_type) { return false; }

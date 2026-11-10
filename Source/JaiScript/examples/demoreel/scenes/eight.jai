@@ -677,7 +677,7 @@ class Eight : Fire {
 				}
 				float light = src >= 0 && (cube_on || flight) ? g[src] : 0.0;
 				if (v <= 5 && light > over) {
-					int lv = light * 9.0;
+					int lv = cast<int>(light * 9.0);
 					grid[i] = hyper + gh[src] * 12 + (lv > 11 ? 11 : lv);
 				} else if (v <= 5 && ink >= 0) {
 					grid[i] = ink;

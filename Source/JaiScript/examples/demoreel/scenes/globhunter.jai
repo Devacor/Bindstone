@@ -1006,8 +1006,8 @@ class GlobHunter : Scene {
 		int cell = -1;
 		int lit = 0;
 		for (int x = x0; x <= x1; ++x) {
-			int iu = fx * 16.0;
-			int iv = fy * 16.0;
+			int iu = cast<int>(fx * 16.0);
+			int iv = cast<int>(fy * 16.0);
 			// the light changes only from one light-map cell to the next
 			int lc = (iv >> 3) * 4096 + (iu >> 3);
 			if (lc != cell) {
@@ -1161,7 +1161,7 @@ class GlobHunter : Scene {
 				int flen = 12 + (wave < 6 ? wave : 12 - wave) * 2;
 				int bank = (((tu >> 2) + (tshift >> 3)) & 3) * 4;
 				for (int y = y0; y < y1; ++y) {
-					int tv = tpos;
+					int tv = cast<int>(tpos);
 					int up = 31 - (tv & 31);
 					int heat = up > flen ? 0 : (up * 3 > flen * 2 ? 1 : (up * 3 > flen ? 2 : 3));
 					grid[gi] = brow + bank + heat;
@@ -1172,7 +1172,7 @@ class GlobHunter : Scene {
 				int wrow = wb + (((hitv - 1) * 2 + side) * 8 + lv) * 8;
 				int tbase = (hitv - 1) * 512 + tu;
 				for (int y2 = y0; y2 < y1; ++y2) {
-					int tv2 = tpos;
+					int tv2 = cast<int>(tpos);
 					grid[gi] = wrow + tx[tbase + (tv2 & 31) * 16];
 					tpos += tstep;
 					gi += ww;
@@ -1260,7 +1260,7 @@ class GlobHunter : Scene {
 			// open: white at the heart of the opening, gold toward its edges, rays rippling up it
 			int shimmer = math::itrunc(tt * 9.0);
 			for (int y = y0; y < y1; ++y) {
-				int tv = tpos;
+				int tv = cast<int>(tpos);
 				int ev = (tv < 16 ? tv : 31 - tv) >> 1;
 				int eu = tu < 8 ? tu : 15 - tu;
 				int edge = ev < eu ? ev : eu;
@@ -1275,7 +1275,7 @@ class GlobHunter : Scene {
 		int heat = math::itrunc((bs + kick * 0.35) * 14.0);
 		int wrow = wall_base + (side * 8 + lv) * 8;
 		for (int y2 = y0; y2 < y1; ++y2) {
-			int tv2 = tpos;
+			int tv2 = cast<int>(tpos);
 			int ti = (tv2 & 31) * 16 + tu;
 			int crack = (hash2(ti, 77) & 15);
 			int c = tex[ti];

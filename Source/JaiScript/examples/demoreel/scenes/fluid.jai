@@ -72,7 +72,7 @@ function maelstrom_ink_row(int y) -> array<float> {
 	float home_y = MS_HOME_Y[y];
 	float qy = y * 0.5 - 0.25;
 	qy = qy > gymax ? gymax : qy;
-	int gy = qy;
+	int gy = cast<int>(qy);
 	float ty = qy - gy;
 	int g = gy * gw;
 	float ua = MS_FU[g] + (MS_FU[g + gw] - MS_FU[g]) * ty;
@@ -93,8 +93,8 @@ function maelstrom_ink_row(int y) -> array<float> {
 			float py = y - run * v;
 			px = px < 1.0 ? 1.0 : (px > xmax ? xmax : px);
 			py = py < 1.0 ? 1.0 : (py > ymax ? ymax : py);
-			int ix = px;
-			int iy = py;
+			int ix = cast<int>(px);
+			int iy = cast<int>(py);
 			float sx = px - ix;
 			int k = iy * dw + ix;
 			int k2 = k + dw;
@@ -150,17 +150,17 @@ function maelstrom_row(int y) -> array<int> {
 		return out;
 	}
 	if (to < from) { return out; }
-	int x0 = from;
+	int x0 = cast<int>(from);
 	if (x0 < from) { ++x0; }
-	int x1 = to;
+	int x1 = cast<int>(to);
 	fx += ax * x0;
 	fy += ay * x0;
 	int dw = MS_DW;
 	float ex = fx - MS_CX;
 	float ey = fy - MS_CY;
 	for (int x = x0; x <= x1; ++x) {
-		int ix = fx;
-		int iy = fy;
+		int ix = cast<int>(fx);
+		int iy = cast<int>(fy);
 		float sx = fx - ix;
 		int k = iy * dw + ix;
 		int k2 = k + dw;
@@ -168,8 +168,8 @@ function maelstrom_row(int y) -> array<int> {
 		float b = MS_INK[k2];
 		float top = a + (MS_INK[k + 1] - a) * sx;
 		float bottom = b + (MS_INK[k2 + 1] - b) * sx;
-		int ink = top + (bottom - top) * (fy - iy);
-		int far = (ex * ex + ey * ey) * 0.25;
+		int ink = cast<int>(top + (bottom - top) * (fy - iy));
+		int far = cast<int>((ex * ex + ey * ey) * 0.25);
 		out[x] = tubes + MS_SHADE[far] + ((ink + phase) & 127);
 		ex += ax;
 		ey += ay;
@@ -664,8 +664,8 @@ class Maelstrom : Scene {
 				float py = y - step * vv[i];
 				px = px < 0.0 ? 0.0 : (px > xmax ? xmax : px);
 				py = py < 0.0 ? 0.0 : (py > ymax ? ymax : py);
-				int ix = px;
-				int iy = py;
+				int ix = cast<int>(px);
+				int iy = cast<int>(py);
 				float sx = px - ix;
 				float sy = py - iy;
 				int k = iy * gw + ix;
@@ -740,9 +740,9 @@ class Maelstrom : Scene {
 		int shades = shade.size();
 		for (int q2 = 0; q2 < shades; ++q2) {
 			float far = shade_radius[q2];
-			int whole_far = far;
+			int whole_far = cast<int>(far);
 			float l = lit[whole_far] + (lit[whole_far + 1] - lit[whole_far]) * (far - whole_far);
-			int whole = l + 0.5;
+			int whole = cast<int>(l + 0.5);
 			shade[q2] = (whole < 0 ? 0 : (whole > 9 ? 9 : whole)) * 128;
 		}
 	}

@@ -89,9 +89,9 @@ int BD_RINGS = 6;            // three frames: one a ring
 
 // the grid: 12-unit cells over x and z in [-72, 72), y in [0, 72)
 function bd_cell(float x, float y, float z) -> int {
-	int cx = (x + 72.0) * 0.0833333;
-	int cy = y * 0.0833333;
-	int cz = (z + 72.0) * 0.0833333;
+	int cx = cast<int>((x + 72.0) * 0.0833333);
+	int cy = cast<int>(y * 0.0833333);
+	int cz = cast<int>((z + 72.0) * 0.0833333);
 	cx = cx < 0 ? 0 : (cx > 11 ? 11 : cx);
 	cy = cy < 0 ? 0 : (cy > 5 ? 5 : cy);
 	cz = cz < 0 ? 0 : (cz > 11 ? 11 : cz);
@@ -212,9 +212,9 @@ function boids_steer(int c) -> array<float> {
 			float fx = (x + 72.0) * 0.0833333;
 			float fy = y * 0.0833333;
 			float fz = (z + 72.0) * 0.0833333;
-			int cx = fx;
-			int cy = fy;
-			int cz = fz;
+			int cx = cast<int>(fx);
+			int cy = cast<int>(fy);
+			int cz = cast<int>(fz);
 			int ox = fx - cx > 0.5 ? 1 : -1;
 			int oy = fy - cy > 0.5 ? 1 : -1;
 			int oz = fz - cz > 0.5 ? 1 : -1;
@@ -778,8 +778,8 @@ class Boids : Scene {
 			float zc = ex * fx + ey * fy + ez * fz;
 			if (zc < 12.0) { continue; }
 			float iz = fl / zc;
-			int sx = half_w + (ex * rx + ez * rz) * iz;
-			int sy = half_h - (ex * ux + ey * uy + ez * uz) * iz;
+			int sx = cast<int>(half_w + (ex * rx + ez * rz) * iz);
+			int sy = cast<int>(half_h - (ex * ux + ey * uy + ez * uz) * iz);
 			if (sx < 2 || sx >= right || sy < 1 || sy >= bottom) { continue; }
 			lo = sy < lo ? sy : lo;
 			hi = sy > hi ? sy : hi;
@@ -859,7 +859,7 @@ class Boids : Scene {
 				if (flock) {
 					int mx = x2 + ripple;
 					mx = mx < 0 ? 0 : (mx > last ? last : mx);
-					int lv2 = (dn[mrow + mx] + dn[mrow - ww + mx]) * 0.2;
+					int lv2 = cast<int>((dn[mrow + mx] + dn[mrow - ww + mx]) * 0.2);
 					dk2 += lv2 > 2 ? 2 : lv2;
 				}
 				int tone = s2 - (s2 & 7);
@@ -883,7 +883,7 @@ class Boids : Scene {
 			}
 			for (int x = 0; x < ww; ++x) {
 				int tone = (sk[srow + x] >> 3) + ((ry[srow + x] * shine) >> 8) + flash;
-				int dk = dn[row + x];
+				int dk = cast<int>(dn[row + x]);
 				dn[row + x] = 0.0;
 				grid[row + x] = (tone > 31 ? 31 : tone) * 8 + (dk > 7 ? 7 : dk);
 			}

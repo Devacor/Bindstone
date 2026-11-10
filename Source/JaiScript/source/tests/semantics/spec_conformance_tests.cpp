@@ -4198,7 +4198,7 @@ private:
 		test("float_division_and_modulo_by_zero_are_ieee", [this]() {
 			// docs/site/guide/04-operators.html "Arithmetic": a float '/' or '%' (an int operand promoted beside a float included) gives
 			// an infinity or NaN at every destination and on every path (literals, typed locals, var, loops, elements, members, a
-			// reference, a vec); two ints still raise, and a float result that leaves an int slot's range raises at the store
+			// reference, a vec); two ints still raise, and a float result never enters an int slot
 			expect("ieee float division", R"(
 				class T { float f = 1.0; var n = 2.5; }
 				function t(function f) -> string { string r = ""; try { r = `${f()}`; } catch (e) { r = e; } return r; }
@@ -4225,7 +4225,7 @@ private:
 				t([]() { return math::is_inf(1.0 / 0.0) && math::is_nan(0.0 % 0.0); }) + "|" +
 				t([]() { int x = 5; x /= 0.0; return x; }) + "|" + t([]() { int z = 0; return 1 / z; }) + "|" + t([]() { int z = 0; return 1 % z; }) + "|" + loops();
 			)", "inf|-inf|nan|nan|inf|inf|nan|nan|inf|inf|float:inf|nan|inf,nan,nan|inf,nan|inf|inf|Division by zero|(inf, -inf)|inf|true|"
-			    "Cannot convert float to integer: non-finite or out of range|Division by zero|Modulo by zero|inf,nan;-inf,nan;nan,nan;inf,-inf,nan;inf;inf", warn_region);
+			    "Cannot assign float to 'x' (declared int)|Division by zero|Modulo by zero|inf,nan;-inf,nan;nan,nan;inf,-inf,nan;inf;inf", warn_region);
 		});
 	}
 
@@ -4384,9 +4384,9 @@ private:
 				t([]() { array<int> b = [1]; string s = ""; for (auto x : b) { x = true; s += `${type_of(x)}:${x}`; } return s; });
 			)", "int:1 int:2 |Cannot initialize 'v' (declared int) with float|Cannot initialize 'v' (declared string) with int|Cannot initialize 'v' (declared int) with string|Cannot initialize 'v' (declared int) with float|"
 			    "14|ss|int:1", warn_region);
-			every_config("checker", "1|0", [](engine& e) {
-				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { }");
-				auto ok = e.check("array<int> a = [1]; for (int& v : a) { } array<float> f = [1.5]; for (int v : f) { }");
+			every_config("checker", "2|0", [](engine& e) {
+				auto bad = e.check("array<float> a = [1.5]; for (int& v : a) { } for (int v : a) { }");
+				auto ok = e.check("array<int> a = [1]; for (int& v : a) { } for (float v : a) { }");
 				return std::to_string(bad.error_count()) + "|" + std::to_string(ok.error_count());
 			});
 		});

@@ -244,7 +244,7 @@ public:
                 string s = to_string(g.h.next()) + "," + to_string(g.h.next());
                 auto m = g.mixed();
                 s += "|" + to_string(m.next()) + "," + to_string(m.next()) + "," + to_string(m.next()) + "," + to_string(m.done());
-                coroutine int typed() { yield 1; return 2.7; }
+                coroutine int typed() { yield 1; return 2; }
                 auto t = typed();
                 t.next();
                 var last = t.next();

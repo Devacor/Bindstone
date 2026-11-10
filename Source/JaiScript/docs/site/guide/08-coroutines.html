@@ -94,14 +94,14 @@ print("{} {} {} {}", Spawner().w().next(), t.next(), t.next(), ns::g().next());<
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">1 2 3 4 5
 30 1 2 7</code></pre></div>
 <p>The declared type describes what the body yields and returns, never the call, which is always a handle. A handle has no type name of its own: hold it in <code>auto</code> or <code>var</code>. <code>type_of</code> names it <code>"coroutine_handle"</code>.</p>
-<p>Each <code>yield e</code> and the final <code>return</code> convert to the declared type as a <code>return</code> does. A value the type cannot take raises at the yield, catchable around the step, and the failed step finishes the coroutine. A bare <code>yield;</code> hands out nothing and is not converted:</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int g() { yield 2.9; yield "three"; return 4; }
+<p>Each <code>yield e</code> and the final <code>return</code> convert to the declared type as a <code>return</code> does. A float the checker sees yielded from an int coroutine fails the load; any other value the type cannot take raises at the yield, catchable around the step, and the failed step finishes the coroutine. A bare <code>yield;</code> hands out nothing and is not converted:</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine float g() { yield 2; yield "three"; return 4; }
 auto h = g();
 print(h.next());
 try { h.next(); } catch (e) { print("caught: ", e); }
 print(h.done());</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2
-caught: Cannot yield string from &#x27;g&#x27; (declared -&gt; int)
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2.0
+caught: Cannot yield string from &#x27;g&#x27; (declared -&gt; float)
 true</code></pre></div>
 <p>A coroutine cannot be a lambda, return a reference, or take a parameter by reference (<code>T&amp;</code>, <code>const T&amp;</code>, <code>auto&amp;</code>, <code>var&amp;</code>). All are parse errors: <code>coroutine int count_up(int&amp; n)</code> reports <code>coroutine 'count_up' cannot take 'n' by reference: it runs on after the call returns, past the argument's lifetime; take it by value (int n), or pass a shared_ptr to share an object</code>.</p>
 <h2 id="method-coroutines">Method coroutines<a class="hlink" href="#method-coroutines" aria-label="link">&#8203;</a></h2>

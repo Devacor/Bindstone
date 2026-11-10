@@ -69,8 +69,10 @@ east
 caught: Cannot cast 9 to &#x27;Direction&#x27;: not one of its values</code></pre></div>
 <ul>
 <li>An int or another enum&#x27;s value into an enum slot fails the load: <code>cannot initialize 'd' declared 'Direction' with 'int': cast&lt;Direction&gt;(n) converts an int that is one of its values</code>. So do <code>d += 1</code> and <code>d++</code> (<code>cannot apply '++' to 'Direction'</code>).</li>
-<li><code>auto d = Direction::north;</code> is a <code>Direction</code>. A <code>var</code> holds the int, and an int out of a <code>var</code> enters an enum slot when it is one of the values (<code>Cannot assign int to 'd' (declared Direction)</code> otherwise).</li>
-<li>Overloads tell <code>f(Direction)</code> from <code>f(int)</code>.</li>
+<li><code>auto d = Direction::north;</code> is a <code>Direction</code>. A <code>var</code> holds the int (<code>var v = Direction::north; type_of(v)</code> is <code>"int"</code>), and an int out of a <code>var</code> enters an enum slot when it is one of the values (<code>Cannot assign int to 'd' (declared Direction)</code> otherwise).</li>
+<li>Overloads tell <code>f(Direction)</code> from <code>f(int)</code>, and <code>catch (Direction e)</code> takes a thrown <code>Direction</code>, which <code>catch (int e)</code> does not.</li>
+<li><code>print</code>, <code>to_string</code>, a template splice and <code>format</code> show the integer.</li>
+<li>A map literal takes values as keys: <code>map&lt;Direction, string&gt; names = {Direction::north: "N"};</code>.</li>
 <li><code>to_json</code> and <code>to_binary</code> write the integer, and a load restores the enum from it.</li>
 </ul>
 <p>Membership is checked at load: <code>Direction::zzz</code> is not a run-time lookup that returns null, it fails the load before anything runs:</p>

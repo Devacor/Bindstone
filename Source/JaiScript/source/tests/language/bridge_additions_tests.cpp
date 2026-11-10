@@ -141,7 +141,8 @@ public:
                 s.insert(1, "x");
                 print(to_json(s));
                 try { b.insert(9, 1); } catch (e) { print("caught: ", e); }
-                try { b.insert(1, "s"); } catch (e) { print("caught: ", e); }
+                var text = "s";
+                try { b.insert(1, text); } catch (e) { print("caught: ", e); }
             )JS", "[1,2,3,4] [1,2]\ncaught: Cannot push 'string' to array<int>\n[0,1,9,2,3]\n[\"a\",\"x\",\"b\"]\n"
                                  "caught: Cannot insert at index 9 of an array of size 5\ncaught: Cannot insert 'string' into array<int>\n"},
                 {"array_helper_callback_throw_propagates", R"JS(

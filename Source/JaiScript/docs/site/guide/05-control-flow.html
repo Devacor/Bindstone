@@ -77,7 +77,7 @@ for (auto item : items) { print("- ", item); }       // item is a copy
 for (auto&amp; s : items) { s = s + "!"; }               // auto&amp; is the element itself
 auto scores = {"alice": 3, "bob": 5};
 for (auto [name, score] : scores) { print(name, " scored ", score); }
-var loose = [1.5, 2.5];
+var loose = [true, 2];
 for (int v : loose) { print(v); }                    // int v = element; per element
 print(items);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">- sword

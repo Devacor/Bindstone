@@ -41,7 +41,7 @@ export LAND_LOG_DIR="$LOG_DIR" JAI_CI_LOG_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
 UNION_FILES="${LAND_UNION_FILES:-Source/JaiScript/docs/PERF_PASS_2026-09-02.md}"
 # Generated from the site's own sources: a conflict in them is settled by regenerating once the sources merged
-SEARCH_INDEX="Source/JaiScript/docs/site/assets/search-index.js"
+SEARCH_INDEX="Source/JaiScript/docs/site/assets/search-index.js Source/JaiScript/docs/site/assets/search-text.js"
 API_OUTPUTS="Source/JaiScript/docs/site/reference/api.html Source/JaiScript/include/jaiscript/detail/builtin_api_arities.hpp"
 
 # client_choice <rev-range>: sets CLIENT_BUILD_WHY and CLIENT_VERIFY_WHY from the paths the range touches

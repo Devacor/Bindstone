@@ -1,4 +1,4 @@
-/* JaiScript docs: theme toggle, hand-rolled highlighter, code/output pairs, client-side search. No dependencies. */
+/* JaiScript docs: theme toggle, hand-rolled highlighter, code/output pairs, the search box. No dependencies. */
 (function () {
   "use strict";
 
@@ -285,11 +285,13 @@
 
   /* ---------------- in-page table of contents ---------------- */
   (function () {
-    var narrow = window.matchMedia && window.matchMedia("(max-width: 900px)").matches;
-    if (narrow) {
+    // The chrome's own inline script folds the sidebar on a narrow page as it is parsed; this follows a resize
+    var narrow = window.matchMedia && window.matchMedia("(max-width: 900px)");
+    var fold = function () {
       var boxes = document.querySelectorAll(".sidebar details");
-      for (var d = 0; d < boxes.length; d++) { boxes[d].open = false; }
-    }
+      for (var d = 0; d < boxes.length; d++) { boxes[d].open = !narrow.matches; }
+    };
+    if (narrow && narrow.addEventListener) narrow.addEventListener("change", fold);
     var host = document.querySelector("[data-page-toc]");
     var article = document.querySelector("article.chapter");
     if (!host || !article) return;
@@ -325,13 +327,14 @@
   }());
 
   /* ---------------- search ---------------- */
+  // The engine (search.js) and every section's text (search-text.js) load when the box is first focused; titles and
+  // headings (search-index.js) answer until the text arrives.
   var box = document.getElementById("search-box");
   var results = document.getElementById("search-results");
-  var index = window.SEARCH_INDEX || [];
   // The path back to the site root, from the site's own stylesheet (the font stylesheet comes first)
   var siteCss = document.querySelector('link[rel="stylesheet"][href$="assets/style.css"]');
   var rootPrefix = (siteCss ? siteCss.getAttribute("href") : "assets/style.css").replace(/assets\/style\.css$/, "");
-  var sel = -1;
+  var sel = -1, engine = null, searchLoad = "", textLoad = "";
 
   function expand(on) {
     results.hidden = !on;
@@ -339,60 +342,80 @@
     if (!on && box) box.removeAttribute("aria-activedescendant");
   }
 
-  function render(items) {
-    if (!items.length) {
-      results.innerHTML = '<div class="sr-none">no matches</div>';
-      expand(true); sel = -1; return;
-    }
-    var htmlOut = "";
-    for (var i = 0; i < items.length; i++) {
-      var it = items[i];
-      htmlOut += '<a role="option" id="sr-' + i + '" href="' + rootPrefix + it.u + (it.a ? "#" + it.a : "") + '">' +
-        '<div class="sr-title">' + esc(it.label) + "</div>" +
-        '<div class="sr-ctx">' + esc(it.ctx) + "</div></a>";
-    }
-    results.innerHTML = htmlOut; expand(true); sel = -1;
+  function loadScript(name, done, failed) {
+    var script = document.createElement("script");
+    script.src = rootPrefix + "assets/" + name;
+    script.onload = done;
+    script.onerror = failed;
+    document.head.appendChild(script);
   }
 
-  function search(q) {
-    q = q.toLowerCase().trim();
-    if (!q) { expand(false); return; }
-    var hits = [];
-    for (var i = 0; i < index.length && hits.length < 12; i++) {
-      var e = index[i];
-      if (e.t.toLowerCase().indexOf(q) >= 0) {
-        hits.push({ u: e.u, label: e.t, ctx: e.s });
-        continue;
+  function loadSearch() {
+    if (searchLoad) return;
+    searchLoad = "loading";
+    loadScript("search.js", function () {
+      engine = window.JaiSearch.create(window.SEARCH_INDEX || []);
+      searchLoad = "ready";
+      search();
+      textLoad = "loading";
+      loadScript("search-text.js", function () {
+        engine.setText(window.SEARCH_TEXT);
+        window.SEARCH_TEXT = null;
+        textLoad = "ready";
+        search();
+      }, function () { textLoad = "failed"; search(); });
+    }, function () { searchLoad = "failed"; search(); });
+  }
+
+  function note(text) { return '<div class="sr-note" role="presentation">' + esc(text) + "</div>"; }
+
+  function search() {
+    if (!box.value.trim()) { expand(false); return; }
+    sel = -1;
+    if (searchLoad === "failed") { results.innerHTML = note("search did not load"); expand(true); return; }
+    if (!engine) { results.innerHTML = note("searching…"); expand(true); return; }
+    var found = engine.query(box.value, 8);
+    if (!found) { expand(false); return; }
+    var htmlOut = found.partial ? note("no section has every word; the closest:") : "";
+    for (var i = 0; i < found.rows.length; i++) {
+      var row = found.rows[i], snippet = "";
+      for (var s = 0; s < row.snippet.length; s++) {
+        snippet += row.snippet[s][1] ? "<mark>" + esc(row.snippet[s][0]) + "</mark>" : esc(row.snippet[s][0]);
       }
-      for (var h = 0; h < e.h.length; h++) {
-        if (e.h[h].toLowerCase().indexOf(q) >= 0) {
-          hits.push({ u: e.u, label: e.h[h], ctx: e.s + " › " + e.t,
-                      a: (e.i && e.i[h]) ||
-                         e.h[h].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") });
-          break;
-        }
-      }
+      if (row.first) htmlOut += '<div class="sr-group" role="presentation">' + esc(row.group) + "</div>";
+      htmlOut += '<a role="option" id="sr-' + i + '" href="' + rootPrefix + esc(row.url).replace(/"/g, "&quot;") + '">' +
+        '<div class="sr-title">' + esc(row.label) + "</div>" +
+        (snippet ? '<div class="sr-snip">' + snippet + "</div>" : "") + "</a>";
     }
-    render(hits);
+    if (!found.rows.length && textLoad !== "loading") htmlOut = '<div class="sr-none">no matches</div>';
+    if (textLoad === "loading") htmlOut += note("searching the full text…");
+    if (textLoad === "failed") htmlOut += note("titles and headings only: the full text did not load");
+    results.innerHTML = htmlOut;
+    results.scrollTop = 0;
+    expand(true);
   }
 
   if (box && results) {
-    box.addEventListener("input", function () { search(box.value); });
+    box.addEventListener("focus", function () { loadSearch(); if (box.value.trim() && results.hidden) search(); });
+    box.addEventListener("input", function () { loadSearch(); search(); });
     box.addEventListener("keydown", function (ev) {
       var links = results.querySelectorAll("a");
       if (ev.key === "ArrowDown" || ev.key === "ArrowUp") {
         ev.preventDefault();
-        if (!links.length) return;
+        if (!links.length || results.hidden) return;
         sel = ev.key === "ArrowDown" ? Math.min(sel + 1, links.length - 1) : Math.max(sel - 1, 0);
         for (var i = 0; i < links.length; i++) links[i].className = i === sel ? "sel" : "";
-        links[sel].scrollIntoView({ block: "nearest" });
-        box.setAttribute("aria-activedescendant", "sr-" + sel);
+        if (sel === 0) results.scrollTop = 0; else links[sel].scrollIntoView({ block: "nearest" });
+        box.setAttribute("aria-activedescendant", links[sel].id);
       } else if (ev.key === "Enter") {
-        if (sel >= 0 && links[sel]) { window.location.href = links[sel].getAttribute("href"); }
-        else if (links.length === 1) { window.location.href = links[0].getAttribute("href"); }
+        var go = links[sel >= 0 ? sel : 0];
+        if (go && !results.hidden) { expand(false); window.location.href = go.getAttribute("href"); }
       } else if (ev.key === "Escape") {
         expand(false); box.blur();
       }
+    });
+    results.addEventListener("click", function (ev) {
+      if (ev.target.closest && ev.target.closest("a")) expand(false);
     });
     document.addEventListener("click", function (ev) {
       if (!results.contains(ev.target) && ev.target !== box) expand(false);
@@ -401,7 +424,7 @@
     document.addEventListener("keydown", function (ev) {
       if (ev.key !== "/" || ev.ctrlKey || ev.metaKey || ev.altKey) return;
       var t = ev.target, tag = t && t.tagName;
-      if (tag === "INPUT" || tag === "TEXTAREA" || (t && t.isContentEditable)) return;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT" || (t && t.isContentEditable)) return;
       ev.preventDefault(); box.focus(); box.select();
     });
   }

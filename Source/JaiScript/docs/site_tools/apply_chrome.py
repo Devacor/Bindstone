@@ -19,6 +19,8 @@ SITE = pathlib.Path(__file__).resolve().parent.parent / "site"
 
 VERSION = "0.5 beta"
 REPO = "https://github.com/Devacor/jaiscript"
+SITE_URL = "https://jaiscript.com/"
+NOT_FOUND = "404.html"   # Apache serves it for any missing path, so its chrome links from the site root
 
 FONTS = (
     '<link rel="preconnect" href="https://fonts.googleapis.com">\n'
@@ -170,6 +172,8 @@ SECTION_INDEX_DESC = {
         "An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.",
     "stability.html":
         "What is settled in the language and the embedding API, and what a 0.x release may still change before 1.0.",
+    NOT_FOUND:
+        "No page lives at this address. Start from the tour, the guide or the reference, or search the docs.",
 }
 
 SECTION_TITLE = {"tour": "The Ten-Minute Tour", "bridges": "Bridges",
@@ -183,7 +187,20 @@ def attr(text):
     return text.replace('"', "&quot;")
 
 
-def head(title, desc, root):
+def canonical(rel):
+    """The one address a page is indexed under; build_sitemap.py lists the same."""
+    return SITE_URL if rel == "index.html" else SITE_URL + rel
+
+
+FOLD_SIDEBAR = (
+    '<script>(function(){if(!window.matchMedia||!matchMedia("(max-width: 900px)").matches)return;\n'
+    'var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d[i].open=false;}())</script>'
+)
+
+
+def head(title, desc, root, rel):
+    address = ('<meta name="robots" content="noindex">' if rel == NOT_FOUND
+               else '<link rel="canonical" href="%s">\n<meta property="og:url" content="%s">' % (canonical(rel), canonical(rel)))
     return "\n".join([
         "<head>",
         '<meta charset="utf-8">',
@@ -196,8 +213,15 @@ def head(title, desc, root):
         '<meta property="og:site_name" content="JaiScript docs">',
         '<meta property="og:title" content="%s">' % attr(title),
         '<meta property="og:description" content="%s">' % attr(desc),
-        '<meta name="twitter:card" content="summary">',
+        '<meta property="og:image" content="%sassets/og-card.png">' % SITE_URL,
+        '<meta property="og:image:width" content="1200">',
+        '<meta property="og:image:height" content="630">',
+        '<meta name="twitter:card" content="summary_large_image">',
+        '<meta name="twitter:image" content="%sassets/og-card.png">' % SITE_URL,
+        address,
+        '<link rel="icon" href="%sfavicon.ico" sizes="32x32">' % root,
         '<link rel="icon" href="%sassets/favicon.svg" type="image/svg+xml">' % root,
+        '<link rel="apple-touch-icon" href="%sassets/apple-touch-icon.png">' % root,
         FONTS,
         '<link rel="stylesheet" href="%sassets/style.css">' % root,
         THEME_BOOTSTRAP,
@@ -249,28 +273,31 @@ def chapter_items(section, chapters, current, root):
     return "".join(items)
 
 
-def chapter_box(label, items, first_number=1):
+def chapter_box(label, chapters, items, current, first_number=1):
+    """current, when it is one of chapters, shows in the summary: all a folded box (a narrow page) says of where it is."""
     counter = "" if first_number == 1 else ' style="counter-reset: ch %d"' % (first_number - 1)
-    return ('<details class="sidebar-box" open><summary class="sidebar-title">%s</summary>'
-            '<ol class="chapter-list"%s>%s</ol></details>' % (label, counter, items))
+    here = "".join('<span class="sidebar-current">%s</span>' % title for name, title, _ in chapters if name == current)
+    return ('<details class="sidebar-box" open><summary class="sidebar-title">%s%s</summary>'
+            '<ol class="chapter-list"%s>%s</ol></details>' % (label, here, counter, items))
 
 
 def chapter_sidebar(section, chapters, current, root):
     if section == "bridges":
-        boxes = (chapter_box("Language Bridges", chapter_items(section, LANGUAGE_BRIDGES, current, root))
-                 + chapter_box("Code Migrations", chapter_items(section, CODE_MIGRATIONS, current, root),
-                               len(LANGUAGE_BRIDGES) + 1))
+        boxes = (chapter_box("Language Bridges", LANGUAGE_BRIDGES,
+                             chapter_items(section, LANGUAGE_BRIDGES, current, root), current)
+                 + chapter_box("Code Migrations", CODE_MIGRATIONS,
+                               chapter_items(section, CODE_MIGRATIONS, current, root), current, len(LANGUAGE_BRIDGES) + 1))
     else:
         label = {"guide": "Guide", "embedding": "Embedding"}[section]
-        boxes = chapter_box(label, chapter_items(section, chapters, current, root))
-    return '<aside class="sidebar" aria-label="Chapters">%s</aside>' % boxes
+        boxes = chapter_box(label, chapters, chapter_items(section, chapters, current, root), current)
+    return '<aside class="sidebar" aria-label="Chapters">%s</aside>\n%s' % (boxes, FOLD_SIDEBAR)
 
 
 def page_sidebar(with_h3):
     flag = " data-toc-h3" if with_h3 else ""
     return ('<aside class="sidebar" aria-label="On this page">'
             '<details class="sidebar-box" open><summary class="sidebar-title">On this page</summary>'
-            '<ol class="page-toc" data-page-toc%s></ol></details></aside>' % flag)
+            '<ol class="page-toc" data-page-toc%s></ol></details></aside>\n%s' % (flag, FOLD_SIDEBAR))
 
 
 def footer(root):
@@ -333,6 +360,7 @@ def build_pages():
 
     pages.append(("index.html", None, "", SECTION_INDEX_DESC["index.html"], "", ""))
     pages.append(("stability.html", None, "", SECTION_INDEX_DESC["stability.html"], page_sidebar(True), ""))
+    pages.append((NOT_FOUND, None, "/", SECTION_INDEX_DESC[NOT_FOUND], "", ""))
 
     pages.append(("tour/index.html", "tour", "../", SECTION_INDEX_DESC["tour/index.html"], page_sidebar(True),
                   prevnext(None, ("../guide/01-hello.html", "next &middot; the guide", GUIDE[0][1]))))
@@ -424,7 +452,7 @@ def rewrite(src, rel, section, root, desc, sidebar, nav):
     else:
         body = PREVNEXT_RE.sub("", body)
 
-    out = (prologue + head(title, desc, root) + "\n<body>\n" + header(section, root)
+    out = (prologue + head(title, desc, root, rel) + "\n<body>\n" + header(section, root)
            + '\n<div class="layout">\n' + sidebar
            + '\n<main class="content" id="main" tabindex="-1">' + crumbs(rel, section, root) + body
            + "</main>\n</div>\n"

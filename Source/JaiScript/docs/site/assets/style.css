@@ -177,8 +177,16 @@ main:focus { outline: none; }
 #search-results a { display: block; padding: .5rem .65rem; border-radius: 0 6px 6px 0; color: var(--fg); border-left: 2px solid transparent; }
 #search-results a:hover, #search-results a.sel { background: var(--mark); border-left-color: var(--accent); text-decoration: none; }
 #search-results .sr-title { font: 600 .92rem var(--display); color: var(--head); }
-#search-results .sr-ctx { font: .72rem var(--mono); color: var(--fg-dim); }
-#search-results .sr-none { padding: .55rem .65rem; color: var(--fg-dim); font: .82rem var(--mono); }
+#search-results .sr-none, #search-results .sr-note { padding: .55rem .65rem; color: var(--fg-dim); font: .82rem var(--mono); }
+#search-results .sr-note { font-size: .72rem; }
+#search-results .sr-group {
+  font: 600 .66rem var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--fg-dim);
+  padding: .6rem .65rem .2rem; overflow-wrap: anywhere;
+}
+#search-results .sr-group:not(:first-child) { border-top: 1px solid var(--border); margin-top: .3rem; }
+#search-results .sr-title { overflow-wrap: anywhere; }
+#search-results .sr-snip { font-size: .8rem; line-height: 1.45; color: var(--fg-dim); margin-top: .15rem; overflow-wrap: anywhere; }
+#search-results mark { background: var(--glow); color: var(--head); border-radius: 2px; padding: 0 .1em; }
 
 /* ---------- layout ---------- */
 .layout { display: flex; max-width: 82rem; margin: 0 auto; align-items: flex-start; }
@@ -196,6 +204,7 @@ main:focus { outline: none; }
   list-style: none; pointer-events: none;   /* inert on desktop; a real control at <=900px */
 }
 .sidebar-title::-webkit-details-marker { display: none; }
+.sidebar-current { display: none; }
 .chapter-list { list-style: none; counter-reset: ch; margin: 0; padding: 0; display: grid; gap: .1rem; }
 .chapter-list > li { counter-increment: ch; margin: 0; }
 .chapter-list > li > a {
@@ -467,6 +476,8 @@ td:first-child { color: var(--head); }
 td code { font-size: .86em; }
 tbody tr:hover td { background: var(--mark); }
 tr:last-child td { border-bottom: none; }
+tr[id] { scroll-margin-top: 5rem; }
+tr:target td { background: var(--glow); }
 
 /* ---------- prev/next ---------- */
 .prevnext {
@@ -637,11 +648,25 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
 }
 
 /* ---------- narrow widths ---------- */
+/* between the one-row header and the stacked one: the search box gives up width before anything wraps */
+@media (min-width: 901px) and (max-width: 1180px) {
+  .site-header { gap: .6rem 1rem; }
+  .site-nav { gap: .15rem .8rem; }
+  .gh-link { padding: 0 .55rem; }
+  .gh-link span { display: none; }
+  .header-tools { flex: 1 1 13rem; min-width: 0; justify-content: flex-end; }
+  .search { flex: 0 1 15rem; min-width: 0; }
+  #search-box { width: 100%; max-width: none; }
+}
+@media (min-width: 901px) and (max-width: 980px) {
+  .brand-sub { display: none; }
+}
 @media (max-width: 960px) {
   .hero { grid-template-columns: minmax(0, 1fr); gap: 2rem; }
 }
 @media (max-width: 900px) {
-  .site-header { position: static; padding: calc(.55rem + 4px) 1rem .6rem; gap: .5rem 1rem; }
+  /* relative, not static: the header keeps its z-index, so the search results stay above the page */
+  .site-header { position: relative; padding: calc(.55rem + 4px) 1rem .6rem; gap: .5rem 1rem; }
   .header-tools { margin-left: 0; width: 100%; }
   .search { flex: 1; }
   #search-box { width: 100%; max-width: none; }
@@ -659,8 +684,11 @@ code, pre, kbd, samp, .cb-gutter, .demo pre, #search-box, .api-controls input {
     margin: 0 0 0 1rem; padding: .15rem 0;
   }
   .sidebar details[open] > .sidebar-title { list-style: disclosure-open; margin-bottom: .5rem; }
+  .sidebar details:not([open]) .sidebar-current {
+    display: inline; margin-left: .6rem; font: 600 .86rem var(--display); letter-spacing: 0; text-transform: none; color: var(--head);
+  }
   .content { padding: 1.2rem 1rem 3rem; }
-  h1[id], h2[id], h3[id] { scroll-margin-top: 1rem; }
+  h1[id], h2[id], h3[id], tr[id] { scroll-margin-top: 1rem; }
 }
 @media (max-width: 600px) {
   .gh-link span { display: none; }

@@ -1,14 +1,14 @@
 /* Runnable samples: every block mark_runnable.py marked data-run gets Run and Reset beside Copy, and its code (and every
    support file a page's samples load, data-file) edits in place. Run sends the block and the page's support files, as they
    read now, to sample-worker.js, which runs them on the engine compiled to WebAssembly; the output fills the sample's
-   output block until Reset puts the page's text back. */
+   output block until Reset puts the page's text back. Samples run one at a time, in the order they were started. */
 (function () {
   "use strict";
   var WORKER = new URL("sample-worker.js", document.currentScript.src).href;
   var BUDGET = 20;
   var LIMIT = 200000;
   var SGR = new RegExp(String.fromCharCode(27) + "\\[([0-9;?]*)([A-Za-z])", "g");
-  var worker = null, running = null;
+  var worker = null, running = null, waiting = [];
 
   function codeOf(block) { return block.querySelector("pre > code"); }
 
@@ -107,55 +107,100 @@
     emit(text.slice(last));
   }
 
-  function stopRun(note) {
-    if (!running) return;
-    if (worker) { worker.terminate(); worker = null; }
-    running.finish(note);
+  function restore(out) {
+    if (out.made) {
+      if (out.block.parentNode) out.block.parentNode.removeChild(out.block);
+      return;
+    }
+    out.code.innerHTML = out.original.html;
+    if (out.label) out.label.textContent = out.original.label;
+    out.block.classList.remove("cb-ran");
   }
 
-  function startRun(block, run, out) {
-    stopRun("stopped");
+  function idle(job) {
+    job.run.textContent = "▶ run";
+    job.run.setAttribute("aria-label", "Run the sample");
+  }
+
+  function finish(job, note) {
+    idle(job);
+    job.text = job.text.replace(/\r/g, "").replace(/\n+$/, "");
+    paint(job.out.code, job.text);
+    if (job.out.label) job.out.label.textContent = "output · " + note;
+  }
+
+  // One sample runs at a time; a sample started meanwhile waits its turn showing what it showed before
+  function next() {
+    running = waiting.shift() || null;
+    if (!running) return;
+    var job = running, decoder = new TextDecoder(), started = performance.now();
     if (!worker) worker = new Worker(WORKER);
+    job.out.block.classList.add("cb-ran");
+    if (job.out.label) job.out.label.textContent = "running in your browser…";
+    job.out.code.textContent = "";
+    worker.onmessage = function (message) {
+      var data = message.data;
+      if (data.out && job.text.length < LIMIT) {
+        job.text += decoder.decode(data.out, { stream: true });
+        if (job.text.length >= LIMIT) job.text = job.text.slice(0, LIMIT) + "\n[output cut at " + LIMIT + " characters]";
+        paint(job.out.code, job.text.replace(/\r/g, ""));
+      }
+      if (data.exit !== undefined) {
+        var ms = Math.round(performance.now() - started);
+        finish(job, data.exit === 0 ? "ran in your browser in " + ms + " ms" : "exit code " + data.exit);
+        next();
+      }
+      if (data.failed !== undefined) {
+        job.text += "\n" + data.failed;
+        worker.terminate();
+        worker = null;
+        finish(job, "the engine did not load");
+        next();
+      }
+    };
+    worker.postMessage({ files: job.files, main: job.main, budget: job.budget });
+  }
+
+  // Stops a sample that is running or waiting. One stopped before it printed anything shows what it showed before.
+  function cancel(job) {
+    var queued = waiting.indexOf(job);
+    if (queued < 0 && running !== job) return;
+    if (queued >= 0) waiting.splice(queued, 1);
+    else if (worker) { worker.terminate(); worker = null; }
+    if (job.text) {
+      finish(job, "stopped");
+    } else {
+      idle(job);
+      if (job.out.made && !job.ranBefore) {
+        restore(job.out);
+      } else {
+        job.out.code.innerHTML = job.htmlBefore;
+        if (job.out.label) job.out.label.textContent = job.labelBefore;
+        if (!job.ranBefore) job.out.block.classList.remove("cb-ran");
+      }
+    }
+    if (queued < 0) next();
+  }
+
+  function start(block, run, out) {
     var files = {};
     var support = document.querySelectorAll(".codeblock[data-file]");
     for (var i = 0; i < support.length; i++) files[support[i].getAttribute("data-file")] = codeOf(support[i]).textContent;
     var main = block.getAttribute("data-run");
     files[main] = codeOf(block).textContent;
-    var decoder = new TextDecoder(), text = "", started = performance.now();
-    out.block.classList.add("cb-ran");
-    if (out.label) out.label.textContent = "running in your browser…";
-    out.code.textContent = "";
+    var job = { run: run, out: out, files: files, main: main, text: "",
+      budget: Number(block.getAttribute("data-budget")) || BUDGET,
+      htmlBefore: out.code.innerHTML, labelBefore: out.label ? out.label.textContent : "",
+      ranBefore: out.block.classList.contains("cb-ran") };
     run.textContent = "■ stop";
     run.setAttribute("aria-label", "Stop the sample");
-    running = {
-      finish: function (note) {
-        running = null;
-        run.textContent = "▶ run";
-        run.setAttribute("aria-label", "Run the sample");
-        text = text.replace(/\r/g, "").replace(/\n+$/, "");
-        paint(out.code, text);
-        if (out.label) out.label.textContent = "output · " + note;
-      }
-    };
-    worker.onmessage = function (message) {
-      var data = message.data;
-      if (data.out && text.length < LIMIT) {
-        text += decoder.decode(data.out, { stream: true });
-        if (text.length >= LIMIT) text = text.slice(0, LIMIT) + "\n[output cut at " + LIMIT + " characters]";
-        paint(out.code, text.replace(/\r/g, ""));
-      }
-      if (data.exit !== undefined) {
-        var ms = Math.round(performance.now() - started);
-        running.finish(data.exit === 0 ? "ran in your browser in " + ms + " ms" : "exit code " + data.exit);
-      }
-      if (data.failed !== undefined) {
-        text += "\n" + data.failed;
-        worker.terminate();
-        worker = null;
-        running.finish("the engine did not load");
-      }
-    };
-    worker.postMessage({ files: files, main: main, budget: Number(block.getAttribute("data-budget")) || BUDGET });
+    waiting.push(job);
+    if (running) {
+      if (out.label) out.label.textContent = "waiting for the sample that is running…";
+    } else {
+      next();
+    }
+    return job;
   }
 
   var runnable = document.querySelectorAll(".codeblock[data-run]");
@@ -165,25 +210,21 @@
       tools.className = "cb-tools";
       var run = button("run", "▶ run", "Run the sample");
       var resetButton = button("reset", "reset", "Put the sample and its output back");
-      var out = null;
+      var out = null, job = null;
+      var active = function () { return job && (running === job || waiting.indexOf(job) >= 0); };
       var trigger = function () {
-        if (running && run.textContent.indexOf("stop") >= 0) { stopRun("stopped"); return; }
-        if (!out) out = outputFor(block);
+        if (active()) { cancel(job); return; }
+        if (!out || !out.block.parentNode) out = outputFor(block);
         block.classList.add("cb-touched");
-        startRun(block, run, out);
+        job = start(block, run, out);
       };
       var resetCode = makeEditable(block, trigger);
       resetButton.addEventListener("click", function () {
-        if (running && run.textContent.indexOf("stop") >= 0) stopRun("stopped");
+        if (active()) cancel(job);
+        job = null;
         if (resetCode) resetCode();
         if (out) {
-          if (out.made) {
-            out.block.parentNode.removeChild(out.block);
-          } else {
-            out.code.innerHTML = out.original.html;
-            if (out.label) out.label.textContent = out.original.label;
-            out.block.classList.remove("cb-ran");
-          }
+          restore(out);
           out = null;
         }
         block.classList.remove("cb-touched");

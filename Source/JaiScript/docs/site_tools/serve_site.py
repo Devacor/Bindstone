@@ -1,5 +1,5 @@
 """Serves the site locally the way jaiscript.com serves it: the Play pages cross-origin isolated (as play/.htaccess makes
-them on Apache) and .wasm as application/wasm.
+them on Apache), .wasm as application/wasm, and 404.html for a path that is not there.
 
     python docs/site_tools/serve_site.py [--port 8000] [--root docs/site] [--no-isolation]
 
@@ -25,6 +25,18 @@ class SiteHandler(http.server.SimpleHTTPRequestHandler):
             self.send_header("Cross-Origin-Embedder-Policy", "require-corp")
         self.send_header("Cache-Control", "no-store")
         super().end_headers()
+
+    def send_error(self, code, message=None, explain=None):
+        page = pathlib.Path(self.directory) / "404.html"
+        if code != 404 or self.command != "GET" or not page.is_file():
+            super().send_error(code, message, explain)
+            return
+        body = page.read_bytes()
+        self.send_response(404)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
 
 
 def main():

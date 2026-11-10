@@ -1014,7 +1014,7 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::angle_between(left: vector, right: matching_vector) -&gt; float observe radians. every engine"><h3 id="api-d8bdc82ef15f"><code>math::angle_between(left: vector, right: matching_vector) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Radians.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::atan2(y: number or vector, x: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-b58e547463b2"><code>math::atan2(y: number or vector, x: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::atan2(y: number, x: number) -&gt; float observe  every engine"><h3 id="api-2e4ecbb3113f"><code>math::atan2(y: number, x: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::ceil(value: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-a545376d57cb"><code>math::ceil(value: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
@@ -1028,12 +1028,12 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::color(value: math::color) -&gt; math::color construct copies a color; a lone scalar or other vector kind is rejected. every engine"><h3 id="api-e2aa6bbaf8bb"><code>math::color(value: math::color) -&gt; math::color</code></h3><p><strong>Every engine</strong> &middot; construct</p>
 <p>Copies a color; a lone scalar or other vector kind is rejected.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::cos(angle: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-290e932f1169"><code>math::cos(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::cos(angle: number) -&gt; float observe  every engine"><h3 id="api-eb84530cdd24"><code>math::cos(angle: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::cross(left: vector2 or vector3, right: matching_vector) -&gt; number or vector3 observe 2d determinant or 3d cross product. every engine"><h3 id="api-ce38f5a700b0"><code>math::cross(left: vector2 or vector3, right: matching_vector) -&gt; number or vector3</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>2D determinant or 3D cross product.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::degrees_to_radians(angle: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-bf57a4848c41"><code>math::degrees_to_radians(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::degrees_to_radians(angle: number) -&gt; float observe  every engine"><h3 id="api-263d61ee0e51"><code>math::degrees_to_radians(angle: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::distance(left: vector, right: matching_vector) -&gt; float observe vector form; scalar-coordinate form has four arguments. every engine"><h3 id="api-cfe9cb8c4e73"><code>math::distance(left: vector, right: matching_vector) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Vector form; scalar-coordinate form has four arguments.</p>
@@ -1086,7 +1086,7 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::length_squared(vector: vector) -&gt; number observe integral vector result remains exact when representable. every engine"><h3 id="api-45a0664fb9bf"><code>math::length_squared(vector: vector) -&gt; number</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Integral vector result remains exact when representable.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::lerp(start: number or vector or color, end: same_shape, percent: number) -&gt; same_shape observe color interpolation uses oklab. every engine"><h3 id="api-207c9a29c815"><code>math::lerp(start: number or vector or color, end: same_shape, percent: number) -&gt; same_shape</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::lerp(start: number or vector or color, end: same_shape, percent: number or same_shape) -&gt; same_shape observe color interpolation uses oklab. every engine"><h3 id="api-6adc56ae0579"><code>math::lerp(start: number or vector or color, end: same_shape, percent: number or same_shape) -&gt; same_shape</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Color interpolation uses OKLab.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::max(left: number or vector, right: number or vector) -&gt; number or vector observe  every engine"><h3 id="api-660405728f0b"><code>math::max(left: number or vector, right: number or vector) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1094,7 +1094,7 @@ print(to_json(stock.to_array()));</code></pre></div>
 <div class="api-entry" data-provider="core" data-search="math::min(left: number or vector, right: number or vector) -&gt; number or vector observe scalar selected operand retains its kind; vectors component-wise. every engine"><h3 id="api-4f619f197f00"><code>math::min(left: number or vector, right: number or vector) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Scalar selected operand retains its kind; vectors component-wise.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::mix(start: number or vector or color, end: same_shape, percent: number) -&gt; same_shape observe alias of lerp. every engine"><h3 id="api-a8fb53ca59e2"><code>math::mix(start: number or vector or color, end: same_shape, percent: number) -&gt; same_shape</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::mix(start: number or vector or color, end: same_shape, percent: number or same_shape) -&gt; same_shape observe alias of lerp. every engine"><h3 id="api-de18f5ce66d9"><code>math::mix(start: number or vector or color, end: same_shape, percent: number or same_shape) -&gt; same_shape</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Alias of lerp.</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::mix_hsv(start: color, end: color, percent: number) -&gt; color observe  every engine"><h3 id="api-587a4e40b6a8"><code>math::mix_hsv(start: color, end: color, percent: number) -&gt; color</code></h3><p><strong>Every engine</strong> &middot; observe</p>
@@ -1114,11 +1114,11 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::perpendicular(vector: vector2) -&gt; vector2 observe  every engine"><h3 id="api-5f2e1e09c28a"><code>math::perpendicular(vector: vector2) -&gt; vector2</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::pow(base: number or vector, exponent: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-177ddc1199bf"><code>math::pow(base: number or vector, exponent: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::pow(base: number, exponent: number) -&gt; float observe  every engine"><h3 id="api-d3fb71291425"><code>math::pow(base: number, exponent: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::project(vector: vector, onto: matching_vector) -&gt; floating_vector observe  every engine"><h3 id="api-364512c82844"><code>math::project(vector: vector, onto: matching_vector) -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::radians_to_degrees(angle: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-94c0b011bb1a"><code>math::radians_to_degrees(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::radians_to_degrees(angle: number) -&gt; float observe  every engine"><h3 id="api-efe69b9c33bc"><code>math::radians_to_degrees(angle: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::reflect(vector: vector, normal: matching_vector) -&gt; floating_vector observe  every engine"><h3 id="api-3d1057499c06"><code>math::reflect(vector: vector, normal: matching_vector) -&gt; floating_vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
@@ -1134,14 +1134,14 @@ print(to_json(stock.to_array()));</code></pre></div>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::round(value: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-c6265a0558ee"><code>math::round(value: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::sin(angle: number or vector) -&gt; float or vector observe radians. every engine"><h3 id="api-df80855c584e"><code>math::sin(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::sin(angle: number) -&gt; float observe radians. every engine"><h3 id="api-567c32e3594d"><code>math::sin(angle: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 <p>Radians.</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::sqrt(value: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-a0d2ca8ba5ea"><code>math::sqrt(value: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::sqrt(value: number) -&gt; float observe  every engine"><h3 id="api-1507e0ce0049"><code>math::sqrt(value: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::tan(angle: number or vector) -&gt; float or vector observe  every engine"><h3 id="api-00639c0df18b"><code>math::tan(angle: number or vector) -&gt; float or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::tan(angle: number) -&gt; float observe  every engine"><h3 id="api-4c785a0286ed"><code>math::tan(angle: number) -&gt; float</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
-<div class="api-entry" data-provider="core" data-search="math::unmix(start: number or vector, end: same_shape, value: same_shape) -&gt; number or vector observe  every engine"><h3 id="api-8601538a615d"><code>math::unmix(start: number or vector, end: same_shape, value: same_shape) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
+<div class="api-entry" data-provider="core" data-search="math::unmix(start: number or vector or color, end: same_shape, value: number or same_shape) -&gt; number or vector observe  every engine"><h3 id="api-17688506b425"><code>math::unmix(start: number or vector or color, end: same_shape, value: number or same_shape) -&gt; number or vector</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>
 <div class="api-entry" data-provider="core" data-search="math::unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -&gt; same_shape observe  every engine"><h3 id="api-d4ca74dc9b56"><code>math::unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -&gt; same_shape</code></h3><p><strong>Every engine</strong> &middot; observe</p>
 </div>

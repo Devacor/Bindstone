@@ -39,6 +39,7 @@
 #include <jaiscript/detail/return_flow.hpp>
 #include <jaiscript/detail/ref_lvalue.hpp>
 #include <jaiscript/detail/constant_arguments.hpp>
+#include <jaiscript/detail/format_text.hpp>
 #include <jaiscript/detail/regex_library.hpp>
 #include <jaiscript/detail/template_library.hpp>
 
@@ -738,6 +739,39 @@ private:
         if (!bound.is_function() || !eng_.format_literal_callee(&bound.unchecked_as_function())) { return; }
         diag(diag_level::error, c->arguments[0]->location,
              "the format text of 'format' must be a string literal: vformat(fmt, ...) formats a run-time text, and + or a template string joins text");
+    }
+    // print / format over a literal that holds a placeholder: its placeholders and the values after it pair up (the formatter
+    // raises the run-time twin). A trailing skip_newline / skip_flush is no value, and an argument of unknown type may be one:
+    // the counts then err toward the larger, and an unused argument is the run's to report.
+    void check_format_arguments(const call_expr* c, const std::string& name, const std::vector<ctype>& args) {
+        if (!c->literal_format_call() || args.size() != c->arguments.size()) { return; }
+        const script_value bound = eng_.get_variable(name);
+        if (!bound.is_function() || !eng_.format_literal_callee(&bound.unchecked_as_function())) { return; }
+        const std::string_view text = static_cast<const literal_expr*>(c->arguments[0].get())->value.unchecked_as_string();
+        if (!detail::has_format_placeholders(text)) { return; }
+        enum class role : uint8_t { value, control, unsure };
+        const auto role_of = [&](size_t i) {
+            const ctype& t = args[i];
+            const bool control_class = t.kind == ctype::object_k && (t.cls == "skip_newline_t" || t.cls == "skip_flush_t");
+            if (!t.is_unknown() && !t.tentative && !control_class) { return role::value; }
+            if (c->arguments[i]->get_type() == node_type::identifier_expr) {
+                const std::string_view spelled = static_cast<const identifier_expr*>(c->arguments[i].get())->name;
+                if (spelled == "skip_newline" || spelled == "skip_flush") { return role::control; }
+            }
+            return role::unsure;
+        };
+        size_t count = 0;
+        bool unsure = false;
+        const bool every_position = name == "format";   // format drops a control value anywhere, print reads its last argument
+        for (size_t i = 1; i < args.size(); ++i) {
+            const role r = every_position || i + 1 == args.size() ? role_of(i) : role::value;
+            if (r == role::control) { continue; }
+            unsure = unsure || r == role::unsure;
+            ++count;
+        }
+        const detail::format_text_use use = detail::walk_format_text(text, count, detail::format_text_counter{});
+        if (use.agrees(count) || (unsure && use.sequential <= count && use.positional_past == detail::format_text_use::none)) { return; }
+        diag(diag_level::error, c->arguments[0]->location, "the format text of '" + name + "' " + detail::format_text_mismatch(use, count));
     }
     // sleep(seconds): one number, and a place where a run can suspend
     void check_sleep_call(const std::vector<ctype>& args, const source_location& loc) {
@@ -5328,6 +5362,7 @@ private:
                 check_host_call(name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
                 if (name == "format") { check_format_text(c, args); }
+                if (name == "print" || name == "format") { check_format_arguments(c, name, args); }
                 // a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
                 if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine_access::k_math_alias_rows) { return ctype::make(ctype::float_k); }
                 return host_result_type(name);

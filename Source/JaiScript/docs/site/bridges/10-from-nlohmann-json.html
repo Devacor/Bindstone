@@ -62,7 +62,6 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>free <code>to_json(json&amp;, const T&amp;)</code> and <code>from_json(const json&amp;, T&amp;)</code></td><td>a member <code>save</code> / <code>load</code> pair, or free two-parameter <code>save(Archive&amp;, const T&amp;)</code> / <code>load(Archive&amp;, T&amp;)</code></td></tr>
 <tr><td><code>NLOHMANN_DEFINE_TYPE_*_WITH_DEFAULT</code>, a missing key keeps the member's default</td><td><code>if (ar.has_property("best")) { ar(JAI_NVP(best)); }</code> in a <code>load</code>; a <code>property_owner</code> keeps the initializer of every property the record lacks</td></tr>
 <tr><td>an <code>adl_serializer&lt;T&gt;</code> specialization for a type you cannot edit</td><td>free <code>serialize</code>, or <code>save</code> / <code>load</code>, beside the type</td></tr>
-<tr><td>one macro listing the members</td><td>or no function at all: a <code>jai::property_owner</code> whose members are <code>JAI_PROPERTY</code> saves and loads them by name, and the same declaration makes them reflected and script-visible (<a href="../embedding/02-dynamic-binder.html">dynamic_binder</a>)</td></tr>
 </tbody></table></div>
 <h3 id="text-and-values">Text and values<a class="hlink" href="#text-and-values" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th>nlohmann::json</th><th>JaiScript</th></tr></thead><tbody>
@@ -85,9 +84,21 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 </tbody></table></div>
 
 <h2 id="a-save-type-converted">A save type converted<a class="hlink" href="#a-save-type-converted" aria-label="link">&#8203;</a></h2>
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (nlohmann::json)</span><pre><code class="lang-cpp">#include &lt;nlohmann/json.hpp&gt;
-
-using nlohmann::json;
+<p>One save type, five ways. The macro and function forms keep every type and member at the same line number;
+<code>JAI_PROPERTY</code> is shorter.</p>
+<div class="tabs" id="save-tabs">
+<div class="tab-list" role="tablist" aria-label="Library and form" hidden>
+<button type="button" role="tab" id="save-tab-nlohmann-non-intrusive" aria-controls="save-nlohmann-non-intrusive" aria-selected="true">nlohmann: non-intrusive</button>
+<button type="button" role="tab" id="save-tab-nlohmann-intrusive" aria-controls="save-nlohmann-intrusive" aria-selected="false" tabindex="-1">nlohmann: intrusive</button>
+<button type="button" role="tab" id="save-tab-non-intrusive" aria-controls="save-non-intrusive" aria-selected="false" tabindex="-1">JaiScript: non-intrusive</button>
+<button type="button" role="tab" id="save-tab-member" aria-controls="save-member" aria-selected="false" tabindex="-1">JaiScript: intrusive</button>
+<button type="button" role="tab" id="save-tab-intrusive" aria-controls="save-intrusive" aria-selected="false" tabindex="-1">JaiScript: JAI_PROPERTY</button>
+</div>
+<div class="tab-panel" id="save-nlohmann-non-intrusive" role="tabpanel" aria-labelledby="save-tab-nlohmann-non-intrusive" tabindex="0">
+<p>A macro after each type lists its members.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (nlohmann::json, non-intrusive)</span><pre><code class="lang-cpp">#include &lt;nlohmann/json.hpp&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
 
 enum class Mood { calm = 0, angry = 1 };
 
@@ -95,7 +106,11 @@ struct Item {
     std::string name;
     int count = 1;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item, name, count)
+
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(Item,
+    name,
+    count
+)
 
 struct SaveGame {
     int level = 1;
@@ -103,83 +118,252 @@ struct SaveGame {
     std::vector&lt;Item&gt; items;
     Mood mood = Mood::calm;
 };
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SaveGame, level, hero, items, mood)
 
-json j = save;
-std::string text = j.dump();
-SaveGame back = json::parse(text).get&lt;SaveGame&gt;();</code></pre></div>
-<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{"hero":"Alice","items":[{"count":1,"name":"rope"},{"count":3,"name":"torch"}],"level":7,"mood":1}</code></pre></div>
-<p>The same save in JaiScript, two ways. <strong>Non-intrusive</strong> is the counterpart of the macros above: the structs stay untouched and a free <code>serialize</code> beside each one names its members. <strong>Intrusive</strong> puts the description in the class: derive <code>jai::property_owner</code>, declare each member with <code>JAI_PROPERTY</code>, and no function is written at all.</p>
-<div class="tabs" id="save-tabs">
-<div class="tab-list" role="tablist" aria-label="Non-intrusive or intrusive" hidden>
-<button type="button" role="tab" id="save-tab-non-intrusive" aria-controls="save-non-intrusive" aria-selected="true">Non-intrusive</button>
-<button type="button" role="tab" id="save-tab-intrusive" aria-controls="save-intrusive" aria-selected="false" tabindex="-1">Intrusive</button>
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(SaveGame,
+    level,
+    hero,
+    items,
+    mood
+)
+
+int main() {
+    Item rope;
+    rope.name = "rope";
+    Item torch;
+    torch.name = "torch";
+    torch.count = 3;
+
+    SaveGame save;
+    save.level = 7;
+    save.hero = "Alice";
+    save.items = {rope, torch};
+    save.mood = Mood::angry;
+
+    nlohmann::json j = save;
+    std::string text = j.dump();
+
+    SaveGame back = nlohmann::json::parse(text).get&lt;SaveGame&gt;();
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="save-nlohmann-intrusive" role="tabpanel" aria-labelledby="save-tab-nlohmann-intrusive" tabindex="0">
+<p>The macro sits inside each type.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (nlohmann::json, intrusive)</span><pre><code class="lang-cpp">#include &lt;nlohmann/json.hpp&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+enum class Mood { calm = 0, angry = 1 };
+
+struct Item {
+    std::string name;
+    int count = 1;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(Item,
+        name,
+        count
+    )
+};
+
+struct SaveGame {
+    int level = 1;
+    std::string hero;
+    std::vector&lt;Item&gt; items;
+    Mood mood = Mood::calm;
+
+    NLOHMANN_DEFINE_TYPE_INTRUSIVE(SaveGame,
+        level,
+        hero,
+        items,
+        mood
+    )
+};
+
+int main() {
+    Item rope;
+    rope.name = "rope";
+    Item torch;
+    torch.name = "torch";
+    torch.count = 3;
+
+    SaveGame save;
+    save.level = 7;
+    save.hero = "Alice";
+    save.items = {rope, torch};
+    save.mood = Mood::angry;
+
+    nlohmann::json j = save;
+    std::string text = j.dump();
+
+    SaveGame back = nlohmann::json::parse(text).get&lt;SaveGame&gt;();
+}</code></pre></div>
 </div>
 <div class="tab-panel" id="save-non-intrusive" role="tabpanel" aria-labelledby="save-tab-non-intrusive" tabindex="0">
+<p>A free <code>serialize</code> replaces each non-intrusive macro.</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, non-intrusive)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
 
-// Item and SaveGame stay exactly as above: plain structs, nothing added inside them.
+enum class Mood { calm = 0, angry = 1 };
 
-template&lt;class Archive&gt;
-void serialize(Archive&amp; ar, Item&amp; item) {
+struct Item {
+    std::string name;
+    int count = 1;
+};
+
+template&lt;class Archive&gt; void serialize(Archive&amp; ar, Item&amp; item) {
     ar("name", item.name);
     ar("count", item.count);
 }
 
-template&lt;class Archive&gt;
-void serialize(Archive&amp; ar, SaveGame&amp; save) {
+struct SaveGame {
+    int level = 1;
+    std::string hero;
+    std::vector&lt;Item&gt; items;
+    Mood mood = Mood::calm;
+};
+
+template&lt;class Archive&gt; void serialize(Archive&amp; ar, SaveGame&amp; save) {
     ar("level", save.level);
     ar("hero", save.hero);
     ar("items", save.items);
     ar("mood", save.mood);
 }
 
-auto eng = jai::engine::make();
-std::string text = jai::to_json(*eng, save, 0);
-SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);</code></pre></div>
-<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{"level": 7,"hero": "Alice","items": [{"name": "rope","count": 1},{"name": "torch","count": 3}],"mood": 1}</code></pre></div>
-<ul>
-<li>The functions are found by argument-dependent lookup, so they sit in the namespace of the type they describe. A free <code>save</code> / <code>load</code> pair works the same way when writing and reading differ.</li>
-<li>Properties are written in call order, flat at the root. A <code>serialize</code> written as a member of the struct writes the same text.</li>
-<li>A missing key is an error: loading <code>{"level": 3}</code> throws <code>jai::serialization_error</code>, <code>Property 'hero' not found during deserialization</code> (nlohmann throws <code>out_of_range</code>, <code>key 'hero' not found</code>). <code>if (ar.has_property("hero"))</code> in a <code>load</code> makes a key optional.</li>
-</ul>
+int main() {
+    Item rope;
+    rope.name = "rope";
+    Item torch;
+    torch.name = "torch";
+    torch.count = 3;
+
+    SaveGame save;
+    save.level = 7;
+    save.hero = "Alice";
+    save.items = {rope, torch};
+    save.mood = Mood::angry;
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, save, 0);
+
+    SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="save-member" role="tabpanel" aria-labelledby="save-tab-member" tabindex="0">
+<p>A member <code>serialize</code> replaces each intrusive macro.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, intrusive)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+enum class Mood { calm = 0, angry = 1 };
+
+struct Item {
+    std::string name;
+    int count = 1;
+
+    template&lt;class Archive&gt; void serialize(Archive&amp; ar) {
+        ar(JAI_NVP(name));
+        ar(JAI_NVP(count));
+    }
+};
+
+struct SaveGame {
+    int level = 1;
+    std::string hero;
+    std::vector&lt;Item&gt; items;
+    Mood mood = Mood::calm;
+
+    template&lt;class Archive&gt; void serialize(Archive&amp; ar) {
+        ar(JAI_NVP(level));
+        ar(JAI_NVP(hero));
+        ar(JAI_NVP(items));
+        ar(JAI_NVP(mood));
+    }
+};
+
+int main() {
+    Item rope;
+    rope.name = "rope";
+    Item torch;
+    torch.name = "torch";
+    torch.count = 3;
+
+    SaveGame save;
+    save.level = 7;
+    save.hero = "Alice";
+    save.items = {rope, torch};
+    save.mood = Mood::angry;
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, save, 0);
+
+    SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);
+}</code></pre></div>
 </div>
 <div class="tab-panel" id="save-intrusive" role="tabpanel" aria-labelledby="save-tab-intrusive" tabindex="0">
-<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, intrusive)</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/macros.hpp&gt;
+<p>Each type derives <code>jai::property_owner</code> and declares its members with <code>JAI_PROPERTY</code>; no function is written.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript, JAI_PROPERTY)</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/macros.hpp&gt;
 #include &lt;jaiscript/properties/property_serialization.hpp&gt;
 #include &lt;jaiscript/serialization/convenience.hpp&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
 
-class Item : public jai::property_owner&lt;Item&gt; {
-public:
+enum class Mood { calm = 0, angry = 1 };
+
+struct Item : jai::property_owner&lt;Item&gt; {
     JAI_PROPERTY((std::string), name);
     JAI_PROPERTY((int), count, 1);
 };
 
-class SaveGame : public jai::property_owner&lt;SaveGame&gt; {
-public:
+struct SaveGame : jai::property_owner&lt;SaveGame&gt; {
     JAI_PROPERTY((int), level, 1);
     JAI_PROPERTY((std::string), hero);
     JAI_PROPERTY((std::vector&lt;Item&gt;), items);
     JAI_PROPERTY((Mood), mood, Mood::calm);
 };
 
-auto eng = jai::engine::make();
-SaveGame save;
-std::string text = jai::to_json(*eng, save, 0);
-SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);</code></pre></div>
+int main() {
+    Item rope;
+    rope.name = "rope";
+    Item torch;
+    torch.name = "torch";
+    torch.count = 3;
+
+    SaveGame save;
+    save.level = 7;
+    save.hero = "Alice";
+    save.items = {rope, torch};
+    save.mood = Mood::angry;
+
+    auto eng = jai::engine::make();
+    std::string text = jai::to_json(*eng, save, 0);
+
+    SaveGame back = jai::from_json&lt;SaveGame&gt;(*eng, text);
+}</code></pre></div>
+</div>
+</div>
+<div class="tablewrap"><table><thead><tr><th></th><th>nlohmann: non-intrusive</th><th>nlohmann: intrusive</th><th>JaiScript: non-intrusive</th><th>JaiScript: intrusive</th><th>JaiScript: JAI_PROPERTY</th></tr></thead><tbody>
+<tr><td>Headers</td><td colspan="2"><code>nlohmann/json.hpp</code></td><td colspan="2"><code>convenience.hpp</code></td><td>plus <code>properties/macros.hpp</code> and <code>property_serialization.hpp</code></td></tr>
+<tr><td>Where the member list lives</td><td>a macro after the type</td><td>a macro inside the type</td><td>a free function after the type, found by ADL</td><td>a member function</td><td>the declarations themselves</td></tr>
+<tr><td>How a member is named</td><td colspan="2">its name in the macro</td><td><code>ar("hero", save.hero)</code></td><td><code>JAI_NVP(hero)</code></td><td>by its declaration</td></tr>
+<tr><td>When writing and reading differ</td><td colspan="2">free <code>to_json</code> and <code>from_json</code></td><td>free <code>save</code> and <code>load</code></td><td colspan="2">member <code>save</code> and <code>load</code></td></tr>
+<tr><td>Text out and back</td><td colspan="2"><code>json j = save; j.dump()</code>, <code>json::parse(text).get&lt;SaveGame&gt;()</code></td><td colspan="3"><code>jai::to_json(*eng, save, 0)</code>, <code>jai::from_json&lt;SaveGame&gt;(*eng, text)</code></td></tr>
+<tr><td>Key order</td><td colspan="2">alphabetical</td><td colspan="2">the order of the calls</td><td>name order</td></tr>
+<tr><td>Reflected and visible to scripts</td><td colspan="4">no</td><td>yes (<a href="../embedding/02-dynamic-binder.html">dynamic_binder</a>)</td></tr>
+</tbody></table></div>
+<p>Both nlohmann forms write:</p>
+<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{"hero":"Alice","items":[{"count":1,"name":"rope"},{"count":3,"name":"torch"}],"level":7,"mood":1}</code></pre></div>
+<p>The JaiScript free and member functions write:</p>
+<div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{"level": 7,"hero": "Alice","items": [{"name": "rope","count": 1},{"name": "torch","count": 3}],"mood": 1}</code></pre></div>
+<p>The <code>JAI_PROPERTY</code> form writes:</p>
 <div class="codeblock cb-plain"><span class="cb-label">text</span><pre><code class="lang-plain">{"hero": "Alice","items": [{"count": 1,"name": "rope"},{"count": 3,"name": "torch"}],"level": 7,"mood": 1}</code></pre></div>
+<p>A missing key: loading <code>{"level": 3}</code>, nlohmann throws <code>out_of_range</code>
+(<code>key 'hero' not found</code>) unless the type uses a <code>_WITH_DEFAULT</code> macro; the JaiScript functions
+throw <code>jai::serialization_error</code> (<code>Property 'hero' not found during deserialization</code>) unless a
+<code>load</code> reads the key under <code>if (ar.has_property("hero"))</code>; the <code>JAI_PROPERTY</code> form
+gives level 3 and every other property its initializer.</p>
 <ul>
-<li>The same declarations make every member reflected and visible to scripts (<a href="../embedding/02-dynamic-binder.html">dynamic_binder</a>), and a member reads as before: <code>save.level = 7;</code>, <code>save.hero.get()</code> where an expression needs the plain value, <code>save.items-&gt;push_back(Item{})</code> to reach the vector.</li>
-<li>A <code>property_owner</code> copies and moves as the struct it replaces does: it is an element of a <code>std::vector</code>, and <code>from_json&lt;SaveGame&gt;</code> returns one by value. An object two members share is a <code>std::shared_ptr</code> member, as in any archive (<a href="04-from-cereal.html#pointers-and-identity">Pointers and identity</a>).</li>
-<li>Properties are written in name order. A missing key is not an error: loading <code>{"level": 3}</code> gives level 3 and every other property its initializer, so adding a <code>JAI_PROPERTY</code> needs no migration code.</li>
-</ul>
-</div>
-</div>
-<p>Both forms share the rest:</p>
-<ul>
-<li><strong>The text is an archive record.</strong> A root that is not a record (a number, a vector, a map, an owning pointer) sits under <code>"value0"</code>: <code>jai::to_json(*eng, std::vector&lt;int&gt;{1, 2, 3}, 0)</code> is <code>{"value0": [1,2,3]}</code>. A <code>std::optional</code> member is written as <code>[has_value, value]</code>, for example <code>"best": [true,12]</code>.</li>
-<li><strong>The reader is forgiving about order.</strong> <code>from_json&lt;T&gt;</code> finds properties by name in any order and skips keys the type does not read. Optional, variant and pointer members still expect their archive shapes.</li>
-<li><strong>Malformed text throws</strong> <code>jai::serialization_error</code>: <code>Expected '"' in JSON</code>.</li>
+<li><strong>A property reads as the member did</strong>: <code>save.level = 7;</code>, <code>save.hero.get()</code> where an expression needs the plain value, <code>save.items-&gt;push_back(Item{})</code> to reach the vector. A <code>property_owner</code> copies and moves as the struct it replaces does.</li>
+<li><strong>The text is an archive record.</strong> A root that is not a record (a number, a vector, a map, an owning pointer) sits under <code>"value0"</code>: <code>jai::to_json(*eng, std::vector&lt;int&gt;{1, 2, 3}, 0)</code> is <code>{"value0": [1,2,3]}</code>.</li>
+<li><strong>The reader finds properties by name</strong> in any order and skips keys the type does not read; optional, variant and pointer members still expect their archive shapes. Malformed text throws <code>jai::serialization_error</code>: <code>Expected '"' in JSON</code>.</li>
 </ul>
 
 <h2 id="json-in-script">JSON in script<a class="hlink" href="#json-in-script" aria-label="link">&#8203;</a></h2>

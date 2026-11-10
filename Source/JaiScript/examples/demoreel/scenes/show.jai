@@ -2,7 +2,7 @@
 // the 8-cube opens, each a dimension of JaiScript. A slide counts itself in with a
 // big word, a code card slides in and types itself in syntax colours, a live
 // demonstration plays beside it and three captions run along the lower third;
-// at the end of its four bars it all flies out and the feature lights its pip
+// at the end of its three bars it all flies out and the feature lights its pip
 // in the checklist. The code is the language's own: every script card runs.
 
 function rgb(int r, int g, int b) -> int { return r * 65536 + g * 256 + b; }
@@ -127,7 +127,7 @@ class Deck {
 	float beat = 0.48387097;
 	float bar = 1.93548388;
 	float first = 1.93548388;   // the first slide's downbeat: bar 1
-	float span = 7.74193552;    // four bars a slide
+	float span = 5.80645164;    // three bars a slide
 
 	// the layout, in cells and pixels, refreshed every frame
 	int cols = 0;
@@ -436,14 +436,14 @@ class Deck {
 		// the captions under it
 		int br = r0 + card_h + 2;
 		for (int k = 0; k < s.bullets.size(); ++k) {
-			float bk = ease_out((lt - 1.6 - k * 1.1) / 0.4);
+			float bk = ease_out((lt - 1.3 - k * 0.85) / 0.4);
 			if (bk <= 0.0) { continue; }
 			int bshift = math::itrunc((bk - 1.0 - out_k) * (split + 4));
 			int row = br + k * 2;
 			if (row >= rows - 2) { break; }
 			fill(grid, col_px(2 + bshift), row_px(row), col_px(3 + bshift), row_px(row + 1), axis_ink + 9);
 			string line = s.bullets[k];
-			int shown = math::itrunc((lt - 1.6 - k * 1.1) * 40.0);
+			int shown = math::itrunc((lt - 1.3 - k * 0.85) * 48.0);
 			txt_put(4 + bshift, row, line.substr(0, shown > line.size() ? line.size() : (shown < 0 ? 0 : shown)), rgb(238, 236, 255));
 		}
 		// the demonstration, sliding in from the right under the cube's window
@@ -459,12 +459,12 @@ class Deck {
 	// the code, typed in at a steady clip with a block cursor; the debugging slide
 	// keeps a breakpoint in the gutter and, once paused, highlights the line it holds
 	void draw_code(var& grid, var& s, int c0, int r0, int card_w, float lt, int d) {
-		int typed = math::itrunc((lt - 0.55) * 42.0);
+		int typed = math::itrunc((lt - 0.55) * 60.0);
 		int lines = s.code.size();
 		int left = c0 + 4;
 		int room = card_w - 6;
 		bool debugging = d == 7;
-		int step_line = debugging && lt > 3.5 ? 2 : -1;
+		int step_line = debugging && lt > 2.9 ? 2 : -1;
 		for (int li = 0; li < lines; ++li) {
 			int row = r0 + 2 + li;
 			txt_put(c0 + 1, row, li + 1 < 10 ? ` ${li + 1}` : `${li + 1}`, rgb(84, 90, 140));
@@ -537,7 +537,7 @@ class Deck {
 	// and back into an object
 	void demo_archive(var& grid, int c0, int r0, int c1, int r1, float lt) {
 		var json = ["{\"$type\":\"Spark\",", " \"$val\":{\"hp\":3,", "         \"name\":\"ember\"}}"];
-		float out_k = lt < 4.2 ? ease_out((lt - 0.8) / 1.4) : 1.0 - ease_out((lt - 4.6) / 1.2);
+		float out_k = lt < 3.1 ? ease_out((lt - 0.6) / 1.1) : 1.0 - ease_out((lt - 3.4) / 1.0);
 		float k = 1.0 - out_k * 0.6;
 		int box_w = 12;
 		int bx = c0 + 2;
@@ -556,7 +556,7 @@ class Deck {
 		for (int q = 0; q < 5; ++q) {
 			float f = lt * 1.3 + q * 0.2;
 			f -= math::floor(f);
-			if (lt >= 4.2) { f = 1.0 - f; }
+			if (lt >= 3.1) { f = 1.0 - f; }
 			dot(grid, ax + (bx2 - ax) * f, fy, 0.9, hyper + 1 * 12 + 10);
 		}
 		int chars = math::itrunc(out_k * 80.0);
@@ -569,8 +569,8 @@ class Deck {
 				txt_glyph(jc + ci, by + li, line[ci] + 0, ink[ci]);
 			}
 		}
-		txt_put(c0 + 2, r1 - 2, lt < 4.2 ? "to_json(s)    >>" : "<<    from_json(j)", INK_FUNC);
-		if (lt > 5.4) { txt_put(c0 + 2, r1 - 3, "t.name == \"ember\"", INK_STR); }
+		txt_put(c0 + 2, r1 - 2, lt < 3.1 ? "to_json(s)    >>" : "<<    from_json(j)", INK_FUNC);
+		if (lt > 4.2) { txt_put(c0 + 2, r1 - 3, "t.name == \"ember\"", INK_STR); }
 	}
 
 	// THREE: an inspector built from reflect::fields, its values live
@@ -580,7 +580,7 @@ class Deck {
 		var types = ["string", "int", "float", "bool", "array"];
 		int hp = 900 - math::itrunc(lt * 61.0) % 900;
 		float speed = 2.5 + math::sin(lt * 2.1) * 1.5;
-		var vals = ["\"lich\"", `${hp}`, gfx.fmt1(speed), lt > 3.0 ? "true" : "false", "[3 items]"];
+		var vals = ["\"lich\"", `${hp}`, gfx.fmt1(speed), lt > 2.4 ? "true" : "false", "[3 items]"];
 		int pick = math::itrunc(lt / (beat * 2.0)) % 5;
 		for (int k = 0; k < 5; ++k) {
 			int row = r0 + 3 + k;
@@ -622,7 +622,7 @@ class Deck {
 		}
 		float step = live_last < 0.0 || lt < live_last ? 0.0 : lt - live_last;
 		live_last = lt;
-		if (live_at < 0.0 && lt >= 3.85) {
+		if (live_at < 0.0 && lt >= 2.88) {
 			live_at = lt;
 			if (!live_was_live) {
 				import(SCENES_DIR + "/live/spin_tweaked.jai");
@@ -664,7 +664,7 @@ class Deck {
 		int bands = 8;
 		int bh = (y1 - y0) / bands;
 		if (bh < 1) { return; }
-		float sweep = ease_out(lt / 3.0) * 1.0;
+		float sweep = ease_out(lt / 2.2) * 1.0;
 		int reach = x0 + math::itrunc((x1 - x0) * (sweep > 1.0 ? 1.0 : sweep));
 		for (int b = 0; b < bands; ++b) {
 			int by = y0 + b * bh;
@@ -681,7 +681,7 @@ class Deck {
 				if (reach < x1 && reach > x0) { grid[base + reach] = ui + 15; }
 			}
 		}
-		if (lt > 3.2) { txt_put(c0 + 2, cell_row(y1) - 1, " 8 cores . 1 frame . same bytes ", rgb(238, 236, 255)); }
+		if (lt > 2.4) { txt_put(c0 + 2, cell_row(y1) - 1, " 8 cores . 1 frame . same bytes ", rgb(238, 236, 255)); }
 	}
 
 	// SIX: one emitter, four receivers; a pulse runs down every wire on the beat
@@ -712,8 +712,8 @@ class Deck {
 
 	// SEVEN: paused on the breakpoint, once per call: the locals and the call stack
 	void demo_debugger(var& grid, int c0, int r0, int c1, int r1, float lt) {
-		bool paused = lt > 3.5;
-		int n = paused ? math::itrunc((lt - 3.5) / (beat * 2.0)) % 5 : 0;
+		bool paused = lt > 2.9;
+		int n = paused ? math::itrunc((lt - 2.9) / (beat * 2.0)) % 5 : 0;
 		fill(grid, col_px(c0 + 1), row_px(r0), col_px(c1 - 1), row_px(r0 + 1), paused ? ui + 13 : ui + 11);
 		txt_put(c0 + 2, r0, paused ? " PAUSED  breakpoint  hero.jai:3 " : " running ", paused ? rgb(255, 250, 230) : rgb(170, 170, 210));
 		txt_put(c0 + 2, r0 + 2, "LOCALS", rgb(150, 146, 210));
@@ -752,6 +752,6 @@ class Deck {
 			dot(grid, x0 + 2 + bw + gap * f, lane_a, 1.2, jai + 10);
 			dot(grid, x1 - 2 - bw - gap * f, lane_b, 1.2, cpp + 10);
 		}
-		txt_put(c0 + 2, r1 - 2, lt > 3.0 ? "print(roll(20));  ->  11" : "print(roll(20));", INK_FUNC);
+		txt_put(c0 + 2, r1 - 2, lt > 2.4 ? "print(roll(20));  ->  11" : "print(roll(20));", INK_FUNC);
 	}
 }

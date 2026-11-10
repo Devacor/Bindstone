@@ -55,7 +55,7 @@ GLOOM_SHOWCASE_HALF=e1e62cb65c9774fe
 GLOOM_SHOWCASE_ASCII=d8e16c271412bf5d
 GLOOM_SOUND="24 effects, 136535 bytes, bank 4270573572, 25 cues 1838541177"
 GLOOM_SHIM_FRAMES=20918499
-DEMOREEL_STREAM=f6ca3c4687fa2f74
+DEMOREEL_STREAM=04c2f0009cddf0e4
 DEMOREEL_JULIA_STREAM=2006425744
 CRAWLER_STATE=2459230215
 CRAWLER_GOD_STATE=4133945146
@@ -268,7 +268,7 @@ gate_demoreel() {
 	# EIGHT's FOUR slide reloads scenes/live/spin_tweaked.jai while it runs, with parallel rows on
 	for backend in vm interp; do
 		hash_on "$backend" || continue
-		run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 40 w 120 h 40 scene 0 at 32.4 pix sext workers 1
+		run_logged "$BIN/jaiscript" --backend="$backend" demoreel.jai -- frames 40 w 120 h 40 scene 0 at 23.4 pix sext workers 1
 		want "demoreel $backend: EIGHT did not reload its live module" "live reloads 1\$"
 	done
 	# the soundtrack's cues and the video frames

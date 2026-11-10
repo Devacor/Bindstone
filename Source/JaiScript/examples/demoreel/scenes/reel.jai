@@ -146,7 +146,7 @@ class Reel {
 		ui_shine = ui.add(255, 255, 255);
 		ui_shadow = ui.add(4, 2, 12);
 		ui_edge = ui.add(255, 244, 200);
-		bars = [40, 6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 24, 4];
+		bars = [32, 6, 6, 6, 7, 7, 8, 8, 6, 21, 8, 24, 4];
 		seed_slots = [16, 3, 4, 5, 6, 8, 9, 10, 13, 15, 17, 23, 21];
 		for (int i = 0; i <= intro_idx; ++i) {
 			var probe = make_scene(i);

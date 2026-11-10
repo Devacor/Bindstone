@@ -82,7 +82,7 @@ public:
             
             const char* script = R"(
                 class Point3D {
-                    Vector2D position = null;
+                    Vector2D position = Vector2D(0, 0);
                     int z = 0;
                     
                     Point3D(double x, double y, int z) {
@@ -431,7 +431,7 @@ public:
 
         test("a_method_bodys_returns_and_scalar_stores_follow_its_receivers_layout", [this]() {
             // bare int, float and var fields stored from arithmetic in a loop (a var field holding an int taking a float, one holding a float
-            // taking an int), an int field taking a float's conversion, bare fields and a program-scope name returned, on the class and on a subclass that takes the name as a field;
+            // taking an int), an int field taking a float's cast, bare fields and a program-scope name returned, on the class and on a subclass that takes the name as a field;
             // then a reload that moves the fields and makes the name a field of the class itself
             auto e = make_engine();
             stdlib::register_all(*e);
@@ -439,7 +439,7 @@ public:
                 int G = 7;
                 class Acc { int n = 0; float f = 0.5; var v = 1; var u = 1.5;
                     void step(int k) { for (int i = 0; i < k; ++i) { n = n + 2; f = f + 1.5; v = v + 1; } }
-                    void blend() { for (int i = 0; i < 2; ++i) { v = v + 0.25; n = f * 2.0; u = i + 3; } }
+                    void blend() { for (int i = 0; i < 2; ++i) { v = v + 0.25; n = cast<int>(f * 2.0); u = i + 3; } }
                     int get() { return n; } float getf() { return f; } var getv() { return v; } int glob() { return G; } }
                 class Sub : Acc { int G = 70; }
                 Acc a = Acc(); Sub b = Sub();
@@ -635,7 +635,7 @@ public:
                 auto count_after_scope = get_destructor_count();
 
                 // Test 2: Destruction on reassignment
-                auto r = Resource("temp");
+                var r = Resource("temp");
                 r = Resource("replacement"); // Should destroy "temp"
                 auto count_after_reassign = get_destructor_count();
 

@@ -985,6 +985,13 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				const auto* identifier = static_cast<const identifier_expr*>(a);
 				if (identifier->global_qualified) return "a reference argument spelled ::name";
 				if (identifier->slot_index == SIZE_MAX) return "a reference argument that is not a local";   // a global, a field or a method name binds through the caller's rules
+				if (p.ref_store_unproven) {   // a float store a variable that is not a float may refuse: the refusal names the parameter
+					const type_info* held = nullptr;
+					if (frame && identifier->slot_index < frame->size()) { held = (*frame)[identifier->slot_index]; }
+					else if (auto found = callable_.slot_types.find(static_cast<uint32_t>(identifier->slot_index)); found != callable_.slot_types.end()) { held = found->second; }
+					if (held && held->is_reference()) { held = held->element_type().get(); }
+					if (!held || held->base_type != script_value_type::jai_float_type) return "a reference parameter whose float store its variable may refuse";
+				}
 				if (p.type && !any_type(p.type.get()) && p.type->type_name != "auto") {
 					// the alias names the caller's variable in the parameter's place, skipping the bind's admission and the parameter's
 					// declared type at the stores: only a variable statically of that type (a local declared it, a
@@ -1008,6 +1015,7 @@ const char* vm_compiler::inline_eligible(const call_expr* call, const function_d
 				const auto declared = callable_.slot_types.find(static_cast<uint32_t>(id->slot_index));
 				if (declared == callable_.slot_types.end() || !declared->second || declared->second->is_reference() || declared->second->base_type != script_value_type::jai_array_type) return "a reference argument that may not be an lvalue";
 				if (i < captures.size() && captures[i] != 0) return "an element a later argument may move";   // the call binds it where it is evaluated
+				if (p.ref_store_unproven) return "a reference parameter whose float store its element may refuse";
 				continue;
 			}
 			return "a reference argument that is not a name or an element";

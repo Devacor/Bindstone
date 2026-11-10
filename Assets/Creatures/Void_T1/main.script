@@ -17,7 +17,7 @@ class Voidling : CreatureKind {
 				if (phased != null) {
 					teleportNear(phasing, 3);
 					// every forward phase costs a quarter of its life, straight from health
-					changeHealth(-math::round(stats().health * 0.25));
+					changeHealth(-cast<int>(math::round(stats().health * 0.25)));
 					// for three seconds after the blink every point the Voidling would take lands on its victim instead
 					phased.absorbFor(networkId(), 1.0, 1.0);
 					redirectTarget = phasing;
@@ -52,7 +52,7 @@ class Voidling : CreatureKind {
 				// never land inside the well's arrival radius: a blink is a strike, not a leak
 				if (d2 > 16.0 && wellD2 > 81.0 && teleportNear(prey, 2)) {
 					// every forward phase costs a quarter of its life, straight from health
-					changeHealth(-math::round(stats().health * 0.25));
+					changeHealth(-cast<int>(math::round(stats().health * 0.25)));
 					blinkCooldown = 8.0;
 					activeTarget = 0;
 					targeting().clear();

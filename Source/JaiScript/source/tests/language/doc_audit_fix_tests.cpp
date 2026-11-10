@@ -202,7 +202,9 @@ public:
             // a program's free functions of one name are an overload set too
             expect("int f(int a) { return 1; } int f(bool b) { return 2; } var out = \"\"; try { f(\"s\"); } catch (e) { out += e; } out;",
                    "No overload of 'f' takes (string)", "free functions at run time", load::warn_region);
-            expect("void h(bool b) { } bool k = \"s\"; h(\"s\"); k;", "true", "a lone bool slot takes a string's truthiness", load::strict);
+            expect_load_error("void h(bool b) { } h(\"s\");", "argument 1 of 'h': cannot pass 'string' to 'b' declared 'bool': write !x.empty() or an explicit comparison",
+                              "a lone bool parameter at load");
+            expect("bool h(bool b) { return b; } var s = \"s\"; bool k = s; to_string(k) + to_string(h(s));", "truetrue", "a var's string keeps its truthiness in a lone bool slot", load::strict);
             expect("class M { int m(int a) { return 1; } int m(bool b) { return 2; } } to_string(M().m(true)) + to_string(M().m(3));", "21",
                    "exact overloads still pick", load::strict);
         });

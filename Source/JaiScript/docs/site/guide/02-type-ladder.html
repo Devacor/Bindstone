@@ -57,6 +57,7 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>string</code></td><td><code>""</code></td></tr>
 <tr><td><code>array&lt;T&gt;</code> / <code>map&lt;K, V&gt;</code></td><td>empty, of the declared type</td></tr>
 <tr><td>a class <code>T</code></td><td>default-constructed, as <code>T()</code></td></tr>
+<tr><td>an enum <code>E</code></td><td>its first declared value</td></tr>
 <tr><td><code>var</code>, <code>shared_ptr&lt;T&gt;</code>, <code>weak_ptr&lt;T&gt;</code>, <code>function</code></td><td><code>null</code></td></tr>
 </tbody></table></div>
 <p>Parentheses and braces construct with arguments: <code>T x(args);</code> and <code>T x{args};</code> call a constructor, <code>T x();</code> and <code>T x{};</code> default-construct, and a primitive takes one value or its zero (<code>int lives{3};</code>). A class that declares no constructor takes its field values in declaration order instead (<code>Point p{1, 2};</code>, aggregate initialization, in <a href="07-classes.html">Classes</a>).</p>
@@ -69,7 +70,7 @@ int lives{3};         // a primitive takes one value in braces
 print("a=({}, {}) b.x={} lives={}", a.x, a.y, b.x, lives);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">hits=0 speed=0.0 alive=false name=[] scores=0 anything=null home=(1.5, 2.5)
 a=(3.0, 4.0) b.x=1.5 lives=3</code></pre></div>
-<p>A class cannot hold itself by value (<code>class Node { Node next; }</code> would build a Node inside every Node, and the parser says so). Spell a link <code>Node next = null;</code>, or share nodes with <code>shared_ptr&lt;Node&gt;</code>.</p>
+<p>A class value is never null, so a class cannot hold itself by value: <code>class Node { Node next; }</code> fails the load. Make the link a <code>shared_ptr&lt;Node&gt;</code>.</p>
 <h2 id="when-a-mismatch-is-caught">When a mismatch is caught<a class="hlink" href="#when-a-mismatch-is-caught" aria-label="Link to this section">&#8203;</a></h2>
 <p>A typed variable holds its type for good. Assign something incompatible and you get an error. The interesting question is <em>when</em>.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int x = 5;
@@ -100,7 +101,7 @@ x is still 5</code></pre></div>
 <p>None of this is opt-in. To loosen it, put <code>[[warn_mode]]</code> at the top of a file, a block, or one statement: the same diagnostics get reported as warnings, and that region loads and runs. <code>extern</code> declares a name the checker cannot see. The full contract is in <a href="13-strict-checking.html">Types That Fail Early</a>.</p>
 <h2 id="auto-locks-on-first-use">auto locks on first use<a class="hlink" href="#auto-locks-on-first-use" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto x = 5;      // auto infers int, then enforces it
-x = 2.9;         // float assigned to locked-int: converts (truncates toward zero)
+x = cast&lt;int&gt;(2.9);   // a float enters an int only through cast
 print("x = {} ({})", x, type_of(x));
 auto y = 1.5;    // locked to float
 y = 2;           // int widens to float
@@ -128,7 +129,7 @@ try { x = "s"; } catch (e) { print("caught: ", e); }
 print(x, " (", type_of(x), ")");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">caught: Cannot assign string to &#x27;x&#x27; (declared int)
 5 (int)</code></pre></div>
-<p>Once locked, <code>null</code> does not un-lock it either: an <code>int</code>-locked <code>auto</code> rejects <code>null</code> exactly as an <code>int</code> would (the table below has no null row for primitives; class-typed slots do take a typed null).</p>
+<p>Once locked, <code>null</code> does not un-lock it either: an <code>int</code>-locked <code>auto</code> rejects <code>null</code> exactly as an <code>int</code> would (the table below has no null row for primitives or class values; handles do take null).</p>
 <h3 id="auto-takes-the-static-type">auto takes the static type<a class="hlink" href="#auto-takes-the-static-type" aria-label="link">&#8203;</a></h3>
 <p>The type <code>auto</code> locks to is the initializer&#x27;s <strong>static</strong> type, the one the checker sees at load, never the type the value happens to hold when the line runs.</p>
 <ul>
@@ -142,9 +143,9 @@ auto a = row[0];     // an array&lt;var&gt; element: static type var, so a is a 
 a = "now a string";
 array&lt;int&gt; ints = [1, 2];
 auto b = ints[0];    // static type int: locked to int
-b = 2.9;
+b = 3;
 print("a = {} ({}), b = {} ({})", a, type_of(a), b, type_of(b));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = now a string (string), b = 2 (int)</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">a = now a string (string), b = 3 (int)</code></pre></div>
 <h3 id="auto-copies-a-value">auto copies a value and shares a handle<a class="hlink" href="#auto-copies-a-value" aria-label="link">&#8203;</a></h3>
 <p><code>auto y = x;</code> copies what C++ <code>auto</code> copies.</p>
 <ul>
@@ -180,30 +181,31 @@ mixed[1] = two
 == result: map</code></pre></div>
 <p>Container homogeneity follows the ladder: <code>auto nums = [1, 2, 3]</code> locks a homogeneous array; <code>var</code> containers may be heterogeneous and may be reassigned to a different container kind entirely.</p>
 <h2 id="conversion-table-typed-locked-auto-targets">The one conversion table<a class="hlink" href="#conversion-table-typed-locked-auto-targets" aria-label="Link to this section">&#8203;</a></h2>
-<p>There is exactly one table, and every typed slot in the language runs it: declarations, <code>=</code>, by-value parameters, returns, instance fields and static fields. The element boundary of a typed container runs its strict end: an element takes its own type, int and float both ways, bool and int both ways and char and string both ways. It applies no truthiness and no <code>to_X()</code> (<a href="09-containers-strings.html">Containers &amp; Strings</a>). Learn it once.</p>
+<p>There is exactly one table, and every typed slot in the language runs it: declarations, <code>=</code>, by-value parameters, returns, instance fields and static fields. The element boundary of a typed container runs its strict end: an element takes its own type, an int into a float element, bool and int both ways and char and string both ways. It applies no truthiness and no <code>to_X()</code> (<a href="09-containers-strings.html">Containers &amp; Strings</a>). Learn it once.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Tag { int count = 0; }
 
 float half(float x) { return x / 2; }        // parameter AND return run the table
 
 float f = 3;                                 // declaration: int widens
 Tag t = Tag();
-t.count = 2.9;                               // field store: float truncates into int
+t.count = true;                              // field store: bool becomes 1
 print("declaration: ", f);
 print("parameter:   ", half(3));
 print("field:       ", t.count, " (", type_of(t.count), ")");</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">declaration: 3.0
 parameter:   1.5
-field:       2 (int)</code></pre></div>
+field:       1 (int)</code></pre></div>
 <p>What each target accepts, and what it does with it:</p>
 <div class="tablewrap"><table><thead><tr><th>Target</th><th>Accepts</th><th>Result</th></tr></thead><tbody>
-<tr><td><code>int</code></td><td>int, float, bool, an object with <code>to_int()</code></td><td>float <strong>truncates toward zero</strong> (<code>3.99</code> &rarr; <code>3</code>, <code>-3.99</code> &rarr; <code>-3</code>); <code>true</code> &rarr; <code>1</code></td></tr>
+<tr><td><code>int</code></td><td>int, bool, an enum value, an object with <code>to_int()</code></td><td><code>true</code> &rarr; <code>1</code>. A float is an <strong>error</strong>: <code>cast&lt;int&gt;(x)</code> truncates toward zero, <code>math::ifloor(x)</code> rounds down</td></tr>
 <tr><td><code>float</code></td><td>float, int, bool, an object with <code>to_float()</code></td><td>int widens (<code>3</code> &rarr; <code>3.0</code>)</td></tr>
-<tr><td><code>bool</code></td><td>anything</td><td>truthiness (<code>5</code> &rarr; <code>true</code>, <code>0</code> &rarr; <code>false</code>)</td></tr>
+<tr><td><code>bool</code></td><td>bool, int, float, null, an object</td><td>truthiness (<code>5</code> &rarr; <code>true</code>, <code>0</code> &rarr; <code>false</code>). A string, an array or a map is a load <strong>error</strong>: write <code>!s.empty()</code> or a comparison</td></tr>
+<tr><td>enum <code>E</code></td><td>a value of <code>E</code></td><td>an int or another enum&#x27;s value is an <strong>error</strong>; <code>cast&lt;E&gt;(n)</code> converts an int that is one of its values</td></tr>
 <tr><td><code>string</code></td><td>string, utf8_string (its bytes), char (its one-character text), an object with <code>to_string()</code></td><td>text only: an int, float, bool, null or container is an <strong>error</strong>, as a string never reads as an int. Stringify it: <code>to_string(5)</code> or <code>`${5}`</code></td></tr>
 <tr><td><code>char</code></td><td>char, a string of exactly one character, an object with <code>to_char()</code></td><td><code>char c = "a";</code> holds <code>'a'</code>; a string of any other length raises <code>Cannot convert 'string' to 'char': a char takes a string of exactly one character</code> (a literal fails the load). There is no int row at all, so <code>char c = 65</code> is an error. <a href="#cast-the-explicit-boundary"><code>cast&lt;char&gt;(65)</code></a> is the spelling</td></tr>
 <tr><td><code>int</code> / <code>float</code></td><td>&hellip;but never a string</td><td><strong>error</strong>; there is no implicit parse. Use <code>"42".to_int()</code></td></tr>
 <tr><td><code>array</code> / <code>map</code></td><td>array / map</td><td>element and key types are enforced at the element boundary when a value lands; a literal the checker can see fails the load (<code>array&lt;int&gt; a = ["x"];</code>: <code>array element 0: expected 'int', got 'string'</code>). See <a href="09-containers-strings.html">Containers &amp; Strings</a></td></tr>
-<tr><td>class <code>C</code></td><td><code>null</code></td><td>stores a <em>typed null</em></td></tr>
+<tr><td>class <code>C</code></td><td>never <code>null</code></td><td><strong>error</strong>: a class value always holds an object. Declare <code>shared_ptr&lt;C&gt;</code> (or <code>var</code>) for a slot that can be empty</td></tr>
 <tr><td>class <code>C</code></td><td>the same class, or a subclass</td><td>a copy that keeps its own class: a <code>Derived</code> in a <code>Base</code> slot is still a <code>Derived</code>, and its overrides run. Parent &rarr; child, siblings, and same-shape unrelated classes are <strong>rejected</strong></td></tr>
 <tr><td>class <code>C</code></td><td><code>shared_ptr&lt;C&gt;</code>, or a handle to a subclass</td><td>copies the pointee into the value slot (it keeps its class too)</td></tr>
 <tr><td>class <code>C</code></td><td>a value that exactly one one-argument constructor <code>C(src)</code> takes directly</td><td>converts through that constructor</td></tr>
@@ -216,9 +218,9 @@ field:       2 (int)</code></pre></div>
 <p><strong>Conversions never chain.</strong> One step is the whole budget. A class with <code>to_int()</code> reaches an <code>int</code> slot, but it will not go through <code>to_int()</code> and <em>then</em> through some other class&#x27;s <code>C(int)</code> constructor to reach a <code>C</code> slot. And if a converting constructor or a <code>to_X()</code> throws on the way, you see its error, not the table&#x27;s.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">float f = 3;         // int -&gt; float widens
 print("f = {} ({})", f, type_of(f));
-int i = 3.99;        // float -&gt; int truncates toward zero
+int i = cast&lt;int&gt;(3.99);    // float -&gt; int only through cast: truncates toward zero
 print("i = {} ({})", i, type_of(i));
-int j = -3.99;
+int j = cast&lt;int&gt;(-3.99);
 print("j = {}", j);
 bool b = 5;          // numeric -&gt; bool is truthiness
 print("b = {}", b);
@@ -242,19 +244,16 @@ int n = Money(1234);         // int &lt;- an object with to_int()
 print("int    &lt;- Money:  ", n);
 
 class Pt { int x = 0; }
-Pt p = null;                 // object &lt;- null: a typed null
-print("Pt     &lt;- null:   ", p == null);
 shared_ptr&lt;Pt&gt; h = new Pt();   // new makes a handle (Chapter 3)
 Pt q = h;                    // object &lt;- shared_ptr&lt;Pt&gt;: copies the pointee
 print("Pt     &lt;- handle: ", q.x);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">string &lt;- Money:  $1234
 int    &lt;- Money:  1234
-Pt     &lt;- null:   true
 Pt     &lt;- handle: 0</code></pre></div>
 <h2 id="cast-the-explicit-boundary">cast&lt;T&gt;(e): the explicit boundary<a class="hlink" href="#cast-the-explicit-boundary" aria-label="Link to this section">&#8203;</a></h2>
 <p>Some conversions the table refuses on purpose, not because they are wrong, but because you should have to say so. <code>cast</code> is where you say so. It is a keyword, not a function.</p>
-<p><code>cast&lt;T&gt;(e)</code> yields exactly what <code>T tmp = e;</code> would hold. For primitives that is the table above, run on demand, with two additions: the char rules below, and <code>cast&lt;string&gt;(e)</code>, which stringifies anything as <code>to_string(e)</code> does:</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("cast&lt;int&gt;(2.7)    = ", cast&lt;int&gt;(2.7));     // the assignment table, spelled out
+<p><code>cast&lt;T&gt;(e)</code> yields exactly what <code>T tmp = e;</code> would hold. For primitives that is the table above, run on demand, with four additions: <code>cast&lt;int&gt;(x)</code> truncates a float toward zero, <code>cast&lt;E&gt;(n)</code> turns an int into the enum value it equals (<code>Cannot cast 3 to 'E': not one of its values</code> otherwise), the char rules below, and <code>cast&lt;string&gt;(e)</code>, which stringifies anything as <code>to_string(e)</code> does:</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">print("cast&lt;int&gt;(2.7)    = ", cast&lt;int&gt;(2.7));     // truncates toward zero
 print("cast&lt;string&gt;(5)   = ", cast&lt;string&gt;(5));
 print("cast&lt;int&gt;('a')    = ", cast&lt;int&gt;('a'));     // char converts ONLY through cast
 print("cast&lt;char&gt;(97)    = ", cast&lt;char&gt;(97));     // range-checked 0..255
@@ -295,7 +294,7 @@ caught: Cannot cast &#x27;int&#x27; to &#x27;Base&#x27;</code></pre></div>
 <li><code>cast&lt;T&amp;&gt;(e)</code>: a <strong>reference</strong> to the same object. Member reads and stores go through it, which makes it the strict-mode fix for reaching a subtype&#x27;s member on a base-typed receiver (see <a href="03-value-semantics.html#escape-hatch-6-cast-t-and-cast-shared-ptr-t">Value Semantics</a>).</li>
 <li><code>cast&lt;shared_ptr&lt;T&gt;&gt;(e)</code>: a <strong>handle</strong> sharing the same object.</li>
 </ul>
-<p>A class mismatch raises the catchable <code>Cannot cast 'X' to 'T'</code>, where <code>X</code> is the object&#x27;s <em>dynamic</em> class. Upcasts always pass. <code>null</code> passes the value and handle forms and fails the reference form. A <code>T</code> that names no type at all is a load error (<code>unknown type in cast</code>).</p>
+<p>A class mismatch raises the catchable <code>Cannot cast 'X' to 'T'</code>, where <code>X</code> is the object&#x27;s <em>dynamic</em> class. Upcasts always pass. <code>null</code> passes the handle form and fails the value and reference forms. A <code>T</code> that names no type at all is a load error (<code>unknown type in cast</code>).</p>
 <div class="callout warn"><p>The value form applied to a handle <em>copies</em>, which is rarely what you meant, so the checker says so, at warning severity. Warnings never gate the load; the runner prints them when you pass <code>--warnings</code>, and a host reads them from <code>last_check_diagnostics()</code>. Line 5 of the sample above draws this one:</p>
 <div class="codeblock cb-output"><span class="cb-label">output &middot; --warnings</span><pre><code class="lang-output">jaiscript: static check warnings:
 try.jai:5:19: warning: cast&lt;Derived&gt;(h) copies the instance - use cast&lt;Derived&amp;&gt;(h) to alias it or cast&lt;shared_ptr&lt;Derived&gt;&gt;(h) to share it (declared at 4:21)
@@ -304,7 +303,7 @@ try.jai:5:19: warning: cast&lt;Derived&gt;(h) copies the instance - use cast&lt;
 </div>
 <h2 id="compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result">Compound assignment: typed targets convert C++-style, var keeps the dynamic result<a class="hlink" href="#compound-assignment-typed-targets-convert-c-style-var-keeps-the-dynamic-result" aria-label="link">&#8203;</a></h2>
 <p>The rule is two-sided:</p>
-<ul><li>On a <strong>typed (or locked-auto) target</strong>, <code>a op= b</code> computes like C++ and converts the result back to the target&#x27;s type. <code>int i = 7; i /= 2</code> → <code>3</code>; <code>i += 0.5</code> → <code>7</code> (7.5 truncated back).</li><li>On a <strong>var target</strong>, the stored value is whatever the operation produces. The variable may change type.</li></ul>
+<ul><li>On a <strong>typed (or locked-auto) target</strong>, <code>a op= b</code> computes like C++ and converts the result back to the target&#x27;s type. <code>int i = 7; i /= 2</code> → <code>3</code>; <code>i += 0.5</code> is <code>i = i + 0.5</code>, a float into an int: a load error.</li><li>On a <strong>var target</strong>, the stored value is whatever the operation produces. The variable may change type.</li></ul>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int i = 7;
 i /= 2;              // C++-style on typed target: stays int
 print("int 7 /= 2 -&gt; {} ({})", i, type_of(i));
@@ -325,13 +324,11 @@ int -7 /= 2 -&gt; -3
 float 7.0 /= 2 -&gt; 3.5
 auto(int) 7 /= 2 -&gt; 3 (int)
 var 7 /= 2 -&gt; 3 (int)</code></pre></div>
-<p>(<code>var v = 7; v /= 2</code> gives <code>3</code> because <code>7 / 2</code> is integer division; the type difference shows with a float operand:)</p>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">int i = 7;
-i += 0.5;
-var v = 7;
+<p>(<code>var v = 7; v /= 2</code> gives <code>3</code> because <code>7 / 2</code> is integer division; a float operand changes the var&#x27;s type:)</p>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">var v = 7;
 v += 0.5;
-print("int: {} ({})  var: {} ({})", i, type_of(i), v, type_of(v));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">int: 7 (int)  var: 7.5 (float)</code></pre></div>
+print("var: {} ({})", v, type_of(v));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">var: 7.5 (float)</code></pre></div>
 <p>The compound-assignment conversion also applies to typed <strong>class fields</strong>, typed array <strong>elements</strong>, and by-<strong>ref</strong> targets.</p><nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../guide/01-hello.html"><span>&larr; previous</span>Hello &amp; Basics</a><a class="next" rel="next" href="../guide/03-value-semantics.html"><span>next &rarr;</span>Value Semantics &amp; References</a></nav></article>
 </main>
 </div>

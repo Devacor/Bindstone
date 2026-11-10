@@ -1334,22 +1334,22 @@ public:
 		});
 
 		test("worker_copied_instances_register_at_the_join", [this]() {
-			// An instance a worker copies (a by-value store into a cleared field: one holding an instance copy-assigns) parks in the worker's
+			// An instance a worker copies (a by-value store into a fresh array: a field holding an instance copy-assigns) parks in the worker's
 			// pending list and joins the class registry after the region: a later hot reload must
 			// still migrate it (the registry is how migration finds live instances)
 			auto e = make_engine();
 			e->parallel_thread_count(4);
 			e->execute(R"(
 				class Leaf { int v = 0; Leaf() {} Leaf(int n) { v = n; } }
-				class Node { Leaf a = Leaf(0); Leaf b = Leaf(0); Node() {} Node(int n) { a = Leaf(n); b = Leaf(-1); } }
+				class Node { Leaf a = Leaf(0); array<Leaf> b = [Leaf(0)]; Node() {} Node(int n) { a = Leaf(n); b = [Leaf(-1)]; } }
 				array<Node> nodes = [];
 				for (int i = 0; i < 100; i++) { nodes.push(Node(i)); }
-				parallel_for (auto& n : nodes) { n.b = null; n.b = n.a; }
+				parallel_for (auto& n : nodes) { n.b = [n.a]; }
 			)");
 			e->execute(R"(
 				class Leaf { int v = 0; int extra = 7; Leaf() {} Leaf(int n) { v = n; } }
 			)");
-			auto r = e->execute("return [nodes[5].b.v, nodes[5].b.extra, nodes[99].b.extra, nodes[5].a.extra];");
+			auto r = e->execute("return [nodes[5].b[0].v, nodes[5].b[0].extra, nodes[99].b[0].extra, nodes[5].a.extra];");
 			const auto& v = r.as_array();
 			check_eq((int64_t)5, v[0].as_int());
 			check_eq((int64_t)7, v[1].as_int());
@@ -4943,9 +4943,9 @@ public:
 			}
 			class PendingNode {
 				PendingLeaf a = PendingLeaf(0);
-				PendingLeaf b = PendingLeaf(0);
+				array<PendingLeaf> b = [PendingLeaf(0)];
 				PendingNode() {}
-				PendingNode(int n) { a = PendingLeaf(n); b = PendingLeaf(-1); }
+				PendingNode(int n) { a = PendingLeaf(n); b = [PendingLeaf(-1)]; }
 			}
 			array<PendingNode> pending_nodes = [];
 			for (int i = 0; i < 256; i++) { pending_nodes.push(PendingNode(i)); }
@@ -4953,7 +4953,7 @@ public:
 		)");
 		auto call = eng->jaibite(R"(
 			parallel_for (auto& n : pending_nodes) {
-				if (pending_copy_enabled) { n.b = null; n.b = n.a; }
+				if (pending_copy_enabled) { n.b = [n.a]; }
 			}
 			pending_nodes.size();
 		)");
@@ -5055,7 +5055,7 @@ public:
 			)");
 			check_eq(script_int(1), eng->execute(R"(
 				for (auto& n : pending_nodes) {
-					if (n.a.extra != 7 || n.b.extra != 7) { return 0; }
+					if (n.a.extra != 7 || n.b[0].extra != 7) { return 0; }
 				}
 				return 1;
 			)").as_int(), "immediate hot reload missed surviving worker copies");
@@ -5094,7 +5094,7 @@ public:
 		)");
 		check_eq(script_int(1), eng->execute(R"(
 			for (auto& n : pending_nodes) {
-				if (n.a.extra != 7 || n.b.extra != 7) { return 0; }
+				if (n.a.extra != 7 || n.b[0].extra != 7) { return 0; }
 			}
 			return 1;
 		)").as_int(), "recovered child instances must participate in hot reload");
@@ -5146,22 +5146,22 @@ public:
 				class RegistryLeaf { int v = 0; RegistryLeaf() {} RegistryLeaf(int n) { v = n; } }
 				class RegistryNode {
 					RegistryLeaf a = RegistryLeaf(0);
-					RegistryLeaf b = RegistryLeaf(0);
+					array<RegistryLeaf> b = [RegistryLeaf(0)];
 					RegistryNode() {}
-					RegistryNode(int n) { a = RegistryLeaf(n); b = RegistryLeaf(-1); }
+					RegistryNode(int n) { a = RegistryLeaf(n); b = [RegistryLeaf(-1)]; }
 				}
 				array<RegistryNode> registry_nodes = [];
 				for (int i = 0; i < 256; i++) { registry_nodes.push(RegistryNode(i)); }
 				function registry_shared_leaves() {
-					for (int i = 0; i < 256; i++) { registry_nodes[i].b.v = 1000 + i; }
+					for (int i = 0; i < 256; i++) { registry_nodes[i].b[0].v = 1000 + i; }
 					int shared = 0;
-					for (int i = 0; i < 256; i++) { if (registry_nodes[i].b.v != 1000 + i) { shared++; } }
-					for (int i = 0; i < 256; i++) { registry_nodes[i].b = RegistryLeaf(-1); }
+					for (int i = 0; i < 256; i++) { if (registry_nodes[i].b[0].v != 1000 + i) { shared++; } }
+					for (int i = 0; i < 256; i++) { registry_nodes[i].b = [RegistryLeaf(-1)]; }
 					return shared;
 				}
 			)");
 			auto region = eng->jaibite(R"(
-				parallel_for (auto& n : registry_nodes) { n.b = null; n.b = n.a; }
+				parallel_for (auto& n : registry_nodes) { n.b = [n.a]; }
 				registry_shared_leaves();
 			)");
 			auto& state = detail::engine_access::parallel_state(*eng);

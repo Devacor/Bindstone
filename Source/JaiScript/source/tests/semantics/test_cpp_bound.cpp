@@ -760,8 +760,8 @@ public:
             count_ref.assign_through(script_value(script_int(9), eng.get()));
             check_eq((int64_t)9, counts.get_array_storage()->get(0, eng.get()).as_int(), "an int element takes an int");
             bool threw = false;
-            try { count_ref.assign_through(script_value(script_float(1e300), eng.get())); } catch (const jai::runtime_error&) { threw = true; }
-            check_true(threw, "an out-of-range float into an int element raises, as the script store does");
+            try { count_ref.assign_through(script_value(script_float(2.5), eng.get())); } catch (const jai::runtime_error&) { threw = true; }
+            check_true(threw, "a float into an int element raises, as the script store does");
             check_eq((int64_t)9, counts.get_array_storage()->get(0, eng.get()).as_int(), "a refused store leaves the element");
         });
 

@@ -367,7 +367,10 @@ namespace stdlib {
             switch (val.type()) {
                 case script_value_type::jai_null_type: return "null";
                 case script_value_type::jai_bool_type: return "bool";
-                case script_value_type::jai_int_type: return "int";
+                case script_value_type::jai_int_type: {
+                    const type_info* tag = val.deref().type_info_raw();
+                    return tag && tag->is_enum ? tag->type_name : std::string("int");
+                }
                 case script_value_type::jai_float_type: return "float";
                 case script_value_type::jai_char_type: return "char";
                 case script_value_type::jai_string_type: return detail::engine_access::is_caught_runtime_error(*eng, val) ? "error" : "string";

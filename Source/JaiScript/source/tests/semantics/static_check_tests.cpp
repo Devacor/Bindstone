@@ -204,7 +204,9 @@ public:
             // In a [[warn_mode]] unit the runtime alone decides: conversions run, a typed mismatch
             // raises the runtime's own error at the store, and no diagnostic is an error.
             auto e = make_engine();
-            check_eq((int64_t)4, e->execute("[[warn_mode]]; int x = 4.7; x").as_int());
+            check_eq((int64_t)1, e->execute("[[warn_mode]]; int x = true; x").as_int());
+            check_eq(std::string("Cannot initialize 'x' (declared int) with float"),
+                     e->execute("[[warn_mode]]; string m = \"\"; try { int x = 4.7; } catch (err) { m = err; } m").as<std::string>());
             check_eq(std::string("Cannot initialize 's' (declared string) with int"),
                      e->execute("[[warn_mode]]; string m = \"\"; try { string s = 42; } catch (err) { m = err; } m").as<std::string>());
             check_eq(true, e->execute("[[warn_mode]]; bool b = \"x\"; b").as<bool>());
@@ -234,13 +236,18 @@ public:
         test("runtime_parity_probes", [this]() {
             auto e = make_engine();
             // conversions the checker must ACCEPT
-            check_eq((int64_t)4, e->execute("int a = 4.7; a").as_int());
+            check_eq((int64_t)4, e->execute("int a = cast<int>(4.7); a").as_int());
             check_eq((int64_t)1, e->execute("int b = true; b").as_int());
-            check_eq(true, e->execute("bool d = \"x\"; d").as<bool>());
+            check_eq(true, e->execute("bool d = 7; d").as<bool>());
             check_near(2.0, e->execute("float f = 2; f").as_float(), 0.0001);
             // violations the checker flags must FAIL at runtime too
             check_throws([&]() { e->execute("int p1 = \"s\";"); });
             check_throws([&]() { e->execute("int p2 = null;"); });
+            check_throws([&]() { e->execute("int p5 = 4.7;"); });
+            check_throws([&]() { e->execute("[[warn_mode]]; int p6 = 4.7;"); });
+            // declared intent: a bool slot refuses text at load; the run time alone reads its truthiness
+            check_throws([&]() { e->execute("bool p7 = \"x\";"); });
+            check_eq(true, e->execute("[[warn_mode]]; bool p8 = \"x\"; p8").as<bool>());
             check_throws([&]() { e->execute("int p3 = 'c';"); });
             check_throws([&]() { e->execute("string p4 = 42;"); });
             check_throws([&]() { e->execute("char p4 = 65;"); });
@@ -252,11 +259,13 @@ public:
         test("the_type_ladder_enforces_typed_slots_infers_auto_and_leaves_var_dynamic", [this]() {
             const std::pair<const char*, size_t> cases[] = {
                 {"int x = 5;", 0},
-                {"int x = 4.7;", 0},
+                {"int x = 4.7;", 1},
+                {"int x = cast<int>(4.7);", 0},
                 {"int x = true;", 0},
                 {"float f = 2;", 0},
                 {"string s = 42;", 1},
-                {"bool b = \"x\";", 0},
+                {"bool b = \"x\";", 1},
+                {"bool b = 2;", 0},
                 {"int x;", 0},
                 {"int x = \"s\";", 1},
                 {"int x = null;", 1},
@@ -279,7 +288,8 @@ public:
 
         test("ladder_assignment_to_typed", [this]() {
             auto e = make_engine();
-            check_eq((size_t)0, error_count(e->check("int x = 1; x = 2.5;")));
+            check_eq((size_t)1, error_count(e->check("int x = 1; x = 2.5;")));
+            check_eq((size_t)0, error_count(e->check("int x = 1; x = true; float f = 1.0; f = x;")));
             check_eq((size_t)1, error_count(e->check("int x = 1; x = \"s\";")));
             auto r = e->check("int declared_here = 1;\ndeclared_here = \"s\";");
             check_eq((size_t)1, error_count(r));
@@ -288,10 +298,10 @@ public:
         });
 
         test("compound_assign_follows_cpp_rules", [this]() {
-            // `x op= rhs` on a typed target is `x = T(x op rhs)` — numeric
-            // conversions are fine, a string result into an int target is not.
+            // `x op= rhs` on a typed target is `x = T(x op rhs)`: an int result widens into a
+            // float target, a float or string result into an int target is refused.
             auto e = make_engine();
-            check_eq((size_t)0, error_count(e->check("int x = 1; x += 2.5;")));
+            check_eq((size_t)1, error_count(e->check("int x = 1; x += 2.5;")));
             check_eq((size_t)0, error_count(e->check("int x = 4; x /= 2;")));
             check_eq((size_t)0, error_count(e->check("float f = 1.0; f *= 2;")));
             check_eq((size_t)1, error_count(e->check("string s = \"a\"; s += 5;")));   // the runtime raises: a string target appends text only
@@ -374,7 +384,8 @@ public:
             auto e = make_engine();
             const char* fn = "function add(int a, int b) { return a + b; }\n";
             check_eq((size_t)0, error_count(e->check(std::string(fn) + "add(1, 2);")));
-            check_eq((size_t)0, error_count(e->check(std::string(fn) + "add(1.5, 2);")));   // converts
+            check_eq((size_t)0, error_count(e->check(std::string(fn) + "add(true, 2);")));   // converts
+            check_eq((size_t)1, error_count(e->check(std::string(fn) + "add(1.5, 2);")));
             check_eq((size_t)1, error_count(e->check(std::string(fn) + "add(1);")));
             check_eq((size_t)1, error_count(e->check(std::string(fn) + "add(1, 2, 3);")));
             check_eq((size_t)1, error_count(e->check(std::string(fn) + "add(\"x\", 2);")));
@@ -402,7 +413,8 @@ public:
         test("return_type_checking", [this]() {
             auto e = make_engine();
             check_eq((size_t)0, error_count(e->check("int f() { return 5; } f();")));
-            check_eq((size_t)0, error_count(e->check("int f() { return 2.5; } f();")));    // converts
+            check_eq((size_t)0, error_count(e->check("float f() { return 2; } f();")));    // converts
+            check_eq((size_t)1, error_count(e->check("int f() { return 2.5; } f();")));
             check_eq((size_t)1, error_count(e->check("string f() { return 5; } f();")));   // text only
             check_eq((size_t)1, error_count(e->check("int f() { return \"s\"; } f();")));
             check_eq((size_t)1, error_count(e->check("void f() { return 5; } f();")));
@@ -1721,7 +1733,7 @@ public:
         test("cast_types_certain_and_reference_receivers_resolve_members", [this]() {
             auto e = make_engine();
             const std::string prelude =
-                "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
+                "class S { int x = 1; } class T : S { int t = 2; } class H { S p; }\n"
                 "auto h = H(); h.p = T();\n";
             // a subtype member on a certain base-typed receiver is the error; cast<T&> is the fix
             bool threw = false;
@@ -1834,15 +1846,16 @@ public:
             check_eq(std::string("loaded"), message("var r = random; var c = r(3); enum E { A } var e = E; namespace math { int twice(int x) { return 2 * x; } } math::twice(math::PI > 3.0 ? 1 : 0);"));
             // an enum's name is its value table, a map<string,int>: a slot that takes that map takes it, any other refuses it at load
             const std::pair<const char*, const char*> tables[] = {
-                {"enum E { A, B } int x = E;", "cannot initialize 'x' declared 'int' with 'enum E': an enum's name is its value table, a map<string,int>; name one of its values (E.A)"},
+                {"enum E { A, B } int x = E;", "cannot initialize 'x' declared 'int' with 'enum E': an enum's name is its value table, a map<string,int>; name one of its values (E::A)"},
                 {"enum E { A, B } int x = 0; x = E;", "cannot assign 'enum E' to 'x' declared 'int': an enum's name is its value table"},
                 {"enum E { A, B } void f(string s) {} f(E);", "argument 1 of 'f': cannot pass 'enum E' to 's' declared 'string': an enum's name is its value table"},
                 {"enum E { A, B } int g() { return E; } g();", "cannot return 'enum E' from 'g' declared to return 'int': an enum's name is its value table"},
+                {"enum E { A, B } bool b = E;", "cannot initialize 'b' declared 'bool' with 'enum E': an enum's name is its value table"},
                 {"enum E { A, B } map<int,int> t = E;", "cannot initialize 't' declared 'map<int,int>' with 'enum E': an enum's name is its value table, a map<string,int> (map key type: expected 'int', got 'string')"},
             };
             for (const auto& [source, text] : tables) { check_true(message(source).find(std::string("error: ") + text) != std::string::npos, std::string(source) + " -> " + message(source)); }
             check_eq(std::string("raised: Cannot initialize 'x' (declared int) with map"), message("[[warn_mode]]; enum E { A, B } int x = E;"));
-            check_eq(std::string("loaded"), message("enum E { A, B } map<string,int> t = E; map<string,float> f = E; auto a = E; bool b = E; array<map<string,int>> all = [E]; "
+            check_eq(std::string("loaded"), message("enum E { A, B } map<string,int> t = E; map<string,float> f = E; auto a = E; bool b = !E.empty(); array<map<string,int>> all = [E]; "
                                                     "int n = 0; for (auto [k, v] : E) { n += v; } int one = E.B;"));
         });
 
@@ -1875,7 +1888,7 @@ public:
         test("cast_value_is_a_proof_source_reference_is_not", [this]() {
             if (vm_reference_run()) { return; }   // asserts the optimized VM's proofs or elisions
             const std::string prelude =
-                "class S { int x = 1; } class T : S { int t = 2; } class H { S p = null; }\n"
+                "class S { int x = 1; } class T : S { int t = 2; } class H { S p; }\n"
                 "auto h = H(); h.p = T();\n";
             auto e = make_engine();
             check_eq((int64_t)2, e->execute(prelude + "T tv = T(); tv = cast<T>(h.p); tv.t").as_int());
@@ -3025,14 +3038,17 @@ public:
             auto r = e->check("class C { static int s = 0;\n  void m() { s = \"x\"; }\n  static void sm() { s = \"y\"; } }");
             check_eq((size_t)2, error_count(r), "bare stores in an instance and a static method");
             check_true(has_diag(r, dlevel::error, "cannot assign 'string' to field 's' declared 'int'"));
-            const std::string ok_cls = "class C { static int s = 0;\n  void m() { s = 2.7; s += 1; }\n  static void sm() { s = true; s++; } }\n";
+            const std::string ok_cls = "class C { static int s = 0;\n  void m() { s = 2; s += 1; }\n  static void sm() { s = true; s++; } }\n";
             check_eq((size_t)0, error_count(e->check(ok_cls)), "well-typed bare stores are clean");
             check_eq((size_t)1, error_count(e->check(ok_cls + "C::s = \"x\";")), "C::s = string");
             check_eq((size_t)1, error_count(e->check(ok_cls + "C::s += \"x\";")), "C::s += string");
             check_eq((size_t)1, error_count(e->check(ok_cls + "function f() { C::s = \"x\"; }")), "inside a function");
             check_eq((size_t)1, error_count(e->check(ok_cls + "auto l = [](){ C::s = \"x\"; };")), "inside a lambda");
             check_true(has_diag(e->check(ok_cls + "C::s = \"x\";"), dlevel::error, "cannot assign 'string' to field 's' declared 'int'"));
-            check_eq((size_t)0, error_count(e->check(ok_cls + "C::s = 5; C::s = 2.7; C::s += 1; C::s++; --C::s; C::s = true;")), "well-typed C::s stores are clean");
+            check_eq((size_t)0, error_count(e->check(ok_cls + "C::s = 5; C::s += 1; C::s++; --C::s; C::s = true;")), "well-typed C::s stores are clean");
+            auto rf = e->check(ok_cls + "C::s = 2.7; C::s += 0.5;");
+            check_eq((size_t)2, error_count(rf), rf.format());
+            check_true(has_diag(rf, dlevel::error, "cannot assign 'float' to field 's' declared 'int': cast<int>(x) truncates toward zero, math::ifloor(x) rounds down"), rf.format());
             auto ri = e->check("class C { static int s = \"x\"; }");
             check_eq((size_t)1, error_count(ri));
             check_true(has_diag(ri, dlevel::error, "cannot initialize field 's' declared 'int' with 'string'"));
@@ -3096,7 +3112,7 @@ public:
             check_true(has_diag(viathis, dlevel::error, "cannot assign 'array' to field 'hp' declared 'int'"), viathis.format());
             auto recv = e->check(imp + sub + "}\nW w = W();\nw.hp = \"s\";\nchar c = w.hp;");
             check_eq((size_t)2, error_count(recv), recv.format());
-            const std::string ok = imp + sub + "int tick() { return hp + twice() + doubled(); } }\nW w = W();\nw.value = 4;\nw.hp = 2.9;\nw.tick() + w.value";
+            const std::string ok = imp + sub + "int tick() { return hp + twice() + doubled(); } }\nW w = W();\nw.value = 4;\nw.hp = 2;\nw.tick() + w.value";
             auto okr = e->check(ok);
             check_eq((size_t)0, error_count(okr), okr.format(ok));
             // lenient by design: binder arity and binder property types
@@ -3155,7 +3171,10 @@ public:
             check_eq((size_t)1, error_count(e->check(cls + "s.hp += \"x\";")), "compound: getter int + string is a string into the int setter");
             check_eq((size_t)1, error_count(e->check("class T { int m() { this.hp = \"s\"; return 1; } int hp_ = 0; void _set_hp(int v) { hp_ = v; } }")), "through this");
             check_eq((size_t)1, error_count(e->check(cls + "void f(S q) { q.hp = \"s\"; }")), "through a typed parameter");
-            check_eq((size_t)0, error_count(e->check(cls + "s.hp = 7; s.hp = 2.5; s.hp = true; s.hp += 1; s.hp++; --s.hp; s.hp -= 2.5; var y = (s.hp = 3);")), "converting stores are clean");
+            check_eq((size_t)0, error_count(e->check(cls + "s.hp = 7; s.hp = true; s.hp += 1; s.hp++; --s.hp; s.hp -= 2; var y = (s.hp = 3);")), "converting stores are clean");
+            auto rf = e->check(cls + "s.hp = 2.5; s.hp -= 2.5;");
+            check_eq((size_t)2, error_count(rf), rf.format());
+            check_true(has_diag(rf, dlevel::error, "cannot assign 'float' to property 'hp' declared 'int': cast<int>(x) truncates toward zero, math::ifloor(x) rounds down"), rf.format());
             const std::string setter_only = "class T2 { int v_ = 0; void _set_hp(int v) { v_ = v; } }\nT2 t = T2();\n";
             check_eq((size_t)1, error_count(e->check(setter_only + "t.hp = \"s\";")), "setter-only plain store");
             check_eq((size_t)0, error_count(e->check(setter_only + "t.hp += \"s\";")), "setter-only compound store: no getter type, lenient");
@@ -3426,6 +3445,7 @@ public:
                 {"a >= i", "using '>='"},
                 {"oc == 1", "cannot compare 'C' with 'int' using '==': class 'C' declares no comparison operator (it is always false); declare the operator in the class or convert the operand"},
                 {"2 < oc", "cannot compare 'int' with 'C' using '<': class 'C' declares no comparison operator"},
+                {"oc == null", "cannot compare 'C' with null using '==': 'C' is never null (it is always false); declare the slot shared_ptr<C> (or var) to hold null"},
                 {"i == null", "cannot compare 'int' with null using '==': 'int' is never null (it is always false); compare with a value of its type, or declare the slot var to hold null"},
                 {"null != s", "cannot compare 'string' with null using '!=': 'string' is never null (it is always true)"},
                 {"b == null", "cannot compare 'bool' with null using '=='"},
@@ -3447,13 +3467,13 @@ public:
             check_eq(false, e->execute("var v = 1; var t = \"s\"; v == t").as<bool>());
             // an auto takes its initializer's type, then holds to it like a declaration
             check_true(has_diag(e->check("auto k = 5;\nbool r = k == null;"), dlevel::error, "cannot compare 'int' with null using '=='"));
-            // what can hold null compares with it: class values, handles, functions, var, and a call whose container result falls off its body
+            // what can hold null compares with it: handles, functions, var, and a call whose container result falls off its body
             const std::string nullable = "class C { int v = 1; }\nC oc = C(); shared_ptr<C> h = new C(); weak_ptr<C> w = h; function fn = null; var v = 1;\n"
                                          "array<int> maybe(int k) { if (k > 0) { return [k]; } }\n"
-                                         "[oc == null, h != null, w == null, fn == null, v == null, maybe(0) == null, null == null].size()";
+                                         "[h != null, w == null, fn == null, v == null, maybe(0) == null, null == null].size()";
             auto quiet = e->check(nullable);
             check_eq((size_t)0, error_count(quiet), quiet.format(nullable));
-            check_eq((int64_t)7, e->execute(nullable).as_int());
+            check_eq((int64_t)6, e->execute(nullable).as_int());
         });
 
         // ------------------------------------------------------------ arithmetic and bitwise with no row
@@ -3742,13 +3762,219 @@ public:
                 int i = 1; float f = 1.0; char c = 'a'; string s = "s"; array<int> a = [1]; map<string, int> m = {};
                 C oc = C(); D od = D(); K ok = K(); shared_ptr<C> h = new C(); var dyn = 3; function fn = (x) => x; var nothing = null;
                 array<bool> r = [i == f, i < c, c == 97, s == "t", a == [2], m != {}, oc == C(), od == 1, 1 == od,
-                                 ok < 3, 3 < ok, h == null, oc == null, fn == null, dyn == "x", dyn < 2, E::A == 0, E::A == E::B, h == h,
+                                 ok < 3, 3 < ok, h == null, fn == null, dyn == "x", dyn < 2, E::A == 0, E::A == E::B, h == h,
                                  oc == h, a < [3], s < "t", dyn == null, nothing == 1];
                 r.size()
             )";
             auto rep = e->check(src);
             check_eq((size_t)0, rep.diagnostics.size(), rep.format(src));
-            check_eq((int64_t)24, e->execute(src).as_int());
+            check_eq((int64_t)23, e->execute(src).as_int());
+        });
+
+        // ------------------------------------------------------------ typed slots: what never converts at load
+        test("a_float_into_an_int_slot_is_a_load_error_at_every_store_site", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            const std::string hint = ": cast<int>(x) truncates toward zero, math::ifloor(x) rounds down";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"int x = 2.5;", "cannot initialize 'x' declared 'int' with 'float'" + hint},
+                {"int x = 0; x = 2.5;", "cannot assign 'float' to 'x' declared 'int'" + hint},
+                {"int x = 0; x += 0.5;", "cannot assign 'float' to 'x' declared 'int'" + hint},
+                {"void f(int p) {} f(1.5);", "argument 1 of 'f': cannot pass 'float' to 'p' declared 'int'" + hint},
+                {"int g() { return 1.5; }", "cannot return 'float' from 'g' declared to return 'int'" + hint},
+                {"class C { int n = 1.5; }", "cannot initialize field 'n' declared 'int' with 'float'" + hint},
+                {"class C { int n = 0; } C c; c.n = 1.5;", "cannot assign 'float' to field 'n' declared 'int'" + hint},
+                {"class C { int v = 0; C(int x) { v = x; } } C c = C(1.5);", "argument 1 of 'C': cannot pass 'float' to 'x' declared 'int'" + hint},
+                {"class C { int v = 0; C(int x) { v = x; } } C c = 1.5;", "cannot initialize 'c' declared 'C' with 'float'"},
+                {"array<int> a = [1]; a[0] = 1.5;", "cannot store into 'array<int>': expected 'int', got 'float'" + hint},
+                {"array<int> a = [1]; a.push(1.5);", "cannot push into 'array<int>': expected 'int', got 'float'" + hint},
+                {"array<int> a = [1]; a.fill(1.5);", "fill() cannot store into 'array<int>': expected 'int', got 'float'" + hint},
+                {"array<int> a = [1]; a.resize(3, 1.5);", "resize() cannot store into 'array<int>': expected 'int', got 'float'" + hint},
+                {"map<string,int> m = {}; m[\"k\"] = 1.5;", "cannot store into 'map<string,int>': expected 'int', got 'float'" + hint},
+                {"array<float> f = [1.5]; array<int> a = f;", "cannot initialize 'a' declared 'array<int>' with 'array<float>': array element type: expected 'int', got 'float'" + hint},
+                {"void f(int q = 1.5) {}", "default value of 'q' declared 'int' has type 'float'"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+                auto warned = e->check("[[warn_mode]]; " + src);
+                check_eq((size_t)0, error_count(warned), warned.format(src));
+                check_true(has_diag(warned, dlevel::warning, text), warned.format(src));
+            }
+            const std::string clean = "float f = 1; f = 2; f += 3; int a = cast<int>(2.5); int b = math::ifloor(2.5); int c = math::itrunc(-2.5); int d = true; "
+                                      "var v = 2; int g = v; array<float> fs = [1, 2]; array<int> xs = [cast<int>(f)]; xs.push(math::ifloor(f)); `${a} ${b} ${c} ${d} ${g}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, rep.diagnostics.size(), rep.format(clean));
+            check_eq(std::string("2 2 -2 1 2"), e->execute(clean).as_string());
+        });
+
+        test("a_class_value_slot_takes_no_null_and_a_class_never_holds_itself_by_value", [this]() {
+            auto e = make_engine();
+            const std::string tail = ": a 'V' is never null; declare 'shared_ptr<V>' (or var) for a slot that can be empty";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"V a = null;", "cannot initialize 'a' declared 'V' with 'null'" + tail},
+                {"V b; b = null;", "cannot assign 'null' to 'b' declared 'V'" + tail},
+                {"void f(V v) {} f(null);", "argument 1 of 'f': cannot pass 'null' to 'v' declared 'V'" + tail},
+                {"V h() { return null; }", "cannot return 'null' from 'h' declared to return 'V'" + tail},
+                {"class H { V v = null; }", "cannot initialize field 'v' declared 'V' with 'null'" + tail},
+                {"class H { static V s = null; }", "cannot initialize field 's' declared 'V' with 'null'" + tail},
+                {"array<V> vs = [V()]; for (V v : vs) { v = null; }", "cannot assign 'null' to 'v' declared 'V'" + tail},
+                {"void f(V d = null) {}", "default value of 'd' declared 'V' has type 'null'"},
+                {"array<V> vs = []; vs.push(null);", "cannot push into 'array<V>': expected 'V', got 'null'"},
+                {"map<string,V> m = {}; m[\"k\"] = null;", "cannot store into 'map<string,V>': expected 'V', got 'null'"},
+                {"V a; bool b = a == null;", "cannot compare 'V' with null using '==': 'V' is never null (it is always false); declare the slot shared_ptr<V> (or var) to hold null"},
+                {"V g(int k) { if (k > 0) { return V(); } }", "'g' declared to return 'V' may reach the end of its body without returning"},
+                {"V g() { return; }", "'g' declared to return 'V' returns no value here"},
+            };
+            for (const auto& [src, text] : cases) {
+                const std::string unit = "class V {} " + src;
+                auto rep = e->check(unit);
+                check_eq((size_t)1, error_count(rep), rep.format(unit));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(unit));
+            }
+            const std::string nullable = "class V { int n = 1; } shared_ptr<V> p = null; p = new V(); p = null; weak_ptr<V> w = null; var v = V(); v = null; auto a = null; "
+                                         "function fn = null; shared_ptr<V> give() { return null; } array<shared_ptr<V>> ps = [null]; p == null && give() == null;";
+            auto quiet = e->check(nullable);
+            check_eq((size_t)0, error_count(quiet), quiet.format(nullable));
+            check_eq(true, e->execute(nullable).as<bool>());
+
+            const std::string link = ": a class value is never null; make one link a 'shared_ptr<";
+            const std::vector<std::pair<std::string, std::vector<std::string>>> cycles = {
+                {"class Node { Node next; }", {"class 'Node' holds itself by value (Node.next)" + link + "Node>' (an array or a map of them starts empty)"}},
+                {"class Node { Node next = null; }", {"class 'Node' holds itself by value (Node.next)", "cannot initialize field 'next' declared 'Node' with 'null': a 'Node' is never null"}},
+                {"class A { B b; } class B { C c; } class C { A a; }", {"class 'A' holds itself by value (A.b -> B.c -> C.a)" + link + "A>'", "class 'B' holds itself by value (B.c -> C.a -> A.b)", "class 'C' holds itself by value (C.a -> A.b -> B.c)"}},
+                {"class Base { Derived d; } class Derived : Base { }", {"class 'Base' holds itself by value (Base.d -> Derived : Base)", "class 'Derived' holds itself by value (Derived : Base -> Base.d)" + link + "Derived>'"}},
+            };
+            for (const auto& [src, texts] : cycles) {
+                for (const std::string& unit : {src, "[[warn_mode]]; " + src}) {
+                    auto rep = e->check(unit);
+                    check_ge(error_count(rep), (size_t)1, rep.format(unit));
+                    if (unit == src) { check_eq(texts.size(), error_count(rep), rep.format(unit)); }
+                    for (const auto& text : texts) {
+                        if (unit == src || text.find("holds itself") != std::string::npos) { check_true(has_diag(rep, dlevel::error, text), text + "\n" + rep.format(unit)); }
+                    }
+                }
+            }
+            const std::string linked = "class Node { int v = 0; shared_ptr<Node> next = null; array<Node> kids = []; map<string,Node> named = {}; }\n"
+                                       "Node n; n.next = new Node(); n.next.v = 4; n.kids.push(Node()); n.named[\"k\"] = Node(); n.next.v + n.kids.size() + n.named.size() + (n.next.next == null ? 1 : 0);";
+            auto ok = e->check(linked);
+            check_eq((size_t)0, error_count(ok), ok.format(linked));
+            check_eq((int64_t)7, e->execute(linked).as_int());
+        });
+
+        test("an_enum_name_is_a_type_whose_slots_take_its_values_only", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            const std::string decl = "enum Dir { north, south, east = 5, west } enum Fx { bones, blood }\n";
+            const std::string hint = ": cast<Dir>(n) converts an int that is one of its values";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"Dir d = 1;", "cannot initialize 'd' declared 'Dir' with 'int'" + hint},
+                {"Dir d = Fx::bones;", "cannot initialize 'd' declared 'Dir' with 'Fx'" + hint},
+                {"Dir d = Dir::north; d = 1;", "cannot assign 'int' to 'd' declared 'Dir'" + hint},
+                {"void go(Dir where) {} go(1);", "argument 1 of 'go': cannot pass 'int' to 'where' declared 'Dir'" + hint},
+                {"Dir f() { return 1; }", "cannot return 'int' from 'f' declared to return 'Dir'" + hint},
+                {"class C { Dir d = 1; }", "cannot initialize field 'd' declared 'Dir' with 'int'" + hint},
+                {"class C { Dir d; } C c; c.d = 1;", "cannot assign 'int' to field 'd' declared 'Dir'" + hint},
+                {"array<Dir> ds = []; ds.push(1);", "cannot push into 'array<Dir>': expected 'Dir', got 'int'"},
+                {"map<Dir,int> m = {}; m[1] = 2;", "Cannot use 'int' as a key of type 'Dir'"},
+                {"Dir d = Dir::north; d += 1;", "cannot assign 'int' to 'd' declared 'Dir'" + hint},
+                {"Dir d = Dir::north; d++;", "cannot apply '++' to 'Dir'"},
+                {"Dir d = Dir::north; bool b = d == null;", "cannot compare 'Dir' with null using '==': 'Dir' is never null"},
+                {"Dir d = Dir::north; string s = d;", "cannot initialize 's' declared 'string' with 'Dir'"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(decl + src);
+                check_eq((size_t)1, error_count(rep), rep.format(decl + src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(decl + src));
+            }
+            const std::string clean = decl +
+                "Dir pick(Dir where) { return where; }\n"
+                "class Walker { Dir facing; Dir back = Dir::south; }\n"
+                "string which(Dir d) { return \"Dir\"; } string which(int n) { return \"int\"; }\n"
+                "Dir d = Dir::south; Dir first; int n = d; auto a = Dir::west; a = pick(Dir.east); var v = Dir::west; Walker w;\n"
+                "array<int> xs = [d]; map<int,string> names = {}; names[d] = \"s\"; array<Dir> ds = [Dir::north]; ds.push(d); map<Dir,int> m = {}; m[Dir::east] = 1;\n"
+                "Dir c = cast<Dir>(5); string out = \"\"; switch (c) { case Dir::east: out = \"east\"; break; default: out = \"other\"; }\n"
+                "`${type_of(d)} ${type_of(first)}:${first} ${type_of(n)}:${n} ${type_of(d + 1)}:${d + 1} ${type_of(a)}:${a} ${type_of(v)}:${v} ${type_of(w.facing)}:${w.facing}${w.back} "
+                "${d == 1} ${out} ${which(d)},${which(Dir::north)},${which(3)},${which(v)} ${Dir[\"east\"]} ${Dir.size()} ${ds.size()} ${m[Dir::east]}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("Dir Dir:0 int:1 int:2 Dir:5 int:6 Dir:01 true east Dir,Dir,int,int 5 4 2 1"), e->execute(clean).as_string());
+            // through a var the run time decides: one of the enum's values enters and takes the type, any other int is refused
+            check_eq(std::string("Dir:5|Cannot initialize 'd' (declared Dir) with int|Cannot assign int to 'd' (declared Dir)|Cannot pass int to parameter 'where' of 'go' (declared Dir)|"
+                                 "Cannot cast 3 to 'Dir': not one of its values|Cannot cast 'string' to 'Dir'"),
+                     e->execute(decl +
+                "string t(function f) { string r = \"\"; try { r = `${f()}`; } catch (err) { r = err; } return r; }\n"
+                "void go(Dir where) {}\n"
+                "t([]() { var five = 5; Dir d = five; return `${type_of(d)}:${d}`; }) + \"|\" + t([]() { var three = 3; Dir d = three; return 1; }) + \"|\" +\n"
+                "t([]() { var three = 3; Dir d = Dir::north; d = three; return 1; }) + \"|\" + t([]() { var three = 3; go(three); return 1; }) + \"|\" +\n"
+                "t([]() { return cast<Dir>(3); }) + \"|\" + t([]() { var s = \"east\"; return cast<Dir>(s); });").as_string());
+        });
+
+        test("a_declared_bool_slot_refuses_text_and_containers_at_load", [this]() {
+            auto e = make_engine();
+            const std::string hint = ": write !x.empty() or an explicit comparison";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"bool b = \"x\";", "cannot initialize 'b' declared 'bool' with 'string'" + hint},
+                {"bool b = false; b = \"x\";", "cannot assign 'string' to 'b' declared 'bool'" + hint},
+                {"void f(bool flag) {} f(\"x\");", "argument 1 of 'f': cannot pass 'string' to 'flag' declared 'bool'" + hint},
+                {"bool g() { return \"x\"; }", "cannot return 'string' from 'g' declared to return 'bool'" + hint},
+                {"class C { bool on = \"x\"; }", "cannot initialize field 'on' declared 'bool' with 'string'" + hint},
+                {"class C { bool on = false; } C c; c.on = \"x\";", "cannot assign 'string' to field 'on' declared 'bool'" + hint},
+                {"utf8_string u = \"x\"; bool b = u;", "cannot initialize 'b' declared 'bool' with 'utf8_string'" + hint},
+                {"bool b = [1];", "cannot initialize 'b' declared 'bool' with 'array'" + hint},
+                {"bool b = {\"k\": 1};", "cannot initialize 'b' declared 'bool' with 'map'" + hint},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(src);
+                check_eq((size_t)1, error_count(rep), rep.format(src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(src));
+            }
+            // conditions keep truthiness, numbers, null and handles still convert, and a var's string converts at run time
+            const std::string clean = "class K {} string s = \"x\"; string none = \"\"; bool a = !s.empty(); bool b = s == \"x\"; bool c = 1; bool d = 0.5; bool e = !s; bool f = s && true;\n"
+                                      "var v = \"x\"; bool g = v; var blank = \"\"; bool g2 = blank; shared_ptr<K> p = null; bool h = p; int taken = 0; if (s) { taken += 1; } if (none) { taken += 10; }\n"
+                                      "`${a}${b}${c}${d}${e}${f}${g}${g2}${h}${taken}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("truetruetruetruefalsetruetruefalsefalse1"), e->execute(clean).as_string());
+        });
+
+        test("a_builtin_method_on_a_known_receiver_has_its_catalog_result_type", [this]() {
+            auto e = make_engine();
+            const std::string decl = "string text = \"abc\"; utf8_string u = \"abc\"; array<int> xs = [1]; array<string> names = [\"a\"]; map<string,int> m = {\"k\": 1};\n";
+            const std::string stringify = ": stringify it with to_string(x) or `${x}`";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"int bad = names.join(\",\");", "cannot initialize 'bad' declared 'int' with 'string'"},
+                {"string s = text.size();", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = xs.size();", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = m.size();", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = text.find(\"b\");", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = text.contains(\"a\");", "cannot initialize 's' declared 'string' with 'bool'" + stringify},
+                {"string s = xs.empty();", "cannot initialize 's' declared 'string' with 'bool'" + stringify},
+                {"string s = m.has(\"k\");", "cannot initialize 's' declared 'string' with 'bool'" + stringify},
+                {"int n = text.substr(0, 1);", "cannot initialize 'n' declared 'int' with 'string'"},
+                {"int n = u.substr(0, 1);", "cannot initialize 'n' declared 'int' with 'utf8_string'"},
+                {"string s = xs.front();", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = xs.pop();", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"int n = names.back();", "cannot initialize 'n' declared 'int' with 'string'"},
+                {"int n = text.at(0);", "cannot initialize 'n' declared 'int' with 'char'"},
+                {"string s = text.to_int(0);", "cannot initialize 's' declared 'string' with 'int'" + stringify},
+                {"string s = text.to_float(0.0);", "cannot initialize 's' declared 'string' with 'float'" + stringify},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(decl + src);
+                check_eq((size_t)1, error_count(rep), rep.format(decl + src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(decl + src));
+            }
+            const std::string clean = decl + "int a = text.size(); int b = xs.size(); bool c = xs.empty(); bool d = m.has(\"k\"); string f = names.join(\",\"); string g = text.substr(0, 1);\n"
+                                             "utf8_string w = u.substr(1, 1); int h = xs.front(); string i = names.back(); char j = text.at(1); int k = text.find(\"c\"); string seven = \"7\";\n"
+                                             "int l = seven.to_int(0); float n = seven.to_float(0.0); int o = seven.to_int(); int p = xs.pop();\n"
+                                             "`${a} ${b} ${c} ${d} ${f} ${g} ${w} ${h} ${i} ${j} ${k} ${l} ${n} ${o} ${p}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("3 1 false true a a b 1 a b 2 7 7.0 7 1"), e->execute(clean).as_string());
+            // to_int() with no fallback returns null for text that does not parse, which an int slot refuses at run time
+            check_eq(std::string("ERROR Cannot initialize 'n' (declared int) with null"), outcome(*e, "string word = \"abc\"; int n = word.to_int(); n"));
         });
 
     }

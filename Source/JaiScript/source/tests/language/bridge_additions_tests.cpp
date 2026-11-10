@@ -305,7 +305,7 @@ public:
                 class Weapon { string name = "axe"; }
                 class Player { var weapon = null; }
                 var nobody = null;
-                Player p;
+                var p = Player();
                 string a = nobody?.weapon?.name ?? "fists";
                 string b = p?.weapon?.name ?? "fists";
                 p.weapon = Weapon();

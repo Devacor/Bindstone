@@ -231,7 +231,7 @@ function shim_run_smoke() -> int {
 		if (i == SHIM_DUMP) { write_file("gloom_frame_shim.txt", text); }
 		frames_hash = text_hash(frames_hash, crypto::sha256(text));
 	}
-	int total = run.elapsed() * 1000;
+	int total = cast<int>(run.elapsed() * 1000);
 	float per_tick = 1.0 * total / HOST_TICKS;
 	int hash = gloom_state_hash();
 	print(`total ${total} ms | ${per_tick:.3f} ms/tick | frames ${frames_hash} | STATE_HASH: ${hash}`);

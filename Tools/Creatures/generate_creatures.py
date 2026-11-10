@@ -93,12 +93,12 @@ nocopy class CreatureKind : ServerCreature {
 				auto spine = targeting.self().spine();
 				spine.timeScale(targeting.self().attackSpeedMultiplier());
 				spine.animate("attack", false);
-				spine.onEvent.connect("launch", [target, targeting](var& animSpine, int index, var& eventData) -> void {
+				spine.onEvent.connect("launch", [target, &targeting](var& animSpine, int index, var& eventData) -> void {
 					if (eventData.name == "launch") {
 						targeting.self().attackTarget(targeting, target);
 					}
 				});
-				spine.onEnd.connect("unlock", [targeting](var& animSpine, int index) -> void {
+				spine.onEnd.connect("unlock", [&targeting](var& animSpine, int index) -> void {
 					if (animSpine.track(index).name() == "attack") {
 						targeting.self().attacking = false;
 						animSpine.timeScale(1.0);
@@ -220,7 +220,7 @@ nocopy class CreatureKind : ServerCreature {
 	void flingAlong(var& victim, double dx, double dy, int cells, double seconds, double landingStun) {
 		var grid = game().pathMap();
 		var here = victim.agent().gridPosition();
-		double length = sqrt(dx * dx + dy * dy);
+		double length = math::sqrt(dx * dx + dy * dy);
 		if (length < 0.0001) {
 			dx = 1.0;
 			dy = 0.0;
@@ -229,7 +229,7 @@ nocopy class CreatureKind : ServerCreature {
 		dx = dx / length;
 		dy = dy / length;
 		for (int step = cells; step > 0; --step) {
-			math::ivec3 landing = math::ivec3(round(here.x + dx * step), round(here.y + dy * step));
+			math::ivec3 landing = math::ivec3(math::round(here.x + dx * step), math::round(here.y + dy * step));
 			if (grid.inBounds(landing) && !grid.blocked(landing)) {
 				victim.stun(seconds);
 				victim.agent().stop();
@@ -374,7 +374,7 @@ nocopy class CreatureKind : ServerCreature {
 			return false;
 		}
 		var center = target.agent().gridPosition();
-		return teleportToCell(math::ivec3(round(center.x), round(center.y)), maxRadius);
+		return teleportToCell(math::ivec3(math::round(center.x), math::round(center.y)), maxRadius);
 	}
 
 	// The closest free cell to a grid cell (the cell itself first), nearest ring after.
@@ -389,7 +389,7 @@ nocopy class CreatureKind : ServerCreature {
 		for (int radius = 1; radius <= maxRadius; ++radius) {
 			for (int dx = -radius; dx <= radius; ++dx) {
 				for (int dy = -radius; dy <= radius; ++dy) {
-					if (max(abs(dx), abs(dy)) != radius) {
+					if (math::max(math::abs(dx), math::abs(dy)) != radius) {
 						continue;
 					}
 					math::ivec3 candidate = math::ivec3(cx + dx, cy + dy);
@@ -506,7 +506,7 @@ var mePos = agent().gridPosition();
 var victimPos = game().creature(target).agent().gridPosition();
 double fx = victimPos.x - mePos.x;
 double fy = victimPos.y - mePos.y;
-double fl = sqrt(fx * fx + fy * fy);
+double fl = math::sqrt(fx * fx + fy * fy);
 if (fl < 0.001) {
 	fx = 1.0;
 	fy = 0.0;
@@ -520,7 +520,7 @@ for (int i = 0; i < others.size(); ++i) {
 		var p = others[i].agent().gridPosition();
 		double dx = p.x - mePos.x;
 		double dy = p.y - mePos.y;
-		double dl = sqrt(dx * dx + dy * dy);
+		double dl = math::sqrt(dx * dx + dy * dy);
 		if (dl > 0.001 && (dx * fx + dy * fy) / dl > 0.3) {
 			others[i].stun(0.25);
 			strike(others[i].networkId(), bite);
@@ -544,7 +544,7 @@ if (chomp % 3 == 1) {
 		if (phased != null) {
 			teleportNear(phasing, 3);
 			// every forward phase costs a quarter of its life, straight from health
-			changeHealth(-round(stats().health * 0.25));
+			changeHealth(-cast<int>(math::round(stats().health * 0.25)));
 			// for three seconds after the blink every point the Voidling would take lands on its victim instead
 			phased.absorbFor(networkId(), 1.0, 1.0);
 			redirectTarget = phasing;
@@ -579,7 +579,7 @@ if (blinkCooldown > 0.0) {
 		// never land inside the well's arrival radius: a blink is a strike, not a leak
 		if (d2 > 16.0 && wellD2 > 81.0 && teleportNear(prey, 2)) {
 			// every forward phase costs a quarter of its life, straight from health
-			changeHealth(-round(stats().health * 0.25));
+			changeHealth(-cast<int>(math::round(stats().health * 0.25)));
 			blinkCooldown = 8.0;
 			activeTarget = 0;
 			targeting().clear();
@@ -594,7 +594,7 @@ creatures["Earth_T1"] = dict(name="Stonekind", element="Earth", role="high healt
     spawn="",
     attack=melee("slam", """// the slam grows with the crowd the shout pulled in: five per enemy pressing it
 var crowd = enemiesInRange(2.5);
-int slam = 5 * max(1, crowd.size());"""),
+int slam = 5 * math::max(1, crowd.size());"""),
     tick="""if (tankingFor > 0.0) {
 	tankingFor = tankingFor - dt;
 }
@@ -672,7 +672,7 @@ creatures["Water_T1"] = dict(name="Tearel", element="Water", role="untargetable 
 		if (tare != null) { vitality = vitality + 1.0 * tare.health() / tare.maxHealth(); tare.fall(); }
 		if (tear != null) { vitality = vitality + 1.0 * tear.health() / tear.maxHealth(); tear.fall(); }
 		if (drip != null) { vitality = vitality + 1.0 * drip.health() / drip.maxHealth(); drip.fall(); }
-		int reformed = round(vitality / 3.0 * maxHealth()) + 10;
+		int reformed = cast<int>(math::round(vitality / 3.0 * maxHealth())) + 10;
 		if (reformed > stats().health) { reformed = stats().health; }
 		changeHealth(reformed - health());
 		tareId = 0;

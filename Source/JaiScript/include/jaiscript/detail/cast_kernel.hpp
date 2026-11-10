@@ -112,12 +112,29 @@ namespace jai::detail {
 		return v;
 	}
 
-	// Value and shared_ptr forms with a CLASS target: null passes tagged; an admitted object is
+	// Value and shared_ptr forms with a CLASS target: null passes tagged into the shared_ptr form alone; an admitted object is
 	// tagged - the value form copies like a typed declaration (existing storage clones, a handle
 	// deep-copies into a value, a temporary moves), the shared_ptr form shares the instance.
+	inline constexpr std::string_view cast_enum_value_text = "Cannot cast {0} to '{1}': not one of its values";
+
+	// cast<E>(n): the int n as E's value; an int no value of E has raises, anything but an int is the cast's own error
+	inline checked_result<script_value> cast_enum_value(script_value seen, const cast_expr& c, engine* eng, string_symbolizer* sym) {
+		if (seen.raw_storage_index() != script_value::TYPEID_INT) { return cast_error(seen, c, sym); }
+		if (!c.target->enum_holds(seen.unchecked_as_int())) {
+			if (sym->frozen()) { return cast_error(seen, c, sym); }
+			return checked_result<script_value>(make_error_code(runtime_error_code::type_mismatch), cast_enum_value_text,
+			                                    sym->intern(std::to_string(seen.unchecked_as_int())), c.target->id);
+		}
+		script_value out(seen.unchecked_as_int(), eng);
+		out.set_type_info(c.target->enum_value_type);
+		return out;
+	}
+
 	inline checked_result<script_value> cast_class_value(script_value seen, const cast_expr& c, bool lvalue_source,
 	                                                     engine* eng, string_symbolizer* sym) {
+		if (c.target->is_enum) { return cast_enum_value(std::move(seen), c, eng, sym); }
 		if (seen.is_null()) {
+			if (c.target->base_type != script_value_type::jai_shared_ptr_type) { return cast_error(seen, c, sym); }   // a class value is never null
 			script_value out(std::monostate{}, eng);
 			out.set_type_info(c.target);
 			return out;
@@ -179,6 +196,16 @@ namespace jai::detail {
 			return cast_error(seen, c, sym);
 		}
 		return script_value(static_cast<script_char>(text[0]), eng);
+	}
+
+	// cast<int>(float) truncates toward zero (no int slot takes a float); out of range raises the checked kernel's text
+	inline bool cast_truncation_applies(const script_value& seen, const type_info& target) {
+		return target.base_type == script_value_type::jai_int_type && seen.raw_storage_index() == script_value::TYPEID_FLOAT;
+	}
+	inline checked_result<script_value> cast_truncated(const script_value& seen, engine* eng) {
+		auto result = checked_float_to_integer(seen.unchecked_as_float());
+		if (!result) { return result.error_value(); }
+		return script_value(result.value(), eng);
 	}
 
 	// cast<string>(e) and cast<utf8_string>(e) are the explicit stringify: e's display text, as to_string(e) gives it (a string slot

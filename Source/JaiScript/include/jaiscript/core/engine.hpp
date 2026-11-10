@@ -1158,7 +1158,8 @@ namespace jai {
         // Engine-owned script namespace registry (namespace_id -> data); survives across backends
         std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& script_namespaces();
         // Names an enum declaration defined (both backends note them): `E::v` reads the value through the enum's variable
-        void note_enum_name(uint64_t name_id);
+        // marks the enum's types (type_info::is_enum) and returns the int type its values are stamped with
+        type_info* note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers);
         bool is_enum_name(uint64_t name_id) const;
 
         // Get string symbolizer for interning identifiers

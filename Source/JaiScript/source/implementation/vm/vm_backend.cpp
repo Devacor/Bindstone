@@ -2555,7 +2555,7 @@ checked_result<script_value> vm_backend::enforce_type_compatibility_named(script
 			case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
 			default: break;
 		}
-		if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want) {
+		if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want && !detail::enum_store(seen, *target_type)) {
 			return std::move(value);
 		}
 	}
@@ -2725,7 +2725,7 @@ checked_result<script_value> vm_backend::try_convert_for_parameter(const script_
 			break;
 	}
 
-	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
+	if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() && !target_type->is_enum &&
 	    (out.v == verdict::reject || out.v == verdict::reject_class)) {
 		return detail::no_converting_constructor_error(symbolizer_, derefed_arg, *target_type, engine_);
 	}
@@ -2978,6 +2978,7 @@ JAI_FORCEINLINE bool vm_backend::store_scalar_lane(script_value& slot, script_va
 	const type_info* vt = value.type_info_raw();
 	const script_value_type vb = vt ? vt->base_type : script_value_type::jai_any_type;
 	const type_info* tag = vt;
+	if ((st && st->is_enum) || (vt && vt->is_enum)) return false;   // the table's enum rows: a stamp comes or goes
 	bool lane = !st;
 	if (lane && detail::slot_value_assign_candidate(slot)) return false;   // an untagged or var slot holding an object: its object decides
 	if (!lane && st->base_type == script_value_type::jai_any_type && !st->dynamic_slot &&
@@ -3088,7 +3089,7 @@ JAI_NOINLINE op_status vm_backend::store_popped_value_full(frame& f, const vm_in
 					return {};
 				}
 			}
-			if (!identity && slot_type && (slot_type->base_type != value.type() ||
+			if (!identity && slot_type && (slot_type->base_type != value.type() || detail::enum_store(value, *slot_type) ||
 			                  slot_type->base_type == script_value_type::jai_object_type ||
 			                  slot_type->base_type == script_value_type::jai_array_type ||
 			                  slot_type->base_type == script_value_type::jai_map_type ||
@@ -5033,6 +5034,7 @@ bool vm_backend::store_slot_raw(frame& f, const vm_instruction& ins, size_t kind
 	if (!slot || slot->raw_storage_index() != kind) return false;
 	const bool is_int = kind == script_value::TYPEID_INT;
 	const type_info* st = slot->type_info_raw();
+	if (st && st->is_enum) return false;   // an enum slot's row decides
 	type_info* tag = is_int ? ti_int_ : ti_float_;
 	if (st && st->base_type != (is_int ? script_value_type::jai_int_type : script_value_type::jai_float_type)) {
 		if (st->base_type != script_value_type::jai_any_type || st->dynamic_slot) return false;
@@ -5717,11 +5719,11 @@ op_status vm_backend::exec_index_impl(frame& f, const vm_instruction& ins) {
 			if (auto map_tag = left.get_type_info()) {
 				if (type_info_ptr key_type = map_tag->key_type();
 				    key_type && key_type->base_type != script_value_type::jai_any_type &&
-				    key.deref().type() != key_type->base_type) {
-					if (!detail::map_key_kind_admits(key.deref().type(), key_type->base_type)) {
+				    key.deref().type() != detail::map_key_kind(*key_type)) {
+					if (!detail::map_key_kind_admits(key.deref().type(), detail::map_key_kind(*key_type))) {
 						return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type));
 					}
-					VM_TRY_ASSIGN(key, detail::map_key_in_kind(key.deref(), key_type->base_type, engine_));
+					VM_TRY_ASSIGN(key, detail::map_key_in_kind(key.deref(), detail::map_key_kind(*key_type), engine_));
 				}
 			}
 			const size_t prior_map_size = map.size();
@@ -6045,8 +6047,7 @@ op_status vm_backend::exec_index_store(frame& f, const vm_instruction& ins) {
 			    index >= 0 && index < static_cast<script_int>(storage->size())) {
 				const script_value& rhs_peek = stack_[stack_.size() - 3].deref();
 				const size_t ri = rhs_peek.raw_storage_index();
-				if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT &&
-				    (storage->kind() == script_array::kind_t::f64 || detail::float_fits_script_int(rhs_peek.unchecked_as_float())))) {
+				if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT && storage->kind() == script_array::kind_t::f64)) {
 					stack_.pop_back();   // index (decoded above)
 					script_value container_local = std::move(stack_.back());
 					stack_.pop_back();
@@ -6858,7 +6859,7 @@ bool vm_backend::cells_resync(frame& f, const chunk::cell_loop& loop) {
 		if (st != canonical && !(st && st->base_type == script_value_type::jai_any_type)) return false;
 		cs.cells[k].bits = cell_bits(*s, want);
 		cs.cells[k].kind = want;
-		cs.cells[k].set_stamp(cl.kind != 0 ? nullptr : st);
+		cs.cells[k].set_stamp(cl.kind != 0 && !(st && st->base_type == script_value_type::jai_any_type) ? nullptr : st);   // a var slot keeps its any stamp through the flush
 	}
 	if (const uint32_t k = define; k != k_invalid_u32) {
 		// the local the statement declared: its declared kind, or the block stays closed
@@ -7803,7 +7804,7 @@ bool vm_backend::cells_enter(frame& f, const chunk::cell_loop& loop, bool head) 
 		cs.cells[k].kind = want;
 		// the landing rule reads the stamp only where the kind is decided at run time (an adopted kind: a var or an unproven slot); a pinned cell's slot
 		// carries the canonical stamp, checked above, and its landing is the declared kind
-		cs.cells[k].set_stamp(cl.kind != 0 ? nullptr : st);   // restored by the flush when recorded
+		cs.cells[k].set_stamp(cl.kind != 0 && !(st && st->base_type == script_value_type::jai_any_type) ? nullptr : st);   // a var slot keeps its any stamp through the flush   // restored by the flush when recorded
 		JAI_CELLS_COUNT(3);
 	}
 	bool resolved = !env_known;
@@ -9133,17 +9134,13 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		const uint8_t declared = !ds || ds->base_type == script_value_type::jai_any_type ? 0 : contract;
 		if (declared != 0 && declared != kind) {
 			if (declared == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = declared; }
-			else if (declared == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
-				// an int declaration takes a float by the declaration's kernel: truncation in range, the general form's text out of range
-				const script_float d = cell_float_of_bits(bits);
-				if (!detail::float_fits_script_int(d)) return false;
-				bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = declared;
-			}
 			else return false;
 		}
 	} else if (have != kind && !loop.cells[dk].temp) {
 		// a local the body declares has no slot stamp: its declaration's type is the cell's contract on every iteration
-		const type_info* st = cs.cells[dk].stamp() ? cs.cells[dk].stamp() : loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
+		const type_info* declared_var = loop.cells[dk].first_decl ? loop.cells[dk].decl_stamp : nullptr;
+		const type_info* st = declared_var && declared_var->base_type == script_value_type::jai_any_type ? declared_var   // a var the body declares stays a var whatever landed in it
+		                    : cs.cells[dk].stamp() ? cs.cells[dk].stamp() : declared_var;
 		if (st && st->base_type == script_value_type::jai_any_type) {
 			// a var: the language lands any kind; the flush keeps the any stamp; a kind the cell's contract does not hold misses
 			if (contract != 0 && kind != contract) return false;
@@ -9151,13 +9148,8 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 			return false;   // an environment value's stamp is its own tag, not its declaration (a var field holds a canonical int): the general store converts
 		} else if (have == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) {
 			bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = have;   // a float slot widens an int (decl or store)
-		} else if (have == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && st && st->base_type == script_value_type::jai_int_type) {
-			// a declared int slot takes a float by the assignment table's kernel: truncation in range, the general form's text out of range
-			const script_float d = cell_float_of_bits(bits);
-			if (!detail::float_fits_script_int(d)) return false;
-			bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = have;
 		} else {
-			return false;   // an int slot fed a float without a declared int stamp: the general form's conversion
+			return false;   // an int slot fed a float: the general form's refusal, or an untyped slot's new kind
 		}
 	} else if (loop.cells[dk].temp && contract != 0 && kind != contract) {
 		// a compiler value under a declared type (a graft's parameter, local or result): the declaration's conversion, as a local's; the
@@ -9165,11 +9157,6 @@ bool vm_backend::cell_land(frame& f, const chunk::cell_loop& loop, uint32_t dk, 
 		// converts nothing: its contract is a typed read's, and the value misses onto the general form
 		if (loop.cells[dk].open_def) return false;
 		if (contract == static_cast<uint8_t>(script_value::TYPEID_FLOAT) && kind == static_cast<uint8_t>(script_value::TYPEID_INT)) { bits = cell_bits_of_float(static_cast<script_float>(static_cast<script_int>(bits))); kind = contract; }
-		else if (contract == static_cast<uint8_t>(script_value::TYPEID_INT) && kind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) {
-			const script_float d = cell_float_of_bits(bits);
-			if (!detail::float_fits_script_int(d)) return false;
-			bits = static_cast<int64_t>(static_cast<script_int>(d)); kind = contract;
-		}
 		else return false;
 	}
 	if (have == 0 && contract != 0 && kind != contract && !loop.cells[dk].temp) return false;   // the first write of a body-declared local under its contract
@@ -9940,8 +9927,8 @@ JAI_FORCEINLINE op_status vm_backend::exec_c_index_store(frame& f, const vm_inst
 	}
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
-		if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) { const script_float d = cell_float_of_bits(vbits); if (!detail::float_fits_script_int(d)) return miss(); node->ints()[at] = static_cast<script_int>(d); }
-		else { node->ints()[at] = static_cast<script_int>(vbits); }
+		if (vkind == static_cast<uint8_t>(script_value::TYPEID_FLOAT)) return miss();
+		node->ints()[at] = static_cast<script_int>(vbits);
 		break;
 	case script_array::kind_t::f64:
 		node->floats()[at] = vkind == static_cast<uint8_t>(script_value::TYPEID_INT) ? static_cast<script_float>(static_cast<script_int>(vbits)) : cell_float_of_bits(vbits);
@@ -10030,7 +10017,7 @@ bool vm_backend::typed_land_int(frame& f, uint32_t a, script_int v) {
 		// the slot already holds this engine's canonical int: the payload is the whole store (the
 		// path below writes the same payload and re-stamps the same type; it never touches the engine)
 		if (s->raw_storage_index() == script_value::TYPEID_INT && slot_type == ti_int_) { JAI_TYPED_INPLACE(0); s->unchecked_set_int_payload(v); return true; }
-		if (slot_type && slot_type->base_type != script_value_type::jai_int_type) { JAI_TYPED_LAND(4); return false; }
+		if (slot_type && (slot_type->base_type != script_value_type::jai_int_type || slot_type->is_enum)) { JAI_TYPED_LAND(4); return false; }
 		script_value nv(v, engine_);
 		if (s->raw_storage_index() == script_value::TYPEID_INT) { JAI_TYPED_LAND(5); s->unchecked_set_int_payload(v); s->set_type_info(nv.get_type_info()); return true; }
 		JAI_TYPED_LAND(6);
@@ -10503,9 +10490,8 @@ bool vm_backend::typed_index_store(frame& f, const fused_index_proto& p, bool no
 	const size_t at = static_cast<size_t>(index);
 	switch (node->kind()) {
 	case script_array::kind_t::i64:
-		// set()'s exact cast; a float outside the int range runs the kernel's checked text
-		if (vi == script_value::TYPEID_FLOAT && !detail::float_fits_script_int(v.unchecked_as_float())) return false;
-		node->ints()[at] = vi == script_value::TYPEID_FLOAT ? static_cast<script_int>(v.unchecked_as_float()) : v.unchecked_as_int();
+		if (vi == script_value::TYPEID_FLOAT) return false;   // the kernel refuses a float
+		node->ints()[at] = v.unchecked_as_int();
 		break;
 	case script_array::kind_t::f64:
 		node->floats()[at] = vi == script_value::TYPEID_INT ? static_cast<script_float>(v.unchecked_as_int()) : v.unchecked_as_float();
@@ -10675,11 +10661,11 @@ op_status vm_backend::map_scalar_store(script_value& container, const script_val
 	handled = true;
 	if (map_tag) {
 		if (const type_info_ptr& key_type = map_tag->type_params.empty() ? no_type : map_tag->type_params[0];
-		    key_type && key_type->base_type != script_value_type::jai_any_type && key_in.type() != key_type->base_type) [[unlikely]] {
-			if (!detail::map_key_kind_admits(key_in.type(), key_type->base_type)) {
+		    key_type && key_type->base_type != script_value_type::jai_any_type && key_in.type() != detail::map_key_kind(*key_type)) [[unlikely]] {
+			if (!detail::map_key_kind_admits(key_in.type(), detail::map_key_kind(*key_type))) {
 				return raise_from(detail::element_type_error(symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key_in, key_type));
 			}
-			VM_TRY_ASSIGN(script_value converted_key, detail::map_key_in_kind(key_in, key_type->base_type, engine_));
+			VM_TRY_ASSIGN(script_value converted_key, detail::map_key_in_kind(key_in, detail::map_key_kind(*key_type), engine_));
 			return map_scalar_store(container, converted_key, value, handled, stored);
 		}
 	}
@@ -10825,11 +10811,9 @@ op_status vm_backend::index_store_fused_rows(frame& f, const vm_instruction& ins
 		    index >= 0 && index < static_cast<script_int>(node->size())) {
 			const script_value& rhs_peek = value_operand ? value_ptr->deref() : stack_.back().deref();
 			const size_t ri = rhs_peek.raw_storage_index();
-			if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT &&
-			    (node->kind() == script_array::kind_t::f64 || detail::float_fits_script_int(rhs_peek.unchecked_as_float())))) {
+			if (ri == script_value::TYPEID_INT || (ri == script_value::TYPEID_FLOAT && node->kind() == script_array::kind_t::f64)) {
 				if (node->kind() == script_array::kind_t::i64) {
-					node->ints()[static_cast<size_t>(index)] = ri == script_value::TYPEID_FLOAT
-						? static_cast<script_int>(rhs_peek.unchecked_as_float()) : rhs_peek.unchecked_as_int();
+					node->ints()[static_cast<size_t>(index)] = rhs_peek.unchecked_as_int();
 				} else {
 					node->floats()[static_cast<size_t>(index)] = ri == script_value::TYPEID_INT
 						? static_cast<script_float>(rhs_peek.unchecked_as_int()) : rhs_peek.unchecked_as_float();
@@ -11099,15 +11083,14 @@ op_status vm_backend::exec_index_compound_fused(frame& f, const vm_instruction& 
 				}
 				script_value resultValue = make_null();
 				VM_TRY_ASSIGN(resultValue, (ins.a & compound_flag_incdec) ? detail::incdec_step(current, op == token_type::plus, engine_) : evaluate_arithmetic(current, op, rhs, detail::compound_index(op)));
-				if (storage->kind() == script_array::kind_t::i64 && resultValue.raw_storage_index() == script_value::TYPEID_FLOAT &&
-				    !detail::float_fits_script_int(resultValue.unchecked_as_float())) {
-					return raise_(make_error_code(runtime_error_code::invalid_numeric_operand), detail::float_to_integer_error);
+				// an int buffer refuses a float result: the enforcing path's text
+				if (storage->kind() != script_array::kind_t::i64 || resultValue.raw_storage_index() == script_value::TYPEID_INT) {
+					storage->set(static_cast<size_t>(index), resultValue);
+					stack_.pop_back();   // rhs
+					stack_.pop_back();   // index
+					stack_.back() = assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(resultValue);   // container slot becomes the result: the stored element
+					return {};
 				}
-				storage->set(static_cast<size_t>(index), resultValue);
-				stack_.pop_back();   // rhs
-				stack_.pop_back();   // index
-				stack_.back() = assignment_result_used(f) ? storage->get(static_cast<size_t>(index), engine_) : std::move(resultValue);   // container slot becomes the result: the stored element
-				return {};
 			}
 			if (storage && !storage->is_typed() && index >= 0 && index < static_cast<script_int>(storage->size())) {
 				script_value* target_ptr = &storage->values()[static_cast<size_t>(index)];
@@ -16194,7 +16177,7 @@ op_status vm_backend::store_namespace_cell(const detail::namespace_store_target&
 			return {};
 		}
 	}
-	if (slot_type && (slot_type->base_type != incoming.type() ||
+	if (slot_type && (slot_type->base_type != incoming.type() || detail::enum_store(incoming, *slot_type) ||
 	                  slot_type->base_type == script_value_type::jai_object_type ||
 	                  slot_type->base_type == script_value_type::jai_array_type ||
 	                  slot_type->base_type == script_value_type::jai_map_type ||
@@ -17839,6 +17822,11 @@ op_status vm_backend::exec_new(frame& f, const vm_instruction& ins) {
 		return raise_(make_error_code(runtime_error_code::type_mismatch));
 	}
 
+	if (expr->type->is_enum && args.empty()) {
+		stack_.push_back(detail::enum_default_value(expr->type, engine_));
+		return {};
+	}
+
 	if (expr->type->base_type == script_value_type::jai_array_type) {
 		auto element_type = expr->type->element_type();
 		if (!element_type && engine_) {
@@ -18151,20 +18139,7 @@ op_status vm_backend::exec_extern_decl(frame& f, const vm_instruction& ins) {
 
 op_status vm_backend::exec_enum_decl(frame& f, const vm_instruction& ins) {
 	auto* decl = static_cast<enum_decl*>(f.code->nodes[ins.a].get());
-	auto enum_map = script_value::make_map(
-		ti_string_,
-		ti_int_,
-		engine_);
-	auto& map_ref = const_cast<script_map&>(enum_map.as_map());
-
-	for (size_t i = 0; i < decl->values.size(); ++i) {
-		auto key = script_value(std::string(decl->values[i].first), engine_);
-		map_ref[std::move(key)] = script_value(static_cast<script_int>(decl->numbers[i]), engine_);
-	}
-	map_ref.mark_enum_values();
-
-	environment_->define(decl->name_id, std::move(enum_map));
-	engine_->note_enum_name(decl->name_id);
+	environment_->define(decl->name_id, detail::enum_value_table(*decl, engine_));
 	const bool program_scope = environment_->is_program_scope();
 	if (program_scope) {
 		engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), true);   // interp parity: visit_enum_decl
@@ -20247,6 +20222,14 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		script_value converted = std::move(out.value());
 		converted.set_type_info(expr->target);
 		stack_.push_back(std::move(converted));
+		return {};
+	}
+	if (detail::cast_truncation_applies(operand, *expr->target)) {
+		auto out = detail::cast_truncated(operand, engine_);
+		if (!out) {
+			return raise_from(out);
+		}
+		stack_.push_back(std::move(out.value()));
 		return {};
 	}
 	if (detail::cast_text_rule_applies(operand, *expr->target)) {   // KEEP BYTE-PARALLEL with the interpreter's visit_cast_expr

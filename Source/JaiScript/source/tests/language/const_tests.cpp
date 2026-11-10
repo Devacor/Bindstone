@@ -215,11 +215,13 @@ public:
             const auto c = run(R"JS(
                 int twice(const int& x) { return x * 2; }
                 float half(const float& x) { return x / 2; }
-                float f = 2.5; int i = 3; var v = 7.9;
-                print(twice(2.5), " ", twice(f), " ", half(i), " ", f, " ", twice(v));
+                float f = 2.5; int i = 3; var v = 7; var fv = 7.9;
+                print(twice(true), " ", half(3), " ", half(i), " ", f, " ", twice(v));
+                try { twice(fv); } catch (e) { print(" ", e); }
             )JS");
             check_eq(std::string(""), c.error);
-            check_eq(std::string("4 4 1.5 2.5 14\n"), c.output);
+            check_eq(std::string("2 1.5 1.5 2.5 14\n Cannot pass float to parameter 'x' of 'twice' (declared int&)\n"), c.output);
+            CHECK_ERROR("int twice(const int& x) { return x * 2; } float f = 2.5; twice(f);", "argument 1 of 'twice': cannot bind 'float' to 'x' declared 'const int&'");
             CHECK_ERROR("int twice(const int& x) { return x * 2; } twice(\"s\");", "argument 1 of 'twice': cannot bind 'string' to 'x' declared 'const int&'");
             CHECK_ERROR("void bump(int& x) { x += 1; } float f = 1.5; bump(f);", "argument 1 of 'bump': cannot bind 'float' to 'x' declared 'int&'");
         });

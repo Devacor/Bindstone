@@ -275,8 +275,8 @@ arr[1] = 42</code></pre></div>
 <p>References respect the type system, and builtin methods work through them. A write through an <code>auto&amp;</code> bound to a typed array&#x27;s element converts when compatible and rejects when not, exactly like writing to the element directly. Calling a string/array/map method through a reference mutates the referent in place:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">array&lt;int&gt; nums = [1, 2, 3];
 auto&amp; e = nums[0];
-e = 9.7;                       // converts to the element type, like any typed write
-print("after e = 9.7: {}", to_json(nums));
+e = true;                      // converts to the element type, like any typed write
+print("after e = true: {}", to_json(nums));
 try {
     e = "nope";                // incompatible writes are rejected through refs too
 } catch (err) {
@@ -286,7 +286,7 @@ var s = "  hello  ";
 auto&amp; r = s;
 r.trim();                      // string methods work through ref declarations
 print("[{}]", s);</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after e = 9.7: [9,2,3]
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">after e = true: [1,2,3]
 caught: Cannot assign &#x27;string&#x27; to element of type &#x27;int&#x27;
 [hello]</code></pre></div>
 <p>A spelled type works the same way. At statement level <code>Node&amp; r = n;</code> declares a reference, as in C++, where whatever can be read as a declaration is one. It is never read as the expression <code>Node &amp; r = n</code>. A reference needs something to refer to, so <code>Node&amp; r;</code> without an initializer does not load: <code>reference variable 'r' must be initialized: a reference names a variable from its declaration on</code>.</p>
@@ -342,12 +342,12 @@ try { bump(label); } catch (err) { print("caught: {}", err); }
 
 int hp = 10;
 var&amp; r = hp;                   // the reference names an int variable
-r = 7.9;                       // so the store converts as hp = 7.9 would
+r = true;                      // so the store converts as hp = true would
 print("hp = {}", hp);
 try { r = "full"; } catch (err) { print("caught: {}", err); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">count = 5
 caught: Cannot pass string to parameter &#x27;n&#x27; of &#x27;bump&#x27; (declared int&amp;)
-hp = 7
+hp = 1
 caught: Cannot assign string to &#x27;r&#x27; (declared int&amp;)</code></pre></div>
 <h2 id="escape-hatch-4-range-for-with-auto">Escape hatch 4: range-for with <code>auto&amp;</code><a class="hlink" href="#escape-hatch-4-range-for-with-auto" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">auto nums = [1, 2, 3];
@@ -451,7 +451,7 @@ original:     77  copy: 0</code></pre></div>
 <ul>
 <li><code>cast&lt;Derived&amp;&gt;(h) = d</code> assigns the object <code>h</code> holds. When <code>h</code> is a <code>shared_ptr</code>, that is the object it shares, so every alias sees the new members, as <code>*h = d</code> would; the handle itself is not rebound.</li>
 <li>A member of it binds by reference: <code>auto&amp; t = cast&lt;Derived&amp;&gt;(h).t</code>.</li>
-<li><code>cast&lt;int&amp;&gt;(n) += 2.5</code> and <code>cast&lt;int&amp;&gt;(n)++</code> store an int into <code>n</code>, as <code>int&amp; r = n; r += 2.5;</code> would, even when <code>n</code> is a <code>var</code>.</li>
+<li><code>cast&lt;int&amp;&gt;(n) += 2</code> and <code>cast&lt;int&amp;&gt;(n)++</code> store an int into <code>n</code>, as <code>int&amp; r = n; r += 2;</code> would, even when <code>n</code> is a <code>var</code>.</li>
 </ul>
 <p>Every C++ lvalue is assignable the same way: a function or method returning <code>T&amp;</code> (<code>first() = 5</code>), a conditional whose arms are lvalues (<code>(useA ? a : b) = 5</code>), <code>(a = b) = c</code> and <code>++x = v</code>. So is an element or member of any of them: <code>getref()[&quot;a&quot;] = 5</code> through a function returning <code>map&lt;string, int&gt;&amp;</code>, or <code>(useA ? xs : ys)[0] = 1</code>.</p>
 <p>Such a call also binds a reference parameter: <code>bump(holder.child())</code> writes the object a host method returning <code>T&amp;</code> names, while a call returning by value stays a temporary.</p>
@@ -464,7 +464,7 @@ first() = 5;                   // a call returning int&amp; names slots[0]
 (use_a ? a : b) = 9;           // a conditional of two lvalues names one of them
 (a = b) = 7;                   // an assignment yields its left side
 var n = 3;
-cast&lt;int&amp;&gt;(n) += 2.5;          // stores an int into the var, as int&amp; r = n would
+cast&lt;int&amp;&gt;(n) += 2;            // stores an int into the var, as int&amp; r = n would
 print("{} {} {} {}", slots[0], a, b, n);
 int count() { return 3; }
 var f = count;                 // called through a var, so only the run time sees it

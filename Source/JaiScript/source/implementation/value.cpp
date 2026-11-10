@@ -981,7 +981,7 @@ script_value script_value::make_array(type_info_ptr element_type, engine* eng) {
             case script_value_type::jai_bool_type: node_kind = script_array::kind_t::b8; break;
             case script_value_type::jai_char_type: node_kind = script_array::kind_t::c8; break;
             case script_value_type::jai_string_type: node_kind = script_array::kind_t::str; break;
-            case script_value_type::jai_object_type: node_kind = script_array::kind_t::obj; break;
+            case script_value_type::jai_object_type: node_kind = element_type->is_enum ? script_array::kind_t::hetero : script_array::kind_t::obj; break;
             default: node_kind = script_array::vec_kind_of(element_type->base_type); break;
         }
     }

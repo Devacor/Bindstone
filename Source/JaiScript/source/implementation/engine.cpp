@@ -4733,8 +4733,22 @@ std::unordered_map<uint64_t, std::shared_ptr<script_namespace_data>>& engine::sc
     return impl->script_namespaces_;
 }
 
-void engine::note_enum_name(uint64_t name_id) {
+type_info* engine::note_enum(uint64_t name_id, std::string_view name, const std::vector<int64_t>& numbers) {
     impl->enum_names_.insert(name_id);
+    type_info* slot = get_type_info_object(std::string(name));
+    const implementation::type_key key{script_value_type::jai_int_type, slot->id, 0};
+    type_info* value = impl->find_type(key);
+    if (!value) {
+        type_info made(script_value_type::jai_int_type, name);
+        made.id = slot->id;
+        value = impl->intern_type(key, made);
+    }
+    for (type_info* type : {slot, value}) {
+        type->is_enum = true;
+        type->enum_value_type = value;
+        type->enum_numbers = numbers;
+    }
+    return value;
 }
 
 bool engine::is_enum_name(uint64_t name_id) const {

@@ -327,7 +327,7 @@ public:
                 {"cast_expressions", R"(
                 class S { int x = 1; }
                 class T : S { int t = 2; }
-                class H { S p = null; }
+                class H { S p = S(); }
                 auto h = H();
                 h.p = T();
                 cast<T&>(h.p).t = 5;

@@ -5158,13 +5158,6 @@ checked_result<declaration_ptr> parser::class_declaration(bool nocopy, std::stri
                         continue;
                     }
 
-                    if (!init && type && type->base_type == script_value_type::jai_object_type && type->type_name == class_name_view) {
-                        report_error("'" + std::string(class_name_view) + " " + std::string(name.lexeme) + ";' would build a " + std::string(class_name_view) +
-                                     " inside every " + std::string(class_name_view) + ": write '" + std::string(class_name_view) + " " + std::string(name.lexeme) +
-                                     " = null;' for a link, or 'shared_ptr<" + std::string(class_name_view) + "> " + std::string(name.lexeme) + ";' to share one", name);
-                        synchronize_class_member(class_open_index);
-                        continue;
-                    }
                     const bool spelled_init = init != nullptr;
                     if (!init) { init = default_initializer(type, name.location); }
                     auto var_decl = std::make_shared<variable_decl>(name.location, type, name.lexeme, get_symbol_id(name), init);

@@ -1108,11 +1108,11 @@ checked_result<void> interpreter::visit_binary_expr_t(binary_expr* expr, const r
                 if (auto map_tag = left.get_type_info()) {
                     if (type_info_ptr key_type = map_tag->key_type();
                         key_type && key_type->base_type != script_value_type::jai_any_type &&
-                        key.deref().type() != key_type->base_type) {
-                        if (!detail::map_key_kind_admits(key.deref().type(), key_type->base_type)) {
+                        key.deref().type() != detail::map_key_kind(*key_type)) {
+                        if (!detail::map_key_kind_admits(key.deref().type(), detail::map_key_kind(*key_type))) {
                             return detail::element_type_error(string_symbolizer_, runtime_error_code::map_key_type_mismatch, "Cannot use '{0}' as a key of type '{1}'", key.deref(), key_type);
                         }
-                        auto converted_key = detail::map_key_in_kind(key.deref(), key_type->base_type, engine_);
+                        auto converted_key = detail::map_key_in_kind(key.deref(), detail::map_key_kind(*key_type), engine_);
                         if (!converted_key) { return converted_key.error_value(); }
                         key = std::move(converted_key.value());
                     }
@@ -3283,7 +3283,7 @@ checked_result<script_value> interpreter::store_namespace_cell(const detail::nam
             return clone_for_assignment(*storage);   // the operator wrote the held instance
         }
     }
-    if (slot_type && (slot_type->base_type != incoming.type() ||
+    if (slot_type && (slot_type->base_type != incoming.type() || detail::enum_store(incoming, *slot_type) ||
                       slot_type->base_type == script_value_type::jai_object_type ||
                       slot_type->base_type == script_value_type::jai_array_type ||
                       slot_type->base_type == script_value_type::jai_map_type ||
@@ -3352,7 +3352,7 @@ checked_result<script_value> interpreter::enforce_type_compatibility(
             case script_value_type::jai_char_type: want = script_value::TYPEID_CHAR; break;
             default: break;
         }
-        if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want) {
+        if (want != script_value::TYPEID_INVALID && seen.raw_storage_index() == want && !detail::enum_store(seen, *target_type)) {
             return std::move(value);
         }
     }
@@ -5358,6 +5358,11 @@ checked_result<void> interpreter::visit_new_expr_t(new_expr* expr, const replay_
         return checked_result<void>(make_error_code(runtime_error_code::type_mismatch));
     }
 
+    if (expr->type->is_enum && expr->arguments.empty()) {
+        push_value(detail::enum_default_value(expr->type, engine_));
+        return {};
+    }
+
     // Handle built-in types specially
     if (expr->type->base_type == script_value_type::jai_array_type) {
         // array<T>{} constructor
@@ -5925,6 +5930,14 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
         script_value converted = std::move(out.value());
         converted.set_type_info(expr->target);
         push_value(std::move(converted));
+        return {};
+    }
+    if (detail::cast_truncation_applies(operand, *expr->target)) {
+        auto out = detail::cast_truncated(operand, engine_);
+        if (!out) {
+            return out.error_value();
+        }
+        push_value(std::move(out.value()));
         return {};
     }
     if (detail::cast_text_rule_applies(operand, *expr->target)) {   // KEEP BYTE-PARALLEL with the vm's exec_cast
@@ -9563,7 +9576,7 @@ checked_result<script_value> interpreter::try_convert_for_parameter(const script
             break;
     }
 
-    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() &&
+    if (target_base_type == script_value_type::jai_object_type && !target_type->type_name.empty() && !target_type->is_enum &&
         (out.v == verdict::reject || out.v == verdict::reject_class)) {
         return detail::no_converting_constructor_error(string_symbolizer_, derefed_arg, *target_type, engine_);
     }
@@ -10083,20 +10096,7 @@ void interpreter::adopt_run_trace(backend_run_state& a_state) {
 }
 
 checked_result<void> interpreter::visit_enum_decl(enum_decl* decl) {
-    auto enum_map = script_value::make_map(
-        engine_->get_type_info_string(),
-        engine_->get_type_info_int(),
-        engine_);
-    auto& map_ref = const_cast<script_map&>(enum_map.as_map());
-
-    for (size_t i = 0; i < decl->values.size(); ++i) {
-        auto key = script_value(std::string(decl->values[i].first), engine_);
-        map_ref[std::move(key)] = make_value(static_cast<script_int>(decl->numbers[i]));
-    }
-    map_ref.mark_enum_values();
-
-    environment_->define(decl->name_id, std::move(enum_map));
-    engine_->note_enum_name(decl->name_id);
+    environment_->define(decl->name_id, detail::enum_value_table(*decl, engine_));
     if (environment_->is_program_scope()) { engine_->mark_const_cell(environment_->get_env_var_ptr(decl->name_id), true); }   // vm parity: exec_enum_decl
     return {};
 }

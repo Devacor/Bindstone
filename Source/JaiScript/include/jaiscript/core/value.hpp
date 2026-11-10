@@ -2898,7 +2898,10 @@ namespace detail {
         
         // Set type info for special cases (like weak_ptr creation)
         JAI_FORCEINLINE void set_type_info(type_info_ptr type) {
-            if (!type || storage_.tag() != reinterpret_cast<uintptr_t>(type.get())) { set_stamp(type); }   // an unchanged stamp writes nothing
+            if (!type || storage_.tag() != reinterpret_cast<uintptr_t>(type.get())) {   // an unchanged stamp writes nothing
+                if (type && type->is_enum) [[unlikely]] { type = type->enum_value_type; }   // an enum slot's declared type stamps its value type
+                set_stamp(type);
+            }
             if (raw_storage_index() == TYPEID_ARRAY) [[unlikely]] { demote_after_stamp(type); }
         }
         JAI_NOINLINE void demote_after_stamp(type_info_ptr type) {
@@ -3331,8 +3334,8 @@ namespace detail {
     inline void script_array::set(size_t i, script_value v) {
         switch (kind_) {
             case kind_t::i64:
-                ints_[i] = v.raw_storage_index() == script_value::TYPEID_FLOAT
-                    ? static_cast<script_int>(v.unchecked_as_float()) : v.unchecked_as_int();
+                assert(v.raw_storage_index() == script_value::TYPEID_INT && "int slot store: caller converts first");
+                ints_[i] = v.unchecked_as_int();
                 break;
             case kind_t::f64:
                 floats_[i] = v.raw_storage_index() == script_value::TYPEID_INT
@@ -3368,8 +3371,8 @@ namespace detail {
     inline void script_array::push(script_value pre_converted) {
         switch (kind_) {
             case kind_t::i64:
-                ints_.push_back(pre_converted.raw_storage_index() == script_value::TYPEID_FLOAT
-                    ? static_cast<script_int>(pre_converted.unchecked_as_float()) : pre_converted.unchecked_as_int());
+                assert(pre_converted.raw_storage_index() == script_value::TYPEID_INT && "int slot push: caller converts first");
+                ints_.push_back(pre_converted.unchecked_as_int());
                 break;
             case kind_t::f64:
                 floats_.push_back(pre_converted.raw_storage_index() == script_value::TYPEID_INT

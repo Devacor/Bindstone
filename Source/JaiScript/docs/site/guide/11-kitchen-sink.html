@@ -48,29 +48,39 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <article class="chapter"><h1 id="enums-namespaces-destructuring-friends">Enums, Namespaces, Destructuring &amp; Friends<a class="hlink" href="#enums-namespaces-destructuring-friends" aria-label="link">&#8203;</a></h1>
 <p>The kitchen sink. This chapter collects the smaller conveniences, the things you reach for daily that don&#x27;t need a chapter of their own: enums, namespaces, destructuring, the ternary operator, and null-safe access. Each behaves the way a C++ developer would guess, with the differences called out.</p>
 <h2 id="enums">Enums<a class="hlink" href="#enums" aria-label="link">&#8203;</a></h2>
-<p><code>enum Name { a, b, c }</code> declares integer constants, counted from 0 as in C++. They compare naturally and work as <code>switch</code> cases:</p>
+<p><code>enum Name { a, b, c }</code> declares a type and its values, counted from 0 as in C++. A <code>Name</code> slot (a variable, parameter, return, field, <code>array&lt;Name&gt;</code> element, map key or value) holds only those values and starts at the first one. A value converts to an <code>int</code> wherever one is wanted; an int enters an enum slot only through <code>cast&lt;Name&gt;(n)</code>:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
-print("east = {}", Direction.east);
-auto d = Direction.south;
-print("d == south: {}", d == Direction.south);
+Direction d = Direction::south;
+print("d == south: {} ({})", d == Direction::south, type_of(d));
+int n = d + 1;                               // a value converts to int
+print("n = {} ({})", n, type_of(n));
 switch (d) {
-    case Direction.north: print("going up");
-    case Direction.south: print("going down");
+    case Direction::north: print("going up");
+    case Direction::south: print("going down");
     default: print("sideways");
 }
-Direction.west;</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">east = 2
-d == south: true
+string name(Direction where) { return where == Direction::east ? "east" : "elsewhere"; }
+print(name(cast&lt;Direction&gt;(2)));             // an int enters only through cast
+try { d = cast&lt;Direction&gt;(9); } catch (e) { print("caught: {}", e); }</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">d == south: true (Direction)
+n = 2 (int)
 going down
-== result: 3</code></pre></div>
-<p>Enum members are plain ints at runtime (<code>Direction.east</code> prints <code>2</code>). Membership, though, is checked at load: <code>Direction.zzz</code> is not a run-time lookup that returns null, it fails the load before anything runs:</p>
+east
+caught: Cannot cast 9 to &#x27;Direction&#x27;: not one of its values</code></pre></div>
+<ul>
+<li>An int or another enum&#x27;s value into an enum slot fails the load: <code>cannot initialize 'd' declared 'Direction' with 'int': cast&lt;Direction&gt;(n) converts an int that is one of its values</code>. So do <code>d += 1</code> and <code>d++</code> (<code>cannot apply '++' to 'Direction'</code>).</li>
+<li><code>auto d = Direction::north;</code> is a <code>Direction</code>. A <code>var</code> holds the int, and an int out of a <code>var</code> enters an enum slot when it is one of the values (<code>Cannot assign int to 'd' (declared Direction)</code> otherwise).</li>
+<li>Overloads tell <code>f(Direction)</code> from <code>f(int)</code>.</li>
+<li><code>to_json</code> and <code>to_binary</code> write the integer, and a load restores the enum from it.</li>
+</ul>
+<p>Membership is checked at load: <code>Direction::zzz</code> is not a run-time lookup that returns null, it fails the load before anything runs:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
-print("{}", Direction.zzz);</code></pre></div>
+print("{}", Direction::zzz);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:23: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
-    print(&quot;{}&quot;, Direction.zzz);
-                          ^</code></pre></div>
-<p>Members are reached with a dot (<code>Direction.east</code>) or, as in C++, with <code>::</code> (<code>Direction::east</code>); both name the same constant.</p>
+&lt;script&gt;:2:24: error: no value &#x27;zzz&#x27; in enum &#x27;Direction&#x27; (declared at 1:6)
+    print(&quot;{}&quot;, Direction::zzz);
+                           ^</code></pre></div>
+<p>Values are spelled with <code>::</code> as in C++ (<code>Direction::east</code>); a dot (<code>Direction.east</code>) names the same value.</p>
 <p>The enum&#x27;s name alone is its value table: a <code>map&lt;string,int&gt;</code> from each value&#x27;s name to its number, which is how a script reflects over an enum. A <code>var</code>, an <code>auto</code> or a <code>map&lt;string,int&gt;</code> takes it, and a range-<code>for</code> walks it in key order:</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 var table = Direction;                       // the enum&#x27;s value table, a map&lt;string,int&gt;
@@ -85,7 +95,7 @@ west = 3</code></pre></div>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Direction { north, south, east, west }
 int d = Direction;</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">jaiscript: static check failed:
-&lt;script&gt;:2:5: error: cannot initialize &#x27;d&#x27; declared &#x27;int&#x27; with &#x27;enum Direction&#x27;: an enum&#x27;s name is its value table, a map&lt;string,int&gt;; name one of its values (Direction.north)
+&lt;script&gt;:2:5: error: cannot initialize &#x27;d&#x27; declared &#x27;int&#x27; with &#x27;enum Direction&#x27;: an enum&#x27;s name is its value table, a map&lt;string,int&gt;; name one of its values (Direction::north)
     int d = Direction;
         ^</code></pre></div>
 <p>A value may take an initializer, as in C++. A value without one is the value before it plus one, and two values may share a number. An initializer is a constant integer built from:</p>
@@ -97,8 +107,8 @@ int d = Direction;</code></pre></div>
 <p>The load computes every value. A name that is not an earlier value, a shift outside 0 to 63 or an overflow fails it (<code>enum value 'b' names 'c', which is not an earlier value of 'F'</code>):</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">enum Flag { none, read = 1 &lt;&lt; 0, write = 1 &lt;&lt; 1, exec = 1 &lt;&lt; 2, all = read | write | exec, next }
 enum Level { low = -2, mid, high = Level::mid + 10 }
-print("{} {} {} {}", Flag.write, Flag.all, Flag.next, Flag.all &amp; Flag.exec);
-print("{} {} {}", Level.low, Level.mid, Level.high);</code></pre></div>
+print("{} {} {} {}", Flag::write, Flag::all, Flag::next, Flag::all &amp; Flag::exec);
+print("{} {} {}", Level::low, Level::mid, Level::high);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 7 8 4
 -2 -1 9</code></pre></div>
 <p>An enum declared inside a function or a block is local to it, like a C++ local enum: its values resolve there and it vanishes with the scope. The same holds for an enum in a file that an <code>include</code> runs inside a function. An enum of the same name at program scope keeps its values, and the checker warns when a local declaration hides one (<code>enum 'Color' declared in function 'reload' is local to it: the program-scope 'Color' keeps its values</code>).</p>

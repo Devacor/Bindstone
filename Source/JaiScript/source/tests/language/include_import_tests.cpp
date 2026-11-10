@@ -2353,7 +2353,7 @@ public:
                 std::error_code ec;
                 std::filesystem::last_write_time(path, std::filesystem::file_time_type::clock::now() + std::chrono::seconds(2 * ++tick), ec);
             };
-            const std::string use = "int dr_twice() { int n = 0; n = dr_level(); return n * 2; }\nvar dr_read() { var v = dr_level(); return v; }\n";
+            const std::string use = "float dr_twice() { float n = 0.0; n = dr_level(); return n * 2; }\nvar dr_read() { var v = dr_level(); return v; }\n";
             const std::string root = "import(\"dr_use.jai\");\nimport(\"dr_lvl.jai\");\n";
             const auto probe = [&](engine& eng) {
                 std::string manifests;

@@ -117,6 +117,9 @@ namespace jai {
         // (bare-identifier ref argument / ref-decl source), so value binding boxes its
         // storage into a cell (see reference_holder cell mode)
         bool ref_escaping = false;
+        // a checker stamp: the body stores a float through this reference parameter, which an int variable bound to it
+        // refuses under the parameter's name (the vm binds such a call instead of grafting it)
+        bool ref_store_unproven = false;
         // Parser escape analysis for a `T& p` parameter: its reference reaches another binding (a call argument), so the call
         // marks it with T (detail::ref_declare) for the bindings that cannot see the name
         bool declared_ref_escapes = false;

@@ -85,10 +85,12 @@ namespace stdlib {
         const uint64_t member_id = field.id;
         if (const script_value* stored = inst.find_script_field_value(member_id)) {
             const type_info_ptr declared = def.get_field_declared_type(member_id);
-            // a saved null is a handle field's empty handle, as `= null` makes it (an expired weak handle saves as null)
-            const bool handle_field = declared && (declared->base_type == script_value_type::jai_weak_ptr_type ||
-                                                   declared->base_type == script_value_type::jai_shared_ptr_type);
-            if (declared && declared->base_type != script_value_type::jai_any_type && (!v.is_null() || handle_field)) {
+            // a saved null is a handle field's empty handle, as `= null` makes it (an expired weak handle saves as null); a class
+            // value field holds no null and keeps its constructed object
+            const bool null_decided = declared && (declared->base_type == script_value_type::jai_weak_ptr_type ||
+                                                   declared->base_type == script_value_type::jai_shared_ptr_type ||
+                                                   declared->base_type == script_value_type::jai_object_type);
+            if (declared && declared->base_type != script_value_type::jai_any_type && (!v.is_null() || null_decided)) {
                 auto converted = detail::field_store_convert_no_script(v, declared, eng);
                 if (!converted) {
                     record_load_retype(eng, def, member_id, field_migration_outcome::reset, v, stored);

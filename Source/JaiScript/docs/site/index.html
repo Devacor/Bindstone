@@ -216,7 +216,7 @@ class Hero {
     int hp = 10;
     void heal(int amount) { hp += amount; }
 }
-function bump(int&amp; x) { x += 1; }   // mutation is visible at both ends
+void bump(int&amp; x) { x += 1; }       // mutation is visible at both ends
 
 auto h = Hero();
 h.heal(5);

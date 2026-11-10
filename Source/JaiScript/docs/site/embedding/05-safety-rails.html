@@ -102,7 +102,7 @@ try {
 } catch (const std::exception&amp; e) {
     std::cout &lt;&lt; e.what() &lt;&lt; &quot;\n&quot;;          // the script&#x27;s catch never saw it
 }
-std::cout &lt;&lt; eng-&gt;execute(&quot;2 + 2&quot;).as_int() &lt;&lt; &quot;\n&quot;;   // the engine survives; each execute gets a fresh deadline</code></pre></div>
+std::cout &lt;&lt; eng-&gt;execute&lt;int&gt;(&quot;2 + 2&quot;) &lt;&lt; &quot;\n&quot;;   // the engine survives; each execute gets a fresh deadline</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Script execution budget exceeded - raise engine::execution_budget or break up the work
 4</code></pre></div>
 <ul><li><strong>Host entry.</strong> An <code>execute()</code>, a coroutine <code>next()</code>, or a script function the host calls (through <code>as_function()</code>) while no script is running. Each arms a fresh deadline from the budget set at that moment.</li>

@@ -1275,7 +1275,7 @@ public:
 			} catch (const std::exception& e) {
 			    std::cout << e.what() << "\n";          // the script's catch never saw it
 			}
-			std::cout << eng->execute("2 + 2").as_int() << "\n";   // the engine survives; each execute gets a fresh deadline
+			std::cout << eng->execute<int>("2 + 2") << "\n";   // the engine survives; each execute gets a fresh deadline
 			// [/sample]
 			wall_clock.finish();
 			eng->execution_budget(5.0);

@@ -28,6 +28,7 @@
 #include <initializer_list>
 #include <unordered_set>
 #include <typeindex>
+#include <type_traits>
 #include <iosfwd>
 
 namespace jai {
@@ -177,6 +178,15 @@ namespace jai {
         // semantics as execute(std::string). Only consulted for tagged sources; the
         // std::string overloads are untouched.
         held_value execute(script_source source);
+
+        // execute<T>(...) is execute(...).as<T>() with the same arguments: it throws when the result is not a T or does
+        // not fit one. T is a value: a reference, a pointer or a view would name the result, which dies with the call.
+        template<typename T, typename... Arguments>
+        T execute(Arguments&&... a_arguments) {
+            static_assert(!std::is_reference_v<T> && !std::is_pointer_v<T> && !std::is_same_v<std::remove_cv_t<T>, std::string_view>,
+                "execute<T> returns a value: ask for std::string, a number or a copied object, never a reference, pointer or view");
+            return execute(std::forward<Arguments>(a_arguments)...).template as<T>();
+        }
 
         // execute_file attributes the script to `script_path`: the path is stamped onto
         // every AST node (file:line:col), so stack traces, error messages, and the

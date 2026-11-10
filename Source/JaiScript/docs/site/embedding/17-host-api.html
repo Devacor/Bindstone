@@ -293,6 +293,14 @@ whose file is missing or fails its check.</p>
 script's last top-level expression, and a null value when the script ends in anything else (a declaration, a loop), so
 <code>result.is_null()</code> after a normal return says only that the script produced no value. A script that does not
 parse or does not pass the checker throws before any statement runs.</p>
+<p><strong><code>execute&lt;T&gt;(...)</code> is <code>execute(...).as&lt;T&gt;()</code>.</strong> It takes what
+<code>execute</code> takes (a string, a <code>script_source</code>, a string with instance variables) and returns the
+result as a <code>T</code>: <code>int v = eng-&gt;execute&lt;int&gt;("2 + 2");</code>. A result that is not a
+<code>T</code> throws what <code>as&lt;T&gt;()</code> throws. A script int is 64 bits and
+<code>int</code> is <code>int32_t</code>, so <code>execute&lt;int&gt;</code> of a value past its range throws
+<code>Integer value out of range for int</code>; ask for <code>int64_t</code> to take any script int.
+<code>T</code> is a value (a number, a <code>std::string</code>, a copied object); a reference, a pointer or a
+<code>std::string_view</code> does not compile, because the result does not outlive the call.</p>
 <div class="tablewrap"><table><thead><tr><th>Exception</th><th>Raised for</th><th><code>what()</code></th></tr></thead><tbody>
 <tr><td><code>jai::parse_error</code></td><td>syntax</td><td><code>parse failed:</code> and every syntax error with its location</td></tr>
 <tr><td><code>jai::static_check_error</code></td><td>load-time type and name errors</td><td><code>static check failed:</code> and every error in the source, compiler style</td></tr>

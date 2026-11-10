@@ -83,7 +83,7 @@ std::cout &lt;&lt; &quot;warn region ran: &quot; &lt;&lt; v &lt;&lt; &quot; with
 
 try { eng-&gt;execute(src); }
 catch (const jai::static_check_error&amp; e) { std::cout &lt;&lt; &quot;load refused:\n&quot; &lt;&lt; e.what() &lt;&lt; &quot;\n&quot;; }
-std::cout &lt;&lt; &quot;clean load: &quot; &lt;&lt; eng-&gt;execute(&quot;2 + 2&quot;).as_int() &lt;&lt; &quot;\n&quot;;</code></pre></div>
+std::cout &lt;&lt; &quot;clean load: &quot; &lt;&lt; eng-&gt;execute&lt;int&gt;(&quot;2 + 2&quot;) &lt;&lt; &quot;\n&quot;;</code></pre></div>
 <div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">diagnostics: 2
   2:4 cannot assign &#x27;string&#x27; to &#x27;x&#x27; declared &#x27;int&#x27;
   3:9 use of undeclared identifier &#x27;missing&#x27;

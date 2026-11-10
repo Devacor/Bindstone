@@ -1,14 +1,17 @@
 // Runs a script on the WebAssembly build under Node, the way the page drives it. The script's folder is mounted as the
 // working directory, so its imports and files resolve as they do natively.
-//   node tools/jaiscript_web/run_node.mjs <build>/bin/jaiscript_web.js <script.jai> [script args...]
+//   node tools/jaiscript_web/run_node.mjs [--budget <seconds>] <build>/bin/jaiscript_web.js <script.jai> [script args...]
 // The Asyncify build is driven like the main-thread page: one jaiweb_tick per frame, waiting out each sleep. A build without
-// Asyncify (jaiscript_web_worker.js) runs the script to its end in one call, the way the worker page does.
+// Asyncify (jaiscript_web_worker.js) runs the script to its end in one call, the way the worker page does, under the
+// execution budget --budget gives it (none by default).
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
-const [moduleJs, script, ...scriptArgs] = process.argv.slice(2);
+const options = process.argv.slice(2);
+const budget = options[0] === "--budget" ? Number(options.splice(0, 2)[1]) : 0;
+const [moduleJs, script, ...scriptArgs] = options;
 if (!moduleJs || !script) {
-	console.error("usage: node run_node.mjs <jaiscript_web.js> <script.jai> [args...]");
+	console.error("usage: node run_node.mjs [--budget <seconds>] <jaiscript_web.js> <script.jai> [args...]");
 	process.exit(2);
 }
 
@@ -33,7 +36,7 @@ const failed = error => {
 };
 
 if (path.basename(moduleJs).includes("worker")) {
-	finish(jai.ccall("jaiweb_run_file", "number", ["string", "string", "number", "number"], [name, args, 0, 0]));
+	finish(jai.ccall("jaiweb_run_file", "number", ["string", "string", "number", "number"], [name, args, budget, 0]));
 } else {
 	let started = true;
 	try {

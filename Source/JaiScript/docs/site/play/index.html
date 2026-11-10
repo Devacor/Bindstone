@@ -52,11 +52,11 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 <button type="button" class="btn play-pick" data-game="grubwell" aria-pressed="false">GRUBWELL</button>
 </div>
 <section id="sandbox" class="play-panel" aria-label="Sandbox">
-<p class="sandbox-intro">Write JaiScript and run it here: the strict checker reads the whole program first, then the VM runs it. The standard library is here, with a file system that lasts until the page closes and the runner's console builtins (<code>key_down</code>, <code>read_key</code>, <code>term_cols</code>, <code>term_rows</code>). A program gets 20 seconds of script time, and Stop ends it at once. The <a href="../guide/index.html">guide</a> has a runnable sample in every chapter; paste one in.</p>
+<p class="sandbox-intro">Write JaiScript and run it here: the strict checker reads the whole program first, then the VM runs it. The program below is a small game, already running: click its output and the arrow keys or WASD walk the gator; change the code and press Run.</p>
+<div class="play-stage sandbox-output"><div id="sandbox-term" class="play-term" aria-label="Program output"></div></div>
 <div class="sandbox-tools"><label for="sandbox-sample">Start from</label> <select id="sandbox-sample"></select>
 <button type="button" id="sandbox-run" class="btn btn-primary">Run</button></div>
 <textarea id="sandbox-editor" class="sandbox-editor" spellcheck="false" autocapitalize="off" autocomplete="off" aria-label="JaiScript program"></textarea>
-<div class="play-stage sandbox-output"><div id="sandbox-term" class="play-term" aria-label="Program output"></div></div>
 </section>
 <section id="game" class="play-panel" aria-label="Game" hidden>
 <div class="play-stage"><div id="play-term" class="play-term play-game" aria-label="Game screen: click it, then play with the keyboard"></div>
@@ -67,6 +67,7 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 
 <h2 id="what-runs-here">What runs here<a class="hlink" href="#what-runs-here" aria-label="link">&#8203;</a></h2>
 <p>The page downloads the engine (the library and the runner's console builtins, built with Emscripten), and for a game its <code>.jai</code> files, then runs the game's drag-drop shim, the file you would drop onto the runner. The VM compiles the scripts in the page; nothing is precompiled and nothing runs on a server. A small terminal screen draws the game's escape codes, and your keys reach the script's <code>key_down</code> and <code>read_key</code>.</p>
+<p>The sandbox has the standard library, with a file system that lasts until the page closes and the runner's console builtins (<code>key_down</code>, <code>read_key</code>, <code>term_cols</code>, <code>term_rows</code>). A program that runs 20 seconds without a <code>sleep</code> is stopped, and Stop ends one at once. The <a href="../guide/index.html">guide</a> has a runnable sample in every chapter; paste one in.</p>
 <p>The engine runs in a worker, where a script's <code>sleep()</code> sleeps as it does in the runner. A page that cannot share memory with the worker (one served over plain http, or a browser without that support) runs a stepped build in the worker instead, where every <code>sleep()</code> hands control back to the worker between frames; it is slower, and the page stays responsive either way. Sound plays through the page: GLOOM's effects as its script synthesizes them, and the demo reel's score, which the script writes as MIDI, through a small synthesizer in the page; the speaker button mutes it. In the worker the engine has WebAssembly threads too, so a script's <code>parallel_for</code> and <code>parallel_transform</code> spread over your cores as they do natively. WebAssembly still runs the VM slower than a native Release build: GLOOM and GRUBWELL keep their frame rate, and the demo reel, which draws every pixel of every scene, plays its heavier scenes slower than in a terminal.</p>
 </article>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">

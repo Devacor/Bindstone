@@ -104,14 +104,15 @@ const JaiPlay = (() => {
 			if (this.options.onExit) { this.options.onExit(code); }
 		}
 
-		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds
-		async start({ game, source, budget = 0 }) {
+		// game: a bundle URL ({entry, args, files}); source: program text run under budget seconds; attended: false for a
+		// run no click began, which leaves the page its focus and the sound locked
+		async start({ game, source, budget = 0, attended = true }) {
 			const useThreads = await threaded;
 			this.stop();
-			JaiAudio.unlock();
+			if (attended) { JaiAudio.unlock(); }
 			(this.screen || this.terminal).reset();
 			this.running = true;
-			this.element.focus();
+			if (attended) { this.element.focus(); }
 			const { cols, rows } = this.options;
 			this.worker = new Worker("play-worker.js");
 			this.worker.onmessage = (message) => {

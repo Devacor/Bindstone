@@ -309,8 +309,12 @@ web_session& new_session(const char* a_args, double a_budget, bool a_blocking_sl
 #endif
 	eng->set_output_stream(std::shared_ptr<std::ostream>(&session.out, [](std::ostream*) {}));
 	if (a_blocking_sleep) {
-		eng->time().source({}, {}, [](std::chrono::nanoseconds a_duration) {
+		// the budget stops a program that runs that long without a sleep, as it does where every sleep ends a host entry
+		eng->time().source({}, {}, [sleeper = eng.get(), awake_since = std::chrono::steady_clock::now()](std::chrono::nanoseconds a_duration) mutable {
 			jaiweb_js_sleep(std::chrono::duration<double, std::milli>(a_duration).count());
+			const auto woke = std::chrono::steady_clock::now();
+			sleeper->time().extend_execution_deadline(woke - awake_since);
+			awake_since = woke;
 		});
 	}
 	jai::stdlib::register_all(eng);

@@ -20,8 +20,9 @@
 # libc++ target that runs, on WebAssembly threads (JAISCRIPT_WASM_THREADS), and plays GLOOM's (serial and on four workers),
 # the crawler's and the demoreel's shims headless under Node
 # (tools/jaiscript_web/run_node.mjs) to the hashes the native gates expect, then runs tools/jaiscript_web/catches.jai, which
-# needs the library's own catches and the browser's entropy. It skips with a message when no Emscripten SDK
-# (EMSDK, else em++ on PATH) or no node is found. WASM_BUILD_DIR names the tree (default build-wasm).
+# needs the library's own catches and the browser's entropy and sleeps its way past its execution budget. It skips with a
+# message when no Emscripten SDK (EMSDK, else em++ on PATH) or no node is found. WASM_BUILD_DIR names the tree (default
+# build-wasm).
 #
 # The two differentials: `fuzz` runs each program on the interpreter and the optimized VM, `fuzz-vm-reference` on the
 # optimized VM and the VM in reference mode (engine::vm_reference_mode: every optimization off), so a divergence there is a
@@ -432,8 +433,8 @@ gate_wasm() {
 	run_logged node "$runner" "$engine" demoreel.jai scene 2 frames 20 pix sext
 	want "wasm demoreel: expected JULIA's stream hash $DEMOREEL_JULIA_STREAM" "stream hash $DEMOREEL_JULIA_STREAM \|"
 	cd "$ROOT/tools/jaiscript_web"
-	run_logged node "$runner" "$engine" catches.jai
-	want "wasm catches: expected the library's own catches and an entropy-seeded random" "^-1 42 caught true\$"
+	run_logged node "$runner" --budget 1 "$engine" catches.jai
+	want "wasm catches: expected the library's own catches, an entropy-seeded random and sleeps that outlast the budget" "^-1 42 caught true\$"
 }
 
 # The public headers (include/jaiscript less detail/, vm/, testing/ and net/openssl_tls.hpp, which needs OpenSSL's) each

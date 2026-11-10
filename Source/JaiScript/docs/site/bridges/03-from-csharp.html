@@ -53,7 +53,278 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <li><strong>A class value is never null.</strong> <code>Hero h = null;</code> is a load error; a slot that can be empty is a <code>shared_ptr&lt;Hero&gt;</code> or a <code>var</code>.</li>
 <li><strong><code>var</code> is C#'s <code>dynamic</code>; <code>auto</code> is C#'s <code>var</code>.</strong></li>
 </ol>
-<h2 id="side-by-side">Side by side<a class="hlink" href="#side-by-side" aria-label="link">&#8203;</a></h2>
+<h2 id="ported">Ported side by side<a class="hlink" href="#ported" aria-label="link">&#8203;</a></h2>
+<p>Five small C# programs and their JaiScript ports. Each pair was run, with .NET 10 and on both JaiScript backends, and printed the output shown. A JaiScript function is declared above the top-level code that calls it.</p>
+<h3 id="port-a">A class as a reference type<a class="hlink" href="#port-a" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-a-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-a-tab-cs" aria-controls="port-a-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="port-a-tab-jai" aria-controls="port-a-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-a-cs" role="tabpanel" aria-labelledby="port-a-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var party = new List&lt;Hero&gt; { new Hero("Ada", 30), new Hero("Brom", 22) };
+Hero leader = party[0];                      // a second reference to Ada
+leader.Hp -= 10;
+foreach (var h in party) { h.Hp += 1; }
+Hero? target = null;                         // a reference may be empty
+target ??= party[1];
+Heal(target, 5);
+string same = leader == party[0] ? "one Ada" : "two Adas";
+Console.WriteLine($"{party[0].Name} {party[0].Hp}, {party[1].Name} {party[1].Hp}, {same}");
+
+static void Heal(Hero hero, int amount) { hero.Hp += amount; }
+
+class Hero {
+    public string Name;
+    public int Hp;
+    public Hero(string name, int hp) { Name = name; Hp = hp; }
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-a-jai" role="tabpanel" aria-labelledby="port-a-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero {
+    string name;
+    int hp;
+    Hero(string n, int h) { name = n; hp = h; }
+}
+void heal(shared_ptr&lt;Hero&gt; hero, int amount) { hero.hp += amount; }
+
+array&lt;shared_ptr&lt;Hero&gt;&gt; party = [new Hero("Ada", 30), new Hero("Brom", 22)];
+shared_ptr&lt;Hero&gt; leader = party[0];          // a second handle to Ada
+leader.hp -= 10;
+for (auto h : party) { h.hp += 1; }
+shared_ptr&lt;Hero&gt; target = null;              // a handle may be empty
+target ??= party[1];
+heal(target, 5);
+string same = leader == party[0] ? "one Ada" : "two Adas";
+print(`${party[0].name} ${party[0].hp}, ${party[1].name} ${party[1].hp}, ${same}`);</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Ada 21, Brom 28, one Ada</code></pre></div>
+<ul><li>Every C# class variable is a reference. JaiScript spells that out: <code>new Hero(...)</code> makes a <code>shared_ptr&lt;Hero&gt;</code>, and <code>leader</code>, <code>target</code> and the elements are handles to it. Only a handle can be null, and <code>==</code> on two handles asks whether they are one object.</li><li>Without <code>new</code> and the handle type the same lines work on values that copy: <a href="#a-class-is-a-value-type">a class is a value</a> has that program.</li></ul>
+<h3 id="port-b">A LINQ pipeline<a class="hlink" href="#port-b" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-b-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-b-tab-cs" aria-controls="port-b-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="port-b-tab-jai" aria-controls="port-b-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-b-cs" role="tabpanel" aria-labelledby="port-b-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var units = new List&lt;Unit&gt; { new("ogre", 30), new("imp", 8), new("elf", 15) };
+List&lt;string&gt; names = units.Where(u =&gt; u.Hp &gt; 10).OrderBy(u =&gt; u.Hp).Select(u =&gt; u.Name).ToList();
+int total = units.Sum(u =&gt; u.Hp);
+Unit? giant = units.FirstOrDefault(u =&gt; u.Hp &gt; 99);
+units.Sort((a, b) =&gt; b.Hp.CompareTo(a.Hp));  // in place
+units.RemoveAll(u =&gt; u.Hp &lt; 10);
+Console.WriteLine($"{string.Join(", ", names)} | {total} | {giant?.Name ?? "nobody"} | {units[0].Name} of {units.Count}");
+
+record Unit(string Name, int Hp);</code></pre></div>
+</div>
+<div class="tab-panel" id="port-b-jai" role="tabpanel" aria-labelledby="port-b-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { string name; int hp; }
+
+array&lt;Unit&gt; units = [Unit("ogre", 30), Unit("imp", 8), Unit("elf", 15)];
+auto healthy = array::sort(array::filter(units, u =&gt; u.hp &gt; 10), (a, b) =&gt; a.hp &lt; b.hp);
+array&lt;string&gt; names = array::map(healthy, u =&gt; u.name);
+int total = units.reduce((sum, u) =&gt; sum + u.hp, 0);
+var giant = units.find(u =&gt; u.hp &gt; 99);
+units.sort((a, b) =&gt; a.hp &gt; b.hp);           // in place
+units.remove_if(u =&gt; u.hp &lt; 10);
+print(`${names.join(", ")} | ${total} | ${giant?.name ?? "nobody"} | ${units[0].name} of ${units.size()}`);</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">elf, ogre | 53 | nobody | ogre of 2</code></pre></div>
+<ul><li>The pipeline is the <code>array::</code> functions, which return new arrays; <code>units.sort</code> and <code>units.remove_if</code> work in place.</li><li>A comparator answers "does a go first?" with a bool. <code>find</code> answers null when nothing matches. A class with no constructor fills its fields in order, as a positional record does.</li></ul>
+<h3 id="port-c">A dictionary<a class="hlink" href="#port-c" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-c-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-c-tab-cs" aria-controls="port-c-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="port-c-tab-jai" aria-controls="port-c-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-c-cs" role="tabpanel" aria-labelledby="port-c-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var stock = new Dictionary&lt;string, int&gt; { ["arrow"] = 20, ["potion"] = 3 };
+stock["rope"] = 1;
+stock["arrow"] -= 5;
+if (stock.TryGetValue("potion", out int potions)) { Console.WriteLine($"potions: {potions}"); }
+int swords = stock.GetValueOrDefault("sword", 0);
+try {
+    Console.WriteLine(stock["sword"]);
+} catch (KeyNotFoundException) {
+    Console.WriteLine($"no sword; default {swords}");
+}
+
+var counts = new SortedDictionary&lt;string, int&gt;();
+foreach (string word in "the cat and the hat".Split(' ')) {
+    counts[word] = counts.GetValueOrDefault(word) + 1;
+}
+var parts = new List&lt;string&gt;();
+foreach (var (word, count) in counts) { parts.Add($"{word}={count}"); }
+Console.WriteLine(string.Join(" ", parts));</code></pre></div>
+</div>
+<div class="tab-panel" id="port-c-jai" role="tabpanel" aria-labelledby="port-c-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">map&lt;string, int&gt; stock = {"arrow": 20, "potion": 3};
+stock["rope"] = 1;
+stock["arrow"] -= 5;
+if (stock.contains("potion")) { print(`potions: ${stock["potion"]}`); }
+int swords = stock.get("sword", 0);
+try {
+    print(stock["sword"]);
+} catch (error e) {
+    print(`no sword; default ${swords}`);
+}
+
+map&lt;string, int&gt; counts;
+for (string word : "the cat and the hat".split(" ")) {
+    counts[word] = counts.get(word, 0) + 1;
+}
+array&lt;string&gt; parts;
+for (auto [word, count] : counts) { parts.push(`${word}=${count}`); }
+print(parts.join(" "));</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">potions: 3
+no sword; default 0
+and=1 cat=1 hat=1 the=2</code></pre></div>
+<ul><li><code>m[k]</code> for a missing key raises a run-time error, as the C# indexer throws. <code>get(k, fallback)</code> is <code>GetValueOrDefault</code>, and <code>contains</code> before <code>m[k]</code> replaces <code>TryGetValue</code>.</li><li>A <code>map</code> iterates in key order, as a <code>SortedDictionary</code> does.</li></ul>
+<h3 id="port-d">An abstract base and a list of them<a class="hlink" href="#port-d" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-d-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-d-tab-cs" aria-controls="port-d-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="port-d-tab-jai" aria-controls="port-d-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-d-cs" role="tabpanel" aria-labelledby="port-d-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var shapes = new List&lt;Shape&gt; { new Circle(1.0), new Rect(2.0, 3.5) };
+double total = 0.0;
+foreach (Shape s in shapes) {
+    Console.WriteLine(s);
+    total += s.Area();
+}
+Console.WriteLine($"total {total:F2}");
+
+abstract class Shape {
+    private readonly string label;
+    protected Shape(string label) { this.label = label; }
+    public abstract double Area();
+    public virtual string Name() =&gt; "shape";
+    public override string ToString() =&gt; $"{label} {Name()}, area {Area():F2}";
+}
+class Circle : Shape {
+    private readonly double radius;
+    public Circle(double r) : base("round") { radius = r; }
+    public override double Area() =&gt; Math.PI * radius * radius;
+    public override string Name() =&gt; "circle";
+}
+class Rect : Shape {
+    private readonly double width, height;
+    public Rect(double w, double h) : base("boxy") { width = w; height = h; }
+    public override double Area() =&gt; width * height;
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-d-jai" role="tabpanel" aria-labelledby="port-d-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape {
+private:
+    string label;
+public:
+    Shape(string l) { label = l; }
+    float area() { throw "Shape.area is abstract"; }
+    string name() { return "shape"; }
+    string to_string() { return `${label} ${name()}, area ${area():.2f}`; }
+}
+class Circle : Shape {
+private:
+    float radius;
+public:
+    Circle(float r) : super("round") { radius = r; }
+    float area() override { return math::PI * radius * radius; }
+    string name() override { return "circle"; }
+}
+class Rect : Shape {
+private:
+    float width;
+    float height;
+public:
+    Rect(float w, float h) : super("boxy") { width = w; height = h; }
+    float area() override { return width * height; }
+}
+
+array&lt;shared_ptr&lt;Shape&gt;&gt; shapes = [new Circle(1.0), new Rect(2.0, 3.5)];
+float total = 0.0;
+for (auto s : shapes) {
+    print(s);
+    total += s.area();
+}
+print(`total ${total:.2f}`);</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">round circle, area 3.14
+boxy shape, area 7.00
+total 10.14</code></pre></div>
+<ul><li>No <code>abstract</code> and no <code>virtual</code>: the base method throws, every method is virtual, and <code>override</code> is required. <code>: base(...)</code> is <code>: super(...)</code>, and access is set by <code>private:</code> and <code>public:</code> sections.</li><li><code>to_string()</code> is <code>ToString()</code>: <code>print</code> and <code>${...}</code> call it.</li></ul>
+<h3 id="port-e">A custom exception and using<a class="hlink" href="#port-e" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-e-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-e-tab-cs" aria-controls="port-e-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="port-e-tab-jai" aria-controls="port-e-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-e-cs" role="tabpanel" aria-labelledby="port-e-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">foreach (int slot in new[] { 1, 7 }) {
+    try {
+        Save(slot);
+    } catch (SaveFailed e) {
+        Console.WriteLine($"failed: {e.Message} (slot {e.Slot})");
+    }
+}
+
+static void Save(int slot) {
+    using var guard = new SlotLock(slot);
+    if (slot &gt; 3) { throw new SaveFailed(slot, "no such slot"); }
+    Console.WriteLine($"saved {slot}");
+}
+
+class SaveFailed : Exception {
+    public int Slot { get; }
+    public SaveFailed(int slot, string why) : base(why) { Slot = slot; }
+}
+class SlotLock : IDisposable {
+    private readonly int slot;
+    public SlotLock(int slot) { this.slot = slot; Console.WriteLine($"lock {slot}"); }
+    public void Dispose() { Console.WriteLine($"unlock {slot}"); }
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-e-jai" role="tabpanel" aria-labelledby="port-e-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class SaveFailed {
+    int slot;
+    string message;
+}
+class SlotLock {
+private:
+    int slot;
+public:
+    SlotLock(int s) { slot = s; print(`lock ${slot}`); }
+    ~SlotLock() { print(`unlock ${slot}`); }
+}
+
+void save(int slot) {
+    SlotLock guard(slot);
+    if (slot &gt; 3) { throw SaveFailed(slot, "no such slot"); }
+    print(`saved ${slot}`);
+}
+
+for (int slot : [1, 7]) {
+    try {
+        save(slot);
+    } catch (SaveFailed e) {
+        print(`failed: ${e.message} (slot ${e.slot})`);
+    }
+}</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">lock 1
+saved 1
+unlock 1
+lock 7
+unlock 7
+failed: no such slot (slot 7)</code></pre></div>
+<ul><li>Any value can be thrown, so <code>SaveFailed</code> extends nothing, and <code>catch (SaveFailed e)</code> selects by type.</li><li><code>using</code> and <code>IDisposable</code> become a destructor: <code>guard</code> is a value, and <code>~SlotLock()</code> runs when <code>save</code> ends, by return or by throw.</li></ul>
+<h2 id="side-by-side">Feature by feature<a class="hlink" href="#side-by-side" aria-label="link">&#8203;</a></h2>
 <h3 id="variables-and-types">Variables and types<a class="hlink" href="#variables-and-types" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C#</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>inferred, dynamic</td><td><code>var n = 5;</code>, <code>dynamic x = 5;</code></td><td><code>auto n = 5;</code>, <code>var x = 5;</code></td></tr>
@@ -83,20 +354,6 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td><code>d.GetValueOrDefault(k, fallback)</code></td><td><code>m.get(k, fallback)</code>. For <code>TryGetValue</code>, test <code>m.contains(k)</code> first</td></tr>
 <tr><td><code>foreach (var kv in d)</code></td><td><code>for (auto [k, v] : m)</code></td></tr>
 </tbody></table></div>
-<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit {
-    string name;
-    int hp;
-    Unit(string n, int h) { name = n; hp = h; }
-}
-array&lt;Unit&gt; units = [Unit("ogre", 30), Unit("imp", 8), Unit("elf", 15)];
-// units.Where(u =&gt; u.Hp &gt; 10).OrderBy(u =&gt; u.Hp).Select(u =&gt; u.Name)
-auto healthy = array::filter(units, u =&gt; u.hp &gt; 10);
-healthy.sort((Unit a, Unit b) =&gt; a.hp &lt; b.hp);
-array&lt;string&gt; names = array::map(healthy, u =&gt; u.name);
-int total = units.reduce((int sum, Unit u) =&gt; sum + u.hp, 0);
-map&lt;string, int&gt; kills = {"ogre": 2};
-print(names.join(", "), " ", total, " ", units.find(u =&gt; u.hp &gt; 99) ?? "nobody", " ", kills.get("imp", 0));</code></pre></div>
-<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">elf, ogre 53 nobody 0</code></pre></div>
 <h3 id="classes-and-properties">Classes<a class="hlink" href="#classes-and-properties" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C#</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>class, struct</td><td>a class is a reference type, a <code>struct</code> a value type</td><td>every class is a value type; no <code>struct</code> keyword. <code>new Hero()</code> makes the shared reference</td></tr>
@@ -113,6 +370,36 @@ print(names.join(", "), " ", total, " ", units.find(u =&gt; u.hp &gt; 99) ?? "no
 <tr><td><code>is</code></td><td><code>x is Hero</code></td><td>no operator. <code>type_of(x) == "Hero"</code> is the exact class only; the is-a test is below</td></tr>
 <tr><td>using, IDisposable, finally</td><td><code>using (var f = Open())</code>, <code>finally { }</code></td><td>a destructor, <code>~File()</code>, runs when its scope ends, a throw included; no <code>finally</code></td></tr>
 </tbody></table></div>
+<div class="tabs" id="classes-sample-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="classes-sample-tab-cs" aria-controls="classes-sample-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="classes-sample-tab-jai" aria-controls="classes-sample-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="classes-sample-cs" role="tabpanel" aria-labelledby="classes-sample-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">Paladin p = new Paladin("Ada");
+p.Hp = -3;                                   // through the setter
+object anyone = p;
+object text = "text";
+Console.WriteLine($"{p.Describe()} {p.Hp} {Hero.Count} hero: {p}");
+Console.WriteLine($"{anyone.GetType().Name == "Hero"} {anyone is Hero} {text is Hero}");
+
+class Hero {
+    private int hp = 10;
+    public static int Count = 0;
+    public string Name;
+    public Hero(string name) { Name = name; Count += 1; }
+    public int Hp { get =&gt; hp; set =&gt; hp = value &lt; 0 ? 0 : value; }
+    public virtual string Describe() =&gt; Name;
+    public override string ToString() =&gt; $"{Name} ({hp} hp)";
+}
+class Paladin : Hero {
+    public Paladin(string name) : base(name) { }
+    public override string Describe() =&gt; "Sir " + base.Describe();
+}</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">Sir Ada 0 1 hero: Ada (0 hp)
+False True False</code></pre></div>
+</div>
+<div class="tab-panel" id="classes-sample-jai" role="tabpanel" aria-labelledby="classes-sample-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Hero {
 private:
     int hp_value = 10;
@@ -140,6 +427,9 @@ try { throw anyone; } catch (Hero h) { print("caught a Hero: ", h.name); }</code
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">Sir Ada 0 1 hero: Ada (0 hp)
 false true false
 caught a Hero: Ada</code></pre></div>
+</div>
+</div>
+<p>C# prints its bools capitalized and throws only an <code>Exception</code>, so its program has no third line.</p>
 <p><strong>The is-a test.</strong> There is no <code>is</code> operator. <code>cast&lt;Hero&amp;&gt;(x)</code> succeeds for a <code>Hero</code> or a subclass and raises otherwise, so the helper above answers <code>x is Hero</code> for any value. A typed <code>catch (Hero h)</code> takes a <code>Hero</code> or a subclass the same way. <code>reflect::bases(x)</code> lists a class instance's direct bases only.</p>
 <h3 id="errors-strings-and-the-rest">Errors, strings and the rest<a class="hlink" href="#errors-strings-and-the-rest" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C#</th><th>JaiScript</th></tr></thead><tbody>
@@ -160,6 +450,37 @@ caught a Hero: Ada</code></pre></div>
 <tr><td>namespace</td><td><code>namespace Game { }</code>, <code>using Game;</code></td><td><code>namespace game { }</code> and <code>game::f()</code>; <code>using game::f;</code> brings in one name</td></tr>
 <tr><td>JSON</td><td><code>JsonSerializer.Serialize(o)</code></td><td><code>to_json(v)</code>, <code>from_json(s)</code></td></tr>
 </tbody></table></div>
+<div class="tabs" id="rest-sample-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="rest-sample-tab-cs" aria-controls="rest-sample-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="rest-sample-tab-jai" aria-controls="rest-sample-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="rest-sample-cs" role="tabpanel" aria-labelledby="rest-sample-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var seen = new List&lt;int&gt;();
+foreach (int e in Evens(7)) { seen.Add(e); }
+
+var b = new Button();
+int clicks = 0;
+b.Clicked += () =&gt; clicks += 1;
+b.Click();
+b.Click();
+
+string name = "  Ada ";
+name = name.Trim();                          // returns a new string
+double hp = 7.25;
+int.TryParse("abc", out int parsed);         // false, and parsed is 0
+Console.WriteLine($"[{string.Join(",", seen)}] {clicks} {name} has {hp:F1} {int.Parse("42") + 1} {parsed}");
+
+static IEnumerable&lt;int&gt; Evens(int limit) {
+    for (int i = 0; i &lt; limit; i += 2) { yield return i; }
+}
+
+class Button {
+    public event Action? Clicked;
+    public void Click() { Clicked?.Invoke(); }
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="rest-sample-jai" role="tabpanel" aria-labelledby="rest-sample-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">coroutine int evens(int limit) {
     for (int i = 0; i &lt; limit; i += 2) { yield i; }
 }
@@ -180,10 +501,36 @@ string name = "  Ada ";
 name.trim();                                 // changes name
 float hp = 7.25;
 print(to_json(seen), " ", clicks, " ", `${name} has ${hp:.1f}`, " ", "42".to_int() + 1, " ", "abc".to_int(0));</code></pre></div>
+</div>
+</div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">[0,2,4,6] 2 Ada has 7.2 43 0</code></pre></div>
 <h2 id="watch-out">Watch out<a class="hlink" href="#watch-out" aria-label="link">&#8203;</a></h2>
 <h3 id="a-class-is-a-value-type">A class is a value, and so is a list of them<a class="hlink" href="#a-class-is-a-value-type" aria-label="link">&#8203;</a></h3>
 <p>Assignment, a by-value parameter and a by-value return copy the whole object. An <code>array&lt;Unit&gt;</code> holds the units themselves, so a loop variable without <code>&amp;</code> is a copy. <code>&amp;</code> is C#'s <code>ref</code>, without the keyword at the call. An array of handles behaves like a C# <code>List&lt;Unit&gt;</code>. <a href="../guide/03-value-semantics.html">Value Semantics &amp; References</a> is the chapter on this.</p>
+<div class="tabs" id="values-sample-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="values-sample-tab-cs" aria-controls="values-sample-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="values-sample-tab-jai" aria-controls="values-sample-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="values-sample-cs" role="tabpanel" aria-labelledby="values-sample-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">Unit a = new Unit();
+Unit b = a;                                  // a second reference to one Unit
+b.Hp = 50;
+Hit(a);
+Console.WriteLine($"{a.Hp} {b.Hp}");
+
+var units = new List&lt;Unit&gt; { new Unit(), new Unit() };
+foreach (var u in units) { u.Hp -= 5; }      // u refers to the element
+Console.WriteLine(units[0].Hp);
+
+static void Hit(Unit u) { u.Hp -= 1; Console.WriteLine($"inside: {u.Hp}"); }   // the caller's Unit
+
+class Unit { public int Hp = 10; }</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">inside: 49
+49 49
+5</code></pre></div>
+</div>
+<div class="tab-panel" id="values-sample-jai" role="tabpanel" aria-labelledby="values-sample-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 Unit a;
 Unit b = a;                                  // a copy
@@ -202,7 +549,25 @@ print(units[0].hp, " ", handles[0].hp);</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">inside: 9
 9 50
 5 1</code></pre></div>
+</div>
+</div>
+<p>In C#, <code>a</code>, <code>b</code> and the parameter reach one <code>Unit</code>, so every number moves together; JaiScript copies at <code>b = a</code> and at the call.</p>
 <p>A write to a copy that nothing reads afterwards is usually a mistake, and the plainest cases fail the load (<a href="../guide/03-value-semantics.html#lost-writes">lost writes</a>):</p>
+<div class="tabs" id="lost-write-tabs">
+<div class="tab-list" role="tablist" aria-label="C# and its JaiScript port" hidden>
+<button type="button" role="tab" id="lost-write-tab-cs" aria-controls="lost-write-cs" aria-selected="true">C#</button>
+<button type="button" role="tab" id="lost-write-tab-jai" aria-controls="lost-write-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="lost-write-cs" role="tabpanel" aria-labelledby="lost-write-tab-cs" tabindex="0">
+<div class="codeblock cb-plain"><span class="cb-label">c#</span><pre><code class="lang-plain">var units = new List&lt;Unit&gt; { new Unit(), new Unit() };
+foreach (var u in units) { u.Hp -= 5; }      // changes the elements
+Unit? nobody = null;
+Console.WriteLine($"{units[0].Hp} {nobody == null}");
+
+class Unit { public int Hp = 10; }</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">5 True</code></pre></div>
+</div>
+<div class="tab-panel" id="lost-write-jai" role="tabpanel" aria-labelledby="lost-write-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Unit { int hp = 10; }
 array&lt;Unit&gt; units = [Unit(), Unit()];
 for (auto u : units) { u.hp -= 5; }
@@ -214,6 +579,8 @@ Unit nobody = null;</code></pre></div>
 &lt;script&gt;:4:6: error: cannot initialize 'nobody' declared 'Unit' with 'null': a 'Unit' is never null; declare 'shared_ptr&lt;Unit&gt;' (or var) for a slot that can be empty
     Unit nobody = null;
          ^</code></pre></div>
+</div>
+</div>
 <h3 id="var-is-dynamic">var is dynamic; auto is C#'s var<a class="hlink" href="#var-is-dynamic" aria-label="link">&#8203;</a></h3>
 <p>A <code>var</code> takes anything for its whole life. An <code>auto</code> takes its type from the initializer and keeps it: <code>auto n = 5; n = "text";</code> is the load error <code>cannot assign 'string' to 'n' declared 'int'</code>.</p>
 <h3 id="integers">Integers are 64-bit and checked<a class="hlink" href="#integers" aria-label="link">&#8203;</a></h3>

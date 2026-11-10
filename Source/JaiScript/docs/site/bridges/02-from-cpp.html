@@ -47,8 +47,375 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Bridges</a><span class="sep" aria-hidden="true">/</span>02</nav>
 <article class="chapter"><h1 id="from-cpp">From C++<a class="hlink" href="#from-cpp" aria-label="link">&#8203;</a></h1>
 <p class="lead">JaiScript reads like C++ and keeps C++'s semantics as its contract: classes are values that copy, references are declared with <code>&amp;</code>, destructors run when a scope ends, operators overload, and <code>auto</code>, range-<code>for</code>, capture lists, <code>switch</code> and <code>try</code>/<code>catch</code> mean what they mean in C++.</p>
-<p>It leaves out what a script does not need (raw pointers, <code>delete</code>, templates, headers, undefined behavior), checks the whole program before the first statement runs, and borrows <code>var</code>, <code>function</code> and arrow lambdas from JavaScript. The tables set the two languages side by side; <a href="#watch-out">Watch out</a> lists where a C++ habit gets a different answer.</p>
-<h2 id="side-by-side">Side by side<a class="hlink" href="#side-by-side" aria-label="link">&#8203;</a></h2>
+<p>It leaves out what a script does not need (raw pointers, <code>delete</code>, templates, headers, undefined behavior), checks the whole program before the first statement runs, and borrows <code>var</code>, <code>function</code> and arrow lambdas from JavaScript. Five ported programs come first, then the tables; <a href="#watch-out">Watch out</a> lists where a C++ habit gets a different answer.</p>
+<h2 id="ported">Ported side by side<a class="hlink" href="#ported" aria-label="link">&#8203;</a></h2>
+<p>Five small C++20 programs and their JaiScript ports. Each pair was run, built with MSVC and on both JaiScript backends, and printed the output shown. Top-level statements stand in for <code>main</code>, <code>array&lt;T&gt;</code> for <code>std::vector&lt;T&gt;</code> and <code>float</code> for <code>double</code>.</p>
+<h3 id="port-a">A value type and its operators<a class="hlink" href="#port-a" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-a-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-a-tab-cpp" aria-controls="port-a-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="port-a-tab-jai" aria-controls="port-a-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-a-cpp" role="tabpanel" aria-labelledby="port-a-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;format&gt;
+#include &lt;iostream&gt;
+#include &lt;vector&gt;
+
+struct Vec2 {
+    double x = 0.0;
+    double y = 0.0;
+    Vec2 operator+(const Vec2&amp; o) const { return {x + o.x, y + o.y}; }
+    Vec2 operator*(double s) const { return {x * s, y * s}; }
+    Vec2&amp; operator+=(const Vec2&amp; o) { x += o.x; y += o.y; return *this; }
+    bool operator==(const Vec2&amp; o) const = default;
+};
+
+int main() {
+    std::vector&lt;Vec2&gt; points = {{1.0, 2.0}, {3.0, 4.0}, {-2.0, 0.5}};
+    const Vec2 velocity{0.5, -1.0};
+    for (auto&amp; p : points) { p += velocity * 2.0; }
+    Vec2 first = points[0];                      // a copy
+    first.x = 100.0;
+    Vec2 sum;
+    for (const auto&amp; p : points) { sum = sum + p; }
+    std::cout &lt;&lt; std::format("{:.1f} {:.1f}\n", points[0].x, first.x);
+    std::cout &lt;&lt; std::format("{:.1f} {:.1f} {}\n", sum.x, sum.y, points[0] == Vec2{2.0, 0.0});
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-a-jai" role="tabpanel" aria-labelledby="port-a-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Vec2 {
+    float x = 0.0;
+    float y = 0.0;
+    Vec2 operator+(const Vec2&amp; o) { return Vec2{x + o.x, y + o.y}; }
+    Vec2 operator*(float s) { return Vec2{x * s, y * s}; }
+}
+
+array&lt;Vec2&gt; points = [Vec2{1.0, 2.0}, Vec2{3.0, 4.0}, Vec2{-2.0, 0.5}];
+const Vec2 velocity{0.5, -1.0};
+for (auto&amp; p : points) { p += velocity * 2.0; }
+Vec2 first = points[0];                      // a copy
+first.x = 100.0;
+Vec2 sum;
+for (const auto&amp; p : points) { sum = sum + p; }
+print("{:.1f} {:.1f}", points[0].x, first.x);
+print("{:.1f} {:.1f} {}", sum.x, sum.y, points[0] == Vec2{2.0, 0.0});</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2.0 100.0
+5.0 0.5 true</code></pre></div>
+<ul><li>The rest is C++ as written: a class is a value, <code>auto&amp;</code> names the element, and <code>Vec2 first = points[0];</code> copies.</li><li><code>+=</code> runs <code>operator+</code> and stores the result; a compound operator is not declared on its own. <code>==</code> compares fields without a declaration. Braces name their class (<code>Vec2{1.0, 2.0}</code>), and there are no const methods.</li></ul>
+<h3 id="port-b">Shared ownership<a class="hlink" href="#port-b" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-b-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-b-tab-cpp" aria-controls="port-b-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="port-b-tab-jai" aria-controls="port-b-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-b-cpp" role="tabpanel" aria-labelledby="port-b-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;iostream&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+struct Node {
+    std::string name;
+    std::vector&lt;std::shared_ptr&lt;Node&gt;&gt; children;
+    std::weak_ptr&lt;Node&gt; parent;
+    explicit Node(std::string n) : name(std::move(n)) {}
+    ~Node() { std::cout &lt;&lt; "~" &lt;&lt; name &lt;&lt; "\n"; }
+};
+
+std::shared_ptr&lt;Node&gt; add_child(std::shared_ptr&lt;Node&gt; parent, std::string name) {
+    auto child = std::make_shared&lt;Node&gt;(std::move(name));
+    child-&gt;parent = parent;
+    parent-&gt;children.push_back(child);
+    return child;
+}
+
+int main() {
+    std::weak_ptr&lt;Node&gt; watch;
+    {
+        auto root = std::make_shared&lt;Node&gt;("root");
+        auto leaf = add_child(add_child(root, "branch"), "leaf");
+        watch = leaf;
+        std::shared_ptr&lt;Node&gt; up = leaf-&gt;parent.lock();
+        std::cout &lt;&lt; up-&gt;name &lt;&lt; " " &lt;&lt; leaf.use_count() &lt;&lt; " " &lt;&lt; root-&gt;children.size() &lt;&lt; "\n";
+    }
+    std::cout &lt;&lt; "expired: " &lt;&lt; std::boolalpha &lt;&lt; watch.expired() &lt;&lt; "\n";
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-b-jai" role="tabpanel" aria-labelledby="port-b-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node {
+    string name;
+    array&lt;shared_ptr&lt;Node&gt;&gt; children;
+    weak_ptr&lt;Node&gt; parent;
+    Node(string n) { name = n; }
+    ~Node() { print("~", name); }
+}
+
+shared_ptr&lt;Node&gt; add_child(shared_ptr&lt;Node&gt; parent, string name) {
+    auto child = make_shared&lt;Node&gt;(name);
+    child-&gt;parent = parent;
+    parent-&gt;children.push(child);
+    return child;
+}
+
+weak_ptr&lt;Node&gt; watch;
+{
+    auto root = new Node("root");                // new is make_shared
+    auto leaf = add_child(add_child(root, "branch"), "leaf");
+    watch = leaf;
+    shared_ptr&lt;Node&gt; up = leaf-&gt;parent.lock();
+    print(up-&gt;name, " ", leaf.use_count(), " ", root-&gt;children.size());
+}
+print("expired: ", watch.expired());</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">branch 2 1
+~root
+~branch
+~leaf
+expired: true</code></pre></div>
+<ul><li><code>new Node("root")</code> is <code>make_shared&lt;Node&gt;("root")</code>: it returns a <code>shared_ptr&lt;Node&gt;</code>, and nothing is ever deleted by hand. The last handle frees the object, so the destructors run in C++'s order.</li><li><code>weak_ptr</code>, <code>lock()</code>, <code>expired()</code> and <code>use_count()</code> keep their meaning. There is no member initializer list: a constructor assigns its fields in its body.</li></ul>
+<h3 id="port-c">A class hierarchy<a class="hlink" href="#port-c" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-c-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-c-tab-cpp" aria-controls="port-c-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="port-c-tab-jai" aria-controls="port-c-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-c-cpp" role="tabpanel" aria-labelledby="port-c-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;format&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+class Shape {
+public:
+    virtual ~Shape() = default;
+    virtual std::string name() const { return "shape"; }
+    virtual double area() const { return 0.0; }
+    std::string describe() const { return std::format("{} {:.2f}", name(), area()); }
+};
+class Circle : public Shape {
+public:
+    explicit Circle(double r) : radius(r) {}
+    std::string name() const override { return "circle"; }
+    double area() const override { return 3.14159 * radius * radius; }
+private:
+    double radius;
+};
+class Rect : public Shape {
+public:
+    Rect(double w, double h) : width(w), height(h) {}
+    double area() const override { return width * height; }
+private:
+    double width;
+    double height;
+};
+
+int main() {
+    std::vector&lt;std::unique_ptr&lt;Shape&gt;&gt; shapes;
+    shapes.push_back(std::make_unique&lt;Circle&gt;(1.0));
+    shapes.push_back(std::make_unique&lt;Rect&gt;(2.0, 3.5));
+    double total = 0.0;
+    for (const auto&amp; s : shapes) {
+        std::cout &lt;&lt; s-&gt;describe() &lt;&lt; "\n";
+        total += s-&gt;area();
+    }
+    std::cout &lt;&lt; std::format("total {:.2f}\n", total);
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-c-jai" role="tabpanel" aria-labelledby="port-c-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape {
+public:
+    string name() { return "shape"; }
+    float area() { return 0.0; }
+    string describe() { return format("{} {:.2f}", name(), area()); }
+}
+class Circle : Shape {
+public:
+    Circle(float r) { radius = r; }
+    string name() override { return "circle"; }
+    float area() override { return 3.14159 * radius * radius; }
+private:
+    float radius;
+}
+class Rect : Shape {
+public:
+    Rect(float w, float h) { width = w; height = h; }
+    float area() override { return width * height; }
+private:
+    float width;
+    float height;
+}
+
+array&lt;shared_ptr&lt;Shape&gt;&gt; shapes;
+shapes.push(make_shared&lt;Circle&gt;(1.0));
+shapes.push(make_shared&lt;Rect&gt;(2.0, 3.5));
+float total = 0.0;
+for (const auto&amp; s : shapes) {
+    print(s-&gt;describe());
+    total += s-&gt;area();
+}
+print("total {:.2f}", total);</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">circle 3.14
+shape 7.00
+total 10.14</code></pre></div>
+<ul><li>No <code>virtual</code>: every method is virtual, and a redefinition must say <code>override</code>. <code>private:</code> admits subclasses.</li><li>No <code>unique_ptr</code>: the container holds <code>shared_ptr&lt;Shape&gt;</code>. An <code>array&lt;Shape&gt;</code> of values works too, because a base-typed element is <a href="#no-slicing">never sliced</a>.</li></ul>
+<h3 id="port-d">Lambdas and a callback<a class="hlink" href="#port-d" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-d-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-d-tab-cpp" aria-controls="port-d-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="port-d-tab-jai" aria-controls="port-d-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-d-cpp" role="tabpanel" aria-labelledby="port-d-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;functional&gt;
+#include &lt;iostream&gt;
+#include &lt;string&gt;
+#include &lt;vector&gt;
+
+struct Button {
+    std::string label;
+    std::function&lt;void(const std::string&amp;)&gt; on_click;
+    void click() const { if (on_click) { on_click(label); } }
+};
+
+int main() {
+    int clicks = 0;
+    std::vector&lt;std::string&gt; log;
+    Button ok{"ok"};
+    ok.click();                                  // no handler yet
+    ok.on_click = [&amp;clicks, &amp;log](const std::string&amp; label) { clicks += 1; log.push_back(label); };
+    ok.click();
+    ok.click();
+
+    int base = 10;
+    auto add_base = [base](int v) { return v + base; };
+    base = 99;                                   // the lambda keeps its copy
+
+    auto counter = [n = 0]() mutable { n += 1; return n; };
+    counter();
+    auto copy = counter;                         // copies the lambda and its n
+    counter();
+    std::cout &lt;&lt; clicks &lt;&lt; " " &lt;&lt; log.size() &lt;&lt; " " &lt;&lt; add_base(1) &lt;&lt; " " &lt;&lt; counter() &lt;&lt; " " &lt;&lt; copy() &lt;&lt; "\n";
+}</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">2 2 11 3 2</code></pre></div>
+</div>
+<div class="tab-panel" id="port-d-jai" role="tabpanel" aria-labelledby="port-d-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Button {
+    string label;
+    function on_click;
+    void click() { if (on_click != nullptr) { on_click(label); } }
+}
+
+int clicks = 0;
+array&lt;string&gt; log;
+Button ok{"ok"};
+ok.click();                                  // no handler yet
+ok.on_click = [&amp;clicks, &amp;log](const string&amp; label) { clicks += 1; log.push(label); };
+ok.click();
+ok.click();
+
+int base = 10;
+auto add_base = [base](int v) { return v + base; };
+base = 99;                                   // the lambda keeps its copy
+
+auto counter = [n = 0]() { n += 1; return n; };
+counter();
+auto copy = counter;                         // both names count on one n
+counter();
+print(clicks, " ", log.size(), " ", add_base(1), " ", counter(), " ", copy());</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">2 2 11 3 4</code></pre></div>
+</div>
+</div>
+<ul><li>Capture lists mean what they mean in C++, and a by-value capture is writable without <code>mutable</code>. A <code>function</code> slot holds any callable or null and declares no signature.</li><li>The last number differs. C++ copies a lambda together with its <code>n</code>; in JaiScript <code>copy</code> and <code>counter</code> are two names for one lambda and count on one <code>n</code>.</li></ul>
+<h3 id="port-e">A thrown class, a destructor and a map<a class="hlink" href="#port-e" aria-label="link">&#8203;</a></h3>
+<div class="tabs" id="port-e-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="port-e-tab-cpp" aria-controls="port-e-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="port-e-tab-jai" aria-controls="port-e-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="port-e-cpp" role="tabpanel" aria-labelledby="port-e-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;iostream&gt;
+#include &lt;map&gt;
+#include &lt;stdexcept&gt;
+#include &lt;string&gt;
+
+struct OutOfStock {
+    std::string item;
+    int wanted;
+    int have;
+};
+struct Audit {
+    std::string what;
+    explicit Audit(std::string w) : what(std::move(w)) {}
+    ~Audit() { std::cout &lt;&lt; "audited " &lt;&lt; what &lt;&lt; "\n"; }
+};
+
+void take(std::map&lt;std::string, int&gt;&amp; stock, const std::string&amp; item, int wanted) {
+    Audit audit{"take " + item};
+    int&amp; have = stock.at(item);                  // a missing key throws std::out_of_range
+    if (have &lt; wanted) { throw OutOfStock{item, wanted, have}; }
+    have -= wanted;
+}
+
+int main() {
+    std::map&lt;std::string, int&gt; stock = {{"rope", 2}, {"arrow", 20}};
+    for (std::string item : {"arrow", "rope", "sword"}) {
+        try {
+            take(stock, item, 5);
+        } catch (const OutOfStock&amp; e) {
+            std::cout &lt;&lt; "wanted " &lt;&lt; e.wanted &lt;&lt; " " &lt;&lt; e.item &lt;&lt; ", have " &lt;&lt; e.have &lt;&lt; "\n";
+        } catch (const std::out_of_range&amp;) {
+            std::cout &lt;&lt; "no " &lt;&lt; item &lt;&lt; " at all\n";
+        }
+    }
+    for (const auto&amp; [item, count] : stock) { std::cout &lt;&lt; item &lt;&lt; "=" &lt;&lt; count &lt;&lt; "\n"; }
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="port-e-jai" role="tabpanel" aria-labelledby="port-e-tab-jai" tabindex="0">
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class OutOfStock {
+    string item;
+    int wanted;
+    int have;
+}
+class Audit {
+    string what;
+    Audit(string w) { what = w; }
+    ~Audit() { print("audited ", what); }
+}
+
+void take(map&lt;string, int&gt;&amp; stock, const string&amp; item, int wanted) {
+    Audit audit{"take " + item};
+    int&amp; have = stock[item];                     // a missing key raises a run-time error
+    if (have &lt; wanted) { throw OutOfStock{item, wanted, have}; }
+    have -= wanted;
+}
+
+map&lt;string, int&gt; stock = {"rope": 2, "arrow": 20};
+for (string item : ["arrow", "rope", "sword"]) {
+    try {
+        take(stock, item, 5);
+    } catch (const OutOfStock&amp; e) {
+        print("wanted ", e.wanted, " ", e.item, ", have ", e.have);
+    } catch (error e) {
+        print("no ", item, " at all");
+    }
+}
+for (const auto&amp; [item, count] : stock) { print(item, "=", count); }</code></pre></div>
+</div>
+</div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">audited take arrow
+audited take rope
+wanted 5 rope, have 2
+audited take sword
+no sword at all
+arrow=15
+rope=2</code></pre></div>
+<ul><li>Any value can be thrown, <code>catch</code> selects by type, and <code>Audit</code>'s destructor runs during the unwind.</li><li>Reading <code>stock[item]</code> for a missing key raises a run-time error, caught as <code>error</code>; C++'s <code>operator[]</code> would insert it, and <code>at</code> throws. <code>stock.get(item, 0)</code> reads with a default.</li></ul>
+<h2 id="side-by-side">Feature by feature<a class="hlink" href="#side-by-side" aria-label="link">&#8203;</a></h2>
 <h3 id="types-and-values">Types and values<a class="hlink" href="#types-and-values" aria-label="link">&#8203;</a></h3>
 <div class="tablewrap"><table><thead><tr><th></th><th>C++</th><th>JaiScript</th></tr></thead><tbody>
 <tr><td>integer</td><td><code>int</code>, <code>int64_t</code>, <code>unsigned</code></td><td><code>int</code>: always 64-bit and signed, the only integer type</td></tr>
@@ -93,6 +460,50 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 <tr><td>coroutine</td><td>C++20 <code>co_yield</code></td><td><code>coroutine int gen() { yield 1; }</code>, driven by <code>next()</code> or range-<code>for</code></td></tr>
 <tr><td>formatting</td><td><code>std::format("{} {:.2f}", a, b)</code></td><td><code>format("{} {:.2f}", a, b)</code>, <code>print("{}", a)</code>, <code>`${b:.2f}`</code>; only a literal is a format string, and <code>vformat</code> is <code>std::vformat</code></td></tr>
 </tbody></table></div>
+<div class="tabs" id="sampler-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="sampler-tab-cpp" aria-controls="sampler-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="sampler-tab-jai" aria-controls="sampler-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="sampler-cpp" role="tabpanel" aria-labelledby="sampler-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;format&gt;
+#include &lt;iostream&gt;
+#include &lt;memory&gt;
+#include &lt;string&gt;
+
+struct Shape {
+    std::string name;
+    explicit Shape(std::string n) : name(std::move(n)) {}
+    virtual ~Shape() = default;
+    virtual double area() const { return 0.0; }
+};
+struct Square : Shape {
+    double side;
+    explicit Square(double s) : Shape("square"), side(s) {}
+    double area() const override { return side * side; }
+    Square operator+(const Square&amp; o) const { return Square(side + o.side); }
+};
+enum class Dir { north, south = 5 };
+void grow(Square&amp; sq, double by) { sq.side += by; }
+auto biggest(auto a, auto b) { return a &gt; b ? a : b; }
+
+int main() {
+    Square sq{3.0};
+    Shape&amp; s = sq;                               // area() dispatches to Square
+    std::shared_ptr&lt;Shape&gt; heap = std::make_shared&lt;Square&gt;(2.0);
+    auto again = heap;                           // a second handle to one object
+    grow(dynamic_cast&lt;Square&amp;&gt;(*again), 3.0);
+    try {
+        throw (sq + sq).side;
+    } catch (double e) {
+        std::cout &lt;&lt; std::format("{} {:.1f} {:.1f} {:.1f} {}\n", s.name, s.area(), heap-&gt;area(), e,
+                                 biggest(std::string("ab"), std::string("b")));
+    }
+    Dir d = Dir::south;
+    std::cout &lt;&lt; std::format("{} {}\n", static_cast&lt;int&gt;(d), d == static_cast&lt;Dir&gt;(5));
+}</code></pre></div>
+</div>
+<div class="tab-panel" id="sampler-jai" role="tabpanel" aria-labelledby="sampler-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape {
     string name;
     Shape(string n) { name = n; }
@@ -102,7 +513,7 @@ class Square : Shape {
     float side;
     Square(float s) : super("square") { side = s; }
     float area() override { return side * side; }
-    Square operator+(Square o) { return Square(side + o.side); }
+    Square operator+(const Square&amp; o) { return Square(side + o.side); }
 }
 enum Dir { north, south = 5 }
 void grow(Square&amp; sq, float by) { sq.side += by; }
@@ -110,20 +521,21 @@ auto biggest(auto a, auto b) { return a &gt; b ? a : b; }
 
 Square sq{3.0};
 Shape&amp; s = sq;                               // area() dispatches to Square
-shared_ptr&lt;Square&gt; heap = make_shared&lt;Square&gt;(2.0);
+shared_ptr&lt;Shape&gt; heap = make_shared&lt;Square&gt;(2.0);
 auto again = heap;                           // a second handle to one object
 grow(cast&lt;Square&amp;&gt;(again), 3.0);
-map&lt;string, int&gt; stock = {"ore": 4, "gem": 1};
-for (auto&amp; [name, count] : stock) { count += 1; }
 try {
     throw (sq + sq).side;
 } catch (float e) {
-    print(format("{} {} {:.1f} {} {}", s.name, s.area(), heap-&gt;area(), e, biggest("ab", "b")));
+    print("{} {:.1f} {:.1f} {:.1f} {}", s.name, s.area(), heap-&gt;area(), e,
+          biggest("ab", "b"));
 }
 Dir d = Dir::south;
-print(stock, " ", d, " ", d == cast&lt;Dir&gt;(5));</code></pre></div>
+print("{} {}", cast&lt;int&gt;(d), d == cast&lt;Dir&gt;(5));</code></pre></div>
+</div>
+</div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">square 9.0 25.0 6.0 b
-{"gem": 2, "ore": 5} 5 true</code></pre></div>
+5 true</code></pre></div>
 <h3 id="spellings">Two spellings, one meaning<a class="hlink" href="#spellings" aria-label="link">&#8203;</a></h3>
 <p>The language blends C++ and JavaScript on purpose, so some things have a spelling from each. Both columns mean exactly the same thing:</p>
 <div class="tablewrap"><table><thead><tr><th>C++ spelling</th><th>JavaScript spelling</th></tr></thead><tbody>
@@ -156,14 +568,55 @@ print(stock, " ", d, " ", d == cast&lt;Dir&gt;(5));</code></pre></div>
 <tr><td>two globals of one name is a link error</td><td>a second top-level declaration of a variable in one file is a load error; a function of the same signature from another file replaces the earlier one (hot reload)</td></tr>
 <tr id="overloads"><td><code>f(int)</code> and <code>f(int&amp;)</code> overload</td><td>overloads must differ in parameter types or count, not only by reference; an ambiguous call raises <code>Ambiguous call to ...</code></td></tr>
 </tbody></table></div>
+<div class="tabs" id="habits-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="habits-tab-cpp" aria-controls="habits-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="habits-tab-jai" aria-controls="habits-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="habits-cpp" role="tabpanel" aria-labelledby="habits-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;iostream&gt;
+#include &lt;string&gt;
+
+struct Shape {
+    virtual ~Shape() = default;
+    virtual std::string kind() const { return "shape"; }
+};
+struct Circle : Shape {
+    double r = 1.5;
+    std::string kind() const override { return "circle"; }
+};
+void shout(std::string&amp; text) { for (char&amp; c : text) { c = static_cast&lt;char&gt;(std::toupper(c)); } std::cout &lt;&lt; text &lt;&lt; "\n"; }
+
+int main() {
+    Shape s = Circle();                              // sliced to a Shape
+    int n = 0;
+    auto count = [n]() mutable { n += 1; return n; };
+    auto copy = count;                               // its own n
+    count();
+    std::string text = "a variable binds string&amp;";   // shout("a literal") does not compile
+    shout(text);
+    int hits = 0;
+    switch (1) {
+        case 0:
+        case 1: hits += 1;                           // falls through
+        case 2: hits += 10;
+    }
+    double zero = 0.0;                               // 10 / 0 is undefined behavior
+    std::cout &lt;&lt; s.kind() &lt;&lt; " " &lt;&lt; copy() &lt;&lt; " " &lt;&lt; hits &lt;&lt; " " &lt;&lt; static_cast&lt;int&gt;(3.9) &lt;&lt; " " &lt;&lt; 1.0 / zero &lt;&lt; "\n";
+}</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">A VARIABLE BINDS STRING&amp;
+shape 1 11 3 inf</code></pre></div>
+</div>
+<div class="tab-panel" id="habits-jai" role="tabpanel" aria-labelledby="habits-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Shape { string kind() { return "shape"; } }
 class Circle : Shape { float r = 1.5; string kind() override { return "circle"; } }
-Shape s = Circle();                                  // no slicing
+void shout(string&amp; text) { text.to_upper(); print(text); }
+
+Shape s = Circle();                                  // no slicing: s is a Circle
 int n = 0;
 auto count = [n]() { n += 1; return n; };
 auto copy = count;                                   // shares n
 count();
-void shout(string&amp; text) { text.to_upper(); print(text); }
 shout("a literal binds string&amp;");
 int hits = 0;
 switch (1) {
@@ -171,11 +624,34 @@ switch (1) {
     case 1: hits += 1;                               // ends here
     case 2: hits += 10;
 }
-print(s.kind(), " ", type_of(s), " ", copy(), " ", hits, " ", cast&lt;int&gt;(3.9), " ", 1.0 / 0.0);
+float zero = 0.0;
+print(s.kind(), " ", copy(), " ", hits, " ", cast&lt;int&gt;(3.9), " ", 1.0 / zero);
 try { print(10 / 0); } catch (error e) { print("caught: ", e.message); }</code></pre></div>
 <div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">A LITERAL BINDS STRING&amp;
-circle Circle 2 1 3 inf
+circle 2 1 3 inf
 caught: Division by zero</code></pre></div>
+</div>
+</div>
+<p>The same lines, different answers: the C++ <code>s</code> is sliced, its lambda copy counts alone, and its <code>switch</code> falls through.</p>
+<div class="tabs" id="load-errors-tabs">
+<div class="tab-list" role="tablist" aria-label="C++ and its JaiScript port" hidden>
+<button type="button" role="tab" id="load-errors-tab-cpp" aria-controls="load-errors-cpp" aria-selected="true">C++</button>
+<button type="button" role="tab" id="load-errors-tab-jai" aria-controls="load-errors-jai" aria-selected="false" tabindex="-1">JaiScript</button>
+</div>
+<div class="tab-panel" id="load-errors-cpp" role="tabpanel" aria-labelledby="load-errors-tab-cpp" tabindex="0">
+<div class="codeblock cb-cpp"><span class="cb-label">C++</span><pre><code class="lang-cpp">#include &lt;iostream&gt;
+
+struct Node { int v = 0; Node* next = nullptr; };
+
+int main() {
+    Node* head = nullptr;
+    double f = 3.9;
+    int i = f;                                   // compiles; /W4 warns of a possible loss of data
+    std::cout &lt;&lt; (head == nullptr) &lt;&lt; " " &lt;&lt; i &lt;&lt; "\n";
+}</code></pre></div>
+<div class="codeblock cb-plain"><span class="cb-label">output</span><pre><code class="lang-plain">1 3</code></pre></div>
+</div>
+<div class="tab-panel" id="load-errors-jai" role="tabpanel" aria-labelledby="load-errors-tab-jai" tabindex="0">
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class Node { int v = 0; Node next; }
 Node head = null;
 float f = 3.9;
@@ -190,6 +666,9 @@ int i = f;</code></pre></div>
 &lt;script&gt;:4:5: error: cannot initialize 'i' declared 'int' with 'float': cast&lt;int&gt;(x) truncates toward zero, math::ifloor(x) rounds down
     int i = f;
         ^</code></pre></div>
+</div>
+</div>
+<p>The C++ side links through a pointer and compiles with one conversion warning; the same intent written with values stops the JaiScript load.</p>
 <h3 id="not-there">What is not there<a class="hlink" href="#not-there" aria-label="link">&#8203;</a></h3>
 <p>Raw pointers (<code>T*</code>, <code>&amp;x</code>, <code>delete</code>), templates, const methods and types, <code>const_cast</code>, <code>constexpr</code>, <code>unsigned</code> and sized integers, <code>struct</code>, <code>virtual</code>, <code>mutable</code>, <code>enum class</code>, <code>goto</code>, <code>static_cast</code> (spelled <code>cast</code>) and <code>sizeof</code>. <code>&amp;x</code>, <code>delete</code>, a const method or type, <code>const_cast</code>, <code>constexpr</code>, a <code>mutable</code> field, <code>virtual</code> and <code>goto</code> are parse errors that name the JaiScript spelling; the others fail with a message that does not name the missing feature, so a puzzling error on a C++-shaped line is worth checking against this list.</p>
 <h2 id="where-to-next">Where to next<a class="hlink" href="#where-to-next" aria-label="link">&#8203;</a></h2>

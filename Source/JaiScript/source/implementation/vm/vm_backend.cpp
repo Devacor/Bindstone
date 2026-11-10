@@ -12741,7 +12741,7 @@ JAI_NOINLINE op_status vm_backend::call_threw(size_t truncate_to) {
 	} catch (const std::exception& e) {
 		if (truncate_to != SIZE_MAX) { stack_.truncate(truncate_to); }
 		active_exception_value_ = script_value(std::string(detail::native_exception_text(e)), engine_);
-		current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
+		current_exception_ = script_exception(detail::native_exception_text(e)); detail::engine_access::set_exception_kind(*current_exception_, error_kind::host);
 		is_unwinding_ = true;
 		stack_.push_back(make_null());
 		return {};
@@ -14252,7 +14252,7 @@ JAI_NOINLINE void vm_backend::raise_script_exception(const std::string& message,
 
 JAI_NOINLINE void vm_backend::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
 	raise_script_exception(no_member_text(kind, member), location);
-	current_exception_->kind = error_kind::no_member;
+	detail::engine_access::set_exception_kind(*current_exception_, error_kind::no_member);
 }
 
 checked_result<script_value> vm_backend::eval_expression(const expression_ptr& expr, const std::shared_ptr<environment>& env) {
@@ -19325,7 +19325,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			std::string message = format_error(*failure, *symbolizer_);
 			active_exception_value_ = script_value(message, engine_);
 			current_exception_ = script_exception(message);
-			current_exception_->kind = error_kind_of(failure->ec);
+			detail::engine_access::set_exception_kind(*current_exception_, error_kind_of(failure->ec));
 		}
 		if (!trace_captured_) { capture_stack_trace(); }   // the stack at the error, for the caught value
 		is_unwinding_ = false;
@@ -19369,7 +19369,7 @@ bool vm_backend::unwind_to_handler(frame& f, const error_propagator* failure) {
 			script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_null(), by_throw,
 			                                                 by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
 			                                                 by_throw ? current_exception_->what() : nullptr,
-			                                                 current_exception_ ? current_exception_->kind : error_kind::other);
+			                                                 current_exception_ ? detail::engine_access::exception_kind(*current_exception_) : error_kind::other);
 			captured_trace_.clear();
 			try_records_[handler_index].caught_scope = std::make_shared<caught_error_scope>(engine_, caught);
 			if (handler.catch_slot != k_invalid_u32 && has_slots(f)) {
@@ -20399,7 +20399,7 @@ checked_result<void> vm_backend::run(frame& entry) {
 		} catch (const std::exception& e) {
 			if (switch_to_) { fp = switch_to_; switch_to_ = nullptr; }
 			script_exception native(detail::native_exception_text(e));
-			native.kind = error_kind::host;
+			detail::engine_access::set_exception_kind(native, error_kind::host);
 			convert_cpp_exception_in_frame(native);
 			if (!handle_throw_unwind(fp, records_base)) { return {}; }
 		} catch (...) {

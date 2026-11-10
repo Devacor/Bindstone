@@ -650,7 +650,7 @@ script_value interpreter::execute(const std::vector<declaration_ptr>& declaratio
         } catch (const std::exception& e) {
             // a native exception a statement raises (a host error, an allocation failure) is the run's script exception, as on the vm
             active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
-            current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
+            current_exception_ = script_exception(detail::native_exception_text(e)); detail::engine_access::set_exception_kind(*current_exception_, error_kind::host);
             is_unwinding_ = true;
         }
 
@@ -4390,7 +4390,7 @@ JAI_NOINLINE void interpreter::raise_script_text(const std::string& text, const 
 
 JAI_NOINLINE void interpreter::raise_no_member(std::string_view kind, std::string_view member, const source_location& location) {
     raise_script_text(no_member_text(kind, member), location);
-    current_exception_->kind = error_kind::no_member;
+    detail::engine_access::set_exception_kind(*current_exception_, error_kind::no_member);
 }
 
 checked_result<void> interpreter::method_value_error(const member_expr* expr, const script_value& object, bool bindable) {
@@ -7173,7 +7173,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         } catch (const std::exception& e) {
             while (valueStack_.size() > try_stack_mark) { (void)valueStack_.pop(); }
             if (auto* se = dynamic_cast<const script_exception*>(&e)) { current_exception_ = *se; }
-            else { current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host; }
+            else { current_exception_ = script_exception(detail::native_exception_text(e)); detail::engine_access::set_exception_kind(*current_exception_, error_kind::host); }
             active_exception_value_ = make_value(std::string(detail::native_exception_text(e)));
             is_unwinding_ = true;
         }
@@ -7218,7 +7218,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
         std::string error_msg = format_error(try_result, *string_symbolizer_);
         active_exception_value_ = make_value(error_msg);
         current_exception_ = script_exception(error_msg);
-        current_exception_->kind = error_kind_of(try_result.error());
+        detail::engine_access::set_exception_kind(*current_exception_, error_kind_of(try_result.error()));
         caught_error = true;
     } else if (is_unwinding_ && current_exception_) {
         // Old-style exception unwinding (for script throw statements)
@@ -7249,7 +7249,7 @@ checked_result<void> interpreter::visit_try_stmt(try_stmt* stmt) {
             script_value caught = engine_->make_caught_error(active_exception_value_ ? *active_exception_value_ : make_value(), by_throw,
                                                              by_throw ? &current_exception_->location() : nullptr, std::move(captured_trace_),
                                                              by_throw ? current_exception_->what() : nullptr,
-                                                             current_exception_ ? current_exception_->kind : error_kind::other);
+                                                             current_exception_ ? detail::engine_access::exception_kind(*current_exception_) : error_kind::other);
             captured_trace_.clear();
             caught_scope.emplace(engine_, caught);
             if (stmt->catch_slot_index != SIZE_MAX && !call_stack_.empty()) {
@@ -7926,7 +7926,7 @@ checked_result<void> interpreter::raise_native_exception(const std::exception& e
     if (const auto* thrown = dynamic_cast<const script_exception*>(&e)) {
         current_exception_ = *thrown;
     } else {
-        current_exception_ = script_exception(detail::native_exception_text(e)); current_exception_->kind = error_kind::host;
+        current_exception_ = script_exception(detail::native_exception_text(e)); detail::engine_access::set_exception_kind(*current_exception_, error_kind::host);
     }
     is_unwinding_ = true;
     push_value(make_value());

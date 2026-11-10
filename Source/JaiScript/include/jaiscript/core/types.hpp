@@ -367,12 +367,15 @@ namespace jai {
     // runtime_error(a + b + c)
     [[noreturn]] JAI_NOINLINE void throw_concat(std::string_view a, std::string_view b, std::string_view c = {});
 
+    namespace detail { struct engine_access; }
     // Script exception for try/catch/throw
     class script_exception : public runtime_error {
         using runtime_error::runtime_error;
     public:
         bool thrown = false;   // a script `throw value` (the catch variable is the value), not a run-time error
-        error_kind kind = error_kind::other;   // a run-time error's family (e.kind)
+    private:
+        friend struct detail::engine_access;
+        error_kind kind_ = error_kind::other;   // a run-time error's family (e.kind), carried from the raise to the catch
     };
     
 } // namespace jai

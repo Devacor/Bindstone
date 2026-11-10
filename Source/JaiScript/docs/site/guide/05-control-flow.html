@@ -213,7 +213,7 @@ code 7 at line 11</code></pre></div>
 <li><code>error</code> takes a run-time error, and nothing a script throws.</li>
 <li><code>catch (e)</code>, <code>catch (var e)</code>, <code>catch (auto e)</code> and <code>catch</code> alone take everything, and come last (<code>a catch with no type catches everything: it is the last handler of its try</code>).</li>
 </ul>
-<p><code>e</code> is the thrown value itself, never a copy, with or without <code>&amp;</code>; <code>const</code> makes it read-only. With no clause for it the error goes on to the next <code>try</code> out, from the place that raised it. There is no <code>finally</code>: a destructor runs when its scope ends, a throw included.</p>
+<p><code>e</code> in <code>catch (T e)</code> names the thrown value itself: no copy is made, where C++ copies. <code>&amp;</code> changes nothing and <code>const</code> makes it read-only. With no clause for it the error goes on to the next <code>try</code> out, from the place that raised it. There is no <code>finally</code>: a destructor runs when its scope ends, a throw included.</p>
 <div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">class LoadError { string what = "load"; }
 class MissingFile : LoadError { }
 string handle(var action) {

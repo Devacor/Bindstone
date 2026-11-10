@@ -238,6 +238,8 @@ namespace jai::detail {
         JAI_FORCEINLINE static uint64_t clock_sample_count(const engine& a_engine) noexcept { return a_engine.clock_sample_count(); }
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, const std::vector<stack_frame>& trace, const char* thrown_text = nullptr, error_kind kind = error_kind::other) { return a_engine.make_caught_error(thrown, by_throw, throw_site, trace, thrown_text, kind); }
         JAI_FORCEINLINE static script_value make_caught_error(engine& a_engine, const script_value& thrown, bool by_throw, const source_location* throw_site, std::vector<stack_frame>&& trace, const char* thrown_text = nullptr, error_kind kind = error_kind::other) { return a_engine.make_caught_error(thrown, by_throw, throw_site, std::move(trace), thrown_text, kind); }
+        JAI_FORCEINLINE static error_kind exception_kind(const script_exception& a_exception) noexcept { return a_exception.kind_; }
+        JAI_FORCEINLINE static void set_exception_kind(script_exception& a_exception, error_kind a_kind) noexcept { a_exception.kind_ = a_kind; }
         JAI_FORCEINLINE static bool is_caught_runtime_error(const engine& a_engine, const script_value& value) noexcept { return a_engine.is_caught_runtime_error(value); }
         JAI_FORCEINLINE static bool catch_clause_takes(const engine& a_engine, const script_value& value, const std::string& type_name) { return a_engine.catch_clause_takes(value, type_name); }
         JAI_FORCEINLINE static bool catch_admits(const engine& a_engine, const std::vector<std::string>& clause_types, const script_value* thrown) { return a_engine.catch_admits(clause_types, thrown); }

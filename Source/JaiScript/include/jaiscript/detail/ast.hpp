@@ -348,10 +348,10 @@ namespace jai {
             : expression(loc, node_type::call_expr), callee(c), arguments(std::move(args)) {}
         ~call_expr() override { detail::release_operands({&callee}, &arguments); }
 
-        // print(...) or format(...) by name whose first argument is a string literal, with values after it: the literal is its
-        // format string (C++20's constant format string), so both backends run the builtin's literal entry while the name binds it
+        // print(...) or format(...) by name whose first argument is a string literal: the literal is its format string (C++20's
+        // constant format string), so both backends run the builtin's literal entry while the name binds it
         bool literal_format_call() const {
-            if (arguments.size() < 2 || callee->get_type() != node_type::identifier_expr || arguments[0]->get_type() != node_type::literal_expr) {
+            if (arguments.empty() || callee->get_type() != node_type::identifier_expr || arguments[0]->get_type() != node_type::literal_expr) {
                 return false;
             }
             const std::string_view name = static_cast<const identifier_expr*>(callee.get())->name;

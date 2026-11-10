@@ -979,8 +979,12 @@ private:
 		return true;
 	}
 
-	// v's components as kind `to` (the typed-slot row): the same kind passes, an ivec widens through f32$, a vec narrows
-	// through i32$ (the checked float-to-int kernel, which may raise)
+	// v's components as kind `to`: the same kind passes, an ivec widens through f32$, and the constructor's vector argument
+	// narrows through i32$ (the checked float-to-int kernel, which may raise); a slot takes no narrowing, so its store stays boxed
+	// and raises the slot's text
+	bool slot_convert_into(const vform& v, vk to, const source_location& loc, vform& f) {
+		return !math::narrows(v.kind, to) && convert_into(v, to, loc, f);
+	}
 	bool convert_into(const vform& v, vk to, const source_location& loc, vform& f) {
 		if (!math::converts(v.kind, to)) return false;
 		f.kind = to; f.n = v.n;
@@ -1750,7 +1754,7 @@ private:
 		vform f;
 		if (v->initializer && vec_of(v->initializer, f, ctx)) {
 			vform conv;
-			if (convert_into(f, c.kind, loc, conv)) {
+			if (slot_convert_into(f, c.kind, loc, conv)) {
 				conv.sensitive += f.sensitive;
 				if (conv.sensitive <= 1) {
 					for (auto& p : prelude) out.push_back(std::move(p));
@@ -1908,7 +1912,7 @@ private:
 			f = rhs;
 		}
 		vform conv;
-		if (!convert_into(f, self.kind, loc, conv)) return false;
+		if (!slot_convert_into(f, self.kind, loc, conv)) return false;
 		conv.sensitive += f.sensitive;
 		if (conv.sensitive > 1) return false;   // the element read and one raising row at most, as a local's store takes
 		for (auto& p : prelude) out.push_back(std::move(p));
@@ -1949,7 +1953,7 @@ private:
 				hazard = ok && cross_reads(f, c);   // p *= p.x reads the stored x in y's product
 			}
 			vform conv;
-			if (ok && convert_into(f, c.kind, loc, conv)) {
+			if (ok && slot_convert_into(f, c.kind, loc, conv)) {
 				conv.sensitive += f.sensitive;
 				if (conv.sensitive <= 1) {
 					for (auto& p : prelude) out.push_back(std::move(p));

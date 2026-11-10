@@ -6,6 +6,7 @@
 #include <jaiscript/testing/foundry.hpp>
 #include <jaiscript/testing/temporary_directory.hpp>
 #include <jaiscript/core/engine.hpp>
+#include <jaiscript/detail/builtin_api_arities.hpp>
 #include <jaiscript/core/dynamic_binder.hpp>
 #include <jaiscript/detail/type_proofs.hpp>
 #include <jaiscript/detail/lexer.hpp>
@@ -3776,6 +3777,7 @@ public:
             auto e = make_engine();
             jai::stdlib::register_all(*e);
             const std::string hint = ": cast<int>(x) truncates toward zero, math::ifloor(x) rounds down";
+            const std::string vec_hint = ": cast<math::ivec2>(v) truncates each component toward zero";
             const std::vector<std::pair<std::string, std::string>> cases = {
                 {"int x = 2.5;", "cannot initialize 'x' declared 'int' with 'float'" + hint},
                 {"int x = 0; x = 2.5;", "cannot assign 'float' to 'x' declared 'int'" + hint},
@@ -3793,7 +3795,25 @@ public:
                 {"map<string,int> m = {}; m[\"k\"] = 1.5;", "cannot store into 'map<string,int>': expected 'int', got 'float'" + hint},
                 {"array<float> f = [1.5]; array<int> a = f;", "cannot initialize 'a' declared 'array<int>' with 'array<float>': array element type: expected 'int', got 'float'" + hint},
                 {"void f(int q = 1.5) {}", "default value of 'q' declared 'int' has type 'float'"},
+                // a float vector into an integer vector's slot is the same narrowing
+                {"math::vec2 v; math::ivec2 a = v;", "cannot initialize 'a' declared 'math::ivec2' with 'math::vec2'" + vec_hint},
+                {"math::vec2 v; math::ivec2 a; a = v;", "cannot assign 'math::vec2' to 'a' declared 'math::ivec2'" + vec_hint},
+                {"void f(math::ivec2 p) {} f(math::vec2(1.5, 2.5));", "argument 1 of 'f': cannot pass 'math::vec2' to 'p' declared 'math::ivec2'" + vec_hint},
+                {"math::ivec3 g() { return math::vec3(1.5, 2.5, 3.5); }", "cannot return 'math::vec3' from 'g' declared to return 'math::ivec3'"},
+                {"class C { math::ivec2 at; } C c; c.at = math::vec2(1.5, 2.5);", "cannot assign 'math::vec2' to field 'at' declared 'math::ivec2'" + vec_hint},
+                {"array<math::ivec2> a; a.push(math::vec2(1.5, 2.5));", "cannot push into 'array<math::ivec2>': expected 'math::ivec2', got 'math::vec2'" + vec_hint},
+                {"array<math::ivec2> a = [math::ivec2(1, 2)]; a[0] = math::vec2(1.5, 2.5);", "cannot store into 'array<math::ivec2>': expected 'math::ivec2', got 'math::vec2'" + vec_hint},
+                {"array<math::vec2> f; array<math::ivec2> a = f;", "cannot initialize 'a' declared 'array<math::ivec2>' with 'array<math::vec2>': array element type: expected 'math::ivec2', got 'math::vec2'" + vec_hint},
+                {"math::ivec2 a; math::ivec2& r = a; r = math::vec2(1.5, 2.5);", "cannot assign 'math::vec2' to 'r' declared 'math::ivec2&'" + vec_hint},
+                // a typed reference stores by its referent's table
+                {"void s(int& a) { a = \"str\"; }", "cannot assign 'string' to 'a' declared 'int&'"},
+                {"int u = 1; int& r = u; r = \"s\";", "cannot assign 'string' to 'r' declared 'int&'"},
+                {"void s(string& a) { a = 5; }", "cannot assign 'int' to 'a' declared 'string&': stringify it with to_string(x) or `${x}`"},
+                {"void s(array<int>& a) { a = \"x\"; }", "cannot assign 'string' to 'a' declared 'array<int>&': expected 'array<int>', got 'string'"},
+                {"void s(bool& b) { b = \"x\"; }", "cannot assign 'string' to 'b' declared 'bool&': write !x.empty() or an explicit comparison"},
+                {"void s(int& a) { a += 0.5; }", "cannot assign 'float' to 'a' declared 'int&'" + hint},
             };
+
             for (const auto& [src, text] : cases) {
                 auto rep = e->check(src);
                 check_eq((size_t)1, error_count(rep), rep.format(src));
@@ -3807,6 +3827,35 @@ public:
             auto rep = e->check(clean);
             check_eq((size_t)0, rep.diagnostics.size(), rep.format(clean));
             check_eq(std::string("2 2 -2 1 2"), e->execute(clean).as_string());
+            // cast<math::ivecN> is the narrowing's spelling and the constructor converts what it is handed; an ivec widens anywhere;
+            // a reference stores what its referent takes
+            const std::string vectors =
+                "math::vec2 v = math::vec2(1.9, -2.9); math::ivec2 a = cast<math::ivec2>(v); math::ivec3 b = cast<math::ivec3>(math::vec3(1.5, -2.5, 3.5));\n"
+                "math::vec2 w = a; array<math::vec2> ws; ws.push(a); math::vec3 up(math::ivec3 i) { return i; } math::ivec2 made = math::ivec2(v);\n"
+                "void set(int& n, string& s, float& f, array<int>& xs) { n = 2; n += 1; s = \"t\"; s += \"u\"; f = 1; xs = [4]; } int n = 0; string s; float f = 0.5; array<int> xs;\n"
+                "set(n, s, f, xs); `${a} ${b} ${w} ${ws} ${up(b)} ${made} ${n}${s}${f}${xs}`;";
+            rep = e->check(vectors);
+            check_eq((size_t)0, rep.diagnostics.size(), rep.format(vectors));
+            check_eq(std::string("(1, -2) (1, -2, 3) (1.0, -2.0) [(1.0, -2.0)] (1.0, -2.0, 3.0) (1, -2) 3tu1.0[4]"), e->execute(vectors).as_string());
+            // through var the slot refuses at run time, and a component the cast cannot hold raises as cast<int> does
+            const std::vector<std::pair<std::string, std::string>> at_run = {
+                {"math::ivec2 a = v;", "Cannot initialize 'a' (declared math::ivec2) with math::vec2"},
+                {"math::ivec2 a; a = v;", "Cannot assign math::vec2 to 'a' (declared math::ivec2)"},
+                {"void f(math::ivec2 p) {} f(v);", "Cannot pass math::vec2 to parameter 'p' of 'f' (declared math::ivec2)"},
+                {"math::ivec2 g() { return v; } g();", "Cannot return math::vec2 from 'g' (declared -> math::ivec2)"},
+                {"class C { math::ivec2 at; } C c; c.at = v;", "Cannot assign math::vec2 to field 'at' of C (declared math::ivec2)"},
+                {"array<math::ivec2> xs; xs.push(v);", "Cannot push 'math::vec2' to array<math::ivec2>"},
+                {"array<math::ivec2> xs = [math::ivec2(1, 2)]; xs[0] = v;", "Cannot assign 'math::vec2' to element of type 'math::ivec2'"},
+                {"var many = [v]; array<math::ivec2> xs = many;", "Cannot store math::vec2 in array<math::ivec2>"},
+                {"math::ivec2 a; math::ivec2& r = a; r = v;", "Cannot assign math::vec2 to 'r' (declared math::ivec2&)"},
+                {"math::vec2 big = math::vec2(1e30, 0.0); cast<math::ivec2>(big);", "Cannot convert float to integer: non-finite or out of range"},
+                {"math::vec3 nan = math::vec3(0.0, math::NAN_VALUE, 0.0); cast<math::ivec3>(nan);", "Cannot convert float to integer: non-finite or out of range"},
+                {"void s(int& a) { var t = \"str\"; a = t; } int n = 0; s(n);", "Cannot assign string to 'a' (declared int&)"},
+            };
+            for (const auto& [src, text] : at_run) {
+                const std::string got = outcome(*make_engine(), "var v = math::vec2(1.9, -2.9); " + src);
+                check_true(got.rfind("ERROR " + text, 0) == 0, src + " -> " + got);
+            }
         });
 
         test("a_class_value_slot_takes_no_null_and_a_class_never_holds_itself_by_value", [this]() {
@@ -4014,6 +4063,157 @@ public:
             check_eq(std::string("3 1 false true a a b 1 a b 2 7 7.0 7 1"), e->execute(clean).as_string());
             // to_int() with no fallback returns null for text that does not parse, which an int slot refuses at run time
             check_eq(std::string("ERROR Cannot initialize 'n' (declared int) with null"), outcome(*e, "string word = \"abc\"; int n = word.to_int(); n"));
+        });
+
+        test("a_qualified_name_is_checked_as_the_bare_one", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            const std::string decl = "namespace game { int score = 0; string title = \"t\"; void add(int n) { score += n; } int twice(int n) { return n * 2; }\n"
+                                     "  namespace deep { array<int> log; void note(string s) { } } }\n";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"game::score = \"ten\";", "cannot assign 'string' to 'game::score' declared 'int'"},
+                {"game::score += 0.5;", "cannot assign 'float' to 'game::score' declared 'int': cast<int>(x) truncates toward zero, math::ifloor(x) rounds down"},
+                {"game::deep::log = 5;", "cannot assign 'int' to 'game::deep::log' declared 'array<int>': expected 'array<int>', got 'int'"},
+                {"string s = game::score;", "cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`"},
+                {"int n = game::title;", "cannot initialize 'n' declared 'int' with 'string'"},
+                {"game::add(\"x\");", "argument 1 of 'game::add': cannot pass 'string' to 'n' declared 'int'"},
+                {"game::add(1, 2);", "'game::add' expects 1 argument(s), got 2"},
+                {"game::deep::note(5);", "argument 1 of 'game::deep::note': cannot pass 'int' to 's' declared 'string': stringify it with to_string(x) or `${x}`"},
+                {"string s = game::twice(2);", "cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`"},
+                {"using game::add; add(\"x\");", "argument 1 of 'game::add': cannot pass 'string' to 'n' declared 'int'"},
+                {"using game::score; score = \"ten\";", "cannot assign 'string' to 'game::score' declared 'int'"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(decl + src);
+                check_eq((size_t)1, error_count(rep), rep.format(decl + src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(decl + src));
+            }
+            const std::string clean = decl + "using game::twice; game::score = 2; game::add(3); game::deep::note(\"n\"); game::deep::log = [1]; int n = game::twice(game::score); float f = game::score;\n"
+                                             "var any = \"late\"; string caught = \"\"; try { game::score = any; } catch (e) { caught = e; }\n"
+                                             "`${n} ${f} ${twice(1)} ${game::title} ${caught}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("10 5.0 2 t Cannot assign string to 'score' (declared int)"), e->execute(clean).as_string());
+            // a namespace another run declared: a call none of its functions takes fails the load, any it does take loads
+            check_eq((size_t)0, error_count(e->check("game::add(4); game::deep::note(\"x\");")));
+            auto later = e->check("game::add(\"x\");");
+            check_true(has_diag(later, dlevel::error, "argument 1 of 'game::add': cannot pass 'string' to 'n' declared 'int'"), later.format(""));
+        });
+
+        test("builtin_and_host_arguments_are_checked_against_their_signatures", [this]() {
+            auto e = make_engine();
+            jai::stdlib::register_all(*e);
+            struct Probe { int n = 0; void set(int v) { n = v; } std::string name(const std::string& prefix, int times) const { return prefix + std::to_string(times); } };
+            dynamic_binder<Probe>(*e, "Probe").constructor<>().method("set", &Probe::set).method("name", &Probe::name).build();
+            e->add_function("host_scale", [](double value, int by) { return value * by; });
+            e->add_function("host_label", [](const std::string& text) { return text + "!"; });
+            const std::string decl = "string text = \"abc\"; array<int> xs = [1, 2]; map<string,int> m = {\"k\": 1}; Probe probe;\n";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"float r = math::sqrt(\"nine\");", "argument 1 of 'math::sqrt': cannot pass 'string' where a number is expected"},
+                {"float r = math::pow(2, xs);", "argument 2 of 'math::pow': cannot pass 'array<int>' where a number is expected"},
+                {"float r = math::length(3);", "argument 1 of 'math::length': cannot pass 'int' where a vector or color is expected"},
+                {"var r = math::floor(\"x\");", "argument 1 of 'math::floor': cannot pass 'string' where a number or a vector or color is expected"},
+                {"string r = text.substr(\"a\");", "argument 1 of 'substr' on 'string': cannot pass 'string' where a number is expected"},
+                {"int r = text.find(3);", "argument 1 of 'find' on 'string': cannot pass 'int' where text is expected"},
+                {"xs.remove(\"x\");", "argument 1 of 'remove' on 'array<int>': cannot pass 'string' where a number is expected"},
+                {"xs.filter(3);", "argument 1 of 'filter' on 'array<int>': cannot pass 'int' where a function is expected"},
+                {"xs.concat(text);", "argument 1 of 'concat' on 'array<int>': cannot pass 'string' where an array is expected"},
+                {"string r = xs.join(4);", "argument 1 of 'join' on 'array<int>': cannot pass 'int' where text is expected"},
+                {"m.filter(\"k\");", "argument 1 of 'filter' on 'map<string,int>': cannot pass 'string' where a function is expected"},
+                {"host_scale(\"wide\", 2);", "no overload of 'host_scale' accepts these argument types"},
+                {"host_scale(1.5);", "'host_scale' expects 2 argument(s), got 1"},
+                {"host_label(5);", "no overload of 'host_label' accepts these argument types"},
+                {"probe.set(\"five\");", "no overload of 'Probe.set' accepts these argument types"},
+                {"probe.set(1, 2);", "'Probe.set' expects 1 argument(s), got 2"},
+                {"probe.name(3, 4);", "no overload of 'Probe.name' accepts these argument types"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto rep = e->check(decl + src);
+                check_eq((size_t)1, error_count(rep), rep.format(decl + src));
+                check_true(has_diag(rep, dlevel::error, text), rep.format(decl + src));
+            }
+            // what a signature leaves open stays the run's to judge: a var, a class's callable or text conversion, an extern function
+            const std::string clean = decl + "extern function later;\nclass Even { bool operator()(int v) { return v % 2 == 0; } }\n"
+                "var any = 9; float a = math::sqrt(any); float b = math::pow(2, 3.0); var c = math::floor(math::vec2(1.5, 2.5)); xs.filter([](int v) { return v % 2 == 0; }); Even even; bool k = even(2);\n"
+                "string d = text.substr(1); int f = text.find(\"c\"); string g = xs.join(\"-\"); probe.set(4); string h = probe.name(\"p\", 2); float i = host_scale(1, 2);\n"
+                "string j = host_label(\"ok\"); void never() { later(1, \"two\", [3]); }\n"
+                "`${a} ${b} ${c} ${xs} ${d} ${f} ${g} ${h} ${i} ${j}`;";
+            auto rep = e->check(clean);
+            check_eq((size_t)0, error_count(rep), rep.format(clean));
+            check_eq(std::string("3.0 8.0 (1.0, 2.0) [2] bc 2 2 p2 2.0 ok!"), e->execute(clean).as_string());
+            // the generated shapes agree with the run: every argument shape the load refuses raises when the call runs
+            static const std::pair<uint8_t, const char*> samples[] = {{jai::detail::shape_number, "1"}, {jai::detail::shape_text, "\"a\""}, {jai::detail::shape_array, "[1, 2]"},
+                {jai::detail::shape_map, "{\"a\": 1}"}, {jai::detail::shape_function, "[](a) { return true; }"}, {jai::detail::shape_math, "math::vec2(1, 2)"}};
+            static const char* const receivers[] = {"[1, 2, 3]", "{\"a\": 1}", "\"hello\"", "\"hello\".to_utf8()"};
+            const auto sample_for = [](uint8_t takes) {
+                for (const auto& [shape, text] : samples) { if (takes & shape) { return text; } }
+                return "1";
+            };
+            size_t refused = 0;
+            std::string program = "[[warn_mode]]\narray<string> passed;\n";
+            const auto add_calls = [&](const std::string& head, const uint8_t* shapes, size_t minimum, size_t maximum, const std::string& label) {
+                const size_t count = std::min<size_t>(maximum, jai::detail::BUILTIN_SHAPE_SLOTS);
+                for (size_t i = 0; i < count; ++i) {
+                    if (shapes[i] == jai::detail::shape_any) { continue; }
+                    for (const auto& [shape, text] : samples) {
+                        if (shapes[i] & shape) { continue; }
+                        std::string args;
+                        for (size_t k = 0; k <= std::max(i, minimum == 0 ? 0 : minimum - 1); ++k) { args += (k ? ", " : "") + std::string(k == i ? text : sample_for(shapes[k])); }
+                        program += "try { " + head + "(" + args + "); passed.push(\"" + label + " " + std::to_string(i) + " " + std::to_string(shape) + "\"); } catch (e) { }\n";
+                        ++refused;
+                    }
+                }
+            };
+            for (const auto& row : jai::detail::BUILTIN_ARITIES) {
+                add_calls("var r = " + std::string(receivers[row.receiver]) + "; r." + std::string(row.name), row.shapes, row.minimum, row.maximum, std::to_string(row.receiver) + "." + std::string(row.name));
+            }
+            for (const auto& row : jai::detail::MATH_FUNCTION_SHAPES) {
+                bool rival = false;   // a signature of another shape with the same count answers for the name too
+                for (const auto& other : jai::detail::MATH_FUNCTION_SHAPES) { rival = rival || (&other != &row && other.name == row.name && other.minimum <= row.maximum && row.minimum <= other.maximum); }
+                if (!rival) { add_calls("var q = math::" + std::string(row.name), row.shapes, row.minimum, row.maximum, "math::" + std::string(row.name)); }
+            }
+            check_true(refused > 500, "the table checks arguments: " + std::to_string(refused));
+            check_eq(std::string("[]"), e->execute(program + "to_string(passed);").as_string());
+        });
+
+        test("a_program_checks_calls_and_reads_across_its_units", [this]() {
+            auto dir = closure_dir("cross_unit_calls");
+            write_unit(dir, "lib.jai", "int twice(int n) { return n * 2; }\nint LIMIT = 10;\nvar loose = 1;\nfunction either(a) { return a; }\n");
+            const std::string root = "import \"lib.jai\";\n";
+            const std::vector<std::pair<std::string, std::string>> cases = {
+                {"string s = twice(\"x\");", "argument 1 of 'twice': cannot pass 'string' to 'n' declared 'int'"},
+                {"int n = twice(1, 2);", "'twice' expects 1 argument(s), got 2"},
+                {"string s = twice(2);", "cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`"},
+                {"string s = LIMIT;", "cannot initialize 's' declared 'string' with 'int': stringify it with to_string(x) or `${x}`"},
+                {"LIMIT = \"high\";", "cannot assign 'string' to 'LIMIT' declared 'int'"},
+                {"void later() { array<int> xs = twice(3); }", "cannot initialize 'xs' declared 'array<int>' with 'int': expected 'array<int>', got 'int'"},
+            };
+            for (const auto& [src, text] : cases) {
+                auto e = program_engine(dir);
+                const std::string got = outcome(*e, root + src);
+                check_true(got.find("error: " + text) != std::string::npos, src + " -> " + got);
+            }
+            {
+                auto e = program_engine(dir);
+                check_eq(std::string("VALUE 14 10 1 x"), outcome(*e, root + "int n = twice(7); int m = LIMIT; string s = `${loose}`; loose = \"x\"; `${n} ${m} ${s} ${either(loose)}`;"));
+                // a later run of another text meets the functions the engine holds
+                check_true(outcome(*e, "twice(\"again\");").find("error: argument 1 of 'twice': cannot pass 'string' to 'n' declared 'int'") != std::string::npos);
+                check_eq(std::string("VALUE 8"), outcome(*e, "twice(4)"));
+            }
+            // a reload that changes a signature its callers no longer fit is refused, naming them; the old code keeps running; with the
+            // callers edited to fit, the same reload applies
+            write_unit(dir, "main.jai", "import \"lib.jai\";\nint doubled(int v) { return twice(v); }\n");
+            auto e = program_engine(dir);
+            e->set_import_behavior(engine::import_behavior::always);
+            const std::string run = "import \"main.jai\";\nimport \"lib.jai\";\ndoubled(4)";
+            check_eq(std::string("VALUE 8"), outcome(*e, run));
+            write_unit(dir, "lib.jai", "string twice(string n) { return n + n; }\nint LIMIT = 10;\nvar loose = 1;\nfunction either(a) { return a; }\n");
+            const std::string refused = outcome(*e, run);
+            check_true(refused.find("main.jai") != std::string::npos && refused.find("argument 1 of 'twice': cannot pass 'int' to 'n' declared 'string'") != std::string::npos, refused);
+            check_eq(std::string("VALUE 8"), outcome(*e, "doubled(4)"), "the refused reload left the old code running");
+            write_unit(dir, "main.jai", "import \"lib.jai\";\nint doubled(int v) { return twice(`${v}`).size(); }\n");
+            check_eq(std::string("VALUE 2"), outcome(*e, run));
+            std::filesystem::remove_all(dir);
         });
 
     }

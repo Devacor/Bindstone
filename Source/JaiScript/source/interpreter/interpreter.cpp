@@ -5933,7 +5933,7 @@ checked_result<void> interpreter::visit_cast_expr_t(cast_expr* expr, const repla
         return {};
     }
     if (detail::cast_truncation_applies(operand, *expr->target)) {
-        auto out = detail::cast_truncated(operand, engine_);
+        auto out = detail::cast_truncated(operand, *expr->target, engine_);
         if (!out) {
             return out.error_value();
         }

@@ -169,6 +169,7 @@ Player.speed: float -&gt; &lt;absent&gt; removed x1</code></pre></div>
 <h2 id="interaction-with-the-rest-of-the-engine">Interaction with the rest of the engine<a class="hlink" href="#interaction-with-the-rest-of-the-engine" aria-label="link">&#8203;</a></h2>
 <ul>
 <li><strong>Type proofs.</strong> A reload that retypes, drops, re-parents or hides a field re-checks every unit checked against the old shape at its next execute, and each proven lane keeps its runtime guard (<a href="06-static-checking.html#proofs">Proofs</a>). Nothing for the host to do.</li>
+<li><strong>Callers in other files.</strong> A reloading module is checked together with every loaded unit that uses it: a function whose signature changed, or a global whose type did, while a caller no longer fits fails the reload with the caller&#x27;s file and line, and the old code keeps running. Saved together, the module and its callers reload together.</li>
 <li><strong>jaibite.</strong> Class redefinition works across repeated bite executions.</li>
 <li><strong>Serialization.</strong> <code>hot_reload_migrate</code> converts live script objects; for saved data and C++ classes that change shape, see <a href="08-serialization.html#versions-and-missing-fields">Versions and missing fields</a>.</li>
 </ul>

@@ -1896,6 +1896,11 @@ struct engine::implementation {
             case script_callable::kind_type::method:
             case script_callable::kind_type::static_method: return p.ast() ? mix_key(result, ran_unit_key(p.ast()->unit.id)) : result;
             case script_callable::kind_type::constructor: return p.cls() ? mix_key(result, ran_unit_key(p.cls()->unit().id)) : result;
+            case script_callable::kind_type::overload_set: {
+                uint64_t members = 0;
+                if (p.overloads()) { for (const auto& m : p.overloads()->members) { members += mix_key(0xF5, m ? ran_unit_key(m->unit.id) : 0); } }
+                return mix_key(result, members);
+            }
             default: return result;
         }
     }
@@ -2885,12 +2890,12 @@ engine::~engine() {
         impl->runs.release_pools();
         impl->runs.sleep_function = script_value(std::monostate{}, nullptr);
         impl->runs.sleep_identity = nullptr;
-        impl->format_literal_rows_.clear();
         // Program-scope variables die in reverse construction order while the engine still runs their destructors;
         // a destructor's error is reported through the script error handler, never propagated
         if (impl->backend && impl->global_environment_) {
             release_program_scope_in_reverse();
         }
+        impl->format_literal_rows_.clear();
         impl->tearing_down = true;
         impl->backend.reset();
         // Definitions a host or a captured environment keeps alive past this point must not

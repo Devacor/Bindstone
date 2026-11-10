@@ -79,6 +79,8 @@ namespace jai::detail::math {
 	inline bool converts(vk from, vk to) noexcept {
 		return from == to || (is_vec_type(from) && is_vec_type(to) && dims(from) == dims(to) && is_color(from) == is_color(to));
 	}
+	// A float vector into an integer vector of its dimensions: no slot takes it, cast<math::ivecN>(v) truncates each component
+	inline bool narrows(vk from, vk to) noexcept { return from != to && integral(to) && !integral(from) && converts(from, to); }
 	inline const char* kind_name(vk k) noexcept { return math_type_name(k); }
 	// The kind with `n` components of the family `integral_family` (jai_invalid_type when the family has none)
 	inline vk family_kind(bool integral_family, size_t n) noexcept {

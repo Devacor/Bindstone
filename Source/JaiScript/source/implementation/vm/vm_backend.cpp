@@ -20227,7 +20227,7 @@ op_status vm_backend::exec_cast(frame& f, const vm_instruction& ins) {
 		return {};
 	}
 	if (detail::cast_truncation_applies(operand, *expr->target)) {
-		auto out = detail::cast_truncated(operand, engine_);
+		auto out = detail::cast_truncated(operand, *expr->target, engine_);
 		if (!out) {
 			return raise_from(out);
 		}

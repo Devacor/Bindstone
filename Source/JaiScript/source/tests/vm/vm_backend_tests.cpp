@@ -2651,7 +2651,8 @@ public:
 			const char* type_error = R"(
 				array<int> arr = [1, 2, 3];
 				function f(int& x) {
-					try { x = "nope"; } catch (e) { return "inner:" + e; }
+					var text = "nope";
+					try { x = text; } catch (e) { return "inner:" + e; }
 					return "no-error";
 				}
 				var out = "";

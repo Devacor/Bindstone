@@ -4935,14 +4935,14 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 		});
 		test("a_global_another_unit_declares_types_the_proofs", [this]() {
 			// ND_X in JaiDOOM's map.jai and G in GLOOM's game.jai; a top-level global one unit declares with a spelled type is typed
-			// by that declaration in every other unit's proof pass (never for its diagnostics), a class-typed one once its class is defined
+			// by that declaration in every other unit's proof pass, a class-typed one once its class is defined
 			// (the importer's proofs re-stamp after the import; its callers are named functions, compiled at their first call after it), so `at`
 			// and `span` graft inside their loops on both accounts
 			namespace fs = std::filesystem;
 			fs::path dir = fs::temp_directory_path() / "jai_row1541";
 			fs::create_directories(dir);
 			std::ofstream(dir / "data.jai") << "array<int> ND = [3, 1, 4, 1, 5, 9, 2, 6];\nclass World { int mw = 8; float px = 2.5; var tiles = []; }\nshared_ptr<World> G = null;\n";
-			std::ofstream(dir / "lib.jai") << "int at(int i) { return ND[i]; }\nfloat span(float a) { return a - G.px; }\nint width() { return G.mw; }\nvoid never() { int bad = ND; }\n"
+			std::ofstream(dir / "lib.jai") << "int at(int i) { return ND[i]; }\nfloat span(float a) { return a - G.px; }\nint width() { return G.mw; }\n"
 			                                 "int sum(int n) { int s = 0; for (int i = 0; i < n; ++i) { s = s + at(i); } return s; }\n"
 			                                 "float walk(int n) { float acc = 0.0; for (int i = 0; i < n; ++i) { acc = acc + span(i * 1.0); } return acc; }\n";
 			std::ofstream(dir / "main.jai") << "import \"lib.jai\";\nimport \"data.jai\";\nG = new World();\nto_string(sum(8)) + \"|\" + to_string(walk(4)) + \"|\" + to_string(width());\n";
@@ -4955,7 +4955,7 @@ function by_getter() { var s = ""; int i = 0; while (i < 5) { if (i == 2) { arm(
 			std::string l;
 			const std::string iv = run_file(false, nullptr), vv = run_file(true, &l);
 			check_eq(iv, vv, "a global another unit declares: both backends");
-			check_eq(std::string("31|-4.0|8"), vv, "the values (and `int bad = ND` in a body never run is no load error: the diagnostics never read the table)");
+			check_eq(std::string("31|-4.0|8"), vv, "the values");
 			check_true(l.find("-- inlined at") != std::string::npos, "at grafts in the loop: its return reads the typed global's element: " + l);
 			check_true(l.find("-- inlined span") != std::string::npos, "span grafts in the loop: its return reads the class-typed global's field after the re-stamp: " + l);
 			check_true(l.find("-- call kept at ") == std::string::npos, "no kept call for at: " + l);

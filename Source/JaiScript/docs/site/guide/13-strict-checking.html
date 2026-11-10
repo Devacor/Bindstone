@@ -76,7 +76,10 @@ c.hp = "full";                              // a type error: this one stops the 
 <tr><td>Names</td><td>every identifier is declared where the use can see it; top-level code sees only what is declared above it (<a href="../reference/rules.html#rule-top-level-order">top-level order</a>), a function body also what is declared below; a qualified name exists in its namespace</td><td><code>use of undeclared identifier 'totl'</code>; <code>no member 'sqroot' in namespace 'math'</code></td></tr>
 <tr><td>Stores</td><td>a declaration, <code>=</code>, <code>op=</code>, a field, a static, a return and a pushed or literal element against the slot&#x27;s type, by <a href="02-type-ladder.html#conversion-table-typed-locked-auto-targets">the conversion table</a></td><td><code>cannot assign 'string' to field 'hp' declared 'int'</code></td></tr>
 <tr><td>Class values</td><td>never null, in a variable, parameter, field, static, return or element; a class cannot hold itself by value, directly, through another class or through a base</td><td><code>cannot initialize 'h' declared 'Hero' with 'null': a 'Hero' is never null; declare 'shared_ptr&lt;Hero&gt;' (or var) for a slot that can be empty</code></td></tr>
-<tr><td>Calls</td><td>a function, method or constructor the checker knows: argument count (defaults counted) and each argument; with overloads, an error only when none fits. A host function: argument count</td><td><code>'fib' expects 1 argument(s), got 2</code></td></tr>
+<tr><td>Calls</td><td>a function, method or constructor the checker knows, another file&#x27;s and a namespace&#x27;s (<code>ns::f</code>) included: argument count (defaults counted), each argument and the use of the result; with overloads, an error only when none fits</td><td><code>'fib' expects 1 argument(s), got 2</code></td></tr>
+<tr><td>Builtin and host calls</td><td>a builtin method and a <code>math::</code> function: each argument&#x27;s shape (a number, text, an array, a map, a function, a vector) as the <a href="../reference/api.html">API reference</a> states it. A function the host registered and a method it bound: argument count and each argument against the C++ signature</td><td><code>argument 1 of 'math::sqrt': cannot pass 'string' where a number is expected</code></td></tr>
+<tr><td>Qualified names</td><td><code>ns::limit = v</code>, a read of <code>ns::limit</code> and <code>ns::f(x)</code> as the bare names are checked, at any depth and through <code>using</code></td><td><code>cannot assign 'string' to 'cfg::limit' declared 'int'</code></td></tr>
+<tr><td>Stores through a reference</td><td>an <code>int&amp;</code>, <code>string&amp;</code>, <code>array&lt;T&gt;&amp;</code> or other scalar, text, container or math reference stores what its type takes</td><td><code>cannot assign 'string' to 'r' declared 'int&amp;'</code></td></tr>
 <tr><td>Members</td><td>a member the receiver&#x27;s declared class lacks, a member only a subclass declares included; a method an array, map or string lacks; any member of an int, float, bool or char but <code>same_as</code></td><td><code>no member 'range' in class 'Unit'</code>; <code>no member 'pusj' on 'array&lt;int&gt;' (did you mean 'push'?)</code></td></tr>
 </tbody></table></div>
 <p>Every site the checker covers, with its message: <a href="../reference/errors.html#checked-at-load">checked at load, by site</a>.</p>
@@ -131,10 +134,11 @@ int fail(int k) { throw "no"; }             // a throw ends its path</code></pre
 <p>A program that runs clean draws no errors, so wherever the checker lacks a type it says nothing and the mistake waits for the statement to run. These are the places:</p>
 <div class="tablewrap"><table><thead><tr><th>Where</th><th>Why the checker is silent</th></tr></thead><tbody>
 <tr><td>A value that came through a <code>var</code>: a <code>var</code> variable, an untyped parameter, an <code>array&lt;var&gt;</code> element, an <code>auto</code> made from one, an <code>auto</code> with no initializer or a <code>null</code> one</td><td>its type is whatever it holds when the line runs; everything computed from it is unknown too</td></tr>
-<tr><td>A store through a reference (<code>r = v</code> with <code>int&amp; r</code>, an <code>auto&amp;</code> loop variable, a <code>T&amp;</code> parameter)</td><td>the reference&#x27;s members are checked, and a float into an <code>int&amp;</code>, but any other value stored through it is converted when the store runs</td></tr>
+<tr><td>A store through an <code>auto&amp;</code>, a <code>var&amp;</code> or a reference to a class</td><td>the reference&#x27;s members are checked; what it names may hold a subclass or define <code>operator=</code>, so the store converts when it runs</td></tr>
 <tr><td>A call through a callable: a <code>function</code> slot, a <code>var</code> or <code>auto</code> holding a function, a callback parameter</td><td>a <code>function</code> slot carries no signature, so the argument count, the argument types and the result&#x27;s type are unknown</td></tr>
-<tr><td>A free function another file declares, and anything named through a namespace (<code>ns::f(x)</code>, <code>ns::limit = v</code>)</td><td>the checker confirms the name exists; its parameters, result and type are judged at run time. A class&#x27;s fields, methods and constructors and a global&#x27;s type are checked across files</td></tr>
-<tr><td>Host values: a host function&#x27;s argument types, a bound method or property reached through a chain, an engine global</td><td>the host supplies no declaration beyond argument counts</td></tr>
+<tr><td>A function or global that two files declare, a class-typed global of another file, a namespace variable of a class type</td><td>more than one declaration could answer, or the slot may hold a subclass: the checker confirms the name exists and the run decides</td></tr>
+<tr><td>Host values: a bound property reached through a chain, an engine global, a bound method a script subclass declares again, a parameter the host takes as any value, a name declared <code>extern function f;</code></td><td>the host&#x27;s signature does not decide them</td></tr>
+<tr><td>A builtin parameter that takes several shapes (<code>math::lerp</code>&#x27;s operands, <code>index_of</code>&#x27;s value)</td><td>the catalog states no single shape</td></tr>
 <tr><td>A file reached through a computed path (<code>import(expr)</code>, <code>include(expr)</code>)</td><td>it cannot be read at load; a unit that has one reports undeclared identifiers as warnings</td></tr>
 <tr><td>Coroutines</td><td>of yielded and returned values only a float into an int is checked, and <code>next()</code>&#x27;s result is unknown. The handle is checked: it answers <code>next()</code>, <code>advance(v)</code>, <code>done()</code> and <code>result()</code>, and any other member is a load error</td></tr>
 <tr><td>Values, not types: an index out of range, a missing map key, integer overflow, a <code>cast</code> whose operand does not fit, <code>"abc".to_int()</code> returning null</td><td>no declaration states them</td></tr>
@@ -146,11 +150,12 @@ try { cb(1, 2); } catch (e) { print("caught: {}", e); }
 try { string s = cb(1); } catch (e) { print("caught: {}", e); }
 
 int hp = 3;
-int&amp; r = hp;
+auto&amp; r = hp;                                  // an auto&amp; states no type
 try { r = "full"; } catch (e) { print("caught: {}", e); }
 
 namespace cfg { int limit = 3; }
-try { cfg::limit = "none"; } catch (e) { print("caught: {}", e); }
+var none = "none";                             // typed text would fail the load
+try { cfg::limit = none; } catch (e) { print("caught: {}", e); }
 
 int label(int n) {
     var v = "n=" + to_string(n);               // a var hides the string

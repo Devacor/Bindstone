@@ -3733,98 +3733,98 @@
     {
       "owner": "math",
       "name": "mix_in",
-      "signature": "mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "mix_out",
-      "signature": "mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "mix_in_out",
-      "signature": "mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "mix_out_in",
-      "signature": "mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::mix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "unmix_in",
-      "signature": "unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "unmix_out",
-      "signature": "unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "unmix_in_out",
-      "signature": "unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_in_out(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",
       "name": "unmix_out_in",
-      "signature": "unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape",
+      "signature": "unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape",
       "provider": "core",
       "effect": "observe",
       "notes": "",
       "source": "include/jaiscript/detail/math_intrinsics.hpp",
       "form": "function",
       "availability": "Every engine",
-      "display": "math::unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number) -> same_shape"
+      "display": "math::unmix_out_in(start: number or vector or color, end: same_shape, value: number or same_shape, strength: number or same_shape) -> same_shape"
     },
     {
       "owner": "math",

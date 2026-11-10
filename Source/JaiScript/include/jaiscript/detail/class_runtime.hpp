@@ -2157,11 +2157,11 @@ inline checked_result<slot_conversion> convert_for_typed_slot_core(const script_
         case script_value_type::jai_color_type:
         case script_value_type::jai_ivec2_type:
         case script_value_type::jai_ivec3_type: {
-            // the same kind; the other precision of the same dimensions converts (int32 to binary32 in one rounding, binary32
-            // to int32 through the checked kernel); anything else rejects with the site's text
+            // the same kind; an ivec widens into the vec of its dimensions (int32 to binary32 in one rounding); anything else,
+            // a vec into an ivec too (cast<math::ivecN> truncates), rejects with the site's text
             const script_value_type have = detail::math::kind_of(v);
             if (have == target) return slot_conversion::of(verdict::identity);
-            if (!detail::math::converts(have, target)) return slot_conversion::of(verdict::reject);
+            if (!detail::math::converts(have, target) || detail::math::narrows(have, target)) return slot_conversion::of(verdict::reject);
             auto converted = detail::math::convert(v, target, eng);
             if (!converted) { return converted.error_value(); }
             return slot_conversion::converted_to(std::move(converted.value()));
@@ -2692,6 +2692,11 @@ inline std::optional<script_value> field_store_convert_no_script(const script_va
 		auto truncated = checked_float_to_integer(value.deref().unchecked_as_float());
 		if (!truncated) { return std::nullopt; }
 		return script_value(truncated.value(), eng);
+	}
+	if (const script_value& held = value.deref(); declared && detail::math::is_kind(held.raw_storage_index()) && detail::math::narrows(detail::math::kind_of(held), declared->base_type)) {
+		auto truncated = detail::math::convert(held, declared->base_type, eng);
+		if (!truncated) { return std::nullopt; }
+		return std::move(truncated.value());
 	}
 	auto result = convert_for_typed_slot_core(value, declared, eng);
 	if (!result) { return std::nullopt; }

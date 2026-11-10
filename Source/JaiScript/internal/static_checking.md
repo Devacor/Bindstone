@@ -180,7 +180,12 @@ math_intrinsics.hpp`, the same shape gate both backends use): typed by the kerne
 (`int` for `itrunc`/`ifloor`/`wrap_*`, `float` for the transcendental and interpolation
 families, operand-typed for `abs`/`min`/`max`/`clamp` — uniform int → `int`,
 uniform float → `float`, mixed or unknown → unknown). Arity is the
-kernel's runtime error, not a static one. A host namespace entry that carries a signature
+kernel's runtime error, not a static one; each argument's shape (a number, text, an array, a map, a function, a math value)
+is checked against the signatures of the name the api catalog generates (`detail/builtin_api_arities.hpp`,
+`MATH_FUNCTION_SHAPES`; several signatures of one count union their shapes, a catalog type that names no single shape takes
+anything): `argument 1 of 'math::sqrt': cannot pass 'string' where a number is expected`. A builtin method on a known
+string, array or map receiver checks the same way from `BUILTIN_ARITIES::shapes` (`argument 1 of 'substr' on 'string': ...`).
+A test runs every refused shape under `[[warn_mode]]` and requires the call to raise. A host namespace entry that carries a signature
 (`script_namespace_data::signatures`: the arity range, each argument's kind, the result) is
 checked against it - the `string::` library declares one per function, so
 `string::repeat(to_char(a), 3)` is `argument 1 of 'string::repeat': cannot pass 'char' where a
@@ -190,10 +195,14 @@ entries declare theirs too (`'time::now' expects 0 argument(s), got 1`, `time::d
 'time::date_from_unix': cannot pass 'string' where a number is expected`, `time::local_now()` types as `time::date`). The core
 `sleep` checks the same way (`argument 1 of 'sleep': cannot pass 'string' where a number is expected`), and its place: an
 error in a `parallel_for` body or a lambda handed to `parallel_transform`/`parallel_reduce`, a warning in a destructor or a
-`hot_reload_migrate` (a run cannot suspend there). A unit that
-declares the namespace itself, or a script function of the entry's name, stays lenient. Any
-other user namespace path `a::b::c` (a flat name; declared here or registered with the engine)
-is lenient at every depth.
+`hot_reload_migrate` (a run cannot suspend there).
+
+**Script namespaces** — `ns::f(args)` checks as the bare call does, at any depth (`using ns::f;` is a token rewrite, so it
+is the qualified call): against the unit's declarations of the function (a later declaration of a signature replaces the
+earlier one) together with any the engine holds from another unit's run, an error only when none takes the call; a namespace
+only another unit declared checks against the engine's held declarations the same way. `ns::x` reads and stores by the
+declared type of the unit's own namespace variable (tentative: diagnostics, never a proof; a class-typed value slot types
+nothing, since it may hold a subclass). A class of the namespace's name keeps the call lenient (its statics answer too).
 
 **Members** — on a receiver whose class is fully known (in-script hierarchy resolvable, or
 engine-registered `class_definition` incl. `_get_`/`_set_` properties and statics),
@@ -408,6 +417,16 @@ a superset by construction — a name it admits is never a false error, only a t
 checker cannot catch. The class table rides the engine the same way; a class re-declared with
 a different shape replaces its entry at the next gather (the last unit gathered wins), and a
 unit's own declaration always wins over the table's.
+
+**Functions and globals across units** — a call of a free function the unit does not declare checks against the one
+declaration exactly one other unit of the program makes (`program_function`: its count, its arguments, its result as a
+tentative type); a read of a program-scope variable another unit declares once with a spelled scalar, text, container or
+math type is that type (tentative), as a store already checks. The engine may hold the name from that same unit's earlier
+run (the table's declaration replaces it: a reload's dependents check against the new text); any other holder (another
+unit's run, a host registration, a second declaring unit) leaves the call unchecked. Without a table entry, a call of a
+script function the engine holds from an earlier run is an error only when no held declaration takes it. A unit with a
+dynamic-path import checks none of this. The clean stamp keys on it already: every table and engine lookup notes the name,
+and `outside_signature` folds the declaring units' keys (an overload set's members too).
 
 **Reload dependents** (`engine::import_modules`, `check_group`): a module that ran before is
 re-checked, before it re-runs, against the program as its new text would leave it. Its new

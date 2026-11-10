@@ -199,10 +199,13 @@ namespace jai::detail {
 	}
 
 	// cast<int>(float) truncates toward zero (no int slot takes a float); out of range raises the checked kernel's text
+	// cast<math::ivecN>(vecN) truncates each component the same way
 	inline bool cast_truncation_applies(const script_value& seen, const type_info& target) {
-		return target.base_type == script_value_type::jai_int_type && seen.raw_storage_index() == script_value::TYPEID_FLOAT;
+		if (seen.raw_storage_index() == script_value::TYPEID_FLOAT) { return target.base_type == script_value_type::jai_int_type; }
+		return math::is_kind(seen.raw_storage_index()) && math::narrows(math::kind_of(seen), target.base_type);
 	}
-	inline checked_result<script_value> cast_truncated(const script_value& seen, engine* eng) {
+	inline checked_result<script_value> cast_truncated(const script_value& seen, const type_info& target, engine* eng) {
+		if (seen.raw_storage_index() != script_value::TYPEID_FLOAT) { return math::convert(seen, target.base_type, eng); }
 		auto result = checked_float_to_integer(seen.unchecked_as_float());
 		if (!result) { return result.error_value(); }
 		return script_value(result.value(), eng);

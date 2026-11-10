@@ -1896,11 +1896,12 @@ private:
 				return e.execute("`${ns::get()}`;").as_string();
 			});
 		});
-		test("a_typed_namespace_store_is_checked_at_run_time_under_strict", [this]() {
+		test("a_typed_namespace_store_through_var_is_checked_at_run_time", [this]() {
 			expect("ns strict", R"(
 				namespace ns { int y = 0; }
 				string m = "";
-				try { ns::y = "s"; } catch (e) { m = e; }
+				var text = "s";
+				try { ns::y = text; } catch (e) { m = e; }
 				m;
 			)", "Cannot assign string to 'y' (declared int)");
 		});
@@ -2438,7 +2439,7 @@ private:
 				{"builtin results stay lenient", "map<string, int> m = {\"a\": 1}; var k = m.keys()[0].to_upper();", 0},
 				{"element stores through a range reference are runtime", "array<int> a = [1]; for (auto& x : a) { x = \"s\"; }", 0},
 				{"out of bounds is runtime", "array<int> a = [1]; int x = a[5];", 0},
-				{"namespace variables are dynamic reads", "namespace ns { int x = 1; } char c = ns::x;", 0},
+				{"a namespace variable reads by its declared type", "namespace ns { int x = 1; } char c = ns::x;", 1},
 				{"missing map key is runtime", "map<string, int> m = {\"a\": 1}; int x = m[\"missing\"];", 0},
 			};
 			for (const auto& r : rows) {
@@ -3409,7 +3410,7 @@ private:
 				{"an unrelated class", "function u1() { shared_ptr<E> s = new E(); shared_ptr<D> d = s; } function u2() { shared_ptr<E> s = new E(); ns::nd = s; }", 2},
 				{"a cast, a var source and an upcast", "function ok() { shared_ptr<B> s = new D(); shared_ptr<D> d = cast<shared_ptr<D>>(s); var v = s; shared_ptr<D> d2 = v;"
 				 " shared_ptr<D> dd = new D(); shared_ptr<B> b = dd; }", 0},
-				{"other namespace stores stay run-time checks", "function f() { ns::n = \"text\"; ns::n = 2.5; }", 0},
+				{"a namespace variable's store checks against its declared type", "function f() { ns::n = \"text\"; ns::n = 2.5; }", 2},
 			};
 			for (const auto& r : rows) {
 				every_config(r.label, std::to_string(r.errors), [&](engine& e) { return std::to_string(e.check(P + r.src).error_count()); });

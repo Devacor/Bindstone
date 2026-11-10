@@ -143,6 +143,12 @@ namespace stdlib {
         }
 
         if (count == 1) {
+            // a format text alone: a placeholder in it has no value to take
+            if (literal && detail::plain_text_value(*kept[0]) && shown[0]->deref().raw_storage_index() == script_value::TYPEID_STRING &&
+                detail::has_format_placeholders(shown[0]->deref().unchecked_as_string())) [[unlikely]] {
+                std::string unused;
+                process_format_string(unused, shown[0]->deref().unchecked_as_string(), shown, kept, count);
+            }
             return script_value(shown[0]->to_string(), eng);
         }
 
@@ -210,7 +216,13 @@ namespace stdlib {
         if (effective_args == 1) {
             // Single-arg print is VERBATIM passthrough by design:
             // {{ }} escapes only apply when format substitution runs — no reason to
-            // alter the string when there is nothing to substitute
+            // alter the string when there is nothing to substitute; a placeholder in a format text has no value to take
+            if (literal && !first_was_shown && args[0].deref().raw_storage_index() == script_value::TYPEID_STRING &&
+                detail::has_format_placeholders(args[0].deref().unchecked_as_string())) [[unlikely]] {
+                const script_value* only[2] = {&args[0], &raw_args[0]};
+                std::string unused;
+                process_format_string(unused, args[0].deref().unchecked_as_string(), only, only + 1, 1);
+            }
             out << args[0].to_string();
             if (should_newline) {
                 out << std::endl;

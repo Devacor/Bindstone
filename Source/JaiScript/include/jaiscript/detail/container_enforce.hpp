@@ -144,9 +144,9 @@ namespace jai::detail {
 		    (target_type == script_value_type::jai_bool_type && elem_type == script_value_type::jai_int_type)) {
 			return true;
 		}
-		// math kinds: the other precision of the same dimensions converts, as at a typed slot
+		// math kinds: an ivec widens into the vec of its dimensions, as at a typed slot
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
-			return math::converts(elem_type, target_type);
+			return math::converts(elem_type, target_type) && !math::narrows(elem_type, target_type);
 		}
 		// a char element takes a string (of one character: the conversion raises for any other) and a string element a char
 		if ((target_type == script_value_type::jai_char_type && elem_type == script_value_type::jai_string_type) ||
@@ -378,6 +378,7 @@ namespace jai::detail {
 			return actual_element;   // the handle rows' store: the object travels as the handle, its own tag
 		}
 		if (is_math_type(target_type) && is_math_type(elem_type)) {
+			if (math::narrows(elem_type, target_type)) { return byte_element_mismatch_error(eng, actual_element, *element_type); }   // a host store arrives unchecked
 			auto converted = math::convert(actual_element, target_type, eng);
 			if (!converted) { return converted.error_value(); }
 			script_value out = std::move(converted.value());
@@ -699,7 +700,7 @@ namespace jai::detail {
 				const bool numeric_pair = src_elem == script_value_type::jai_int_type && target_elem_base == script_value_type::jai_float_type;
 				const bool bool_int_pair = (src_elem == script_value_type::jai_bool_type && target_elem_base == script_value_type::jai_int_type) ||
 				                           (src_elem == script_value_type::jai_int_type && target_elem_base == script_value_type::jai_bool_type);
-				const bool math_pair = is_math_type(src_elem) && is_math_type(target_elem_base) && math::converts(src_elem, target_elem_base);
+				const bool math_pair = is_math_type(src_elem) && is_math_type(target_elem_base) && math::converts(src_elem, target_elem_base) && !math::narrows(src_elem, target_elem_base);
 				const bool text_pair = (src_elem == script_value_type::jai_string_type && target_elem_base == script_value_type::jai_char_type) ||
 				                       (src_elem == script_value_type::jai_char_type && target_elem_base == script_value_type::jai_string_type);
 				if (!numeric_pair && !bool_int_pair && !math_pair && !text_pair && src_elem != target_elem_base) {

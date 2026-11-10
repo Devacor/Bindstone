@@ -150,6 +150,10 @@ namespace adl_detect {
 	struct has_adl_serialize : std::false_type {};
 	template<typename Archive, typename T>
 	struct has_adl_serialize<Archive, T, std::void_t<decltype(serialize(std::declval<Archive&>(), std::declval<T&>()))>> : std::true_type {};
+
+	// inside an archive class the member serialize(name, value) hides the free function from ADL
+	template<typename Archive, typename T>
+	void call_adl_serialize(Archive& archive, T& value) { serialize(archive, value); }
 }
 
 // All serialization functions call I/O methods through self() for static dispatch.
@@ -634,7 +638,7 @@ public:
                 self()->begin_object();
                 push_context(SerializationContext::ObjectBody);
             }
-            serialize(*self(), const_cast<T&>(value));
+            adl_detect::call_adl_serialize(*self(), const_cast<T&>(value));
             if (wrap) {
                 pop_context();
                 self()->end_object();
@@ -1247,7 +1251,7 @@ public:
         else if constexpr (has_adl_serialize<T>::value) {
             // ADL serialize functions read named properties, so expect object wrapper
             self()->begin_object();
-            serialize(*self(), value);
+            adl_detect::call_adl_serialize(*self(), value);
             self()->end_object();
         }
         else if constexpr (has_adl_load<T>::value) {

@@ -9,6 +9,7 @@
 #include <jaiscript/properties/macros.hpp>
 #include <jaiscript/properties/property_serialization.hpp>
 #include <jaiscript/serialization/binary_archive.hpp>
+#include <jaiscript/serialization/convenience.hpp>
 #include <memory>
 #include <cmath>
 #include <algorithm>
@@ -107,6 +108,17 @@ inline void load(Archive& ar, GameConfig& cfg) {
     ar.serialize("max_players", cfg.max_players);
     ar.serialize("friendly_fire", cfg.friendly_fire);
     ar.serialize("round_time", cfg.round_time);
+}
+
+struct RoundRules {
+    int rounds = 3;
+    std::string map_name;
+};
+
+template<typename Archive>
+inline void serialize(Archive& ar, RoundRules& rules) {
+    ar("rounds", rules.rounds);
+    ar("map_name", rules.map_name);
 }
 
 } // namespace jai::foundry::tests
@@ -278,6 +290,18 @@ public:
             check_eq(cfg2.max_players, 8, "max_players restored");
             check_eq(cfg2.friendly_fire, true, "friendly_fire restored");
             check_eq(cfg2.round_time, 600.0, "round_time restored");
+
+            RoundRules rules;
+            rules.rounds = 5;
+            rules.map_name = "dust";
+            std::string text = jai::to_json(*eng, rules, 0);
+            check_eq(std::string(R"({"value0": {"rounds": 5,"map_name": "dust"}})"), text, "a free serialize writes through the archive");
+            RoundRules fromText = jai::from_json<RoundRules>(*eng, text);
+            check_eq(5, fromText.rounds, "rounds restored from JSON");
+            check_eq(std::string("dust"), fromText.map_name, "map_name restored from JSON");
+            RoundRules fromBytes = jai::from_binary<RoundRules>(*eng, jai::to_binary(*eng, rules));
+            check_eq(5, fromBytes.rounds, "rounds restored from binary");
+            check_eq(std::string("dust"), fromBytes.map_name, "map_name restored from binary");
         });
 
         test("has_static_type_detection", [this]() {

@@ -189,8 +189,15 @@ std::ofstream os("player.json");
     cereal::JSONOutputArchive ar(os);
     ar(player);
 }</code></pre></div>
-<p>In JaiScript, <code>Item</code> and <code>Player</code> change only <code>CEREAL_NVP</code> to
-<code>JAI_NVP</code>. The type headers go, and so does the inventory's version gate:</p>
+<p>The same save in JaiScript, three ways. Cereal's version is intrusive, so <strong>member functions</strong> is the direct port; <strong>non-intrusive</strong> moves the functions out of the types; <strong>JAI_PROPERTY</strong> is intrusive with no functions at all.</p>
+<div class="tabs" id="conversion-tabs">
+<div class="tab-list" role="tablist" aria-label="Intrusive or non-intrusive" hidden>
+<button type="button" role="tab" id="conversion-tab-member" aria-controls="conversion-member" aria-selected="true">Intrusive: member functions</button>
+<button type="button" role="tab" id="conversion-tab-property" aria-controls="conversion-property" aria-selected="false" tabindex="-1">Intrusive: JAI_PROPERTY</button>
+<button type="button" role="tab" id="conversion-tab-free" aria-controls="conversion-free" aria-selected="false" tabindex="-1">Non-intrusive</button>
+</div>
+<div class="tab-panel" id="conversion-member" role="tabpanel" aria-labelledby="conversion-tab-member" tabindex="0">
+<p><code>Item</code> and <code>Player</code> change only <code>CEREAL_NVP</code> to <code>JAI_NVP</code>. The type headers go, and so does the inventory's version gate:</p>
 <div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
 
 class Inventory {
@@ -208,6 +215,67 @@ std::ofstream("player.json") &lt;&lt; jai::to_json(*eng, player);
 std::stringstream text;
 text &lt;&lt; std::ifstream("player.json").rdbuf();
 Player loaded = jai::from_json&lt;Player&gt;(*eng, text.str());</code></pre></div>
+</div>
+<div class="tab-panel" id="conversion-property" role="tabpanel" aria-labelledby="conversion-tab-property" tabindex="0">
+<p>Each type derives <code>jai::property_owner</code> and declares its fields with <code>JAI_PROPERTY</code>. No <code>serialize</code>, <code>save</code> or <code>load</code> is written, and the same declarations make the fields reflected and visible to scripts:</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/properties/macros.hpp&gt;
+#include &lt;jaiscript/properties/property_serialization.hpp&gt;
+#include &lt;jaiscript/serialization/convenience.hpp&gt;
+
+class Item : public jai::property_owner&lt;Item&gt; {
+public:
+    JAI_PROPERTY((std::string), name);
+    JAI_PROPERTY((int), count, 1);
+};
+
+class Inventory : public jai::property_owner&lt;Inventory&gt; {
+public:
+    JAI_PROPERTY((std::vector&lt;std::shared_ptr&lt;Item&gt;&gt;), items);
+    JAI_PROPERTY((int), capacity, 20);
+};
+
+class Player : public jai::property_owner&lt;Player&gt; {
+public:
+    JAI_PROPERTY((std::string), name);
+    JAI_PROPERTY((int), hp, 100);
+    JAI_PROPERTY((std::shared_ptr&lt;Inventory&gt;), inventory, std::make_shared&lt;Inventory&gt;());
+    JAI_TRANSIENT_PROPERTY((float), hpFraction, 1.0f);   // reflected, never saved
+};
+
+auto eng = jai::engine::make();
+auto player = std::make_shared&lt;Player&gt;();
+std::string text = jai::to_json(*eng, player);
+auto loaded = jai::from_json&lt;std::shared_ptr&lt;Player&gt;&gt;(*eng, text);</code></pre></div>
+<p>A <code>property_owner</code> cannot be moved, so the player and the items are held through <code>std::shared_ptr</code>. Properties are written in name order, a property the file lacks keeps its initializer, and <code>hpFraction</code> is recomputed by the code that uses it or in a <code>load</code> the class adds (<a href="#the-property-route">The property route</a>).</p>
+</div>
+<div class="tab-panel" id="conversion-free" role="tabpanel" aria-labelledby="conversion-tab-free" tabindex="0">
+<p>Cereal's free <code>serialize(Archive&amp;, T&amp;)</code> and <code>save</code> / <code>load</code> pairs port the same way: free templates beside each type, found by argument-dependent lookup.</p>
+<div class="codeblock cb-cpp"><span class="cb-label">C++ (JaiScript)</span><pre><code class="lang-cpp">#include &lt;jaiscript/serialization/convenience.hpp&gt;
+
+// Item, Inventory and Player are plain structs with no serialization code inside them.
+// A free function reaches public members only, so Inventory's fields are public here.
+
+template&lt;class Archive&gt;
+void serialize(Archive&amp; ar, Item&amp; item) { ar("name", item.name); ar("count", item.count); }
+
+template&lt;class Archive&gt;
+void serialize(Archive&amp; ar, Inventory&amp; inventory) { ar("items", inventory.items); ar("capacity", inventory.capacity); }
+
+template&lt;class Archive&gt;
+void save(Archive&amp; ar, const Player&amp; player) { ar("name", player.name); ar("hp", player.hp); ar("inventory", player.inventory); }
+
+template&lt;class Archive&gt;
+void load(Archive&amp; ar, Player&amp; player) {
+    ar("name", player.name); ar("hp", player.hp); ar("inventory", player.inventory);
+    player.hpFraction = player.hp / 100.0f;
+}
+
+auto eng = jai::engine::make();
+std::string text = jai::to_json(*eng, player);
+Player loaded = jai::from_json&lt;Player&gt;(*eng, text);</code></pre></div>
+<p>A root saved through free functions sits under <code>"value0"</code>: <code>{"value0": {"name": "Vex", "hp": 40, "inventory": {"$id": 1, "$val": {...}}}}</code>.</p>
+</div>
+</div>
 <p>The gate existed for Cereal files written before <code>capacity</code> did. Those files reach JaiScript through
 the converter, which reads them with Cereal and its version branch
 (<a href="#converting-existing-files">below</a>), so the first JaiScript layout holds every current field. The

@@ -3609,6 +3609,8 @@ public:
                 {"class W { E boss; array<E> crew = [E()]; }\nW w;\nvoid f() { auto c = w.crew[0]; c.name = \"x\"; }", "'c.name' writes to 'c'"},
                 {"int f(int n) { int r = 0; if (n > 0) { r = n; } else { r = 1; return r; } return 0; }", "'r' writes to 'r'"},
                 {"void f() { int r = 0; try { r = 5; } catch (err) { print(r); } }", "'r' writes to 'r'"},
+                {"void f() { auto nums = [1, 2, 3]; for (auto x : nums) { x *= 2; } print(nums); }", "'x' writes to 'x'"},   // the literal types the auto array
+                {"auto tags = [\"a\", \"b\"];\nfor (auto t : tags) { t.to_upper(); }", "'t.to_upper()' writes to 't'"},
             };
             for (const auto& [stmt, text] : lost) {
                 auto r = e->check(decls + stmt + "\nprint(total);");
@@ -3619,7 +3621,9 @@ public:
                 "for (auto& e : es) { e.hp -= 1; }",
                 "for (auto e : es) { e.hp -= 1; print(e.hp); }",
                 "for (auto e : es) { auto c = e; c.hp -= 3; print(c.hp); }",
-                "for (auto e : es) { e.hp -= 1; print(\"hit\"); }",                    // a call may observe it (reflect::instances)
+                "void log_hit() {}\nfor (auto e : es) { e.hp -= 1; log_hit(); }",       // a call may observe it (reflect::instances)
+                "void f(int n) { auto vals = [n, 2]; for (auto x : vals) { x *= 2; } }",   // only a literal's elements type an auto array here
+                "auto mixed = [1, \"a\"];\nfor (auto x : mixed) { x = 2; }",
                 "for (auto e : es) { e.hp -= 1; E other = E(); }",                    // a construction runs code
                 "for (auto x : xs) { x *= 2; total += x; }",
                 "int f(int n) { while (n > 0) { n--; } return n; }",
@@ -3650,6 +3654,41 @@ public:
                 bool lost_write = false;
                 for (const auto& d : r.diagnostics) { if (d.message.find("so the write is lost") != std::string::npos) { lost_write = true; } }
                 check_true(!lost_write, std::string(stmt) + "\n" + r.format());
+            }
+            // the engine's own print and format over plain values run no script, so they observe no copy; an instance's text may
+            {
+                auto s = make_engine();
+                jai::stdlib::register_all(*s);
+                auto hit = s->check(decls + "for (auto e : es) { e.hp -= 1; print(\"hit {}\", total); }");
+                check_true(has_diag(hit, dlevel::error, "'e.hp' writes to 'e'"), hit.format());
+                for (const char* stmt : {"for (auto e : es) { e.hp -= 1; print(e); }", "for (auto e : es) { e.hp -= 1; print(\"hp {}\", e.hp); }",
+                                         "void print(string s) {}\nfor (auto e : es) { e.hp -= 1; print(\"hit\"); }"}) {
+                    auto r = s->check(decls + stmt);
+                    check_eq((size_t)0, error_count(r), std::string(stmt) + "\n" + r.format());
+                }
+            }
+            // a change to a container or text a call returned by value dies with the copy; an element store into one raises
+            const std::pair<const char*, const char*> through_results[] = {
+                {"array<int> list() { return xs; }\nlist().push(4);", "push changes a call result in place and nothing reads it: 'list' returns by value"},
+                {"string label() { return \"a\"; }\nlabel().to_upper();", "to_upper changes a call result in place and nothing reads it: 'label' returns by value"},
+                {"class B { array<int> v = [1]; array<int> list() { return v; } }\nB b;\nb.list().sort();", "sort changes a call result in place and nothing reads it: 'b.list' returns by value"},
+                {"class B { array<int> v = [1]; array<int> list() { return v; } }\nB b;\nb.list()[0] = 7;", "cannot assign to a call result: 'b.list' returns by value"},
+                {"map<string, int> table() { return {\"a\": 1}; }\ntable()[\"a\"] += 1;", "cannot assign to a call result: 'table' returns by value"},
+            };
+            for (const auto& [stmt, text] : through_results) {
+                auto r = e->check(decls + stmt);
+                check_eq((size_t)1, error_count(r), std::string(stmt) + "\n" + r.format());
+                check_true(has_diag(r, dlevel::error, text), r.format());
+            }
+            for (const char* stmt : {
+                "array<int>& list() { return xs; }\nlist().push(4);\nlist()[0] = 7;",    // a reference result names storage
+                "var list() { return xs; }\nlist().push(4);",                            // an undeclared result is the run's
+                "array<int> list() { return xs; }\nint n = list().size();\nauto copy = list();\ncopy.push(4);\nprint(copy);",
+                "array<int> list() { return xs; }\ntry { list().pop(); } catch (err) { print(err); }",   // a change that may raise
+                "E first() { return es[0]; }\nfirst().hp = 5;",                          // a class result may share its object: the run decides
+            }) {
+                auto r = e->check(decls + stmt);
+                check_eq((size_t)0, error_count(r), std::string(stmt) + "\n" + r.format());
             }
             // a class that runs code of its own when written or destroyed, or has a subclass that does, is not judged
             const char* observing[] = {

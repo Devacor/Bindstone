@@ -242,7 +242,7 @@ public:
 				string r = "";
 				try { byval()[0] = 7; } catch (e) { r = e; }
 				r + "|" + to_string(arr[0]);
-			)", "Cannot assign to rvalue expression|1");
+			)", "Cannot assign to rvalue expression|1", warn_region);   // the load's error where the checker judges it
 		});
 		// docs/site/guide/03-value-semantics.html and C++ [expr.ass]: built-in assignment to a member of a class prvalue is
 		// ill-formed, so a store into a member of a class value no storage holds raises the math temporary's text
@@ -983,7 +983,7 @@ private:
 					return `${G.size()},${h.items.size()},${rows[0].size()},${loc.size()}`;
 				}
 				run();
-			)", "4,1,1,1");
+			)", "4,1,1,1", warn_region);   // h.get().push(2) changes a copy: the load's error where the checker judges it
 		});
 		test("a_by_value_return_of_an_aggregate_shares_its_shared_ptr_members", [this]() {
 			expect("aggregate return", R"(

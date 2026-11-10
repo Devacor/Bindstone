@@ -628,6 +628,7 @@ private:
         bool lw_handle = false;           // a class-typed slot that may hold a handle (an auto from one, a by-value class parameter)
         bool placeholders = false;        // this scope declares '_' more than once: naming it is ambiguous (C++26 [basic.scope.scope])
         bool shared_name = false;         // an extern's or an inline declaration's name: the unit's top level may declare it again
+        ctype::kind_t literal_elem = ctype::unknown;   // an auto declared with a uniform scalar array literal: the element kind the run types the array by
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -744,10 +745,13 @@ private:
     // print / format over a literal that holds a placeholder: its placeholders and the values after it pair up (the formatter
     // raises the run-time twin). A trailing skip_newline / skip_flush is no value, and an argument of unknown type may be one:
     // the counts then err toward the larger, and an unused argument is the run's to report.
-    void check_format_arguments(const call_expr* c, const std::string& name, const std::vector<ctype>& args) {
-        if (!c->literal_format_call() || args.size() != c->arguments.size()) { return; }
+    // the name binds the engine's own print or format
+    bool formatter_bound(const std::string& name) const {
         const script_value bound = eng_.get_variable(name);
-        if (!bound.is_function() || !eng_.format_literal_callee(&bound.unchecked_as_function())) { return; }
+        return bound.is_function() && eng_.format_literal_callee(&bound.unchecked_as_function());
+    }
+    void check_format_arguments(const call_expr* c, const std::string& name, const std::vector<ctype>& args) {
+        if (!c->literal_format_call() || args.size() != c->arguments.size() || !formatter_bound(name)) { return; }
         const std::string_view text = static_cast<const literal_expr*>(c->arguments[0].get())->value.unchecked_as_string();
         if (!detail::has_format_placeholders(text)) { return; }
         enum class role : uint8_t { value, control, unsure };
@@ -5421,7 +5425,10 @@ private:
                 check_host_call(name, args, c->location);
                 if (name == "parallel_reduce") { check_reduce_callbacks(c); }
                 if (name == "format") { check_format_text(c, args); }
-                if (name == "print" || name == "format") { check_format_arguments(c, name, args); }
+                if (name == "print" || name == "format") {
+                    check_format_arguments(c, name, args);
+                    if (lw_on() && formatter_bound(name)) { lw_formatter_calls_.insert(c); }
+                }
                 // a stdlib math alias yields the builtin's float wherever its name binds the builtin: a proof every consumer guards at run time
                 if (args.size() == 1 && eng_.math_alias_fn(id->symbol_id) < engine_access::k_math_alias_rows) { return ctype::make(ctype::float_k); }
                 return host_result_type(name);
@@ -5511,6 +5518,7 @@ private:
                 check_builtin_member(recv, m);
                 checkBuiltinArity(recv, m, c);
                 in_place_result_used(recv, m, c);
+                call_result_mutation(m, c);
             }
             stamp(c->builtin_receiver, proven, uint8_t(0));
             stamp(c->builtin_receiver_open, uint8_t(!proven && (recv.kind == ctype::unknown || recv.kind == ctype::string_k || recv.kind == ctype::array_k || recv.kind == ctype::map_k)), uint8_t(0));
@@ -5761,6 +5769,11 @@ private:
                 if (recv.kind == ctype::map_k && !recv.tentative && key.kind == ctype::object_k && !key.tentative && !key.cls.empty()) { warn_identity_map_key(subscript, key.cls); }
                 check_map_subscript_key(subscript, recv, key);
                 stamp(subscript->static_operand_class, operand_class_unknown, operand_class_unknown);
+                if (const expression* base = lw_strip(subscript->left.get()); base->get_type() == node_type::call_expr &&
+                    by_value_container_result(static_cast<const call_expr*>(base))) {
+                    non_lvalue_target(a->location, base);   // an element of a container no storage holds: the store raises when it runs
+                    return rhs;
+                }
                 if (recv.kind == ctype::object_k && !recv.tentative && subscript_returns_by_value(recv.cls)) {
                     std::string text(detail::by_value_subscript_store_text);
                     text[0] = static_cast<char>(std::tolower(static_cast<unsigned char>(text[0])));
@@ -5830,6 +5843,58 @@ private:
         for (const auto* fn : *hit.methods) { if (!by_value(fn)) { return false; } }
         for (const auto* fn : overrides_of(cls, "[]")) { if (!by_value(fn)) { return false; } }
         return true;
+    }
+
+    // The array, map or text type every function a call may reach declares it returns by value (a free function's overloads; a
+    // method's and its overrides' on a receiver whose class the walk knows): the result is a copy no storage holds. Null for a
+    // reference, a class, a var or an undeclared result, a host function, a callee the walk does not resolve.
+    const type_info* by_value_container_result(const call_expr* c) {
+        if (!c->callee) { return nullptr; }
+        const type_info* result = nullptr;
+        const auto admit = [&](const function_decl* fn) {
+            const type_info* t = fn->return_type.get();
+            if (!t || fn->is_coroutine || t->is_reference()) { return false; }
+            switch (t->base_type) {
+                case script_value_type::jai_array_type: case script_value_type::jai_map_type: case script_value_type::jai_string_type:
+                case script_value_type::jai_utf8_string_type:
+                    break;
+                default:
+                    return false;
+            }
+            if (result && result->canonical_name() != t->canonical_name()) { return false; }
+            result = t;
+            return true;
+        };
+        if (c->callee->get_type() == node_type::identifier_expr) {
+            auto* id = static_cast<const identifier_expr*>(c->callee.get());
+            if (id->global_qualified || find_local(id->name) || class_ctx_) { return nullptr; }
+            const auto it = functions_.find(id->name);
+            if (it == functions_.end() || it->second.empty()) { return nullptr; }
+            for (const auto* fn : it->second) { if (!admit(fn)) { return nullptr; } }
+            return result;
+        }
+        if (c->callee->get_type() != node_type::member_expr) { return nullptr; }
+        auto* m = static_cast<const member_expr*>(c->callee.get());
+        if (m->is_static || m->null_safe) { return nullptr; }
+        const auto found = lw_types_.find(m->object.get());
+        if (found == lw_types_.end() || found->second.kind != ctype::object_k || found->second.tentative || found->second.cls.empty()) { return nullptr; }
+        member_hit hit = lookup_member(found->second.cls, m->member, /*want_static=*/false);
+        if (!hit.found || !hit.provable || !hit.methods || hit.methods->empty()) { return nullptr; }
+        for (const auto* fn : *hit.methods) { if (!admit(fn)) { return nullptr; } }
+        for (const auto* fn : overrides_of(found->second.cls, m->member)) { if (!admit(fn)) { return nullptr; } }
+        return result;
+    }
+    // A builtin that changes its receiver in place and cannot raise, run on a container or text a call returned by value: the
+    // change dies with the copy
+    void call_result_mutation(const member_expr* m, const call_expr* c) {
+        const expression* base = lw_on() && !m->is_arrow && !m->null_safe ? lw_strip(m->object.get()) : nullptr;
+        if (!base || base->get_type() != node_type::call_expr) { return; }
+        const type_info* returned = by_value_container_result(static_cast<const call_expr*>(base));
+        if (!returned) { return; }
+        const ctype receiver = ctype_from_type_info(returned);
+        if (!lw_value_kind(receiver) || !lw_mutator(receiver, m->member, c)) { return; }
+        const std::string callee = detail::target_spelling(static_cast<const call_expr*>(base)->callee.get());
+        diag(diag_level::error, c->location, std::string(m->member) + " changes a call result in place and nothing reads it: '" + callee + "' returns by value");
     }
 
     // A call whose callee resolves to the program's free functions or a class's constructors, none returning a reference
@@ -6105,6 +6170,7 @@ private:
     std::unordered_map<const expression*, ctype> lw_types_;
     std::unordered_map<const void*, uint8_t> lw_modes_;
     std::unordered_set<const void*> lw_opaque_locals_;   // locals whose death may run code (a destructor, a dying handle)
+    std::unordered_set<const call_expr*> lw_formatter_calls_;   // calls the walk resolved to the engine's own print or format
     std::unordered_map<std::string_view, uint8_t> lw_quiet_memo_;   // 1 quiet, 2 not, 3 in progress
     lw_region_state* lw_ = nullptr;
 
@@ -6532,7 +6598,16 @@ private:
             }
             case node_type::call_expr: {
                 auto* c = static_cast<const call_expr*>(e);
-                if (!c->callee || c->callee->get_type() != node_type::member_expr) { return true; }
+                if (!c->callee) { return true; }
+                if (c->callee->get_type() != node_type::member_expr) {
+                    // the engine's print and format over plain values write text and run no script: no instance's text, no callback
+                    if (!lw_formatter_calls_.count(c)) { return true; }
+                    for (const auto& a : c->arguments) {
+                        const auto at = lw_type(a.get());
+                        if (!at || !lw_plain(*at)) { return true; }
+                    }
+                    return false;
+                }
                 auto* m = static_cast<const member_expr*>(c->callee.get());
                 for (const auto& a : c->arguments) {
                     const auto at = lw_type(a.get());
@@ -7245,7 +7320,12 @@ private:
             // a class-typed variable copies only a value element (a handle element shares its object, whatever the spelling)
             const bool spelled = f->element_type && !f->auto_spelled && f->element_type->base_type != script_value_type::jai_any_type;
             const bool var_spelled = f->element_type && !f->auto_spelled && !spelled;   // a var takes any later value: never judged
-            const ctype judged = var_spelled ? ctype{} : spelled && entry.type.kind != ctype::object_k ? entry.type : elem;
+            ctype copied = elem;   // an auto array of one scalar literal kind holds that kind, though no type spells it
+            if (copied.is_unknown() && container.kind == ctype::array_k && !container.tentative && f->container->get_type() == node_type::identifier_expr) {
+                const var_entry* held = find_named(static_cast<const identifier_expr*>(f->container.get()));
+                if (held && !held->dynamic && !held->is_reference && held->literal_elem != ctype::unknown) { copied = ctype::make(held->literal_elem); }
+            }
+            const ctype judged = var_spelled ? ctype{} : spelled && entry.type.kind != ctype::object_k ? entry.type : copied;
             entry.lw_handle = judged.kind == ctype::object_k && elem.kind != ctype::object_k;
             lw_register(entry, judged, f, f->variable_name, lw_origin::range_for, spelled ? f->element_type->canonical_name() : "auto",
                         !loop_const && !entry.lw_handle);
@@ -7717,7 +7797,30 @@ private:
                         !decl->is_const && !decl->function_spelling && !entry.lw_handle);
         }
         entry.shared_name = decl->is_inline;
+        if (has_init && decl->auto_spelled && !entry.dynamic && !is_reference_decl) { entry.literal_elem = uniform_literal_element(decl->initializer.get()); }
         declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
+    }
+
+    // The element kind of a literal the run types as array<int>, <float>, <string>, <bool> or <char> when an auto declares it
+    // (detail::infer_uniform_array_type): every element a literal of that one kind (a negated number included)
+    ctype::kind_t uniform_literal_element(const expression* init) const {
+        if (!init || init->get_type() != node_type::array_literal_expr) { return ctype::unknown; }
+        const auto* literal = static_cast<const array_literal_expr*>(init);
+        ctype::kind_t kind = ctype::unknown;
+        for (const auto& el : literal->elements) {
+            const expression* written = el.get();
+            if (written->get_type() == node_type::unary_expr && static_cast<const unary_expr*>(written)->op.type == token_type::minus) {
+                written = static_cast<const unary_expr*>(written)->operand.get();
+            }
+            if (written->get_type() != node_type::literal_expr) { return ctype::unknown; }
+            const auto found = literal_element_types_.find(el.get());
+            if (found == literal_element_types_.end() || found->second.tentative) { return ctype::unknown; }
+            const ctype::kind_t k = found->second.kind;
+            if (k != ctype::int_k && k != ctype::float_k && k != ctype::string_k && k != ctype::bool_k && k != ctype::char_k) { return ctype::unknown; }
+            if (kind != ctype::unknown && k != kind) { return ctype::unknown; }
+            kind = k;
+        }
+        return kind;
     }
 
     JAI_NOINLINE void walk_function(const function_decl* fn) {

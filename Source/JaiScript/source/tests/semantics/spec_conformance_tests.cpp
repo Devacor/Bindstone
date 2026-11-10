@@ -306,7 +306,7 @@ public:
 				return std::to_string(e.execute("g(0)").as_int()) + "|" + std::to_string(e.execute("K().m(0)").as_int());
 			});
 		});
-		// docs/site/reference/index.html "Run-time errors": a store through null names the member and the receiver as the read
+		// docs/site/reference/errors.html "Run-time errors": a store through null names the member and the receiver as the read
 		// does; a store to a member a namespace lacks is the read's undefined name; a vector constructor names the shape it takes
 		test("store_and_constructor_texts_name_what_failed", [this]() {
 			expect("null receivers", R"(
@@ -1607,7 +1607,7 @@ private:
 		});
 	}
 
-	// docs/site/reference/index.html "Operators": ++/-- work on every lvalue
+	// docs/site/reference/rules.html "Operators": ++/-- work on every lvalue
 	void increments() {
 		test("increments_on_members_elements_map_entries_and_nested_lvalues", [this]() {
 			expect("incdec", R"(
@@ -2116,7 +2116,7 @@ private:
 				std::string out;
 				try { e.max_call_depth(backend_type::interpreter, 0); out += "accepted"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
-				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/site/reference/index.html "Run-time errors")
+				// not a tail call: a VM self tail call reuses its frame and runs into the budget instead (docs/site/reference/errors.html "Run-time errors")
 				e.execution_budget(0);
 				try { e.execute(spec::in_warn_region("function r() { return r() + 1; } r();")); out += "no error"; } catch (const std::exception& ex) { out += ex.what(); }
 				out += "|";
@@ -4588,7 +4588,7 @@ private:
 
 	void compound_operand_text() {
 		test("a_compound_operand_error_has_one_text_at_every_destination", [this]() {
-			// docs/site/reference/index.html "Run-time errors", compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
+			// docs/site/reference/errors.html "Run-time errors", compound assignment: Cannot apply 'op=' to <target> and <operand>, a variable, a field, a static,
 			// an element and a map entry alike
 			expect("compound text", R"(
 				class F { int n = 5; static int s = 5; }

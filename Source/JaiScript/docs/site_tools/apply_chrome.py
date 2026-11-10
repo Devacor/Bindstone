@@ -155,6 +155,19 @@ CODE_MIGRATIONS = [
 
 BRIDGES = LANGUAGE_BRIDGES + CODE_MIGRATIONS
 
+REFERENCE = [
+    ("rules.html", "Language Rules",
+     "Operators, keywords, the type-conversion table, cast, extern, the checker attributes, include and import, and the language's contractual rules, one per row."),
+    ("errors.html", "Errors and Diagnostics",
+     "How to read a static listing and a run-time error, the error kinds, and the catalogue of every error text with when it is raised and how to fix it."),
+    ("library.html", "Library Reference",
+     "Builtin methods of arrays, maps, strings and smart pointers, the library namespaces at a glance, and the lookup tables for formatting, binary data, regular expressions, JSON, reflection, web and random numbers."),
+    ("host.html", "Host and Runner Reference",
+     "The engine API by task, the host-side tables of the embedding chapters, the command-line runner and its host API, performance rules of thumb, and the repository's documents."),
+    ("api.html", "Full API Signatures",
+     "Full callable signatures, defaults, return types, effects and availability for builtins, the standard library and standalone runner."),
+]
+
 SECTION_INDEX_DESC = {
     "tour/index.html":
         "Ten minutes, one small game: value semantics, the strict checker, a swarm, coroutines, hot reload and parallel_for, every line run on both backends.",
@@ -169,7 +182,7 @@ SECTION_INDEX_DESC = {
     "play/index.html":
         "Write JaiScript and run it in the page, or play GLOOM, GRUBWELL and the demo reel: the JaiScript engine compiled to WebAssembly runs the scripts.",
     "reference/index.html":
-        "Quick-lookup tables distilled from the guide and embedding chapters: operators, types, conversions, the host API, and rules of thumb.",
+        "The lookup pages: language rules, the error catalogue, the library, the host and runner API, and full signatures.",
     "index.html":
         "An embedded scripting language for C++ engines: C++-flavored syntax, script classes with hot reload, coroutines, and gradual typing.",
     "stability.html":
@@ -290,8 +303,10 @@ def chapter_sidebar(section, chapters, current, root):
                  + chapter_box("Code Migrations", CODE_MIGRATIONS,
                                chapter_items(section, CODE_MIGRATIONS, current, root), current, len(LANGUAGE_BRIDGES) + 1))
     else:
-        label = {"guide": "Guide", "embedding": "Embedding"}[section]
+        label = {"guide": "Guide", "embedding": "Embedding", "reference": "Reference"}[section]
         boxes = chapter_box(label, chapters, chapter_items(section, chapters, current, root), current)
+    if section == "reference":
+        boxes = boxes.replace('data-page-toc', 'data-page-toc data-toc-h3')
     return '<aside class="sidebar" aria-label="Chapters">%s</aside>\n%s' % (boxes, FOLD_SIDEBAR)
 
 
@@ -334,7 +349,7 @@ def crumbs(rel, section, root):
     else:
         parts.append('<a href="index.html">%s</a>' % SECTION_CRUMB[section])
         number = re.match(r"(\d+)-", name)
-        parts.append(number.group(1) if number else "API" if name == "api.html" else name)
+        parts.append(number.group(1) if number else dict((n, t) for n, t, _ in REFERENCE).get(name, name))
     return ('<nav class="crumbs" aria-label="Breadcrumb">%s</nav>'
             % '<span class="sep" aria-hidden="true">/</span>'.join(parts))
 
@@ -414,13 +429,16 @@ def build_pages():
 
     pages.append(("play/index.html", "play", "../", SECTION_INDEX_DESC["play/index.html"], "", ""))
 
+    reference_index = ("../reference/index.html", "reference", SECTION_TITLE["reference"])
     pages.append(("reference/index.html", "reference", "../",
-                  SECTION_INDEX_DESC["reference/index.html"], page_sidebar(True),
-                  prevnext(("../examples/index.html", "previous &middot; examples",
-                            SECTION_TITLE["examples"]), None)))
-    pages.append(("reference/api.html", "reference", "../",
-                  "Full callable signatures, defaults, return types, effects and availability for builtins, the standard library and standalone runner.",
-                  page_sidebar(False), ""))
+                  SECTION_INDEX_DESC["reference/index.html"], chapter_sidebar("reference", REFERENCE, None, "../"),
+                  prevnext(("../examples/index.html", "previous &middot; examples", SECTION_TITLE["examples"]),
+                           ("../reference/" + REFERENCE[0][0], "next", REFERENCE[0][1]))))
+    for i, (name, title, desc) in enumerate(REFERENCE):
+        prev = reference_index if i == 0 else ("../reference/" + REFERENCE[i - 1][0], "previous", REFERENCE[i - 1][1])
+        nxt = None if i == len(REFERENCE) - 1 else ("../reference/" + REFERENCE[i + 1][0], "next", REFERENCE[i + 1][1])
+        pages.append(("reference/" + name, "reference", "../", desc,
+                      chapter_sidebar("reference", REFERENCE, name, "../"), prevnext(prev, nxt)))
     return pages
 
 

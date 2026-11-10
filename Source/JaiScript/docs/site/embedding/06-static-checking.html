@@ -107,7 +107,7 @@ clean load: 4</code></pre></div>
 </ul>
 
 <h2 id="one-conversion-table">One conversion table<a class="hlink" href="#one-conversion-table" aria-label="link">&#8203;</a></h2>
-<p>The checker at load and every typed slot at run time (declarations, assignment, by-value parameters, returns, instance and static field stores, container elements) run the same table. The reference has it row by row (<a href="../reference/index.html#type-conversions">type conversions</a>) and the guide walks through it (<a href="../guide/13-strict-checking.html#one-conversion-table">one conversion table</a>). What a host most needs from it:</p>
+<p>The checker at load and every typed slot at run time (declarations, assignment, by-value parameters, returns, instance and static field stores, container elements) run the same table. The reference has it row by row (<a href="../reference/rules.html#type-conversions">type conversions</a>) and the guide walks through it (<a href="../guide/13-strict-checking.html#one-conversion-table">one conversion table</a>). What a host most needs from it:</p>
 <ul>
 <li>A string slot takes text or a char, never a number, and an <code>int</code> slot never takes a string. A bound object converts into a primitive slot through its <code>to_int()</code>, <code>to_float()</code>, <code>to_string()</code> or <code>to_char()</code>.</li>
 <li>A class slot takes null, the class or a subclass, a handle of one, or a source that exactly one one-parameter constructor takes directly; a plain assignment also takes what an <code>operator=</code> of the class or an in-script base accepts. A registered ancestor&#x27;s <code>operator=</code> is not checked.</li>

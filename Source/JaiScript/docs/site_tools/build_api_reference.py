@@ -166,7 +166,7 @@ def main():
 			# Chrome may have been normalized; only generated main content is compared.
 			current_main=re.search(r'<main\b[^>]*>([\s\S]*?)</main>',current)
 			wanted_main=re.search(r'<main\b[^>]*>([\s\S]*?)</main>',content)
-			crumbs=lambda body: re.sub(r'^\s*<nav class="crumbs"[\s\S]*?</nav>\s*','',body)
+			crumbs=lambda body: re.sub(r'<nav class="prevnext"[\s\S]*?</nav>','',re.sub(r'^\s*<nav class="crumbs"[\s\S]*?</nav>\s*','',body))
 			same=current_main and crumbs(current_main[1]).strip()==wanted_main[1].strip()
 		else: same=current==content
 		if not same:

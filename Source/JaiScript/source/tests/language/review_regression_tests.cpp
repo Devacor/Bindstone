@@ -1968,7 +1968,7 @@ public:
             }
         });
         test("compound_assignment_mismatch_names_the_operator_and_both_types", [this]() {
-            // docs/site/reference/index.html "Run-time errors": every compound site raises the same catchable text on both backends (the runtime text is under
+            // docs/site/reference/errors.html "Run-time errors": every compound site raises the same catchable text on both backends (the runtime text is under
             // test, so the checker is off); a float target with a non-numeric operand used to escape the try as a C++ exception
             for (bool proofs : {true, false}) {
                 auto e = make_engine();

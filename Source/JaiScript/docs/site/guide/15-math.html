@@ -68,7 +68,7 @@ print(a, " ", type_of(a), " / ", b, " ", type_of(b), " / ", type_of(math::clamp(
 <ul>
 <li>Call the type with up to one argument per component; missing components are 0. <code>T v(args)</code> and <code>T v{args}</code> work, and a bare declaration holds the default.</li>
 <li>A narrower vector followed by scalars that complete the count builds a wider one.</li>
-<li>One scalar is not a vector: <code>math::vec3(5)</code> raises <code>math::vec3 expects one vector of 3 components</code>. The other argument mistakes are in the <a href="../reference/index.html#run-time-errors">run-time errors</a> table.</li>
+<li>One scalar is not a vector: <code>math::vec3(5)</code> raises <code>math::vec3 expects one vector of 3 components</code>. The other argument mistakes are in the <a href="../reference/errors.html#run-time-errors">run-time errors</a> table.</li>
 <li>A color takes <code>(r, g, b)</code> with alpha 1, <code>(r, g, b, a)</code>, nothing or another color.</li>
 <li id="typed-slots">The family conversion also happens at every declared vector slot: a variable, a parameter, a return, a field, an array element. A <code>string</code> slot takes text only, so give it <code>to_string(v)</code>; anything else is rejected with the typed-slot text.</li>
 <li><code>using</code> brings the names into a file (<a href="11-kitchen-sink.html">Namespaces</a>); <code>type_of</code> still reports the full name.</li>

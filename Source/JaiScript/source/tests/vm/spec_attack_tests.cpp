@@ -448,7 +448,7 @@ private:
 		});
 	}
 
-	// docs/site/guide/04-operators.html shifts, the count's text in docs/site/reference/index.html "Run-time errors";
+	// docs/site/guide/04-operators.html shifts, the count's text in docs/site/reference/errors.html "Run-time errors";
 	// docs/site/guide/05-control-flow.html "Terminal errors": a budget overrun is terminal
 	void shifts_and_budget() {
 		test("shift_counts_out_of_range_raise_inside_a_counted_loop", [this]() {

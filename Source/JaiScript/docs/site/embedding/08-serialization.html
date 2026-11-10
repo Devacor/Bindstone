@@ -303,7 +303,7 @@ auto back = jai::from_json&lt;std::shared_ptr&lt;Actor&gt;&gt;(*eng, json);   //
 <ul>
 <li>Type and property names are data: a load never executes a payload-controlled name.</li>
 <li>A binary array or map count is not pre-allocated: it reserves at most 1 MiB ahead of the elements that actually load, so a 12-byte payload cannot request a 2 GB allocation.</li>
-<li>Data of another kind where a record, an array, a map or an integer belongs fails the load (<code>Expected an object in the archive, found an integer</code>), and so does a number its field cannot hold (<code>Archive value 300 does not fit int8</code>, and <code>1.5</code> into an integer field alike). Nothing wraps or truncates (<a href="../reference/index.html#host-errors-archives">the texts</a>).</li>
+<li>Data of another kind where a record, an array, a map or an integer belongs fails the load (<code>Expected an object in the archive, found an integer</code>), and so does a number its field cannot hold (<code>Archive value 300 does not fit int8</code>, and <code>1.5</code> into an integer field alike). Nothing wraps or truncates (<a href="../reference/errors.html#host-errors-archives">the texts</a>).</li>
 </ul>
 <p id="saved-receivers-are-script">Two things in a payload do reach code:</p>
 <ul>

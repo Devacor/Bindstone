@@ -263,9 +263,9 @@ It is a fan project, not affiliated with or endorsed by id Software.
 - [`docs/site/bridges/index.html`](docs/site/bridges/index.html) — language bridges from
   JavaScript, C++ and C#, and code migrations from Cereal, Boost.Serialization, Boost.Signals2,
   ChaiScript, sol2, Squirrel, pybind11, nlohmann::json, Qt properties and coroutine schedulers.
-- [`docs/site/reference/index.html`](docs/site/reference/index.html) — operators, conversions,
-  builtin methods, the engine API, and every run-time error text (byte-identical on both
-  backends).
+- [`docs/site/reference/`](docs/site/reference/index.html) — the lookup pages: language rules
+  (operators, conversions), the library, the engine API, and every error text in
+  [`errors.html`](docs/site/reference/errors.html) (byte-identical on both backends).
 - [`docs/site/embedding/06-static-checking.html`](docs/site/embedding/06-static-checking.html) —
   the checker's contract: modes, the conversion table, escape hatches.
 - [`tools/vscode-jaiscript/`](tools/vscode-jaiscript/) — syntax highlighting and the debugger

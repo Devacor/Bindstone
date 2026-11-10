@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Library Reference — JaiScript docs</title>
+<meta name="description" content="Builtin methods of arrays, maps, strings and smart pointers, the library namespaces at a glance, and the lookup tables for formatting, binary data, regular expressions, JSON, reflection, web and random numbers.">
+<meta name="theme-color" content="#0b0d13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f6f5f1" media="(prefers-color-scheme: light)">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="JaiScript docs">
+<meta property="og:title" content="Library Reference — JaiScript docs">
+<meta property="og:description" content="Builtin methods of arrays, maps, strings and smart pointers, the library namespaces at a glance, and the lookup tables for formatting, binary data, regular expressions, JSON, reflection, web and random numbers.">
+<meta property="og:image" content="https://jaiscript.com/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://jaiscript.com/assets/og-card.png">
+<link rel="canonical" href="https://jaiscript.com/reference/library.html">
+<meta property="og:url" content="https://jaiscript.com/reference/library.html">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
+<link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
+<link rel="stylesheet" href="../assets/style.css">
+<script>(function(){var t=null;try{t=localStorage.getItem("jai-theme")}catch(e){}
+if(!t)t=window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";
+document.documentElement.setAttribute("data-theme",t);}())</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+<a class="brand" href="../index.html"><span class="brand-mark" aria-hidden="true">{*}</span>JaiScript<span class="brand-sub">docs</span></a>
+<nav class="site-nav" aria-label="Sections"><a href="../tour/index.html">Tour</a><a href="../bridges/index.html">Bridges</a><a href="../guide/index.html">Guide</a><a href="../embedding/index.html">Embedding</a><a href="../examples/index.html">Examples</a><a href="../play/index.html">Play</a><a href="../reference/index.html" class="active" aria-current="page">Reference</a></nav>
+<div class="header-tools">
+<div class="search" role="search"><input id="search-box" type="search" placeholder="Search docs&hellip;" autocomplete="off" aria-label="Search docs" aria-controls="search-results" aria-expanded="false" aria-autocomplete="list"><div id="search-results" role="listbox" aria-label="Search results" hidden></div></div>
+<a class="gh-link" href="https://github.com/Devacor/jaiscript" title="JaiScript on GitHub" aria-label="JaiScript on GitHub"><svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"></path></svg><span>GitHub</span></a>
+<button id="theme-toggle" type="button" aria-label="Switch to light theme" title="Switch to light theme">&#9681;</button>
+</div>
+</header>
+<div class="layout">
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Reference<span class="sidebar-current">Library Reference</span></summary><ol class="chapter-list"><li><a href="../reference/rules.html">Language Rules</a></li><li><a href="../reference/errors.html">Errors and Diagnostics</a></li><li class="current"><a href="../reference/library.html" aria-current="page">Library Reference</a><ol class="page-toc" data-page-toc data-toc-h3></ol></li><li><a href="../reference/host.html">Host and Runner Reference</a></li><li><a href="../reference/api.html">Full API Signatures</a></li></ol></details></aside>
+<script>(function(){if(!window.matchMedia||!matchMedia("(max-width: 900px)").matches)return;
+var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d[i].open=false;}())</script>
+<main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Reference</a><span class="sep" aria-hidden="true">/</span>Library Reference</nav>
+<article class="chapter"><h1 id="library-page">Library Reference<a class="hlink" href="#library-page" aria-label="link">&#8203;</a></h1>
+<p><a href="api.html"><strong>Full API signatures:</strong> arguments, defaults, results, effects, and availability for builtins, standard-library functions, and the standalone runner.</a></p>
+<h2 id="builtin-methods">Builtin methods<a class="hlink" href="#builtin-methods" aria-label="link">&#8203;</a></h2>
+<p>From <a href="../guide/09-containers-strings.html">Containers &amp; Strings</a>. One registry serves both backends, so the lists below are the same on each.</p>
+<h3 id="arrays">Arrays (31)<a class="hlink" href="#arrays" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th>kind</th><th>methods</th></tr></thead><tbody><tr><td>observers</td><td><code>size</code> <code>empty</code> <code>front</code> <code>back</code> <code>index_of</code> <code>has</code> <code>contains</code> <code>first</code> <code>last</code> <code>length</code></td></tr><tr><td>call back per element</td><td><code>reduce</code> <code>for_each</code> <code>find</code> <code>find_index</code> <code>some</code> <code>every</code></td></tr><tr><td>returns a string</td><td><code>join</code></td></tr><tr><td><strong>change in place, return nothing</strong></td><td><code>push</code> <code>clear</code> <code>sort</code> <code>reverse</code> <code>insert</code> <code>slice</code> <code>filter</code> <code>map</code> <code>concat</code> (<code>append</code>)</td></tr><tr><td><strong>change in place, return what they took</strong></td><td><code>pop</code> (the element) <code>remove</code> (<code>erase</code>; whether there was one) <code>remove_if</code> (the count)</td></tr></tbody></table></div>
+<p><code>a.filter(f)</code> keeps the elements <code>f</code> accepts in <code>a</code> itself and returns nothing, so <code>auto b = a.filter(f);</code> is an error (<a href="errors.html#err-in-place-result">the text</a>). <code>remove_if</code> drops the ones its predicate accepts. The copying forms are the <code>array::</code> functions: <code>array::slice</code>, <code>array::filter</code>, <code>array::map</code>, <code>array::concat</code>, <code>array::append</code>, <code>array::sort</code> and <code>array::reverse</code> return a new array and leave their argument alone.</p>
+<ul>
+<li><code>pop</code> on an empty array raises a catchable error.</li>
+<li>The callback helpers pass the element, or the element and its index to a two-parameter callback. A <code>T&amp;</code> element parameter is the element itself.</li>
+<li><code>a.map(f)</code> keeps <code>a</code>&#x27;s element type (results convert into it). <code>array::map</code> returns an <code>array&lt;T&gt;</code> when its callback declares <code>T</code>.</li>
+<li><code>find</code> returns a copy or <code>null</code>, <code>find_index</code> an index or <code>-1</code>.</li>
+<li><code>reduce(f)</code> without an initial value raises on an empty array.</li>
+<li><code>insert(i, v)</code> takes <code>i</code> from 0 to <code>size()</code>.</li>
+<li>A typed array (<code>array&lt;int&gt;</code>) checks every store against its element type. <code>array&lt;var&gt;</code>, and a literal with no spelled element type, holds anything.</li>
+</ul>
+<h3 id="maps">Maps (14)<a class="hlink" href="#maps" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th>kind</th><th>methods</th></tr></thead><tbody><tr><td>observers</td><td><code>size</code> <code>empty</code> <code>contains</code> <code>has</code> <code>get</code> <code>keys</code> <code>values</code> <code>length</code> <code>to_array</code></td></tr><tr><td><strong>change in place, return nothing</strong></td><td><code>clear</code> <code>filter</code> (predicate takes <code>(key, value)</code>; keeps the accepted entries, while <code>map::filter(m, f)</code> returns a new map)</td></tr><tr><td><strong>change in place, return what they took</strong></td><td><code>erase</code> <code>remove</code> (whether the key was there) <code>remove_if</code> (the count)</td></tr></tbody></table></div>
+<p>Writing <code>m[key] = v</code> inserts or overwrites. <strong>Reading a missing key raises</strong> (<code>Key "k" not found in map</code>) and never inserts, on every map: a plain read, a compound or increment, a reference bound to the entry. <code>contains(key)</code> asks; <code>get(key)</code> returns null for a missing key; <code>get(key, default)</code> supplies an explicit fallback. Keys are ordered; any script value can be a key (the total ordering of <code>&lt;=&gt;</code> guarantees it). A declared key type is enforced on stores (<code>map&lt;string,int&gt; m; m[5] = 1</code> raises); keys never coerce.</p>
+<h3 id="strings">Strings (38 core)<a class="hlink" href="#strings" aria-label="link">&#8203;</a></h3>
+<p><code>s[i]</code> indexes <strong>bytes</strong> and returns a <code>char</code>, which promotes to an unsigned <code>int</code> (0..255) in numeric contexts. So <code>s[i] + 0</code> reads a byte value, <code>s[i] - '0'</code> is the digit-parse shape, and <code>s[i] == 0x1A</code> is a byte test.</p>
+<ul>
+<li><code>s.at(i)</code> returns the same <code>char</code>, a negative <code>i</code> counting from the end. On a <code>utf8_string</code>, <code>u.at(i)</code> returns character <code>i</code> as text.</li>
+<li><code>s[i] = c</code> replaces byte <code>i</code> and <code>s[i] = text</code> replaces it with the whole text (<code>s[i] += text</code> joins the char with the text, then stores it).</li>
+<li>A char beside a string compares and joins as its one-character text (<code>s[i] == "x"</code>, <code>s + 'c'</code>).</li>
+<li>On a <code>utf8_string</code>, <code>u[i]</code> reads and replaces character <code>i</code>.</li>
+<li>Bytes are minted with <code>cast&lt;char&gt;(n)</code> or <code>to_char(n)</code> (both range-checked 0..255; <code>out += cast&lt;char&gt;(b)</code> is the binary-writer shape). They are also minted with <code>\xNN</code> escapes in a quoted or backtick string (exactly two hex digits; <code>"\x00"</code> embeds a real NUL).</li>
+<li>A raw string is <code>R"(text)"</code> or <code>R"delim(text)delim"</code> (a delimiter of up to 16 characters, none a space, parenthesis, backslash or quote). It holds its text with no escapes, a line ending inside as one <code>\n</code>.</li>
+<li><code>find</code> returns <code>-1</code> when absent.</li>
+<li><code>split()</code> with no argument splits on whitespace and drops empty pieces (<code>split(string::whitespace)</code> is the same). <code>split(sep)</code> keeps empties; <code>split("")</code> splits into characters; <code>explode</code> is its synonym.</li>
+</ul>
+<div class="tablewrap"><table><thead><tr><th>kind</th><th>methods</th></tr></thead><tbody><tr><td>observers (leave the string alone)</td><td><code>length</code> <code>size</code> <code>empty</code> <code>at</code> <code>front</code> <code>back</code> <code>substr</code> <code>find</code> <code>rfind</code> <code>find_first_of</code> <code>find_last_of</code> <code>find_first_not_of</code> <code>find_last_not_of</code> <code>contains</code> <code>starts_with</code> <code>ends_with</code> <code>count</code> <code>to_int</code> <code>to_float</code> <code>split</code></td></tr><tr><td><strong>in-place mutators</strong> (change the receiver, return nothing)</td><td><code>to_lower</code> <code>to_upper</code> <code>trim</code> <code>trim_left</code> <code>trim_right</code> <code>pad_left</code> <code>pad_right</code> <code>pad_center</code> <code>replace</code> <code>replace_first</code> <code>replace_last</code> <code>insert</code> <code>erase</code> <code>remove_prefix</code> <code>remove_suffix</code> <code>reverse</code> <code>repeat</code> <code>append</code></td></tr></tbody></table></div>
+<p>A mutator returns nothing, so its result cannot be used: <code>auto upper = name.to_upper();</code> and the chain <code>s.trim().to_lower()</code> are errors (<a href="errors.html#err-in-place-result">the text</a>). Call each mutator as a statement, build new strings with <code>+</code> (which never mutates), or call the <code>string::</code> function of the same name (<code>string::to_upper(s)</code> returns a new string; <a href="../guide/09-containers-strings.html#in-place-or-a-copy">the pairs</a>).</p>
+<p>Every engine also has text helpers beyond the core table: <code>lines</code> <code>partition</code> <code>compare</code> <code>code</code> <code>explode</code> <code>byte_size</code> <code>utf8_length</code> <code>utf8_chars</code> <code>is_valid_utf8</code> <code>is_digit</code> <code>is_alpha</code> <code>is_alnum</code> <code>is_space</code> <code>is_upper</code> <code>is_lower</code> <code>to_utf8</code> (a <code>utf8_string</code>), and the binary doors <code>to_bytes([offset], [count])</code> (an <code>array&lt;uint8&gt;</code>) and <code>reader()</code> (a <code>binary::reader</code>). A <code>utf8_string</code> answers the same method names in characters, except <code>to_utf8</code>.</p>
+<h3 id="smart-pointers">Smart pointers<a class="hlink" href="#smart-pointers" aria-label="link">&#8203;</a></h3>
+<div class="tablewrap"><table><thead><tr><th>type</th><th>methods</th></tr></thead><tbody><tr><td><code>shared_ptr</code> (5)</td><td><code>reset</code> <code>use_count</code> <code>cpp_ref_count</code> <code>unique</code> <code>same_as</code></td></tr><tr><td><code>weak_ptr</code> (4)</td><td><code>lock</code> <code>expired</code> <code>reset</code> <code>same_as</code></td></tr></tbody></table></div>
+
+<h2 id="library">Library at a glance<a class="hlink" href="#library" aria-label="link">&#8203;</a></h2>
+<div class="codeblock cb-jai" data-run="main.jai"><span class="cb-label">jaiscript</span><pre><code class="lang-jai">math::vec3 p = math::vec3(1, 2, 3);
+p.x = 10;                                     // a component is an lvalue
+array&lt;math::vec3&gt; pts = [p, math::vec3(0, 0, 1)];
+print(p * 2.0, " ", math::dot(p, p), " ", math::length(math::vec2(3, 4)), " ", pts[1]);
+
+binary::writer w;
+w.uint16(513); w.text("hi");
+var r = w.to_string().reader();
+print(r.uint16(), " ", r.text(), " ", r.at_end());
+
+utf8_string u = "h\xC3\xA9llo";
+print(u.size(), " ", u[1], " ", "h\xC3\xA9llo".size());
+
+array&lt;float&gt; xs = [1.0, 2.0, 3.0];
+parallel_for (auto&amp; x : xs) { x *= 2.0; }
+print(to_json(xs), " ", type_of(time::utc_now()));
+print(to_json({"a": [1, 2]}, 2));</code></pre></div>
+<div class="codeblock cb-output"><span class="cb-label">output</span><pre><code class="lang-output">(20.0, 4.0, 6.0) 113.0 5.0 (0.0, 0.0, 1.0)
+513 hi true
+5 é 6
+[2.0,4.0,6.0] time::date
+{
+  "a": [
+    1,
+    2
+  ]
+}</code></pre></div>
+<div class="tablewrap"><table><thead><tr><th>Area</th><th>Surface</th><th>Chapter</th></tr></thead><tbody>
+<tr><td>vectors and colors</td><td><code>math::vec2</code> <code>vec3</code> <code>vec4</code> <code>ivec2</code> <code>ivec3</code> <code>color</code>: value types with component fields (<code>x y z w</code>, <code>r g b a</code>), component-wise operators, an ivec's zero divisor component raising <code>Division by zero</code>; <code>math::dot</code> <code>cross</code> <code>length</code> <code>normalize</code> <code>distance</code> <code>rotate</code> <code>rotate_around</code> <code>angle</code> <code>from_angle</code> and the component-wise <code>math::lerp</code> <code>math::mix</code> <code>math::clamp</code> <code>math::min</code> <code>math::max</code> family; <code>array&lt;math::vec3&gt;</code> is a typed buffer. A default <code>math::color</code> is opaque white; colors mix in OKLab</td><td><a href="../guide/15-math.html">Math</a></td></tr>
+<tr><td>host math types</td><td><code>JAI_BIND_VEC2</code> / <code>VEC3</code> / <code>VEC4</code> / <code>IVEC2</code> / <code>IVEC3</code> / <code>COLOR</code> in a C++ type&#x27;s header make it cross the boundary as the native kind</td><td><a href="../embedding/15-math-adapters.html">Math Adapters</a></td></tr>
+<tr><td>regular expressions</td><td><code>regex(pattern, [flags])</code> (flags <code>i m s x</code>), <code>r.search(text, [start])</code>, <code>r.matches(text)</code>, <code>r.find_all(text)</code>, <code>r.replace(text, with)</code> / <code>r.replace_first</code> (<code>$1 ${name} $0 $$</code> or a function of the match), <code>r.split(text, [max])</code>, <code>r.pattern</code> / <code>r.flags</code>, <code>regex::escape(text)</code>; <code>regex::match</code>: <code>m.text()</code>, <code>m[i]</code> / <code>m["name"]</code>, <code>m.start(g)</code>, <code>m.end(g)</code>, <code>m.size()</code>; linear time, bytes on a string and characters on a utf8_string; a constant pattern compiles at load</td><td><a href="../guide/09-containers-strings.html#regular-expressions">Containers &amp; Strings</a></td></tr>
+<tr><td>binary data</td><td><code>s.reader()</code> / <code>binary::reader(s)</code>, <code>binary::writer w;</code>, the widths <code>int8</code>..<code>int64</code>, <code>uint8</code>..<code>uint32</code>, <code>float32</code>, <code>float64</code>, <code>text(n)</code>, <code>bytes(n)</code>; <code>binary::layout("field", width, ...)</code> with <code>r.unpack</code>, <code>w.pack</code> and <code>r.read(Class, layout)</code>; <code>s.to_bytes()</code> and <code>string::from_bytes(b)</code>; <code>array&lt;uint8&gt;</code> / <code>array&lt;int8&gt;</code> are one-byte buffers</td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
+<tr><td>text</td><td><code>string</code> is bytes, <code>utf8_string</code> counts characters (<code>size</code>, <code>u[i]</code>, <code>substr</code>, range-<code>for</code>); <code>split()</code> on whitespace</td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
+<tr><td>random numbers</td><td><code>random r;</code> (seeded by the system), <code>random r(seed);</code> (the same stream on every platform): <code>next_int(lo, hi)</code> inclusive, <code>next_float()</code> in [0, 1), <code>next_float(lo, hi)</code>, <code>next_bool()</code>, <code>pick</code>, <code>shuffle</code>, <code>next_bytes(n)</code>, <code>seed(s)</code>; a copy replays its draws and <code>state</code> round-trips through every archive</td><td><a href="../guide/18-random.html">Random Numbers &amp; Crypto</a></td></tr>
+<tr><td>crypto</td><td><code>crypto::random_bytes(n)</code> <code>random_hex(n)</code> <code>random_int(lo, hi)</code> (the system&#x27;s secure generator, never seedable); <code>sha256</code> <code>sha512</code> <code>sha1</code> <code>md5</code> (hex, <code>_bytes</code> raw) and <code>sha256_file(path)</code>; <code>hmac_sha256(key, message)</code> <code>hmac_sha512</code>; <code>equals(a, b)</code> in constant time; <code>password_hash(pw[, cost])</code> and <code>password_verify(pw, hash)</code>, bcrypt as PHP writes it</td><td><a href="../guide/18-random.html#crypto">Random Numbers &amp; Crypto</a></td></tr>
+<tr><td>web text (opt-in: <code>register_web</code>)</td><td><code>web::html_escape(s)</code> (<code>&amp; &lt; &gt; &quot; &#x27;</code>), <code>web::html_unescape(s)</code> (HTML5 references, as a browser reads them), <code>web::url_encode</code> / <code>url_decode</code> (RFC 3986), <code>web::form_encode</code> / <code>form_decode</code> (space as <code>+</code>), <code>web::parse_query</code>, <code>web::parse_query_all</code>, <code>web::build_query</code> (key order), <code>web::parse_url</code> to a <code>web::url</code> whose <code>to_string()</code> joins it back</td><td><a href="../guide/17-web.html">The web:: Library</a></td></tr>
+<tr><td>HTTP client (opt-in: <code>register_spider</code>, a host transport, the <code>network</code> permission)</td><td><code>spider::catch(url[, options])</code> (also <code>spider::get</code>), <code>spider::sling(content, url[, options])</code> (also <code>spider::post(url, content[, options])</code>), options <code>method</code>, <code>headers</code>, <code>timeout</code>, <code>type</code>, <code>redirects</code>; each answers a <code>spider::Response</code> (<code>status</code>, <code>headers</code>, <code>cookies</code>, <code>body</code>, <code>url</code>, <code>ok()</code>, <code>json()</code>, <code>header(name)</code>)</td><td><a href="../guide/17-web.html#spider">HTTP with spider::</a></td></tr>
+<tr><td>atomics (opt-in: <code>register_atomics</code>)</td><td><code>atomic&lt;int&gt;</code> <code>atomic&lt;float&gt;</code> <code>atomic&lt;bool&gt;</code>: a host&#x27;s <code>std::atomic</code> bound by reference into every engine that shares it; <code>load</code> <code>store</code> <code>exchange</code> <code>compare_exchange(expected&amp;, desired)</code>, <code>fetch_add</code> <code>fetch_sub</code> (int, float), <code>fetch_and</code> <code>fetch_or</code> <code>fetch_xor</code> (int), <code>+= -=</code> and <code>++ --</code> (int) as single atomic steps, a typed slot as a load; never copied</td><td><a href="../embedding/02-dynamic-binder.html#atomics">Dynamic Binder</a></td></tr>
+<tr><td>time</td><td><code>time::now()</code> <code>engine_elapsed()</code> <code>execute_elapsed()</code> <code>unix_time()</code> <code>unix_ms()</code> <code>date_now(template)</code> <code>utc_now()</code> <code>local_now()</code> <code>date_from_unix(seconds)</code> <code>utc_date(y, m, d, ...)</code> <code>local_date(y, m, d, ...)</code>, the value types <code>time::stopwatch</code> and <code>time::date</code></td><td><a href="../guide/14-time.html">Time</a></td></tr>
+<tr><td>waiting</td><td><code>sleep(seconds)</code>, a builtin of every engine: suspends a run the host started with <code>engine::start</code> until the time has passed, and blocks anywhere else</td><td><a href="../guide/08-coroutines.html#sleep">Coroutines</a></td></tr>
+<tr><td>JSON</td><td><code>to_json(x)</code> compact, <code>to_json(x, n)</code> pretty-printed with <code>n</code> spaces per level; <code>from_json(s)</code> rebuilds class instances (through their constructor), chars and non-string map keys</td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
+<tr><td>parallelism</td><td><code>parallel_for (auto&amp; x : arr) { ... }</code> , <code>parallel_for (int i = a; i &lt; b; i++) { ... }</code> , <code>parallel_transform(arr, f)</code> and <code>parallel_reduce(arr, init, step, combine)</code>: deterministic at any worker count; a body that writes enclosing state raises <code>parallel_for: body writes enclosing state 'total' at 11:31</code></td><td><a href="../guide/09-containers-strings.html">Containers &amp; Strings</a></td></tr>
+<tr><td>reflection</td><td><code>reflect::</code>: type queries, fields and methods by name, <code>reflect::bind(obj, "name")</code></td><td><a href="../guide/12-reflection.html">Reflection</a></td></tr>
+</tbody></table></div>
+<p id="bare-engine"><strong>What a bare engine has.</strong> <code>jai::engine::make()</code> alone runs the whole language with these builtins:</p>
+<ul>
+<li>a <code>print</code> that concatenates its arguments, and template strings with format specs (<code>format_value</code>)</li>
+<li>the builtin container and string methods and their <code>array::</code> forms</li>
+<li><code>math::</code> (functions, vectors, colors, <code>wrap_*</code>), <code>regex</code>, and <code>binary::</code> readers and writers with <code>string::from_bytes</code></li>
+<li><code>same_object</code>, <code>extend</code>, <code>thread_count</code>, <code>parallel_transform</code> and <code>parallel_reduce</code>, <code>sleep</code></li>
+<li>the location builtins (<code>executable_dir</code>, <code>file_data</code>, <code>resolve_path</code> and the rest)</li>
+</ul>
+<p><code>jai::stdlib::register_all</code> adds the formatted <code>print</code>, <code>format</code>, <code>to_string</code>, <code>type_of</code>, JSON and binary serialization, the <code>string::</code> functions, <code>to_char</code>, <code>random</code>, <code>time::</code>, <code>crypto::</code> and <code>reflect::</code>. <code>web::</code> and <code>spider::</code> are separate opt-ins.</p>
+
+<nav class="prevnext" aria-label="Chapter navigation"><a class="prev" rel="prev" href="../reference/errors.html"><span>&larr; previous</span>Errors and Diagnostics</a><a class="next" rel="next" href="../reference/host.html"><span>next &rarr;</span>Host and Runner Reference</a></nav></article>
+</main>
+</div>
+<footer class="site-footer">
+<p>JaiScript 0.5 beta &middot; <a href="https://github.com/Devacor/jaiscript/blob/main/LICENSE">MIT license</a> &middot; <a href="https://github.com/Devacor/jaiscript">source</a> &middot; <a href="https://github.com/Devacor/jaiscript/issues">report a docs bug</a></p>
+<p class="foot-note">every standalone script sample on this site runs on both backends, and the output shown is what they print</p>
+</footer>
+<script src="../assets/search-index.js"></script>
+<script src="../assets/site.js"></script>
+</body>
+</html>

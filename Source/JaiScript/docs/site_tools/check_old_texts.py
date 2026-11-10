@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Grep the site for retired error texts (the current ones: reference/index.html "Run-time errors").
+"""Grep the site for retired error texts (the current ones: reference/errors.html "Run-time errors").
 
     python site_tools/check_old_texts.py
 
@@ -46,7 +46,7 @@ OLD_TEXTS = [
     r"shadows base class method",
     r"overrides virtual method from base class",
     # `Cannot push 'string' to array<int>` and `Cannot assign 'string' to element of type 'int'`
-    # are still the live texts (reference/index.html quotes the push one), so they
+    # are still the live texts (reference/errors.html quotes the push one), so they
     # are deliberately not here.
     r"Cannot copy: the value nests too deep",
     r"Maximum JSON nesting depth",

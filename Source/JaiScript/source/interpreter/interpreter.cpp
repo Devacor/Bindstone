@@ -4970,31 +4970,10 @@ checked_result<void> interpreter::visit_lambda_expr(lambda_expr* expr) {
             capture.symbol_id = string_symbolizer_->intern(capture.name);
         }
     }
-    // The body's free names, once per node (KEEP BYTE-PARALLEL with vm_compiler::compile_lambda's used_variables)
     if (!expr->free_names_built) {
-        std::unordered_set<uint64_t> declared;
-        for (const auto& p : expr->parameters) {
-            declared.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : string_symbolizer_->intern(p.name));
-        }
-        detail::body_walker walker;
-        walker.symbolizer = string_symbolizer_;
-        walker.on_declared = [&declared](uint64_t id) { declared.insert(id); };
-        walker.stmt(expr->body);
-        walker.on_declared = {};
-        std::unordered_set<uint64_t> seen;
-        walker.on_identifier = [&](identifier_expr* ident) {
-            if (!ident->global_qualified && !declared.count(ident->symbol_id) && seen.insert(ident->symbol_id).second) {
-                expr->free_names.push_back(ident->symbol_id);
-            }
-        };
-        walker.on_instance = [&]() {
-            if (seen.insert(this_id).second) { expr->free_names.push_back(this_id); }
-        };
-        walker.stmt(expr->body);
-        for (uint64_t sym : expr->chained_outer_names) {
-            if (!declared.count(sym) && seen.insert(sym).second) { expr->free_names.push_back(sym); }
-        }
-        expr->uses_instance = seen.count(this_id) != 0;
+        auto free = detail::free_names_of(*expr, string_symbolizer_);
+        expr->free_names = std::move(free.names);
+        expr->uses_instance = free.uses_instance;
         expr->free_names_built = true;
     }
     const std::vector<uint64_t>& free_names = expr->free_names;

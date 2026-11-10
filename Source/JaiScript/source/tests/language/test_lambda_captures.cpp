@@ -289,6 +289,35 @@ public:
                    "Lambda capture list does not capture enclosing name 'twice'; name it, or use [this], [=] or [&]", "[] reaches no method");
         });
 
+        test("a_lambda_captures_the_members_its_nested_lambdas_name", [expect]() {
+            const std::string cls =
+                "int bonus = -100;\n"
+                "int twice(int a_x) { return -1; }\n"
+                "class Caller { int bonus = 500; int twice(int a_x) { return -7; } int run(var a_f) { return a_f(); } }\n"
+                "class C {\n"
+                "  int bonus = 3;\n"
+                "  int twice(int a_x) { return a_x * 2 + bonus; }\n"
+                "  int arrowField() { var f = () => { var g = x => bonus + x; return g(5); }; return f(); }\n"
+                "  int arrowMethod() { var f = () => { var g = x => twice(x); return g(5); }; return f(); }\n"
+                "  int refField() { var f = [&]() { var g = [&](int x) { return bonus + x; }; return g(5); }; return f(); }\n"
+                "  int refMethod() { var f = [&]() { var g = [&](int x) { return twice(x); }; return g(5); }; return f(); }\n"
+                "  int copyField() { var f = [=]() { var g = [=](int x) { return bonus + x; }; return g(5); }; return f(); }\n"
+                "  int copyMethod() { var f = [=]() { var g = [=](int x) { return twice(x); }; return g(5); }; return f(); }\n"
+                "  int threeDeep() { var f = () => { var g = () => { var h = x => bonus + twice(x); return h(5); }; return g(); }; return f(); }\n"
+                "  int write() { var f = [&]() { var g = [&]() { bonus = bonus + 1; }; g(); }; f(); return bonus; }\n"
+                "  int snapshot() { var f = [=]() { var g = [=]() { return bonus; }; return g(); }; bonus = 9; return f(); }\n"
+                "  int ownLocal() { var f = () => { int bonus = 40; var g = x => bonus + x; return g(5); }; return f(); }\n"
+                "  var escaping() { return () => { var g = x => bonus + twice(x); return g(5); }; }\n"
+                "}\n";
+            expect(cls + "C c; `${c.arrowField()}|${c.arrowMethod()}|${c.refField()}|${c.refMethod()}|${c.copyField()}|${c.copyMethod()}`",
+                   "8|13|8|13|8|13", "a nested lambda's field and method in each default-capture form");
+            expect(cls + "C c; `${c.threeDeep()}|${c.write()}|${c.snapshot()}|${c.ownLocal()}`", "16|4|4|45", "three deep, a write through [&], a [=] copy, the outer lambda's own local");
+            expect(cls + "to_string(Caller().run(C().escaping()))", "16", "called from another class's method");
+            expect("[[warn_mode]];\n" + cls + "class D : C { int none() { var f = []() { var g = [&](int x) { return bonus + x; }; return g(5); }; return f(); } }\n"
+                   "string m = \"\"; try { D().none(); } catch (e) { m = e; } m",
+                   "Lambda capture list does not capture enclosing name 'bonus'; name it, or use [this], [=] or [&]", "[] admits no member for a nested lambda");
+        });
+
         test("mutation_through_ref_capture_visible_in_enclosing_scope_with_global", [expect, with_global, report]() {
             const std::string f = "int f() { int a = 1; auto lam = [&]() { a = a + 100; return 0; }; lam(); return a; }";
             expect(with_global + f + report, "101|5", "the enclosing local sees the write, the global does not");

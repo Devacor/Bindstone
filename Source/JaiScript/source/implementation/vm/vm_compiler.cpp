@@ -9558,29 +9558,9 @@ JAI_NOINLINE closure_proto vm_compiler::closure_proto_of(const std::shared_ptr<l
 		}
 	}
 
-	{
-		std::unordered_set<uint64_t> param_ids;
-		for (const auto& p : expr->parameters) {
-			param_ids.insert(p.symbol_id != UINT64_MAX ? p.symbol_id : symbolizer_->intern(p.name));
-		}
-		std::unordered_set<uint64_t> seen;
-		body_walker walker;
-		walker.symbolizer = symbolizer_;
-		walker.on_identifier = [&](identifier_expr* ident) {
-			if (ident->global_qualified || declared.count(ident->symbol_id)) return;
-			if (seen.insert(ident->symbol_id).second) {
-				proto.used_variables.push_back(ident->symbol_id);
-			}
-		};
-		walker.on_instance = [&]() {
-			if (seen.insert(this_id).second) { proto.used_variables.push_back(this_id); }
-		};
-		walker.stmt(proto.body);
-		proto.uses_instance = seen.count(this_id) != 0;
-		for (uint64_t sym : expr->chained_outer_names) {
-			if (!param_ids.count(sym) && seen.insert(sym).second) proto.used_variables.push_back(sym);
-		}
-	}
+	auto free = detail::free_names_of(*expr, symbolizer_);
+	proto.used_variables = std::move(free.names);
+	proto.uses_instance = free.uses_instance;
 	return proto;
 }
 

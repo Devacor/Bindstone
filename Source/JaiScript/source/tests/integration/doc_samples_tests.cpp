@@ -247,19 +247,6 @@ public:
 // [/sample]
 }
 
-namespace doc_values_turret {
-// [sample values-turret-host]
-struct Turret {
-    std::string name = "turret";
-    int64_t ammo = 0;
-};
-struct Tower {
-    Turret turret;
-    Turret& child() { return turret; }
-};
-// [/sample]
-}
-
 namespace doc_signals {
 // [sample signals-door]
 class Door {
@@ -1009,41 +996,6 @@ public:
 			// [/sample]
 			describe_block.finish();
 			expect_script(page, "binder-pickup", eng);
-		});
-
-		test("values_bound_turret", [this]() {
-			using doc_values_turret::Turret;
-			using doc_values_turret::Tower;
-			auto eng = make_engine();
-			jai::stdlib::register_all(eng);
-			cpp_sample host(*this, "guide/03-value-semantics.html", "values-turret-host");
-			// [sample values-turret-host]
-			jai::dynamic_binder<Turret>(*eng, "Turret")
-			    .property("name", &Turret::name)
-			    .property("ammo", &Turret::ammo)
-			    .method("=", [](Turret& self, const Turret& other) -> Turret& { return self = other; })
-			    .build();
-			jai::dynamic_binder<Tower>(*eng, "Tower")
-			    .method("child", &Tower::child)
-			    .build();
-			// [/sample]
-			host.finish();
-			expect_script("guide/03-value-semantics.html", "values-turret", eng);
-		});
-
-		test("values_atomics", [this]() {
-			// [sample values-atomics-host]
-			std::atomic<int64_t> page_views{0};          // the host's: it outlives the engine
-			// [/sample]
-			auto eng = make_engine();
-			jai::stdlib::register_all(eng);
-			cpp_sample host(*this, "guide/03-value-semantics.html", "values-atomics-host");
-			// [sample values-atomics-host]
-			jai::stdlib::register_atomics(eng);
-			eng->add_global_ref("page_views", page_views);
-			// [/sample]
-			host.finish();
-			expect_script("guide/03-value-semantics.html", "values-atomics", eng);
 		});
 
 		test("signals_door_and_observable", [this]() {

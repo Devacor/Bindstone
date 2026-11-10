@@ -11,8 +11,16 @@
 <meta property="og:site_name" content="JaiScript docs">
 <meta property="og:title" content="From Cereal — JaiScript Code Migrations">
 <meta property="og:description" content="Moving a C++ codebase from Cereal or Boost.Serialization to the JaiScript archives: every construct mapped, a worked conversion, the property route that removes serialize functions, both libraries side by side, and converting existing files once.">
-<meta name="twitter:card" content="summary">
+<meta property="og:image" content="https://jaiscript.com/assets/og-card.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:image" content="https://jaiscript.com/assets/og-card.png">
+<link rel="canonical" href="https://jaiscript.com/bridges/04-from-cereal.html">
+<meta property="og:url" content="https://jaiscript.com/bridges/04-from-cereal.html">
+<link rel="icon" href="../favicon.ico" sizes="32x32">
 <link rel="icon" href="../assets/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="../assets/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:ital,wght@0,400;0,700;1,400&amp;family=Chakra+Petch:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;600&amp;display=swap">
@@ -33,7 +41,9 @@ document.documentElement.setAttribute("data-theme",t);}())</script>
 </div>
 </header>
 <div class="layout">
-<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Language Bridges</summary><ol class="chapter-list"><li><a href="../bridges/01-from-javascript.html">From JavaScript</a></li><li><a href="../bridges/02-from-cpp.html">From C++</a></li><li><a href="../bridges/03-from-csharp.html">From C#</a></li></ol></details><details class="sidebar-box" open><summary class="sidebar-title">Code Migrations</summary><ol class="chapter-list" style="counter-reset: ch 3"><li class="current"><a href="../bridges/04-from-cereal.html" aria-current="page">From Cereal</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a></li><li><a href="../bridges/06-from-chaiscript.html">From ChaiScript Bindings</a></li><li><a href="../bridges/07-from-sol2.html">From sol2 (Lua) Bindings</a></li><li><a href="../bridges/08-from-squirrel.html">From Squirrel Bindings</a></li><li><a href="../bridges/09-from-pybind11.html">From pybind11 and Boost.Python</a></li><li><a href="../bridges/10-from-nlohmann-json.html">From nlohmann::json</a></li><li><a href="../bridges/11-from-qt-properties.html">From Qt Properties, RTTR and refl-cpp</a></li><li><a href="../bridges/12-from-coroutines.html">From Lua Coroutines and C++20 Schedulers</a></li></ol></details></aside>
+<aside class="sidebar" aria-label="Chapters"><details class="sidebar-box" open><summary class="sidebar-title">Language Bridges</summary><ol class="chapter-list"><li><a href="../bridges/01-from-javascript.html">From JavaScript</a></li><li><a href="../bridges/02-from-cpp.html">From C++</a></li><li><a href="../bridges/03-from-csharp.html">From C#</a></li></ol></details><details class="sidebar-box" open><summary class="sidebar-title">Code Migrations<span class="sidebar-current">From Cereal</span></summary><ol class="chapter-list" style="counter-reset: ch 3"><li class="current"><a href="../bridges/04-from-cereal.html" aria-current="page">From Cereal</a><ol class="page-toc" data-page-toc></ol></li><li><a href="../bridges/05-from-boost-signals2.html">From Boost.Signals2</a></li><li><a href="../bridges/06-from-chaiscript.html">From ChaiScript Bindings</a></li><li><a href="../bridges/07-from-sol2.html">From sol2 (Lua) Bindings</a></li><li><a href="../bridges/08-from-squirrel.html">From Squirrel Bindings</a></li><li><a href="../bridges/09-from-pybind11.html">From pybind11 and Boost.Python</a></li><li><a href="../bridges/10-from-nlohmann-json.html">From nlohmann::json</a></li><li><a href="../bridges/11-from-qt-properties.html">From Qt Properties, RTTR and refl-cpp</a></li><li><a href="../bridges/12-from-coroutines.html">From Lua Coroutines and C++20 Schedulers</a></li></ol></details></aside>
+<script>(function(){if(!window.matchMedia||!matchMedia("(max-width: 900px)").matches)return;
+var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d[i].open=false;}())</script>
 <main class="content" id="main" tabindex="-1"><nav class="crumbs" aria-label="Breadcrumb"><a href="../index.html">Docs</a><span class="sep" aria-hidden="true">/</span><a href="index.html">Bridges</a><span class="sep" aria-hidden="true">/</span>04</nav>
 <article class="chapter"><h1 id="from-cereal">From Cereal<a class="hlink" href="#from-cereal" aria-label="link">&#8203;</a></h1>
 <p>Cereal and the JaiScript archives share a shape: a type describes itself once, in a <code>serialize</code>

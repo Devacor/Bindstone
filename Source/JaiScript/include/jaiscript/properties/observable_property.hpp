@@ -46,7 +46,7 @@ public:
 		return *this;
 	}
 
-	observable_property& operator=(const observable_property& rhs) {
+	observable_property& operator=(const observable_property& rhs) requires std::is_copy_assignable_v<T> {
 		if (this->m_value != rhs.m_value) {
 			T old_value = this->m_value;
 			this->m_value = rhs.m_value;
@@ -55,7 +55,7 @@ public:
 		return *this;
 	}
 
-	observable_property& operator=(const T& v) {
+	observable_property& operator=(const T& v) requires std::is_copy_assignable_v<T> {
 		if (this->m_value != v) {
 			T old_value = this->m_value;
 			this->m_value = v;

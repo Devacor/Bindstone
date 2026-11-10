@@ -259,8 +259,9 @@ namespace jai {
 			return *this;
 		}
 
-		// Assignment operators
-		property& operator=(const T& v) { m_value = v; return *this; }
+		// Constrained with the copy assignment above: an owner's defaulted copy assignment must find no way to assign a
+		// move-only property, where a const property would otherwise convert to const T&.
+		property& operator=(const T& v) requires std::is_copy_assignable_v<T> { m_value = v; return *this; }
 		property& operator=(T&& v) { m_value = std::move(v); return *this; }
 
 		// ===== CONVERSION OPERATORS =====

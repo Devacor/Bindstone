@@ -4019,11 +4019,31 @@ checked_result<statement_ptr> parser::expression_statement() {
     return std::make_shared<expression_stmt>(expr->location, expr);
 }
 
+// `if (a = b)`: the assignment is the condition itself; `if ((a = b))` has parentheses of its own and is left unmarked
+void parser::mark_bare_condition(const expression_ptr& condition, size_t first_token) {
+    if (!condition || condition->get_type() != node_type::assignment_expr) return;
+    auto* assign = static_cast<assignment_expr*>(condition.get());
+    if (assign->op.type != token_type::equal || assign->incdec_desugar) return;
+    if ((*stream_)[first_token].type == token_type::left_paren) {
+        size_t depth = 0;
+        size_t at = first_token;
+        for (; at < current_; ++at) {
+            const token_type k = (*stream_)[at].type;
+            if (k == token_type::left_paren) { ++depth; }
+            else if (k == token_type::right_paren && --depth == 0) { break; }
+        }
+        if (at + 1 == current_) return;
+    }
+    assign->bare_condition = true;
+}
+
 checked_result<statement_ptr> parser::if_statement() {
     const token& ifToken = previous();
 
     JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'if'"));
+    const size_t condition_start = current_;
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
+    mark_bare_condition(condition, condition_start);
     JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after if condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr then_statement, statement());
@@ -4041,7 +4061,9 @@ checked_result<statement_ptr> parser::while_statement() {
     jump_scope loop(jumps_, {jumps_.breakable + 1, jumps_.continuable + 1, jumps_.parallel_body});
 
     JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'while'"));
+    const size_t condition_start = current_;
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
+    mark_bare_condition(condition, condition_start);
     JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after while condition"));
 
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
@@ -4452,7 +4474,9 @@ traditional_for:
     // Condition
     expression_ptr condition = nullptr;
     if (!check(token_type::semicolon)) {
+        const size_t condition_start = current_;
         JAISCRIPT_TRY_ASSIGN(condition, expression());
+        mark_bare_condition(condition, condition_start);
     }
     JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after for loop condition"));
 
@@ -6203,7 +6227,9 @@ checked_result<statement_ptr> parser::do_while_statement() {
     JAISCRIPT_TRY_ASSIGN(statement_ptr body, statement());
     JAISCRIPT_TRY_ASSIGN(token while_token, consume(token_type::while_keyword, "expected 'while' after the body of 'do'"));
     JAISCRIPT_TRY(expect(token_type::left_paren, "expected '(' after 'while'"));
+    const size_t condition_start = current_;
     JAISCRIPT_TRY_ASSIGN(expression_ptr condition, expression());
+    mark_bare_condition(condition, condition_start);
     JAISCRIPT_TRY(expect(token_type::right_paren, "expected ')' after while condition"));
     JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after do-while condition"));
 

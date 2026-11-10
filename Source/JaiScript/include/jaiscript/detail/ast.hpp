@@ -295,6 +295,8 @@ namespace jai {
         // In an assignment target (`(a = b) = c`, `++x = v`) the parser makes the inner assignment yield the reference it
         // stored through (its target is then an implicit cast<&>), the C++ lvalue an assignment is
         bool yields_reference = false;
+        // a plain `=` that is the whole condition of an if, while, do-while or for, with no parentheses of its own
+        bool bare_condition = false;
         mutable const_site const_check;
 
         assignment_expr(const source_location& loc, expression_ptr t, const token& o, expression_ptr v)

@@ -180,6 +180,7 @@ namespace jai {
         checked_result<statement_ptr> case_body_statement();
         checked_result<statement_ptr> expression_statement();
         checked_result<statement_ptr> block_statement();
+        void mark_bare_condition(const expression_ptr& condition, size_t first_token);
         checked_result<statement_ptr> if_statement();
         checked_result<statement_ptr> while_statement();
         checked_result<statement_ptr> for_statement();

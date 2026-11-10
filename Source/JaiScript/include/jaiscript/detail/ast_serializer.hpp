@@ -36,7 +36,7 @@ namespace jai::detail {
     // BUMP THIS on any change to what a parse produces: the serialized bytes and the parse-time semantics baked into the
     // AST (slot assignment, node and token numbers, capture plans). A stale sidecar is reparsed and rewritten (the version
     // check feeds the corrupt-file fallback), so a bump is always safe and a missed one leaves stale caches.
-    inline constexpr uint32_t k_jaibite_version = 56;
+    inline constexpr uint32_t k_jaibite_version = 57;
     // Header flags (u32):
     // bit 0 = the bite was static-checked clean under the SAVING engine's surface —
     // trusted on load only when the registration fingerprint also matches.
@@ -438,7 +438,7 @@ namespace jai::detail {
             node(e->target.get());
             tok(e->op);
             node(e->value.get());
-            u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0) | (e->yields_reference ? 4 : 0)));
+            u8(static_cast<uint8_t>((e->postfix_old_result ? 1 : 0) | (e->incdec_desugar ? 2 : 0) | (e->yields_reference ? 4 : 0) | (e->bare_condition ? 8 : 0)));
         }
 
         JAI_NOINLINE void write_call_expr(const ast_node* n) {
@@ -1310,7 +1310,7 @@ namespace jai::detail {
         JAI_NOINLINE ast_node_ptr read_assignment_expr(const source_location& loc) {
             auto e = assignment_head(loc, expr_req());
             e->value = expr_req();
-            { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->yields_reference = (fl & 4) != 0; }
+            { const uint8_t fl = u8(); e->postfix_old_result = (fl & 1) != 0; e->incdec_desugar = (fl & 2) != 0; e->bare_condition = (fl & 8) != 0; e->yields_reference = (fl & 4) != 0; }
             return e;
         }
 

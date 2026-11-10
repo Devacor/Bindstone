@@ -164,6 +164,21 @@ public:
             check_eq((size_t)0, quiet.diagnostics.size());
         });
 
+        test("an_assignment_as_a_condition_warns_unless_it_has_its_own_parentheses", [this]() {
+            auto e = make_engine();
+            const std::string text = "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign";
+            auto warned = e->check("int a = 0; int b = 3;\nif (a = b) { }\nwhile (a = 0) { }\ndo { } while (a = 0);\nfor (; a = 0; ) { }\nif ((a) = b) { }");
+            check_eq((size_t)0, error_count(warned));
+            check_eq((size_t)5, warning_count(warned));
+            for (size_t i = 0; i < warned.diagnostics.size(); ++i) {
+                check_eq(text, warned.diagnostics[i].message);
+                check_eq(i + 2, warned.diagnostics[i].line);
+            }
+            auto quiet = e->check("int a = 0; int b = 3; bool c = false;\nif ((a = b)) { }\nwhile ((a = 0)) { }\ndo { } while ((a = 0));\nfor (; (a = 0); ) { }\n"
+                                  "if (a == b) { }\nif ((a = b) > 0) { }\nif (a += 1) { }\nif (c || (a = b)) { }");
+            check_true(quiet.diagnostics.empty(), quiet.format());
+        });
+
         test("a_handle_builtin_shadow_warns_where_a_handle_holds_the_class", [this]() {
             auto e = make_engine();
             std::vector<std::string> run_time;

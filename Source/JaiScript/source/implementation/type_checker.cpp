@@ -5639,6 +5639,9 @@ private:
     }
 
     ctype infer_assignment_impl(assignment_expr* a, uint8_t& store_proof) {
+        if (a->bare_condition) {
+            diag(diag_level::warning, a->location, "assignment used as a condition: write '==' to compare, or '((a = b))' with parentheses of its own to assign");
+        }
         ctype rhs = infer(a->value.get());
         // a plain store of a string-valued right side: the compiler's text-builder store (`s = s + ...`) takes it, behind its run-time guards
         if (a->op.type == token_type::equal) {

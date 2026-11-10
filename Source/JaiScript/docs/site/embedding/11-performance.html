@@ -189,8 +189,7 @@ arrays, then <code>parallel_transform</code> for the bulk stages, then one C++ f
 </tbody></table></div>
 <p id="what-the-vm-does-for-you">Compilation costs about a third of parsing and is cached with the parsed source, so a repeated script pays both
 once. The automatic <a href="04-jaibite.html">jaibite</a> disk cache makes file loads IO-bound: a 535-line game file's
-load-and-run drops from 5.8 ms to 2.4 ms. Checked integer overflow, the execution-budget clock (sampled every 1024
-ticks) and the idle debugger hook do not show in hot loops.</p>
+load-and-run drops from 5.8 ms to 2.4 ms.</p>
 <h3 id="value-strategy-costs">What each aliasing strategy costs<a class="hlink" href="#value-strategy-costs" aria-label="link">&#8203;</a></h3>
 <p>One computation over a mid-sized object (a string, an 8-int array, 4 scalars), VM, µs per call, report machine:</p>
 <div class="tablewrap"><table><thead><tr><th>strategy</th><th>µs/call</th><th>against <code>&amp;</code></th></tr></thead><tbody>

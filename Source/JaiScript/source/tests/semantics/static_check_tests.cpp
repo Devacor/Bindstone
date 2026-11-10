@@ -981,15 +981,20 @@ public:
                 {"void f() { auto _ = 1; auto _ = 2; print(_); }", placeholder},
                 {"void f() { auto _ = 1; auto [_, b] = [1, 2]; _ = b; }", placeholder},
                 {"void f(int _) { auto _ = 2; { print(_); } }", placeholder},
-                {"auto _ = 1; auto _ = 2; print(_);", placeholder}
+                {"auto _ = 1; auto _ = 2; print(_);", placeholder},
+                {"int y = 1; string y = \"s\";", "redeclaration of 'y' in the same scope"},   // one unit's top level is a scope
+
+                {"auto [a, b] = [1, 2]; int z = 2; string z = \"s\"; string w = z;", "redeclaration of 'z' in the same scope"},
+                {"auto [a, b] = [1, 2]; int b = 3;", "redeclaration of 'b' in the same scope"}
             }) {
                 auto report = e->check(source);
                 check_true(has_diag(report, dlevel::error, text), source + "\n" + report.format(source));
             }
             for (const char* source : {
                 "void f() { int y = 1; { string y = \"s\"; } }",       // a nested block's own name shadows (a warning)
-                "int y = 1; string y = \"s\";",                          // a program's top level declares again, as a re-run does
-                "int y = 1; var y = [1]; int n = y.size(); int z = 2; string z = \"s\"; string w = z;",   // and the later declaration stands for it
+                "extern int y; int y = 1; int n = y;",                   // an extern's definition
+                "inline int y = 1; inline int y = 2; int y = 3;",        // an inline declaration adopts the name; the unit's plain one turns it
+                "int y = 1; { int y = 2; } if (y == 1) { string y = \"s\"; }",
                 "class C { void f() {} void f(int a) {} }",              // overloads
                 "void f(int a) { for (int i = 0; i < 1; i++) {} for (int i = 0; i < 1; i++) {} }",
                 "void f(int _) { auto _ = 1; auto _ = 2; auto [_, _] = [3, 4]; { auto _ = 5; print(_); } }",   // C++26's placeholder
@@ -999,6 +1004,12 @@ public:
                 check_eq(std::size_t(0), report.error_count(), std::string(source) + "\n" + report.format(source));
                 if (std::string(source).find('_') != std::string::npos) { check_eq(std::size_t(0), report.diagnostics.size(), report.format(source)); }
             }
+            const std::string twice = "int y = 1;\nvar y = [1];";
+            check_true(e->check(twice).format(twice).find("redeclaration of 'y' in the same scope (declared at 1:5)") != std::string::npos, "the first declaration's position");
+            // a later run of the program declares its names again: the later declaration stands
+            auto rerun = make_engine();
+            rerun->execute("int y = 1;");
+            check_eq(std::string("s"), rerun->execute("string y = \"s\"; y;").as_string());
             // every placeholder lives to the end of its scope and dies in reverse order, as a C++ local does
             auto run = make_engine();
             check_eq(std::string("open a,open b,close b,close a,"), run->execute(
@@ -2111,7 +2122,7 @@ public:
                 check_eq((size_t)0, error_count(e->check("bool same = 5.same_as(5);\nchar c = 'a';\nbool also = c.same_as('a');\nvar v = 5;\nv.anything();\narray<int> xs = [1];\nxs[0].whatever();")));
                 // the registry's names, maps that may hold callables, dynamic and element receivers stay clean
                 check_eq((size_t)0, error_count(e->check("array<string> a = [\"x\"];\na.push(\"y\");\nint n = a.size();\nstring s = \"ab\";\ns.to_upper();\nvar k = s.find(\"b\");\nmap<string, int> m = {\"k\": 1};\nvar ks = m.keys();\nbool has = m.contains(\"k\");")));
-                check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm[\"f\"](1);\nenum Dir { n, s }\nint d = Dir.s;\nvar vm = {\"g\": 1};\nvm.anything();\nvar d = [1];\nd.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
+                check_eq((size_t)0, error_count(e->check("map<string, function> fm = {\"f\": [](int x) { return x; }};\nfm[\"f\"](1);\nenum Dir { n, s }\nint d = Dir.s;\nvar vm = {\"g\": 1};\nvm.anything();\nvar dv = [1];\ndv.whatever();\narray<string> rows = [\"a\"];\nrows[0].whatever();")));
                 auto w = make_engine();
                 w->type_proofs(proofs);
                 check_eq(std::string("array has no member 'splice'"), w->execute("[[warn_mode]]; array<string> a = [\"x\"];\nvar m = \"\";\ntry { a.splice(0, \"y\"); } catch (err) { m = err; }\nm;").to_string());

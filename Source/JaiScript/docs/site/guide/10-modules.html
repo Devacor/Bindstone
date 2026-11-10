@@ -150,6 +150,7 @@ void hot_reload_migrate(map&lt;string, var&gt; previous) {
 <ul>
 <li><strong>Another unit&#x27;s declaration of the same name gets its own cell</strong> and shadows the old one, as a nested block does in C++. Code reads its own unit&#x27;s cell when its unit declared the name. Otherwise it reads the newest cell declared no later than the code was compiled (top-level code: the start of its current run; a function: the run that declared it), so code compiled before a redeclaration keeps its binding. A name only a later unit declares resolves to the newest cell.</li>
 <li><strong>The same unit run again writes in place</strong>, with the initializer rule of a <a href="#reloading-from-a-running-program">re-run</a>.</li>
+<li><strong>One run of a unit declares a top-level variable once</strong>: a second declaration in the same text is <code>redeclaration of 'x' in the same scope</code>, except an <code>extern</code>&#x27;s definition and an <code>inline</code> declaration.</li>
 <li><strong>Functions and classes replace in place</strong> whatever the unit.</li>
 <li><strong><code>{ }</code> blocks scope as in C++, at program scope too.</strong> A declaration inside a bare block, an <code>if</code>, a loop body or a <code>try</code> shadows the outer name until the block ends. A function called from inside the block still sees the binding of the scope it was declared in.</li>
 </ul>

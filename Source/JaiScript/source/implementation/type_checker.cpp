@@ -627,6 +627,7 @@ private:
         int lw = -1;                      // its lost-write candidate (lw_cands_), -1 for none
         bool lw_handle = false;           // a class-typed slot that may hold a handle (an auto from one, a by-value class parameter)
         bool placeholders = false;        // this scope declares '_' more than once: naming it is ambiguous (C++26 [basic.scope.scope])
+        bool shared_name = false;         // an extern's or an inline declaration's name: the unit's top level may declare it again
     };
 
     // A reference's (or an auto loop variable's) known class or typed container, for member diagnostics alone
@@ -876,9 +877,10 @@ private:
         diags_.push_back({severity, loc.line, loc.column, std::move(message), file.empty() ? related_line : 0, file.empty() ? related_column : 0, std::move(file)});
     }
 
-    // C++ [basic.scope]: a block or a parameter list declares a name once; a program's top level may declare one again, the later
-    // declaration standing for the earlier as a re-run's does. C++26's placeholder: a later '_' that names a local variable or a
-    // structured binding (name_independent) redeclares freely, and the name then names none of them
+    // C++ [basic.scope]: a block, a parameter list or one unit's top level declares a name once; a later run of the program
+    // declares it again (each run is checked alone), and so does the definition of an extern or an inline declaration. C++26's
+    // placeholder: a later '_' that names a local variable or a structured binding (name_independent) redeclares freely, and
+    // the name then names none of them
     void declare_local(std::string_view name, var_entry entry, const source_location& at, bool name_independent = false) {
         auto [held, fresh] = scopes_.back().emplace(name, entry);
         if (fresh) { return; }
@@ -887,11 +889,10 @@ private:
             held->second.placeholders = true;
             return;
         }
-        if (scopes_.size() > 1) {
+        if (scopes_.size() > 1 || !(held->second.shared_name || entry.shared_name)) {
             diag(diag_level::error, at, "redeclaration of '" + std::string(name) + "' in the same scope", held->second.line, held->second.column);
-        } else {
-            held->second = std::move(entry);   // a program's later declaration stands for the name from here on, as it does at run time
         }
+        if (scopes_.size() == 1) { held->second = std::move(entry); }   // the later declaration stands for the name from here on, as it does at run time
     }
 
     // C++ [class.mem]: a class declares a member name once (methods overload with one another, never with a field)
@@ -7376,6 +7377,7 @@ private:
             entry.dynamic = true;
         }
         if (x->qualified()) { qualified_externs_[std::string(x->name)] = entry; }
+        entry.shared_name = true;
         if (x->written().find("::") == std::string_view::npos) { scopes_.back().emplace(x->written(), std::move(entry)); }
     }
 
@@ -7569,6 +7571,7 @@ private:
             check_const_bind(decl, entry);
             warn_shadow("local", decl->name, decl->location);
             if (lw_on()) { lw_opaque_locals_.insert(decl); }
+            entry.shared_name = decl->is_inline;
             declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
             return;
         }
@@ -7654,6 +7657,7 @@ private:
             lw_register(entry, judged, decl, decl->name, lw_origin::local, spelled ? entry.display : "auto",
                         !decl->is_const && !decl->function_spelling && !entry.lw_handle);
         }
+        entry.shared_name = decl->is_inline;
         declare_local(decl->name, std::move(entry), decl->location, !decl->is_static);
     }
 

@@ -125,16 +125,6 @@ namespace MV {
 
 				FileBundle();
 
-				FileBundle(const FileBundle& other) : jai::property_owner<FileBundle>(other) {
-				}
-
-				FileBundle& operator=(const FileBundle& other) {
-					if (this != &other) {
-						jai::property_owner<FileBundle>::operator=(other);
-					}
-					return *this;
-				}
-
 				JAI_PROPERTY((std::string), skeletonFile, "");
 				JAI_PROPERTY((std::string), atlasFile, "");
 				JAI_PROPERTY((float), loadScale, 1.0f);

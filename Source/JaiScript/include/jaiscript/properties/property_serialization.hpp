@@ -291,7 +291,7 @@ namespace jai {
 	void property_manager::save(Archive& ar) const {
 		serialization::any_archive_writer type_erased(ar);
 
-		for (const auto& [name, prop] : m_properties) {
+		for (property_base* prop : all()) {
 			if (prop->allow_save()) {
 				prop->serialize(type_erased);
 			}
@@ -309,9 +309,8 @@ namespace jai {
 			for (size_t i = 0; i < prop_names.size(); ++i) {
 				const std::string& prop_name = prop_names[i];
 				if (ar.seek_property_by_index(i)) {
-					auto it = m_properties.find(prop_name);
-					if (it != m_properties.end()) {
-						it->second->serialize(type_erased);
+					if (property_base* prop = get(prop_name)) {
+						prop->serialize(type_erased);
 					}
 				}
 			}
@@ -319,7 +318,7 @@ namespace jai {
 			// JSON: seek each known property by name — critical when multiple property_mgrs
 			// at different inheritance levels (Sprite → Drawable → Component) read the same
 			// flat object; consuming the sequential iterator would lose position.
-			for (const auto& [name, prop] : m_properties) {
+			for (property_base* prop : all()) {
 				if (type_erased.seek_property(prop->name())) {
 					prop->serialize(type_erased);
 				}

@@ -129,6 +129,14 @@ namespace jai {
 
 		inline property_base(property_manager& property_register, std::string name);
 
+		// A property is registered by address under its name. A copy or a move makes one with the same name and save
+		// switches, which its owner's manager registers (property_manager's relocating constructor); the source keeps its
+		// name, and an assignment changes neither side's.
+		property_base(const property_base&) = default;
+		property_base(property_base&& a_other) noexcept : property_base(static_cast<const property_base&>(a_other)) {}
+		property_base& operator=(const property_base&) noexcept { return *this; }
+		property_base& operator=(property_base&&) noexcept { return *this; }
+
 		mutable serialize_mode m_serialize_mode = serialize_mode::automatic;
 		mutable bool m_allow_serialization = true;  // Dynamic runtime toggle
 
@@ -228,17 +236,26 @@ namespace jai {
 			return *this;
 		}
 
-		// Properties are pinned to the manager that registered their address: a moved-to
-		// object would be unregistered and the moved-from entry would dangle.
-		property(property&&) = delete;
-		property& operator=(property&&) = delete;
+		property(const property& a_other) requires std::is_copy_constructible_v<T>
+			: property_base(a_other)
+			, m_value(a_other.m_value)
+			, m_custom_clone(a_other.m_custom_clone) {
+		}
 
-		// We cannot meaningfully copy construct a property because they need to be tightly bound to their property_manager reference.
-		property(const property&) = delete;
+		property(property&& a_other) noexcept requires std::is_move_constructible_v<T>
+			: property_base(std::move(a_other))
+			, m_value(std::move(a_other.m_value))
+			, m_custom_clone(a_other.m_custom_clone) {
+		}
 
-		// Basic assignment only copies the value. We do have a clone_to_target method too, which can be used to invoke explicit deep copy semantics.
-		property& operator=(const property& rhs) {
+		// Assignment carries the value alone; clone_to_target is the copy that runs a custom clone.
+		property& operator=(const property& rhs) requires std::is_copy_assignable_v<T> {
 			m_value = rhs.m_value;
+			return *this;
+		}
+
+		property& operator=(property&& rhs) noexcept requires std::is_move_assignable_v<T> {
+			m_value = std::move(rhs.m_value);
 			return *this;
 		}
 

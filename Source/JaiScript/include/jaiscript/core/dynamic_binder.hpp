@@ -187,6 +187,9 @@ namespace dynamic_binder_validation {
     template<typename Sig, typename Sync>
     struct is_signal_type<signal<Sig, Sync>> : std::true_type {};
 
+    template<typename Sig, typename Sync>
+    struct is_signal_type<member_signal_emitter<Sig, Sync>> : std::true_type {};
+
     // std::function members are callback hooks (script lambdas assign into them);
     // like signals, they are opaque to scripts and need no registration.
     template<typename T>

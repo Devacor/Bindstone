@@ -14,7 +14,7 @@ public:
 	using base_type = property<T>;
 	using value_type = T;
 
-	using change_signal_type = signal_emitter<void(const T&, const T&)>;
+	using change_signal_type = member_signal_emitter<void(const T&, const T&)>;
 
 	observable_property(property_manager& reg, std::string name)
 		: base_type(reg, std::move(name)) {}
@@ -26,10 +26,25 @@ public:
 	observable_property(property_manager& reg, std::string name, T def)
 		: base_type(reg, std::move(name), std::move(def)) {}
 
-	// Pinned to the registering manager, like property<T>: no moves, no copy construction.
-	observable_property(observable_property&&) = delete;
-	observable_property& operator=(observable_property&&) = delete;
-	observable_property(const observable_property&) = delete;
+	// A copy starts with no receivers. A move takes them, and move assignment replaces the target outright: its
+	// receivers are let go and see no change.
+	observable_property(const observable_property& a_other) requires std::is_copy_constructible_v<T>
+		: base_type(a_other)
+		, on_change_(a_other.on_change_) {
+	}
+
+	observable_property(observable_property&& a_other) noexcept requires std::is_move_constructible_v<T>
+		: base_type(std::move(a_other))
+		, on_change_(std::move(a_other.on_change_)) {
+	}
+
+	observable_property& operator=(observable_property&& a_other) noexcept requires std::is_move_assignable_v<T> {
+		if (this != &a_other) {
+			this->m_value = std::move(a_other.m_value);
+			on_change_ = std::move(a_other.on_change_);
+		}
+		return *this;
+	}
 
 	observable_property& operator=(const observable_property& rhs) {
 		if (this->m_value != rhs.m_value) {

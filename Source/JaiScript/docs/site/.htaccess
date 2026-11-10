@@ -1,5 +1,14 @@
 ErrorDocument 404 /404.html
 
+# Plain http answers with a permanent redirect to https; certificate validation under /.well-known/ stays on http
+<IfModule mod_rewrite.c>
+RewriteEngine On
+RewriteCond %{HTTPS} !=on
+RewriteCond %{HTTP:X-Forwarded-Proto} !=https
+RewriteCond %{REQUEST_URI} !^/\.well-known/
+RewriteRule ^ https://%{HTTP_HOST}%{REQUEST_URI} [R=301,L]
+</IfModule>
+
 AddDefaultCharset utf-8
 AddCharset utf-8 .html .css .js .json .svg .xml .txt
 AddType "text/plain; charset=utf-8" .sh .ps1 .cmd .jai

@@ -3320,30 +3320,7 @@ JAI_NOINLINE checked_result<declaration_ptr> parser::declaration_rest() {
         // Check for destructuring: auto [x, y, z] = expr;
         if ((previous().type == token_type::auto_keyword || previous().type == token_type::var_keyword)
             && check(token_type::left_bracket)) {
-            advance();  // consume [
-
-            auto loc = previous().location;
-            auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
-
-            do {
-                JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected variable name in destructuring", "variable"));
-                auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
-                decl->names.push_back({sym_view, sym_id});
-
-                if (in_function_scope()) {
-                    decl->slot_indices.push_back(allocate_slot(sym_id));
-                } else {
-                    decl->slot_indices.push_back(SIZE_MAX);
-                }
-            } while (match(token_type::comma));
-
-            JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after destructuring names"));
-            JAISCRIPT_TRY(expect(token_type::equal, "expected '=' after destructuring pattern"));
-
-            JAISCRIPT_TRY_ASSIGN(decl->initializer, expression());
-            JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after destructuring declaration"));
-
-            return decl;
+            return destructuring_declaration();
         }
 
         // Check if this keyword is followed by :: - if so, it's a namespace access, not a type
@@ -4362,30 +4339,39 @@ checked_result<statement_ptr> parser::for_statement() {
     bool is_const = match(token_type::const_keyword);
     bool is_reference = false;
     type_info_ptr element_type = nullptr;
+    // for (const x : xs) and for (const [k, v] : m): const alone is const auto, as in a declaration (const x = e;)
+    const bool bare_const = is_const && (check(token_type::left_bracket) ||
+        (check(token_type::identifier) && current_ + 1 < stream_->size() && (*stream_)[current_ + 1].type == token_type::colon));
+    if (is_const && (check(token_type::colon) || check(token_type::ampersand))) {
+        report_error("a range-for's const variable needs a name: for (const x : xs)", peek());
+        return make_error_code(parse_error_code::syntax_error);
+    }
 
     // Check if we have a type followed by optional & and identifier : pattern (every type spelling: array<int>,
     // map<string, int>, shared_ptr<C>, weak_ptr<C> start with keywords)
-    if (is_type_keyword_token(peek().type) || check(token_type::identifier)) {
+    if (bare_const || is_type_keyword_token(peek().type) || check(token_type::identifier)) {
 
-        // Parse the type
-        auto element_type_result = parse_type();
-        if (!element_type_result) {
-            // Failed to parse type, restore position and try traditional for
-            current_ = savedPosition;
-            goto traditional_for;
-        }
-        element_type = std::move(element_type_result.value());
+        if (!bare_const) {
+            // Parse the type
+            auto element_type_result = parse_type();
+            if (!element_type_result) {
+                // Failed to parse type, restore position and try traditional for
+                current_ = savedPosition;
+                goto traditional_for;
+            }
+            element_type = std::move(element_type_result.value());
 
-        // Check for reference after type
-        if (match(token_type::ampersand)) {
-            is_reference = true;
+            // Check for reference after type
+            if (match(token_type::ampersand)) {
+                is_reference = true;
+            }
         }
 
         // for (auto [k, v] : m): the entry's key and value by name, C++17's structured binding. The loop walks a hidden entry
         // variable and the names are declarations reading its halves: by value both are the iteration's copies, with auto& the
         // value is a reference to the map's entry (detail::stamp_map_entry_bindings marks the shape for both backends)
         const token_type spelled = (*stream_)[savedPosition + (is_const ? 1 : 0)].type;
-        if (check(token_type::left_bracket) && (spelled == token_type::auto_keyword || spelled == token_type::var_keyword)) {
+        if (check(token_type::left_bracket) && (bare_const || spelled == token_type::auto_keyword || spelled == token_type::var_keyword)) {
             const token bracket = advance();
             const bool auto_spelled = !element_type;
             std::vector<token> names;
@@ -4494,16 +4480,23 @@ traditional_for:
         errors_.resize(errors_before);
         pushed_back_token_ = pushed_before;
     }
+    // for (const i = 0; ...): const alone is const auto
+    const bool bare_const_init = init_const && check(token_type::identifier) && current_ + 1 < stream_->size() &&
+                                 (*stream_)[current_ + 1].type == token_type::equal;
     if (match(token_type::semicolon)) {
         // No init
     } else if (check(token_type::auto_keyword) || check(token_type::var_keyword) ||
                check(token_type::int_keyword) || check(token_type::float_keyword) ||
                check(token_type::string_keyword) || check(token_type::bool_keyword) ||
                check(token_type::char_keyword) || check(token_type::array_keyword) ||
-               check(token_type::map_keyword) || identifier_declares) {
+               check(token_type::map_keyword) || identifier_declares || bare_const_init) {
         // Parse variable declaration without consuming the semicolon
         // (the for loop will handle it)
-        JAISCRIPT_TRY_ASSIGN(type_info_ptr type, parse_type());
+        type_info_ptr type;
+        if (!bare_const_init) {
+            JAISCRIPT_TRY_ASSIGN(type_info_ptr spelled_type, parse_type());
+            type = std::move(spelled_type);
+        }
 
         // Check for reference after type
         if (match(token_type::ampersand)) {
@@ -5800,6 +5793,24 @@ checked_result<declaration_ptr> parser::inline_variable_declaration() {
     return declaration_ptr(decl);
 }
 
+// [x, y, z] = expr; after auto, var or a bare const: the '[' is next
+checked_result<declaration_ptr> parser::destructuring_declaration() {
+    advance();
+    auto loc = previous().location;
+    auto decl = std::make_shared<destructuring_decl>(loc, nullptr);
+    do {
+        JAISCRIPT_TRY_ASSIGN(token name_tok, consume_name("expected variable name in destructuring", "variable"));
+        auto [sym_id, sym_view] = symbolizer_->intern_with_view(name_tok.lexeme);
+        decl->names.push_back({sym_view, sym_id});
+        decl->slot_indices.push_back(in_function_scope() ? allocate_slot(sym_id) : SIZE_MAX);
+    } while (match(token_type::comma));
+    JAISCRIPT_TRY(expect(token_type::right_bracket, "expected ']' after destructuring names"));
+    JAISCRIPT_TRY(expect(token_type::equal, "expected '=' after destructuring pattern"));
+    JAISCRIPT_TRY_ASSIGN(decl->initializer, expression());
+    JAISCRIPT_TRY(expect(token_type::semicolon, "expected ';' after destructuring declaration"));
+    return declaration_ptr(decl);
+}
+
 checked_result<declaration_ptr> parser::const_declaration() {
     const token at = advance();
     if (check(token_type::const_keyword)) {
@@ -5807,7 +5818,10 @@ checked_result<declaration_ptr> parser::const_declaration() {
         return make_error_code(parse_error_code::syntax_error);
     }
     declaration_ptr decl;
-    if (untyped_declaration_ahead()) {
+    if (check(token_type::left_bracket)) {
+        // const [a, b] = e;: const auto [a, b] = e
+        JAISCRIPT_TRY_ASSIGN(decl, destructuring_declaration());
+    } else if (untyped_declaration_ahead()) {
         // const x = e;: the JavaScript spelling of const auto x = e (internal/const.md)
         token name = advance();
         expression_ptr init;

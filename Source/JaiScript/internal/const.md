@@ -33,7 +33,9 @@ what is not enforced.
 (`const const int x` is a parse error). The lexer reserves `const` as a keyword, so no script uses it as a name.
 
 **JavaScript spelling:** `const x = e;` reads as `const auto x = e;`, and an untyped
-`const x` parameter reads as `const auto x`. This follows `let` (a `var` synonym), with C++'s deep meaning: once
+`const x` parameter reads as `const auto x`; so do `for (const x : c)`, `for (const [k, v] : m)`, `const [a, b] = e;` and a
+for-init's `const i = 0`. A const loop variable or binding over value elements of a known class (a typed array's element, a typed
+map's value) is checked as a const of that class: a writing method call or a field store through it fails the load. This follows `let` (a `var` synonym), with C++'s deep meaning: once
 `const xs = [1, 2];` is declared, `xs.push(3)` is an error, and the error says why (section 8).
 
 ### 1.2 Initializer

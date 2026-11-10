@@ -159,6 +159,7 @@ namespace jai {
         checked_result<declaration_ptr> inline_variable_declaration();
         // const T x = e; / const x = e; (internal/const.md): the declaration, then finish_const marks it and enforces the initializer
         checked_result<declaration_ptr> const_declaration();
+        checked_result<declaration_ptr> destructuring_declaration();
         bool finish_const(const declaration_ptr& decl, const token& at, bool class_constant);
         bool const_method_suffix();   // `) const`: JaiScript has no const methods
         bool untyped_declaration_ahead() const;   // IDENT followed by ';' or '='

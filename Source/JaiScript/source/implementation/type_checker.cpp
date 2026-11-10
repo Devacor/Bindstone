@@ -634,6 +634,8 @@ private:
         bool lw_handle = false;           // a class-typed slot that may hold a handle (an auto from one, a by-value class parameter)
         parameter* reference_parameter = nullptr;   // a reference parameter's own declaration
         bool placeholders = false;        // this scope declares '_' more than once: naming it is ambiguous (C++26 [basic.scope.scope])
+        const type_info* const_element = nullptr;   // a const range-for variable or binding over value elements of a known class: that class
+        const type_info* pair_value = nullptr;      // a range-for map entry: the map's declared value type
         bool shared_name = false;         // an extern's or an inline declaration's name: the unit's top level may declare it again
         ctype::kind_t literal_elem = ctype::unknown;   // an auto declared with a uniform scalar array literal: the element kind the run types the array by
     };
@@ -2079,6 +2081,7 @@ private:
                 }
                 if (v->is_handle) { handle = true; known = true; }
                 if (v->dynamic && !v->is_reference) { known = false; }
+                if (v->const_element && is_const) { from_type(v->const_element); }   // an element of a known class held by value
                 if (v->map_pair) { known = true; handle = false; }   // a range-for pair is a value: its halves are the pair's
             } else if (class_ctx_ && !id->global_qualified && lookup_member(class_ctx_name_, id->name, false).found) {
                 member_hit h = lookup_member(class_ctx_name_, id->name, false);
@@ -7615,6 +7618,10 @@ private:
         scopes_.pop_back();
     }
 
+    // a class held by value (a write through a const holder of it is a write to the const); a handle, a var and a scalar are not
+    static const type_info* value_class_type(const type_info* t) {
+        return t && t->base_type == script_value_type::jai_object_type && !t->type_name.empty() ? t : nullptr;
+    }
     JAI_NOINLINE void walk_range_for(range_for_stmt* f) {
         const ctype container = enum_table(infer(f->container.get()));
         if (f->binds_map_entry && !container.tentative && !container.is_unknown() && container.kind != ctype::map_k && container.kind != ctype::coroutine_k) {   // for (auto [k, v] : x)
@@ -7703,6 +7710,8 @@ private:
             lw_register(entry, judged, f, f->variable_name, lw_origin::range_for, spelled ? f->element_type->canonical_name() : "auto",
                         !loop_const && !entry.lw_handle);
         }
+        if (loop_const && !entry.map_pair && !container.tentative) { entry.const_element = value_class_type(elem.ti); }
+        if (entry.map_pair && container.ti && !container.tentative) { entry.pair_value = container.ti->value_type().get(); }
         warn_shadow("range-for variable", f->variable_name, f->location);
         scopes_.back().emplace(f->variable_name, std::move(entry));
         walk_stmt(f->body.get());
@@ -7871,11 +7880,13 @@ private:
     }
 
     JAI_NOINLINE void walk_destructuring(destructuring_decl* dd) {
-        infer(dd->initializer.get());
+        const ctype init = infer(dd->initializer.get());
+        const type_info* element = dd->is_const && init.kind == ctype::array_k && !init.tentative && init.ti ? value_class_type(init.ti->element_type().get()) : nullptr;
         for (const auto& [name, _] : dd->names) {
             var_entry entry;
             entry.dynamic = true;
             entry.is_const = dd->is_const;
+            entry.const_element = element;
             entry.line = dd->location.line; entry.column = dd->location.column;
             warn_shadow("local", name, dd->location);
             declare_local(name, std::move(entry), dd->location, /*name_independent=*/true);
@@ -8170,6 +8181,12 @@ private:
         }
         if (has_init && decl->slot_index != SIZE_MAX && decl->initializer->get_type() == node_type::lambda_expr && !is_reference_decl) {
             entry.lambda = static_cast<const lambda_expr*>(decl->initializer.get());
+        }
+        if (decl->is_const && has_init && decl->initializer->get_type() == node_type::member_expr) {   // a const structured binding's value half
+            auto* half = static_cast<const member_expr*>(decl->initializer.get());
+            const var_entry* pair = half->member == "second" && half->object && half->object->get_type() == node_type::identifier_expr
+                ? find_local(static_cast<const identifier_expr*>(half->object.get())->name) : nullptr;
+            if (pair && pair->map_pair) { entry.const_element = value_class_type(pair->pair_value); }
         }
         check_const_bind(decl, entry);
         warn_shadow("local", decl->name, decl->location);

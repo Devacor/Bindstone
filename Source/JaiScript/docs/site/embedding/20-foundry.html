@@ -50,6 +50,10 @@ var d=document.querySelectorAll(".sidebar details");for(var i=0;i<d.length;i++)d
 JaiScript. It is one header, <code>&lt;jaiscript/testing/foundry.hpp&gt;</code>, and one runner source file,
 <code>source/tests/main_test_runner.cpp</code>, which holds <code>main</code>. It needs nothing beyond the library. A
 test is a C++ lambda, so it covers plain host code as readily as script run through an engine.</p>
+<p>The header is part of the library's <code>include/</code> folder. The runner is a source file in the
+<a href="https://github.com/Devacor/jaiscript/blob/main/source/tests/main_test_runner.cpp">repository</a>, compiled into
+your test program; a project that uses an <a href="18-build-integration.html#installed-package">installed package</a>
+copies that one file beside its tests.</p>
 <h2 id="a-suite">A suite<a class="hlink" href="#a-suite" aria-label="link">&#8203;</a></h2>
 <div class="codeblock cb-cpp"><span class="cb-label">inventory_tests.cpp</span><pre><code class="lang-cpp">#include &lt;jaiscript/testing/foundry.hpp&gt;
 #include &lt;jaiscript/core/engine.hpp&gt;
@@ -84,11 +88,11 @@ FOUNDRY_REGISTER(inventory_tests)</code></pre></div>
 <ul>
 <li><strong>A suite</strong> derives <code>jai::foundry::suite</code>, passes its name to the base, and adds its tests in
 <code>forge_tests()</code> with <code>test(name, function)</code>.</li>
-<li><strong>A failed check throws,</strong> which ends that test and records the message. Any other
-<code>std::exception</code> that leaves a test fails it the same way, and the remaining tests still run.</li>
-<li><strong><code>FOUNDRY_REGISTER</code></strong> hands the suite to the runner; no list of suites is kept by hand. It
-goes at global scope and takes a plain name, so a class inside a namespace gets a <code>using</code> alias first:
-<code>using inventory_tests = my_game::inventory_tests;</code>.</li>
+<li><strong>A failed check throws,</strong> which ends that test and records the message. Anything else a test throws
+fails it the same way (a <code>std::exception</code> with its <code>what()</code>, any other type as an unknown
+exception), and the remaining tests still run.</li>
+<li><strong><code>FOUNDRY_REGISTER</code></strong> hands the suite to the runner; no list of suites is kept by hand. A
+class inside a namespace registers under its qualified name: <code>FOUNDRY_REGISTER(my_game::inventory_tests)</code>.</li>
 <li><strong><code>make_engine()</code></strong> returns a <code>jai::engine</code> for a test: the runner's backend choice,
 a 120-second execution budget so a runaway script fails instead of hanging the run, and imports that are rechecked on
 every use. Register your own bindings on it as your host does.</li>

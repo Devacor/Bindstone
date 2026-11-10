@@ -199,7 +199,7 @@ function run_headless(int frames) -> int {
 			write_bmp(OPT_DUMP + "_" + to_string(f) + ".bmp");
 		}
 	}
-	int elapsed = run.elapsed() * 1000;
+	int elapsed = cast<int>(run.elapsed() * 1000);
 	print(format("frames {0} | bytes {1} (len {2}..{3}) | stream hash {4} | {5} ms total, {6} ms/frame incl. hashing, {7} ms/frame render",
 		frames, total_bytes, min_len, max_len, hash, elapsed, (elapsed * 1.0) / frames, render.elapsed() * 1000 / frames));
 	print(`rows ${HB_WORKERS != 0 ? "parallel" : "serial"} | pixels ${HB_SEXT ? "sext" : "half"} | text in ${text_frames} frames | live reloads ${LIVE_RELOADS}`);
